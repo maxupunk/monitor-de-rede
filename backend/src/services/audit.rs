@@ -96,6 +96,8 @@ pub enum ResourceType {
     /// Teste de enlace (ADR 015).
     LinkTest,
     LinkTestSchedule,
+    /// Tarefa agendada (ferramenta do catálogo num horário cron).
+    ScheduledTask,
 }
 
 impl ResourceType {
@@ -122,6 +124,7 @@ impl ResourceType {
             ResourceType::Backup => "backup",
             ResourceType::LinkTest => "link_test",
             ResourceType::LinkTestSchedule => "link_test_schedule",
+            ResourceType::ScheduledTask => "scheduled_task",
         }
     }
 }
@@ -157,6 +160,7 @@ impl std::str::FromStr for ResourceType {
             "backup" => Ok(ResourceType::Backup),
             "link_test" | "linktest" => Ok(ResourceType::LinkTest),
             "link_test_schedule" | "linktestschedule" => Ok(ResourceType::LinkTestSchedule),
+            "scheduled_task" | "scheduledtask" => Ok(ResourceType::ScheduledTask),
             _ => Err(AppError::validation(format!(
                 "Tipo de recurso inválido: {s}"
             ))),

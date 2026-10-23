@@ -54,6 +54,9 @@ impl Initializer for MonitoringInitializer {
         crate::services::backup::schedule::spawn(ctx);
         // Backup automático dos bancos de dados cadastrados.
         crate::services::databases::schedule::spawn(ctx);
+        // Tarefas agendadas (cron): ferramentas do catálogo da IA nos horários
+        // marcados, em nome de quem as salvou.
+        crate::services::scheduled_tasks::runner::spawn(ctx);
 
         // Cadastro é uma conveniência de boot: banco indisponível não impede o
         // processo HTTP de subir, e a operação é idempotente em banco vazio.

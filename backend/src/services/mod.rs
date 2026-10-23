@@ -26,6 +26,7 @@ pub mod package_mirror;
 pub mod plugins;
 pub mod preferences;
 pub mod probes;
+pub mod scheduled_tasks;
 pub mod server_addresses;
 pub mod settings;
 pub mod shared;

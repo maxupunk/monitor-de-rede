@@ -51,6 +51,10 @@ const ACTION_TOOLS = new Set([
   'create_alert_rule',
   'toggle_alert_rule',
   'delete_alert_rule',
+  'create_scheduled_task',
+  'update_scheduled_task',
+  'run_scheduled_task',
+  'delete_scheduled_task',
   'ask_user',
 ])
 
@@ -245,6 +249,31 @@ const TOOL_META: Record<string, AiToolLook> = {
     icon: 'mdi-clipboard-play-outline',
     color: 'purple',
   },
+  list_scheduled_tasks: {
+    label: 'Tarefas Agendadas',
+    icon: 'mdi-calendar-clock',
+    color: 'primary',
+  },
+  create_scheduled_task: {
+    label: 'Agendar Tarefa',
+    icon: 'mdi-calendar-plus',
+    color: 'primary',
+  },
+  update_scheduled_task: {
+    label: 'Alterar Tarefa Agendada',
+    icon: 'mdi-calendar-edit',
+    color: 'primary',
+  },
+  run_scheduled_task: {
+    label: 'Rodar Tarefa Agendada',
+    icon: 'mdi-play-circle-outline',
+    color: 'success',
+  },
+  delete_scheduled_task: {
+    label: 'Excluir Tarefa Agendada',
+    icon: 'mdi-calendar-remove',
+    color: 'error',
+  },
 }
 
 /**
@@ -264,30 +293,39 @@ export function aiToolMeta(name: string): AiToolMeta {
   return { ...look, kind: aiToolKind(name) }
 }
 
+/**
+ * Rótulo dos argumentos mais comuns das ferramentas, na ordem do que mais
+ * identifica a chamada. Também nomeia os campos do formulário das tarefas
+ * agendadas.
+ */
+export const TOOL_ARG_LABELS: ReadonlyArray<readonly [string, string]> = [
+  ['target', 'Alvo'],
+  ['hostname', 'Host'],
+  ['identifier', 'Dispositivo'],
+  ['device', 'Dispositivo'],
+  ['interface', 'Interface'],
+  ['monitor_id', 'Monitor'],
+  ['alert_id', 'Alerta'],
+  ['rule_id', 'Regra'],
+  ['name', 'Nome'],
+  ['field', 'Campo'],
+  ['metric', 'Métrica'],
+  ['playbook_type', 'Playbook'],
+  ['pattern', 'Padrão'],
+  ['source', 'Fonte'],
+  ['container', 'Container'],
+  ['query', 'Busca'],
+  ['status', 'Status'],
+  ['task_id', 'Tarefa'],
+  ['tool', 'Ferramenta'],
+  ['cron', 'Agenda'],
+]
+
 /** Resumo de uma linha dos argumentos, na ordem do que mais identifica a chamada. */
 export function formatToolArgs(args: Record<string, unknown>): string {
-  const labeled: Array<[string, string]> = [
-    ['target', 'Alvo'],
-    ['hostname', 'Host'],
-    ['identifier', 'Dispositivo'],
-    ['device', 'Dispositivo'],
-    ['interface', 'Interface'],
-    ['monitor_id', 'Monitor'],
-    ['alert_id', 'Alerta'],
-    ['rule_id', 'Regra'],
-    ['name', 'Nome'],
-    ['field', 'Campo'],
-    ['metric', 'Métrica'],
-    ['playbook_type', 'Playbook'],
-    ['pattern', 'Padrão'],
-    ['source', 'Fonte'],
-    ['container', 'Container'],
-    ['query', 'Busca'],
-    ['status', 'Status'],
-  ]
-  const parts = labeled
-    .filter(([key]) => args[key] !== undefined && args[key] !== null && args[key] !== '')
-    .map(([key, label]) => `${label}: ${String(args[key])}`)
+  const parts = TOOL_ARG_LABELS.filter(
+    ([key]) => args[key] !== undefined && args[key] !== null && args[key] !== ''
+  ).map(([key, label]) => `${label}: ${String(args[key])}`)
   if (parts.length > 0) return parts.slice(0, 2).join(' · ')
   const keys = Object.keys(args)
   return keys.length > 0 ? keys.join(', ') : 'Sem parâmetros adicionais'

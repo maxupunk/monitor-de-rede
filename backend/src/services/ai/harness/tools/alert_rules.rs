@@ -113,6 +113,11 @@ impl AiToolHandler for AlertRulesGuide {
         "get_alert_rules_guide"
     }
 
+    // Guia de leitura: só serve dentro de uma conversa.
+    fn schedulable(&self) -> bool {
+        false
+    }
+
     fn description(&self) -> &'static str {
         "Guia das regras de alerta: como um alerta nasce, ciclo de vida, todos os campos (condition.field), operadores, receitas prontas e como diagnosticar a origem de um alerta. Leia antes de criar uma regra."
     }

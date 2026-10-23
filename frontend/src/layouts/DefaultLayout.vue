@@ -441,6 +441,7 @@ const navItems = computed<NavItem[]>(() => [
         { title: 'Backup', icon: 'mdi-backup-restore', to: '/backup' },
       ]
     : []),
+  { title: 'Tarefas agendadas', icon: 'mdi-calendar-clock', to: '/scheduled-tasks' },
   { title: 'Configurações', icon: 'mdi-cog', to: '/settings' },
   ...(canInstall.value && !isInstalled.value
     ? [

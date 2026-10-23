@@ -37,6 +37,8 @@ pub mod plugins;
 pub mod probe_tasks;
 pub mod probes;
 pub mod push_subscriptions;
+pub mod scheduled_task_runs;
+pub mod scheduled_tasks;
 pub mod sites;
 pub mod storage_destinations;
 pub mod system_backup_plan;

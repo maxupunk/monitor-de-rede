@@ -18,8 +18,8 @@ use crate::{
             alert_events, alert_rules, device_interfaces, device_links, devices, discovery_results,
             discovery_runs, dns_servers, event_outbox, link_test_legs, link_test_schedules,
             link_tests, maintenance_windows, metrics, monitor_results, monitor_results_hourly,
-            monitors, networks, notification_outbox, probe_tasks, probes, sites, vpn_peers,
-            vpn_servers,
+            monitors, networks, notification_outbox, probe_tasks, probes, scheduled_task_runs,
+            scheduled_tasks, sites, vpn_peers, vpn_servers,
         },
         logs::device_logs,
     },
@@ -193,6 +193,15 @@ pub async fn clear_all_items(
         .await?
         .rows_affected;
     total_deleted += link_test_schedules::Entity::delete_many()
+        .exec(&txn)
+        .await?
+        .rows_affected;
+    // Tarefas agendadas citam equipamentos, monitores e alertas que somem.
+    total_deleted += scheduled_task_runs::Entity::delete_many()
+        .exec(&txn)
+        .await?
+        .rows_affected;
+    total_deleted += scheduled_tasks::Entity::delete_many()
         .exec(&txn)
         .await?
         .rows_affected;

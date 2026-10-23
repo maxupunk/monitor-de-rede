@@ -228,6 +228,21 @@ export function formatEventDetails(evt: RealtimeEventPayload): FormattedEventDet
         rawJson,
       }
     }
+    case 'scheduled_task:updated': {
+      const failed = d.status === 'failed'
+      return {
+        title: `Tarefa agendada · ${d.name || `#${d.id ?? ''}`}`,
+        message: failed
+          ? 'A tarefa agendada falhou — veja o histórico dela'
+          : d.status === 'skipped'
+            ? 'A tarefa agendada não rodou no horário'
+            : 'Tarefa agendada atualizada',
+        icon: failed ? 'mdi-calendar-alert' : 'mdi-calendar-clock',
+        color: failed ? 'error' : d.status === 'skipped' ? 'warning' : 'info',
+        time: dateStr,
+        rawJson,
+      }
+    }
     case 'topology:updated': {
       return {
         title: 'Topologia de Rede',

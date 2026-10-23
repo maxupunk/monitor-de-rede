@@ -33,6 +33,8 @@ pub use super::plugins::Entity as Plugins;
 pub use super::probe_tasks::Entity as ProbeTasks;
 pub use super::probes::Entity as Probes;
 pub use super::push_subscriptions::Entity as PushSubscriptions;
+pub use super::scheduled_task_runs::Entity as ScheduledTaskRuns;
+pub use super::scheduled_tasks::Entity as ScheduledTasks;
 pub use super::sites::Entity as Sites;
 pub use super::storage_destinations::Entity as StorageDestinations;
 pub use super::system_backup_plan::Entity as SystemBackupPlan;

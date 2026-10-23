@@ -21,6 +21,9 @@
 //!   redes, manutenção e notificações.
 //! - [`audit`]: a trilha de auditoria — quem mudou o quê e quando, com o
 //!   antes/depois, para achar a alteração que precedeu um problema.
+//! - [`schedules`]: tarefas agendadas — rodar uma destas ferramentas num
+//!   horário (cron), listar, mudar, pausar e excluir. O catálogo do que pode
+//!   ser agendado é o [`UnattendedTools`].
 //! - [`ask`]: a IA pergunta ao usuário antes de prosseguir.
 //! - [`plugins`]: plugins de dispositivo — acessar o equipamento (SSH/HTTP),
 //!   criar, testar e executar scripts. Todo acesso passa pelo usuário.
@@ -46,6 +49,7 @@ mod lookup;
 mod platform;
 mod plugins;
 pub mod risk;
+mod schedules;
 mod series;
 mod timeline;
 
@@ -113,11 +117,12 @@ pub enum ToolGroup {
     Platform,
     Devices,
     Audit,
+    Schedules,
 }
 
 impl ToolGroup {
     /// Os grupos que podem ser carregados sob demanda, na ordem do catálogo.
-    pub const DEFERRED: [Self; 11] = [
+    pub const DEFERRED: [Self; 12] = [
         Self::History,
         Self::Analysis,
         Self::Charts,
@@ -129,6 +134,7 @@ impl ToolGroup {
         Self::AlertRules,
         Self::Devices,
         Self::Audit,
+        Self::Schedules,
     ];
 
     #[must_use]
@@ -146,6 +152,7 @@ impl ToolGroup {
             Self::Platform => "platform",
             Self::Devices => "devices",
             Self::Audit => "audit",
+            Self::Schedules => "schedules",
         }
     }
 
@@ -165,6 +172,7 @@ impl ToolGroup {
             Self::Platform => "agentes, VPN, topologia, descoberta e redes",
             Self::Devices => "equipamento por SSH/HTTP e plugins",
             Self::Audit => "auditoria: quem mudou o quê",
+            Self::Schedules => "tarefas agendadas",
         }
     }
 
@@ -186,6 +194,7 @@ impl ToolGroup {
             Self::Platform => "The message is about monitoring agents, the VPN, network topology, discovery or networks.",
             Self::Devices => "The user wants to access a device over SSH or its web interface, run a command or change a setting on it, install a package, or list, create, test or use a device plugin, app, driver or script.",
             Self::Audit => "The message is about the audit log: who changed what and when, or which configuration change came before a problem.",
+            Self::Schedules => "The user wants something to run automatically at a given time or periodically, or asks about scheduled tasks: list, change, pause, run or delete them.",
         }
     }
 
@@ -299,6 +308,19 @@ impl ToolPolicy {
             confirm_active: false,
             interactive: false,
             container_actions: AiAutomationMode::Off,
+        }
+    }
+
+    /// Tarefa agendada: roda o que foi decidido ao agendar, sem perguntar e
+    /// sem ninguém para responder ([`UnattendedTools`]).
+    #[must_use]
+    pub const fn unattended() -> Self {
+        Self {
+            allow_active: true,
+            actions: AiAutomationMode::Auto,
+            confirm_active: false,
+            interactive: false,
+            container_actions: AiAutomationMode::Auto,
         }
     }
 
@@ -481,6 +503,19 @@ pub trait AiToolHandler: Send + Sync {
         Ok(format!("Executar {}", self.name()))
     }
 
+    /// Pode virar tarefa agendada ([`UnattendedTools`])? Quem pergunta ao
+    /// usuário ou acessa equipamento já fica de fora pela política; aqui saem
+    /// o que só faz sentido dentro de uma conversa (gráficos, guias) e as
+    /// próprias tarefas — agendar um agendamento não leva a nada.
+    fn schedulable(&self) -> bool {
+        !matches!(self.group(), ToolGroup::Charts | ToolGroup::Schedules)
+    }
+
+    /// Só o administrador pode rodar (e, por isso, agendar).
+    fn admin_only(&self) -> bool {
+        self.kind() == ToolKind::ContainerAction
+    }
+
     /// Contrato no formato de function calling da OpenAI.
     fn definition(&self) -> AiTool {
         AiTool {
@@ -548,8 +583,148 @@ fn all_handlers() -> Vec<Box<dyn AiToolHandler>> {
         Box::new(plugins::SavePluginDraft),
         Box::new(plugins::RunPluginAction),
         Box::new(plugins::ValidatePlugin),
+        Box::new(schedules::ListScheduledTasks),
+        Box::new(schedules::CreateScheduledTask),
+        Box::new(schedules::UpdateScheduledTask),
+        Box::new(schedules::RunScheduledTask),
+        Box::new(schedules::DeleteScheduledTask),
         Box::new(ask::AskUser),
     ]
+}
+
+/// Contrato de uma ferramenta que pode virar tarefa agendada.
+#[derive(Debug, Clone)]
+pub struct ToolContract {
+    pub name: &'static str,
+    pub description: &'static str,
+    pub group: ToolGroup,
+    pub kind: ToolKind,
+    pub admin_only: bool,
+    /// JSON Schema dos argumentos — o mesmo que a IA recebe.
+    pub parameters: Value,
+}
+
+/// O catálogo das tarefas agendadas: as ferramentas que rodam sem ninguém
+/// do outro lado.
+///
+/// A confirmação aconteceu quando a tarefa foi salva — na tela, ou no chat
+/// com o pedido de confirmação de `create_scheduled_task` —, então a
+/// execução não pergunta de novo. Por isso o catálogo nunca tem o que pede
+/// confirmação a cada chamada (acesso a equipamento) nem o que conversa com
+/// o usuário, e independe das configurações da IA: quem decidiu rodar foi a
+/// pessoa que agendou, com o papel dela.
+pub struct UnattendedTools {
+    handlers: Vec<Box<dyn AiToolHandler>>,
+}
+
+impl Default for UnattendedTools {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl UnattendedTools {
+    #[must_use]
+    pub fn new() -> Self {
+        let policy = ToolPolicy::unattended();
+        let handlers = all_handlers()
+            .into_iter()
+            .filter(|handler| policy.allows(handler.kind()) && handler.schedulable())
+            .collect();
+        Self { handlers }
+    }
+
+    fn handler(&self, name: &str) -> AppResult<&dyn AiToolHandler> {
+        self.handlers
+            .iter()
+            .find(|handler| handler.name() == name)
+            .map(AsRef::as_ref)
+            .ok_or_else(|| {
+                AppError::validation(format!("A ferramenta \"{name}\" não pode ser agendada"))
+            })
+    }
+
+    fn contract_of(handler: &dyn AiToolHandler) -> ToolContract {
+        ToolContract {
+            name: handler.name(),
+            description: handler.description(),
+            group: handler.group(),
+            kind: handler.kind(),
+            admin_only: handler.admin_only(),
+            parameters: handler.parameters(),
+        }
+    }
+
+    /// Todo o catálogo, na ordem em que a IA o vê.
+    #[must_use]
+    pub fn contracts(&self) -> Vec<ToolContract> {
+        self.handlers
+            .iter()
+            .map(|handler| Self::contract_of(handler.as_ref()))
+            .collect()
+    }
+
+    /// O contrato de uma ferramenta agendável.
+    ///
+    /// # Errors
+    ///
+    /// `Validation` quando ela não existe ou não pode ser agendada.
+    pub fn contract(&self, name: &str) -> AppResult<ToolContract> {
+        self.handler(name).map(Self::contract_of)
+    }
+
+    /// Nomes agendáveis, para a mensagem de erro de quem errou o nome.
+    #[must_use]
+    pub fn names(&self) -> Vec<&'static str> {
+        self.handlers.iter().map(|handler| handler.name()).collect()
+    }
+
+    /// O risco de rodar a chamada.
+    ///
+    /// # Errors
+    ///
+    /// Ferramenta fora do catálogo.
+    pub async fn risk(
+        &self,
+        ctx: &AppContext,
+        name: &str,
+        args: &ToolArgs,
+    ) -> AppResult<RiskAssessment> {
+        Ok(self.handler(name)?.risk(ctx, args).await)
+    }
+
+    /// O que a chamada vai fazer, na frase da confirmação. `None` para
+    /// consultas, que não têm frase própria.
+    ///
+    /// # Errors
+    ///
+    /// Ferramenta fora do catálogo ou erro do banco.
+    pub async fn preview(
+        &self,
+        ctx: &AppContext,
+        name: &str,
+        args: &ToolArgs,
+    ) -> AppResult<Option<String>> {
+        let handler = self.handler(name)?;
+        if handler.kind() == ToolKind::Passive {
+            return Ok(None);
+        }
+        handler.preview(ctx, args).await.map(Some)
+    }
+
+    /// Roda a ferramenta em nome do autor que vem em `args`.
+    ///
+    /// # Errors
+    ///
+    /// Ferramenta fora do catálogo, argumento inválido ou falha da execução.
+    pub async fn execute(
+        &self,
+        ctx: &AppContext,
+        name: &str,
+        args: &ToolArgs,
+    ) -> AppResult<ToolOutput> {
+        self.handler(name)?.execute(ctx, args).await
+    }
 }
 
 /// Ferramentas liberadas para uma sessão de chat.
@@ -935,6 +1110,44 @@ mod tests {
             !nomes(&tudo).contains(&LOAD_TOOLS.to_string()),
             "nada a carregar, sem load_tools"
         );
+    }
+
+    #[test]
+    fn tarefa_agendada_so_roda_o_que_dispensa_alguem_do_outro_lado() {
+        let catalogo = UnattendedTools::new();
+        let nomes = catalogo.names();
+        for agendavel in [
+            "get_system_summary",
+            "ping_host",
+            "silence_alert",
+            "create_maintenance_window",
+            "toggle_alert_rule",
+            "docker_container_action",
+            "get_audit_log",
+        ] {
+            assert!(nomes.contains(&agendavel), "{agendavel}");
+        }
+        for fora in [
+            "ask_user",
+            "device_ssh_exec",
+            "run_plugin_action",
+            "chart_monitor_latency",
+            "get_alert_rules_guide",
+            "search_system_docs",
+            "create_scheduled_task",
+            "list_scheduled_tasks",
+        ] {
+            assert!(!nomes.contains(&fora), "{fora} não pode virar tarefa");
+            assert!(catalogo.contract(fora).is_err());
+        }
+        assert!(
+            catalogo
+                .contract("docker_container_action")
+                .unwrap()
+                .admin_only
+        );
+        assert!(catalogo.contract("get_audit_log").unwrap().admin_only);
+        assert!(!catalogo.contract("ping_host").unwrap().admin_only);
     }
 
     #[test]

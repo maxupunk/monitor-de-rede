@@ -54,6 +54,10 @@ sea-orm = { version = "2.0", features = [
   "macros",
 ] }
 chrono = { version = "0.4" }
+# Expressões cron das tarefas agendadas (próximas execuções na hora local do
+# servidor). Já estava na árvore como transitiva do `loco-rs` (pelo
+# `tokio-cron-scheduler`), então promovê-la a direta não acrescenta download.
+croner = { version = "3.0" }
 validator = { version = "0.20" }
 uuid = { version = "1.6", features = ["v4"] }
 # Backup de bancos de terceiros (MySQL, MariaDB, PostgreSQL), nativo: o dump

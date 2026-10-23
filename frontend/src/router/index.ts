@@ -39,6 +39,11 @@ const routes = [
         component: () => import('../pages/LinkTestsPage.vue'),
       },
       {
+        path: 'scheduled-tasks',
+        name: 'scheduled-tasks',
+        component: () => import('../pages/ScheduledTasksPage.vue'),
+      },
+      {
         path: 'discovery',
         name: 'discovery',
         component: () => import('../pages/DiscoveryPage.vue'),

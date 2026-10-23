@@ -39,6 +39,10 @@ impl AiToolHandler for AuditLog {
         "get_audit_log"
     }
 
+    fn admin_only(&self) -> bool {
+        true
+    }
+
     fn group(&self) -> ToolGroup {
         ToolGroup::Audit
     }

@@ -499,6 +499,11 @@ impl AiToolHandler for SearchDocs {
         "search_system_docs"
     }
 
+    // Documentação: só serve dentro de uma conversa.
+    fn schedulable(&self) -> bool {
+        false
+    }
+
     fn description(&self) -> &'static str {
         "Consulta a documentação interna do NetMonitor (SNMP, VPN, descoberta, janelas de manutenção, alertas, monitores)."
     }

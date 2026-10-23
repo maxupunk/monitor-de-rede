@@ -26,6 +26,7 @@ pub mod port_scan;
 pub mod probes;
 pub mod push;
 pub mod root;
+pub mod scheduled_tasks;
 pub mod server_addresses;
 pub mod settings;
 pub mod sites;

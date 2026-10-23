@@ -203,6 +203,11 @@ impl AiToolHandler for AuthoringGuide {
         "get_plugin_authoring_guide"
     }
 
+    // Guia de leitura: só serve dentro de uma conversa.
+    fn schedulable(&self) -> bool {
+        false
+    }
+
     fn description(&self) -> &'static str {
         "Skill de autoria de plugins de dispositivo: fluxo obrigatório, formato do pacote, API do script (Rhai), testes e boas práticas. Leia ANTES de criar ou alterar um plugin."
     }

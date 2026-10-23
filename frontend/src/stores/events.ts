@@ -21,6 +21,7 @@ import { useLogsStore } from './logs'
 import { usePluginsStore } from './plugins'
 import { usePluginAppsStore } from './pluginApps'
 import { useLinkTestsStore } from './linkTests'
+import { isScheduledTaskEvent, useScheduledTasksStore } from './scheduledTasks'
 import { isLogTemplateInfo } from '@/utils/logCategories'
 import { isDeciderModelState, useAiDeciderStore } from './aiDecider'
 import { asApprovalResolved, useAiApprovalsStore } from './aiApprovals'
@@ -178,6 +179,10 @@ export const useEventsStore = defineStore('events', () => {
     }, delay)
   }
 
+  function isScheduledTaskNews(data: unknown): boolean {
+    return isScheduledTaskEvent(data) && (data.status === 'failed' || data.status === 'skipped')
+  }
+
   function handleIncomingEvent(payload: RealtimeEventPayload) {
     lastEventAt.value = payload.timestamp
 
@@ -192,7 +197,10 @@ export const useEventsStore = defineStore('events', () => {
       // segundo: estado ao vivo, não notícia para o feed.
       payload.type === 'link_test:updated' ||
       payload.type === 'link_test:sample' ||
-      payload.type === 'link_test:health'
+      payload.type === 'link_test:health' ||
+      // Tarefa agendada: só a falha e o "não rodou" são notícia — o começo e
+      // o sucesso de uma tarefa de minuto em minuto encheriam o feed.
+      (payload.type === 'scheduled_task:updated' && !isScheduledTaskNews(payload.data))
     if (payload.type !== 'stream:connected' && !isEphemeralTelemetry) {
       recentEvents.value.unshift(payload)
       if (recentEvents.value.length > FEED_LIMIT) {
@@ -510,6 +518,11 @@ export const useEventsStore = defineStore('events', () => {
 
       case 'link_test_schedule:updated': {
         useLinkTestsStore().applyScheduleUpdated(data)
+        break
+      }
+
+      case 'scheduled_task:updated': {
+        useScheduledTasksStore().applyUpdated(data)
         break
       }
 

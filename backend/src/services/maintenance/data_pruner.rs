@@ -20,7 +20,7 @@ use sea_orm::{
 use crate::{
     models::_entities::{
         alert_events, audit_logs, discovery_runs, event_outbox, metrics, monitor_results,
-        notification_outbox, plugin_runs,
+        notification_outbox, plugin_runs, scheduled_task_runs,
     },
     services::{alerts::contracts::AlertStatus, shared::errors::AppResult, telemetry},
 };
@@ -50,6 +50,9 @@ pub const DEFAULT_RETENTION_PLUGIN_RUNS_DAYS: i64 = 90;
 /// Testes de enlace terminados (com pernas e amostras): o mesmo prazo das
 /// execuções de plugin que cada etapa gerou.
 pub const DEFAULT_RETENTION_LINK_TESTS_DAYS: i64 = 90;
+/// Execuções de tarefas agendadas: uma tarefa de minuto em minuto grava
+/// ~43 mil por mês, então o prazo é o das métricas, não o dos incidentes.
+pub const DEFAULT_RETENTION_SCHEDULED_TASK_RUNS_DAYS: i64 = 30;
 const DELETE_BATCH_SIZE: u64 = 10_000;
 /// Folga entre lotes. No SQLite há um escritor só: sem ela, a purga de uma
 /// tabela grande segura o lock em sequência e a coleta, o syslog e as telas
@@ -69,6 +72,7 @@ pub struct PruneStats {
     pub audit_deleted: u64,
     pub plugin_runs_deleted: u64,
     pub link_tests_deleted: u64,
+    pub scheduled_task_runs_deleted: u64,
 }
 
 impl PruneStats {
@@ -84,6 +88,7 @@ impl PruneStats {
             + self.audit_deleted
             + self.plugin_runs_deleted
             + self.link_tests_deleted
+            + self.scheduled_task_runs_deleted
     }
 }
 
@@ -219,6 +224,17 @@ pub async fn prune_all<C: ConnectionTrait>(db: &C) -> AppResult<PruneStats> {
     )
     .await?;
 
+    // Execução em curso não tem `finished_at` e nunca envelhece.
+    let scheduled_task_runs_deleted = delete_in_batches::<scheduled_task_runs::Entity, _>(
+        db,
+        scheduled_task_runs::Column::Id,
+        Condition::all().add(scheduled_task_runs::Column::FinishedAt.lt(cutoff(
+            "RETENTION_SCHEDULED_TASK_RUNS_DAYS",
+            DEFAULT_RETENTION_SCHEDULED_TASK_RUNS_DAYS,
+        ))),
+    )
+    .await?;
+
     Ok(PruneStats {
         outbox_deleted,
         results_deleted,
@@ -230,6 +246,7 @@ pub async fn prune_all<C: ConnectionTrait>(db: &C) -> AppResult<PruneStats> {
         audit_deleted,
         plugin_runs_deleted,
         link_tests_deleted,
+        scheduled_task_runs_deleted,
     })
 }
 
@@ -315,8 +332,9 @@ mod tests {
             audit_deleted: 8,
             plugin_runs_deleted: 9,
             link_tests_deleted: 10,
+            scheduled_task_runs_deleted: 11,
         };
-        assert_eq!(stats.total(), 55);
+        assert_eq!(stats.total(), 66);
         assert_eq!(PruneStats::default().total(), 0);
     }
 
