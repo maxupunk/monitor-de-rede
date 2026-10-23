@@ -156,6 +156,7 @@ services/
 ├── snmp/           sessões, coletores, perfis
 ├── topology/       ligações e confiança
 ├── link_tests/     teste de enlace (ADR 015): plano, negociação de motor, pernas e etapas, agendamentos
+├── scheduled_tasks/ tarefas agendadas (cron): ferramenta do catálogo da IA + argumentos num horário
 ├── alerts/         datasets → evaluator → manager (+ catalog, recovery, repository)
 ├── notifications/  channels/ (telegram, discord, webhook, email) + formatter
 ├── probes/         agent, dispatcher, receiver, liveness, buffer
@@ -788,7 +789,7 @@ cada falha encheria o banco com o próprio aviso.
 
 | Frente | Onde entra | Quando consulta | Onde a sugestão aparece |
 |---|---|---|---|
-| Ferramentas do chat | `harness/agent.rs`, junto da janela de contexto | cada pergunta | invisível: soma grupos às palavras-chave |
+| Ferramentas do chat | `harness/agent.rs`, junto da janela de contexto | cada pergunta | invisível: escolhe os grupos que vão ao chat (núcleo e o que foi marcado com `@` sempre vão); sem Decisor no ar, vai o catálogo inteiro |
 | Identificação | `discovery/decider_identity.rs`, depois de gravar a execução | host `unknown`/`web_device` ou sem sistema | chip na Descoberta (pelo snapshot `discovery:scan`) e no cadastro (`/devices/identify`) |
 | Interfaces | `snmp/decider_interfaces.rs` (`POST /api/snmp/interfaces/suggestions`) | ao mostrar a lista de interfaces | "Uplink sugerido", "Vale monitorar", "Selecionar sugeridas" |
 | Eventos de log | `syslog/categorizer.rs`, worker fora do caminho quente | uma vez por **padrão** novo (não por linha) | chip e filtro em `/logs`; "Criar alerta" abre o catálogo |

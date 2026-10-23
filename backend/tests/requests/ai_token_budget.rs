@@ -14,6 +14,7 @@ use backend::{
     dtos::ai::{ChatMessageInput, TestConnectionResponse},
     services::{
         ai::{
+            decider::config::AiDeciderSettings,
             drivers::traits::{
                 AiChatChunk, AiChatOptions, AiChunkStream, AiDriver, AiMessage, AiTool, AiToolCall,
             },
@@ -33,6 +34,8 @@ use futures::StreamExt;
 use loco_rs::{prelude::AppContext, testing::prelude::*};
 use serde_json::json;
 use serial_test::serial;
+
+use super::fake_ollaya::{self, by_keyword, with_key};
 
 /// O que o provedor recebeu numa rodada.
 #[derive(Debug, Clone)]
@@ -127,7 +130,19 @@ async fn conversar(
     carga: ToolLoading,
 ) -> (Vec<Rodada>, Vec<HarnessEvent>) {
     let (driver, rodadas) = Gravador::novo(roteiro);
-    let settings = AiSettings::default();
+    // O Decisor de teste só reconhece gráfico; o resto fica para o `load_tools`.
+    with_key();
+    let decisor = fake_ollaya::start(by_keyword(&[("gráfico", "charts")])).await;
+    let settings = AiSettings {
+        decider: AiDeciderSettings {
+            enabled: true,
+            base_url: decisor.base_url.clone(),
+            model: "laya".into(),
+            timeout_ms: 5_000,
+            ..AiDeciderSettings::default()
+        },
+        ..AiSettings::default()
+    };
     let eventos: Vec<HarnessEvent> = run_agent_loop(
         ctx.clone(),
         settings.clone(),

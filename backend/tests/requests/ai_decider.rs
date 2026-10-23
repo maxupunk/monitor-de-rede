@@ -24,7 +24,6 @@ use backend::{
                 agent::{run_agent_loop, AgentRequest, ConversationMemory, ToolLoading},
                 prompt::ChatContext,
                 tools::{ToolGroup, ToolPolicy},
-                turn::preselect_groups,
             },
             settings::{self, AiSettings},
         },
@@ -173,51 +172,96 @@ impl AiDriver for Anota {
     }
 }
 
+/// As ferramentas que chegam ao provedor numa pergunta do chat.
+async fn tools_sent(
+    ctx: &loco_rs::app::AppContext,
+    settings: AiSettings,
+    question: &str,
+) -> Vec<String> {
+    let tools = Arc::new(Mutex::new(Vec::new()));
+    run_agent_loop(
+        ctx.clone(),
+        settings.clone(),
+        Box::new(Anota(tools.clone())),
+        AgentRequest {
+            messages: vec![ChatMessageInput {
+                role: "user".into(),
+                content: question.into(),
+            }],
+            context: ChatContext::default(),
+            policy: ToolPolicy::from_settings(&settings),
+            tool_loading: ToolLoading::OnDemand,
+            memory: ConversationMemory::default(),
+            actor: backend::services::audit::AuditActor::default(),
+        },
+    )
+    .await
+    .collect::<Vec<_>>()
+    .await;
+    let sent = tools.lock().unwrap().clone();
+    sent
+}
+
 #[tokio::test]
 #[serial]
-async fn grupo_indicado_pelo_decider_chega_ao_provedor() {
+async fn com_decisor_so_vai_o_que_ele_escolheu() {
     request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
-        let question = "a aplicação do financeiro está de pé?";
-        assert!(
-            !preselect_groups(question, &[]).contains(&ToolGroup::Docker),
-            "a pergunta não pode achar Docker pelas palavras-chave, senão o teste não prova nada"
-        );
-
         with_key();
         let settings = AiSettings {
             decider: decider(fake_ollaya().await),
             ..AiSettings::default()
         };
-        let tools = Arc::new(Mutex::new(Vec::new()));
-        run_agent_loop(
-            ctx.clone(),
-            settings.clone(),
-            Box::new(Anota(tools.clone())),
-            AgentRequest {
-                messages: vec![ChatMessageInput {
-                    role: "user".into(),
-                    content: question.into(),
-                }],
-                context: ChatContext::default(),
-                policy: ToolPolicy::from_settings(&settings),
-                tool_loading: ToolLoading::OnDemand,
-                memory: ConversationMemory::default(),
-                actor: backend::services::audit::AuditActor::default(),
-            },
-        )
-        .await
-        .collect::<Vec<_>>()
-        .await;
-
-        let tools = tools.lock().unwrap().clone();
+        let tools = tools_sent(&ctx, settings, "a aplicação do financeiro está de pé?").await;
         assert!(
             tools.iter().any(|name| name == "get_docker_containers"),
             "{tools:?}"
         );
         assert!(
-            !tools.iter().any(|name| name == "ping_host"),
+            !tools.iter().any(|name| name == "get_monitor_history"),
             "só o que o Decisor indicou entra: {tools:?}"
         );
+        assert!(
+            tools.iter().any(|name| name == "load_tools"),
+            "se ele errar para menos, a IA ainda carrega o resto: {tools:?}"
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn sem_decisor_vai_o_catalogo_inteiro() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
+        // Desligado na tela e ligado sem servidor no ar: nos dois casos não há
+        // quem escolha, e nada pode ficar de fora.
+        let fora_do_ar = AiDeciderSettings {
+            enabled: true,
+            base_url: "http://192.0.2.1:9".into(),
+            timeout_ms: 500,
+            ..AiDeciderSettings::default()
+        };
+        for decider in [AiDeciderSettings::default(), fora_do_ar] {
+            let settings = AiSettings {
+                decider,
+                ..AiSettings::default()
+            };
+            let tools = tools_sent(&ctx, settings, "a aplicação do financeiro está de pé?").await;
+            for esperada in [
+                "get_docker_containers",
+                "get_monitor_history",
+                "get_audit_log",
+                "list_scheduled_tasks",
+            ] {
+                assert!(
+                    tools.iter().any(|name| name == esperada),
+                    "{esperada}: {tools:?}"
+                );
+            }
+            assert!(
+                !tools.iter().any(|name| name == "load_tools"),
+                "não sobra nada a carregar: {tools:?}"
+            );
+        }
     })
     .await;
 }

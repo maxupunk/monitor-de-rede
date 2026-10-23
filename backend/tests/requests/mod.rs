@@ -58,6 +58,7 @@ mod quick_ping;
 mod reach_monitors;
 mod root;
 mod saas_monitoring;
+mod scheduled_tasks;
 mod scheduler_probes_lifecycle;
 mod server_addresses;
 mod settings;

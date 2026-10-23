@@ -83,8 +83,8 @@ async fn chat_nao_espera_o_carregamento_e_deixa_o_modelo_subindo() {
     )
     .await;
     assert!(
-        groups.is_empty(),
-        "modelo frio: segue com as palavras-chave"
+        groups.is_none(),
+        "modelo frio: não há quem escolha, o chat recebe tudo"
     );
     assert!(started.elapsed() < LOAD, "não esperou o carregamento");
     assert_eq!(ollaya.calls(), 0);
@@ -99,7 +99,7 @@ async fn chat_nao_espera_o_carregamento_e_deixa_o_modelo_subindo() {
     )
     .await;
     assert!(
-        groups.contains(&ToolGroup::Docker),
+        groups.is_some_and(|groups| groups.contains(&ToolGroup::Docker)),
         "quente: o Decisor decide"
     );
 }
