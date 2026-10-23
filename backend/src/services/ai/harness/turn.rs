@@ -6,8 +6,9 @@
 //! isso sem tirar nada de uma pergunta de verdade:
 //!
 //! - [`is_small_talk`]: saudação e agradecimento respondem sem ferramenta.
-//! - [`preselect_groups`]: o que a pergunta obviamente pede já vai carregado;
-//!   o resto a IA carrega com `load_tools` se precisar.
+//! - [`context_groups`]: o que a pessoa marcou (`@container`, o alerta da
+//!   tela) já vai carregado; o resto quem escolhe é o Decisor — ou, sem ele,
+//!   vai o catálogo inteiro (`agent::run_agent_loop`).
 //! - [`compact_for_model`]: resultado gigante não entra inteiro na conversa.
 
 use std::collections::HashSet;
@@ -84,167 +85,13 @@ pub fn is_small_talk(messages: &[ChatMessageInput]) -> bool {
             .all(|word| SMALL_TALK_WORDS.contains(&word.as_str()))
 }
 
-/// Trechos que denunciam cada grupo. Casam no começo da palavra, sem acento.
-const HINTS: &[(ToolGroup, &[&str])] = &[
-    (
-        ToolGroup::History,
-        &[
-            "histor", "uptime", "disponib", "ontem", "semana", "mes", "metric", "cpu", "memoria",
-            "trafego", "banda", "ultimas", "ultimos", "24h", "7d", "horas", "dias", "falhas",
-        ],
-    ),
-    (
-        ToolGroup::Charts,
-        &["grafic", "chart", "curva", "evolu", "plot"],
-    ),
-    (
-        ToolGroup::Analysis,
-        &[
-            "causa",
-            "raiz",
-            "porque",
-            "normal",
-            "baseline",
-            "padrao",
-            "horario",
-            "aconteceu",
-            "timeline",
-            "incidente",
-            "pior",
-            "piorou",
-            "comparar",
-            "compare",
-        ],
-    ),
-    (ToolGroup::Logs, &["log", "logs", "syslog"]),
-    (
-        ToolGroup::Docker,
-        &["docker", "container", "containers", "reinici", "restart"],
-    ),
-    (
-        ToolGroup::Platform,
-        &[
-            "agente",
-            "vpn",
-            "wireguard",
-            "peer",
-            "tunel",
-            "topolog",
-            "vizinh",
-            "uplink",
-            "descobert",
-            "varredura",
-            "subrede",
-            "cidr",
-            "vlan",
-            "site",
-            "notifica",
-            "telegram",
-            "email",
-            "webhook",
-            "discord",
-        ],
-    ),
-    (
-        ToolGroup::Diagnostics,
-        &[
-            "ping",
-            "traceroute",
-            "tracert",
-            "rota",
-            "porta",
-            "portas",
-            "scan",
-            "dns",
-            "resolv",
-            "testar",
-            "teste",
-            "conectividade",
-            "internet",
-            "playbook",
-            "latencia",
-        ],
-    ),
-    (
-        ToolGroup::Actions,
-        &[
-            "silenci", "reconhec", "manutenc", "criar", "crie", "cadastr", "adicion",
-        ],
-    ),
-    (
-        ToolGroup::AlertRules,
-        &[
-            "alerta",
-            "alert",
-            "regra",
-            "limiar",
-            "threshold",
-            "dispar",
-            "origem",
-            "gatilho",
-            "apagar",
-            "exclu",
-            "remov",
-            "desativ",
-            "ativar",
-            "notifica",
-            "onde",
-        ],
-    ),
-    (
-        ToolGroup::Devices,
-        &[
-            "ssh",
-            "telnet",
-            "plugin",
-            "plugins",
-            "driver",
-            "drivers",
-            "script",
-            "scripts",
-            "opkg",
-            "pacote",
-            "pacotes",
-            "luci",
-            "uci",
-            "firmware",
-            "credencia",
-            "http",
-            "web",
-            "aplicativ",
-            "apps",
-        ],
-    ),
-    (
-        ToolGroup::Audit,
-        &["auditor", "audit", "alterac", "alterou", "alterad"],
-    ),
-];
-
-/// Grupos que a pergunta (e o que foi marcado nela) obviamente pede.
-///
-/// Errar para mais custa só os schemas de um grupo; errar para menos custa
-/// uma rodada de `load_tools` — nunca a resposta.
+/// Grupos que o contexto **marcado** pela pessoa pede: o container, o
+/// monitor ou a fonte citada com `@`, e o alerta ou a regra da tela de onde o
+/// chat foi aberto. Não é palpite sobre o texto — quem escolhe pelo texto é o
+/// Decisor ([`tool_routing`](crate::services::ai::decider::tool_routing)).
 #[must_use]
-pub fn preselect_groups(question: &str, mentions: &[AiMention]) -> ToolGroups {
-    let words = words(question);
-    let mut groups: ToolGroups = HINTS
-        .iter()
-        .filter(|(_, hints)| {
-            words
-                .iter()
-                .any(|word| hints.iter().any(|hint| word.starts_with(hint)))
-        })
-        .map(|(group, _)| *group)
-        .collect();
-    let joined = words.join(" ");
-    if joined.contains("por que") || joined.contains("linha do tempo") {
-        groups.insert(ToolGroup::Analysis);
-    }
-    if joined.contains("de onde") || joined.contains("qual a causa") {
-        groups.insert(ToolGroup::Analysis);
-        groups.insert(ToolGroup::AlertRules);
-    }
+pub fn context_groups(mentions: &[AiMention], alert_or_rule: bool) -> ToolGroups {
+    let mut groups = ToolGroups::new();
     for mention in mentions {
         match (mention.kind, mention.id.as_str()) {
             (AiMentionKind::Container, _) | (AiMentionKind::Source, "docker") => {
@@ -258,6 +105,10 @@ pub fn preselect_groups(question: &str, mentions: &[AiMention]) -> ToolGroups {
             }
             _ => {}
         }
+    }
+    if alert_or_rule {
+        groups.insert(ToolGroup::AlertRules);
+        groups.insert(ToolGroup::Analysis);
     }
     groups
 }
@@ -439,40 +290,7 @@ mod tests {
     }
 
     #[test]
-    fn pergunta_pre_carrega_o_grupo_que_obviamente_pede() {
-        let grupos = preselect_groups("Mostre o gráfico de latência das últimas 24h", &[]);
-        assert!(grupos.contains(&ToolGroup::Charts));
-        assert!(grupos.contains(&ToolGroup::History));
-        assert!(
-            grupos.contains(&ToolGroup::Diagnostics),
-            "latência sugere teste"
-        );
-
-        assert!(preselect_groups("Por que a borda caiu?", &[]).contains(&ToolGroup::Analysis));
-        assert!(
-            preselect_groups("Investigue o alerta #12: qual a causa provável?", &[])
-                .contains(&ToolGroup::AlertRules)
-        );
-        assert!(
-            preselect_groups("Crie uma regra de alerta para a latência", &[])
-                .contains(&ToolGroup::AlertRules)
-        );
-        assert!(preselect_groups("o agente da filial está conectado?", &[])
-            .contains(&ToolGroup::Platform));
-        assert!(preselect_groups("quais dispositivos estão offline?", &[]).is_empty());
-        let auditoria = preselect_groups(
-            "verifica na auditoria se após alguma alteração começou o AP-STA-DISCONNECTED",
-            &[],
-        );
-        assert!(auditoria.contains(&ToolGroup::Audit));
-        assert!(
-            !auditoria.contains(&ToolGroup::Platform),
-            "auditoria tem grupo próprio"
-        );
-        assert!(
-            preselect_groups("lista de aplicativos no sistema", &[]).contains(&ToolGroup::Devices)
-        );
-
+    fn contexto_marcado_carrega_o_grupo_sem_olhar_o_texto() {
         let container = AiMention {
             kind: AiMentionKind::Container,
             id: "abc".into(),
@@ -480,9 +298,14 @@ mod tests {
             detail: None,
         };
         assert_eq!(
-            preselect_groups("e esse aqui?", &[container]),
+            context_groups(&[container], false),
             ToolGroups::from([ToolGroup::Docker])
         );
+        assert_eq!(
+            context_groups(&[], true),
+            ToolGroups::from([ToolGroup::AlertRules, ToolGroup::Analysis])
+        );
+        assert!(context_groups(&[], false).is_empty());
     }
 
     #[test]

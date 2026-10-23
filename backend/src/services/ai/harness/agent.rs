@@ -27,7 +27,7 @@ use super::{
         target_device_id, AiToolRisk, RiskAssessment, ToolArgs, ToolGroup, ToolGroups, ToolKind,
         ToolPolicy, ToolRegistry, LOAD_TOOLS,
     },
-    turn::{compact_for_model, is_small_talk, preselect_groups, requested_groups},
+    turn::{compact_for_model, context_groups, is_small_talk, requested_groups},
 };
 use crate::{
     dtos::ai::{AiChart, ChatMessageInput, ChatStreamRequest},
@@ -666,21 +666,25 @@ pub async fn run_agent_loop(
                     )
                     .await
                 } else {
-                    ToolGroups::new()
+                    None
                 }
             },
             context_window::resolve(driver.as_ref(), &configured_model)
         );
-        let preselected: ToolGroups = match request.tool_loading {
-            ToolLoading::Everything => available.iter().copied().collect(),
-            ToolLoading::OnDemand => {
-                let mut groups = preselect_groups(question, &request.context.mentions);
-                // O Decisor só acrescenta: o que as palavras-chave acharam fica.
-                groups.extend(routed.iter());
-                if request.context.alert_id.is_some() || request.context.rule_id.is_some() {
-                    groups.insert(ToolGroup::AlertRules);
-                    groups.insert(ToolGroup::Analysis);
-                }
+        let everything = || available.iter().copied().collect::<ToolGroups>();
+        let preselected: ToolGroups = match (request.tool_loading, routed) {
+            (ToolLoading::Everything, _) => everything(),
+            (ToolLoading::OnDemand, _) if small_talk => ToolGroups::new(),
+            // Sem Decisor não há quem escolha: vai o catálogo inteiro.
+            (ToolLoading::OnDemand, None) => everything(),
+            // O Decisor escolhe; o que a pessoa marcou (`@container`, o
+            // alerta da tela) entra junto.
+            (ToolLoading::OnDemand, Some(decided)) => {
+                let mut groups = context_groups(
+                    &request.context.mentions,
+                    request.context.alert_id.is_some() || request.context.rule_id.is_some(),
+                );
+                groups.extend(decided.iter());
                 groups
                     .iter()
                     .filter(|group| available.contains(group))
@@ -711,10 +715,11 @@ pub async fn run_agent_loop(
             history = recent_history(history, SMALL_TALK_HISTORY);
             build_small_talk_prompt(&settings)
         } else {
+            // O catálogo do `load_tools` só faz sentido se sobrou grupo de fora.
             build_system_prompt(
                 &settings,
                 request.policy,
-                request.tool_loading == ToolLoading::OnDemand,
+                available.iter().any(|group| !preselected.contains(group)),
             )
         };
 

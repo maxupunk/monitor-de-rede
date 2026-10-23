@@ -2,10 +2,12 @@
 //!
 //! Uma pergunta sim/não por grupo, todas na mesma passada — uma pergunta
 //! costuma pedir mais de um grupo, então uma escolha única não serviria.
-//! O resultado só **acrescenta** grupos aos das palavras-chave
-//! ([`preselect_groups`](crate::services::ai::harness::turn::preselect_groups)):
-//! errar para mais custa os schemas de um grupo; errar para menos, uma
-//! rodada de `load_tools`.
+//!
+//! Com o Decisor no ar, é ele quem escolhe o que vai ao chat (além do núcleo
+//! e do que a pessoa marcou); errar para menos custa uma rodada de
+//! `load_tools`. Sem ele — desligado, sem modelo, carregando ou falhando —
+//! [`route`] devolve `None` e o chat recebe o catálogo inteiro: nada fica de
+//! fora por falta de quem escolha.
 
 use std::collections::BTreeMap;
 
@@ -89,20 +91,23 @@ pub async fn score(
         .await
 }
 
-/// Os grupos que o Decisor indica para a pergunta do chat. Vazio quando ele está
-/// desligado, não há o que decidir, o modelo ainda está carregando ou o
-/// Ollaya falhou — o chat nunca espera nem quebra por causa dele.
+/// Os grupos que o Decisor escolhe para a pergunta do chat.
+///
+/// `None` quando não há Decisor para escolher — desligado, sem modelo, ainda
+/// carregando ou com falha nesta pergunta: o chat manda então o catálogo
+/// inteiro, e nunca espera nem quebra por causa dele. `Some` vazio é escolha:
+/// a pergunta só precisa do núcleo.
 pub async fn route(
     runtime: &DeciderRuntime,
     settings: &AiDeciderSettings,
     question: &str,
     groups: &[ToolGroup],
-) -> ToolGroups {
-    if !settings.allows(DeciderFeature::ChatTools)
-        || groups.is_empty()
-        || question.trim().is_empty()
-    {
-        return ToolGroups::new();
+) -> Option<ToolGroups> {
+    if !settings.allows(DeciderFeature::ChatTools) {
+        return None;
+    }
+    if groups.is_empty() || question.trim().is_empty() {
+        return Some(ToolGroups::new());
     }
     match score(runtime, settings, Lane::Interactive, question, groups).await {
         Ok(outcome) => {
@@ -113,11 +118,11 @@ pub async fn route(
                 groups = ?selected.ids(),
                 "decisor: grupos de ferramentas decididos"
             );
-            selected
+            Some(selected)
         }
         Err(error) => {
-            tracing::debug!(%error, "decisor sem resposta nesta pergunta; seguindo com as palavras-chave");
-            ToolGroups::new()
+            tracing::debug!(%error, "decisor sem resposta nesta pergunta; o chat recebe todas as ferramentas");
+            None
         }
     }
 }
@@ -160,7 +165,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn desligado_nao_consulta_nada() {
+    async fn desligado_nao_consulta_nada_e_o_chat_recebe_tudo() {
         let settings = AiDeciderSettings {
             // Endereço que não responde: se consultasse, o teste demoraria/falharia.
             base_url: "http://127.0.0.1:9".into(),
@@ -173,11 +178,11 @@ mod tests {
             &GROUPS
         )
         .await
-        .is_empty());
+        .is_none());
     }
 
     #[tokio::test]
-    async fn servidor_fora_do_ar_devolve_vazio() {
+    async fn servidor_fora_do_ar_conta_como_sem_decisor() {
         let settings = AiDeciderSettings {
             enabled: true,
             base_url: "http://127.0.0.1:9".into(),
@@ -191,6 +196,6 @@ mod tests {
             &GROUPS
         )
         .await
-        .is_empty());
+        .is_none());
     }
 }
