@@ -1,6 +1,6 @@
 //! Triagem do resumo automático de incidente pelo Decisor.
 //!
-//! O que se afirma aqui, contra o Ollaya falso: no modo "decidir", um alerta
+//! O que se afirma aqui, contra o Ollama falso: no modo "decidir", um alerta
 //! que o Decisor não acha acionável fica marcado como suprimido, com a opinião
 //! gravada sem apagar o resto do `data`; no modo "só registrar", a opinião é
 //! gravada e nada é suprimido; desligada, não há consulta; e fora do ar, a
@@ -21,7 +21,7 @@ use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 use serde_json::json;
 use serial_test::serial;
 
-use super::fake_ollaya::{self, by_keyword, with_key, FakeOllaya};
+use super::fake_ollama::{self, by_keyword, FakeOllama};
 
 async fn alerta(ctx: &AppContext) -> alert_events::Model {
     let dev = devices::ActiveModel {
@@ -49,12 +49,12 @@ async fn alerta(ctx: &AppContext) -> alert_events::Model {
     .unwrap()
 }
 
-/// Um Ollaya que acha todo alerta um sintoma, nunca acionável.
-async fn cetico() -> FakeOllaya {
-    fake_ollaya::start(by_keyword(&[("", "symptom")])).await
+/// Um Ollama que acha todo alerta um sintoma, nunca acionável.
+async fn cetico() -> FakeOllama {
+    fake_ollama::start(by_keyword(&[("", "symptom")])).await
 }
 
-async fn modo(ctx: &AppContext, fake: &FakeOllaya, mode: DeciderTriageMode) {
+async fn modo(ctx: &AppContext, fake: &FakeOllama, mode: DeciderTriageMode) {
     let mut decider = fake.settings();
     decider.features.incident_triage = mode;
     settings::save_decider(&ctx.db, decider).await.unwrap();
@@ -64,7 +64,6 @@ async fn modo(ctx: &AppContext, fake: &FakeOllaya, mode: DeciderTriageMode) {
 #[serial]
 async fn decidir_suprime_o_que_nao_e_acionavel_e_preserva_o_data() {
     request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
-        with_key();
         let fake = cetico().await;
         modo(&ctx, &fake, DeciderTriageMode::Enforce).await;
         let evento = alerta(&ctx).await;
@@ -76,7 +75,7 @@ async fn decidir_suprime_o_que_nao_e_acionavel_e_preserva_o_data() {
 
         assert!(opinion.suppressed);
         assert!(opinion.symptom > 90.0 && opinion.actionable < 10.0);
-        assert_eq!(opinion.model, "laya:multilingual");
+        assert_eq!(opinion.model, "laya:322m-multilingual-bf16");
         let data = alert_events::Entity::find_by_id(evento.id)
             .one(&ctx.db)
             .await
@@ -96,7 +95,6 @@ async fn decidir_suprime_o_que_nao_e_acionavel_e_preserva_o_data() {
 #[serial]
 async fn so_registrar_nunca_suprime() {
     request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
-        with_key();
         let fake = cetico().await;
         modo(&ctx, &fake, DeciderTriageMode::Shadow).await;
         let evento = alerta(&ctx).await;
@@ -115,7 +113,6 @@ async fn so_registrar_nunca_suprime() {
 #[serial]
 async fn desligada_nao_consulta_e_fora_do_ar_nao_opina() {
     request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
-        with_key();
         let fake = cetico().await;
         modo(&ctx, &fake, DeciderTriageMode::Off).await;
         let evento = alerta(&ctx).await;

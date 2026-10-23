@@ -30,9 +30,12 @@
             <div class="text-overline text-success">Recomendado</div>
             <div class="text-h6 font-weight-bold text-break">{{ best.model }}</div>
             <div class="text-body-2">
-              Acertou {{ percent(best.overall) }} das decisões e respondeu em até
-              {{ formatLatency(best.p95Ms) }} em CPU (95% das vezes).
-              <template v-if="best.bundled">Vem instalado com o NetMonitor.</template>
+              Acertou {{ percent(best.overall) }} das decisões<template v-if="best.p95Ms !== null">
+                e respondeu em até {{ formatLatency(best.p95Ms) }} em CPU (95% das vezes)</template
+              >.
+              <template v-if="best.bundled"
+                >Vem com o NetMonitor: a própria API o instala no Ollama.</template
+              >
             </div>
           </div>
           <v-chip :color="accuracyColor(best.overall)" variant="flat" size="large">
@@ -88,7 +91,7 @@
 
           <template #item.p95Ms="{ item }">
             <div class="d-flex flex-column align-start py-1">
-              <span class="font-weight-medium">{{ formatLatency(item.p95Ms) }}</span>
+              <span class="font-weight-medium">{{ formatLatency(item.p95Ms, 'só GPU') }}</span>
               <v-chip :color="speedOf(item).color" size="x-small" variant="tonal" class="mt-1">
                 {{ speedOf(item).label }}
               </v-chip>
@@ -116,7 +119,7 @@
                   {{ tag.label }}
                 </v-chip>
                 <v-chip :color="speedOf(item).color" size="x-small" variant="tonal">
-                  {{ formatLatency(item.p95Ms) }} · {{ speedOf(item).label }}
+                  {{ formatLatency(item.p95Ms, 'medido na GPU') }} · {{ speedOf(item).label }}
                 </v-chip>
               </div>
               <div class="d-flex flex-wrap ga-1">
@@ -214,6 +217,11 @@ function tagsOf(row: DeciderBenchmarkRow): { label: string; color: ModelFact['co
 
 function speedOf(row: DeciderBenchmarkRow): { label: string; color: ModelFact['color'] } {
   const timeout = report.value?.timeoutMs ?? 4000
+  // Medido só na GPU: o tempo em CPU não se sabe — e um decodificador em CPU
+  // espera segundos por pergunta.
+  if (row.p95Ms === null || row.overTimeout === null) {
+    return { label: 'tempo em CPU não medido', color: 'warning' }
+  }
   if (row.p95Ms <= timeout && row.overTimeout <= OVER_TIMEOUT_TOLERANCE) {
     return { label: 'rápido o bastante', color: 'success' }
   }

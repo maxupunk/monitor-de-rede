@@ -1,6 +1,6 @@
 //! O Decisor sugerindo tipo e sistema do que a descoberta encontrou.
 //!
-//! O que se afirma aqui, contra o Ollaya falso: um host em dúvida ganha o
+//! O que se afirma aqui, contra o Ollama falso: um host em dúvida ganha o
 //! palpite em `details.decider`, sem mudar o tipo que a heurística gravou; com o
 //! Decisor desligado não há consulta; fora do ar, o enriquecimento só não
 //! acontece; e o "identificar" do cadastro devolve o palpite quando a
@@ -21,7 +21,7 @@ use serde_json::{json, Value};
 use serial_test::serial;
 
 use super::{
-    fake_ollaya::{self, by_keyword, with_key},
+    fake_ollama::{self, by_keyword},
     prepare_data,
 };
 
@@ -95,8 +95,7 @@ async fn row_data(ctx: &AppContext, id: i64) -> discovery_results::Model {
 #[serial]
 async fn host_em_duvida_ganha_o_palpite_sem_mudar_o_tipo_gravado() {
     request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
-        with_key();
-        let fake = fake_ollaya::start(by_keyword(&[("hikvision", "camera")])).await;
+        let fake = fake_ollama::start(by_keyword(&[("hikvision", "camera")])).await;
         settings::save_decider(&ctx.db, fake.settings())
             .await
             .unwrap();
@@ -117,7 +116,10 @@ async fn host_em_duvida_ganha_o_palpite_sem_mudar_o_tipo_gravado() {
         );
         let decider = &row.data.unwrap()["details"]["decider"];
         assert_eq!(decider["deviceType"]["value"], "camera");
-        assert_eq!(decider["deviceType"]["model"], "laya:multilingual");
+        assert_eq!(
+            decider["deviceType"]["model"],
+            "laya:322m-multilingual-bf16"
+        );
         assert!(decider["deviceType"]["confidence"].as_f64().unwrap() >= 60.0);
         let state = fake.states.lock().unwrap()[0].clone();
         assert!(
@@ -132,8 +134,7 @@ async fn host_em_duvida_ganha_o_palpite_sem_mudar_o_tipo_gravado() {
 #[serial]
 async fn desligado_nao_consulta_e_nao_mexe_no_resultado() {
     request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
-        with_key();
-        let fake = fake_ollaya::start(by_keyword(&[("hikvision", "camera")])).await;
+        let fake = fake_ollama::start(by_keyword(&[("hikvision", "camera")])).await;
         let mut decider = fake.settings();
         decider.features.device_identity = false;
         settings::save_decider(&ctx.db, decider).await.unwrap();
@@ -182,8 +183,7 @@ async fn fora_do_ar_so_nao_enriquece() {
 #[serial]
 async fn identificar_devolve_o_palpite_quando_a_evidencia_e_fraca() {
     request_with_config::<App, _, _>(RequestConfig::default(), |request, ctx| async move {
-        with_key();
-        let fake = fake_ollaya::start(by_keyword(&[("hikvision", "camera")])).await;
+        let fake = fake_ollama::start(by_keyword(&[("hikvision", "camera")])).await;
         settings::save_decider(&ctx.db, fake.settings())
             .await
             .unwrap();

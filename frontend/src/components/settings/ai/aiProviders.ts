@@ -12,7 +12,8 @@ export type AiDriver = 'opencode' | 'openrouter' | 'ollama'
 /** Endpoint fixo do OpenCode Zen (não há campo para trocá-lo). */
 export const OPENCODE_BASE_URL = 'https://opencode.ai/zen/v1'
 
-export const OLLAMA_DEFAULT_BASE_URL = 'http://localhost:11434/v1'
+/** O serviço `ollama` do compose — o mesmo que atende o Decisor. */
+export const OLLAMA_DEFAULT_BASE_URL = 'http://ollama:11434/v1'
 
 export const DEFAULT_OLLAMA_NUM_CTX = 16384
 

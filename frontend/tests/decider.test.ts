@@ -4,43 +4,42 @@ import type { DeciderProviderView } from '@/bindings/DeciderProviderView'
 import { defaultDeciderSettings } from '@/stores/aiDecider'
 import {
   formForProvider,
-  isLocalOllaya,
+  isLocalOllama,
   memoryLabel,
   benchmarkFact,
   decisionsFact,
   isNearChance,
   modelFacts,
   primaryScore,
-  RECOMMENDED_CPU_MODEL,
+  RECOMMENDED_MODEL,
   providerMissing,
   timeoutForModel,
   usesCustomUrl,
 } from '@/utils/decider'
 
-describe('isLocalOllaya', () => {
-  it('reconhece o Ollaya desta máquina', () => {
-    expect(isLocalOllaya('http://ollaya:11435')).toBe(true)
-    expect(isLocalOllaya('http://localhost:11435/')).toBe(true)
-    expect(isLocalOllaya('127.0.0.1:11435')).toBe(true)
-    expect(isLocalOllaya('http://[::1]:11435')).toBe(true)
-    expect(isLocalOllaya('http://host.docker.internal:11435')).toBe(true)
-    expect(isLocalOllaya('')).toBe(true)
+describe('isLocalOllama', () => {
+  it('reconhece o Ollama desta máquina', () => {
+    expect(isLocalOllama('http://ollama:11434')).toBe(true)
+    expect(isLocalOllama('http://localhost:11434/')).toBe(true)
+    expect(isLocalOllama('127.0.0.1:11434')).toBe(true)
+    expect(isLocalOllama('http://[::1]:11434')).toBe(true)
+    expect(isLocalOllama('http://host.docker.internal:11434')).toBe(true)
+    expect(isLocalOllama('')).toBe(true)
   })
 
   it('outra máquina não é local', () => {
-    expect(isLocalOllaya('http://192.168.1.50:11435')).toBe(false)
-    expect(isLocalOllaya('https://decider.exemplo.com.br')).toBe(false)
-    expect(isLocalOllaya('http://ollaya-gpu:11435')).toBe(false)
+    expect(isLocalOllama('http://192.168.1.50:11434')).toBe(false)
+    expect(isLocalOllama('https://decider.exemplo.com.br')).toBe(false)
+    expect(isLocalOllama('http://ollama-gpu:11434')).toBe(false)
   })
 })
 
 const decider: DeciderModelSpecView = {
-  family: 'Decisor',
+  family: 'Laya Network',
   language: 'multilingual',
   memoryMb: 4000,
   latencyMs: 307,
   gpuRecommended: false,
-  accuracy: 0.361,
   suggestedTimeoutMs: 1500,
   recommended: true,
   bundled: false,
@@ -51,15 +50,13 @@ const kev4b: DeciderModelSpecView = {
   language: 'english',
   downloadMb: 9500,
   memoryMb: 11000,
-  latencyMs: 354,
   gpuRecommended: true,
-  accuracy: 0.669,
   suggestedTimeoutMs: 2500,
   recommended: false,
   bundled: false,
 }
 
-/** Publicado sem memória nem acerto (como o decision:eos). */
+/** Sem memória medida. */
 const semNumeros: DeciderModelSpecView = {
   family: 'Decision',
   language: 'english',
@@ -72,20 +69,18 @@ const semNumeros: DeciderModelSpecView = {
 }
 
 describe('ficha do modelo', () => {
-  it('o Decisor é multilíngue e roda em CPU', () => {
+  it('o Laya Network é multilíngue e roda em CPU', () => {
     const labels = modelFacts(decider).map((fact) => fact.label)
     expect(labels).toContain('Multilíngue (100+ línguas)')
     expect(labels).toContain('Roda bem em CPU')
-    expect(labels).toContain('307 ms por 5 perguntas (CPU)')
+    expect(labels).toContain('307 ms por decisão em CPU (mediana)')
     expect(labels.some((label) => label.includes('download'))).toBe(false)
   })
 
-  it('o Kev avisa a língua, mostra acerto, velocidade, tamanho e GPU', () => {
+  it('o Kev avisa a língua, mostra tamanho e GPU — sem tempo em CPU, sem chip de tempo', () => {
     const facts = modelFacts(kev4b)
     expect(facts.map((fact) => fact.label)).toEqual([
       'Sem português',
-      'Acerto 67% (teste do autor)',
-      '354 ms por 5 perguntas (RTX 4090)',
       '9.5 GB de download',
       '~11 GB de memória',
       'GPU recomendada',
@@ -93,9 +88,8 @@ describe('ficha do modelo', () => {
     expect(facts.filter((fact) => fact.color === 'warning')).toHaveLength(2)
   })
 
-  it('sem número publicado, sem chip — e o download vira o piso da memória', () => {
+  it('sem número medido, sem chip — e o download vira o piso da memória', () => {
     const labels = modelFacts(semNumeros).map((fact) => fact.label)
-    expect(labels.some((label) => label.startsWith('Acerto'))).toBe(false)
     expect(labels.some((label) => label.includes('memória'))).toBe(false)
     expect(memoryLabel(kev4b)).toBe('aproximadamente 11 GB')
     expect(memoryLabel(semNumeros)).toBe('pelo menos 1.5 GB')
@@ -119,12 +113,12 @@ describe('tempo máximo ao trocar de modelo', () => {
   })
 })
 
-const ollaya: DeciderProviderView = {
-  id: 'ollaya',
-  label: 'Ollaya',
+const ollama: DeciderProviderView = {
+  id: 'ollama',
+  label: 'Ollama',
   description: '',
-  protocol: 'ollaya',
-  defaultBaseUrl: 'http://ollaya:11435',
+  protocol: 'ollama',
+  defaultBaseUrl: 'http://ollama:11434',
   defaultModel: 'laya',
   models: [],
   requiresKey: false,
@@ -164,8 +158,8 @@ describe('troca de provedor', () => {
     expect(next.timeoutMs).toBe(3000)
   })
 
-  it('URL de um provedor nunca vai para outro (Ollaya local não vira OpenRouter)', () => {
-    const local = { ...form, baseUrl: 'http://127.0.0.1:11435' }
+  it('URL de um provedor nunca vai para outro (Ollama local não vira OpenRouter)', () => {
+    const local = { ...form, baseUrl: 'http://127.0.0.1:11434' }
     expect(formForProvider(local, decider, cloudflare, 1500).baseUrl).toBe(
       'https://api.cloudflare.com/client/v4'
     )
@@ -173,8 +167,8 @@ describe('troca de provedor', () => {
 
   it('volta a URL já digitada para o provedor nesta tela', () => {
     const outra = { ...form, provider: 'cloudflare' as const, baseUrl: cloudflare.defaultBaseUrl }
-    expect(formForProvider(outra, cloudflare, ollaya, 1500, 'http://10.0.0.5:11435').baseUrl).toBe(
-      'http://10.0.0.5:11435'
+    expect(formForProvider(outra, cloudflare, ollama, 1500, 'http://10.0.0.5:11434').baseUrl).toBe(
+      'http://10.0.0.5:11434'
     )
   })
 
@@ -184,7 +178,7 @@ describe('troca de provedor', () => {
       usesCustomUrl({ ...cf, baseUrl: 'https://api.cloudflare.com/client/v4/' }, cloudflare)
     ).toBe(false)
     expect(usesCustomUrl({ ...cf, baseUrl: '' }, cloudflare)).toBe(false)
-    expect(usesCustomUrl({ ...cf, baseUrl: 'http://127.0.0.1:11435' }, cloudflare)).toBe(true)
+    expect(usesCustomUrl({ ...cf, baseUrl: 'http://127.0.0.1:11434' }, cloudflare)).toBe(true)
   })
 
   it('diz o que falta, em português', () => {
@@ -195,7 +189,7 @@ describe('troca de provedor', () => {
     }
     expect(providerMissing(vazio, cloudflare)).toBe('Faltam o ID da conta e a chave de acesso')
     expect(providerMissing({ ...vazio, accountId: 'c', apiKey: '********' }, cloudflare)).toBeNull()
-    expect(providerMissing(defaultDeciderSettings(), ollaya)).toBeNull()
+    expect(providerMissing(defaultDeciderSettings(), ollama)).toBeNull()
   })
 })
 
@@ -240,9 +234,9 @@ describe('benchmark do NetMonitor', () => {
     expect(decisionsFact(network).short).toBe('92%')
   })
 
-  it('o padrão é o Decima Network, que vem com o NetMonitor', () => {
-    expect(defaultDeciderSettings().model).toBe(RECOMMENDED_CPU_MODEL)
-    expect(RECOMMENDED_CPU_MODEL).toBe('netmonitor/decima-network:v9')
+  it('o padrão é o Laya Network, que vem com o NetMonitor', () => {
+    expect(defaultDeciderSettings().model).toBe(RECOMMENDED_MODEL)
+    expect(RECOMMENDED_MODEL).toBe('netmonitor/laya-network:v2')
     expect(defaultDeciderSettings().timeoutMs).toBe(4000)
   })
 })

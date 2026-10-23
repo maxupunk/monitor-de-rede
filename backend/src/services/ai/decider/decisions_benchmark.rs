@@ -1,7 +1,7 @@
 //! O resultado de cada modelo no benchmark das **decisões do NetMonitor**.
 //!
 //! Fonte: o Laya-tuning (`laya-tuning netmonitor-benchmark`), que manda ao
-//! Ollaya as perguntas reais das seis decisões — ferramentas do chat,
+//! Ollama as perguntas reais das seis decisões — ferramentas do chat,
 //! identidade de dispositivo, categoria de log, triagem de alerta, revisão de
 //! ação e interfaces —, montadas como o backend as monta, e confere contra
 //! rótulos curados à mão. Todos os modelos nos mesmos casos e na mesma CPU
@@ -50,9 +50,10 @@ pub struct ModelResult {
     pub overall_high: f64,
     pub screen: f64,
     pub tasks: std::collections::BTreeMap<String, f64>,
-    pub p50_ms: f64,
-    pub p95_ms: f64,
-    pub over_timeout: f64,
+    /// `None` nos medidos só na GPU: o acerto vale, o tempo não.
+    pub p50_ms: Option<f64>,
+    pub p95_ms: Option<f64>,
+    pub over_timeout: Option<f64>,
 }
 
 static SNAPSHOT: LazyLock<Option<Snapshot>> =
@@ -183,13 +184,15 @@ mod tests {
         let first = &report.models[0];
         assert_eq!(first.model, DEFAULT_DECIDER_MODEL);
         assert!(first.recommended && first.bundled);
-        assert!(first.p95_ms <= f64::from(DEFAULT_DECIDER_TIMEOUT_MS));
+        assert!(first
+            .p95_ms
+            .is_some_and(|p95| p95 <= f64::from(DEFAULT_DECIDER_TIMEOUT_MS)));
         assert_eq!(report.tasks.len(), first.tasks.len());
     }
 
     #[test]
     fn acha_pelo_apelido() {
-        let by_alias = result("decima-network").expect("pelo apelido");
+        let by_alias = result("laya-network").expect("pelo apelido");
         assert_eq!(by_alias.model, DEFAULT_DECIDER_MODEL);
         assert!(result("modelo-que-nao-existe").is_none());
     }

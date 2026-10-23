@@ -3,7 +3,7 @@ import type { DeciderGroupScore } from "./DeciderGroupScore";
 
 export type TestDeciderResponse = { success: boolean, 
 /**
- * O Ollaya respondeu.
+ * O servidor respondeu.
  */
 online: boolean, 
 /**

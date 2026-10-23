@@ -7,12 +7,12 @@ import type { DeciderModelSpecView } from '@/bindings/DeciderModelSpecView'
 import { formatDecimalBytes, formatElapsedMs, formatLatency, formatPercent } from './formatters'
 
 /**
- * Hosts que significam "o Ollaya roda nesta mesma máquina": o serviço do
+ * Hosts que significam "o Ollama roda nesta mesma máquina": o serviço do
  * `docker-compose.yml`, o loopback e os nomes com que um container alcança o
  * próprio host. Qualquer outro endereço é outra máquina — a RAM gasta é dela.
  */
 const LOCAL_HOSTS = new Set([
-  'ollaya',
+  'ollama',
   'localhost',
   'host.docker.internal',
   'host.containers.internal',
@@ -20,8 +20,8 @@ const LOCAL_HOSTS = new Set([
   '[::1]',
 ])
 
-/** A URL aponta para um Ollaya que consome a RAM deste servidor? */
-export function isLocalOllaya(url: string | null | undefined): boolean {
+/** A URL aponta para um Ollama que consome a RAM deste servidor? */
+export function isLocalOllama(url: string | null | undefined): boolean {
   const raw = (url ?? '').trim()
   if (!raw) return true
   let host: string
@@ -35,7 +35,7 @@ export function isLocalOllaya(url: string | null | undefined): boolean {
 
 const MB = 1_000_000
 
-/** Quem sugere o tempo máximo por pergunta: um modelo do Ollaya ou um provedor. */
+/** Quem sugere o tempo máximo por pergunta: um modelo do Ollama ou um provedor. */
 export interface TimeoutSource {
   suggestedTimeoutMs: number
 }
@@ -51,9 +51,12 @@ export interface ModelFact {
 export const BENCHMARK_URL =
   'https://akitaonrails.com/2026/10/10/qual-modelo-de-decisao-classificador-de-ia-tipo-jev-e-melhor/'
 
-/** Os recomendados (`recommended` no catálogo do backend): um em CPU, um com GPU. */
-export const RECOMMENDED_CPU_MODEL = 'netmonitor/decima-network:v9'
-export const RECOMMENDED_GPU_MODEL = 'jeb:4b'
+/**
+ * O recomendado (`recommended` no catálogo do backend): o ajustado nas decisões
+ * do NetMonitor, que roda em CPU e vem com ele. Nenhum da biblioteca do Ollama
+ * passa dele no benchmark, nem com GPU.
+ */
+export const RECOMMENDED_MODEL = 'netmonitor/laya-network:v2'
 
 /** Abaixo disso o modelo fica perto do chute (~31% no teste) — mesma régua do backend. */
 const USEFUL_ACCURACY = 0.6
@@ -83,7 +86,10 @@ export function benchmarkFact(benchmark: DeciderBenchmarkView): ModelFact & { sh
 /** A nota no benchmark das decisões do NetMonitor, com a sigla para a lista. */
 export function decisionsFact(score: DeciderDecisionsScoreView): ModelFact & { short: string } {
   return {
-    label: `NetMonitor ${percent(score.overall)} · ${formatLatency(score.p95Ms)} (p95, CPU)`,
+    label:
+      score.p95Ms === null
+        ? `NetMonitor ${percent(score.overall)} (medido na GPU)`
+        : `NetMonitor ${percent(score.overall)} · ${formatLatency(score.p95Ms)} (p95, CPU)`,
     short: percent(score.overall),
     color: accuracyColor(score.overall),
     icon: 'mdi-podium',
@@ -134,20 +140,15 @@ export function modelFacts(
   } else if (spec && !decisions) {
     const { label, color, icon } = languageFact(spec.language)
     facts.push({ label, color, icon })
-    if (spec.accuracy != null) {
-      facts.push({
-        label: `Acerto ${percent(spec.accuracy)} (teste do autor)`,
-        color: 'info',
-        icon: 'mdi-target',
-      })
-    }
   }
   if (!spec) return facts
-  facts.push({
-    label: `${formatElapsedMs(spec.latencyMs)} por 5 perguntas (${spec.gpuRecommended ? 'RTX 4090' : 'CPU'})`,
-    color: 'info',
-    icon: 'mdi-timer-outline',
-  })
+  if (spec.latencyMs != null) {
+    facts.push({
+      label: `${formatElapsedMs(spec.latencyMs)} por decisão em CPU (mediana)`,
+      color: 'info',
+      icon: 'mdi-timer-outline',
+    })
+  }
   if (spec.downloadMb) {
     facts.push({
       label: `${formatDecimalBytes(spec.downloadMb * MB)} de download`,
@@ -219,7 +220,7 @@ export function usesCustomUrl(
  * O formulário ao trocar de provedor. Modelo e URL são do provedor: voltam
  * ao padrão dele, ou à URL que o usuário já tinha digitado para ele nesta
  * tela (`rememberedUrl`) — nunca passam de um provedor para outro, senão a
- * URL do Ollaya iria parar no OpenRouter. Chave e ID da conta também não
+ * URL do Ollama iria parar no OpenRouter. Chave e ID da conta também não
  * passam; o tempo máximo segue a regra de {@link timeoutForModel}.
  */
 export function formForProvider(

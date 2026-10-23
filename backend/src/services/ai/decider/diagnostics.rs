@@ -44,7 +44,7 @@ pub async fn test(
         .filter(|question| !question.is_empty())
         .unwrap_or(SAMPLE_QUESTION);
 
-    // No Ollaya, o modelo precisa estar baixado; na nuvem a própria decisão
+    // No Ollama, o modelo precisa estar baixado; na nuvem a própria decisão
     // confere a chave e o modelo.
     if settings.manages_models() {
         let installed = match DeciderClient::connect(settings)
@@ -65,7 +65,7 @@ pub async fn test(
                 true,
                 false,
                 format!(
-                    "O Ollaya respondeu, mas o modelo '{}' não está instalado. {next_step}",
+                    "O Ollama respondeu, mas o modelo '{}' não está instalado. {next_step}",
                     settings.model
                 ),
             );

@@ -42,7 +42,7 @@
       <v-col v-if="showUrlField" cols="12" md="6">
         <v-text-field
           v-model="form.baseUrl"
-          :label="managesModels ? 'URL do Ollaya' : 'URL da API'"
+          :label="managesModels ? 'URL do Ollama' : 'URL da API'"
           :placeholder="provider?.defaultBaseUrl || 'https://…'"
           :hint="urlHint"
           :color="customUrl ? 'warning' : undefined"
@@ -124,10 +124,11 @@
         <v-alert v-else-if="deciderStore.models" type="error" variant="tonal" density="compact">
           {{ deciderStore.models.errorMessage }}
           <div class="mt-1">
-            Nesta máquina, o serviço <code>ollaya</code> sobe junto com o
-            <code>docker compose up</code>. Com a URL padrão, o servidor o procura pelo nome do
-            serviço, em <code>127.0.0.1:11435</code> e em <code>host.docker.internal:11435</code>.
-            Em outra máquina, use o endereço dela (porta 11435) e a chave, se ela exigir.
+            Nesta máquina, o serviço <code>ollama</code> sobe junto com o
+            <code>docker compose up</code> (é o mesmo do chat). Com a URL padrão, o servidor o
+            procura pelo nome do serviço, em <code>127.0.0.1:11434</code> e em
+            <code>host.docker.internal:11434</code>. Em outra máquina, use o endereço dela (porta
+            11434).
           </div>
         </v-alert>
       </template>
@@ -170,7 +171,7 @@
         <v-alert type="info" variant="tonal" density="compact" class="mt-2 text-body-2">
           Na nuvem, o texto de cada decisão — perguntas do chat, logs, nomes e IPs de dispositivos —
           vai para {{ destination }}, e o uso é cobrado na sua conta (por token de entrada). Para
-          nada sair da rede, use o Ollaya.
+          nada sair da rede, use o Ollama.
         </v-alert>
       </template>
     </div>
@@ -225,7 +226,7 @@ const showUrlField = computed(
     managesModels.value || form.value.provider === 'custom' || editingUrl.value || customUrl.value
 )
 
-/** O botão dentro do campo: buscar o Ollaya ou voltar ao endereço padrão. */
+/** O botão dentro do campo: buscar o Ollama ou voltar ao endereço padrão. */
 const urlAction = computed(() => {
   if (managesModels.value) return { icon: 'mdi-refresh', run: () => emit('refresh') }
   if (customUrl.value) return { icon: 'mdi-restore', run: restoreDefaultUrl }
@@ -234,7 +235,7 @@ const urlAction = computed(() => {
 
 const urlHint = computed(() => {
   if (managesModels.value)
-    return 'Nesta máquina: deixe http://ollaya:11435 — o servidor acha o Ollaya do compose. Em outra: o IP dela, porta 11435.'
+    return 'Nesta máquina: deixe http://ollama:11434 — o servidor acha o Ollama do compose (o mesmo do chat). Em outra: o IP dela, porta 11434.'
   if (form.value.provider === 'custom')
     return 'Sem o caminho final: o NetMonitor acrescenta o do formato.'
   if (customUrl.value)
@@ -250,7 +251,7 @@ function restoreDefaultUrl() {
 
 const keyHint = computed(() => {
   if (form.value.apiKey === '********') return 'Gravada. Digite outra para trocar.'
-  if (managesModels.value) return 'Só se o Ollaya exigir. Vazia, vale a OLLAYA_API_KEY do compose.'
+  if (managesModels.value) return 'Só se o Ollama estiver atrás de um proxy que exige chave.'
   return 'Fica guardada no servidor e nunca volta inteira para a tela.'
 })
 

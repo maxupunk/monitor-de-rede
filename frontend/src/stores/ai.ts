@@ -122,7 +122,7 @@ export interface OllamaModelsResponse {
   errorMessage?: string | null
 }
 
-/** Progresso de download de modelo — o mesmo contrato para Ollama e Ollaya. */
+/** Progresso de download de modelo — o mesmo contrato para o chat e o Decisor, os dois no Ollama. */
 export type OllamaPullProgress = Partial<ModelPullProgress> &
   Pick<ModelPullProgress, 'status' | 'done'>
 

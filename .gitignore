@@ -32,4 +32,3 @@ target/
 master.key
 
 # Pesos dos modelos do Decisor (centenas de MB): vêm do release, nunca do git
-docker/ollaya-models/*/blobs/

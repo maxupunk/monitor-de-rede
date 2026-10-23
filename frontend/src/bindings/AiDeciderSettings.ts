@@ -9,16 +9,18 @@ export type AiDeciderSettings = {
  */
 enabled: boolean, 
 /**
- * Quem responde: o Ollaya (padrão) ou um serviço na nuvem.
+ * Quem responde: o Ollama (padrão) ou um serviço na nuvem. Desconhecido
+ * vira o padrão.
  */
 provider: DeciderProvider, 
 /**
- * Formato da API no provedor "Outro"; os demais têm o seu.
+ * Formato da API no provedor "Outro"; os demais têm o seu. Desconhecido
+ * vira o padrão.
  */
 customProtocol: DecisionProtocol, baseUrl: string, 
 /**
- * Chave do provedor. Vai mascarada à tela (como as chaves do chat). No
- * Ollaya, vazia usa a `OLLAYA_API_KEY` do compose.
+ * Chave do provedor. Vai mascarada à tela (como as chaves do chat). O
+ * Ollama local não pede; um atrás de proxy com autenticação, sim.
  */
 apiKey?: string, 
 /**

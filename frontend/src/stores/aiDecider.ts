@@ -12,22 +12,29 @@ import type { DeciderModelSpecView } from '@/bindings/DeciderModelSpecView'
 import type { DeciderModelsResponse } from '@/bindings/DeciderModelsResponse'
 import type { ModelPullProgress } from '@/bindings/ModelPullProgress'
 import type { TestDeciderResponse } from '@/bindings/TestDeciderResponse'
+import { RECOMMENDED_MODEL } from '@/utils/decider'
 import { streamModelPull } from '@/utils/modelPull'
 
 export type { AiDeciderSettings, DeciderBenchmarkReport, DeciderModelOption, TestDeciderResponse }
 
 /**
- * Estado do modelo na memória do Ollaya, pelo evento `laya:model_state`.
- * Carregar tira o modelo do disco (5–20 s): a tela mostra "carregando" em vez
- * de parecer travada, e o tempo máximo por pergunta não conta isso.
+ * Estado do modelo no Ollama, pelo evento `decider:model_state`. Instalar
+ * (o modelo que vem com o NetMonitor, na primeira vez) e carregar tiram o
+ * modelo da rede e do disco: a tela mostra o andamento em vez de parecer
+ * travada, e o tempo máximo por pergunta não conta isso.
  */
 export interface DeciderModelState {
   model: string
   baseUrl: string
-  state: 'loading' | 'ready' | 'failed'
+  state: DeciderModelPhase
   loadMs?: number
+  /** `installing`: quanto já foi baixado, de 0 a 100. */
+  percentage?: number
   message?: string
 }
+
+const MODEL_PHASES = ['installing', 'loading', 'ready', 'failed'] as const
+export type DeciderModelPhase = (typeof MODEL_PHASES)[number]
 
 export function isDeciderModelState(value: unknown): value is DeciderModelState {
   if (!value || typeof value !== 'object') return false
@@ -35,7 +42,7 @@ export function isDeciderModelState(value: unknown): value is DeciderModelState 
   return (
     typeof candidate.model === 'string' &&
     typeof candidate.baseUrl === 'string' &&
-    (candidate.state === 'loading' || candidate.state === 'ready' || candidate.state === 'failed')
+    MODEL_PHASES.includes(candidate.state as DeciderModelPhase)
   )
 }
 
@@ -43,10 +50,10 @@ export function isDeciderModelState(value: unknown): value is DeciderModelState 
 export function defaultDeciderSettings(): AiDeciderSettings {
   return {
     enabled: false,
-    provider: 'ollaya',
+    provider: 'ollama',
     customProtocol: 'systemone',
-    baseUrl: 'http://ollaya:11435',
-    model: 'netmonitor/decima-network:v9',
+    baseUrl: 'http://ollama:11434',
+    model: RECOMMENDED_MODEL,
     minConfidence: 60,
     timeoutMs: 4000,
     features: {
@@ -79,7 +86,7 @@ function errorMessage(err: unknown, fallback: string): string {
   return fallback
 }
 
-/** Decisor via Ollaya: modelos disponíveis, testar o que ele decide e baixar o modelo. */
+/** Decisor via Ollama: modelos disponíveis, testar o que ele decide e baixar o modelo. */
 export const useAiDeciderStore = defineStore('aiDecider', () => {
   /** O que está gravado no servidor; o card compara com o formulário. */
   const saved = ref<AiDeciderSettings | null>(null)
@@ -133,7 +140,7 @@ export const useAiDeciderStore = defineStore('aiDecider', () => {
   /**
    * Consulta pontual (ao abrir a tela, ao trocar provedor ou URL, depois de
    * um download), com o formulário inteiro: a lista depende do provedor, e
-   * um Ollaya em outra máquina pode pedir a chave ainda não gravada.
+   * um Ollama em outra máquina pode pedir a chave ainda não gravada.
    */
   async function loadModels(decider: AiDeciderSettings): Promise<void> {
     loadingModels.value = true
@@ -142,7 +149,7 @@ export const useAiDeciderStore = defineStore('aiDecider', () => {
     } catch (err) {
       models.value = {
         online: false,
-        managesModels: decider.provider === 'ollaya',
+        managesModels: decider.provider === 'ollama',
         errorMessage: errorMessage(err, 'Falha ao consultar o provedor'),
         installed: [],
         loaded: [],
@@ -204,7 +211,7 @@ export const useAiDeciderStore = defineStore('aiDecider', () => {
   /** O último estado de carregamento recebido pelo SSE. */
   const modelState = ref<DeciderModelState | null>(null)
 
-  /** O modelo está na memória do Ollaya agora? */
+  /** O modelo está na memória do Ollama agora? */
   function inMemory(model: string): boolean {
     return isModelInstalled(models.value?.loaded ?? [], model)
   }

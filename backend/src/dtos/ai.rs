@@ -313,8 +313,10 @@ pub struct DeciderModelOption {
 pub struct DeciderDecisionsScoreView {
     /// Nota geral (0–1): média das seis decisões, cada uma pesando igual.
     pub overall: f64,
-    /// 95% das decisões responderam até aqui, em CPU.
-    pub p95_ms: f64,
+    /// 95% das decisões responderam até aqui, em CPU; `None` quando o modelo
+    /// foi medido só na GPU.
+    #[ts(type = "number | null")]
+    pub p95_ms: Option<f64>,
 }
 
 /// Uma decisão do NetMonitor avaliada no benchmark.
@@ -351,7 +353,8 @@ pub struct DeciderBenchmarkRow {
     pub description: Option<String>,
     pub recommended: bool,
     pub gpu_recommended: bool,
-    /// Vem instalado com o NetMonitor (serviço `ollaya-models`).
+    /// Vem com o NetMonitor: a própria API o instala no Ollama
+    /// (`decider::bundled`).
     pub bundled: bool,
     /// Nota geral (0–1) e o intervalo de confiança de 90%.
     pub overall: f64,
@@ -360,11 +363,16 @@ pub struct DeciderBenchmarkRow {
     /// Nota contando só as sugestões que a tela mostra (confiança mínima).
     pub screen: f64,
     pub tasks: Vec<DeciderBenchmarkTaskScore>,
-    pub p50_ms: f64,
-    pub p95_ms: f64,
+    /// Tempo por decisão em CPU; `None` quando o modelo foi medido só na GPU
+    /// (vale o acerto, não o tempo).
+    #[ts(type = "number | null")]
+    pub p50_ms: Option<f64>,
+    #[ts(type = "number | null")]
+    pub p95_ms: Option<f64>,
     /// Fração das decisões acima do tempo máximo (0–1): nelas o NetMonitor
     /// segue sem a decisão.
-    pub over_timeout: f64,
+    #[ts(type = "number | null")]
+    pub over_timeout: Option<f64>,
 }
 
 /// `GET /api/ai/decider/benchmark` — os modelos medidos nas decisões do
@@ -426,15 +434,13 @@ pub struct DeciderModelSpecView {
     #[serde(default)]
     #[ts(optional)]
     pub memory_mb: Option<u32>,
-    /// Mediana publicada para cinco perguntas: em CPU, ou numa RTX 4090 quando
-    /// `gpu_recommended`.
-    pub latency_ms: u32,
-    /// Em CPU responde devagar demais para o chat.
-    pub gpu_recommended: bool,
-    /// Acerto no typed-decisions (0–1), quando comparável.
+    /// Mediana de uma decisão em CPU no benchmark do NetMonitor; ausente
+    /// quando não houve rodada em CPU.
     #[serde(default)]
     #[ts(optional)]
-    pub accuracy: Option<f64>,
+    pub latency_ms: Option<u32>,
+    /// Em CPU responde devagar demais para o chat.
+    pub gpu_recommended: bool,
     /// Teto de opções por escolha, quando o modelo tem um.
     #[serde(default)]
     #[ts(optional)]
@@ -443,8 +449,8 @@ pub struct DeciderModelSpecView {
     pub suggested_timeout_ms: u32,
     /// O recomendado da família.
     pub recommended: bool,
-    /// Vem instalado com o NetMonitor (serviço `ollaya-models`): não se baixa
-    /// do registro do Ollaya.
+    /// Vem com o NetMonitor: a própria API o instala no Ollama a partir da
+    /// release `decider-models` (`decider::bundled`), não do registro do Ollama.
     #[serde(default)]
     pub bundled: bool,
 }
@@ -456,13 +462,13 @@ pub struct DeciderModelsResponse {
     /// O servidor respondeu. Em nuvem não há o que listar: vale `true` e a
     /// conexão se confere no teste (passo 3).
     pub online: bool,
-    /// O provedor baixa e carrega modelos (só o Ollaya): a tela mostra
+    /// O provedor baixa e carrega modelos (só o Ollama): a tela mostra
     /// download, memória e "carregar agora".
     #[serde(default)]
     pub manages_models: bool,
     #[serde(default)]
     pub error_message: Option<String>,
-    /// Nomes como o Ollaya os lista (`laya:multilingual`…).
+    /// Nomes como o Ollama os lista (`netmonitor/laya-network:v2`…).
     pub installed: Vec<String>,
     /// Carregados na memória agora (`/api/ps`). Fora dela, a primeira
     /// pergunta espera o modelo sair do disco (5–20 s).
@@ -527,7 +533,7 @@ pub struct DeciderGroupScore {
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct TestDeciderResponse {
     pub success: bool,
-    /// O Ollaya respondeu.
+    /// O servidor respondeu.
     pub online: bool,
     /// O modelo configurado está instalado nele.
     pub model_installed: bool,
@@ -612,7 +618,7 @@ pub struct OllamaPullRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
-/// Progresso do download de um modelo num servidor local (Ollama ou Ollaya).
+/// Progresso do download de um modelo no Ollama (o do chat ou o do Decisor).
 pub struct ModelPullProgress {
     pub status: String,
     #[serde(default)]

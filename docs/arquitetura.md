@@ -156,6 +156,7 @@ services/
 ├── snmp/           sessões, coletores, perfis
 ├── topology/       ligações e confiança
 ├── link_tests/     teste de enlace (ADR 015): plano, negociação de motor, pernas e etapas, agendamentos
+├── scheduled_tasks/ tarefas agendadas (cron): ferramenta do catálogo da IA + argumentos num horário
 ├── alerts/         datasets → evaluator → manager (+ catalog, recovery, repository)
 ├── notifications/  channels/ (telegram, discord, webhook, email) + formatter
 ├── probes/         agent, dispatcher, receiver, liveness, buffer
@@ -741,16 +742,23 @@ vai para o buffer do agente e volta como evento na reconexão.
 > Decisor se chamava Laya, o nome da família de modelos que ele usava).
 
 O Decisor consulta um **modelo de decisão** — um classificador que não gera
-texto. Ele roda no container opcional `ollaya` (que sobe com o
-`docker compose up`; o peso depende do modelo e a tela avisa ao ligar), num
-Ollaya em outra máquina ou num serviço na nuvem (TypeSafe, OpenRouter,
-Cloudflare, OpenAI; ver `providers.rs`). O padrão é o
-`netmonitor/decima-network:v9`: o `decima:small` ajustado nas decisões do
-NetMonitor (projeto Laya-tuning), com 93% no benchmark delas, 83% num
-benchmark cego de casos reais nunca vistos (perguntas de fóruns, logs e
-strings de dispositivos) e 0,6 s por decisão em CPU. Ele não está no registro do Ollaya: vem no pacote
-`docker/ollaya-models/` e o serviço `ollaya-models` do compose o instala no
-volume do Ollaya a cada `up` (sha256 conferido, manifesto por último). A ordem
+texto. Ele roda no serviço `ollama` do compose — o único container de IA, o
+mesmo que serve o LLM do chat —, num Ollama em outra máquina ou num serviço na
+nuvem (TypeSafe, OpenRouter, Cloudflare, OpenAI; ver `providers.rs`). As
+decisões vão por `POST /v1/systemone` (o formato System One: `{model, state,
+questions}` → `{model, answers, usage}`), e os modelos são geridos pela API
+nativa do Ollama (`/api/tags`, `/api/ps`, `/api/pull`, `/api/create`).
+
+O padrão é o `netmonitor/laya-network:v2`: um modelo da família Laya
+(ModernBERT/mmBERT com uma cabeça de decisão, em GGUF) ajustado nas decisões do
+NetMonitor no projeto Laya-tuning. Ele não está no registro do Ollama: a
+própria API o instala no Ollama a partir da release `decider-models` do projeto
+(`DECIDER_MODELS_URL`; `decider/bundled.rs`), enviando o arquivo em fluxo para
+`POST /api/blobs/sha256:<digest>` — o Ollama confere o sha256 — e registrando o
+nome com `POST /api/create`. Isso acontece pelo botão "Baixar modelo" da tela
+ou, sozinho, quando o Decisor é ligado com o modelo ausente; o andamento sai
+pelo SSE em `decider:model_state` (`installing`, com `percentage`, e depois
+`loading` → `ready` / `failed`). A ordem
 e a recomendação da tela usam primeiro a nota no benchmark das decisões do
 NetMonitor (`decisions_benchmark.rs`, snapshot gerado pelo Laya-tuning e
 mostrado na página "Benchmark dos modelos", `GET /api/ai/decider/benchmark`) e,
@@ -765,10 +773,12 @@ antes.
 ```text
 services/ai/decider/
   config.rs         chave mestra, provedor, chave de acesso, uma chave por frente (features)
-  providers.rs      presets: Ollaya, TypeSafe, OpenRouter, Cloudflare, OpenAI, Outro
-  protocols.rs      os formatos de API (Ollaya, System One, Cloudflare, OpenAI, OpenRouter)
+  providers.rs      presets: Ollama, TypeSafe, OpenRouter, Cloudflare, OpenAI, Outro
+  protocols.rs      os formatos de API (Ollama, System One, Cloudflare, OpenAI, OpenRouter)
   client.rs         HTTP dos provedores (um reqwest::Client por processo)
-  catalog.rs        fichas dos modelos do Ollaya, na ordem da recomendação
+  locate.rs         onde está o Ollama do compose (rede interna, loopback, host do Docker)
+  bundled.rs        instala no Ollama o modelo que vem com o NetMonitor
+  catalog.rs        fichas dos modelos de decisão do Ollama, na ordem da recomendação
   benchmark.rs      resultados do teste público (acerto geral e em português)
   decision.rs       trait Decision: perguntas + leitura das respostas
   runtime.rs        DeciderRuntime: cache da config, filas, disjuntor
@@ -781,26 +791,27 @@ services/ai/decider/
 **Duas filas.** `Lane::Interactive` (chat, identificar dispositivo, sugerir
 interfaces) passa direto; `Lane::Background` (descoberta, logs, triagem) entra
 um por vez num semáforo e respeita um disjuntor (3 falhas seguidas → 60 s sem
-consultar). O Ollaya em CPU faz uma inferência por vez; um lote de logs não pode
+consultar). O Ollama em CPU faz uma inferência por vez; um lote de logs não pode
 empurrar o chat além do tempo limite. O disjuntor avisa ao abrir e ao fechar, e
 só: os logs da aplicação viram linhas de log (`syslog::app_layer`), e avisar a
 cada falha encheria o banco com o próprio aviso.
 
 | Frente | Onde entra | Quando consulta | Onde a sugestão aparece |
 |---|---|---|---|
-| Ferramentas do chat | `harness/agent.rs`, junto da janela de contexto | cada pergunta | invisível: soma grupos às palavras-chave |
+| Ferramentas do chat | `harness/agent.rs`, junto da janela de contexto | cada pergunta | invisível: escolhe os grupos que vão ao chat (núcleo e o que foi marcado com `@` sempre vão); sem Decisor no ar, vai o catálogo inteiro |
 | Identificação | `discovery/decider_identity.rs`, depois de gravar a execução | host `unknown`/`web_device` ou sem sistema | chip na Descoberta (pelo snapshot `discovery:scan`) e no cadastro (`/devices/identify`) |
 | Interfaces | `snmp/decider_interfaces.rs` (`POST /api/snmp/interfaces/suggestions`) | ao mostrar a lista de interfaces | "Uplink sugerido", "Vale monitorar", "Selecionar sugeridas" |
 | Eventos de log | `syslog/categorizer.rs`, worker fora do caminho quente | uma vez por **padrão** novo (não por linha) | chip e filtro em `/logs`; "Criar alerta" abre o catálogo |
 | Triagem proativa | `proactive/triage.rs`, antes do teto por hora | cada alerta que abriria resumo | "Resumo pulado pelo Decisor" + "Gerar resumo agora" |
 
-**Modelo frio** (só no Ollaya; na nuvem o modelo está sempre pronto). Tirar o
+**Modelo frio** (só no Ollama; na nuvem o modelo está sempre pronto). Tirar o
 modelo do disco leva de segundos a minutos; o "tempo máximo por pergunta" vale
 só para a inferência, e carregar tem prazo próprio (`catalog::load_timeout`,
 30 s por GB, de 2 a 15 minutos). O runtime consulta `/api/ps` (resultado
-guardado por 20 s) e, com o modelo fora da memória, carrega um por vez
-(`/api/decide` sem `state`) publicando `decider:model_state` (`loading` → `ready`
-/ `failed`) pelo SSE. Por fila: `OnDemand` (o teste da tela, sugerir
+guardado por 20 s) e, com o modelo fora da memória, carrega um por vez (uma
+pergunta de aquecimento em `/v1/systemone`) publicando `decider:model_state`
+(`loading` → `ready` / `failed`) pelo SSE; o modelo que vem com o NetMonitor e
+ainda não está no Ollama é instalado antes (`installing`). Por fila: `OnDemand` (o teste da tela, sugerir
 interfaces) e `Background` esperam o carregamento; `Interactive` (chat,
 identificar) não espera — dispara o carregamento e segue sem o Decisor naquela
 vez. Ligar o Decisor ao salvar já aquece o modelo.

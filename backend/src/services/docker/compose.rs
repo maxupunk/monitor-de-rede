@@ -395,7 +395,7 @@ mod tests {
             crate::services::docker::protection::PROTECTED_LABEL.into(),
             "true".into(),
         );
-        let known = projects(&[central, container("netmonitor", "ollaya", "running")]);
+        let known = projects(&[central, container("netmonitor", "ollama", "running")]);
         assert!(known[0].protected);
         let request = |action| ComposeRequest {
             project: "netmonitor".into(),

@@ -1,13 +1,13 @@
 //! Os formatos de API dos provedores de decisão.
 //!
 //! As decisões falam só a língua interna ([`Question`] e [`DecideResponse`],
-//! a do Ollaya). Cada formato traduz o pedido e a resposta, sem rede — o
+//! a do System One). Cada formato traduz o pedido e a resposta, sem rede — o
 //! cliente (`decider::client`) faz a chamada. Formato novo é um tipo novo que
 //! implementa [`WireFormat`]; nada mais muda.
 //!
 //! | formato | caminho | diferenças da língua interna |
 //! |---|---|---|
-//! | Ollaya | `/api/decide` | nenhuma |
+//! | Ollama | `/v1/systemone` | nenhuma: o System One servido localmente |
 //! | System One (TypeSafe) | `/v1/systemone` | nenhuma (campos a mais na resposta são ignorados) |
 //! | OpenRouter Decisions | `/alpha/decisions` | nenhuma: o corpo do System One em outro caminho |
 //! | Cloudflare | `/accounts/{conta}/ai/run/@cf/cloudflare/{modelo}` | resposta dentro de `result` |
@@ -57,8 +57,7 @@ pub trait WireFormat: Send + Sync {
 #[must_use]
 pub fn wire_for(protocol: DecisionProtocol) -> &'static dyn WireFormat {
     match protocol {
-        DecisionProtocol::Ollaya => &Native("/api/decide"),
-        DecisionProtocol::Systemone => &Native("/v1/systemone"),
+        DecisionProtocol::Ollama | DecisionProtocol::Systemone => &Native("/v1/systemone"),
         DecisionProtocol::Cloudflare => &Cloudflare,
         DecisionProtocol::Openai => &OpenAiDecisions,
         DecisionProtocol::Openrouter => &Native("/alpha/decisions"),
@@ -73,7 +72,7 @@ fn invalid(error: impl std::fmt::Display) -> AppError {
     AppError::service_unavailable(format!("Resposta fora do formato esperado: {error}"))
 }
 
-/// O corpo da língua interna, que Ollaya, TypeSafe e Cloudflare aceitam.
+/// O corpo da língua interna, que Ollama, TypeSafe e Cloudflare aceitam.
 fn native_body(
     settings: &AiDeciderSettings,
     state: &str,
@@ -87,7 +86,7 @@ fn native_body(
     .map_err(|error| AppError::Internal(anyhow::Error::new(error)))
 }
 
-/// Ollaya e System One: o mesmo corpo, caminhos diferentes.
+/// System One (Ollama, TypeSafe, OpenRouter): o mesmo corpo, caminhos diferentes.
 struct Native(&'static str);
 
 impl WireFormat for Native {
@@ -250,7 +249,7 @@ impl WireFormat for OpenAiDecisions {
     }
 }
 
-/// A mensagem de erro de qualquer provedor: `{"error":"…"}` (Ollaya),
+/// A mensagem de erro de qualquer provedor: `{"error":"…"}` (Ollama),
 /// `{"error":{"message":"…"}}` (OpenAI), `{"message":"…"}` (TypeSafe,
 /// Vercel) ou `{"errors":[{"message":"…"}]}` (Cloudflare). Sem nenhum
 /// desses, o corpo como veio.
@@ -310,7 +309,7 @@ mod tests {
     }
 
     #[test]
-    fn system_one_e_o_corpo_do_ollaya_em_outro_caminho() {
+    fn system_one_e_o_corpo_do_ollama_na_nuvem() {
         let typesafe = settings(DeciderProvider::Typesafe);
         let request = wire_for(typesafe.protocol())
             .request(&typesafe, "o link caiu", &questions())

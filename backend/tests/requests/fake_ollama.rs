@@ -1,7 +1,8 @@
-//! Um Ollaya falso em `127.0.0.1:0` para os testes do Decisor.
+//! Um Ollama falso em `127.0.0.1:0` para os testes do Decisor.
 //!
-//! Exige o Bearer de [`TOKEN`], lista o `laya:multilingual` como instalado e
-//! responde `/api/decide` pelo `Responder` dado. Conta as chamadas e guarda
+//! Lista o `laya:multilingual` como instalado e responde `/v1/systemone` pelo
+//! `Responder` dado; a pergunta de aquecimento (`warmup`) é a carga do
+//! modelo. Conta as chamadas e guarda
 //! os estados recebidos, para o teste provar que houve (ou não) consulta.
 
 // Cada arquivo de teste usa uma parte diferente do servidor falso.
@@ -17,28 +18,26 @@ use std::{
 
 use axum::{
     extract::State,
-    http::{HeaderMap, StatusCode},
+    http::StatusCode,
     routing::{get, post},
     Json, Router,
 };
-use backend::services::ai::decider::config::{AiDeciderSettings, API_KEY_ENV};
+use backend::services::ai::decider::config::AiDeciderSettings;
 use serde_json::{json, Value};
-
-pub const TOKEN: &str = "chave-do-ollaya";
 
 /// Responde uma pergunta: (estado, id da pergunta, pergunta) → resposta.
 pub type Responder = Arc<dyn Fn(&str, &str, &Value) -> Value + Send + Sync>;
 
 #[derive(Clone)]
-pub struct FakeOllaya {
+pub struct FakeOllama {
     pub base_url: String,
     pub calls: Arc<AtomicUsize>,
     pub states: Arc<Mutex<Vec<String>>>,
-    /// Quantas vezes o modelo foi carregado (`/api/decide` sem `state`).
+    /// Quantas vezes o modelo foi carregado (a pergunta de aquecimento).
     pub loads: Arc<AtomicUsize>,
 }
 
-impl FakeOllaya {
+impl FakeOllama {
     pub fn calls(&self) -> usize {
         self.calls.load(Ordering::SeqCst)
     }
@@ -52,8 +51,8 @@ impl FakeOllaya {
         AiDeciderSettings {
             enabled: true,
             base_url: self.base_url.clone(),
-            // O que o Ollaya falso tem instalado (o padrão do Decisor é outro).
-            model: "laya".into(),
+            // O que o Ollama falso tem instalado (o padrão do Decisor é outro).
+            model: "laya:322m-multilingual-bf16".into(),
             timeout_ms: 5_000,
             ..AiDeciderSettings::default()
         }
@@ -70,43 +69,35 @@ struct Shared {
     load_delay: Duration,
 }
 
-/// O compose entrega a mesma chave à API e ao Ollaya pelo ambiente. Quem
-/// chama precisa ser `#[serial]`.
-pub fn with_key() {
-    std::env::set_var(API_KEY_ENV, TOKEN);
-}
-
 /// Com o modelo já na memória — o caso de quase todos os testes.
-pub async fn start(responder: Responder) -> FakeOllaya {
+pub async fn start(responder: Responder) -> FakeOllama {
     start_with(responder, true, Duration::ZERO).await
 }
 
 /// Com o modelo fora da memória: carregar leva `load_delay`.
-pub async fn start_cold(responder: Responder, load_delay: Duration) -> FakeOllaya {
+pub async fn start_cold(responder: Responder, load_delay: Duration) -> FakeOllama {
     start_with(responder, false, load_delay).await
 }
 
-async fn start_with(responder: Responder, loaded: bool, load_delay: Duration) -> FakeOllaya {
+async fn start_with(responder: Responder, loaded: bool, load_delay: Duration) -> FakeOllama {
     async fn decide(
         State(shared): State<Shared>,
-        headers: HeaderMap,
         Json(body): Json<Value>,
     ) -> (StatusCode, Json<Value>) {
-        let expected = format!("Bearer {TOKEN}");
-        if headers.get("authorization").and_then(|v| v.to_str().ok()) != Some(expected.as_str()) {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({ "error": "unauthorized", "code": "UNAUTHORIZED" })),
-            );
-        }
-        if body.get("state").is_none() {
-            // Contrato do Ollaya: sem `state`, só carrega o modelo.
+        let warmup = body["questions"]
+            .as_object()
+            .is_some_and(|questions| questions.len() == 1 && questions.contains_key("warmup"));
+        if warmup {
+            // O Decisor carrega o modelo com uma pergunta de aquecimento.
             tokio::time::sleep(shared.load_delay).await;
             shared.loaded.store(true, Ordering::SeqCst);
             shared.loads.fetch_add(1, Ordering::SeqCst);
             return (
                 StatusCode::OK,
-                Json(json!({ "model": "laya:multilingual", "answers": {}, "done_reason": "load" })),
+                Json(json!({
+                    "model": "laya:322m-multilingual-bf16",
+                    "answers": { "warmup": { "type": "noul", "noul": 0.5 } },
+                })),
             );
         }
         shared.calls.fetch_add(1, Ordering::SeqCst);
@@ -123,13 +114,13 @@ async fn start_with(responder: Responder, loaded: bool, load_delay: Duration) ->
             .collect();
         (
             StatusCode::OK,
-            Json(json!({ "model": "laya:multilingual", "answers": answers })),
+            Json(json!({ "model": "laya:322m-multilingual-bf16", "answers": answers })),
         )
     }
 
     async fn ps(State(shared): State<Shared>) -> Json<Value> {
         let models = if shared.loaded.load(Ordering::SeqCst) {
-            json!([{ "name": "laya:multilingual" }])
+            json!([{ "name": "laya:322m-multilingual-bf16" }])
         } else {
             json!([])
         };
@@ -142,10 +133,12 @@ async fn start_with(responder: Responder, loaded: bool, load_delay: Duration) ->
     let app = Router::new()
         .route(
             "/api/tags",
-            get(|| async { Json(json!({ "models": [{ "name": "laya:multilingual" }] })) }),
+            get(|| async {
+                Json(json!({ "models": [{ "name": "laya:322m-multilingual-bf16" }] }))
+            }),
         )
         .route("/api/ps", get(ps))
-        .route("/api/decide", post(decide))
+        .route("/v1/systemone", post(decide))
         .with_state(Shared {
             responder,
             calls: calls.clone(),
@@ -157,7 +150,7 @@ async fn start_with(responder: Responder, loaded: bool, load_delay: Duration) ->
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    FakeOllaya {
+    FakeOllama {
         base_url: format!("http://{address}"),
         calls,
         states,

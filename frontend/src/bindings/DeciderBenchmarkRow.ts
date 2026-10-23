@@ -10,7 +10,8 @@ export type DeciderBenchmarkRow = { model: string,
  */
 family?: string, description?: string, recommended: boolean, gpuRecommended: boolean, 
 /**
- * Vem instalado com o NetMonitor (serviço `ollaya-models`).
+ * Vem com o NetMonitor: a própria API o instala no Ollama
+ * (`decider::bundled`).
  */
 bundled: boolean, 
 /**
@@ -20,9 +21,14 @@ overall: number, overallLow: number, overallHigh: number,
 /**
  * Nota contando só as sugestões que a tela mostra (confiança mínima).
  */
-screen: number, tasks: Array<DeciderBenchmarkTaskScore>, p50Ms: number, p95Ms: number, 
+screen: number, tasks: Array<DeciderBenchmarkTaskScore>, 
+/**
+ * Tempo por decisão em CPU; `None` quando o modelo foi medido só na GPU
+ * (vale o acerto, não o tempo).
+ */
+p50Ms: number | null, p95Ms: number | null, 
 /**
  * Fração das decisões acima do tempo máximo (0–1): nelas o NetMonitor
  * segue sem a decisão.
  */
-overTimeout: number, };
+overTimeout: number | null, };

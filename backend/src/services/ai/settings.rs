@@ -23,7 +23,11 @@ pub const MASKED_KEY: &str = "********";
 
 pub const OPENCODE_DEFAULT_BASE_URL: &str = "https://opencode.ai/zen/v1";
 pub const DEFAULT_OPENCODE_MODEL: &str = "muse-spark-1.3-contributor-free";
-pub const DEFAULT_OLLAMA_BASE_URL: &str = "http://localhost:11434/v1";
+/// O serviço `ollama` do compose, na rede interna: o único container de IA,
+/// que atende o chat e o Decisor (`decider::config::DEFAULT_DECIDER_BASE_URL`).
+pub const DEFAULT_OLLAMA_URL: &str = "http://ollama:11434";
+/// O mesmo Ollama pela API compatível com a OpenAI, que o driver do chat usa.
+pub const DEFAULT_OLLAMA_BASE_URL: &str = "http://ollama:11434/v1";
 pub const DEFAULT_OLLAMA_MODEL: &str = "ornith-1.5:9b";
 pub const DEFAULT_OLLAMA_NUM_CTX: u64 = 16_384;
 pub const DEFAULT_OPENROUTER_MODEL: &str = "openrouter/free";
@@ -185,7 +189,7 @@ pub struct AiSettings {
     /// O que a IA faz sozinha: resumo de incidente e resumo periódico.
     pub proactive: AiProactiveSettings,
 
-    /// Decisor (via Ollaya): decide antes do chat quais ferramentas mandar.
+    /// Decisor (via Ollama): decide antes do chat quais ferramentas mandar.
     pub decider: AiDeciderSettings,
 
     pub custom_system_prompt: Option<String>,
@@ -589,6 +593,30 @@ mod tests {
         assert_eq!(antiga.decider.model, "laya:en");
         let gravada = serde_json::to_value(&antiga).unwrap();
         assert!(gravada.get("decider").is_some() && gravada.get("laya").is_none());
+    }
+
+    #[test]
+    fn provedor_desconhecido_no_decisor_nao_zera_a_configuracao_do_chat() {
+        use crate::services::ai::decider::providers::DeciderProvider;
+
+        let gravada: AiSettings = serde_json::from_str(
+            r#"{
+                "activeDriver": "openrouter",
+                "openrouterApiKey": "chave-guardada",
+                "ollamaModel": "qwen2.5:7b",
+                "decider": { "enabled": true, "provider": "desconhecido", "minConfidence": 70 }
+            }"#,
+        )
+        .expect("um provedor desconhecido não invalida a configuração");
+        assert_eq!(gravada.active_driver, "openrouter");
+        assert_eq!(
+            gravada.openrouter_api_key.as_deref(),
+            Some("chave-guardada")
+        );
+        assert_eq!(gravada.ollama_model.as_deref(), Some("qwen2.5:7b"));
+        assert_eq!(gravada.decider.provider, DeciderProvider::default());
+        assert!(gravada.decider.enabled);
+        assert_eq!(gravada.decider.min_confidence, 70);
     }
 
     #[test]

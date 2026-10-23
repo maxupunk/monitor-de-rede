@@ -1,10 +1,10 @@
 {
   "source": "Laya-tuning",
-  "reference": "2026-10-22-selecao-bench-v2.3",
+  "reference": "2026-10-23-laya-network-v2",
   "cases": 471,
   "measuredOn": "2026-10-23",
-  "hardware": "12th Gen Intel(R) Core(TM) i7-1255U · 12 threads",
-  "ollaya": "0.15.0",
+  "hardware": "12th Gen Intel(R) Core(TM) i7-1255U · 12 threads (CPU); os sem tempo foram medidos numa RTX 4050",
+  "server": "ollama 0.40.10",
   "timeoutMs": 4000,
   "tasks": [
     "action_review",
@@ -16,137 +16,137 @@
   ],
   "models": [
     {
-      "model": "netmonitor/decima-network:v9",
-      "overall": 0.9275,
-      "overallLow": 0.9115,
-      "overallHigh": 0.9412,
-      "screen": 0.8916,
+      "model": "netmonitor/laya-network:v2",
+      "overall": 0.8913,
+      "overallLow": 0.8724,
+      "overallHigh": 0.9088,
+      "screen": 0.8766,
       "tasks": {
-        "action_review": 0.8966,
-        "device_identity": 0.968,
-        "incident_triage": 0.9245,
-        "interfaces": 0.8235,
-        "log_category": 0.98,
-        "tool_routing": 0.9722
+        "action_review": 0.776,
+        "device_identity": 0.9754,
+        "incident_triage": 0.9605,
+        "interfaces": 0.7524,
+        "log_category": 0.94,
+        "tool_routing": 0.9437
       },
-      "p50Ms": 574.5,
-      "p95Ms": 980.6,
-      "overTimeout": 0.0
+      "p50Ms": 1860.1,
+      "p95Ms": 3586.7,
+      "overTimeout": 0.0276
     },
     {
-      "model": "decider:0.8b",
-      "overall": 0.6816,
-      "overallLow": 0.6579,
-      "overallHigh": 0.7055,
-      "screen": 0.6033,
+      "model": "tev1:4b-q4_K_M",
+      "overall": 0.7861,
+      "overallLow": 0.7659,
+      "overallHigh": 0.8071,
+      "screen": 0.7527,
       "tasks": {
-        "action_review": 0.5189,
-        "device_identity": 0.5726,
-        "incident_triage": 0.6876,
-        "interfaces": 0.6782,
-        "log_category": 0.92,
-        "tool_routing": 0.7123
+        "action_review": 0.5564,
+        "device_identity": 0.9114,
+        "incident_triage": 0.6784,
+        "interfaces": 0.7336,
+        "log_category": 0.96,
+        "tool_routing": 0.8767
       },
-      "p50Ms": 3349.6,
-      "p95Ms": 12147.0,
-      "overTimeout": 0.4221
+      "p50Ms": null,
+      "p95Ms": null,
+      "overTimeout": null
     },
     {
-      "model": "kev:0.8b",
-      "overall": 0.6804,
-      "overallLow": 0.659,
-      "overallHigh": 0.7022,
-      "screen": 0.4967,
+      "model": "d3:2b",
+      "overall": 0.7424,
+      "overallLow": 0.7246,
+      "overallHigh": 0.7636,
+      "screen": 0.6898,
       "tasks": {
-        "action_review": 0.5054,
+        "action_review": 0.5287,
+        "device_identity": 0.7871,
+        "incident_triage": 0.6718,
+        "interfaces": 0.7222,
+        "log_category": 0.96,
+        "tool_routing": 0.7848
+      },
+      "p50Ms": null,
+      "p95Ms": null,
+      "overTimeout": null
+    },
+    {
+      "model": "kev:4b-q4_K_M",
+      "overall": 0.7387,
+      "overallLow": 0.7191,
+      "overallHigh": 0.7548,
+      "screen": 0.6035,
+      "tasks": {
+        "action_review": 0.4804,
+        "device_identity": 0.8876,
+        "incident_triage": 0.5872,
+        "interfaces": 0.779,
+        "log_category": 0.94,
+        "tool_routing": 0.7582
+      },
+      "p50Ms": null,
+      "p95Ms": null,
+      "overTimeout": null
+    },
+    {
+      "model": "kev:0.8b-q8_0",
+      "overall": 0.6831,
+      "overallLow": 0.6603,
+      "overallHigh": 0.7044,
+      "screen": 0.498,
+      "tasks": {
+        "action_review": 0.5179,
         "device_identity": 0.7543,
-        "incident_triage": 0.5293,
-        "interfaces": 0.626,
+        "incident_triage": 0.5232,
+        "interfaces": 0.636,
         "log_category": 0.9,
-        "tool_routing": 0.7672
+        "tool_routing": 0.767
       },
-      "p50Ms": 3043.0,
-      "p95Ms": 11483.4,
-      "overTimeout": 0.3402
+      "p50Ms": null,
+      "p95Ms": null,
+      "overTimeout": null
     },
     {
-      "model": "decision:eos",
-      "overall": 0.6707,
-      "overallLow": 0.6476,
-      "overallHigh": 0.6943,
-      "screen": 0.5594,
+      "model": "tev1:0.8b-q8_0",
+      "overall": 0.6413,
+      "overallLow": 0.6186,
+      "overallHigh": 0.6658,
+      "screen": 0.5778,
       "tasks": {
-        "action_review": 0.5081,
-        "device_identity": 0.6903,
-        "incident_triage": 0.5962,
-        "interfaces": 0.5429,
+        "action_review": 0.5152,
+        "device_identity": 0.6493,
+        "incident_triage": 0.6169,
+        "interfaces": 0.5678,
         "log_category": 0.86,
-        "tool_routing": 0.8266
+        "tool_routing": 0.6387
       },
-      "p50Ms": 3505.6,
-      "p95Ms": 13594.9,
-      "overTimeout": 0.4754
+      "p50Ms": null,
+      "p95Ms": null,
+      "overTimeout": null
     },
     {
-      "model": "nli:deberta-v3-large",
-      "overall": 0.5562,
-      "overallLow": 0.53,
-      "overallHigh": 0.5784,
-      "screen": 0.364,
-      "tasks": {
-        "action_review": 0.5,
-        "device_identity": 0.3581,
-        "incident_triage": 0.5,
-        "interfaces": 0.4167,
-        "log_category": 0.68,
-        "tool_routing": 0.8821
-      },
-      "p50Ms": 2910.3,
-      "p95Ms": 18026.8,
-      "overTimeout": 0.3566
-    },
-    {
-      "model": "laya:en",
-      "overall": 0.5401,
-      "overallLow": 0.5046,
-      "overallHigh": 0.5653,
-      "screen": 0.4704,
+      "model": "laya:421m-english-bf16",
+      "overall": 0.5402,
+      "overallLow": 0.5049,
+      "overallHigh": 0.5659,
+      "screen": 0.4733,
       "tasks": {
         "action_review": 0.5912,
         "device_identity": 0.2888,
-        "incident_triage": 0.5107,
-        "interfaces": 0.4285,
+        "incident_triage": 0.5132,
+        "interfaces": 0.4268,
         "log_category": 0.7,
         "tool_routing": 0.7212
       },
-      "p50Ms": 1242.0,
-      "p95Ms": 6073.5,
-      "overTimeout": 0.0934
+      "p50Ms": null,
+      "p95Ms": null,
+      "overTimeout": null
     },
     {
-      "model": "decima:base",
-      "overall": 0.534,
-      "overallLow": 0.5066,
-      "overallHigh": 0.5659,
-      "screen": 0.4431,
-      "tasks": {
-        "action_review": 0.5522,
-        "device_identity": 0.2301,
-        "incident_triage": 0.6,
-        "interfaces": 0.3437,
-        "log_category": 0.62,
-        "tool_routing": 0.8579
-      },
-      "p50Ms": 1290.5,
-      "p95Ms": 4292.4,
-      "overTimeout": 0.1656
-    },
-    {
-      "model": "laya:typed-decisions",
+      "model": "laya:421m-typed-decisions-bf16",
       "overall": 0.525,
       "overallLow": 0.4968,
       "overallHigh": 0.5463,
-      "screen": 0.3444,
+      "screen": 0.3567,
       "tasks": {
         "action_review": 0.5,
         "device_identity": 0.3618,
@@ -155,117 +155,27 @@
         "log_category": 0.74,
         "tool_routing": 0.5895
       },
-      "p50Ms": 1270.3,
-      "p95Ms": 4909.9,
-      "overTimeout": 0.0697
+      "p50Ms": null,
+      "p95Ms": null,
+      "overTimeout": null
     },
     {
-      "model": "nli:modernbert-large",
-      "overall": 0.5072,
-      "overallLow": 0.482,
-      "overallHigh": 0.532,
-      "screen": 0.342,
+      "model": "laya:322m-multilingual-bf16",
+      "overall": 0.445,
+      "overallLow": 0.4145,
+      "overallHigh": 0.4723,
+      "screen": 0.4062,
       "tasks": {
-        "action_review": 0.5,
-        "device_identity": 0.2859,
-        "incident_triage": 0.578,
-        "interfaces": 0.375,
-        "log_category": 0.62,
-        "tool_routing": 0.684
-      },
-      "p50Ms": 2188.5,
-      "p95Ms": 14850.4,
-      "overTimeout": 0.3115
-    },
-    {
-      "model": "decima:small",
-      "overall": 0.4924,
-      "overallLow": 0.4707,
-      "overallHigh": 0.519,
-      "screen": 0.3949,
-      "tasks": {
-        "action_review": 0.4794,
-        "device_identity": 0.2756,
-        "incident_triage": 0.5084,
-        "interfaces": 0.3251,
-        "log_category": 0.62,
-        "tool_routing": 0.746
-      },
-      "p50Ms": 294.5,
-      "p95Ms": 886.3,
-      "overTimeout": 0.0
-    },
-    {
-      "model": "von:1.1",
-      "overall": 0.4919,
-      "overallLow": 0.4631,
-      "overallHigh": 0.5191,
-      "screen": 0.4161,
-      "tasks": {
-        "action_review": 0.4591,
-        "device_identity": 0.3714,
-        "incident_triage": 0.5672,
-        "interfaces": 0.3667,
-        "log_category": 0.64,
-        "tool_routing": 0.5472
-      },
-      "p50Ms": 2448.9,
-      "p95Ms": 8507.4,
-      "overTimeout": 0.2172
-    },
-    {
-      "model": "largha:150m-fp32",
-      "overall": 0.4595,
-      "overallLow": 0.4337,
-      "overallHigh": 0.4861,
-      "screen": 0.3268,
-      "tasks": {
-        "action_review": 0.5868,
-        "device_identity": 0.242,
-        "incident_triage": 0.5,
-        "interfaces": 0.3083,
-        "log_category": 0.56,
-        "tool_routing": 0.5598
-      },
-      "p50Ms": 212.7,
-      "p95Ms": 945.0,
-      "overTimeout": 0.0
-    },
-    {
-      "model": "laya:multilingual",
-      "overall": 0.4434,
-      "overallLow": 0.4124,
-      "overallHigh": 0.4697,
-      "screen": 0.4047,
-      "tasks": {
-        "action_review": 0.4365,
+        "action_review": 0.449,
         "device_identity": 0.2851,
         "incident_triage": 0.4778,
-        "interfaces": 0.3747,
+        "interfaces": 0.3728,
         "log_category": 0.46,
-        "tool_routing": 0.6265
+        "tool_routing": 0.625
       },
-      "p50Ms": 737.7,
-      "p95Ms": 2397.1,
-      "overTimeout": 0.0085
-    },
-    {
-      "model": "gliclass:large",
-      "overall": 0.385,
-      "overallLow": 0.3621,
-      "overallHigh": 0.4052,
-      "screen": 0.3379,
-      "tasks": {
-        "action_review": 0.5,
-        "device_identity": 0.1719,
-        "incident_triage": 0.5,
-        "interfaces": 0.3583,
-        "log_category": 0.28,
-        "tool_routing": 0.5
-      },
-      "p50Ms": 1582.0,
-      "p95Ms": 5643.5,
-      "overTimeout": 0.1639
+      "p50Ms": null,
+      "p95Ms": null,
+      "overTimeout": null
     }
   ]
 }

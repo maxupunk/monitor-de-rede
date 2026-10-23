@@ -41,6 +41,6 @@ responseStyle: AiResponseStyle,
  */
 proactive: AiProactiveSettings, 
 /**
- * Decisor (via Ollaya): decide antes do chat quais ferramentas mandar.
+ * Decisor (via Ollama): decide antes do chat quais ferramentas mandar.
  */
 decider: AiDeciderSettings, customSystemPrompt: string | null, };
