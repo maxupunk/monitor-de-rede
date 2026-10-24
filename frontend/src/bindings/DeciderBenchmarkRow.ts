@@ -8,7 +8,7 @@ export type DeciderBenchmarkRow = { model: string,
 /**
  * Da ficha do catálogo; `None` para um modelo fora dele.
  */
-family?: string, description?: string, recommended: boolean, gpuRecommended: boolean, 
+family?: string, description?: string, recommended: boolean, 
 /**
  * Vem instalado com o NetMonitor (serviço `ollaya-models`).
  */
@@ -25,4 +25,9 @@ screen: number, tasks: Array<DeciderBenchmarkTaskScore>, p50Ms: number, p95Ms: n
  * Fração das decisões acima do tempo máximo (0–1): nelas o NetMonitor
  * segue sem a decisão.
  */
-overTimeout: number, };
+overTimeout: number, 
+/**
+ * A latência é a deste outro modelo (mesmo grafo e tamanho, outros
+ * pesos); `None` quando foi medida no próprio.
+ */
+latencyFrom?: string, };

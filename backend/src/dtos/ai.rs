@@ -295,10 +295,6 @@ pub struct DeciderModelOption {
     #[serde(default)]
     #[ts(optional)]
     pub spec: Option<DeciderModelSpecView>,
-    /// Resultado no teste público, quando o modelo foi avaliado.
-    #[serde(default)]
-    #[ts(optional)]
-    pub benchmark: Option<DeciderBenchmarkView>,
     /// Nota no benchmark das decisões do NetMonitor, quando medido nele.
     #[serde(default)]
     #[ts(optional)]
@@ -350,7 +346,6 @@ pub struct DeciderBenchmarkRow {
     #[ts(optional)]
     pub description: Option<String>,
     pub recommended: bool,
-    pub gpu_recommended: bool,
     /// Vem instalado com o NetMonitor (serviço `ollaya-models`).
     pub bundled: bool,
     /// Nota geral (0–1) e o intervalo de confiança de 90%.
@@ -365,6 +360,11 @@ pub struct DeciderBenchmarkRow {
     /// Fração das decisões acima do tempo máximo (0–1): nelas o NetMonitor
     /// segue sem a decisão.
     pub over_timeout: f64,
+    /// A latência é a deste outro modelo (mesmo grafo e tamanho, outros
+    /// pesos); `None` quando foi medida no próprio.
+    #[serde(default)]
+    #[ts(optional)]
+    pub latency_from: Option<String>,
 }
 
 /// `GET /api/ai/decider/benchmark` — os modelos medidos nas decisões do
@@ -384,20 +384,6 @@ pub struct DeciderBenchmarkReport {
     pub models: Vec<DeciderBenchmarkRow>,
 }
 
-/// Resultado no teste público (`decider::benchmark`).
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../frontend/src/bindings/")]
-pub struct DeciderBenchmarkView {
-    /// Acerto geral, inglês e português (0–1).
-    pub accuracy: f64,
-    /// Acerto só em português (0–1).
-    pub portuguese: f64,
-    #[serde(default)]
-    #[ts(optional)]
-    pub latency_ms: Option<u32>,
-}
-
 /// Língua que o modelo atende.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
@@ -414,34 +400,16 @@ pub enum DeciderModelLanguage {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct DeciderModelSpecView {
-    /// Família ("Decisor", "Kev"), para agrupar na lista.
+    /// Família ("Decima Network", "Kev"), para agrupar na lista.
     pub family: String,
     pub language: DeciderModelLanguage,
-    /// Tamanho do download, em MB, quando publicado.
+    /// Tamanho do download, em MB.
     #[serde(default)]
     #[ts(optional)]
     pub download_mb: Option<u32>,
-    /// Memória com o modelo carregado, em MB (VRAM com GPU; em CPU, RAM),
-    /// quando publicada.
-    #[serde(default)]
-    #[ts(optional)]
-    pub memory_mb: Option<u32>,
-    /// Mediana publicada para cinco perguntas: em CPU, ou numa RTX 4090 quando
-    /// `gpu_recommended`.
-    pub latency_ms: u32,
-    /// Em CPU responde devagar demais para o chat.
-    pub gpu_recommended: bool,
-    /// Acerto no typed-decisions (0–1), quando comparável.
-    #[serde(default)]
-    #[ts(optional)]
-    pub accuracy: Option<f64>,
-    /// Teto de opções por escolha, quando o modelo tem um.
-    #[serde(default)]
-    #[ts(optional)]
-    pub max_choice_options: Option<u16>,
-    /// Tempo máximo por decisão sugerido para este modelo.
+    /// Tempo máximo por decisão sugerido para este modelo (`decider::catalog`).
     pub suggested_timeout_ms: u32,
-    /// O recomendado da família.
+    /// O recomendado para o NetMonitor.
     pub recommended: bool,
     /// Vem instalado com o NetMonitor (serviço `ollaya-models`): não se baixa
     /// do registro do Ollaya.
@@ -504,9 +472,6 @@ pub struct DeciderProviderView {
 pub struct DeciderProviderModel {
     pub name: String,
     pub description: String,
-    #[serde(default)]
-    #[ts(optional)]
-    pub benchmark: Option<DeciderBenchmarkView>,
 }
 
 /// Quão provável o Decisor acha que um grupo de ferramentas é necessário.

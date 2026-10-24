@@ -6,12 +6,9 @@ import {
   formForProvider,
   isLocalOllaya,
   memoryLabel,
-  benchmarkFact,
   decisionsFact,
-  isNearChance,
   modelFacts,
-  primaryScore,
-  RECOMMENDED_CPU_MODEL,
+  RECOMMENDED_MODEL,
   providerMissing,
   timeoutForModel,
   usesCustomUrl,
@@ -35,87 +32,77 @@ describe('isLocalOllaya', () => {
 })
 
 const decider: DeciderModelSpecView = {
-  family: 'Decisor',
+  family: 'Decima Network',
   language: 'multilingual',
-  memoryMb: 4000,
-  latencyMs: 307,
-  gpuRecommended: false,
-  accuracy: 0.361,
-  suggestedTimeoutMs: 1500,
+  downloadMb: 510,
+  suggestedTimeoutMs: 2000,
   recommended: true,
-  bundled: false,
+  bundled: true,
 }
 
-const kev4b: DeciderModelSpecView = {
+const kev08: DeciderModelSpecView = {
   family: 'Kev',
   language: 'english',
-  downloadMb: 9500,
-  memoryMb: 11000,
-  latencyMs: 354,
-  gpuRecommended: true,
-  accuracy: 0.669,
-  suggestedTimeoutMs: 2500,
+  downloadMb: 1800,
+  suggestedTimeoutMs: 10000,
   recommended: false,
   bundled: false,
 }
 
-/** Publicado sem memória nem acerto (como o decision:eos). */
-const semNumeros: DeciderModelSpecView = {
-  family: 'Decision',
+/** Sem tamanho de download conhecido. */
+const semDownload: DeciderModelSpecView = {
+  family: 'Outro',
   language: 'english',
-  downloadMb: 1500,
-  latencyMs: 2000,
-  gpuRecommended: false,
-  suggestedTimeoutMs: 6000,
+  suggestedTimeoutMs: 4000,
   recommended: false,
   bundled: false,
 }
 
 describe('ficha do modelo', () => {
-  it('o Decisor é multilíngue e roda em CPU', () => {
-    const labels = modelFacts(decider).map((fact) => fact.label)
-    expect(labels).toContain('Multilíngue (100+ línguas)')
-    expect(labels).toContain('Roda bem em CPU')
-    expect(labels).toContain('307 ms por 5 perguntas (CPU)')
-    expect(labels.some((label) => label.includes('download'))).toBe(false)
-  })
+  const network = { overall: 0.9321, p95Ms: 980.6 }
 
-  it('o Kev avisa a língua, mostra acerto, velocidade, tamanho e GPU', () => {
-    const facts = modelFacts(kev4b)
-    expect(facts.map((fact) => fact.label)).toEqual([
-      'Sem português',
-      'Acerto 67% (teste do autor)',
-      '354 ms por 5 perguntas (RTX 4090)',
-      '9.5 GB de download',
-      '~11 GB de memória',
-      'GPU recomendada',
+  it('só números do benchmark do NetMonitor: nota, p95, língua e download', () => {
+    expect(modelFacts(decider, network).map((fact) => fact.label)).toEqual([
+      'NetMonitor 93% · 981 ms (p95, CPU)',
+      'Multilíngue (100+ línguas)',
+      '510 MB de download',
     ])
-    expect(facts.filter((fact) => fact.color === 'warning')).toHaveLength(2)
   })
 
-  it('sem número publicado, sem chip — e o download vira o piso da memória', () => {
-    const labels = modelFacts(semNumeros).map((fact) => fact.label)
-    expect(labels.some((label) => label.startsWith('Acerto'))).toBe(false)
-    expect(labels.some((label) => label.includes('memória'))).toBe(false)
-    expect(memoryLabel(kev4b)).toBe('aproximadamente 11 GB')
-    expect(memoryLabel(semNumeros)).toBe('pelo menos 1.5 GB')
+  it('o Kev avisa a língua', () => {
+    const facts = modelFacts(kev08, { overall: 0.6102, p95Ms: 11483.4 })
+    expect(facts.map((fact) => fact.label)).toEqual([
+      'NetMonitor 61% · 11483 ms (p95, CPU)',
+      'Sem português',
+      '1.8 GB de download',
+    ])
+    expect(facts[1]?.color).toBe('warning')
+  })
+
+  it('fora do catálogo e sem medição, sem chip', () => {
+    expect(modelFacts(null, null)).toEqual([])
+  })
+
+  it('o download é o piso da memória', () => {
+    expect(memoryLabel(kev08)).toBe('pelo menos 1.8 GB')
+    expect(memoryLabel(semDownload)).toBe('alguns GB')
   })
 })
 
 describe('tempo máximo ao trocar de modelo', () => {
   it('valor não mexido segue o sugerido do novo modelo, nos dois sentidos', () => {
-    expect(timeoutForModel(1500, decider, kev4b, 1500)).toBe(2500)
-    expect(timeoutForModel(2500, kev4b, decider, 1500)).toBe(1500)
+    expect(timeoutForModel(2000, decider, kev08, 4000)).toBe(10000)
+    expect(timeoutForModel(10000, kev08, decider, 4000)).toBe(2000)
   })
 
   it('valor ajustado à mão só sobe', () => {
-    expect(timeoutForModel(2000, decider, kev4b, 1500)).toBe(2500)
-    expect(timeoutForModel(8000, kev4b, decider, 1500)).toBe(8000)
+    expect(timeoutForModel(3000, decider, kev08, 4000)).toBe(10000)
+    expect(timeoutForModel(5000, semDownload, decider, 4000)).toBe(5000)
   })
 
   it('modelo fora do catálogo não mexe no tempo', () => {
-    expect(timeoutForModel(1500, decider, null, 1500)).toBe(1500)
-    expect(timeoutForModel(1500, null, kev4b, 1500)).toBe(2500)
+    expect(timeoutForModel(2000, decider, null, 4000)).toBe(2000)
+    expect(timeoutForModel(4000, null, kev08, 4000)).toBe(10000)
   })
 })
 
@@ -199,50 +186,21 @@ describe('troca de provedor', () => {
   })
 })
 
-describe('teste público', () => {
-  const kev08 = { accuracy: 0.631, portuguese: 0.619, latencyMs: 86 }
-  const laya = { accuracy: 0.369, portuguese: 0.381, latencyMs: 19 }
-  const jeb4 = { accuracy: 0.905, portuguese: 0.893, latencyMs: 205 }
-
-  it('vale antes da língua declarada e do acerto do autor', () => {
-    const labels = modelFacts(null, kev08).map((fact) => fact.label)
-    expect(labels).toEqual(['Acerto 63% · PT 62%'])
-  })
-
-  it('cor pela régua: bom, útil, perto do chute', () => {
-    expect(benchmarkFact(jeb4).color).toBe('success')
-    expect(benchmarkFact(kev08).color).toBe('info')
-    expect(benchmarkFact(laya).color).toBe('error')
-    expect(benchmarkFact(kev08).short).toBe('63%')
-  })
-
-  it('perto do chute só abaixo de 60%', () => {
-    expect(isNearChance(primaryScore(laya, null))).toBe(true)
-    expect(isNearChance(primaryScore(kev08, null))).toBe(false)
-    expect(isNearChance(null)).toBe(false)
-  })
-})
-
 describe('benchmark do NetMonitor', () => {
   const network = { overall: 0.919, p95Ms: 664 }
-  const kev08 = { accuracy: 0.631, portuguese: 0.619, latencyMs: 86 }
-
-  it('a nota das decisões do NetMonitor vale antes do teste público', () => {
-    expect(primaryScore(kev08, { overall: 0.693, p95Ms: 11052 })).toBe(0.693)
-    expect(primaryScore(kev08, null)).toBe(0.631)
-    expect(primaryScore(null, null)).toBeNull()
-  })
 
   it('vira o primeiro chip da ficha, com a cor da régua', () => {
-    const facts = modelFacts(null, null, network)
+    const facts = modelFacts(null, network)
     expect(facts[0]?.label).toBe('NetMonitor 92% · 664 ms (p95, CPU)')
     expect(decisionsFact(network).color).toBe('success')
     expect(decisionsFact(network).short).toBe('92%')
+    expect(decisionsFact({ overall: 0.61, p95Ms: 11483 }).color).toBe('info')
+    expect(decisionsFact({ overall: 0.37, p95Ms: 300 }).color).toBe('error')
   })
 
   it('o padrão é o Decima Network, que vem com o NetMonitor', () => {
-    expect(defaultDeciderSettings().model).toBe(RECOMMENDED_CPU_MODEL)
-    expect(RECOMMENDED_CPU_MODEL).toBe('netmonitor/decima-network:v9')
+    expect(defaultDeciderSettings().model).toBe(RECOMMENDED_MODEL)
+    expect(RECOMMENDED_MODEL).toBe('netmonitor/decima-network:v11')
     expect(defaultDeciderSettings().timeoutMs).toBe(4000)
   })
 })

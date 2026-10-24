@@ -10,7 +10,7 @@ pub const DEFAULT_DECIDER_BASE_URL: &str = "http://ollaya:11435";
 /// O ajustado nas decisões do NetMonitor: a maior nota no benchmark delas
 /// (`decider::decisions_benchmark`) e 0,6 s por decisão em CPU. Vem instalado
 /// com o NetMonitor (serviço `ollaya-models` do compose).
-pub const DEFAULT_DECIDER_MODEL: &str = "netmonitor/decima-network:v9";
+pub const DEFAULT_DECIDER_MODEL: &str = "netmonitor/decima-network:v11";
 /// Probabilidade mínima (%) para um grupo de ferramentas entrar.
 pub const DEFAULT_DECIDER_MIN_CONFIDENCE: u8 = 60;
 /// Tempo máximo de uma decisão. Estourou, o chat segue sem ela.

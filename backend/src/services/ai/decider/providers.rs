@@ -11,7 +11,6 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use super::benchmark::Benchmark;
 use crate::dtos::ai::{DeciderProviderModel, DeciderProviderView};
 
 /// Quem responde às decisões.
@@ -58,20 +57,10 @@ pub enum DecisionProtocol {
 pub struct ProviderModel {
     pub name: &'static str,
     pub description: &'static str,
-    /// Resultado no teste público (`decider::benchmark`), quando avaliado.
-    pub benchmark: Option<Benchmark>,
 }
 
-const fn model(
-    name: &'static str,
-    description: &'static str,
-    benchmark: Option<Benchmark>,
-) -> ProviderModel {
-    ProviderModel {
-        name,
-        description,
-        benchmark,
-    }
+const fn model(name: &'static str, description: &'static str) -> ProviderModel {
+    ProviderModel { name, description }
 }
 
 /// O preset de um provedor.
@@ -119,7 +108,6 @@ impl ProviderPreset {
                 .map(|model| DeciderProviderModel {
                     name: model.name.to_string(),
                     description: model.description.to_string(),
-                    benchmark: model.benchmark.map(|benchmark| benchmark.view()),
                 })
                 .collect(),
             requires_key: self.requires_key,
@@ -158,16 +146,8 @@ pub const PRESETS: &[ProviderPreset] = &[
         default_base_url: "https://api.typesafe.ai",
         default_model: "jev-latest",
         models: &[
-            model(
-                "jev-latest",
-                "Jev estável (hoje o jev-1.13.0): 97,6% no teste público, igual em português",
-                Some(Benchmark::new(976, 976, 255)),
-            ),
-            model(
-                "jev-preview",
-                "Jev em prévia: as novidades antes do estável",
-                None,
-            ),
+            model("jev-latest", "Jev estável (hoje o jev-1.13.0)"),
+            model("jev-preview", "Jev em prévia: as novidades antes do estável"),
         ],
         requires_key: true,
         requires_account: false,
@@ -178,27 +158,15 @@ pub const PRESETS: &[ProviderPreset] = &[
     ProviderPreset {
         provider: DeciderProvider::Openrouter,
         label: "OpenRouter",
-        description: "Os melhores do teste público numa conta só — Microsoft Decision-1, Perplexity Decider e Jev —, sem lista de espera. Cobrado por token de entrada.",
+        description: "Microsoft Decision-1, Perplexity Decider e Jev numa conta só, sem lista de espera. Cobrado por token de entrada.",
         protocol: Some(DecisionProtocol::Openrouter),
         default_base_url: "https://openrouter.ai/api",
         default_model: "microsoft/microsoft-decision-1",
         models: &[
-            model(
-                "microsoft/microsoft-decision-1",
-                "Microsoft Decision-1 9B: 97,6% no teste público e 100% em português, pelo menor custo medido",
-                Some(Benchmark::new(976, 1_000, 422)),
-            ),
-            model(
-                "perplexity/pplx-decider-v1.1-27b",
-                "Perplexity Decider 1.1 27B: o mais preciso do teste público (99,4%, 100% em português)",
-                Some(Benchmark::accuracy_only(994, 1_000)),
-            ),
-            model(
-                "~typesafe/jev-latest",
-                "Jev, sempre a versão mais nova",
-                Some(Benchmark::new(976, 976, 255)),
-            ),
-            model("typesafe/jev-1.13", "Jev 1.13, versão fixa", Some(Benchmark::new(976, 976, 255))),
+            model("microsoft/microsoft-decision-1", "Microsoft Decision-1 9B"),
+            model("perplexity/pplx-decider-v1.1-27b", "Perplexity Decider 1.1 27B"),
+            model("~typesafe/jev-latest", "Jev, sempre a versão mais nova"),
+            model("typesafe/jev-1.13", "Jev 1.13, versão fixa"),
         ],
         requires_key: true,
         requires_account: false,
@@ -216,14 +184,9 @@ pub const PRESETS: &[ProviderPreset] = &[
         models: &[
             model(
                 "clef-flash",
-                "Clef-flash 9B: barato e cabe na cota gratuita diária; cai 8 pontos em português",
-                Some(Benchmark::new(875, 833, 394)),
+                "Clef-flash 9B: barato e cabe na cota gratuita diária",
             ),
-            model(
-                "clef",
-                "Clef 27B: o mais preciso da Cloudflare",
-                Some(Benchmark::new(958, 940, 302)),
-            ),
+            model("clef", "Clef 27B: o maior da Cloudflare"),
         ],
         requires_key: true,
         requires_account: true,
@@ -238,11 +201,7 @@ pub const PRESETS: &[ProviderPreset] = &[
         protocol: Some(DecisionProtocol::Openai),
         default_base_url: "https://api.openai.com",
         default_model: "gpt-6-luna",
-        models: &[model(
-            "gpt-6-luna",
-            "O modelo de decisão da OpenAI",
-            Some(Benchmark::new(905, 905, 222)),
-        )],
+        models: &[model("gpt-6-luna", "O modelo de decisão da OpenAI")],
         requires_key: true,
         requires_account: false,
         key_url: Some("https://platform.openai.com/api-keys"),

@@ -10,7 +10,6 @@ use serde_json::json;
 use crate::{
     dtos::snmp::{InterfaceSuggestions, InterfaceSuggestionsInput},
     services::ai::decider::{
-        catalog,
         config::DeciderFeature,
         decisions::interfaces::{rank_candidates, InterfaceAdvice},
         runtime::{DeciderRuntime, Lane},
@@ -25,10 +24,7 @@ pub async fn suggest(ctx: &AppContext, input: &InterfaceSuggestionsInput) -> Int
     else {
         return InterfaceSuggestions::default();
     };
-    let ranked = rank_candidates(
-        &input.interfaces,
-        catalog::max_choice_options(&settings.model),
-    );
+    let ranked = rank_candidates(&input.interfaces);
     if ranked.is_empty() {
         return InterfaceSuggestions::default();
     }

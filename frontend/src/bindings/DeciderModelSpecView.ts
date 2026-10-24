@@ -6,41 +6,19 @@ import type { DeciderModelLanguage } from "./DeciderModelLanguage";
  */
 export type DeciderModelSpecView = { 
 /**
- * Família ("Decisor", "Kev"), para agrupar na lista.
+ * Família ("Decima Network", "Kev"), para agrupar na lista.
  */
 family: string, language: DeciderModelLanguage, 
 /**
- * Tamanho do download, em MB, quando publicado.
+ * Tamanho do download, em MB.
  */
 downloadMb?: number, 
 /**
- * Memória com o modelo carregado, em MB (VRAM com GPU; em CPU, RAM),
- * quando publicada.
- */
-memoryMb?: number, 
-/**
- * Mediana publicada para cinco perguntas: em CPU, ou numa RTX 4090 quando
- * `gpu_recommended`.
- */
-latencyMs: number, 
-/**
- * Em CPU responde devagar demais para o chat.
- */
-gpuRecommended: boolean, 
-/**
- * Acerto no typed-decisions (0–1), quando comparável.
- */
-accuracy?: number, 
-/**
- * Teto de opções por escolha, quando o modelo tem um.
- */
-maxChoiceOptions?: number, 
-/**
- * Tempo máximo por decisão sugerido para este modelo.
+ * Tempo máximo por decisão sugerido para este modelo (`decider::catalog`).
  */
 suggestedTimeoutMs: number, 
 /**
- * O recomendado da família.
+ * O recomendado para o NetMonitor.
  */
 recommended: boolean, 
 /**

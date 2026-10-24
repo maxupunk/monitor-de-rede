@@ -1,10 +1,9 @@
 import type { AiDeciderSettings } from '@/bindings/AiDeciderSettings'
-import type { DeciderBenchmarkView } from '@/bindings/DeciderBenchmarkView'
 import type { DeciderDecisionsScoreView } from '@/bindings/DeciderDecisionsScoreView'
 import type { DeciderModelLanguage } from '@/bindings/DeciderModelLanguage'
 import type { DeciderProviderView } from '@/bindings/DeciderProviderView'
 import type { DeciderModelSpecView } from '@/bindings/DeciderModelSpecView'
-import { formatDecimalBytes, formatElapsedMs, formatLatency, formatPercent } from './formatters'
+import { formatDecimalBytes, formatLatency, formatPercent } from './formatters'
 
 /**
  * Hosts que significam "o Ollaya roda nesta mesma máquina": o serviço do
@@ -47,15 +46,10 @@ export interface ModelFact {
   icon: string
 }
 
-/** O teste público publicado em 10/10/2026, de onde vêm os acertos medidos. */
-export const BENCHMARK_URL =
-  'https://akitaonrails.com/2026/10/10/qual-modelo-de-decisao-classificador-de-ia-tipo-jev-e-melhor/'
+/** O recomendado (`recommended` no catálogo do backend) e o padrão. */
+export const RECOMMENDED_MODEL = 'netmonitor/decima-network:v11'
 
-/** Os recomendados (`recommended` no catálogo do backend): um em CPU, um com GPU. */
-export const RECOMMENDED_CPU_MODEL = 'netmonitor/decima-network:v9'
-export const RECOMMENDED_GPU_MODEL = 'jeb:4b'
-
-/** Abaixo disso o modelo fica perto do chute (~31% no teste) — mesma régua do backend. */
+/** Abaixo disso o modelo fica perto do chute nas decisões do NetMonitor. */
 const USEFUL_ACCURACY = 0.6
 const GOOD_ACCURACY = 0.85
 
@@ -70,16 +64,6 @@ export function accuracyColor(value: number): ModelFact['color'] {
   return 'error'
 }
 
-/** O resultado no teste público: acerto geral e em português, com a sigla para a lista. */
-export function benchmarkFact(benchmark: DeciderBenchmarkView): ModelFact & { short: string } {
-  return {
-    label: `Acerto ${percent(benchmark.accuracy)} · PT ${percent(benchmark.portuguese)}`,
-    short: percent(benchmark.accuracy),
-    color: accuracyColor(benchmark.accuracy),
-    icon: 'mdi-target',
-  }
-}
-
 /** A nota no benchmark das decisões do NetMonitor, com a sigla para a lista. */
 export function decisionsFact(score: DeciderDecisionsScoreView): ModelFact & { short: string } {
   return {
@@ -90,22 +74,6 @@ export function decisionsFact(score: DeciderDecisionsScoreView): ModelFact & { s
   }
 }
 
-/**
- * A nota que vale para a escolha: a das decisões do NetMonitor quando o modelo
- * foi medido nelas, senão a do teste público — a mesma regra do backend.
- */
-export function primaryScore(
-  benchmark: DeciderBenchmarkView | null | undefined,
-  decisions: DeciderDecisionsScoreView | null | undefined
-): number | null {
-  return decisions?.overall ?? benchmark?.accuracy ?? null
-}
-
-/** A nota fica tão baixa que o modelo está perto de escolher no chute. */
-export function isNearChance(score: number | null | undefined): score is number {
-  return score != null && score < USEFUL_ACCURACY
-}
-
 /** A língua do modelo, com a sigla curta para a lista. */
 export function languageFact(language: DeciderModelLanguage): ModelFact & { short: string } {
   return language === 'multilingual'
@@ -114,13 +82,11 @@ export function languageFact(language: DeciderModelLanguage): ModelFact & { shor
 }
 
 /**
- * O que pesa na escolha: acerto, velocidade, tamanho, memória e se precisa de
- * GPU. O teste público (com português medido) vale antes do número do autor e
- * da língua declarada; sem número publicado, sem chip.
+ * O que pesa na escolha: a nota e a latência no benchmark das decisões do
+ * NetMonitor (a única fonte de números), a língua e o tamanho do download.
  */
 export function modelFacts(
   spec: DeciderModelSpecView | null,
-  benchmark?: DeciderBenchmarkView | null,
   decisions?: DeciderDecisionsScoreView | null
 ): ModelFact[] {
   const facts: ModelFact[] = []
@@ -128,26 +94,9 @@ export function modelFacts(
     const { label, color, icon } = decisionsFact(decisions)
     facts.push({ label, color, icon })
   }
-  if (benchmark) {
-    const { label, color, icon } = benchmarkFact(benchmark)
-    facts.push({ label, color, icon })
-  } else if (spec && !decisions) {
-    const { label, color, icon } = languageFact(spec.language)
-    facts.push({ label, color, icon })
-    if (spec.accuracy != null) {
-      facts.push({
-        label: `Acerto ${percent(spec.accuracy)} (teste do autor)`,
-        color: 'info',
-        icon: 'mdi-target',
-      })
-    }
-  }
   if (!spec) return facts
-  facts.push({
-    label: `${formatElapsedMs(spec.latencyMs)} por 5 perguntas (${spec.gpuRecommended ? 'RTX 4090' : 'CPU'})`,
-    color: 'info',
-    icon: 'mdi-timer-outline',
-  })
+  const { label, color, icon } = languageFact(spec.language)
+  facts.push({ label, color, icon })
   if (spec.downloadMb) {
     facts.push({
       label: `${formatDecimalBytes(spec.downloadMb * MB)} de download`,
@@ -155,27 +104,14 @@ export function modelFacts(
       icon: 'mdi-download',
     })
   }
-  if (spec.memoryMb) {
-    facts.push({
-      label: `~${formatDecimalBytes(spec.memoryMb * MB)} de memória`,
-      color: 'info',
-      icon: 'mdi-memory',
-    })
-  }
-  facts.push(
-    spec.gpuRecommended
-      ? { label: 'GPU recomendada', color: 'warning', icon: 'mdi-expansion-card-variant' }
-      : { label: 'Roda bem em CPU', color: 'success', icon: 'mdi-cpu-64-bit' }
-  )
   return facts
 }
 
 /**
- * Memória do modelo carregado, para o aviso ao ligar. Sem número publicado,
- * o download é o piso: o modelo não cabe em menos que o próprio arquivo.
+ * Memória do modelo carregado, para o aviso ao ligar: o download é o piso —
+ * o modelo não cabe em menos que o próprio arquivo.
  */
 export function memoryLabel(spec: DeciderModelSpecView): string {
-  if (spec.memoryMb) return `aproximadamente ${formatDecimalBytes(spec.memoryMb * MB)}`
   if (spec.downloadMb) return `pelo menos ${formatDecimalBytes(spec.downloadMb * MB)}`
   return 'alguns GB'
 }

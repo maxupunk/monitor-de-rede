@@ -92,6 +92,9 @@
               <v-chip :color="speedOf(item).color" size="x-small" variant="tonal" class="mt-1">
                 {{ speedOf(item).label }}
               </v-chip>
+              <span v-if="latencyNoteOf(item)" class="text-caption mt-1">
+                {{ latencyNoteOf(item) }}
+              </span>
             </div>
           </template>
 
@@ -119,6 +122,7 @@
                   {{ formatLatency(item.p95Ms) }} · {{ speedOf(item).label }}
                 </v-chip>
               </div>
+              <div v-if="latencyNoteOf(item)" class="text-caption">{{ latencyNoteOf(item) }}</div>
               <div class="d-flex flex-wrap ga-1">
                 <v-chip
                   v-for="task in report.tasks"
@@ -208,7 +212,6 @@ function tagsOf(row: DeciderBenchmarkRow): { label: string; color: ModelFact['co
   const tags: { label: string; color: ModelFact['color'] }[] = []
   if (row.recommended) tags.push({ label: 'recomendado', color: 'success' })
   if (row.bundled) tags.push({ label: 'vem com o NetMonitor', color: 'info' })
-  if (row.gpuRecommended) tags.push({ label: 'GPU', color: 'warning' })
   return tags
 }
 
@@ -218,6 +221,18 @@ function speedOf(row: DeciderBenchmarkRow): { label: string; color: ModelFact['c
     return { label: 'rápido o bastante', color: 'success' }
   }
   return { label: `${percent(row.overTimeout)} acima de ${formatLatency(timeout)}`, color: 'error' }
+}
+
+/**
+ * De onde vem a latência quando não foi medida no próprio modelo: outra versão
+ * com o mesmo grafo e tamanho, só com outros pesos.
+ */
+function latencyNoteOf(row: DeciderBenchmarkRow): string | null {
+  const from = row.latencyFrom
+  if (!from) return null
+  const [repo, tag] = from.split(':')
+  const source = tag && repo === row.model.split(':')[0] ? `da ${tag}` : `de ${from}`
+  return `Latência ${source}: mesmo modelo, outros pesos`
 }
 
 onMounted(() => deciderStore.loadBenchmark())

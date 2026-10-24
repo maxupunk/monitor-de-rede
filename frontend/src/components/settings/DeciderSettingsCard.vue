@@ -100,15 +100,6 @@
                       {{ decisionsFact(item.decisions).short }}
                     </v-chip>
                     <v-chip
-                      v-else-if="item.benchmark"
-                      size="x-small"
-                      variant="tonal"
-                      :color="benchmarkFact(item.benchmark).color"
-                      :title="`${benchmarkFact(item.benchmark).label} no teste público`"
-                    >
-                      {{ benchmarkFact(item.benchmark).short }}
-                    </v-chip>
-                    <v-chip
                       v-else-if="item.spec"
                       size="x-small"
                       variant="tonal"
@@ -116,15 +107,6 @@
                       :title="languageFact(item.spec.language).label"
                     >
                       {{ languageFact(item.spec.language).short }}
-                    </v-chip>
-                    <v-chip
-                      v-if="item.spec?.gpuRecommended"
-                      size="x-small"
-                      variant="tonal"
-                      color="warning"
-                      title="GPU recomendada"
-                    >
-                      GPU
                     </v-chip>
                     <v-chip
                       size="x-small"
@@ -197,7 +179,7 @@
       </v-btn>
 
       <!-- Ficha do modelo escolhido: o que pesa na escolha -->
-      <template v-if="selectedSpec || selectedBenchmark || selectedDecisions">
+      <template v-if="selectedSpec || selectedDecisions">
         <div class="d-flex flex-wrap ga-1 mt-2">
           <v-chip
             v-for="fact in selectedFacts"
@@ -222,51 +204,15 @@
           <code>docker compose up -d ollaya-models</code> e atualize esta tela.
         </v-alert>
         <v-alert
-          v-if="nearChance"
-          type="warning"
-          variant="tonal"
-          density="compact"
-          class="mt-2 text-body-2"
-        >
-          <template v-if="selectedDecisions">
-            No benchmark das decisões do NetMonitor, este modelo fez
-          </template>
-          <template v-else>
-            No
-            <a :href="BENCHMARK_URL" target="_blank" rel="noopener" class="text-primary"
-              >teste público</a
-            >
-            (23 modelos, em inglês e português), este modelo acertou
-          </template>
-          {{ nearChance }} — perto de escolher no chute (~31%). Prefira
-          <strong>{{ RECOMMENDED_CPU_MODEL }}</strong> em CPU ou
-          <strong>{{ RECOMMENDED_GPU_MODEL }}</strong> com GPU.
-        </v-alert>
-        <v-alert
-          v-else-if="
-            selectedSpec?.language === 'english' && !selectedBenchmark && !selectedDecisions
-          "
+          v-if="selectedSpec?.language === 'english'"
           type="info"
           variant="tonal"
           density="compact"
           class="mt-2 text-body-2"
         >
-          Este modelo não declara português e não foi avaliado. O texto analisado (perguntas do
-          chat, logs, nomes) costuma estar em português: prefira um avaliado —
-          <strong>{{ RECOMMENDED_CPU_MODEL }}</strong> em CPU ou
-          <strong>{{ RECOMMENDED_GPU_MODEL }}</strong> com GPU — ou experimente com perguntas reais
-          em Avançado › Experimentar antes de ligar.
-        </v-alert>
-        <v-alert
-          v-if="selectedSpec?.gpuRecommended"
-          type="warning"
-          variant="tonal"
-          density="compact"
-          class="mt-2 text-body-2"
-        >
-          Em CPU, cada pergunta do chat pode esperar alguns segundos por este modelo. Para o dia a
-          dia, rode o Ollaya com GPU (imagem <code>ollaya:cuda</code>) ou aponte o passo 1 para um
-          Ollaya numa máquina com GPU.
+          Este modelo só atende inglês, e o texto analisado (perguntas do chat, logs, nomes) costuma
+          estar em português. Prefira <strong>{{ RECOMMENDED_MODEL }}</strong> — ou experimente com
+          perguntas reais em Avançado › Experimentar antes de ligar.
         </v-alert>
         <div v-if="timeoutNote" class="d-flex align-center ga-1 mt-2 text-body-2">
           <v-icon size="16" color="info">mdi-timer-cog-outline</v-icon>
@@ -528,15 +474,9 @@ import {
 import type { DeciderTriageMode } from '@/bindings/DeciderTriageMode'
 import { formatElapsedMs, formatLatency, formatPercent } from '@/utils/formatters'
 import {
-  BENCHMARK_URL,
-  RECOMMENDED_CPU_MODEL,
-  RECOMMENDED_GPU_MODEL,
-  benchmarkFact,
+  RECOMMENDED_MODEL,
   decisionsFact,
   isLocalOllaya,
-  isNearChance,
-  percent,
-  primaryScore,
   languageFact,
   memoryLabel,
   modelFacts,
@@ -674,16 +614,8 @@ const status = computed(() => {
 
 /** A ficha do modelo do formulário; `null` para um fora do catálogo. */
 const selectedSpec = computed(() => deciderStore.spec(form.value.model ?? ''))
-const selectedBenchmark = computed(() => deciderStore.benchmark(form.value.model ?? ''))
 const selectedDecisions = computed(() => deciderStore.decisions(form.value.model ?? ''))
-const selectedFacts = computed(() =>
-  modelFacts(selectedSpec.value, selectedBenchmark.value, selectedDecisions.value)
-)
-/** O acerto do modelo escolhido quando ele fica perto do chute; `null` quando não. */
-const nearChance = computed(() => {
-  const score = primaryScore(selectedBenchmark.value, selectedDecisions.value)
-  return isNearChance(score) ? percent(score) : null
-})
+const selectedFacts = computed(() => modelFacts(selectedSpec.value, selectedDecisions.value))
 
 /** Avisa quando trocar de modelo mexeu no tempo máximo por pergunta. */
 const timeoutNote = ref<string | null>(null)

@@ -135,14 +135,11 @@ fn scaled(value: u64, step: u64, units: &[&str]) -> String {
 }
 
 /// As interfaces que vale perguntar: sem loopback, as ativas e com mais
-/// tráfego primeiro, até o limite de opções de uma escolha — o do Ollaya ou,
-/// se menor, o do modelo (`max_options`, ver `decider::catalog`). Como a lista
-/// já vem por relevância, o corte tira só as menos prováveis de ser o uplink.
+/// tráfego primeiro, até o limite de opções de uma escolha no Ollaya. Como a
+/// lista já vem por relevância, o corte tira só as menos prováveis de ser o
+/// uplink.
 #[must_use]
-pub fn rank_candidates(
-    interfaces: &[InterfaceCandidate],
-    max_options: Option<usize>,
-) -> Vec<&InterfaceCandidate> {
+pub fn rank_candidates(interfaces: &[InterfaceCandidate]) -> Vec<&InterfaceCandidate> {
     let mut ranked: Vec<&InterfaceCandidate> = interfaces
         .iter()
         .filter(|interface| !interface.is_loopback())
@@ -155,7 +152,7 @@ pub fn rank_candidates(
             interface.if_index,
         )
     });
-    ranked.truncate(max_options.map_or(MAX_CHOICE_OPTIONS, |max| max.min(MAX_CHOICE_OPTIONS)));
+    ranked.truncate(MAX_CHOICE_OPTIONS);
     ranked
 }
 
@@ -272,21 +269,8 @@ mod tests {
             iface(3, "ether3", 50, true),
             iface(4, "ether4", 900, true),
         ];
-        let ranked: Vec<i32> = rank_candidates(&list, None)
-            .iter()
-            .map(|i| i.if_index)
-            .collect();
+        let ranked: Vec<i32> = rank_candidates(&list).iter().map(|i| i.if_index).collect();
         assert_eq!(ranked, [4, 3, 2]);
-
-        let poucas: Vec<i32> = rank_candidates(&list, Some(2))
-            .iter()
-            .map(|i| i.if_index)
-            .collect();
-        assert_eq!(
-            poucas,
-            [4, 3],
-            "modelo com teto menor fica com as mais prováveis"
-        );
     }
 
     #[test]
@@ -295,7 +279,7 @@ mod tests {
             .map(|n| iface(n, &format!("p{n}"), 0, true))
             .collect();
         let advice = InterfaceAdvice {
-            ranked: rank_candidates(&list, Some(10_000)),
+            ranked: rank_candidates(&list),
             min_confidence: 60,
         };
         assert_eq!(advice.ranked.len(), MAX_CHOICE_OPTIONS);
@@ -322,7 +306,7 @@ mod tests {
     fn le_uplink_e_interfaces_acima_do_limiar() {
         let list = [iface(7, "ether7", 5, true), iface(9, "ether9", 1, true)];
         let advice = InterfaceAdvice {
-            ranked: rank_candidates(&list, None),
+            ranked: rank_candidates(&list),
             min_confidence: 60,
         };
         let answers = BTreeMap::from([

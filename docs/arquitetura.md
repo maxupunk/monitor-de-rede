@@ -746,16 +746,18 @@ texto. Ele roda no container opcional `ollaya` (que sobe com o
 `docker compose up`; o peso depende do modelo e a tela avisa ao ligar), num
 Ollaya em outra máquina ou num serviço na nuvem (TypeSafe, OpenRouter,
 Cloudflare, OpenAI; ver `providers.rs`). O padrão é o
-`netmonitor/decima-network:v9`: o `decima:small` ajustado nas decisões do
-NetMonitor (projeto Laya-tuning), com 93% no benchmark delas, 83% num
-benchmark cego de casos reais nunca vistos (perguntas de fóruns, logs e
-strings de dispositivos) e 0,6 s por decisão em CPU. Ele não está no registro do Ollaya: vem no pacote
-`docker/ollaya-models/` e o serviço `ollaya-models` do compose o instala no
-volume do Ollaya a cada `up` (sha256 conferido, manifesto por último). A ordem
-e a recomendação da tela usam primeiro a nota no benchmark das decisões do
-NetMonitor (`decisions_benchmark.rs`, snapshot gerado pelo Laya-tuning e
-mostrado na página "Benchmark dos modelos", `GET /api/ai/decider/benchmark`) e,
-para quem não foi medido nele, o teste público (`benchmark.rs`). Responde perguntas
+`netmonitor/decima-network:v11`: o `decima:small` ajustado nas decisões do
+NetMonitor (projeto Laya-tuning), com 93% no benchmark delas e 0,6 s por
+decisão em CPU (medida na v9, o mesmo grafo com outros pesos). Ele não está no
+registro do Ollaya: vem no pacote `docker/ollaya-models/` e o serviço
+`ollaya-models` do compose o instala no volume do Ollaya a cada `up` (sha256
+conferido, manifesto por último). A tela oferece só os modelos medidos no
+benchmark das decisões do NetMonitor — hoje a v11, o `kev:0.8b` e o
+`decider:0.8b` — e todo número dela (nota, p95, tempo sugerido por pergunta)
+sai desse benchmark (`decisions_benchmark.rs`, snapshot gerado pelo Laya-tuning
+e mostrado na página "Benchmark dos modelos", `GET /api/ai/decider/benchmark`);
+nada de número publicado por fora. A lista abre no recomendado e segue pela
+nota. Responde perguntas
 tipadas — sim/não,
 escolha, escala — sobre um texto, em dezenas de milissegundos, com
 probabilidade calibrada. O sistema o consulta onde uma heurística lia texto sem
@@ -769,8 +771,8 @@ services/ai/decider/
   providers.rs      presets: Ollaya, TypeSafe, OpenRouter, Cloudflare, OpenAI, Outro
   protocols.rs      os formatos de API (Ollaya, System One, Cloudflare, OpenAI, OpenRouter)
   client.rs         HTTP dos provedores (um reqwest::Client por processo)
-  catalog.rs        fichas dos modelos do Ollaya, na ordem da recomendação
-  benchmark.rs      resultados do teste público (acerto geral e em português)
+  catalog.rs        fichas dos modelos medidos, na ordem da recomendação
+  decisions_benchmark.rs  nota e latência no benchmark das decisões (Laya-tuning)
   decision.rs       trait Decision: perguntas + leitura das respostas
   runtime.rs        DeciderRuntime: cache da config, filas, disjuntor
   suggestion.rs     DeciderSuggestion { value, confidence 0–100, model }

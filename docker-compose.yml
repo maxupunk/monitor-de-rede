@@ -265,17 +265,13 @@ services:
   # sem tokens). Sobe sempre junto — parado, sem modelo carregado, ocupa
   # ~150 MB. Só pesa quando o Decisor é ligado em Configurações → IA e um
   # modelo é carregado; `OLLAYA_KEEP_ALIVE` o descarrega depois do tempo
-  # ocioso. Quanto pesa depende do modelo, que a tela lista pela nota no
-  # benchmark do NetMonitor (página Benchmark dos modelos) e, sem ela, pelo
-  # teste público de 10/10/2026. Em resumo:
-  #   - netmonitor/decima-network:v9 (padrão): 0,5 GB, ajustado nas decisões
+  # ocioso. Quanto pesa depende do modelo; a tela lista só os medidos no
+  # benchmark das decisões do NetMonitor (página Benchmark dos modelos):
+  #   - netmonitor/decima-network:v11 (padrão): 0,5 GB, ajustado nas decisões
   #     do NetMonitor — 93% no benchmark dele, 0,6 s por decisão em CPU. Vem
   #     instalado pelo serviço `ollaya-models` (abaixo);
-  #   - kev:0.8b: 1,8 GB, 68% no benchmark do NetMonitor, segundos em CPU;
-  #   - jeb:4b: 4,6 GB, o melhor com GPU (90,5%, 89% em português);
-  #   - kev:4b, decider:4b, kev:9b…: de 8 a 20 GB e GPU — em CPU cada pergunta
-  #     do chat espera segundos;
-  #   - laya: o mais leve, mas perto do chute no teste (37–43%).
+  #   - kev:0.8b: 1,8 GB, 61% no benchmark, só inglês, segundos em CPU;
+  #   - decider:0.8b: 1,5 GB, 59,5% no benchmark, só inglês, segundos em CPU.
   # Sem RAM ou GPU sobrando aqui? Na mesma tela dá para apontar para um Ollaya
   # em outra máquina ou para um provedor na nuvem (TypeSafe, OpenRouter,
   # Cloudflare, OpenAI) — aí este serviço pode até ser removido.
@@ -311,7 +307,7 @@ services:
         max-file: '3'
 
   # Instala no volume do Ollaya os modelos que vêm com o NetMonitor
-  # (`docker/ollaya-models/`, hoje o netmonitor/decima-network:v9) e sai. Roda
+  # (`docker/ollaya-models/`, hoje o netmonitor/decima-network:v11) e sai. Roda
   # a cada `up`: modelo já instalado não baixa nada, todo blob é conferido pelo
   # sha256 e o manifesto vai por último — o Ollaya só lista modelo completo.
   # Os pesos vêm de `docker/ollaya-models/<modelo>/blobs/` quando estão lá

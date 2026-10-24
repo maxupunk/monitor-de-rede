@@ -6,7 +6,6 @@ import type { DeciderModelOption } from '@/bindings/DeciderModelOption'
 import type { DeciderProvider } from '@/bindings/DeciderProvider'
 import type { DeciderProviderView } from '@/bindings/DeciderProviderView'
 import type { DeciderBenchmarkReport } from '@/bindings/DeciderBenchmarkReport'
-import type { DeciderBenchmarkView } from '@/bindings/DeciderBenchmarkView'
 import type { DeciderDecisionsScoreView } from '@/bindings/DeciderDecisionsScoreView'
 import type { DeciderModelSpecView } from '@/bindings/DeciderModelSpecView'
 import type { DeciderModelsResponse } from '@/bindings/DeciderModelsResponse'
@@ -46,7 +45,7 @@ export function defaultDeciderSettings(): AiDeciderSettings {
     provider: 'ollaya',
     customProtocol: 'systemone',
     baseUrl: 'http://ollaya:11435',
-    model: 'netmonitor/decima-network:v9',
+    model: 'netmonitor/decima-network:v11',
     minConfidence: 60,
     timeoutMs: 4000,
     features: {
@@ -164,11 +163,6 @@ export const useAiDeciderStore = defineStore('aiDecider', () => {
     return option(model)?.spec ?? null
   }
 
-  /** O resultado no teste público; `null` para quem não foi avaliado. */
-  function benchmark(model: string): DeciderBenchmarkView | null {
-    return option(model)?.benchmark ?? null
-  }
-
   /** A nota no benchmark das decisões do NetMonitor; `null` para quem não foi medido. */
   function decisions(model: string): DeciderDecisionsScoreView | null {
     return option(model)?.decisions ?? null
@@ -195,7 +189,8 @@ export const useAiDeciderStore = defineStore('aiDecider', () => {
 
   /**
    * Para o do catálogo vale o veredito do backend, que conhece os apelidos
-   * (`kev` baixado é o `kev:4b`); o resto, pela regra de nomes.
+   * (`decima-network` é o `netmonitor/decima-network:v11`); o resto, pela
+   * regra de nomes.
    */
   function installed(model: string): boolean {
     return option(model)?.installed ?? isModelInstalled(models.value?.installed ?? [], model)
@@ -317,7 +312,6 @@ export const useAiDeciderStore = defineStore('aiDecider', () => {
     loadModels,
     installed,
     spec,
-    benchmark,
     decisions,
     benchmarkReport,
     loadingBenchmark,

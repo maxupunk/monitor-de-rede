@@ -76,27 +76,35 @@ async fn autocomplete_junta_catalogo_e_instalados() {
 
         assert!(models.online, "{:?}", models.error_message);
         assert_eq!(models.installed, ["laya:multilingual"]);
+        let nomes: Vec<&str> = models
+            .options
+            .iter()
+            .map(|option| option.name.as_str())
+            .collect();
+        // O catálogo, do recomendado para a menor nota; o instalado fora dele
+        // vem no fim.
+        assert_eq!(
+            nomes,
+            [
+                "netmonitor/decima-network:v11",
+                "kev:0.8b",
+                "decider:0.8b",
+                "laya:multilingual"
+            ]
+        );
         let installed: Vec<&str> = models
             .options
             .iter()
             .filter(|option| option.installed)
             .map(|option| option.name.as_str())
             .collect();
-        // O roteador `laya` casa com a variante instalada; os dois vão para o
-        // fim da lista (perto do chute), da maior nota para a menor.
-        assert_eq!(installed, ["laya:multilingual", "laya"]);
-        assert_eq!(
-            models.options[0].name, "netmonitor/decima-network:v9",
-            "o recomendado em CPU abre a lista"
-        );
+        assert_eq!(installed, ["laya:multilingual"]);
         assert!(
-            models.options[0].decisions.is_some(),
+            models.options[..3]
+                .iter()
+                .all(|option| option.decisions.is_some()),
             "com a nota do benchmark do NetMonitor"
         );
-        assert!(models
-            .options
-            .iter()
-            .any(|option| option.name == "laya:en" && !option.installed));
     })
     .await;
 }

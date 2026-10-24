@@ -7,9 +7,9 @@
 //! rótulos curados à mão. Todos os modelos nos mesmos casos e na mesma CPU
 //! (`decisions_benchmark.json`, gerado lá e copiado para cá).
 //!
-//! É o primeiro critério da recomendação e da ordem da lista: mede o que o
-//! NetMonitor pergunta, em português, no hardware de uma instalação comum. O
-//! teste público ([`super::benchmark`]) fica para quem não foi medido aqui.
+//! É a única fonte de nota e latência da tela: mede o que o NetMonitor
+//! pergunta, em português, no hardware de uma instalação comum. O catálogo
+//! ([`super::catalog`]) só lista modelos medidos aqui.
 
 use std::sync::LazyLock;
 
@@ -53,6 +53,10 @@ pub struct ModelResult {
     pub p50_ms: f64,
     pub p95_ms: f64,
     pub over_timeout: f64,
+    /// A latência é a deste outro modelo: o mesmo grafo e o mesmo tamanho, só
+    /// os pesos mudam (medido em GPU, o modelo herda a medição em CPU dele).
+    #[serde(default)]
+    pub latency_from: Option<String>,
 }
 
 static SNAPSHOT: LazyLock<Option<Snapshot>> =
@@ -77,7 +81,7 @@ pub fn result(model: &str) -> Option<&'static ModelResult> {
 }
 
 impl ModelResult {
-    /// Nota geral em milésimos, na escala do teste público.
+    /// Nota geral em milésimos.
     #[must_use]
     pub fn permille(&self) -> u16 {
         // 0–1 vira 0–1000: cabe com folga num u16.
@@ -101,7 +105,6 @@ impl ModelResult {
             family: spec.map(|spec| spec.family.to_string()),
             description: spec.map(|spec| spec.description.to_string()),
             recommended: spec.is_some_and(|spec| spec.recommended),
-            gpu_recommended: spec.is_some_and(catalog::ModelSpec::gpu_recommended),
             bundled: spec.is_some_and(|spec| spec.bundled),
             overall: self.overall,
             overall_low: self.overall_low,
@@ -121,6 +124,7 @@ impl ModelResult {
             p50_ms: self.p50_ms,
             p95_ms: self.p95_ms,
             over_timeout: self.over_timeout,
+            latency_from: self.latency_from.clone(),
         }
     }
 }

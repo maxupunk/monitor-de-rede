@@ -9,7 +9,6 @@
 //! as heurísticas de sempre.
 
 pub mod action_review;
-pub mod benchmark;
 pub mod catalog;
 pub mod client;
 pub mod config;
