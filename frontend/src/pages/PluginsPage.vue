@@ -2,7 +2,7 @@
   <div>
     <PageHeader
       title="Plugins de dispositivo"
-      subtitle="Drivers que agem nos equipamentos por SSH, HTTP ou Telnet — criados, importados ou gerados pela IA"
+      subtitle="Drivers que agem nos equipamentos por SSH, HTTP ou Telnet. Instale-os na aba Plugins de cada equipamento."
     >
       <template #actions>
         <v-btn color="primary" variant="flat" prepend-icon="mdi-plus" @click="openEditor(null)">
@@ -26,178 +26,87 @@
       </template>
     </PageHeader>
 
-    <v-alert type="info" variant="tonal" class="mb-4" density="comfortable">
-      Plugins são usados na aba <strong>Plugins</strong> de cada dispositivo. Importados entram em
-      quarentena com revisão de segurança; rascunhos pedem aprovação a cada acesso até serem
-      testados e ativados.
-    </v-alert>
     <v-alert v-if="store.error" type="error" variant="tonal" class="mb-4">{{
       store.error
     }}</v-alert>
 
-    <v-card v-if="appsStore.apps.length > 0" elevation="2" class="rounded-lg mb-4">
-      <v-card-title class="d-flex align-center ga-2">
-        <v-icon color="primary">mdi-apps</v-icon>
-        Aplicativos
-      </v-card-title>
-      <v-card-subtitle>
-        Plugins que trabalham com vários equipamentos de uma vez — também no menu Aplicativos.
-      </v-card-subtitle>
-      <v-card-text>
-        <v-row dense>
-          <v-col v-for="app in appsStore.apps" :key="app.id" cols="12" sm="6" lg="4">
-            <v-card border flat class="rounded-lg h-100" :to="'/apps/' + app.id">
-              <v-card-item
-                :prepend-icon="app.icon"
-                :title="app.title"
-                :subtitle="`${app.members} equipamento(s)`"
-              ></v-card-item>
-              <v-card-text v-if="app.description" class="text-body-2">
-                {{ app.description }}
-              </v-card-text>
-            </v-card>
-          </v-col>
-        </v-row>
-      </v-card-text>
+    <v-alert
+      v-if="attention.length > 0"
+      type="warning"
+      variant="tonal"
+      class="mb-4"
+      density="comfortable"
+      icon="mdi-bell-alert-outline"
+    >
+      {{ attentionText }}
+      <template #append>
+        <v-btn color="warning" variant="flat" size="small" @click="filter = 'pending'"> Ver </v-btn>
+      </template>
+    </v-alert>
+
+    <div class="d-flex flex-wrap align-center ga-3 mb-4">
+      <v-chip-group v-model="filter" mandatory column class="flex-grow-1">
+        <v-chip
+          v-for="option in LIBRARY_FILTERS"
+          :key="option.value"
+          :value="option.value"
+          :color="option.color"
+          :base-color="option.color"
+          :prepend-icon="option.icon"
+          :variant="filter === option.value ? 'flat' : 'tonal'"
+          :disabled="option.value !== 'all' && counts[option.value] === 0"
+        >
+          {{ option.label }} · {{ counts[option.value] }}
+        </v-chip>
+      </v-chip-group>
+      <v-text-field
+        v-model="search"
+        prepend-inner-icon="mdi-magnify"
+        placeholder="Buscar plugin"
+        aria-label="Buscar plugin por nome, slug ou descrição"
+        variant="outlined"
+        density="compact"
+        hide-details
+        clearable
+        class="search"
+      ></v-text-field>
+    </div>
+
+    <v-row v-if="store.libraryLoading && store.library.length === 0" dense>
+      <v-col v-for="n in 6" :key="n" cols="12" md="6" xl="4">
+        <v-skeleton-loader type="list-item-avatar-two-line, paragraph, actions" class="rounded-lg">
+        </v-skeleton-loader>
+      </v-col>
+    </v-row>
+
+    <v-card v-else-if="store.library.length === 0" border flat class="rounded-lg text-center pa-8">
+      <v-icon size="48" color="primary">mdi-puzzle-plus-outline</v-icon>
+      <div class="text-h6 mt-2">Nenhum plugin ainda</div>
+      <p class="text-body-2 mb-4">Crie um no editor, peça à IA ou importe um pacote.</p>
+      <v-btn color="primary" variant="flat" prepend-icon="mdi-plus" @click="openEditor(null)">
+        Novo plugin
+      </v-btn>
     </v-card>
 
-    <v-card elevation="2" class="rounded-lg">
-      <v-card-text>
-        <v-text-field
-          v-model="search"
-          prepend-inner-icon="mdi-magnify"
-          label="Buscar por nome ou slug"
-          variant="outlined"
-          density="compact"
-          hide-details
-          class="mb-4"
-        ></v-text-field>
-        <v-data-table
-          :headers="headers"
-          :items="filtered"
-          :loading="store.libraryLoading"
-          item-value="id"
-          density="comfortable"
-          no-data-text="Nenhum plugin"
-        >
-          <template #[`item.name`]="{ item }">
-            <div class="font-weight-bold">{{ item.name }}</div>
-            <div class="text-body-small font-mono">{{ item.slug }} · v{{ item.version }}</div>
-            <div v-if="item.description" class="text-body-2 mt-1" style="max-width: 60ch">
-              {{ item.description }}
-            </div>
-          </template>
-          <template #[`item.status`]="{ item }">
-            <v-chip size="small" :color="statusPresentation(item.status).color" variant="flat">
-              {{ statusPresentation(item.status).label }}
-            </v-chip>
-          </template>
-          <template #[`item.source`]="{ item }">
-            <v-chip size="small" :color="sourcePresentation(item.source).color" variant="tonal">
-              {{ sourcePresentation(item.source).label }}
-            </v-chip>
-            <v-chip
-              v-if="item.deviceId"
-              size="small"
-              color="secondary"
-              variant="tonal"
-              class="ml-1"
-            >
-              Exclusivo
-            </v-chip>
-          </template>
-          <template #[`item.risk`]="{ item }">
-            <v-chip
-              v-if="item.risk"
-              size="small"
-              :color="severityPresentation(item.risk).color"
-              variant="tonal"
-            >
-              {{ severityPresentation(item.risk).label }}
-            </v-chip>
-            <span v-else>—</span>
-          </template>
-          <template #[`item.validatedCount`]="{ item }">
-            <v-chip
-              size="small"
-              :color="item.validatedCount > 0 ? 'success' : 'warning'"
-              variant="tonal"
-            >
-              {{ item.validatedCount }} equipamento(s)
-            </v-chip>
-          </template>
-          <template #[`item.actions`]="{ item }">
-            <div class="d-flex align-center justify-end ga-1">
-              <v-btn
-                v-if="item.status === 'quarantine'"
-                size="small"
-                color="error"
-                variant="flat"
-                @click="openReview(item.id)"
-              >
-                Revisão
-              </v-btn>
-              <v-btn
-                v-if="item.status === 'tested'"
-                size="small"
-                color="success"
-                variant="flat"
-                @click="step(item, 'promote')"
-              >
-                Ativar
-              </v-btn>
-              <v-btn
-                v-if="opensApp(item)"
-                size="small"
-                color="primary"
-                variant="flat"
-                :prepend-icon="item.fleet?.icon ?? 'mdi-apps'"
-                :to="'/apps/' + item.id"
-              >
-                Abrir
-              </v-btn>
-              <v-btn
-                icon="mdi-pencil-outline"
-                size="small"
-                variant="text"
-                color="primary"
-                :aria-label="`Abrir ${item.name}`"
-                @click="openEditor(item.id)"
-              />
-              <v-btn
-                icon="mdi-download-outline"
-                size="small"
-                variant="text"
-                color="secondary"
-                :aria-label="`Exportar ${item.name}`"
-                @click="store.exportPlugin(item)"
-              />
-              <v-btn
-                :icon="
-                  item.status === 'disabled'
-                    ? 'mdi-power-plug-outline'
-                    : 'mdi-power-plug-off-outline'
-                "
-                size="small"
-                variant="text"
-                :color="item.status === 'disabled' ? 'success' : 'warning'"
-                :aria-label="item.status === 'disabled' ? 'Reativar' : 'Desativar'"
-                @click="step(item, item.status === 'disabled' ? 'enable' : 'disable')"
-              />
-              <v-btn
-                v-if="item.source !== 'builtin'"
-                icon="mdi-delete-outline"
-                size="small"
-                variant="text"
-                color="error"
-                :aria-label="`Excluir ${item.name}`"
-                @click="remove(item)"
-              />
-            </div>
-          </template>
-        </v-data-table>
-      </v-card-text>
-    </v-card>
+    <div v-else-if="visible.length === 0" class="text-center pa-6">
+      <div class="text-body-1 font-weight-medium mb-2">Nenhum plugin com esses filtros.</div>
+      <v-btn color="primary" variant="tonal" prepend-icon="mdi-filter-off" @click="resetFilters">
+        Limpar filtros
+      </v-btn>
+    </div>
+
+    <v-row v-else dense>
+      <v-col v-for="item in visible" :key="item.id" cols="12" md="6" xl="4">
+        <PluginLibraryCard
+          :plugin="item"
+          @edit="openEditor($event.id)"
+          @review="openReview($event.id)"
+          @export="store.exportPlugin($event)"
+          @remove="remove"
+          @lifecycle="step"
+        />
+      </v-col>
+    </v-row>
 
     <PluginEditorDialog v-model="editor.open" :plugin-id="editor.pluginId" />
     <PluginReviewDialog
@@ -219,21 +128,24 @@ import type { PluginDetail } from '@/bindings/PluginDetail'
 import type { PluginSummary } from '@/bindings/PluginSummary'
 import PageHeader from '@/components/PageHeader.vue'
 import PluginEditorDialog from '@/components/plugins/PluginEditorDialog.vue'
+import PluginLibraryCard from '@/components/plugins/PluginLibraryCard.vue'
 import PluginReviewDialog from '@/components/plugins/PluginReviewDialog.vue'
 import { confirm } from '@/composables/useConfirm'
 import { usePluginsStore } from '@/stores/plugins'
 import { usePluginAppsStore } from '@/stores/pluginApps'
 import {
+  filterLibrary,
+  LIBRARY_FILTERS,
+  libraryCounts,
   readPackageFile,
-  severityPresentation,
-  sourcePresentation,
-  statusPresentation,
+  type LibraryFilter,
 } from '@/utils/pluginPresentation'
 
 const store = usePluginsStore()
 const appsStore = usePluginAppsStore()
 const fileInput = ref<HTMLInputElement | null>(null)
-const search = ref('')
+const search = ref<string | null>('')
+const filter = ref<LibraryFilter>('all')
 const feedback = reactive({ show: false, text: '', color: 'success' })
 const editor = reactive({ open: false, pluginId: null as number | null })
 const review = reactive({
@@ -242,26 +154,29 @@ const review = reactive({
   busy: null as 'review' | 'accept' | null,
 })
 
-const headers = [
-  { title: 'Plugin', key: 'name' },
-  { title: 'Status', key: 'status' },
-  { title: 'Origem', key: 'source' },
-  { title: 'Risco', key: 'risk' },
-  { title: 'Validado em', key: 'validatedCount' },
-  { title: '', key: 'actions', sortable: false, align: 'end' as const },
-]
+const counts = computed(() => libraryCounts(store.library))
+const visible = computed(() => filterLibrary(store.library, filter.value, search.value ?? ''))
 
-const filtered = computed(() => {
-  const term = search.value.trim().toLowerCase()
-  if (!term) return store.library
-  return store.library.filter(
-    (item) => item.name.toLowerCase().includes(term) || item.slug.includes(term)
-  )
+/** O que espera o operador: revisão de importados e ativação de testados. */
+const attention = computed(() =>
+  store.library.filter((item) => item.status === 'quarantine' || item.status === 'tested')
+)
+const attentionText = computed(() => {
+  const toReview = attention.value.filter((item) => item.status === 'quarantine').length
+  const toActivate = attention.value.length - toReview
+  const parts = []
+  if (toReview) parts.push(`${toReview} aguardando revisão de segurança`)
+  if (toActivate) parts.push(`${toActivate} pronto(s) para ativar`)
+  return `Plugins esperando você: ${parts.join(' e ')}.`
 })
+
+function resetFilters() {
+  filter.value = 'all'
+  search.value = ''
+}
 
 onMounted(() => {
   void store.fetchLibrary()
-  void appsStore.fetchApps()
 })
 
 function notify(text: string, color = 'success') {
@@ -277,13 +192,6 @@ function describe(err: unknown, fallback: string): string {
 function openEditor(pluginId: number | null) {
   editor.pluginId = pluginId
   editor.open = true
-}
-
-/** Plugin de frota ligado tem a página dele em Aplicativos. */
-function opensApp(item: PluginSummary): boolean {
-  return (
-    item.surfaces.includes('fleet') && item.status !== 'disabled' && item.status !== 'quarantine'
-  )
 }
 
 async function step(item: PluginSummary, action: 'promote' | 'enable' | 'disable') {
@@ -359,3 +267,10 @@ async function importFile(event: Event) {
   }
 }
 </script>
+
+<style scoped>
+.search {
+  flex: 1 1 240px;
+  max-width: 360px;
+}
+</style>

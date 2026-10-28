@@ -2,8 +2,13 @@ import { describe, expect, it } from 'vitest'
 import type { DevicePluginItem } from '@/bindings/DevicePluginItem'
 import type { DevicePluginsView } from '@/bindings/DevicePluginsView'
 import type { Surface } from '@/bindings/Surface'
+import type { PluginSummary } from '@/bindings/PluginSummary'
 import {
   devicePrefillFor,
+  filterLibrary,
+  libraryCounts,
+  nextStepOf,
+  opensApp,
   followUpOf,
   formatOutputValue,
   installedPluginTabs,
@@ -176,5 +181,45 @@ describe('ordem das chaves na tela', () => {
       'decision',
     ])
     expect(orderedKeys(keys, undefined)).toEqual(keys)
+  })
+})
+
+describe('biblioteca de plugins', () => {
+  function summary(id: number, status: string, name: string, extra: Partial<PluginSummary> = {}) {
+    return { ...item(id, false).plugin, status, name, ...extra }
+  }
+
+  const library = [
+    summary(1, 'active', 'Wi-Fi OpenWrt', { description: 'Redes sem fio' }),
+    summary(2, 'disabled', 'Status Linux'),
+    summary(3, 'tested', 'Pacotes'),
+    summary(4, 'quarantine', 'Importado'),
+    summary(5, 'draft', 'Rascunho'),
+    summary(6, 'active', 'Info HTTP'),
+  ]
+
+  it('põe primeiro o que pede ação do operador', () => {
+    expect(filterLibrary(library, 'all', '').map((p) => p.id)).toEqual([4, 3, 5, 6, 1, 2])
+  })
+
+  it('filtra pelo estado e busca também na descrição', () => {
+    expect(filterLibrary(library, 'pending', '').map((p) => p.id)).toEqual([4, 3, 5])
+    expect(filterLibrary(library, 'active', 'sem fio').map((p) => p.id)).toEqual([1])
+    expect(filterLibrary(library, 'disabled', 'wi-fi')).toEqual([])
+  })
+
+  it('conta os plugins de cada filtro', () => {
+    expect(libraryCounts(library)).toEqual({ all: 6, pending: 3, active: 2, disabled: 1 })
+  })
+
+  it('diz o próximo passo só de quem ainda não está em uso', () => {
+    expect(nextStepOf('active')).toBeNull()
+    expect(nextStepOf('quarantine')).toContain('revise')
+  })
+
+  it('abre o aplicativo só de plugin de frota ligado', () => {
+    expect(opensApp(summary(7, 'active', 'Frota', { surfaces: ['fleet'] }))).toBe(true)
+    expect(opensApp(summary(8, 'quarantine', 'Frota', { surfaces: ['fleet'] }))).toBe(false)
+    expect(opensApp(summary(9, 'active', 'Aba'))).toBe(false)
   })
 })

@@ -8,6 +8,7 @@ import type { DevicePluginItem } from '@/bindings/DevicePluginItem'
 import type { DevicePluginsView } from '@/bindings/DevicePluginsView'
 import type { Effect } from '@/bindings/Effect'
 import type { PluginPackage } from '@/bindings/PluginPackage'
+import type { PluginSummary } from '@/bindings/PluginSummary'
 import type { Severity } from '@/bindings/Severity'
 import type { MatchRule } from '@/bindings/MatchRule'
 import type { Device } from '@/stores/devices'
@@ -94,6 +95,91 @@ export const severityPresentation = (value: Severity): Presentation => SEVERITY[
 export const runStatusPresentation = (value: string): Presentation =>
   RUN_STATUS[value] ?? { ...FALLBACK, label: value }
 export const originLabel = (value: string): string => ORIGIN[value] ?? value
+
+/** Filtros da biblioteca: o estado em que o plugin está na vida dele. */
+export type LibraryFilter = 'all' | 'pending' | 'active' | 'disabled'
+
+/** Ordem na biblioteca: o que pede uma ação do operador vem antes. */
+const STATUS_RANK: Record<string, number> = {
+  quarantine: 0,
+  tested: 1,
+  draft: 2,
+  active: 3,
+  disabled: 4,
+}
+
+export const LIBRARY_FILTERS: {
+  value: LibraryFilter
+  label: string
+  color: string
+  icon: string
+}[] = [
+  { value: 'all', label: 'Todos', color: 'primary', icon: 'mdi-puzzle-outline' },
+  { value: 'pending', label: 'Em preparo', color: 'warning', icon: 'mdi-progress-wrench' },
+  { value: 'active', label: 'Ativos', color: 'success', icon: 'mdi-power-plug' },
+  { value: 'disabled', label: 'Desativados', color: 'secondary', icon: 'mdi-power-plug-off' },
+]
+
+/** Em que filtro o plugin cai (fora de "Todos"). */
+export function libraryFilterOf(status: string): Exclude<LibraryFilter, 'all'> {
+  if (status === 'active') return 'active'
+  if (status === 'disabled') return 'disabled'
+  return 'pending'
+}
+
+/** Plugins do filtro e da busca (nome, slug ou descrição), na ordem da biblioteca. */
+export function filterLibrary(
+  plugins: PluginSummary[],
+  filter: LibraryFilter,
+  search: string
+): PluginSummary[] {
+  const term = search.trim().toLowerCase()
+  return plugins
+    .filter((plugin) => filter === 'all' || libraryFilterOf(plugin.status) === filter)
+    .filter(
+      (plugin) =>
+        !term ||
+        plugin.name.toLowerCase().includes(term) ||
+        plugin.slug.toLowerCase().includes(term) ||
+        (plugin.description ?? '').toLowerCase().includes(term)
+    )
+    .sort(
+      (a, b) =>
+        (STATUS_RANK[a.status] ?? 5) - (STATUS_RANK[b.status] ?? 5) ||
+        a.name.localeCompare(b.name, 'pt-BR')
+    )
+}
+
+/** Quantos plugins há em cada filtro. */
+export function libraryCounts(plugins: PluginSummary[]): Record<LibraryFilter, number> {
+  const counts: Record<LibraryFilter, number> = {
+    all: plugins.length,
+    pending: 0,
+    active: 0,
+    disabled: 0,
+  }
+  for (const plugin of plugins) counts[libraryFilterOf(plugin.status)] += 1
+  return counts
+}
+
+/** Ícone do plugin: o do aplicativo ou o da tela própria. */
+export const pluginIcon = (plugin: PluginSummary): string =>
+  plugin.fleet?.icon ?? plugin.list?.icon ?? 'mdi-puzzle-outline'
+
+/** Plugin de frota ligado tem a página dele em Aplicativos. */
+export const opensApp = (plugin: PluginSummary): boolean =>
+  plugin.surfaces.includes('fleet') &&
+  plugin.status !== 'disabled' &&
+  plugin.status !== 'quarantine'
+
+/** O que falta para o plugin entrar em uso, em uma frase (nada quando já está). */
+const NEXT_STEP: Record<string, string> = {
+  quarantine: 'Importado: revise a segurança antes de instalar.',
+  draft: 'Rascunho: rode os testes no editor para poder ativar.',
+  tested: 'Passou nos testes: pronto para ativar.',
+}
+
+export const nextStepOf = (status: string): string | null => NEXT_STEP[status] ?? null
 
 /** Ponto de partida do editor: o mínimo que passa na validação. */
 export function packageTemplate(): PluginPackage {
