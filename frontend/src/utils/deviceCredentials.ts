@@ -36,10 +36,7 @@ export function credentialSecretLabel(credential: CredentialView): string {
       ? 'acesso dedicado por chave'
       : 'chave do acesso dedicado perdida'
   }
-  if (credential.storage === 'vault') {
-    return credential.hasStoredSecret ? 'senha guardada cifrada' : 'sem senha guardada'
-  }
-  return credential.sessionActive ? 'senha da sessão informada' : 'senha pedida a cada sessão'
+  return credential.sessionActive ? 'senha informada (vale 30 min)' : 'senha pedida quando precisar'
 }
 
 export function credentialSubtitle(credential: CredentialView): string {

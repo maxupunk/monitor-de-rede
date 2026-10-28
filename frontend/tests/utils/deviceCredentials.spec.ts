@@ -19,12 +19,12 @@ function credential(overrides: Partial<CredentialView>): CredentialView {
   return {
     kind: 'ssh',
     username: 'admin',
-    storage: 'vault',
+    storage: 'ask',
     port: 22,
     https: false,
     viaProbeId: null,
-    hasStoredSecret: true,
-    sessionActive: false,
+    hasStoredSecret: false,
+    sessionActive: true,
     ...overrides,
   }
 }
@@ -36,17 +36,17 @@ describe('credenciais do equipamento', () => {
     expect(credentialKindFor('mactelnet')).toBe('telnet')
   })
 
-  it('pronta é a guardada com senha ou a de sessão já informada', () => {
+  it('pronta é a de senha já informada na janela (nenhuma senha fica guardada)', () => {
     expect(credentialReady(credential({}))).toBe(true)
-    expect(credentialReady(credential({ hasStoredSecret: false }))).toBe(false)
-    expect(credentialReady(credential({ storage: 'ask', hasStoredSecret: false }))).toBe(false)
-    expect(credentialReady(credential({ storage: 'ask', sessionActive: true }))).toBe(true)
+    expect(credentialReady(credential({ sessionActive: false }))).toBe(false)
   })
 
   it('o acesso dedicado vale pela chave guardada, sem sessão', () => {
     const dedicated = credential({
       storage: 'key',
       username: 'netmonitor',
+      hasStoredSecret: true,
+      sessionActive: false,
       dedicated: {
         platform: 'mikrotik',
         publicKey: 'ssh-ed25519 AAAA netmonitor-0a1b',
@@ -73,14 +73,14 @@ describe('credenciais do equipamento', () => {
 
   it('o subtítulo diz porta, senha e por onde sai', () => {
     expect(credentialSubtitle(credential({ viaProbeId: 3 }))).toBe(
-      'porta 22 · senha guardada cifrada · via agente #3'
+      'porta 22 · senha informada (vale 30 min) · via agente #3'
     )
   })
 
   it('prefere a do próprio tipo, e uma pronta vence uma que pede senha', () => {
     const ssh = credential({ kind: 'ssh' })
     const telnet = credential({ kind: 'telnet', port: 23 })
-    const telnetPendente = credential({ kind: 'telnet', storage: 'ask', hasStoredSecret: false })
+    const telnetPendente = credential({ kind: 'telnet', sessionActive: false })
 
     expect(pickShellCredential([telnet, ssh], 'ssh')).toBe(ssh)
     expect(pickShellCredential([ssh, telnet], 'telnet')).toBe(telnet)
@@ -96,7 +96,7 @@ describe('credenciais do equipamento', () => {
     expect(accessReady([], 'http')).toBe(true)
     expect(accessReady([], 'ssh')).toBe(false)
     expect(accessReady([credential({})], 'ssh')).toBe(true)
-    expect(accessReady([credential({ hasStoredSecret: false })], 'ssh')).toBe(false)
+    expect(accessReady([credential({ sessionActive: false })], 'ssh')).toBe(false)
     expect(accessReady([credential({ kind: 'telnet' })], 'ssh')).toBe(false)
     expect(accessTitle('http')).toBe('Acesso HTTP (interface web)')
     expect(accessNeededReason('AP-terraço', 'ssh')).toBe(

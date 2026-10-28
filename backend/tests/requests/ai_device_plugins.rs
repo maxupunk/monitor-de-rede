@@ -97,7 +97,7 @@ async fn cenario(ctx: &AppContext) -> (devices::Model, i64) {
         &ctx.db,
         device.id,
         serde_json::from_value(json!({
-            "kind": "http", "username": "admin", "secret": "s3nh4", "storage": "vault", "port": port
+            "kind": "http", "username": "admin", "secret": "s3nh4", "storage": "ask", "port": port
         }))
         .unwrap(),
     )

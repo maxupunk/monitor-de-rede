@@ -514,7 +514,7 @@ pub async fn revoke_on<C: ConnectionTrait>(
             )
             .await;
     }
-    credentials::delete(db, device_id, TransportKind::Ssh).await?;
+    credentials::forget(db, device_id, TransportKind::Ssh).await?;
     Ok(RevokeOutcome { leftovers })
 }
 

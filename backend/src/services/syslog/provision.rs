@@ -11,9 +11,10 @@
 //! Este módulo recebe usuário e senha prontos e não guarda nada. De onde eles
 //! vêm é de [`super::login`]: digitados na hora (usados uma vez) ou a
 //! credencial salva do equipamento — a mesma da aba "Plugins › Credenciais".
-//! Guardar a senha de administrador de trinta roteadores torna o sistema um
-//! alvo valioso, então isso nunca é implícito: só acontece quando o operador
-//! marca "salvar", e a senha vai cifrada para o mesmo cofre dos plugins.
+//! Guardar a senha de administrador de trinta roteadores tornaria o sistema um
+//! alvo valioso, então ela nunca vai ao banco: "salvar" lembra o usuário e
+//! deixa a senha 30 minutos em memória; o que fica de fato é o acesso dedicado
+//! por chave (ADR 016).
 //!
 //! # Por que um shell interativo, e não `exec`
 //!

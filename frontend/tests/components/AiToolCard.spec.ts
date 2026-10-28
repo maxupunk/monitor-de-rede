@@ -22,12 +22,12 @@ function saved(): CredentialView {
   return {
     kind: 'ssh',
     username: 'root',
-    storage: 'vault',
+    storage: 'ask',
     port: 22,
     https: false,
     viaProbeId: null,
-    hasStoredSecret: true,
-    sessionActive: false,
+    hasStoredSecret: false,
+    sessionActive: true,
   }
 }
 

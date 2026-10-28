@@ -7,7 +7,7 @@
       label="Tipo de acesso"
       variant="outlined"
       density="comfortable"
-      class="mb-3"
+      class="mt-2 mb-3"
     ></v-select>
     <v-row dense>
       <v-col cols="12" sm="7">
@@ -35,8 +35,14 @@
       </v-col>
     </v-row>
 
-    <v-radio-group v-model="storage" color="primary" class="mt-1 mb-1" hide-details>
-      <v-radio v-if="kind === 'ssh'" value="key" class="mb-2">
+    <v-radio-group
+      v-if="kind === 'ssh'"
+      v-model="storage"
+      color="primary"
+      class="mt-1 mb-1"
+      hide-details
+    >
+      <v-radio value="key" class="mb-2">
         <template #label>
           <div>
             <div class="font-weight-medium d-flex align-center flex-wrap ga-2">
@@ -52,27 +58,16 @@
           </div>
         </template>
       </v-radio>
-      <v-radio value="vault">
+      <v-radio value="ask">
         <template #label>
           <div>
-            <div class="font-weight-medium">Guardar cifrada</div>
-            <div class="text-body-small">
-              Cifrada com a chave do servidor. Nunca volta para a tela nem para a IA.
-            </div>
-          </div>
-        </template>
-      </v-radio>
-      <v-radio value="ask" class="mt-2">
-        <template #label>
-          <div>
-            <div class="font-weight-medium">Pedir a cada sessão</div>
-            <div class="text-body-small">
-              Nada é gravado; a senha vale por 30 minutos depois de informada.
-            </div>
+            <div class="font-weight-medium">Pedir a senha quando precisar</div>
+            <div class="text-body-small">{{ ASK_DESCRIPTION }}</div>
           </div>
         </template>
       </v-radio>
     </v-radio-group>
+    <p v-else class="text-body-2 mt-1 mb-1">{{ ASK_DESCRIPTION }}</p>
 
     <v-select
       v-if="dedicated"
@@ -122,6 +117,7 @@
       persistent-hint
       variant="outlined"
       density="comfortable"
+      class="mt-2"
     ></v-select>
   </v-form>
 </template>
@@ -179,7 +175,7 @@ const form = ref<{ validate: () => Promise<{ valid: boolean }> } | null>(null)
 const username = ref('')
 const secret = ref('')
 const showSecret = ref(false)
-const storage = ref<SecretStorage>('vault')
+const storage = ref<SecretStorage>('ask')
 const port = ref<number | ''>('')
 const https = ref(false)
 const viaProbeId = ref<number | null>(null)
@@ -194,21 +190,21 @@ const defaultPort = computed(() => {
   return kind.value === 'telnet' ? 23 : 22
 })
 
+const ASK_DESCRIPTION =
+  'A senha não é gravada: é pedida nesta janela quando faz falta e vale 30 minutos.'
+
 const secretHint = computed(() => {
   if (dedicated.value) return 'Usada só para criar o acesso; não fica guardada em lugar nenhum.'
-  if (storage.value === 'ask') return 'Opcional agora: se informada, já abre a sessão.'
-  if (existing.value?.hasStoredSecret) return 'Deixe vazio para manter a senha guardada.'
-  return kind.value === 'http'
-    ? 'Página sem login? Deixe vazio.'
-    : 'Obrigatória para guardar cifrada.'
+  if (kind.value === 'http') return 'Página sem login? Deixe vazio.'
+  if (existing.value?.sessionActive) return 'Já informada; vazio mantém a sessão atual.'
+  return 'Libera o acesso por 30 minutos.'
 })
 
-/** SSH/Telnet guardados sem senha não entram no equipamento — é o que faltava. */
+/** SSH/Telnet sem senha não entram no equipamento — é o que se veio pedir. */
 function secretRule(value: string): boolean | string {
   if (dedicated.value) return Boolean(value) || 'Informe a senha do administrador'
-  if (storage.value !== 'vault' || kind.value === 'http') return true
-  if (existing.value?.hasStoredSecret || value) return true
-  return 'Informe a senha para guardar cifrada'
+  if (kind.value === 'http' || existing.value?.sessionActive || value) return true
+  return 'Informe a senha para liberar o acesso'
 }
 
 const routes = computed(() =>
@@ -222,7 +218,7 @@ function fill() {
   platform.value = suggested ?? null
   username.value =
     current?.username ?? (suggested === 'mikrotik' ? 'admin' : kind.value === 'ssh' ? 'root' : '')
-  storage.value = current?.storage ?? (suggested ? 'key' : 'vault')
+  storage.value = current?.storage ?? (suggested ? 'key' : 'ask')
   port.value = current?.port ?? ''
   https.value = current?.https ?? false
   viaProbeId.value = current?.viaProbeId ?? null
@@ -232,9 +228,9 @@ function fill() {
 
 watch([kind, () => props.credentials], fill, { immediate: true })
 
-/** O acesso dedicado só existe no SSH: trocar de tipo volta para a senha guardada. */
+/** O acesso dedicado só existe no SSH: trocar de tipo volta para a senha da janela. */
 watch(kind, (value) => {
-  if (value !== 'ssh' && storage.value === 'key') storage.value = 'vault'
+  if (value !== 'ssh' && storage.value === 'key') storage.value = 'ask'
 })
 
 /** Confere e monta o pedido; `null` quando há campo a corrigir. */

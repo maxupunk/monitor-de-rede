@@ -274,7 +274,8 @@ pub struct BindSourceInput {
 /// O login vem de um de dois lugares: `savedCredential` usa a credencial salva
 /// do equipamento (a da aba "Plugins › Credenciais"); sem ele, valem
 /// `username` e `password`, usados só nesta requisição — a menos que
-/// `saveCredential` peça para guardá-los, cifrados, depois que funcionarem.
+/// `saveCredential` peça para lembrá-los depois que funcionarem: o usuário vai ao
+/// cadastro e a senha fica 30 minutos em memória, nunca no banco.
 /// Ver [`crate::services::syslog::login`]. O DTO fica sem `Debug` derivado de
 /// propósito: um `tracing` distraído despejaria a senha no log.
 #[derive(Clone, Deserialize)]

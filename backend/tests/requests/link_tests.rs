@@ -419,7 +419,7 @@ async fn plano_traz_os_passos_que_faltam_e_eles_se_resolvem_pela_api() {
             .assert_status_ok();
         request
             .put(&format!("/api/devices/{}/credentials", ap.id))
-            .json(&json!({ "kind": "ssh", "username": "root", "secret": "x", "storage": "vault" }))
+            .json(&json!({ "kind": "ssh", "username": "root", "secret": "x", "storage": "ask" }))
             .await
             .assert_status_ok();
         let plano = json_of(

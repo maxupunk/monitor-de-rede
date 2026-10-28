@@ -300,14 +300,6 @@ export const usePluginsStore = defineStore('plugins', () => {
     if (view) view.credentials = view.credentials.filter((item) => item.kind !== kind)
   }
 
-  async function openSession(deviceId: number, kind: TransportKind, secret: string) {
-    const saved = await apiService.post<CredentialView>(
-      `/devices/${deviceId}/credentials/${kind}/session`,
-      { secret }
-    )
-    replaceCredential(deviceId, saved)
-  }
-
   /**
    * Cria o acesso dedicado por chave (ADR 016): a senha do administrador vai
    * só nesta chamada e não é guardada.
@@ -613,7 +605,6 @@ export const usePluginsStore = defineStore('plugins', () => {
     replaceCredential,
     saveCredential,
     deleteCredential,
-    openSession,
     provisionDedicated,
     rotateDedicated,
     revokeDedicated,

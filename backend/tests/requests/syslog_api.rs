@@ -936,7 +936,7 @@ async fn a_ativacao_usa_a_credencial_salva_do_equipamento() {
         let guardada = request
             .put(&credenciais)
             .json(&serde_json::json!({
-                "kind": "telnet", "username": "admin", "secret": "x", "storage": "vault"
+                "kind": "telnet", "username": "admin", "secret": "x", "storage": "ask"
             }))
             .await;
         assert_eq!(guardada.status_code(), 200, "{}", guardada.text());

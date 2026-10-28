@@ -116,12 +116,12 @@ describe('aplicativo de frota: o acesso que falta, pedido ali mesmo', () => {
     settleAccess({
       kind: 'telnet',
       username: 'admin',
-      storage: 'vault',
+      storage: 'ask',
       port: 23,
       https: false,
       viaProbeId: null,
-      hasStoredSecret: true,
-      sessionActive: false,
+      hasStoredSecret: false,
+      sessionActive: true,
     })
     await expect(asked).resolves.toBe(true)
     expect(get).toHaveBeenCalledWith('/plugins/3/fleet')
@@ -179,12 +179,12 @@ function sshSaved(): CredentialView {
   return {
     kind: 'ssh',
     username: 'root',
-    storage: 'vault',
+    storage: 'ask',
     port: 22,
     https: false,
     viaProbeId: null,
-    hasStoredSecret: true,
-    sessionActive: false,
+    hasStoredSecret: false,
+    sessionActive: true,
   }
 }
 

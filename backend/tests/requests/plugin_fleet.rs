@@ -125,7 +125,7 @@ async fn two_aps(
         request
             .put(&format!("/api/devices/{}/credentials", ap.id))
             .json(
-                &json!({ "kind": "http", "username": "admin", "storage": "vault",
+                &json!({ "kind": "http", "username": "admin", "storage": "ask",
                            "secret": "s3nh4", "port": porta }),
             )
             .await

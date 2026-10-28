@@ -1051,7 +1051,7 @@ fn ssh(secret: &str) -> CredentialInput {
         kind: TransportKind::Ssh,
         username: "root".into(),
         secret: Some(secret.into()),
-        storage: SecretStorage::Vault,
+        storage: SecretStorage::Ask,
         port: None,
         https: None,
         via_probe_id: None,

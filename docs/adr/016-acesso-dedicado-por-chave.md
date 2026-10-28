@@ -79,7 +79,18 @@ cada sessão (`ask`, só em memória por 30 min). Os dois tinham custo:
    campos em silêncio, por isso **`PROTOCOL_VERSION` sobe para 5**.
 8. **Rotas**: `POST /api/devices/{id}/access/dedicated` (cria),
    `POST …/dedicated/rotate` e `DELETE …/dedicated` (`{ localOnly }`). Todas são
-   auditadas como `Execute` no equipamento.
+   auditadas como `Execute` no equipamento. O `DELETE` genérico de credencial
+   recusa a do acesso dedicado: apagá-la só aqui deixaria a chave esquecida no
+   equipamento.
+9. **Nenhuma senha de equipamento no banco** (SSH, Telnet e HTTP). O modo
+   `vault` deixou de existir; a migração `m20261028_000001` apagou as senhas
+   cifradas e passou essas credenciais para `ask`. Sobram dois modos: `key` (o
+   acesso dedicado) e `ask`, em que o banco guarda usuário, porta e agente e a
+   senha é pedida **numa janela só** — o `DeviceAccessDialog`, aberto de
+   qualquer tela por `useDeviceAccess` quando a API responde
+   `missing_credential` — e fica 30 minutos em memória. O "salvar" da
+   ativação do syslog passou a lembrar o login por esses 30 minutos. HTTP sem a
+   senha da sessão segue sem senha (a página pode ser pública).
 
 ## Consequências
 
@@ -89,6 +100,14 @@ cada sessão (`ask`, só em memória por 30 min). Os dois tinham custo:
   sobreviver à troca dela e poder revogar, não reduzir privilégio.
 - RouterOS anterior à 7.12 e OpenWrt com OpenSSH no lugar do Dropbear recebem
   uma mensagem clara e continuam com a senha.
-- Telnet continua por senha: não existe chave no Telnet.
+- Telnet continua por senha: não existe chave no Telnet — pedida na janela.
+- O que roda sozinho (agendador, lote de frota, teste de enlace agendado) só
+  alcança equipamento com acesso dedicado: a senha da janela vale para a API,
+  nunca para o agendador.
+- Validado contra RouterOS CHR 7.23.8 e OpenWrt 24.10.4 reais (Docker): criar,
+  usar, rotacionar e revogar; no RouterOS o `netmonitor` recebe só as políticas
+  listadas, o SSH recusa senha para ele, e o plugin `mikrotik-routeros` roda
+  inteiro com ele (inclusive o usuário temporário do teste de enlace). O teste
+  `acesso_dedicado_em_equipamento_real` (ignorado por padrão) repete isso.
 - A senha descartável do usuário `netmonitor` passa pelo canal SSH já
   autenticado e não fica em lugar nenhum.

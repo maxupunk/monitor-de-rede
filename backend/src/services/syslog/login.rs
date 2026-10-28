@@ -3,9 +3,9 @@
 //! A credencial do equipamento mora num lugar só — a aba "Plugins ›
 //! Credenciais" ([`crate::services::plugins::credentials`]). A ativação do
 //! syslog não tem um cofre próprio: ou usa a credencial salva ali, ou usa a
-//! digitada, que só é gravada lá quando o operador pede **e** ela funcionou.
-//! Guardar uma senha que o equipamento recusou só adiaria o erro para o próximo
-//! plugin.
+//! digitada, que só é lembrada lá (usuário no cadastro, senha 30 minutos em
+//! memória) quando o operador pede **e** ela funcionou. Lembrar uma senha que
+//! o equipamento recusou só adiaria o erro para o próximo plugin.
 
 use sea_orm::ConnectionTrait;
 
@@ -61,7 +61,7 @@ pub async fn resolve<C: ConnectionTrait>(
     Ok(login)
 }
 
-/// Grava o login que acabou de funcionar como a credencial do equipamento.
+/// Lembra o login que acabou de funcionar como a credencial do equipamento.
 ///
 /// A porta só é gravada quando é de fato a do tipo: a do MAC-Telnet (20561) não
 /// é a porta Telnet do equipamento, e gravá-la quebraria os plugins por Telnet.

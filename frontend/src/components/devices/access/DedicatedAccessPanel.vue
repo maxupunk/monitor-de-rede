@@ -6,7 +6,7 @@
           <v-icon>mdi-key-chain</v-icon>
         </v-avatar>
       </template>
-      <v-card-title class="text-subtitle-1 font-weight-bold">
+      <v-card-title class="text-subtitle-1 font-weight-bold text-wrap">
         Acesso dedicado do NetMonitor
       </v-card-title>
       <v-card-subtitle class="subtitle">

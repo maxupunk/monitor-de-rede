@@ -76,7 +76,7 @@
 <script setup lang="ts">
 import type { CredentialView } from '@/bindings/CredentialView'
 import { usePluginsStore } from '@/stores/plugins'
-import { confirm, prompt } from '@/composables/useConfirm'
+import { confirm } from '@/composables/useConfirm'
 import { requestAccess } from '@/composables/useDeviceAccess'
 import { credentialReady, credentialSubtitle, isDedicated } from '@/utils/deviceCredentials'
 
@@ -119,19 +119,9 @@ async function removeCredential(credential: CredentialView) {
   }
 }
 
+/** A senha é pedida na mesma janela do acesso, como em qualquer outra tela. */
 async function openSession(credential: CredentialView) {
-  const secret = await prompt({
-    title: `Senha ${credential.kind.toUpperCase()}`,
-    message: `Senha de ${credential.username} para esta sessão (vale 30 minutos; não é gravada).`,
-    inputLabel: 'Senha',
-    inputType: 'password',
-    confirmText: 'Usar nesta sessão',
-  })
-  if (!secret) return
-  try {
-    await store.openSession(props.deviceId, credential.kind, secret)
-  } catch (err: unknown) {
-    emit('notify', describe(err, 'Falha ao registrar a senha'), 'error')
-  }
+  const saved = await requestAccess({ deviceId: props.deviceId, transport: credential.kind })
+  if (saved) emit('notify', 'Acesso liberado por 30 minutos.', 'success')
 }
 </script>

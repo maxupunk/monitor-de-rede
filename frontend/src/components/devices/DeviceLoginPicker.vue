@@ -68,13 +68,13 @@
         density="compact"
         :disabled="disabled"
         hide-details
-        label="Salvar para os próximos acessos"
+        label="Lembrar por 30 minutos"
       ></v-checkbox>
       <div class="text-body-2 save-hint">
         {{
           save
-            ? 'Fica cifrada nas credenciais do dispositivo e serve também aos plugins. Só é salva se o acesso funcionar.'
-            : 'Sem salvar, o login vale só para esta ativação.'
+            ? 'O usuário fica nas credenciais do dispositivo e a senha vale 30 minutos também para os plugins — nunca é gravada. Só vale se o acesso funcionar.'
+            : 'Sem lembrar, o login vale só para esta ativação.'
         }}
       </div>
     </template>

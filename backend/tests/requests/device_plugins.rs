@@ -242,7 +242,7 @@ async fn segredo_revelado_so_para_quem_pediu_e_sem_rastro() {
             .put(&format!("/api/devices/{}/credentials", device.id))
             .json(
                 &json!({ "kind": "http", "username": "admin", "secret": "senha-do-roteador",
-                           "storage": "vault", "port": port }),
+                           "storage": "ask", "port": port }),
             )
             .await
             .assert_status_success();
@@ -347,7 +347,7 @@ async fn acao_roda_no_equipamento_e_a_senha_nao_volta() {
             .put(&format!("/api/devices/{}/credentials", device.id))
             .json(
                 &json!({ "kind": "http", "username": "admin", "secret": "s3nh4-secreta",
-                           "storage": "vault", "port": port }),
+                           "storage": "ask", "port": port }),
             )
             .await;
         credencial.assert_status_success();
@@ -358,7 +358,9 @@ async fn acao_roda_no_equipamento_e_a_senha_nao_volta() {
             .await;
         assert!(!aba.text().contains("s3nh4-secreta"));
         let aba = json_of(&aba.text());
-        assert_eq!(aba["credentials"][0]["hasStoredSecret"], true);
+        // A senha não vai ao banco: abre a sessão em memória.
+        assert_eq!(aba["credentials"][0]["hasStoredSecret"], false);
+        assert_eq!(aba["credentials"][0]["sessionActive"], true);
         let plugin = aba["plugins"]
             .as_array()
             .unwrap()
@@ -646,7 +648,7 @@ async fn topologia_mostra_acoes_do_no_e_servico_executa_com_andamento() {
             .put(&format!("/api/devices/{}/credentials", device.id))
             .json(
                 &json!({ "kind": "http", "username": "admin", "secret": "s3nh4",
-                           "storage": "vault", "port": port }),
+                           "storage": "ask", "port": port }),
             )
             .await
             .assert_status_success();

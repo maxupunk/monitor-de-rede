@@ -1,20 +1,21 @@
-//! Credenciais de acesso ao equipamento, com a escolha de guardar ou não.
+//! Credenciais de acesso ao equipamento — sem senha no banco.
 //!
 //! É o lugar único das credenciais do equipamento: plugins rodam de novo,
 //! validam em outro dia, são testados pela IA, e a ativação do syslog
-//! ([`crate::services::syslog::login`]) usa a mesma credencial — ou grava aqui
-//! a que o operador digitou, quando ele pede para salvar. Por isso a escolha é
-//! por credencial:
+//! ([`crate::services::syslog::login`]) usa a mesma credencial. Senha de
+//! equipamento **nunca** é gravada (ADR 016); há dois modos:
 //!
-//! * `vault` — a senha é cifrada (`crypto::encrypt`, `ENCRYPTION_KEY`) e
-//!   gravada. Nunca volta para a tela, nem para a IA, nem para o script: é
-//!   decifrada só no instante de montar a conexão.
-//! * `ask` — nada vai ao banco. A senha é informada por sessão e fica em
-//!   memória ([`session_store`]) até expirar.
+//! * `ask` — o banco guarda usuário, porta e agente. A senha é pedida na
+//!   janela do acesso, quando faz falta, e fica em memória
+//!   ([`session_store`]) por 30 minutos.
 //! * `key` — o acesso dedicado (ADR 016): a senha do administrador foi usada
 //!   uma vez para instalar no equipamento uma chave exclusiva do NetMonitor, e
 //!   só a chave privada, cifrada, é guardada. Nasce só por
 //!   [`super::dedicated_access`]; o formulário comum não a cria nem a troca.
+//!
+//! Sem senha guardada, o que roda sozinho (agendador, lote de frota) só
+//! alcança equipamento com acesso dedicado: a senha da janela vale para a API,
+//! nunca para o agendador.
 //!
 //! Por dispositivo há no máximo uma credencial de cada tipo (SSH, HTTP,
 //! Telnet), com a porta e, opcionalmente, o agente remoto por onde o acesso
@@ -53,9 +54,7 @@ pub const SESSION_TTL: Duration = Duration::from_secs(30 * 60);
 #[serde(rename_all = "snake_case")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub enum SecretStorage {
-    /// Cifrada no banco.
-    Vault,
-    /// Pedida a cada sessão, só em memória.
+    /// Pedida na janela do acesso, só em memória.
     Ask,
     /// Chave do acesso dedicado, cifrada no banco (ADR 016).
     Key,
@@ -65,17 +64,16 @@ impl SecretStorage {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::Vault => "vault",
             Self::Ask => "ask",
             Self::Key => "key",
         }
     }
 
     fn parse(value: &str) -> Self {
-        match value {
-            "vault" => Self::Vault,
-            "key" => Self::Key,
-            _ => Self::Ask,
+        if value == "key" {
+            Self::Key
+        } else {
+            Self::Ask
         }
     }
 }
@@ -188,35 +186,32 @@ fn to_view(model: &device_credentials::Model) -> AppResult<CredentialView> {
     })
 }
 
-/// O login pronto para uso agora: a senha guardada, decifrada, ou a da
-/// sessão — ou a chave do acesso dedicado, com a chave de host fixada.
+/// O login pronto para uso agora: a senha informada na janela (sessão) ou a
+/// chave do acesso dedicado, com a chave de host fixada.
 ///
-/// `ask` sem sessão aberta é erro aqui; guardada sem segredo volta sem senha,
-/// e cada chamador decide se isso serve.
+/// SSH/Telnet sem a senha da sessão é erro aqui — a tela abre a janela. HTTP
+/// segue sem senha: a página pode ser pública (a credencial só guarda porta e
+/// HTTPS), e o plugin que precisa de login recebe a recusa do equipamento.
 fn login_of(model: &device_credentials::Model, kind: TransportKind) -> AppResult<Login> {
-    let storage = SecretStorage::parse(&model.storage);
-    let secret = match storage {
-        SecretStorage::Vault | SecretStorage::Key => model
-            .secret_encrypted
-            .as_deref()
-            .map(crypto::decrypt)
-            .transpose()?,
-        SecretStorage::Ask => session_store().get(&session_key(model.device_id, kind)),
-    };
-    Ok(match storage {
-        SecretStorage::Ask if secret.is_none() => {
-            return Err(session_missing(model.device_id, kind))
-        }
-        SecretStorage::Key => Login {
+    match SecretStorage::parse(&model.storage) {
+        SecretStorage::Key => Ok(Login {
             username: model.username.clone(),
             password: None,
-            private_key: secret,
+            private_key: model
+                .secret_encrypted
+                .as_deref()
+                .map(crypto::decrypt)
+                .transpose()?,
             host_key: dedicated_of(model).and_then(|dedicated| dedicated.host_key),
-        },
-        SecretStorage::Vault | SecretStorage::Ask => {
-            Login::with_password(model.username.clone(), secret)
+        }),
+        SecretStorage::Ask => {
+            let password = session_store().get(&session_key(model.device_id, kind));
+            if password.is_none() && kind != TransportKind::Http {
+                return Err(session_missing(model.device_id, kind));
+            }
+            Ok(Login::with_password(model.username.clone(), password))
         }
-    })
+    }
 }
 
 /// O erro único de "falta o acesso": a tela o reconhece pelo código e abre o
@@ -251,7 +246,8 @@ fn session_missing(device_id: i64, kind: TransportKind) -> AppError {
         device_id,
         kind,
         format!(
-            "A senha {} deste equipamento é pedida a cada sessão. Informe-a para continuar.",
+            "A senha {} deste equipamento não fica guardada. Informe-a para continuar (vale 30 \
+             minutos).",
             kind.as_str().to_uppercase()
         ),
     )
@@ -287,7 +283,8 @@ async fn find<C: ConnectionTrait>(
 ///
 /// # Errors
 ///
-/// Usuário vazio, agente inexistente, falha de cifra ou do banco.
+/// Usuário vazio, agente inexistente, troca indevida do acesso dedicado ou
+/// erro do banco.
 pub async fn upsert<C: ConnectionTrait>(
     db: &C,
     device_id: i64,
@@ -322,8 +319,8 @@ pub async fn upsert<C: ConnectionTrait>(
                 "A chave do acesso dedicado não é digitada: use \"Rotacionar chave\".",
             ))
         }
-        (true, SecretStorage::Key) | (false, SecretStorage::Vault | SecretStorage::Ask) => {}
-        (true, _) => {
+        (true, SecretStorage::Key) | (false, SecretStorage::Ask) => {}
+        (true, SecretStorage::Ask) => {
             return Err(AppError::validation(
                 "Este equipamento usa o acesso dedicado do NetMonitor. Revogue-o antes de \
                  voltar para senha — assim a chave sai do equipamento também.",
@@ -336,15 +333,9 @@ pub async fn upsert<C: ConnectionTrait>(
             ))
         }
     }
+    // Só a chave do acesso dedicado vai ao banco; a senha digitada abre a
+    // sessão em memória.
     let secret_encrypted = match input.storage {
-        SecretStorage::Vault => match &secret {
-            Some(secret) => Some(crypto::encrypt(secret)?),
-            None => existing
-                .as_ref()
-                .and_then(|model| model.secret_encrypted.clone()),
-        },
-        // Trocar para "pedir a cada sessão" apaga a senha guardada — é o
-        // sentido da troca.
         SecretStorage::Ask => None,
         SecretStorage::Key => existing
             .as_ref()
@@ -353,7 +344,7 @@ pub async fn upsert<C: ConnectionTrait>(
     let key = session_key(device_id, input.kind);
     match (input.storage, secret) {
         (SecretStorage::Ask, Some(secret)) => session_store().put(key, secret),
-        (SecretStorage::Vault | SecretStorage::Key, _) => session_store().forget(&key),
+        (SecretStorage::Key, _) => session_store().forget(&key),
         (SecretStorage::Ask, None) => {}
     }
     let mut extra = serde_json::json!({ "https": input.https.unwrap_or(false) });
@@ -419,6 +410,30 @@ pub async fn delete<C: ConnectionTrait>(
     device_id: i64,
     kind: TransportKind,
 ) -> AppResult<()> {
+    if find(db, device_id, kind)
+        .await?
+        .is_some_and(|model| is_dedicated(&model))
+    {
+        // Apagar só aqui deixaria a chave esquecida no equipamento.
+        return Err(AppError::business_rule(
+            "Este é o acesso dedicado do NetMonitor: use \"Revogar acesso\", que tira a chave \
+             do equipamento também.",
+        ));
+    }
+    forget(db, device_id, kind).await
+}
+
+/// Apaga a credencial do tipo, seja qual for — para a revogação do acesso
+/// dedicado, que já cuidou do equipamento.
+///
+/// # Errors
+///
+/// Erro do banco.
+pub(crate) async fn forget<C: ConnectionTrait>(
+    db: &C,
+    device_id: i64,
+    kind: TransportKind,
+) -> AppResult<()> {
     session_store().forget(&session_key(device_id, kind));
     device_credentials::Entity::delete_many()
         .filter(device_credentials::Column::DeviceId.eq(device_id))
@@ -435,9 +450,9 @@ pub async fn delete<C: ConnectionTrait>(
 pub enum AccessGap {
     /// Nenhuma credencial deste tipo.
     Missing(TransportKind),
-    /// Guardada cifrada, mas sem senha.
+    /// Acesso dedicado sem a chave guardada.
     NoSecret(TransportKind),
-    /// Pedida a cada sessão, e a sessão não está aberta.
+    /// A senha não foi informada na janela (ou a sessão expirou).
     SessionPending(TransportKind),
 }
 
@@ -456,11 +471,11 @@ impl AccessGap {
         match self {
             Self::Missing(_) => format!("{device_name} está sem acesso {label}"),
             Self::NoSecret(_) => {
-                format!("{device_name} tem o acesso {label} cadastrado sem a senha")
+                format!("{device_name} tem o acesso dedicado {label} sem a chave guardada")
             }
-            Self::SessionPending(_) => format!(
-                "A senha {label} de {device_name} é pedida a cada sessão e ainda não foi informada"
-            ),
+            Self::SessionPending(_) => {
+                format!("A senha {label} de {device_name} ainda não foi informada")
+            }
         }
     }
 }
@@ -475,9 +490,7 @@ pub fn gap_in(list: &[CredentialView], transports: &[TransportKind]) -> Option<A
         .find_map(|&kind| match list.iter().find(|view| view.kind == kind) {
             None => Some(AccessGap::Missing(kind)),
             Some(view) => match view.storage {
-                SecretStorage::Vault | SecretStorage::Key if !view.has_stored_secret => {
-                    Some(AccessGap::NoSecret(kind))
-                }
+                SecretStorage::Key if !view.has_stored_secret => Some(AccessGap::NoSecret(kind)),
                 SecretStorage::Ask if !view.session_active => Some(AccessGap::SessionPending(kind)),
                 _ => None,
             },
@@ -558,13 +571,13 @@ pub async fn resolve<C: ConnectionTrait>(
     Ok(resolved)
 }
 
-/// O login salvo de um tipo, para quem entra no equipamento fora de um plugin
-/// (a ativação do syslog). A senha é decifrada aqui e não sai do servidor.
+/// O login cadastrado de um tipo, para quem entra no equipamento fora de um
+/// plugin (a ativação do syslog): a senha da sessão ou a chave do acesso
+/// dedicado. Não sai do servidor.
 ///
 /// # Errors
 ///
-/// Credencial inexistente, sem senha guardada, `ask` sem sessão aberta, ou
-/// falha ao decifrar.
+/// Credencial inexistente, senha não informada, ou falha ao decifrar a chave.
 pub async fn stored_login<C: ConnectionTrait>(
     db: &C,
     device_id: i64,
@@ -583,9 +596,7 @@ pub async fn stored_login<C: ConnectionTrait>(
         return Err(missing_credential(
             device_id,
             kind,
-            format!(
-                "A credencial {label} deste equipamento está sem senha guardada. Informe a senha."
-            ),
+            format!("A credencial {label} deste equipamento está sem senha. Informe a senha."),
         ));
     }
     Ok(login)
@@ -668,10 +679,11 @@ pub async fn dedicated_login<C: ConnectionTrait>(
     Ok((login, access))
 }
 
-/// Guarda, cifrado, um login que acabou de funcionar no equipamento.
+/// Lembra um login que acabou de funcionar no equipamento: o usuário vai ao
+/// cadastro e a senha abre a sessão de 30 minutos — nunca ao banco.
 ///
 /// O resto da credencial daquele tipo (HTTPS, agente remoto) é preservado:
-/// salvar a senha não pode desfazer a rota que um plugin já usa. Sem `port`,
+/// lembrar o login não pode desfazer a rota que um plugin já usa. Sem `port`,
 /// vale a já cadastrada.
 ///
 /// # Errors
@@ -694,7 +706,7 @@ pub async fn remember_login<C: ConnectionTrait>(
         kind,
         username: login.username.clone(),
         secret: login.password.clone(),
-        storage: SecretStorage::Vault,
+        storage: SecretStorage::Ask,
         port: port.or_else(|| {
             existing
                 .as_ref()
@@ -742,13 +754,6 @@ mod tests {
             None,
             "HTTP sem login vale"
         );
-        let guardada = view(TransportKind::Ssh, SecretStorage::Vault, true, false);
-        assert_eq!(gap_in(&[guardada], &ssh), None);
-        let sem_senha = view(TransportKind::Ssh, SecretStorage::Vault, false, false);
-        assert_eq!(
-            gap_in(&[sem_senha], &ssh),
-            Some(AccessGap::NoSecret(TransportKind::Ssh))
-        );
         let sessao = view(TransportKind::Ssh, SecretStorage::Ask, false, false);
         assert_eq!(
             gap_in(std::slice::from_ref(&sessao), &ssh),
@@ -768,7 +773,7 @@ mod tests {
             Some(AccessGap::NoSecret(TransportKind::Ssh))
         );
         // A do outro tipo não serve.
-        let telnet = view(TransportKind::Telnet, SecretStorage::Vault, true, false);
+        let telnet = view(TransportKind::Telnet, SecretStorage::Ask, false, true);
         assert_eq!(
             gap_in(&[telnet], &ssh),
             Some(AccessGap::Missing(TransportKind::Ssh))

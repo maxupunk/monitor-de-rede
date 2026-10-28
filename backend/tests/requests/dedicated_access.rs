@@ -266,7 +266,7 @@ async fn acesso_dedicado_do_primeiro_acesso_a_revogacao() {
         // O formulário comum não troca o acesso dedicado por senha.
         request
             .put(&format!("/api/devices/{}/credentials", device.id))
-            .json(&json!({ "kind": "ssh", "username": "root", "secret": "x", "storage": "vault" }))
+            .json(&json!({ "kind": "ssh", "username": "root", "secret": "x", "storage": "ask" }))
             .await
             .assert_status_unprocessable_entity();
 
@@ -299,11 +299,129 @@ async fn acesso_dedicado_do_primeiro_acesso_a_revogacao() {
         }));
         active.update(&ctx.db).await.unwrap();
 
+        // Apagar só aqui deixaria a chave esquecida lá: o DELETE comum recusa.
+        let apagar = request
+            .delete(&format!("/api/devices/{}/credentials/ssh", device.id))
+            .await;
+        assert!(!apagar.status_code().is_success(), "{}", apagar.text());
+        assert!(
+            apagar.text().contains("Revogar acesso"),
+            "{}",
+            apagar.text()
+        );
+        assert_eq!(fake.authorized_keys.lock().unwrap().len(), 1);
+
         // Revogar tira a chave de lá e a credencial daqui.
         let revogado = request.delete(&dedicated).await;
         revogado.assert_status_success();
         assert_eq!(json_of(&revogado.text())["leftovers"], json!([]));
         assert!(fake.authorized_keys.lock().unwrap().is_empty());
+        assert!(credentials::list(&ctx.db, device.id)
+            .await
+            .unwrap()
+            .is_empty());
+    })
+    .await;
+}
+
+/// O mesmo fluxo contra um equipamento de verdade — RouterOS CHR ou OpenWrt
+/// em Docker, nunca a rede de produção. Roda só quando pedido:
+///
+/// ```text
+/// NM_REAL_SSH_PORT=2222 NM_REAL_SSH_USER=root NM_REAL_SSH_PASSWORD=… \
+///   cargo test --test mod real_device -- --ignored
+/// ```
+///
+/// `NM_REAL_SSH_HOST` (padrão `127.0.0.1`) e `NM_REAL_PLATFORM` (`mikrotik`
+/// ou `openwrt`; sem ele, descobre) são opcionais; `NM_REAL_KEEP=1` para antes
+/// de revogar, para conferir o equipamento.
+#[tokio::test]
+#[serial]
+#[ignore = "precisa de um RouterOS/OpenWrt real (ver o comentário)"]
+async fn acesso_dedicado_em_equipamento_real() {
+    use backend::services::plugins::dedicated_access::{
+        self, DedicatedPlatform, ProvisionInput, RevokeInput, Target,
+    };
+    let env = |name: &str| std::env::var(name).ok().filter(|value| !value.is_empty());
+    let host = env("NM_REAL_SSH_HOST").unwrap_or_else(|| "127.0.0.1".into());
+    let port: u16 = env("NM_REAL_SSH_PORT")
+        .expect("NM_REAL_SSH_PORT")
+        .parse()
+        .unwrap();
+    let username = env("NM_REAL_SSH_USER").expect("NM_REAL_SSH_USER");
+    let password = env("NM_REAL_SSH_PASSWORD").unwrap_or_default();
+    let platform = env("NM_REAL_PLATFORM").map(|name| match name.as_str() {
+        "mikrotik" => DedicatedPlatform::Mikrotik,
+        _ => DedicatedPlatform::Openwrt,
+    });
+
+    request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
+        let device = devices::ActiveModel {
+            name: Set("Equipamento real".into()),
+            r#type: Set("router".into()),
+            status: Set("online".into()),
+            ip_address: Set(Some(host.clone())),
+            ..Default::default()
+        }
+        .insert(&ctx.db)
+        .await
+        .unwrap();
+        let target = Target {
+            ip: host.clone(),
+            port,
+            via_probe_id: None,
+        };
+        let transport = LocalTransport::new("central").unwrap();
+
+        let view = dedicated_access::provision_on(
+            &ctx.db,
+            &transport,
+            device.id,
+            &target,
+            ProvisionInput {
+                platform,
+                username,
+                password,
+                port: Some(port),
+                via_probe_id: None,
+            },
+        )
+        .await
+        .unwrap_or_else(|error| panic!("criar: {error}"));
+        let first = view.dedicated.clone().expect("acesso dedicado");
+        println!(
+            "criado: {} como {} — {:?}",
+            first.key_fingerprint, view.username, first.platform
+        );
+        assert!(first.host_key.is_some(), "a chave de host fica fixada");
+        run_as_plugin(&ctx, device.id, port)
+            .await
+            .unwrap_or_else(|error| panic!("usar a chave: {error}"));
+
+        let rotated = dedicated_access::rotate_on(&ctx.db, &transport, device.id, &target)
+            .await
+            .unwrap_or_else(|error| panic!("rotacionar: {error}"));
+        let second = rotated.dedicated.expect("acesso dedicado");
+        assert_ne!(second.key_fingerprint, first.key_fingerprint);
+        // Transporte novo: a sessão da chave antiga não pode mascarar o teste.
+        run_as_plugin(&ctx, device.id, port)
+            .await
+            .unwrap_or_else(|error| panic!("usar a chave rotacionada: {error}"));
+
+        if env("NM_REAL_KEEP").is_some() {
+            // Para conferir o equipamento à mão; revogue depois.
+            return;
+        }
+        let outcome = dedicated_access::revoke_on(
+            &ctx.db,
+            &LocalTransport::new("central").unwrap(),
+            device.id,
+            &target,
+            &RevokeInput::default(),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("revogar: {error}"));
+        println!("revogado; sobrou: {:?}", outcome.leftovers);
         assert!(credentials::list(&ctx.db, device.id)
             .await
             .unwrap()

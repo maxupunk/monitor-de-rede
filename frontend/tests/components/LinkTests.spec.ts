@@ -475,12 +475,12 @@ describe('telas do teste de enlace', () => {
     const put = vi.spyOn(apiService, 'put').mockResolvedValue({
       kind: 'ssh',
       username: 'root',
-      storage: 'vault',
+      storage: 'ask',
       port: 22,
       https: false,
       viaProbeId: null,
-      hasStoredSecret: true,
-      sessionActive: false,
+      hasStoredSecret: false,
+      sessionActive: true,
     })
     mountWith(DeviceAccessHost, {})
     mountWith(LinkTestWizard, { modelValue: true, request: { kind: 'server', targetDeviceId: 7 } })

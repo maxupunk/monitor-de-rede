@@ -29,12 +29,12 @@ function saved(): CredentialView {
   return {
     kind: 'ssh',
     username: 'root',
-    storage: 'vault',
+    storage: 'ask',
     port: 22,
     https: false,
     viaProbeId: null,
-    hasStoredSecret: true,
-    sessionActive: false,
+    hasStoredSecret: false,
+    sessionActive: true,
   }
 }
 
@@ -91,7 +91,7 @@ describe('acesso do equipamento pedido ali mesmo', () => {
         kind: 'ssh',
         username: 'root',
         secret: 'segredo',
-        storage: 'vault',
+        storage: 'ask',
       })
     )
     await expect(result).resolves.toBe(41)

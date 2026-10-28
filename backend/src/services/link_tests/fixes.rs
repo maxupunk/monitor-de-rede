@@ -209,7 +209,7 @@ mod tests {
                 kind: TransportKind::Ssh,
                 username: "root".into(),
                 secret: Some("segredo".into()),
-                storage: SecretStorage::Vault,
+                storage: SecretStorage::Ask,
                 port: None,
                 https: None,
                 via_probe_id: None,

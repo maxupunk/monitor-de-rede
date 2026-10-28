@@ -51,12 +51,13 @@ cada acesso ao equipamento (ou ligando, ciente do risco, um modo automático).
    testado não ativo e a IA sem modo automático pausam **a cada chamada** e
    publicam `plugin:approval_required` como snapshot no SSE global.
 
-5. **Segredos fora do script e da IA.** Credencial por equipamento e tipo:
-   `vault` (cifrada com `crypto::encrypt`) ou `ask` (só em memória, 30 min).
+5. **Segredos fora do script e da IA.** Credencial por equipamento e tipo,
+   sem senha no banco: `ask` (pedida na janela do acesso, 30 min em memória)
+   ou, no SSH, `key` (acesso dedicado por chave, ADR 016).
    O script escreve `{{username}}`/`{{password}}`; a troca acontece no último
-   instante e o transcript passa por máscara. No SSH há um terceiro modo,
-   `key` — o acesso dedicado por chave, com a senha do administrador só no
-   primeiro acesso ([ADR 016](016-acesso-dedicado-por-chave.md)).
+   instante e o transcript passa por máscara. O acesso dedicado usa a senha
+   do administrador só no primeiro acesso
+   ([ADR 016](016-acesso-dedicado-por-chave.md)).
 
 6. **Pacote `.nmplugin`** com manifesto, script, `usage` (documentação de uso,
    viaja com o plugin), `compatibility` (validações funcionais registradas) e
