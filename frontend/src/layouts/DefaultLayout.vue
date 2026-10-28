@@ -363,6 +363,7 @@ const navItems = computed<NavItem[]>(() => [
       { title: 'Sites', icon: 'mdi-domain', to: '/sites' },
       { title: 'Topologia', icon: 'mdi-sitemap', to: '/topology' },
       { title: 'Testes de velocidade', icon: 'mdi-speedometer', to: '/link-tests' },
+      { title: 'Sinais Wi-Fi', icon: 'mdi-wifi', to: '/wifi' },
     ],
   },
   // Quem mede de fora da central.

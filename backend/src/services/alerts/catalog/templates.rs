@@ -83,7 +83,7 @@ fn log_pattern(spec: LogPatternSpec) -> AlertRuleTemplate {
 }
 
 /// As seis categorias exibidas na tela, com os rótulos em português.
-pub const CATEGORY_LABELS: [(&str, &str); 8] = [
+pub const CATEGORY_LABELS: [(&str, &str); 9] = [
     ("disponibilidade", "Disponibilidade"),
     ("desempenho", "Desempenho"),
     ("servicos", "Serviços e aplicações"),
@@ -92,6 +92,7 @@ pub const CATEGORY_LABELS: [(&str, &str); 8] = [
     ("saude", "Saúde do equipamento"),
     ("vpn", "Túneis VPN (WireGuard)"),
     ("logs", "Padrões no log (syslog)"),
+    ("wifi", "Aparelhos vigiados (Wi-Fi)"),
 ];
 
 /// Um item do catálogo. Os campos são exatamente os que o frontend lê em
@@ -604,6 +605,52 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             inhibit_when_parent_down: false,
             recommended: false,
         },
+        // --- Clientes Wi-Fi vigiados ----------------------------------------
+        //
+        // Fora do conjunto básico: só fazem sentido depois que alguém vigia um
+        // aparelho, e é aí que entram (`catalog::once::ensure_wifi_watch`).
+        AlertRuleTemplate {
+            key: "wifi_watched_offline",
+            name: "Aparelho vigiado fora do Wi-Fi",
+            description: "Um aparelho que deveria estar sempre conectado (câmera, IoT) não aparece em nenhum roteador há 10 minutos.",
+            category: "wifi",
+            rule_type: "custom",
+            condition: json!({
+                "field": fields::WIFI_CLIENT_OFFLINE_SECONDS,
+                "operator": "gte",
+                "value": 600,
+            }),
+            severity: "critical",
+            // A contagem já vem no fato (`last_seen_at` no banco): sobrevive a
+            // um restart, ao contrário da histerese em memória.
+            duration_seconds: 0,
+            recovery_window_seconds: 300,
+            flap_threshold: 5,
+            flap_window_seconds: 900,
+            notification_cooldown_seconds: 900,
+            inhibit_when_parent_down: false,
+            recommended: false,
+        },
+        AlertRuleTemplate {
+            key: "wifi_watched_poor_signal",
+            name: "Aparelho vigiado com sinal ruim",
+            description: "O aparelho vigiado está conectado, mas com sinal ou ruído na faixa crítica há 15 minutos — a câmera trava, o IoT perde comando.",
+            category: "wifi",
+            rule_type: "custom",
+            condition: json!({
+                "field": fields::WIFI_CLIENT_HEALTH,
+                "operator": "eq",
+                "value": "critical",
+            }),
+            severity: "warning",
+            duration_seconds: 900,
+            recovery_window_seconds: 600,
+            flap_threshold: 5,
+            flap_window_seconds: 900,
+            notification_cooldown_seconds: 900,
+            inhibit_when_parent_down: false,
+            recommended: false,
+        },
         // --- Padrões no log (Fase 6 do roadmap de syslog) -------------------
         log_pattern(LogPatternSpec {
             key: "log_login_failure",
@@ -744,6 +791,10 @@ pub fn all() -> Vec<AlertRuleTemplate> {
 /// listá-lo seria um erro invisível.
 pub const HEALTH_KEYS: [&str; 3] = ["cpu_usage_high", "memory_usage_high", "storage_usage_high"];
 
+/// As regras dos clientes Wi-Fi vigiados, aplicadas quando o primeiro aparelho
+/// passa a ser vigiado.
+pub const WIFI_WATCH_KEYS: [&str; 2] = ["wifi_watched_offline", "wifi_watched_poor_signal"];
+
 /// Um template pela chave.
 #[must_use]
 pub fn find(key: &str) -> Option<AlertRuleTemplate> {
@@ -764,8 +815,8 @@ mod tests {
     /// 18 do roadmap de alertas + ICMP filtrado + 7 padrões de log (Fase 6 do
     /// roadmap de syslog) + 3 de saúde de equipamento (Fase 3 do roadmap do
     /// servidor como dispositivo) + 3 de baseline móvel + 3 de anomalias
-    /// estatísticas (§2.3.3).
-    const TOTAL_TEMPLATES: usize = 35;
+    /// estatísticas (§2.3.3) + 2 dos aparelhos Wi-Fi vigiados.
+    const TOTAL_TEMPLATES: usize = 37;
 
     #[test]
     fn o_catalogo_tem_os_templates_dos_dois_roadmaps() {
@@ -796,7 +847,7 @@ mod tests {
                 template.category
             );
         }
-        assert_eq!(labels.len(), 8);
+        assert_eq!(labels.len(), 9);
     }
 
     #[test]

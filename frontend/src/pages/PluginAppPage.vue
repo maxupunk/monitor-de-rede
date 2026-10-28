@@ -2,6 +2,9 @@
   <div>
     <PageHeader :title="title" :subtitle="subtitle">
       <template #actions>
+        <v-btn v-if="isWifiApp" color="info" variant="tonal" prepend-icon="mdi-wifi" to="/wifi">
+          Sinais e clientes
+        </v-btn>
         <v-btn
           v-if="authStore.isAdmin && spec?.statusAction"
           color="primary"
@@ -299,6 +302,8 @@ const subtitle = computed(
 )
 const fleetSchema = computed(() => view.value?.plugin.settings?.fleet ?? null)
 const tools = computed(() => toolsOf(spec.value))
+/** O plugin alimenta a telemetria Wi-Fi: os clientes ficam no painel Sinais Wi-Fi. */
+const isWifiApp = computed(() => view.value?.plugin.wifi ?? false)
 const readyIds = computed(() =>
   (view.value?.members ?? [])
     .filter((member) => member.credentialsReady)

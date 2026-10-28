@@ -255,6 +255,63 @@ export const ALERT_METRICS: AlertMetricOption[] = [
     defaultOperator: 'contains',
     defaultValue: '',
   },
+  // --- Clientes Wi-Fi vigiados ----------------------------------------------
+  //
+  // Só aparelhos marcados como "vigiados" publicam estes campos: celular que
+  // sai do local nunca vira alerta.
+  {
+    field: 'wifiClientOfflineSeconds',
+    title: 'Tempo fora do Wi-Fi (s)',
+    hint: 'Há quantos segundos o aparelho vigiado não aparece em nenhum roteador. Ex.: 600 = 10 minutos.',
+    kind: 'number',
+    unit: 's',
+    defaultOperator: 'gte',
+    defaultValue: 600,
+  },
+  {
+    field: 'wifiClientStatus',
+    title: 'Situação do aparelho vigiado',
+    hint: 'Se o aparelho apareceu na última leitura dos roteadores.',
+    kind: 'enum',
+    options: [
+      { value: 'connected', title: 'Conectado' },
+      { value: 'offline', title: 'Fora do Wi-Fi' },
+    ],
+    defaultOperator: 'eq',
+    defaultValue: 'offline',
+  },
+  {
+    field: 'wifiClientHealth',
+    title: 'Saúde do Wi-Fi do aparelho vigiado',
+    hint: 'Classificação da conexão pelo sinal, ruído e retransmissões.',
+    kind: 'enum',
+    options: [
+      { value: 'critical', title: 'Sinal ruim' },
+      { value: 'high_retries', title: 'Interferência' },
+      { value: 'fair', title: 'Atenção' },
+      { value: 'healthy', title: 'Saudável' },
+      { value: 'power_save', title: 'Em repouso' },
+    ],
+    defaultOperator: 'eq',
+    defaultValue: 'critical',
+  },
+  {
+    field: 'wifiClientSignalDbm',
+    title: 'Sinal do aparelho vigiado (dBm)',
+    hint: 'Força do sinal recebido pelo roteador. Abaixo de -75 dBm já é fraco.',
+    kind: 'number',
+    unit: 'dBm',
+    defaultOperator: 'lt',
+    defaultValue: -75,
+  },
+  {
+    field: 'wifiClientName',
+    title: 'Nome do aparelho vigiado',
+    hint: 'Restringe a regra a aparelhos específicos. Ex.: contiver "câmera".',
+    kind: 'text',
+    defaultOperator: 'contains',
+    defaultValue: '',
+  },
   // --- Padrões no log recebido por syslog (Fase 6 do roadmap de syslog) ---
   //
   // Só `logMatchCount` e `logSeverity` aparecem na tela. O `pattern` (a regex)
@@ -652,6 +709,8 @@ export type AlertProblemKind =
   | 'dns_failure'
   | 'interface_flap'
   | 'vpn_instability'
+  | 'wifi_offline'
+  | 'wifi_signal'
   | 'statistical_anomaly'
   | (string & {})
 
@@ -663,6 +722,8 @@ const PROBLEM_KIND_LABELS: Record<string, string> = {
   dns_failure: 'Falha de DNS',
   interface_flap: 'Interface oscilando',
   vpn_instability: 'Instabilidade VPN',
+  wifi_offline: 'Fora do Wi-Fi',
+  wifi_signal: 'Sinal Wi-Fi ruim',
   statistical_anomaly: 'Anomalia estatística',
 }
 

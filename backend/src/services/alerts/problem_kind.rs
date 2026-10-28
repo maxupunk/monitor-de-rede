@@ -35,6 +35,10 @@ pub enum ProblemKind {
     InterfaceFlap,
     /// Túnel VPN caindo ou instável.
     VpnInstability,
+    /// Aparelho vigiado sumiu do Wi-Fi (de todos os roteadores).
+    WifiOffline,
+    /// Aparelho vigiado conectado, mas com sinal ou interferência ruins.
+    WifiSignal,
     /// Anomalia estatística (Z-Score ou desvio relevante em relação à baseline).
     StatisticalAnomaly,
 }
@@ -51,6 +55,8 @@ impl ProblemKind {
             Self::DnsFailure => "dns_failure",
             Self::InterfaceFlap => "interface_flap",
             Self::VpnInstability => "vpn_instability",
+            Self::WifiOffline => "wifi_offline",
+            Self::WifiSignal => "wifi_signal",
             Self::StatisticalAnomaly => "statistical_anomaly",
         }
     }
@@ -67,6 +73,8 @@ impl ProblemKind {
             "dns_failure" => Some(Self::DnsFailure),
             "interface_flap" => Some(Self::InterfaceFlap),
             "vpn_instability" => Some(Self::VpnInstability),
+            "wifi_offline" => Some(Self::WifiOffline),
+            "wifi_signal" => Some(Self::WifiSignal),
             "statistical_anomaly" | "anomaly" => Some(Self::StatisticalAnomaly),
             _ => None,
         }
@@ -83,6 +91,8 @@ impl ProblemKind {
             Self::DnsFailure => "falha de DNS",
             Self::InterfaceFlap => "interface oscilando",
             Self::VpnInstability => "instabilidade VPN",
+            Self::WifiOffline => "fora do Wi-Fi",
+            Self::WifiSignal => "sinal Wi-Fi ruim",
             Self::StatisticalAnomaly => "anomalia estatística",
         }
     }
@@ -116,6 +126,11 @@ pub fn observed_value(kind: ProblemKind, dataset: &AlertDataset) -> Option<Strin
             number(fields::PACKET_LOSS).map(|value| format!("{value:.0}% de perda"))
         }
         ProblemKind::Latency => number(fields::LATENCY_MS).map(|value| format!("{value:.0} ms")),
+        ProblemKind::WifiOffline => number(fields::WIFI_CLIENT_OFFLINE_SECONDS)
+            .map(|seconds| format!("fora há {:.0} min", seconds / 60.0)),
+        ProblemKind::WifiSignal => {
+            number(fields::WIFI_CLIENT_SIGNAL_DBM).map(|dbm| format!("{dbm:.0} dBm"))
+        }
         ProblemKind::StatisticalAnomaly => number(fields::LATENCY_Z_SCORE)
             .map(|z| format!("{z:+.1}σ latência"))
             .or_else(|| number(fields::PACKET_LOSS_Z_SCORE).map(|z| format!("{z:+.1}σ perda")))
@@ -190,6 +205,12 @@ fn kind_of_field(field: &str) -> Option<ProblemKind> {
         fields::VPN_STATUS_TRANSITION
         | fields::VPN_PEER_STATUS
         | fields::VPN_SECONDS_SINCE_ACTIVITY => Some(ProblemKind::VpnInstability),
+        fields::WIFI_CLIENT_STATUS | fields::WIFI_CLIENT_OFFLINE_SECONDS => {
+            Some(ProblemKind::WifiOffline)
+        }
+        fields::WIFI_CLIENT_SIGNAL_DBM | fields::WIFI_CLIENT_HEALTH => {
+            Some(ProblemKind::WifiSignal)
+        }
         // `status`, `statusCode`, `snmpUptime`, tráfego e campos desconhecidos
         // não dizem nada por si: a decisão passa para o dataset.
         _ => None,
@@ -213,6 +234,12 @@ fn classify_by_dataset(dataset: &AlertDataset) -> ProblemKind {
         || dataset.contains_key(fields::VPN_PEER_STATUS)
     {
         return ProblemKind::VpnInstability;
+    }
+    if dataset.contains_key(fields::WIFI_CLIENT_OFFLINE_SECONDS) {
+        return ProblemKind::WifiOffline;
+    }
+    if dataset.contains_key(fields::WIFI_CLIENT_HEALTH) {
+        return ProblemKind::WifiSignal;
     }
     if dataset.get("type").and_then(Value::as_str) == Some("dns") {
         return ProblemKind::DnsFailure;
@@ -313,6 +340,14 @@ mod tests {
 
         let vpn = dataset(&[(fields::VPN_PEER_STATUS, json!("disconnected"))]);
         assert_eq!(classify(None, &vpn), ProblemKind::VpnInstability);
+        let fora = dataset(&[(fields::WIFI_CLIENT_OFFLINE_SECONDS, json!(900))]);
+        assert_eq!(classify(None, &fora), ProblemKind::WifiOffline);
+        assert_eq!(
+            observed_value(ProblemKind::WifiOffline, &fora).as_deref(),
+            Some("fora há 15 min")
+        );
+        let fraco = dataset(&[(fields::WIFI_CLIENT_HEALTH, json!("critical"))]);
+        assert_eq!(classify(None, &fraco), ProblemKind::WifiSignal);
     }
 
     #[test]

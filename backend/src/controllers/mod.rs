@@ -37,3 +37,4 @@ pub mod users;
 pub mod vendors;
 pub mod vpn_peers;
 pub mod vpn_servers;
+pub mod wifi;

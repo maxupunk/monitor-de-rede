@@ -29,6 +29,7 @@
 - Saúde do equipamento: `cpuUsagePercent`, `memoryUsedPercent`, `storageUsedPercent` (0–100), `loadAverage1m`.
 - Interfaces SNMP: `interfaceName`, `interfaceOperStatus`, `interfaceStatusTransition` (`up_to_down`|`down_to_up`), `interfaceSpeedBps`, `interfaceSpeedTransition` (`downgrade`|`upgrade`), `interfaceSpeedDropPercent`.
 - Túneis VPN: `vpnPeerName`, `vpnPeerStatus` (`connected`|`unstable`|`disconnected`|`awaiting`), `vpnStatusTransition` (`connected_to_disconnected`|`connected_to_unstable`|`reconnected`), `vpnSecondsSinceActivity`.
+- Aparelhos Wi-Fi vigiados (câmeras, IoT — só quem foi marcado como vigiado): `wifiClientName`, `wifiClientStatus` (`connected`|`offline`), `wifiClientOfflineSeconds` (há quanto tempo não aparece em nenhum roteador), `wifiClientSignalDbm`, `wifiClientHealth` (`healthy`|`fair`|`high_retries`|`critical`|`power_save`).
 - Logs (syslog): `logPatternKey`, `logMatchCount` (ocorrências na janela), `logWindowSeconds`, `logSeverity` (0 = emergência … 7 = debug), `logMessage`.
 - Anomalia estatística (comparação com o normal do próprio alvo): `latencyZScore`, `latencyDeviationPercent`, `latencyUpperBandMs`, `packetLossZScore`, `packetLossDeviationPercent`, `uptimeZScore`, `uptimeDeviationPercent`, `syslogVolumeZScore`, `trafficInZScore`, `trafficOutZScore`. Z-score ≥ 3 é um desvio forte.
 

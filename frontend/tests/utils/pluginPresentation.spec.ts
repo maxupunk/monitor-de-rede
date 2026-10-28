@@ -44,6 +44,7 @@ function item(
       surfaces,
       settings: null,
       fleet: null,
+      wifi: false,
       risk: null,
       lastTestAt: null,
       lastTestOk: null,

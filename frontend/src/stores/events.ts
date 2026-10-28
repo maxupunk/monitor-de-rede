@@ -26,6 +26,8 @@ import { isLogTemplateInfo } from '@/utils/logCategories'
 import { isDeciderModelState, useAiDeciderStore } from './aiDecider'
 import { asApprovalResolved, useAiApprovalsStore } from './aiApprovals'
 import { useAiStore } from './ai'
+import { useWifiClientsStore } from './wifiClients'
+import { isWifiDeviceSnapshot, isWifiWatchedSnapshot } from '@/utils/wifiPresentation'
 import { getStoredToken } from '@/utils/authStorage'
 
 export interface RealtimeEventPayload {
@@ -198,6 +200,9 @@ export const useEventsStore = defineStore('events', () => {
       payload.type === 'link_test:updated' ||
       payload.type === 'link_test:sample' ||
       payload.type === 'link_test:health' ||
+      // Clientes Wi-Fi: estado ao vivo de cada roteador, não notícia.
+      payload.type === 'wifi:snapshot' ||
+      payload.type === 'wifi:watched' ||
       // Tarefa agendada: só a falha e o "não rodou" são notícia — o começo e
       // o sucesso de uma tarefa de minuto em minuto encheriam o feed.
       (payload.type === 'scheduled_task:updated' && !isScheduledTaskNews(payload.data))
@@ -547,6 +552,16 @@ export const useEventsStore = defineStore('events', () => {
         useAiApprovalsStore().applyResolved(resolved)
         // Decidido em outra aba: o card da conversa aberta acompanha.
         useAiStore().applyApprovalDecision(resolved)
+        break
+      }
+
+      case 'wifi:snapshot': {
+        if (isWifiDeviceSnapshot(data)) useWifiClientsStore().applySnapshot(data)
+        break
+      }
+
+      case 'wifi:watched': {
+        if (isWifiWatchedSnapshot(data)) useWifiClientsStore().applyWatched(data)
         break
       }
     }

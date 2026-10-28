@@ -33,6 +33,7 @@ use crate::{
         devices::system_device,
         monitoring::{health::series, managed, reachability},
         shared::errors::AppResult,
+        wifi,
     },
 };
 use sea_orm::{
@@ -122,6 +123,15 @@ pub async fn for_device(
 
     let alert_fields = published_fields(&monitores, &series_gravadas);
 
+    let plugins = !is_system
+        && device
+            .ip_address
+            .as_deref()
+            .is_some_and(|ip| !ip.trim().is_empty());
+    // Wi-Fi é ter quem leia: um plugin ativo e instalado com o bloco `wifi`.
+    // O tipo do cadastro ("access_point") não prova nada.
+    let wifi = plugins && wifi::source::for_device(db, device.id).await?.is_some();
+
     Ok(DeviceCapabilities {
         device_id: device.id,
         is_system,
@@ -134,11 +144,8 @@ pub async fn for_device(
         health,
         // Plugins agem sobre o equipamento pelo IP; o dispositivo que
         // representa a instalação não é alvo — o sistema não se reconfigura.
-        plugins: !is_system
-            && device
-                .ip_address
-                .as_deref()
-                .is_some_and(|ip| !ip.trim().is_empty()),
+        plugins,
+        wifi,
         // As mesmas capacidades governam os botões. No dispositivo do sistema,
         // escanear as próprias portas ou editar IP e comunidade SNMP de um
         // equipamento protegido não são ações válidas — e um botão que só pode

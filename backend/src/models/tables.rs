@@ -16,8 +16,8 @@ use std::collections::HashSet;
 use loco_rs::Result;
 use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 
-/// As 46 tabelas do esquema, na ordem de criação da §6 (pais antes de filhos).
-pub const CREATION_ORDER: [&str; 46] = [
+/// As 47 tabelas do esquema, na ordem de criação da §6 (pais antes de filhos).
+pub const CREATION_ORDER: [&str; 47] = [
     "users",
     "sites",
     "probes",
@@ -84,6 +84,8 @@ pub const CREATION_ORDER: [&str; 46] = [
     // tarefas.
     "scheduled_tasks",
     "scheduled_task_runs",
+    // Clientes Wi-Fi vigiados. Depois de `devices` e `users` pelas FKs.
+    "wifi_watched_clients",
     // Opcional (§6 #23 / §10). **Não migrada:** a §10.2 optou por
     // `loco_rs::auth::JWT`, que não guarda token no banco. Fica listada porque
     // a limpeza pula tabelas inexistentes e a Fase 6 ainda pode voltar atrás.
@@ -179,9 +181,9 @@ mod tests {
 
     #[test]
     fn cobre_as_27_tabelas_sem_repetir() {
-        assert_eq!(CREATION_ORDER.len(), 46);
+        assert_eq!(CREATION_ORDER.len(), 47);
         let unicas: HashSet<&&str> = CREATION_ORDER.iter().collect();
-        assert_eq!(unicas.len(), 46, "há nome de tabela repetido");
+        assert_eq!(unicas.len(), 47, "há nome de tabela repetido");
     }
 
     #[test]

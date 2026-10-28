@@ -5,6 +5,7 @@
 
 use serde_json::{json, Value};
 
+use super::format_seconds;
 use crate::{
     models::vpn_peers::VpnPeerConnectionStatus,
     services::alerts::{
@@ -160,17 +161,6 @@ fn status_in_portuguese(status: &str) -> &str {
         "awaiting" => "aguardando primeira conexão",
         other => other,
     }
-}
-
-fn format_seconds(seconds: i64) -> String {
-    if seconds < 60 {
-        return format!("{seconds}s");
-    }
-    let minutes = seconds / 60;
-    if minutes < 60 {
-        return format!("{minutes} min");
-    }
-    format!("{}h{:02}", minutes / 60, minutes % 60)
 }
 
 #[cfg(test)]

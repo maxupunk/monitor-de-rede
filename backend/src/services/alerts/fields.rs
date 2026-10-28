@@ -120,6 +120,21 @@ pub const VPN_STATUS_TRANSITION: &str = "vpnStatusTransition";
 /// Segundos desde o último sinal de vida (keepalive ou handshake).
 pub const VPN_SECONDS_SINCE_ACTIVITY: &str = "vpnSecondsSinceActivity";
 
+// --- Clientes Wi-Fi vigiados -------------------------------------------------
+
+/// Nome dado ao aparelho vigiado ("Câmera da portaria").
+pub const WIFI_CLIENT_NAME: &str = "wifiClientName";
+/// Onde o aparelho está: `connected` | `offline` (ver [`wifi_client_status`]).
+pub const WIFI_CLIENT_STATUS: &str = "wifiClientStatus";
+/// Há quantos segundos o aparelho não aparece em roteador nenhum. Só existe
+/// quando ele está fora — é o campo que a regra de queda compara.
+pub const WIFI_CLIENT_OFFLINE_SECONDS: &str = "wifiClientOfflineSeconds";
+/// Sinal recebido pelo roteador, em dBm (só quando conectado).
+pub const WIFI_CLIENT_SIGNAL_DBM: &str = "wifiClientSignalDbm";
+/// Saúde da conexão (`WifiHealth`): `healthy` | `fair` | `high_retries` |
+/// `critical` | `power_save` (só quando conectado).
+pub const WIFI_CLIENT_HEALTH: &str = "wifiClientHealth";
+
 // --- Padrões no log recebido por syslog -------------------------------------
 
 /// Chave do padrão que casou, igual à do template (`log_login_failure`).
@@ -137,7 +152,7 @@ pub const VPN_PREVIOUS_STATUS: &str = "vpnPreviousStatus";
 
 /// Vocabulário completo oferecido na tela de regras. A **ordem importa**: é a
 /// ordem em que os campos aparecem no seletor da interface.
-pub const ALERT_FIELDS: [&str; 53] = [
+pub const ALERT_FIELDS: [&str; 58] = [
     STATUS,
     REACHABILITY_CAUSE,
     LATENCY_MS,
@@ -165,6 +180,11 @@ pub const ALERT_FIELDS: [&str; 53] = [
     VPN_PEER_STATUS,
     VPN_STATUS_TRANSITION,
     VPN_SECONDS_SINCE_ACTIVITY,
+    WIFI_CLIENT_NAME,
+    WIFI_CLIENT_STATUS,
+    WIFI_CLIENT_OFFLINE_SECONDS,
+    WIFI_CLIENT_SIGNAL_DBM,
+    WIFI_CLIENT_HEALTH,
     LOG_PATTERN_KEY,
     LOG_MATCH_COUNT,
     LOG_WINDOW_SECONDS,
@@ -214,4 +234,10 @@ pub mod vpn_status_transition {
     pub const DISCONNECTED: &str = "connected_to_disconnected";
     pub const DESTABILIZED: &str = "connected_to_unstable";
     pub const RECONNECTED: &str = "reconnected";
+}
+
+/// Valores de [`WIFI_CLIENT_STATUS`].
+pub mod wifi_client_status {
+    pub const CONNECTED: &str = "connected";
+    pub const OFFLINE: &str = "offline";
 }

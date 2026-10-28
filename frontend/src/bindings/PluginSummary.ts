@@ -42,6 +42,11 @@ settings: SettingsSpec | null,
  */
 fleet: FleetSpec | null, 
 /**
+ * Alimenta a telemetria Wi-Fi (bloco `wifi`): a frota leva ao painel
+ * "Sinais Wi-Fi".
+ */
+wifi: boolean, 
+/**
  * Risco da última revisão de segurança.
  */
 risk: Severity | null, lastTestAt: string | null, lastTestOk: boolean | null, 

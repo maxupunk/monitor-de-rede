@@ -59,6 +59,12 @@ pub enum AlertField {
     VpnPeerStatus,
     VpnStatusTransition,
     VpnSecondsSinceActivity,
+    // Clientes Wi-Fi vigiados
+    WifiClientName,
+    WifiClientStatus,
+    WifiClientOfflineSeconds,
+    WifiClientSignalDbm,
+    WifiClientHealth,
     // Padrões no log
     LogPatternKey,
     LogMatchCount,
@@ -150,7 +156,7 @@ mod tests {
     /// Escrita à mão de propósito: é ela que obriga quem acrescenta uma
     /// variante a olhar para a lista do Rust — e o teste abaixo obriga as duas
     /// a coincidirem com a do frontend.
-    const TODAS: [AlertField; 53] = [
+    const TODAS: [AlertField; 58] = [
         AlertField::Status,
         AlertField::ReachabilityCause,
         AlertField::LatencyMs,
@@ -178,6 +184,11 @@ mod tests {
         AlertField::VpnPeerStatus,
         AlertField::VpnStatusTransition,
         AlertField::VpnSecondsSinceActivity,
+        AlertField::WifiClientName,
+        AlertField::WifiClientStatus,
+        AlertField::WifiClientOfflineSeconds,
+        AlertField::WifiClientSignalDbm,
+        AlertField::WifiClientHealth,
         AlertField::LogPatternKey,
         AlertField::LogMatchCount,
         AlertField::LogWindowSeconds,

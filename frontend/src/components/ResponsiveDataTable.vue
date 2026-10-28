@@ -83,7 +83,15 @@ import { VDataTable } from 'vuetify/components'
 import type { VNode } from 'vue'
 
 const props = defineProps<{
-  headers: { title: string; key: string; width?: string; sortable?: boolean }[]
+  headers: {
+    title: string
+    key: string
+    /** O campo que ordena e aparece, quando não é o próprio `key`. */
+    value?: string
+    width?: string
+    sortable?: boolean
+    align?: 'start' | 'center' | 'end'
+  }[]
   items: any[]
   loading?: boolean
   search?: string

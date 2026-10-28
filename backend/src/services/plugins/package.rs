@@ -329,9 +329,17 @@ fn validate_tests(package: &PluginPackage, problems: &mut Vec<String>) {
             .as_ref()
             .and_then(|roles| roles.actions.run.as_deref())
             == Some(action.id.as_str());
+        // O `ping` Wi-Fi precisa de uma estação conectada como alvo, que a
+        // validação também não tem.
+        let wifi_ping = manifest
+            .wifi
+            .as_ref()
+            .and_then(|roles| roles.ping.as_deref())
+            == Some(action.id.as_str());
         if action.effect == Effect::Read
             && !action.reveals
             && !throughput_run
+            && !wifi_ping
             && !package
                 .tests
                 .functional

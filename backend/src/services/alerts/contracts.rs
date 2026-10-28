@@ -166,6 +166,11 @@ impl AlertScopeKey {
         format!("vpn_peer:{vpn_peer_id}")
     }
 
+    #[must_use]
+    pub fn wifi_client(watched_id: i64) -> String {
+        format!("wifi_client:{watched_id}")
+    }
+
     /// Extrai o id quando a chave é de monitor.
     ///
     /// Existe por causa da recuperação: alertas antigos foram gravados só com
@@ -186,6 +191,7 @@ mod tests {
         assert_eq!(AlertScopeKey::monitor(12), "monitor:12");
         assert_eq!(AlertScopeKey::interface(34), "interface:34");
         assert_eq!(AlertScopeKey::vpn_peer(7), "vpn_peer:7");
+        assert_eq!(AlertScopeKey::wifi_client(3), "wifi_client:3");
     }
 
     #[test]

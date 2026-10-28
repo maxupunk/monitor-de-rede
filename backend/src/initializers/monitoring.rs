@@ -97,6 +97,9 @@ impl Initializer for MonitoringInitializer {
             }
         }
         ensure_local_agent(ctx).await;
+        // A lista dos aparelhos vigiados fica no barramento desde o boot: a
+        // tela a recebe ao conectar no SSE, sem consulta.
+        crate::services::wifi::watchlist::publish(ctx).await;
         Ok(())
     }
 }

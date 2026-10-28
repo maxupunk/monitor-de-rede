@@ -60,6 +60,7 @@ function fleet(members: FleetMember[]): FleetView {
     surfaces: ['fleet'],
     settings: null,
     fleet: null,
+    wifi: false,
     risk: null,
     lastTestAt: null,
     lastTestOk: true,

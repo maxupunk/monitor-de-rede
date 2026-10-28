@@ -37,6 +37,8 @@ pub struct DeviceCapabilities {
     /// Plugins de dispositivo (acesso SSH/HTTP): todo equipamento com IP,
     /// menos o do próprio sistema.
     pub plugins: bool,
+    /// Há um plugin Wi-Fi ativo e instalado: a aba de clientes Wi-Fi.
+    pub wifi: bool,
 
     // --- Ações do cabeçalho ---
     /// Varredura SNMP (descobrir interfaces e sistema).

@@ -76,6 +76,8 @@ pub enum Origin {
     Fleet,
     /// Uma etapa de um teste de enlace (ADR 015).
     LinkTest,
+    /// A leitura periódica dos clientes Wi-Fi vigiados.
+    WifiWatch,
 }
 
 impl Origin {
@@ -87,6 +89,7 @@ impl Origin {
             Self::Validation => "validation",
             Self::Fleet => "fleet",
             Self::LinkTest => "link_test",
+            Self::WifiWatch => "wifi_watch",
         }
     }
 
@@ -98,6 +101,7 @@ impl Origin {
             Self::Validation => "A validação",
             Self::Fleet => "A frota",
             Self::LinkTest => "O teste de enlace",
+            Self::WifiWatch => "O vigia de Wi-Fi",
         }
     }
 }
@@ -117,7 +121,12 @@ pub fn approval_for(plugin: &plugins::Model, origin: Origin, ai_auto_accept: boo
     let active = plugin.status == status::ACTIVE;
     match origin {
         Origin::Ai if ai_auto_accept => Approval::Auto,
-        Origin::User | Origin::Validation | Origin::Fleet | Origin::LinkTest | Origin::Ai
+        Origin::User
+        | Origin::Validation
+        | Origin::Fleet
+        | Origin::LinkTest
+        | Origin::WifiWatch
+        | Origin::Ai
             if active =>
         {
             Approval::Auto

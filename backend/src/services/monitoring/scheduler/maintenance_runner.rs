@@ -6,6 +6,7 @@ use loco_rs::app::AppContext;
 use super::cadence::{
     is_due, DATA_PRUNE_INTERVAL_SECONDS, LINK_TEST_SCHEDULES_INTERVAL_SECONDS,
     ROLLUP_INTERVAL_SECONDS, VPN_STATUS_INTERVAL_SECONDS, VPN_TRAFFIC_INTERVAL_SECONDS,
+    WIFI_WATCH_INTERVAL_SECONDS,
 };
 use crate::services::{
     alerts::hysteresis,
@@ -16,6 +17,7 @@ use crate::services::{
     shared::errors::AppResult,
     syslog,
     vpn::traffic_recorder,
+    wifi,
 };
 
 /// Sincroniza o status (10s) e histórico (30s) do tráfego dos túneis VPN.
@@ -116,6 +118,20 @@ pub async fn rollup_monitor_results_if_due(ctx: &AppContext) -> AppResult<()> {
 ///
 /// Confere a cada minuto; o teste em si roda em segundo plano, com a mesma
 /// trava de concorrência dos testes pedidos pela tela.
+/// Dispara o vigia dos clientes Wi-Fi vigiados. Roda em segundo plano: a
+/// leitura dos APs por SSH leva segundos e não pode atrasar os monitores.
+pub fn run_wifi_watch_if_due(ctx: &AppContext) {
+    if !is_due("wifi_watch", WIFI_WATCH_INTERVAL_SECONDS, Utc::now()) {
+        return;
+    }
+    let ctx = ctx.clone();
+    tokio::spawn(async move {
+        if let Err(error) = wifi::watch::run(&ctx).await {
+            tracing::warn!(%error, "falha no vigia dos clientes Wi-Fi");
+        }
+    });
+}
+
 pub async fn run_link_test_schedules_if_due(ctx: &AppContext) -> AppResult<()> {
     let now = Utc::now();
     if !is_due(

@@ -24,6 +24,7 @@ function fleet(): FleetView {
       surfaces: ['device', 'fleet'],
       settings: null,
       fleet: { title: 'Rede Wi-Fi', statusAction: 'status' },
+      wifi: true,
       risk: null,
       lastTestAt: null,
       lastTestOk: null,

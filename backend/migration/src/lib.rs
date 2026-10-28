@@ -66,6 +66,7 @@ mod m20261016_000001_link_tests;
 mod m20261018_000001_link_test_legs_via;
 mod m20261021_000001_link_test_legs_health;
 mod m20261023_000001_scheduled_tasks;
+mod m20261027_000001_wifi_watched_clients;
 
 pub struct Migrator;
 
@@ -199,6 +200,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261018_000001_link_test_legs_via::Migration),
             Box::new(m20261021_000001_link_test_legs_health::Migration),
             Box::new(m20261023_000001_scheduled_tasks::Migration),
+            Box::new(m20261027_000001_wifi_watched_clients::Migration),
             // inject-above (do not remove this comment)
         ]
     }

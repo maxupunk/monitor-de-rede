@@ -97,6 +97,9 @@ pub struct PluginSummary {
     pub settings: Option<SettingsSpec>,
     /// A frota, com a lista já convertida do formato antigo (`matrix`).
     pub fleet: Option<FleetSpec>,
+    /// Alimenta a telemetria Wi-Fi (bloco `wifi`): a frota leva ao painel
+    /// "Sinais Wi-Fi".
+    pub wifi: bool,
     /// Risco da última revisão de segurança.
     pub risk: Option<Severity>,
     pub last_test_at: Option<String>,

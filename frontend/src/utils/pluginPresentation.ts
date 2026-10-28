@@ -79,6 +79,7 @@ const ORIGIN: Record<string, string> = {
   validation: 'Validação',
   fleet: 'Frota',
   link_test: 'Teste de velocidade',
+  wifi_watch: 'Vigia de Wi-Fi',
 }
 
 const FALLBACK: Presentation = { label: '—', color: 'secondary', icon: 'mdi-help' }

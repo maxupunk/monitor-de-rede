@@ -105,6 +105,7 @@ pub fn summary(model: &plugins::Model) -> AppResult<PluginSummary> {
         surfaces: manifest.surfaces,
         settings: manifest.settings,
         fleet: manifest.fleet.map(manifest::FleetSpec::resolved),
+        wifi: manifest.wifi.is_some(),
         risk: review_of(model).map(|report| report.risk),
         last_test_at: model.last_test_at.map(|at| at.to_rfc3339()),
         last_test_ok: model.last_test_ok,

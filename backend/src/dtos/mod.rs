@@ -16,6 +16,7 @@ pub mod server_addresses;
 pub mod snmp;
 pub mod storages;
 pub mod users;
+pub mod wifi;
 
 /// Lê um corpo de requisição **opcional** sem deixá-lo mascarar o erro real.
 ///

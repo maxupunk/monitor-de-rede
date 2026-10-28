@@ -22,15 +22,13 @@
 
 use sea_orm::ConnectionTrait;
 
-use crate::{
-    models::system_settings::Model as SystemSetting,
-    services::{
-        alerts::catalog::{
-            service::{apply_scoped, CatalogApplicationResult, TemplateScope},
-            templates,
-        },
-        shared::errors::AppResult,
+use crate::services::{
+    alerts::catalog::{
+        once::apply_once,
+        service::{CatalogApplicationResult, TemplateScope},
+        templates,
     },
+    shared::errors::AppResult,
 };
 
 /// Prefixo da chave. O ID do dispositivo entra no sufixo para que o mecanismo
@@ -41,12 +39,8 @@ fn marker_key(device_id: i64) -> String {
     format!("{MARKER_PREFIX}.{device_id}")
 }
 
-/// Aplica os templates de saúde ao dispositivo, uma vez na vida da instalação.
-///
-/// Idempotente por duas vias independentes, e as duas são necessárias: o
-/// marcador impede que uma regra removida pelo usuário reapareça, e a
-/// idempotência com escopo do catálogo impede duplicata caso o marcador se
-/// perca numa restauração de backup.
+/// Aplica os templates de saúde ao dispositivo, uma vez na vida da instalação
+/// (o marcador e a idempotência ficam em [`apply_once`]).
 ///
 /// # Errors
 ///
@@ -55,21 +49,13 @@ pub async fn ensure_for_device<C: ConnectionTrait>(
     db: &C,
     device_id: i64,
 ) -> AppResult<CatalogApplicationResult> {
-    let key = marker_key(device_id);
-    if SystemSetting::get(db, &key).await?.is_some() {
-        return Ok(CatalogApplicationResult::default());
-    }
-
-    let keys: Vec<String> = templates::HEALTH_KEYS
-        .iter()
-        .map(|key| (*key).to_string())
-        .collect();
-    let result = apply_scoped(db, &keys, TemplateScope::device(device_id)).await?;
-
-    // O marcador é gravado depois da aplicação: se a transação de criação
-    // falhar, o próximo boot tenta de novo em vez de desistir para sempre.
-    SystemSetting::set(db, &key, Some("1".to_string())).await?;
-    Ok(result)
+    apply_once(
+        db,
+        &marker_key(device_id),
+        &templates::HEALTH_KEYS,
+        TemplateScope::device(device_id),
+    )
+    .await
 }
 
 #[cfg(test)]

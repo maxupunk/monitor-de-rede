@@ -33,7 +33,7 @@ use crate::{
             collect_unmonitored_device, dispatch_notifications, due_unmonitored_snmp_devices,
             execute_one, execute_snmp_device_group, local_snmp_device_id,
             rollup_monitor_results_if_due, run_data_pruner_if_due, run_link_test_schedules_if_due,
-            sync_vpn_traffic_if_due,
+            run_wifi_watch_if_due, sync_vpn_traffic_if_due,
         },
         probes::liveness::mark_stale_probes_offline,
         shared::errors::AppResult,
@@ -207,6 +207,8 @@ async fn run_cycle_inner(ctx: &AppContext, detach_discovery: bool) -> AppResult<
     if let Err(error) = rollup_monitor_results_if_due(ctx).await {
         tracing::warn!(%error, "falha ao executar rollup de resultados");
     }
+    // Clientes Wi-Fi vigiados: só lê os APs se houver aparelho vigiado.
+    run_wifi_watch_if_due(ctx);
     // Teste de enlace agendado (ADR 015): o teste roda em segundo plano, com
     // a mesma trava de concorrência dos pedidos da tela.
     if let Err(error) = run_link_test_schedules_if_due(ctx).await {

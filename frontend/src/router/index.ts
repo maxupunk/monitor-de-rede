@@ -28,6 +28,11 @@ const routes = [
         component: () => import('../pages/DeviceDetailPage.vue'),
       },
       {
+        path: 'wifi',
+        name: 'wifi-clients',
+        component: () => import('../pages/WifiClientsPage.vue'),
+      },
+      {
         path: 'topology',
         name: 'topology',
         component: () => import('../pages/TopologyPage.vue'),

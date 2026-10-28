@@ -73,3 +73,4 @@ mod topology;
 mod users_crud;
 mod vendors;
 mod vpn_orchestration;
+mod wifi_telemetry;

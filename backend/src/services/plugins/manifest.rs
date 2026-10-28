@@ -413,6 +413,58 @@ pub const THROUGHPUT_CONTRACTS: [(&str, &[(&str, ContractType)]); 5] = [
     ),
 ];
 
+/// As ações do manifesto que alimentam a telemetria Wi-Fi. A saída de cada
+/// uma é um contrato fixo (`services::wifi::contract`): o fabricante muda, a
+/// tela e a classificação de saúde não.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct WifiRoles {
+    /// Lista as estações conectadas (leitura, sem parâmetros).
+    pub clients: String,
+    /// Mede a latência do equipamento até o IP de uma estação (leitura,
+    /// parâmetro `target`). Sem ela, a tela não oferece o teste.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub ping: Option<String>,
+}
+
+impl WifiRoles {
+    /// `(papel, ação)` de cada papel declarado.
+    fn declared(&self) -> impl Iterator<Item = (&'static str, &str)> {
+        [
+            ("clients", Some(&self.clients)),
+            ("ping", self.ping.as_ref()),
+        ]
+        .into_iter()
+        .filter_map(|(role, action)| action.map(|action| (role, action.as_str())))
+    }
+}
+
+/// Os parâmetros que a plataforma passa a cada papel Wi-Fi.
+pub const WIFI_CONTRACTS: [(&str, &[(&str, ContractType)]); 2] = [
+    ("clients", &[]),
+    ("ping", &[("target", ContractType::Text)]),
+];
+
+/// De que bloco é o contrato, para a mensagem apontar o lugar certo.
+struct ContractScope {
+    /// Onde o papel é declarado (`throughput.actions`, `wifi`).
+    path: &'static str,
+    /// Para que serve o papel ("do teste de enlace").
+    purpose: &'static str,
+}
+
+const THROUGHPUT_SCOPE: ContractScope = ContractScope {
+    path: "throughput.actions",
+    purpose: "do teste de enlace",
+};
+
+const WIFI_SCOPE: ContractScope = ContractScope {
+    path: "wifi",
+    purpose: "da telemetria Wi-Fi",
+};
+
 impl ThroughputActions {
     /// `(papel, ação)` de cada papel declarado.
     fn declared(&self) -> impl Iterator<Item = (&'static str, &str)> {
@@ -639,6 +691,11 @@ pub struct PluginManifest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub throughput: Option<ThroughputRoles>,
+    /// Telemetria Wi-Fi: quem lista as estações e quem mede a latência até
+    /// uma delas (`services::wifi`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub wifi: Option<WifiRoles>,
 }
 
 impl FleetSpec {
@@ -824,6 +881,9 @@ pub fn validate(manifest: &PluginManifest) -> Vec<String> {
     if let Some(roles) = &manifest.throughput {
         validate_throughput(manifest, roles, &mut problems);
     }
+    if let Some(roles) = &manifest.wifi {
+        validate_wifi(manifest, roles, &mut problems);
+    }
     problems
 }
 
@@ -932,7 +992,44 @@ fn validate_throughput(
             .iter()
             .find(|(name, _)| *name == role)
             .map_or(&[][..], |(_, contract)| *contract);
-        validate_contract(role, id, action.params.as_ref(), contract, problems);
+        validate_contract(
+            &THROUGHPUT_SCOPE,
+            role,
+            id,
+            action.params.as_ref(),
+            contract,
+            problems,
+        );
+    }
+}
+
+/// O bloco `wifi`: ações existentes, de leitura, que não revelam segredo e
+/// com os parâmetros do contrato fixo.
+fn validate_wifi(manifest: &PluginManifest, roles: &WifiRoles, problems: &mut Vec<String>) {
+    for (role, id) in roles.declared() {
+        let Some(action) = manifest.action(id) else {
+            problems.push(format!(
+                "`wifi.{role}` cita `{id}`, que não é ação do plugin"
+            ));
+            continue;
+        };
+        if action.effect != Effect::Read || action.reveals {
+            problems.push(format!(
+                "`wifi.{role}` (`{id}`) precisa ser de leitura (`effect: read`) e não revelar segredo"
+            ));
+        }
+        let contract = WIFI_CONTRACTS
+            .iter()
+            .find(|(name, _)| *name == role)
+            .map_or(&[][..], |(_, contract)| *contract);
+        validate_contract(
+            &WIFI_SCOPE,
+            role,
+            id,
+            action.params.as_ref(),
+            contract,
+            problems,
+        );
     }
 }
 
@@ -940,12 +1037,14 @@ fn validate_throughput(
 /// Nenhum é exigido (`required`): a plataforma omite o que não se aplica
 /// (`limitMbps` sem limite, `user`/`password` sem autenticação).
 fn validate_contract(
+    scope: &ContractScope,
     role: &str,
     id: &str,
     schema: Option<&Value>,
     contract: &[(&str, ContractType)],
     problems: &mut Vec<String>,
 ) {
+    let ContractScope { path, purpose } = scope;
     let empty = serde_json::Map::new();
     let properties = schema
         .and_then(|schema| schema.get("properties"))
@@ -954,7 +1053,7 @@ fn validate_contract(
     for (name, kind) in contract {
         let Some(property) = properties.get(*name) else {
             problems.push(format!(
-                "`throughput.actions.{role}` (`{id}`) precisa do parâmetro `{name}`"
+                "`{path}.{role}` (`{id}`) precisa do parâmetro `{name}`"
             ));
             continue;
         };
@@ -974,14 +1073,14 @@ fn validate_contract(
         };
         if !valid {
             problems.push(format!(
-                "`{id}.{name}` (papel `{role}` do teste de enlace) precisa ser {expected}"
+                "`{id}.{name}` (papel `{role}` {purpose}) precisa ser {expected}"
             ));
         }
     }
     for name in properties.keys() {
         if !contract.iter().any(|(expected, _)| expected == name) {
             problems.push(format!(
-                "`{id}.{name}` não faz parte do contrato do papel `{role}` do teste de enlace — \
+                "`{id}.{name}` não faz parte do contrato do papel `{role}` {purpose} — \
                  a plataforma não o preenche"
             ));
         }
@@ -1485,6 +1584,63 @@ mod tests {
             }
         }))
         .unwrap()
+    }
+
+    /// Um AP: lista as estações e mede a latência até uma delas.
+    fn com_wifi() -> PluginManifest {
+        serde_json::from_value(json!({
+            "slug": "ap", "name": "AP", "version": "1.0.0", "transports": ["ssh"],
+            "actions": [
+                { "id": "detect", "title": "Detectar", "effect": "read" },
+                { "id": "clients", "title": "Clientes", "effect": "read" },
+                { "id": "ping", "title": "Ping", "effect": "read",
+                  "params": { "type": "object", "properties": {
+                      "target": { "type": "string", "pattern": "[0-9a-fA-F.:]+" } },
+                      "required": ["target"] } }
+            ],
+            "wifi": { "clients": "clients", "ping": "ping" }
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn papeis_wifi_coerentes_passam() {
+        let manifesto = com_wifi();
+        assert!(
+            validate(&manifesto).is_empty(),
+            "{:?}",
+            validate(&manifesto)
+        );
+        // O ping é opcional: sem ele, a tela só não oferece o teste.
+        let mut sem_ping = com_wifi();
+        sem_ping.wifi.as_mut().unwrap().ping = None;
+        assert!(validate(&sem_ping).is_empty());
+    }
+
+    #[test]
+    fn papeis_wifi_incoerentes_sao_apontados() {
+        let mut fantasma = com_wifi();
+        fantasma.wifi.as_mut().unwrap().clients = "estacoes".into();
+        assert!(validate(&fantasma)
+            .iter()
+            .any(|p| p.contains("`wifi.clients` cita `estacoes`")));
+
+        let mut escrita = com_wifi();
+        escrita.actions[1].effect = Effect::Write;
+        assert!(validate(&escrita)
+            .iter()
+            .any(|p| p.contains("`wifi.clients` (`clients`) precisa ser de leitura")));
+
+        let mut sem_alvo = com_wifi();
+        sem_alvo.actions[2].params = Some(json!({ "type": "object", "properties": {
+            "host": { "type": "string" } } }));
+        let problems = validate(&sem_alvo);
+        assert!(problems
+            .iter()
+            .any(|p| p.contains("`wifi.ping` (`ping`) precisa do parâmetro `target`")));
+        assert!(problems.iter().any(|p| p.contains(
+            "`ping.host` não faz parte do contrato do papel `ping` da telemetria Wi-Fi"
+        )));
     }
 
     #[test]

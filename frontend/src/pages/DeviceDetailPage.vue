@@ -175,6 +175,7 @@
         </v-tab>
         <v-tab v-if="can.logs" value="logs" prepend-icon="mdi-text-box-search-outline">Logs</v-tab>
         <v-tab v-if="can.vpn" value="vpn" prepend-icon="mdi-shield-lock-outline">VPN</v-tab>
+        <v-tab v-if="can.wifi" value="wifi" prepend-icon="mdi-wifi">Clientes Wi-Fi</v-tab>
         <!-- Plugins instalados: abas próprias, agrupadas e em outra cor -->
         <template v-if="installedPlugins.length">
           <v-divider vertical class="mx-1 my-3" />
@@ -256,6 +257,11 @@
               @revoke-vpn-access="revokeVpnAccess"
               @show-vpn-firewall-hints="showVpnFirewallHints"
             />
+          </v-window-item>
+
+          <!-- Aba Clientes Wi-Fi: as estações chegam pelo SSE -->
+          <v-window-item value="wifi">
+            <DeviceWifiClients v-if="can.wifi" :device-id="deviceId" />
           </v-window-item>
 
           <!-- Aba Plugins: catálogo, credenciais e histórico -->
@@ -875,6 +881,7 @@ import DeviceInterfacesTab from '@/components/devices/tabs/DeviceInterfacesTab.v
 import DeviceEventsTab from '@/components/devices/tabs/DeviceEventsTab.vue'
 import DeviceLogsTab from '@/components/devices/tabs/DeviceLogsTab.vue'
 import DeviceVpnTab from '@/components/devices/tabs/DeviceVpnTab.vue'
+import DeviceWifiClients from '@/components/wifi/DeviceWifiClients.vue'
 import DevicePluginsTab from '@/components/devices/tabs/DevicePluginsTab.vue'
 import InstalledPluginView from '@/components/plugins/device/InstalledPluginView.vue'
 import { usePluginsStore } from '@/stores/plugins'
@@ -914,6 +921,7 @@ const can = computed(() => {
     events: caps?.events ?? false,
     logs: caps?.logs ?? false,
     vpn: caps?.vpn ?? Boolean(detailStore.device?.vpnPeer),
+    wifi: caps?.wifi ?? false,
     health: caps?.health ?? false,
     plugins: caps?.plugins ?? false,
     snmpScan,
@@ -931,6 +939,7 @@ const abasAplicaveis = computed(() => {
   if (can.value.events) abas.push('events')
   if (can.value.logs) abas.push('logs')
   if (can.value.vpn) abas.push('vpn')
+  if (can.value.wifi) abas.push('wifi')
   if (can.value.plugins) abas.push('plugins')
   abas.push(...installedPlugins.value.map((plugin) => pluginTab(plugin.id)))
   return abas

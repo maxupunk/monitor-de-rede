@@ -42,6 +42,10 @@ health: boolean,
  */
 plugins: boolean, 
 /**
+ * Há um plugin Wi-Fi ativo e instalado: a aba de clientes Wi-Fi.
+ */
+wifi: boolean, 
+/**
  * Varredura SNMP (descobrir interfaces e sistema).
  */
 canSnmpScan: boolean, 

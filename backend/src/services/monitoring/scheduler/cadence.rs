@@ -23,6 +23,10 @@ pub const ROLLUP_INTERVAL_SECONDS: i64 = 3_600;
 /// Cadência da conferência dos agendamentos de teste de enlace.
 pub const LINK_TEST_SCHEDULES_INTERVAL_SECONDS: i64 = 60;
 
+/// Cadência do vigia dos clientes Wi-Fi vigiados: uma sessão SSH por AP a
+/// cada 5 min — leve para o AP e fino o bastante para a regra de 10 min.
+pub const WIFI_WATCH_INTERVAL_SECONDS: i64 = 300;
+
 /// Próximo instante de cada tarefa periódica do ciclo.
 fn next_run_at() -> &'static Mutex<HashMap<&'static str, DateTime<Utc>>> {
     static NEXT: OnceLock<Mutex<HashMap<&'static str, DateTime<Utc>>>> = OnceLock::new();

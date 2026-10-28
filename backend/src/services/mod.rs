@@ -39,3 +39,4 @@ pub mod users;
 pub mod vendors;
 pub mod vpn;
 pub mod webpush;
+pub mod wifi;

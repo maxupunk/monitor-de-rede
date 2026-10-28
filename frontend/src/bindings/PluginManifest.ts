@@ -9,6 +9,7 @@ import type { Surface } from "./Surface";
 import type { ThroughputRoles } from "./ThroughputRoles";
 import type { TopologySpec } from "./TopologySpec";
 import type { TransportKind } from "./TransportKind";
+import type { WifiRoles } from "./WifiRoles";
 
 export type PluginManifest = { slug: string, name: string, version: string, description?: string, author?: string, transports: Array<TransportKind>, match: MatchRule, actions: Array<PluginAction>, 
 /**
@@ -36,4 +37,9 @@ topology?: TopologySpec,
 /**
  * Papéis num teste de enlace: o que serve, o que dirige.
  */
-throughput?: ThroughputRoles, };
+throughput?: ThroughputRoles, 
+/**
+ * Telemetria Wi-Fi: quem lista as estações e quem mede a latência até
+ * uma delas (`services::wifi`).
+ */
+wifi?: WifiRoles, };
