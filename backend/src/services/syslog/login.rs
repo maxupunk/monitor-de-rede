@@ -46,10 +46,7 @@ pub async fn resolve<C: ConnectionTrait>(
             if password.is_empty() {
                 return Err(AppError::validation("Informe a senha de acesso."));
             }
-            Login {
-                username: username.trim().to_owned(),
-                password: Some(password.to_owned()),
-            }
+            Login::with_password(username.trim().to_owned(), Some(password.to_owned()))
         }
         LoginChoice::Saved(TransportKind::Http) => {
             return Err(AppError::validation(

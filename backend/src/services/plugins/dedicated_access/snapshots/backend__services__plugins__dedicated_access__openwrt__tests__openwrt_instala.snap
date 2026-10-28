@@ -1,0 +1,5 @@
+---
+source: src/services/plugins/dedicated_access/openwrt.rs
+expression: "Openwrt.install_commands(&key, \"\").join(\"\\n\")"
+---
+umask 077; mkdir -p /etc/dropbear; touch /etc/dropbear/authorized_keys; grep -qF ' netmonitor-0123456789ab' /etc/dropbear/authorized_keys || echo 'no-port-forwarding,no-agent-forwarding,no-X11-forwarding ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITESTE netmonitor-0123456789ab' >> /etc/dropbear/authorized_keys; chmod 600 /etc/dropbear/authorized_keys

@@ -886,6 +886,7 @@ impl Inner {
                         stdout,
                         stderr,
                         exit_code,
+                        ..
                     } => (
                         exit_code.map(i64::from),
                         if stderr.is_empty() {
@@ -999,6 +1000,7 @@ impl Inner {
                 stdout,
                 stderr,
                 exit_code,
+                ..
             } => Ok((stdout, stderr, exit_code)),
             DeviceIoReply::Http { .. } => fail("resposta inesperada do transporte"),
         }
@@ -1494,18 +1496,12 @@ mod tests {
             reason: None,
             credentials: Credentials {
                 ssh: Some(AccessProfile {
-                    login: Login {
-                        username: "root".into(),
-                        password: Some("s3nh4".into()),
-                    },
+                    login: Login::with_password("root", Some("s3nh4".into())),
                     port: 22,
                     https: false,
                 }),
                 http: Some(AccessProfile {
-                    login: Login {
-                        username: "admin".into(),
-                        password: Some("s3nh4".into()),
-                    },
+                    login: Login::with_password("admin", Some("s3nh4".into())),
                     port: 80,
                     https: false,
                 }),

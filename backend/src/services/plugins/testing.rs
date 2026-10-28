@@ -67,10 +67,7 @@ pub struct TestReport {
 fn test_credentials() -> Credentials {
     let profile = |port| {
         Some(AccessProfile {
-            login: Login {
-                username: "usuario-de-teste".into(),
-                password: None,
-            },
+            login: Login::with_password("usuario-de-teste", None),
             port,
             https: false,
         })

@@ -13,7 +13,7 @@
       <v-col cols="12" sm="7">
         <v-text-field
           v-model="username"
-          label="Usuário"
+          :label="dedicated ? 'Usuário administrador' : 'Usuário'"
           :rules="[(v: string) => Boolean(v?.trim()) || 'Informe o usuário']"
           variant="outlined"
           density="comfortable"
@@ -36,6 +36,22 @@
     </v-row>
 
     <v-radio-group v-model="storage" color="primary" class="mt-1 mb-1" hide-details>
+      <v-radio v-if="kind === 'ssh'" value="key" class="mb-2">
+        <template #label>
+          <div>
+            <div class="font-weight-medium d-flex align-center flex-wrap ga-2">
+              Acesso dedicado do NetMonitor
+              <v-chip v-if="dedicatedPlatform" color="success" size="x-small" variant="flat">
+                Recomendado
+              </v-chip>
+            </div>
+            <div class="text-body-small">
+              A senha do administrador é usada uma vez e não é guardada.
+              {{ dedicatedAccessEffect(platform ?? dedicatedPlatform) }}
+            </div>
+          </div>
+        </template>
+      </v-radio>
       <v-radio value="vault">
         <template #label>
           <div>
@@ -58,9 +74,20 @@
       </v-radio>
     </v-radio-group>
 
+    <v-select
+      v-if="dedicated"
+      v-model="platform"
+      :items="PLATFORMS"
+      label="Sistema do equipamento"
+      variant="outlined"
+      density="comfortable"
+      class="mt-4"
+      hide-details
+    ></v-select>
+
     <v-text-field
       v-model="secret"
-      label="Senha"
+      :label="dedicated ? 'Senha do administrador' : 'Senha'"
       :type="showSecret ? 'text' : 'password'"
       :append-inner-icon="showSecret ? 'mdi-eye-off' : 'mdi-eye'"
       :hint="secretHint"
@@ -107,17 +134,25 @@
  */
 import { computed, ref, watch } from 'vue'
 import type { AgentRouteOption } from '@/bindings/AgentRouteOption'
-import type { CredentialInput } from '@/bindings/CredentialInput'
 import type { CredentialView } from '@/bindings/CredentialView'
+import type { DedicatedPlatform } from '@/bindings/DedicatedPlatform'
 import type { SecretStorage } from '@/bindings/SecretStorage'
 import type { TransportKind } from '@/bindings/TransportKind'
 import { agentRouteItems } from '@/utils/agentRoutes'
-import { credentialOf, transportLabel } from '@/utils/deviceCredentials'
+import {
+  type AccessSubmission,
+  credentialOf,
+  dedicatedAccessEffect,
+  dedicatedPlatformLabel,
+  transportLabel,
+} from '@/utils/deviceCredentials'
 
 const props = defineProps<{
   /** As credenciais que o equipamento já tem: a do tipo escolhido preenche o formulário. */
   credentials: CredentialView[]
   agents: AgentRouteOption[]
+  /** O sistema conhecido do equipamento, quando o acesso dedicado o cobre. */
+  dedicatedPlatform?: DedicatedPlatform | null
   /** O tipo vem de quem pediu (o que falta) — não se troca. */
   lockKind?: boolean
   disabled?: boolean
@@ -132,6 +167,14 @@ const KINDS = (['ssh', 'http', 'telnet'] as const).map((value) => ({
   value,
 }))
 
+const PLATFORMS: { title: string; value: DedicatedPlatform | null }[] = [
+  { title: 'Descobrir sozinho', value: null },
+  ...(['mikrotik', 'openwrt'] as const).map((value) => ({
+    title: dedicatedPlatformLabel(value),
+    value,
+  })),
+]
+
 const form = ref<{ validate: () => Promise<{ valid: boolean }> } | null>(null)
 const username = ref('')
 const secret = ref('')
@@ -140,6 +183,9 @@ const storage = ref<SecretStorage>('vault')
 const port = ref<number | ''>('')
 const https = ref(false)
 const viaProbeId = ref<number | null>(null)
+const platform = ref<DedicatedPlatform | null>(null)
+
+const dedicated = computed(() => kind.value === 'ssh' && storage.value === 'key')
 
 const existing = computed(() => credentialOf(props.credentials, kind.value))
 
@@ -149,6 +195,7 @@ const defaultPort = computed(() => {
 })
 
 const secretHint = computed(() => {
+  if (dedicated.value) return 'Usada só para criar o acesso; não fica guardada em lugar nenhum.'
   if (storage.value === 'ask') return 'Opcional agora: se informada, já abre a sessão.'
   if (existing.value?.hasStoredSecret) return 'Deixe vazio para manter a senha guardada.'
   return kind.value === 'http'
@@ -158,6 +205,7 @@ const secretHint = computed(() => {
 
 /** SSH/Telnet guardados sem senha não entram no equipamento — é o que faltava. */
 function secretRule(value: string): boolean | string {
+  if (dedicated.value) return Boolean(value) || 'Informe a senha do administrador'
   if (storage.value !== 'vault' || kind.value === 'http') return true
   if (existing.value?.hasStoredSecret || value) return true
   return 'Informe a senha para guardar cifrada'
@@ -170,8 +218,11 @@ const routes = computed(() =>
 /** Preenche com a credencial do tipo (ou os padrões) — ao abrir e ao trocar o tipo. */
 function fill() {
   const current = existing.value
-  username.value = current?.username ?? (kind.value === 'ssh' ? 'root' : '')
-  storage.value = current?.storage ?? 'vault'
+  const suggested = kind.value === 'ssh' ? props.dedicatedPlatform : null
+  platform.value = suggested ?? null
+  username.value =
+    current?.username ?? (suggested === 'mikrotik' ? 'admin' : kind.value === 'ssh' ? 'root' : '')
+  storage.value = current?.storage ?? (suggested ? 'key' : 'vault')
   port.value = current?.port ?? ''
   https.value = current?.https ?? false
   viaProbeId.value = current?.viaProbeId ?? null
@@ -181,20 +232,41 @@ function fill() {
 
 watch([kind, () => props.credentials], fill, { immediate: true })
 
+/** O acesso dedicado só existe no SSH: trocar de tipo volta para a senha guardada. */
+watch(kind, (value) => {
+  if (value !== 'ssh' && storage.value === 'key') storage.value = 'vault'
+})
+
 /** Confere e monta o pedido; `null` quando há campo a corrigir. */
-async function build(): Promise<CredentialInput | null> {
+async function build(): Promise<AccessSubmission | null> {
   const result = await form.value?.validate()
   if (result && !result.valid) return null
+  const chosenPort = typeof port.value === 'number' && port.value > 0 ? port.value : undefined
+  if (dedicated.value) {
+    return {
+      mode: 'dedicated',
+      input: {
+        platform: platform.value ?? undefined,
+        username: username.value.trim(),
+        password: secret.value,
+        port: chosenPort,
+        viaProbeId: viaProbeId.value,
+      },
+    }
+  }
   return {
-    kind: kind.value,
-    username: username.value.trim(),
-    secret: secret.value || undefined,
-    storage: storage.value,
-    port: typeof port.value === 'number' && port.value > 0 ? port.value : undefined,
-    https: kind.value === 'http' ? https.value : undefined,
-    viaProbeId: viaProbeId.value,
+    mode: 'credential',
+    input: {
+      kind: kind.value,
+      username: username.value.trim(),
+      secret: secret.value || undefined,
+      storage: storage.value,
+      port: chosenPort,
+      https: kind.value === 'http' ? https.value : undefined,
+      viaProbeId: viaProbeId.value,
+    },
   }
 }
 
-defineExpose({ build })
+defineExpose({ build, dedicated })
 </script>

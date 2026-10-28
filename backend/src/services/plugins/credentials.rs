@@ -11,6 +11,10 @@
 //!   decifrada só no instante de montar a conexão.
 //! * `ask` — nada vai ao banco. A senha é informada por sessão e fica em
 //!   memória ([`session_store`]) até expirar.
+//! * `key` — o acesso dedicado (ADR 016): a senha do administrador foi usada
+//!   uma vez para instalar no equipamento uma chave exclusiva do NetMonitor, e
+//!   só a chave privada, cifrada, é guardada. Nasce só por
+//!   [`super::dedicated_access`]; o formulário comum não a cria nem a troca.
 //!
 //! Por dispositivo há no máximo uma credencial de cada tipo (SSH, HTTP,
 //! Telnet), com a porta e, opcionalmente, o agente remoto por onde o acesso
@@ -26,6 +30,7 @@ use serde_json::Value;
 use ts_rs::TS;
 
 use super::{
+    dedicated_access::DedicatedAccess,
     manifest::TransportKind,
     runtime::{AccessProfile, Credentials},
     transport::Login,
@@ -52,6 +57,8 @@ pub enum SecretStorage {
     Vault,
     /// Pedida a cada sessão, só em memória.
     Ask,
+    /// Chave do acesso dedicado, cifrada no banco (ADR 016).
+    Key,
 }
 
 impl SecretStorage {
@@ -60,14 +67,15 @@ impl SecretStorage {
         match self {
             Self::Vault => "vault",
             Self::Ask => "ask",
+            Self::Key => "key",
         }
     }
 
     fn parse(value: &str) -> Self {
-        if value == "vault" {
-            Self::Vault
-        } else {
-            Self::Ask
+        match value {
+            "vault" => Self::Vault,
+            "key" => Self::Key,
+            _ => Self::Ask,
         }
     }
 }
@@ -89,6 +97,11 @@ pub struct CredentialView {
     pub has_stored_secret: bool,
     /// Há senha de sessão em memória, ainda válida.
     pub session_active: bool,
+    /// O acesso dedicado instalado no equipamento (só em `key`). Leva a chave
+    /// pública e as impressões digitais — nunca a chave privada.
+    #[ts(optional)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dedicated: Option<DedicatedAccess>,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
@@ -122,6 +135,19 @@ pub fn session_store() -> &'static EphemeralSecretStore {
 
 fn session_key(device_id: i64, kind: TransportKind) -> String {
     format!("plugin-credential:{device_id}:{}", kind.as_str())
+}
+
+/// O acesso dedicado guardado em `extra.dedicated`, se houver.
+fn dedicated_of(model: &device_credentials::Model) -> Option<DedicatedAccess> {
+    model
+        .extra
+        .as_ref()
+        .and_then(|extra| extra.get("dedicated"))
+        .and_then(|value| serde_json::from_value(value.clone()).ok())
+}
+
+fn is_dedicated(model: &device_credentials::Model) -> bool {
+    SecretStorage::parse(&model.storage) == SecretStorage::Key
 }
 
 fn https_of(model: &device_credentials::Model) -> bool {
@@ -158,22 +184,39 @@ fn to_view(model: &device_credentials::Model) -> AppResult<CredentialView> {
         via_probe_id: model.via_probe_id,
         has_stored_secret: model.secret_encrypted.is_some(),
         session_active: session_store().has(&session_key(model.device_id, kind)),
+        dedicated: dedicated_of(model),
     })
 }
 
-/// A senha pronta para uso agora: a guardada, decifrada, ou a da sessão.
-fn password_of(
-    model: &device_credentials::Model,
-    kind: TransportKind,
-) -> AppResult<Option<String>> {
-    match SecretStorage::parse(&model.storage) {
-        SecretStorage::Vault => model
+/// O login pronto para uso agora: a senha guardada, decifrada, ou a da
+/// sessão — ou a chave do acesso dedicado, com a chave de host fixada.
+///
+/// `ask` sem sessão aberta é erro aqui; guardada sem segredo volta sem senha,
+/// e cada chamador decide se isso serve.
+fn login_of(model: &device_credentials::Model, kind: TransportKind) -> AppResult<Login> {
+    let storage = SecretStorage::parse(&model.storage);
+    let secret = match storage {
+        SecretStorage::Vault | SecretStorage::Key => model
             .secret_encrypted
             .as_deref()
             .map(crypto::decrypt)
-            .transpose(),
-        SecretStorage::Ask => Ok(session_store().get(&session_key(model.device_id, kind))),
-    }
+            .transpose()?,
+        SecretStorage::Ask => session_store().get(&session_key(model.device_id, kind)),
+    };
+    Ok(match storage {
+        SecretStorage::Ask if secret.is_none() => {
+            return Err(session_missing(model.device_id, kind))
+        }
+        SecretStorage::Key => Login {
+            username: model.username.clone(),
+            password: None,
+            private_key: secret,
+            host_key: dedicated_of(model).and_then(|dedicated| dedicated.host_key),
+        },
+        SecretStorage::Vault | SecretStorage::Ask => {
+            Login::with_password(model.username.clone(), secret)
+        }
+    })
 }
 
 /// O erro único de "falta o acesso": a tela o reconhece pelo código e abre o
@@ -267,6 +310,32 @@ pub async fn upsert<C: ConnectionTrait>(
     }
     let secret = input.secret.filter(|secret| !secret.is_empty());
     let existing = find(db, device_id, input.kind).await?;
+    let existing_dedicated = existing
+        .as_ref()
+        .filter(|model| is_dedicated(model))
+        .and_then(dedicated_of);
+    match (existing_dedicated.is_some(), input.storage) {
+        // Editar porta ou agente de um acesso dedicado vale; trocar a chave
+        // por uma digitada, não.
+        (true, SecretStorage::Key) if secret.is_some() => {
+            return Err(AppError::validation(
+                "A chave do acesso dedicado não é digitada: use \"Rotacionar chave\".",
+            ))
+        }
+        (true, SecretStorage::Key) | (false, SecretStorage::Vault | SecretStorage::Ask) => {}
+        (true, _) => {
+            return Err(AppError::validation(
+                "Este equipamento usa o acesso dedicado do NetMonitor. Revogue-o antes de \
+                 voltar para senha — assim a chave sai do equipamento também.",
+            ))
+        }
+        (false, SecretStorage::Key) => {
+            return Err(AppError::validation(
+                "O acesso dedicado é criado pelo botão \"Criar acesso dedicado\", com a senha \
+                 do administrador informada uma vez.",
+            ))
+        }
+    }
     let secret_encrypted = match input.storage {
         SecretStorage::Vault => match &secret {
             Some(secret) => Some(crypto::encrypt(secret)?),
@@ -277,14 +346,21 @@ pub async fn upsert<C: ConnectionTrait>(
         // Trocar para "pedir a cada sessão" apaga a senha guardada — é o
         // sentido da troca.
         SecretStorage::Ask => None,
+        SecretStorage::Key => existing
+            .as_ref()
+            .and_then(|model| model.secret_encrypted.clone()),
     };
     let key = session_key(device_id, input.kind);
     match (input.storage, secret) {
         (SecretStorage::Ask, Some(secret)) => session_store().put(key, secret),
-        (SecretStorage::Vault, _) => session_store().forget(&key),
+        (SecretStorage::Vault | SecretStorage::Key, _) => session_store().forget(&key),
         (SecretStorage::Ask, None) => {}
     }
-    let extra = serde_json::json!({ "https": input.https.unwrap_or(false) });
+    let mut extra = serde_json::json!({ "https": input.https.unwrap_or(false) });
+    if let Some(dedicated) = existing_dedicated {
+        extra["dedicated"] = serde_json::to_value(dedicated)
+            .map_err(|error| AppError::Internal(anyhow::anyhow!("acesso dedicado: {error}")))?;
+    }
     let port = input.port.map(i32::from);
 
     let saved = if let Some(model) = existing {
@@ -399,7 +475,9 @@ pub fn gap_in(list: &[CredentialView], transports: &[TransportKind]) -> Option<A
         .find_map(|&kind| match list.iter().find(|view| view.kind == kind) {
             None => Some(AccessGap::Missing(kind)),
             Some(view) => match view.storage {
-                SecretStorage::Vault if !view.has_stored_secret => Some(AccessGap::NoSecret(kind)),
+                SecretStorage::Vault | SecretStorage::Key if !view.has_stored_secret => {
+                    Some(AccessGap::NoSecret(kind))
+                }
                 SecretStorage::Ask if !view.session_active => Some(AccessGap::SessionPending(kind)),
                 _ => None,
             },
@@ -448,10 +526,7 @@ pub async fn resolve<C: ConnectionTrait>(
         let Some(model) = find(db, device_id, kind).await? else {
             if kind == TransportKind::Http {
                 resolved.credentials.http = Some(AccessProfile {
-                    login: Login {
-                        username: String::new(),
-                        password: None,
-                    },
+                    login: Login::with_password(String::new(), None),
                     port: kind.default_port(),
                     https: false,
                 });
@@ -466,17 +541,8 @@ pub async fn resolve<C: ConnectionTrait>(
                 ),
             ));
         };
-        let password = match password_of(&model, kind)? {
-            None if SecretStorage::parse(&model.storage) == SecretStorage::Ask => {
-                return Err(session_missing(device_id, kind))
-            }
-            password => password,
-        };
         let profile = AccessProfile {
-            login: Login {
-                username: model.username.clone(),
-                password,
-            },
+            login: login_of(&model, kind)?,
             port: port_of(&model, kind),
             https: https_of(&model),
         };
@@ -512,25 +578,94 @@ pub async fn stored_login<C: ConnectionTrait>(
             format!("Este equipamento não tem credencial {label} salva. Informe usuário e senha."),
         )
     })?;
-    let password = match password_of(&model, kind)? {
-        Some(password) => password,
-        None if SecretStorage::parse(&model.storage) == SecretStorage::Ask => {
-            return Err(session_missing(device_id, kind))
-        }
-        None => {
-            return Err(missing_credential(
-                device_id,
-                kind,
-                format!(
+    let login = login_of(&model, kind)?;
+    if login.password.is_none() && login.private_key.is_none() {
+        return Err(missing_credential(
+            device_id,
+            kind,
+            format!(
                 "A credencial {label} deste equipamento está sem senha guardada. Informe a senha."
             ),
-            ))
+        ));
+    }
+    Ok(login)
+}
+
+/// Grava o acesso dedicado que acabou de ser instalado e provado: a chave
+/// privada cifrada, o resto em `extra.dedicated`. Substitui a credencial SSH
+/// que houver — a senha que estava guardada sai do banco.
+///
+/// # Errors
+///
+/// Falha de cifra ou do banco.
+pub async fn save_dedicated<C: ConnectionTrait>(
+    db: &C,
+    device_id: i64,
+    username: &str,
+    private_key: &str,
+    dedicated: &DedicatedAccess,
+    port: u16,
+    via_probe_id: Option<i64>,
+) -> AppResult<CredentialView> {
+    let kind = TransportKind::Ssh;
+    session_store().forget(&session_key(device_id, kind));
+    let extra = serde_json::json!({
+        "https": false,
+        "dedicated": serde_json::to_value(dedicated)
+            .map_err(|error| AppError::Internal(anyhow::anyhow!("acesso dedicado: {error}")))?,
+    });
+    let secret = Some(crypto::encrypt(private_key)?);
+    let port = Some(i32::from(port));
+    let saved = if let Some(model) = find(db, device_id, kind).await? {
+        let mut active: device_credentials::ActiveModel = model.into();
+        active.username = Set(username.to_owned());
+        active.secret_encrypted = Set(secret);
+        active.storage = Set(SecretStorage::Key.as_str().to_owned());
+        active.port = Set(port);
+        active.via_probe_id = Set(via_probe_id);
+        active.extra = Set(Some(extra));
+        active.update(db).await?
+    } else {
+        device_credentials::ActiveModel {
+            device_id: Set(device_id),
+            kind: Set(kind.as_str().to_owned()),
+            username: Set(username.to_owned()),
+            secret_encrypted: Set(secret),
+            storage: Set(SecretStorage::Key.as_str().to_owned()),
+            port: Set(port),
+            via_probe_id: Set(via_probe_id),
+            extra: Set(Some(extra)),
+            ..Default::default()
         }
+        .insert(db)
+        .await?
     };
-    Ok(Login {
-        username: model.username,
-        password: Some(password),
-    })
+    to_view(&saved)
+}
+
+/// O login do acesso dedicado, para rotacionar ou revogar.
+///
+/// # Errors
+///
+/// O equipamento não tem acesso dedicado, ou falha ao decifrar.
+pub async fn dedicated_login<C: ConnectionTrait>(
+    db: &C,
+    device_id: i64,
+) -> AppResult<(Login, DedicatedAccess)> {
+    let kind = TransportKind::Ssh;
+    let model = find(db, device_id, kind)
+        .await?
+        .filter(is_dedicated)
+        .ok_or_else(|| AppError::business_rule("Este equipamento não tem acesso dedicado."))?;
+    let access = dedicated_of(&model)
+        .ok_or_else(|| AppError::business_rule("O registro do acesso dedicado está incompleto."))?;
+    let login = login_of(&model, kind)?;
+    if login.private_key.is_none() {
+        return Err(AppError::business_rule(
+            "A chave do acesso dedicado não está guardada.",
+        ));
+    }
+    Ok((login, access))
 }
 
 /// Guarda, cifrado, um login que acabou de funcionar no equipamento.
@@ -550,6 +685,11 @@ pub async fn remember_login<C: ConnectionTrait>(
     port: Option<u16>,
 ) -> AppResult<CredentialView> {
     let existing = find(db, device_id, kind).await?;
+    if let Some(model) = existing.as_ref().filter(|model| is_dedicated(model)) {
+        // O acesso dedicado continua valendo: a senha que acabou de funcionar
+        // não o substitui (nem vai ao banco).
+        return to_view(model);
+    }
     let input = CredentialInput {
         kind,
         username: login.username.clone(),
@@ -586,6 +726,7 @@ mod tests {
             via_probe_id: None,
             has_stored_secret: stored,
             session_active: session,
+            dedicated: None,
         }
     }
 
@@ -618,6 +759,14 @@ mod tests {
             ..sessao
         };
         assert_eq!(gap_in(&[aberta], &ssh), None);
+        // O acesso dedicado vale como a senha guardada.
+        let chave = view(TransportKind::Ssh, SecretStorage::Key, true, false);
+        assert_eq!(gap_in(&[chave], &ssh), None);
+        let chave_perdida = view(TransportKind::Ssh, SecretStorage::Key, false, false);
+        assert_eq!(
+            gap_in(&[chave_perdida], &ssh),
+            Some(AccessGap::NoSecret(TransportKind::Ssh))
+        );
         // A do outro tipo não serve.
         let telnet = view(TransportKind::Telnet, SecretStorage::Vault, true, false);
         assert_eq!(

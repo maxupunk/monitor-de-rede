@@ -54,7 +54,9 @@ cada acesso ao equipamento (ou ligando, ciente do risco, um modo automático).
 5. **Segredos fora do script e da IA.** Credencial por equipamento e tipo:
    `vault` (cifrada com `crypto::encrypt`) ou `ask` (só em memória, 30 min).
    O script escreve `{{username}}`/`{{password}}`; a troca acontece no último
-   instante e o transcript passa por máscara.
+   instante e o transcript passa por máscara. No SSH há um terceiro modo,
+   `key` — o acesso dedicado por chave, com a senha do administrador só no
+   primeiro acesso ([ADR 016](016-acesso-dedicado-por-chave.md)).
 
 6. **Pacote `.nmplugin`** com manifesto, script, `usage` (documentação de uso,
    viaja com o plugin), `compatibility` (validações funcionais registradas) e

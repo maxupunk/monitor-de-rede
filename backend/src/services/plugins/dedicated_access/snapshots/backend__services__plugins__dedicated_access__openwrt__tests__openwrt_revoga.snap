@@ -1,0 +1,5 @@
+---
+source: src/services/plugins/dedicated_access/openwrt.rs
+expression: "Openwrt.revoke_commands(&key.comment).join(\"\\n\")"
+---
+sed -i '/ netmonitor-0123456789ab$/d' /etc/dropbear/authorized_keys

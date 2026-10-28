@@ -501,6 +501,7 @@ mod tests {
                 stdout: "tx: 1Mbps\ntx: 2Mbps\n".into(),
                 stderr: String::new(),
                 exit_code: Some(0),
+                host_key: None,
             })
         }
 
@@ -536,10 +537,7 @@ mod tests {
                             host: "192.168.88.1".into(),
                             port: 22,
                         },
-                        login: device_io::Login {
-                            username: "admin".into(),
-                            password: None,
-                        },
+                        login: device_io::Login::with_password("admin", None),
                         command: "/tool bandwidth-test".into(),
                         timeout_ms: 1_000,
                     },

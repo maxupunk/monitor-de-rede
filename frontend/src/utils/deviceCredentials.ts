@@ -1,4 +1,8 @@
+import type { CredentialInput } from '@/bindings/CredentialInput'
 import type { CredentialView } from '@/bindings/CredentialView'
+import type { DedicatedAccess } from '@/bindings/DedicatedAccess'
+import type { DedicatedPlatform } from '@/bindings/DedicatedPlatform'
+import type { ProvisionInput } from '@/bindings/ProvisionInput'
 import type { TransportKind } from '@/bindings/TransportKind'
 import { ApiError, MISSING_CREDENTIAL_CODE } from '@/services/apiService'
 
@@ -23,10 +27,15 @@ export function credentialKindFor(protocol: string): TransportKind {
 
 /** Há senha pronta para uso agora, sem perguntar nada ao operador. */
 export function credentialReady(credential: CredentialView): boolean {
-  return credential.storage === 'vault' ? credential.hasStoredSecret : credential.sessionActive
+  return credential.storage === 'ask' ? credential.sessionActive : credential.hasStoredSecret
 }
 
 export function credentialSecretLabel(credential: CredentialView): string {
+  if (credential.storage === 'key') {
+    return credential.hasStoredSecret
+      ? 'acesso dedicado por chave'
+      : 'chave do acesso dedicado perdida'
+  }
   if (credential.storage === 'vault') {
     return credential.hasStoredSecret ? 'senha guardada cifrada' : 'sem senha guardada'
   }
@@ -60,6 +69,43 @@ export function pickShellCredential(
       .filter((credential) => SHELL_KINDS.includes(credential.kind))
       .sort((a, b) => rank(a) - rank(b))[0] ?? null
   )
+}
+
+/** O que o formulário do acesso pede para gravar: a credencial comum ou o acesso dedicado. */
+export type AccessSubmission =
+  { mode: 'credential'; input: CredentialInput } | { mode: 'dedicated'; input: ProvisionInput }
+
+/** A credencial com o acesso dedicado instalado (ADR 016). */
+export type DedicatedCredential = CredentialView & { dedicated: DedicatedAccess }
+
+export function isDedicated(
+  credential: CredentialView | null | undefined
+): credential is DedicatedCredential {
+  return credential?.storage === 'key' && Boolean(credential.dedicated)
+}
+
+const DEDICATED_PLATFORM_LABELS: Record<DedicatedPlatform, string> = {
+  mikrotik: 'MikroTik RouterOS',
+  openwrt: 'OpenWrt',
+}
+
+/** "MikroTik RouterOS", "OpenWrt". */
+export function dedicatedPlatformLabel(platform: DedicatedPlatform): string {
+  return DEDICATED_PLATFORM_LABELS[platform]
+}
+
+/**
+ * O que o acesso dedicado cria no equipamento, em uma frase para a tela —
+ * sem plataforma conhecida, as duas.
+ */
+export function dedicatedAccessEffect(platform: DedicatedPlatform | null | undefined): string {
+  if (platform === 'mikrotik') {
+    return 'Cria no RouterOS o usuário netmonitor, com grupo próprio e uma chave SSH só deste equipamento.'
+  }
+  if (platform === 'openwrt') {
+    return 'Instala no OpenWrt uma chave SSH só deste equipamento, sem túneis, que pode ser revogada.'
+  }
+  return 'No MikroTik cria o usuário netmonitor com chave própria; no OpenWrt instala uma chave exclusiva no root.'
 }
 
 const TRANSPORT_LABELS: Record<TransportKind, string> = {

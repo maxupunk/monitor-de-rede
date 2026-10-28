@@ -58,8 +58,10 @@ use super::policy::Permission;
 /// * **3** — `Command::VolumeExport`: o tar de um volume pela mesma ponte
 ///   (ADR 014, o Docker da central atendido pelo agente local);
 /// * **4** — `Command::Throughput` e saída de `DeviceIo` em `Chunk`
-///   (ADR 015 §6).
-pub const PROTOCOL_VERSION: u16 = 4;
+///   (ADR 015 §6);
+/// * **5** — `Login` do `DeviceIo` com chave privada e chave de host fixada
+///   (ADR 016, acesso dedicado por chave).
+pub const PROTOCOL_VERSION: u16 = 5;
 
 /// Teto de um quadro. Logs e inventários grandes são quebrados em chunks.
 pub const MAX_FRAME_BYTES: usize = 4 * 1024 * 1024;

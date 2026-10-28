@@ -1,0 +1,9 @@
+---
+source: src/services/plugins/dedicated_access/mikrotik.rs
+expression: "Mikrotik.install_commands(&key, \"SenhaDescartavel\").join(\"\\n\")"
+---
+:if ([:len [/user group find name="netmonitor"]] = 0) do={/user group add name="netmonitor" policy="ssh,read,write,test,policy,sensitive" comment="NetMonitor: acesso dedicado"} else={/user group set [find name="netmonitor"] policy="ssh,read,write,test,policy,sensitive"}
+:if ([:len [/user find name="netmonitor"]] = 0) do={/user add name="netmonitor" group="netmonitor" password="SenhaDescartavel" comment="NetMonitor: acesso dedicado por chave SSH"} else={/user set [find name="netmonitor"] group="netmonitor" disabled=no}
+/user ssh-keys remove [find user="netmonitor"]
+/file add name="netmonitor.pub" contents="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITESTE netmonitor-0123456789ab"
+/user ssh-keys import public-key-file="netmonitor.pub" user="netmonitor"

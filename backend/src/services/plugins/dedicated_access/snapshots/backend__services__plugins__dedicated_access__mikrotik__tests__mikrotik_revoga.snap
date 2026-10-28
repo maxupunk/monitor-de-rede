@@ -1,0 +1,7 @@
+---
+source: src/services/plugins/dedicated_access/mikrotik.rs
+expression: "Mikrotik.revoke_commands(&key.comment).join(\"\\n\")"
+---
+/user ssh-keys remove [find user="netmonitor"]
+/user remove [find name="netmonitor"]
+/user group remove [find name="netmonitor"]

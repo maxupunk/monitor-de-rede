@@ -14,7 +14,7 @@
 use std::{collections::HashMap, net::IpAddr, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
-use russh::{client::Handle, ChannelMsg};
+use russh::ChannelMsg;
 use tokio::{sync::Mutex, time::timeout};
 
 use super::{
@@ -26,11 +26,26 @@ use crate::services::{
     syslog::provision::{falha_de_acesso, ssh, telnet},
 };
 
-type SshSession = Arc<Handle<ssh::AceitaQualquerChave>>;
+/// A sessão e a chave de host que o equipamento apresentou nela.
+type SshSession = (Arc<ssh::Sessao>, String);
+
+/// Alvo, usuário e qual chave (se o login é por chave): a sessão de um não
+/// serve ao outro — a rotação do acesso dedicado prova a chave nova com a
+/// antiga ainda aberta.
+type SessionKey = (IpAddr, u16, String, Option<u64>);
+
+fn key_identity(login: &Login) -> Option<u64> {
+    use std::hash::{Hash, Hasher};
+    login.private_key.as_ref().map(|key| {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        key.hash(&mut hasher);
+        hasher.finish()
+    })
+}
 
 pub struct LocalTransport {
     origin: String,
-    ssh_sessions: Mutex<HashMap<(IpAddr, u16, String), SshSession>>,
+    ssh_sessions: Mutex<HashMap<SessionKey, SshSession>>,
     http: reqwest::Client,
 }
 
@@ -56,15 +71,20 @@ impl LocalTransport {
 
     async fn ssh_session(&self, endpoint: &Endpoint, login: &Login) -> AppResult<SshSession> {
         let ip = endpoint.ip().map_err(AppError::validation)?;
-        let key = (ip, endpoint.port, login.username.clone());
+        let key = (
+            ip,
+            endpoint.port,
+            login.username.clone(),
+            key_identity(login),
+        );
         let mut sessions = self.ssh_sessions.lock().await;
         if let Some(session) = sessions.get(&key) {
-            if !session.is_closed() {
+            if !session.0.is_closed() {
                 return Ok(session.clone());
             }
         }
-        let password = login.password.as_deref().unwrap_or_default();
-        let session = Arc::new(ssh::conecta(ip, endpoint.port, &login.username, password).await?);
+        let (session, host_key) = ssh::conecta_vendo_host(ip, endpoint.port, login).await?;
+        let session = (Arc::new(session), host_key);
         sessions.insert(key, session.clone());
         Ok(session)
     }
@@ -76,7 +96,7 @@ impl LocalTransport {
         command: &str,
         on_line: Option<LineSink<'_>>,
     ) -> AppResult<DeviceIoReply> {
-        let session = self.ssh_session(endpoint, login).await?;
+        let (session, host_key) = self.ssh_session(endpoint, login).await?;
         let mut channel = session
             .channel_open_session()
             .await
@@ -111,6 +131,7 @@ impl LocalTransport {
             stdout: bytes_to_text(&stdout),
             stderr: bytes_to_text(&stderr),
             exit_code,
+            host_key: Some(host_key),
         })
     }
 
@@ -131,6 +152,7 @@ impl LocalTransport {
             stdout: strip_echo(&output, command),
             stderr: String::new(),
             exit_code: None,
+            host_key: None,
         })
     }
 
@@ -390,10 +412,7 @@ AAAEDv3xpp8fBhWhAcvTQ+b0Y4gcPVjhRxTQhYBMDhiXU/7g0vAFOwfz8VL8IF81Q2NCy6
                 host: "127.0.0.1".into(),
                 port,
             },
-            login: Login {
-                username: "root".into(),
-                password: Some(password.into()),
-            },
+            login: Login::with_password("root", Some(password.into())),
             command: command.into(),
             timeout_ms: 5_000,
         }

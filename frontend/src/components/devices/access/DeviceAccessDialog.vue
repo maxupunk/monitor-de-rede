@@ -33,16 +33,38 @@
           <v-progress-circular indeterminate color="primary" size="24"></v-progress-circular>
           <span class="text-body-medium">Carregando o acesso do equipamento…</span>
         </div>
+        <DedicatedAccessPanel
+          v-else-if="dedicatedCredential"
+          :device-id="deviceId"
+          :credential="dedicatedCredential"
+          @rotated="onRotated"
+          @revoked="onRevoked"
+        />
         <DeviceAccessForm
           v-else
           ref="form"
           v-model:kind="kind"
           :credentials="credentials"
           :agents="agents"
+          :dedicated-platform="dedicatedPlatform"
           :lock-kind="transport !== null"
           :disabled="saving"
           @submit="save"
         />
+
+        <v-alert
+          v-if="leftovers.length"
+          type="warning"
+          variant="tonal"
+          density="compact"
+          class="mt-3"
+        >
+          O acesso foi revogado e a chave já não entra, mas o equipamento recusou alguns passos —
+          remova à mão:
+          <ul class="mt-1 ml-4">
+            <li v-for="item in leftovers" :key="item">{{ item }}</li>
+          </ul>
+        </v-alert>
 
         <v-alert v-if="error" type="error" variant="tonal" density="compact" class="mt-3">
           {{ error }}
@@ -52,17 +74,18 @@
       <v-card-actions class="px-4 pb-4 flex-wrap ga-2">
         <v-spacer></v-spacer>
         <v-btn color="primary" variant="text" :disabled="saving" @click="close">
-          {{ reason ? 'Agora não' : 'Cancelar' }}
+          {{ dedicatedCredential ? 'Fechar' : reason ? 'Agora não' : 'Cancelar' }}
         </v-btn>
         <v-btn
+          v-if="!dedicatedCredential"
           color="primary"
           variant="flat"
-          prepend-icon="mdi-content-save-outline"
+          :prepend-icon="creatingDedicated ? 'mdi-key-plus' : 'mdi-content-save-outline'"
           :loading="saving"
           :disabled="loading"
           @click="save"
         >
-          Salvar acesso
+          {{ creatingDedicated ? 'Criar acesso dedicado' : 'Salvar acesso' }}
         </v-btn>
       </v-card-actions>
     </v-card>
@@ -78,11 +101,17 @@
 import { computed, ref, watch } from 'vue'
 import { useDisplay } from 'vuetify'
 import type { AgentRouteOption } from '@/bindings/AgentRouteOption'
-import type { CredentialInput } from '@/bindings/CredentialInput'
 import type { CredentialView } from '@/bindings/CredentialView'
+import type { DedicatedPlatform } from '@/bindings/DedicatedPlatform'
 import type { TransportKind } from '@/bindings/TransportKind'
 import { usePluginsStore } from '@/stores/plugins'
-import { accessTitle } from '@/utils/deviceCredentials'
+import {
+  type AccessSubmission,
+  accessTitle,
+  credentialOf,
+  isDedicated,
+} from '@/utils/deviceCredentials'
+import DedicatedAccessPanel from './DedicatedAccessPanel.vue'
 import DeviceAccessForm from './DeviceAccessForm.vue'
 
 const props = defineProps<{
@@ -102,15 +131,28 @@ const emit = defineEmits<{
 const { xs } = useDisplay()
 const store = usePluginsStore()
 
-const form = ref<{ build: () => Promise<CredentialInput | null> } | null>(null)
+const form = ref<{
+  build: () => Promise<AccessSubmission | null>
+  dedicated: boolean
+} | null>(null)
 const kind = ref<TransportKind>('ssh')
 const credentials = ref<CredentialView[]>([])
 const agents = ref<AgentRouteOption[]>([])
 const deviceName = ref('')
+const dedicatedPlatform = ref<DedicatedPlatform | null>(null)
+const leftovers = ref<string[]>([])
 const loading = ref(false)
 const saving = ref(false)
 const error = ref<string | null>(null)
 let loadSeq = 0
+
+/** A credencial do tipo escolhido já é o acesso dedicado: mostra o painel dele. */
+const dedicatedCredential = computed(() => {
+  const credential = credentialOf(credentials.value, kind.value)
+  return isDedicated(credential) ? credential : null
+})
+
+const creatingDedicated = computed(() => form.value?.dedicated ?? false)
 
 const title = computed(() =>
   props.transport ? accessTitle(props.transport) : 'Acesso ao equipamento'
@@ -124,6 +166,7 @@ async function load() {
   const seq = ++loadSeq
   loading.value = true
   error.value = null
+  leftovers.value = []
   kind.value = props.transport ?? 'ssh'
   try {
     const access = await store.fetchAccess(props.deviceId)
@@ -131,6 +174,7 @@ async function load() {
     credentials.value = access.credentials
     agents.value = access.agents
     deviceName.value = access.deviceName
+    dedicatedPlatform.value = access.dedicatedPlatform ?? null
   } catch (err: unknown) {
     if (seq === loadSeq) error.value = describe(err, 'Não foi possível carregar o acesso.')
   } finally {
@@ -147,12 +191,15 @@ watch(
 )
 
 async function save() {
-  const input = await form.value?.build()
-  if (!input) return
+  const submission = await form.value?.build()
+  if (!submission) return
   saving.value = true
   error.value = null
   try {
-    const saved = await store.saveCredential(props.deviceId, input)
+    const saved =
+      submission.mode === 'dedicated'
+        ? await store.provisionDedicated(props.deviceId, submission.input)
+        : await store.saveCredential(props.deviceId, submission.input)
     emit('saved', saved)
     emit('update:modelValue', false)
   } catch (err: unknown) {
@@ -160,6 +207,17 @@ async function save() {
   } finally {
     saving.value = false
   }
+}
+
+function onRotated(credential: CredentialView) {
+  credentials.value = [...credentials.value.filter((c) => c.kind !== credential.kind), credential]
+  emit('saved', credential)
+}
+
+/** Revogado: volta ao formulário, para cadastrar outro acesso se quiser. */
+function onRevoked(rest: string[]) {
+  credentials.value = credentials.value.filter((c) => c.kind !== 'ssh')
+  leftovers.value = rest
 }
 
 function close() {

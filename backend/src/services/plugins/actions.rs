@@ -62,11 +62,13 @@ pub async fn device_view(ctx: &AppContext, device_id: i64) -> AppResult<DevicePl
 /// Dispositivo inexistente ou erro do banco.
 pub async fn access_view(ctx: &AppContext, device_id: i64) -> AppResult<DeviceAccessView> {
     let device = device(ctx, device_id).await?;
+    let dedicated_platform = super::dedicated_access::suggested_platform(&device);
     Ok(DeviceAccessView {
         device_id,
         device_name: device.name,
         credentials: credentials::list(&ctx.db, device_id).await?,
         agents: route_options(ctx, Permission::DeviceIo).await?,
+        dedicated_platform,
     })
 }
 

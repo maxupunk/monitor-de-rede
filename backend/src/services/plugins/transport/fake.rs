@@ -128,6 +128,7 @@ impl DeviceTransport for FakeTransport {
                 stdout: fixture.stdout.clone(),
                 stderr: fixture.stderr.clone(),
                 exit_code: Some(fixture.exit),
+                host_key: None,
             },
         })
     }
@@ -148,10 +149,7 @@ mod tests {
                 host: "192.0.2.1".into(),
                 port: 22,
             },
-            login: Login {
-                username: "root".into(),
-                password: None,
-            },
+            login: Login::with_password("root", None),
             command: command.into(),
             timeout_ms: 1_000,
         }

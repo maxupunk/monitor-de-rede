@@ -189,6 +189,11 @@ pub struct DeviceAccessView {
     pub credentials: Vec<CredentialView>,
     /// Agentes remotos por onde o acesso pode sair.
     pub agents: Vec<crate::dtos::agents::AgentRouteOption>,
+    /// Plataforma do acesso dedicado por chave, quando o sistema conhecido do
+    /// equipamento é um que ele cobre (ADR 016).
+    #[ts(optional)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dedicated_platform: Option<crate::services::plugins::dedicated_access::DedicatedPlatform>,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]

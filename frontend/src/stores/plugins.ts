@@ -7,6 +7,8 @@ import type { AutoAcceptState } from '@/bindings/AutoAcceptState'
 import type { CredentialInput } from '@/bindings/CredentialInput'
 import type { CredentialView } from '@/bindings/CredentialView'
 import type { DeviceAccessView } from '@/bindings/DeviceAccessView'
+import type { ProvisionInput } from '@/bindings/ProvisionInput'
+import type { RevokeOutcome } from '@/bindings/RevokeOutcome'
 import type { DevicePluginsView } from '@/bindings/DevicePluginsView'
 import type { PluginDetail } from '@/bindings/PluginDetail'
 import type { PluginPackage } from '@/bindings/PluginPackage'
@@ -306,6 +308,45 @@ export const usePluginsStore = defineStore('plugins', () => {
     replaceCredential(deviceId, saved)
   }
 
+  /**
+   * Cria o acesso dedicado por chave (ADR 016): a senha do administrador vai
+   * só nesta chamada e não é guardada.
+   */
+  async function provisionDedicated(
+    deviceId: number,
+    input: ProvisionInput
+  ): Promise<CredentialView> {
+    const saved = await apiService.post<CredentialView>(
+      `/devices/${deviceId}/access/dedicated`,
+      input
+    )
+    replaceCredential(deviceId, saved)
+    return saved
+  }
+
+  /** Troca a chave do acesso dedicado usando a própria chave atual. */
+  async function rotateDedicated(deviceId: number): Promise<CredentialView> {
+    const saved = await apiService.post<CredentialView>(
+      `/devices/${deviceId}/access/dedicated/rotate`
+    )
+    replaceCredential(deviceId, saved)
+    return saved
+  }
+
+  /**
+   * Retira a chave do equipamento e apaga a credencial; `localOnly` só apaga
+   * aqui (equipamento trocado ou fora de alcance).
+   */
+  async function revokeDedicated(deviceId: number, localOnly = false): Promise<RevokeOutcome> {
+    const outcome = await apiService.delete<RevokeOutcome>(
+      `/devices/${deviceId}/access/dedicated`,
+      { localOnly }
+    )
+    const view = deviceViews.value[deviceId]
+    if (view) view.credentials = view.credentials.filter((item) => item.kind !== 'ssh')
+    return outcome
+  }
+
   /** Instala o plugin no equipamento: ele ganha a própria aba. */
   async function installPlugin(deviceId: number, pluginId: number): Promise<void> {
     deviceViews.value[deviceId] = await apiService.post<DevicePluginsView>(
@@ -573,6 +614,9 @@ export const usePluginsStore = defineStore('plugins', () => {
     saveCredential,
     deleteCredential,
     openSession,
+    provisionDedicated,
+    rotateDedicated,
+    revokeDedicated,
     runAction,
     installPlugin,
     uninstallPlugin,

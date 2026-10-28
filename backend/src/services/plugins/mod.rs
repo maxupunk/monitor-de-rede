@@ -22,6 +22,7 @@ pub mod auto_accept;
 pub mod builtin;
 pub mod compat;
 pub mod credentials;
+pub mod dedicated_access;
 pub mod effect;
 pub mod fingerprint;
 pub mod fleet;

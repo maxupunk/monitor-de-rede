@@ -44,7 +44,7 @@ use super::{
 use crate::services::{
     devices::adapters::{registry as device_adapters, DeviceAccessMethod},
     network_tools::mactelnet,
-    plugins::manifest::TransportKind,
+    plugins::{manifest::TransportKind, transport::Login},
     shared::errors::{AppError, AppResult},
 };
 
@@ -132,13 +132,20 @@ pub struct ProvisionRequest {
     pub mac: Option<mactelnet::MacAddress>,
     pub port: u16,
     pub protocol: Protocol,
-    pub username: String,
-    pub password: String,
+    /// Usuário e senha, ou a chave do acesso dedicado (só no SSH).
+    pub login: Login,
     /// Id do sistema — o mesmo do catálogo e do `snippets`.
     pub operating_system: String,
     /// Endereço deste servidor, como o roteador o enxerga.
     pub server_address: String,
     pub server_port: u16,
+}
+
+impl ProvisionRequest {
+    /// A senha do login — vazia no acesso por chave, que não tem.
+    fn senha(&self) -> &str {
+        self.login.password.as_deref().unwrap_or_default()
+    }
 }
 
 /// O que a tela mostra depois.
@@ -221,7 +228,7 @@ pub async fn run(
 
     Ok(ProvisionOutcome {
         commands: comandos,
-        transcript: raspa(&transcript, &pedido.password),
+        transcript: raspa(&transcript, pedido.senha()),
         confirmed,
         observed_source,
         identified_hostname,
@@ -237,7 +244,13 @@ async fn executa(
     let mut sessao = match pedido.protocol {
         Protocol::Ssh => Sessao::Ssh(Box::new(ssh::abre(pedido).await?)),
         Protocol::Telnet => Sessao::Telnet(Box::new(
-            telnet::abre(pedido.host, pedido.port, &pedido.username, &pedido.password).await?,
+            telnet::abre(
+                pedido.host,
+                pedido.port,
+                &pedido.login.username,
+                pedido.senha(),
+            )
+            .await?,
         )),
         Protocol::MacTelnet => {
             let mac = pedido.mac.ok_or_else(|| {
@@ -247,7 +260,8 @@ async fn executa(
                 )
             })?;
             Sessao::MacTelnet(Box::new(
-                mactelnet::abre(mac, &pedido.username, &pedido.password, TETO_DE_CONEXAO).await?,
+                mactelnet::abre(mac, &pedido.login.username, pedido.senha(), TETO_DE_CONEXAO)
+                    .await?,
             ))
         }
     };
@@ -277,7 +291,7 @@ async fn executa(
         // O `sudo` do caminho Linux pergunta a senha do próprio usuário. Sem
         // esta resposta o comando morre no timeout sem dizer por quê.
         let saida = if pede_senha_de_sudo(&saida) {
-            sessao.envia_linha(&pedido.password).await?;
+            sessao.envia_linha(pedido.senha()).await?;
             format!("{saida}{}", sessao.le_ate_silenciar().await?)
         } else {
             saida
@@ -490,76 +504,103 @@ pub(crate) mod ssh {
         falha_de_acesso, AppError, AppResult, ProvisionRequest, SILENCIO, TETO_DE_CONEXAO,
         TETO_POR_COMANDO,
     };
+    use crate::services::{
+        plugins::transport::Login,
+        shared::ssh::{self as ssh_comum, PinnedHostKey},
+    };
     use russh::{
         client::{self, AuthResult, Handle},
-        keys::ssh_key::PublicKey,
         ChannelMsg,
     };
     use std::{net::IpAddr, sync::Arc};
     use tokio::time::{timeout, Instant};
 
-    /// Aceita a chave de host apresentada, seja ela qual for.
+    /// A sessão SSH com um equipamento.
     ///
-    /// **É uma decisão consciente, e ela tem custo.** Não há `known_hosts` a
-    /// consultar: é a primeira e única conexão a este equipamento, e não existe
-    /// nada com que comparar. Recusar por não conhecer tornaria o recurso
-    /// inútil; aceitar deixa a sessão exposta a um intermediário que já esteja
-    /// dentro da rede administrada.
-    ///
-    /// O que torna o custo aceitável: a credencial é de uso único, o alvo é um
-    /// IP da rede local que este mesmo sistema monitora, e quem já consegue se
-    /// interpor no caminho até o roteador tem caminhos mais curtos. A tela diz
-    /// que a conexão não valida a identidade do equipamento.
-    pub(crate) struct AceitaQualquerChave;
-
-    impl client::Handler for AceitaQualquerChave {
-        type Error = russh::Error;
-
-        async fn check_server_key(&mut self, _chave: &PublicKey) -> Result<bool, Self::Error> {
-            Ok(true)
-        }
-    }
+    /// A chave de host é conferida pelo [`PinnedHostKey`]: sem pin (login
+    /// digitado, credencial por senha) ela é aceita e só anotada — não há
+    /// `known_hosts` com que comparar, e recusar por não conhecer tornaria o
+    /// recurso inútil. O acesso dedicado (ADR 016) fixa a chave vista no
+    /// provisionamento, e dali em diante outra chave derruba a conexão antes de
+    /// a chave do NetMonitor ser apresentada.
+    pub(crate) type Sessao = Handle<PinnedHostKey>;
 
     pub struct Shell {
         canal: russh::Channel<client::Msg>,
-        _sessao: Handle<AceitaQualquerChave>,
+        _sessao: Sessao,
     }
 
-    /// Conecta e autentica por senha. A sessão devolvida abre quantos canais
-    /// o chamador precisar.
-    pub(crate) async fn conecta(
+    /// Conecta e autentica — por chave quando o login traz uma, por senha
+    /// senão. Devolve também a impressão digital da chave de host vista, que o
+    /// provisionamento do acesso dedicado fixa.
+    pub(crate) async fn conecta_vendo_host(
         host: IpAddr,
         port: u16,
-        username: &str,
-        password: &str,
-    ) -> AppResult<Handle<AceitaQualquerChave>> {
+        login: &Login,
+    ) -> AppResult<(Sessao, String)> {
         let config = Arc::new(client::Config {
             inactivity_timeout: Some(super::TETO_DA_SESSAO),
             ..client::Config::default()
         });
+        let handler = PinnedHostKey::new(login.host_key.clone());
+        let vista = Arc::clone(&handler.observed);
 
-        let mut sessao = timeout(
+        let conectado = timeout(
             TETO_DE_CONEXAO,
-            client::connect(config, (host, port), AceitaQualquerChave),
+            client::connect(config, (host, port), handler),
         )
         .await
-        .map_err(|_| falha_de_acesso("tempo esgotado ao conectar na porta SSH"))?
-        .map_err(falha_de_acesso)?;
+        .map_err(|_| falha_de_acesso("tempo esgotado ao conectar na porta SSH"))?;
+        let mut sessao = match conectado {
+            Ok(sessao) => sessao,
+            Err(erro) => {
+                if let (Some(esperada), Some(recebida)) =
+                    (login.host_key.as_deref(), ssh_comum::observed(&vista))
+                {
+                    if esperada != recebida {
+                        return Err(AppError::business_rule(format!(
+                            "A identidade do equipamento mudou (esperada {esperada}, recebida                              {recebida}). Se ele foi trocado ou reinstalado, refaça o acesso                              dedicado; se não, alguém pode estar no caminho até ele."
+                        )));
+                    }
+                }
+                return Err(falha_de_acesso(erro));
+            }
+        };
 
-        let resultado = sessao
-            .authenticate_password(username, password)
-            .await
-            .map_err(falha_de_acesso)?;
-        if !matches!(resultado, AuthResult::Success) {
-            return Err(AppError::unauthorized(
-                "Usuário ou senha recusados pelo equipamento.",
-            ));
+        let aceito = if let Some(chave) = login.private_key.as_deref() {
+            ssh_comum::authenticate_key(&mut sessao, &login.username, chave, None)
+                .await
+                .map_err(falha_de_acesso)?
+        } else {
+            let resultado = sessao
+                .authenticate_password(
+                    &login.username,
+                    login.password.as_deref().unwrap_or_default(),
+                )
+                .await
+                .map_err(falha_de_acesso)?;
+            matches!(resultado, AuthResult::Success)
+        };
+        if !aceito {
+            return Err(AppError::unauthorized(if login.private_key.is_some() {
+                "O equipamento recusou a chave do acesso dedicado. Ela pode ter sido removida                  lá: refaça o acesso dedicado."
+            } else {
+                "Usuário ou senha recusados pelo equipamento."
+            }));
         }
-        Ok(sessao)
+        Ok((sessao, ssh_comum::observed(&vista).unwrap_or_default()))
+    }
+
+    /// [`conecta_vendo_host`] para quem não precisa da chave de host. A sessão
+    /// devolvida abre quantos canais o chamador precisar.
+    pub(crate) async fn conecta(host: IpAddr, port: u16, login: &Login) -> AppResult<Sessao> {
+        conecta_vendo_host(host, port, login)
+            .await
+            .map(|(sessao, _)| sessao)
     }
 
     pub async fn abre(pedido: &ProvisionRequest) -> AppResult<Shell> {
-        let sessao = conecta(pedido.host, pedido.port, &pedido.username, &pedido.password).await?;
+        let sessao = conecta(pedido.host, pedido.port, &pedido.login).await?;
 
         let canal = sessao
             .channel_open_session()
@@ -878,8 +919,7 @@ mod tests {
             mac: Some(mactelnet::MacAddress::parse("02:00:00:00:00:01").unwrap()),
             port: mactelnet::PORT,
             protocol: Protocol::MacTelnet,
-            username: "admin".to_owned(),
-            password: "segredo".to_owned(),
+            login: Login::with_password("admin", Some("segredo".to_owned())),
             operating_system: "windows".to_owned(),
             server_address: "192.0.2.10".to_owned(),
             server_port: 514,

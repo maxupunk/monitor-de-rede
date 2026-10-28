@@ -30,7 +30,6 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use russh::client;
-use russh::keys::ssh_key::{HashAlg, PublicKey};
 use russh_sftp::client::SftpSession;
 use russh_sftp::protocol::FileType;
 
@@ -39,6 +38,7 @@ use super::{
     BucketObject, ListOptions, ListPage, ObjectMetadata, ObjectReader, StorageError,
     StorageExplorer,
 };
+use crate::services::shared::ssh::{self, PinnedHostKey};
 
 /// Teto para abrir a conexão TCP + handshake SSH. Um NAS desligado não pode
 /// segurar o agendador até o timeout do sistema operacional.
@@ -93,7 +93,7 @@ impl SftpExplorer {
             self.config.port.unwrap_or(DEFAULT_SFTP_PORT),
         );
         let expected = self.expected_fingerprint();
-        let handler = ClientHandler {
+        let handler = PinnedHostKey {
             expected: expected.clone(),
             observed: Arc::clone(&self.observed),
         };
@@ -155,7 +155,7 @@ impl SftpExplorer {
     /// servidores que contam falhas de autenticação.
     async fn authenticate(
         &self,
-        session: &mut client::Handle<ClientHandler>,
+        session: &mut client::Handle<PinnedHostKey>,
     ) -> Result<(), StorageError> {
         let user = self.config.username.as_str();
 
@@ -173,28 +173,11 @@ impl SftpExplorer {
                 .map(str::trim)
                 .filter(|value| !value.is_empty());
 
-            let decoded = russh::keys::decode_secret_key(key, passphrase).map_err(|err| {
-                StorageError::Backend(format!(
-                    "Chave privada inválida ou passphrase errada: {err}"
-                ))
-            })?;
-
-            let hash = session
-                .best_supported_rsa_hash()
+            let authenticated = ssh::authenticate_key(session, user, key, passphrase)
                 .await
-                .ok()
-                .flatten()
-                .flatten();
+                .map_err(StorageError::Backend)?;
 
-            let authenticated = session
-                .authenticate_publickey(
-                    user,
-                    russh::keys::PrivateKeyWithHashAlg::new(Arc::new(decoded), hash),
-                )
-                .await
-                .map_err(|err| StorageError::Backend(format!("Falha na autenticação: {err}")))?;
-
-            if authenticated.success() {
+            if authenticated {
                 return Ok(());
             }
 
@@ -230,38 +213,6 @@ impl SftpExplorer {
             "Informe uma senha ou uma chave privada para autenticar no SFTP".to_string(),
         ))
     }
-}
-
-/// Handler do cliente SSH: confere a chave do servidor contra a gravada.
-///
-/// Sem impressão digital gravada (primeiro uso), aceita e anota a que viu —
-/// o serviço a grava junto da config depois que a conexão inteira deu certo.
-struct ClientHandler {
-    expected: Option<String>,
-    observed: Arc<Mutex<Option<String>>>,
-}
-
-impl client::Handler for ClientHandler {
-    type Error = russh::Error;
-
-    async fn check_server_key(
-        &mut self,
-        server_public_key: &PublicKey,
-    ) -> Result<bool, Self::Error> {
-        let fingerprint = fingerprint_of(server_public_key);
-        if let Ok(mut observed) = self.observed.lock() {
-            *observed = Some(fingerprint.clone());
-        }
-        Ok(self
-            .expected
-            .as_deref()
-            .is_none_or(|expected| expected == fingerprint))
-    }
-}
-
-/// `SHA256:<base64>`, o mesmo formato do `ssh-keygen -lf`.
-fn fingerprint_of(key: &PublicKey) -> String {
-    key.fingerprint(HashAlg::Sha256).to_string()
 }
 
 #[async_trait]
@@ -441,10 +392,7 @@ impl StorageExplorer for SftpExplorer {
     }
 
     fn observed_identity(&self) -> Option<String> {
-        self.observed
-            .lock()
-            .ok()
-            .and_then(|observed| observed.clone())
+        ssh::observed(&self.observed)
     }
 }
 

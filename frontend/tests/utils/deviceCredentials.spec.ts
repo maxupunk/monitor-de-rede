@@ -8,6 +8,8 @@ import {
   credentialKindFor,
   credentialReady,
   credentialSubtitle,
+  dedicatedAccessEffect,
+  isDedicated,
   missingAccessIn,
   missingAccessOf,
   pickShellCredential,
@@ -39,6 +41,34 @@ describe('credenciais do equipamento', () => {
     expect(credentialReady(credential({ hasStoredSecret: false }))).toBe(false)
     expect(credentialReady(credential({ storage: 'ask', hasStoredSecret: false }))).toBe(false)
     expect(credentialReady(credential({ storage: 'ask', sessionActive: true }))).toBe(true)
+  })
+
+  it('o acesso dedicado vale pela chave guardada, sem sessão', () => {
+    const dedicated = credential({
+      storage: 'key',
+      username: 'netmonitor',
+      dedicated: {
+        platform: 'mikrotik',
+        publicKey: 'ssh-ed25519 AAAA netmonitor-0a1b',
+        keyFingerprint: 'SHA256:chave',
+        keyComment: 'netmonitor-0a1b',
+        hostKey: 'SHA256:host',
+        provisionedAt: '2026-10-28T12:00:00Z',
+      },
+    })
+    expect(credentialReady(dedicated)).toBe(true)
+    expect(isDedicated(dedicated)).toBe(true)
+    expect(isDedicated(credential({}))).toBe(false)
+    expect(credentialReady(credential({ storage: 'key', hasStoredSecret: false }))).toBe(false)
+    expect(credentialSubtitle(dedicated)).toBe(
+      'porta 22 · acesso dedicado por chave · a partir da central'
+    )
+  })
+
+  it('a tela diz o que o acesso dedicado cria em cada sistema', () => {
+    expect(dedicatedAccessEffect('mikrotik')).toContain('usuário netmonitor')
+    expect(dedicatedAccessEffect('openwrt')).toContain('OpenWrt')
+    expect(dedicatedAccessEffect(null)).toContain('MikroTik')
   })
 
   it('o subtítulo diz porta, senha e por onde sai', () => {

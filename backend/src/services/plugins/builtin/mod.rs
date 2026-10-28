@@ -140,10 +140,7 @@ mod tests {
             reason: None,
             credentials: Credentials {
                 ssh: Some(AccessProfile {
-                    login: Login {
-                        username: "root".into(),
-                        password: None,
-                    },
+                    login: Login::with_password("root", None),
                     port: 22,
                     https: false,
                 }),

@@ -27,14 +27,35 @@ use crate::services::shared::errors::AppResult;
 /// `logread` inteiro não pode derrubar o processo nem inflar o transcript.
 pub const MAX_OUTPUT_BYTES: usize = 1024 * 1024;
 
-/// Usuário e senha. O `Debug` não mostra a senha: este tipo aparece em log de
-/// erro e em `tracing`, e a senha não pode ir junto.
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Usuário e senha — ou a chave do acesso dedicado (ADR 016). O `Debug` não
+/// mostra segredo: este tipo aparece em log de erro e em `tracing`, e a senha
+/// ou a chave não podem ir junto.
+#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Login {
     pub username: String,
     #[serde(default)]
     pub password: Option<String>,
+    /// Chave privada OpenSSH do acesso dedicado. Com ela o SSH autentica por
+    /// chave, nunca por senha.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub private_key: Option<String>,
+    /// Fingerprint SHA-256 da chave de host fixada no provisionamento: o SSH
+    /// recusa equipamento que se apresente com outra.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_key: Option<String>,
+}
+
+impl Login {
+    /// Usuário e senha, sem chave.
+    #[must_use]
+    pub fn with_password(username: impl Into<String>, password: Option<String>) -> Self {
+        Self {
+            username: username.into(),
+            password,
+            ..Self::default()
+        }
+    }
 }
 
 impl fmt::Debug for Login {
@@ -42,6 +63,11 @@ impl fmt::Debug for Login {
         f.debug_struct("Login")
             .field("username", &self.username)
             .field("password", &self.password.as_ref().map(|_| "********"))
+            .field(
+                "private_key",
+                &self.private_key.as_ref().map(|_| "********"),
+            )
+            .field("host_key", &self.host_key)
             .finish()
     }
 }
@@ -146,6 +172,11 @@ pub enum DeviceIoReply {
         stdout: String,
         stderr: String,
         exit_code: Option<i32>,
+        /// Impressão digital da chave de host que o equipamento apresentou
+        /// (só SSH). O provisionamento do acesso dedicado a fixa — inclusive
+        /// quando a chamada saiu por um agente remoto.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        host_key: Option<String>,
     },
     Http {
         status: u16,
@@ -291,10 +322,14 @@ mod tests {
         let login = Login {
             username: "root".into(),
             password: Some("s3cr3t".into()),
+            private_key: Some("-----BEGIN OPENSSH PRIVATE KEY-----chave".into()),
+            host_key: Some("SHA256:abc".into()),
         };
         let debug = format!("{login:?}");
         assert!(debug.contains("root"));
         assert!(!debug.contains("s3cr3t"));
+        assert!(!debug.contains("chave"));
+        assert!(debug.contains("SHA256:abc"), "o pin não é segredo");
     }
 
     #[test]
@@ -304,14 +339,15 @@ mod tests {
                 host: "192.168.1.1".into(),
                 port: 22,
             },
-            login: Login {
-                username: "root".into(),
-                password: None,
-            },
+            login: Login::with_password("root", None),
             command: "uptime".into(),
             timeout_ms: 5_000,
         };
         let json = serde_json::to_value(&call).unwrap();
+        assert!(
+            json["login"].get("privateKey").is_none(),
+            "login por senha não leva campo de chave"
+        );
         assert_eq!(json["kind"], "ssh_exec");
         assert_eq!(json["timeoutMs"], 5_000);
         assert_eq!(serde_json::from_value::<DeviceIoCall>(json).unwrap(), call);
@@ -365,6 +401,7 @@ mod tests {
             stdout: "a\n\nb\n".into(),
             stderr: String::new(),
             exit_code: Some(0),
+            host_key: None,
         };
         feed_lines(&reply, &|line: &str| {
             lines.lock().unwrap().push(line.to_owned());

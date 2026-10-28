@@ -27,6 +27,7 @@ use crate::{
         plugins::{
             actions, auto_accept,
             credentials::{self, CredentialInput},
+            dedicated_access::{self, ProvisionInput, RevokeInput},
             fleet, gate,
             manifest::TransportKind,
             reveal, runs,
@@ -612,6 +613,44 @@ async fn credentials_session(
     Ok(format::json(view)?)
 }
 
+// --- Acesso dedicado por chave (ADR 016) -----------------------------------
+
+async fn dedicated_create(
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Path(device_id): Path<i64>,
+    Json(input): Json<ProvisionInput>,
+) -> AppResult<Response> {
+    let user = authenticated_user(&ctx, &headers).await?;
+    actions::device(&ctx, device_id).await?;
+    let view = dedicated_access::provision(&ctx, device_id, user.id, input).await?;
+    Ok(format::json(view)?)
+}
+
+async fn dedicated_rotate(
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Path(device_id): Path<i64>,
+) -> AppResult<Response> {
+    let user = authenticated_user(&ctx, &headers).await?;
+    actions::device(&ctx, device_id).await?;
+    let view = dedicated_access::rotate(&ctx, device_id, user.id).await?;
+    Ok(format::json(view)?)
+}
+
+async fn dedicated_revoke(
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Path(device_id): Path<i64>,
+    body: String,
+) -> AppResult<Response> {
+    let user = authenticated_user(&ctx, &headers).await?;
+    let input: RevokeInput = optional_body(&body);
+    actions::device(&ctx, device_id).await?;
+    let outcome = dedicated_access::revoke(&ctx, device_id, user.id, input).await?;
+    Ok(format::json(outcome)?)
+}
+
 // --- Execuções e aprovações -------------------------------------------------
 
 async fn run_show(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
@@ -756,6 +795,14 @@ pub fn routes() -> Routes {
         .add(
             "/devices/{id}/credentials/{kind}/session",
             post(credentials_session),
+        )
+        .add(
+            "/devices/{id}/access/dedicated",
+            post(dedicated_create).delete(dedicated_revoke),
+        )
+        .add(
+            "/devices/{id}/access/dedicated/rotate",
+            post(dedicated_rotate),
         )
         .add("/plugin-runs/{id}", get(run_show))
         .add("/plugin-runs/{id}/cancel", post(run_cancel))

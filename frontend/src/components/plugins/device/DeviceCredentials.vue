@@ -31,7 +31,7 @@
         >
           <template #prepend>
             <v-icon :color="credentialReady(credential) ? 'success' : 'warning'">
-              {{ credentialReady(credential) ? 'mdi-lock-check-outline' : 'mdi-lock-clock' }}
+              {{ credentialIcon(credential) }}
             </v-icon>
           </template>
           <template #append>
@@ -46,14 +46,19 @@
               Informar senha
             </v-btn>
             <v-btn
-              icon="mdi-pencil-outline"
+              :icon="isDedicated(credential) ? 'mdi-key-chain' : 'mdi-pencil-outline'"
               size="small"
               variant="text"
               color="primary"
-              :aria-label="`Editar credencial ${credential.kind}`"
+              :aria-label="
+                isDedicated(credential)
+                  ? 'Gerenciar o acesso dedicado'
+                  : `Editar credencial ${credential.kind}`
+              "
               @click="openCredential(credential)"
             />
             <v-btn
+              v-if="!isDedicated(credential)"
               icon="mdi-delete-outline"
               size="small"
               variant="text"
@@ -73,7 +78,7 @@ import type { CredentialView } from '@/bindings/CredentialView'
 import { usePluginsStore } from '@/stores/plugins'
 import { confirm, prompt } from '@/composables/useConfirm'
 import { requestAccess } from '@/composables/useDeviceAccess'
-import { credentialReady, credentialSubtitle } from '@/utils/deviceCredentials'
+import { credentialReady, credentialSubtitle, isDedicated } from '@/utils/deviceCredentials'
 
 const props = defineProps<{
   deviceId: number
@@ -83,6 +88,11 @@ const props = defineProps<{
 const emit = defineEmits<{ notify: [message: string, color: string] }>()
 
 const store = usePluginsStore()
+
+function credentialIcon(credential: CredentialView): string {
+  if (isDedicated(credential)) return 'mdi-key-chain'
+  return credentialReady(credential) ? 'mdi-lock-check-outline' : 'mdi-lock-clock'
+}
 
 function describe(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback

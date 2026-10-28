@@ -113,10 +113,7 @@ mod tests {
                 host: "192.168.88.1".into(),
                 port: 22,
             },
-            login: Login {
-                username: "admin".into(),
-                password: Some("s3nh4".into()),
-            },
+            login: Login::with_password("admin", Some("s3nh4".into())),
             command: command.into(),
             timeout_ms: 5_000,
         }
@@ -148,6 +145,7 @@ mod tests {
                         stdout: "tx-current: 94.5Mbps\nrx-current: 10Mbps\n".into(),
                         stderr: String::new(),
                         exit_code: Some(0),
+                        host_key: None,
                     };
                     session.handle(Envelope::reply(
                         request.id,
