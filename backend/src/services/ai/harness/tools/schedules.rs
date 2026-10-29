@@ -13,7 +13,8 @@ use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
 use serde_json::{json, Value};
 
 use super::{
-    AiToolHandler, RiskAssessment, ToolArgs, ToolGroup, ToolKind, ToolOutput, UnattendedTools,
+    as_output, AiToolHandler, RiskAssessment, ToolArgs, ToolGroup, ToolKind, ToolOutput,
+    UnattendedTools,
 };
 use crate::{
     models::{scheduled_task_runs, scheduled_tasks},
@@ -69,21 +70,6 @@ async fn chat_author(ctx: &AppContext, args: &ToolArgs) -> Result<Author, ToolOu
     Author::load(&ctx.db, args.actor().clone(), ScheduledTaskOrigin::Ai)
         .await
         .map_err(|error| ToolOutput::not_found(error.to_string()))
-}
-
-/// Erro de validação volta à IA como dado, para ela corrigir.
-fn as_output<T>(result: AppResult<T>) -> AppResult<Result<T, ToolOutput>> {
-    match result {
-        Ok(value) => Ok(Ok(value)),
-        Err(
-            error @ (AppError::Validation(_)
-            | AppError::NotFound(_)
-            | AppError::Forbidden(_)
-            | AppError::Conflict(_)
-            | AppError::BusinessRule(_)),
-        ) => Ok(Err(ToolOutput::not_found(error.to_string()))),
-        Err(error) => Err(error),
-    }
 }
 
 fn preview_or_error(result: Result<String, ToolOutput>) -> String {

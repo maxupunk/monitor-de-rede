@@ -1,127 +1,103 @@
 <template>
-  <v-card elevation="2" class="rounded-lg fill-height d-flex flex-column">
-    <v-card-title class="d-flex align-center justify-space-between py-3 px-4 flex-wrap ga-2">
-      <div>
-        <div class="d-flex align-center ga-2">
-          <v-icon color="teal">mdi-checkbox-blank-circle-outline</v-icon>
-          <span class="font-weight-bold text-h6">{{
-            widget.title || 'Status Binário (Up/Down)'
-          }}</span>
-        </div>
-        <div class="text-caption text-grey mt-1 d-flex align-center ga-1">
-          <v-icon size="14" color="teal">mdi-binary</v-icon>
-          <span>Exclusivo para Estados Booleanos (1=Up, 0=Down)</span>
-        </div>
-      </div>
+  <DashboardCard
+    :title="widget.title || 'Status Binário (Up/Down)'"
+    icon="mdi-checkbox-blank-circle-outline"
+    icon-color="teal"
+    subtitle="Estado booleano do monitor (1 = Up, 0 = Down)"
+  >
+    <template #actions>
+      <v-select
+        v-model="selectedMonitorId"
+        :items="monitorOptions"
+        item-title="name"
+        item-value="id"
+        density="compact"
+        variant="outlined"
+        hide-details
+        aria-label="Monitor"
+        class="binary-widget__select"
+        placeholder="Selecione o Monitor"
+      ></v-select>
+    </template>
 
-      <div class="d-flex align-center ga-2 flex-wrap">
-        <v-select
-          v-model="selectedMonitorId"
-          :items="monitorOptions"
-          item-title="name"
-          item-value="id"
-          density="compact"
-          variant="outlined"
-          hide-details
-          style="min-width: 200px; max-width: 260px"
-          class="text-caption"
-          placeholder="Selecione o Monitor"
-        ></v-select>
-      </div>
-    </v-card-title>
-    <v-divider></v-divider>
-
-    <v-card-text class="pa-4 flex-grow-1">
-      <div class="d-flex align-center justify-space-between mb-4 flex-wrap ga-3">
-        <div class="d-flex align-center ga-3">
-          <v-avatar :color="isCurrentUp ? 'success' : 'error'" size="44">
-            <v-icon color="white" size="24">
-              {{ isCurrentUp ? 'mdi-check-circle-outline' : 'mdi-close-circle-outline' }}
-            </v-icon>
-          </v-avatar>
-          <div>
-            <div class="text-subtitle-1 font-weight-bold">
-              {{ targetName }}
-            </div>
-            <div class="text-caption text-grey">Alvo: {{ targetHost }} ({{ targetType }})</div>
-          </div>
-        </div>
-
-        <div class="d-flex align-center ga-2">
-          <v-chip
-            :color="isCurrentUp ? 'success' : 'error'"
-            variant="flat"
-            class="font-weight-bold"
-          >
-            {{ isCurrentUp ? 'ESTADO: UP (1)' : 'ESTADO: DOWN (0)' }}
-          </v-chip>
+    <div class="d-flex align-center justify-space-between mb-4 flex-wrap ga-3">
+      <div class="d-flex align-center ga-3">
+        <v-avatar :color="isCurrentUp ? 'success' : 'error'" size="44">
+          <v-icon color="white" size="24">
+            {{ isCurrentUp ? 'mdi-check-circle-outline' : 'mdi-close-circle-outline' }}
+          </v-icon>
+        </v-avatar>
+        <div>
+          <div class="text-subtitle-1 font-weight-bold">{{ targetName }}</div>
+          <div class="text-caption">Alvo: {{ targetHost }} ({{ targetType }})</div>
         </div>
       </div>
 
-      <!-- Binary Timeline Grid / Blocks -->
-      <div class="binary-matrix pa-3 rounded-lg bg-surface-variant mb-4">
-        <div class="text-caption text-grey mb-2 d-flex align-center justify-space-between">
-          <span>Histórico Sequencial de Amostras Binárias</span>
-          <span class="font-weight-bold text-success">Disponibilidade: {{ uptimePercent }}%</span>
-        </div>
+      <v-chip :color="isCurrentUp ? 'success' : 'error'" variant="flat" class="font-weight-bold">
+        {{ isCurrentUp ? 'ESTADO: UP (1)' : 'ESTADO: DOWN (0)' }}
+      </v-chip>
+    </div>
 
-        <div class="d-flex align-center ga-1 flex-wrap justify-start">
-          <v-tooltip v-for="(block, idx) in binaryHistory" :key="idx" location="top">
-            <template #activator="{ props: tooltipProps }">
-              <div
-                v-bind="tooltipProps"
-                class="binary-block rounded"
-                :class="block.val === 1 ? 'bg-success' : 'bg-error'"
-              ></div>
-            </template>
-            <span>{{ block.time }} — {{ block.val === 1 ? '1 (UP)' : '0 (DOWN)' }}</span>
-          </v-tooltip>
-        </div>
+    <!-- Linha do tempo binária: um bloco por checagem -->
+    <div class="binary-widget__matrix mb-4">
+      <div class="text-caption mb-2 d-flex align-center justify-space-between">
+        <span>Histórico sequencial das checagens</span>
+        <span class="font-weight-bold text-success">
+          Disponibilidade: {{ formatPercent(uptimePercent, 0) }}
+        </span>
       </div>
 
-      <v-row density="compact">
-        <v-col cols="4">
-          <div class="pa-2 border rounded text-center">
-            <div class="text-caption text-grey">Total de Checagens</div>
-            <div class="text-h6 font-weight-bold text-primary">{{ totalChecks }}</div>
-          </div>
-        </v-col>
-        <v-col cols="4">
-          <div class="pa-2 border rounded text-center">
-            <div class="text-caption text-grey">Flapping (Alternâncias)</div>
+      <div v-if="binaryHistory.length > 0" class="d-flex align-center ga-1 flex-wrap">
+        <v-tooltip v-for="(block, idx) in binaryHistory" :key="idx" location="top">
+          <template #activator="{ props: tooltipProps }">
             <div
-              class="text-h6 font-weight-bold"
-              :class="flipCount > 0 ? 'text-warning' : 'text-success'"
-            >
-              {{ flipCount }}
-            </div>
-          </div>
-        </v-col>
-        <v-col cols="4">
-          <div class="pa-2 border rounded text-center">
-            <div class="text-caption text-grey">Última Checagem</div>
-            <div class="text-subtitle-2 font-weight-bold mt-1 text-truncate">
-              {{ lastCheckedFormatted }}
-            </div>
-          </div>
-        </v-col>
-      </v-row>
-    </v-card-text>
+              v-bind="tooltipProps"
+              class="binary-widget__block rounded"
+              :class="block.val === 1 ? 'bg-success' : 'bg-error'"
+            ></div>
+          </template>
+          <span>{{ block.time }} — {{ block.val === 1 ? '1 (UP)' : '0 (DOWN)' }}</span>
+        </v-tooltip>
+      </div>
+      <div v-else class="text-body-2">Nenhuma checagem registrada para este monitor.</div>
+    </div>
 
-    <v-divider></v-divider>
-    <v-card-actions
-      class="px-4 py-2 bg-surface-variant d-flex align-center justify-space-between text-caption"
-    >
-      <span class="text-grey font-weight-medium">Filtro Estrito: Dados Booleanos (0/1)</span>
-      <v-chip size="x-small" color="teal" variant="tonal">Card Binário Validado</v-chip>
-    </v-card-actions>
-  </v-card>
+    <v-row dense>
+      <v-col cols="4">
+        <div class="binary-widget__kpi">
+          <div class="binary-widget__kpi-label">Total de checagens</div>
+          <div class="text-h6 font-weight-bold text-primary">{{ totalChecks }}</div>
+        </div>
+      </v-col>
+      <v-col cols="4">
+        <div class="binary-widget__kpi">
+          <div class="binary-widget__kpi-label">Alternâncias (flapping)</div>
+          <div
+            class="text-h6 font-weight-bold"
+            :class="flipCount > 0 ? 'text-warning' : 'text-success'"
+          >
+            {{ flipCount }}
+          </div>
+        </div>
+      </v-col>
+      <v-col cols="4">
+        <div class="binary-widget__kpi">
+          <div class="binary-widget__kpi-label">Última checagem</div>
+          <div class="text-subtitle-2 font-weight-bold mt-1 text-truncate">
+            {{ lastCheckedFormatted }}
+          </div>
+        </div>
+      </v-col>
+    </v-row>
+  </DashboardCard>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useMonitorsStore } from '@/stores/monitors'
 import type { WidgetConfig } from '@/stores/dashboard'
+import { formatClockTime, formatPercent, formatShortDateTime } from '@/utils/formatters'
+import DashboardCard from '@/components/dashboard/DashboardCard.vue'
 
 const props = defineProps<{
   widget: WidgetConfig
@@ -163,39 +139,20 @@ const isCurrentUp = computed(() => {
   return activeMonitor.value.status === 'up'
 })
 
-const binaryHistory = computed(() => {
-  const list: Array<{ val: 0 | 1; time: string }> = []
-  const results = activeMonitor.value?.recentResults || []
-
-  if (results.length > 0) {
-    for (const r of results) {
-      const isUp = r.status === 'up'
-      const d = new Date(r.finishedAt)
-      list.push({
-        val: isUp ? 1 : 0,
-        time: d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      })
-    }
-  } else {
-    // Amostras binárias demonstrativas sintéticas
-    const now = new Date()
-    for (let i = 24; i >= 0; i--) {
-      const t = new Date(now.getTime() - i * 60 * 1000)
-      list.push({
-        val: i === 5 ? 0 : 1,
-        time: t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      })
-    }
-  }
-  return list
-})
+/** Uma entrada por checagem real; sem resultados, a linha do tempo fica vazia. */
+const binaryHistory = computed(() =>
+  (activeMonitor.value?.recentResults || []).map((r) => ({
+    val: (r.status === 'up' ? 1 : 0) as 0 | 1,
+    time: formatShortDateTime(r.finishedAt),
+  }))
+)
 
 const totalChecks = computed(() => binaryHistory.value.length)
 
 const uptimePercent = computed(() => {
   if (binaryHistory.value.length === 0) return 100
   const upCount = binaryHistory.value.filter((b) => b.val === 1).length
-  return Math.round((upCount / binaryHistory.value.length) * 100)
+  return (upCount / binaryHistory.value.length) * 100
 })
 
 const flipCount = computed(() => {
@@ -208,37 +165,43 @@ const flipCount = computed(() => {
   return flips
 })
 
-const lastCheckedFormatted = computed(() => {
-  if (activeMonitor.value?.lastCheckedAt) {
-    return new Date(activeMonitor.value.lastCheckedAt).toLocaleTimeString([], {
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-    })
-  }
-  return 'Agora mesmo'
-})
+const lastCheckedFormatted = computed(() =>
+  activeMonitor.value?.lastCheckedAt ? formatClockTime(activeMonitor.value.lastCheckedAt) : '—'
+)
 </script>
 
 <style scoped>
-.binary-block {
+.binary-widget__select {
+  min-width: 200px;
+  max-width: 260px;
+}
+
+.binary-widget__matrix {
+  padding: 12px;
+  border-radius: 8px;
+  background: rgba(var(--v-theme-primary), 0.06);
+}
+
+.binary-widget__block {
   width: 14px;
   height: 24px;
   transition: transform 0.15s ease;
   cursor: pointer;
 }
 
-.binary-block:hover {
+.binary-widget__block:hover {
   transform: scale(1.2);
 }
 
-.ga-1 {
-  gap: 4px;
+.binary-widget__kpi {
+  padding: 8px;
+  border-radius: 8px;
+  text-align: center;
+  background: rgba(var(--v-theme-primary), 0.06);
 }
-.ga-2 {
-  gap: 8px;
-}
-.ga-3 {
-  gap: 12px;
+
+.binary-widget__kpi-label {
+  font-size: 0.75rem;
+  color: rgba(var(--v-theme-on-surface), 0.8);
 }
 </style>

@@ -139,174 +139,183 @@ export const CARD_TEMPLATES: CardTemplate[] = [
   },
 ]
 
-const STORAGE_KEY = 'netmonitor_dashboard_layout_v1'
+/*
+ * v2: o padrão de fábrica mudou (enxuto, com o Docker como widget). Quem tinha
+ * só o cache local passa a ver o padrão novo; o layout salvo no servidor
+ * continua valendo para quem sincroniza.
+ */
+const STORAGE_KEY = 'netmonitor_dashboard_layout_v2'
 const SYNC_MODE_KEY = 'netmonitor_dashboard_sync_mode'
 const PROMPT_DISMISSED_KEY = 'netmonitor_dashboard_prompt_dismissed'
 
+/** Larguras nomeadas: o que o operador (e a IA) escolhe, em vez de colunas. */
+export type WidgetSize = 'third' | 'half' | 'two_thirds' | 'full'
+
+export const WIDGET_SIZES: Record<
+  WidgetSize,
+  { label: string; icon: string; cols: number; sm: number; md: number; lg: number }
+> = {
+  third: { label: '1/3 da largura', icon: 'mdi-view-column', cols: 12, sm: 12, md: 6, lg: 4 },
+  half: { label: 'Metade', icon: 'mdi-view-split-vertical', cols: 12, sm: 12, md: 6, lg: 6 },
+  two_thirds: { label: '2/3 da largura', icon: 'mdi-view-quilt', cols: 12, sm: 12, md: 12, lg: 8 },
+  full: { label: 'Largura total', icon: 'mdi-view-stream', cols: 12, sm: 12, md: 12, lg: 12 },
+}
+
+/** Tamanho nomeado de um widget, deduzido das colunas salvas. */
+export function widgetSizeOf(widget: Pick<WidgetConfig, 'md' | 'lg'>): WidgetSize {
+  const lg = widget.lg ?? widget.md ?? 12
+  if (lg <= 4) return 'third'
+  if (lg <= 6) return 'half'
+  if (lg <= 8) return 'two_thirds'
+  return 'full'
+}
+
+function sized(size: WidgetSize) {
+  const { cols, sm, md, lg } = WIDGET_SIZES[size]
+  return { cols, sm, md, lg }
+}
+
+/**
+ * Widgets de instância única, na ordem do padrão de fábrica. O padrão
+ * responde, de cima para baixo: "está tudo bem?" (números), "o que está
+ * quebrado?" (saúde e alertas), "como a rede se comporta?" (latência e
+ * eventos), "quem oscila?" e o detalhe por monitor. Os de `visible: false`
+ * ficam no catálogo, prontos para ligar.
+ */
 export const DEFAULT_WIDGETS: WidgetConfig[] = [
-  // Linha 1: Visão geral numérica — sempre no topo
   {
     id: 'stat_cards',
     type: 'stat_cards',
-    title: 'Cards de Resumo Estatístico',
+    title: 'Resumo',
     category: 'summary',
-    cols: 12,
-    sm: 12,
-    md: 12,
-    lg: 12,
+    ...sized('full'),
     visible: true,
     order: 0,
     icon: 'mdi-view-dashboard-outline',
-    description: 'Visão sintetizada de Dispositivos, Monitores, Disponibilidade e Alertas.',
+    description: 'Dispositivos, monitores, disponibilidade e alertas em quatro números.',
   },
-  // Linha 2: Saúde global (donut) + Alertas críticos ativos (lado a lado)
   {
     id: 'health_gauge',
     type: 'health_gauge',
-    title: 'Saúde Global & Status dos Ativos',
+    title: 'Saúde global',
     category: 'charts',
-    cols: 12,
-    sm: 12,
-    md: 6,
-    lg: 6,
+    ...sized('half'),
     visible: true,
     order: 1,
     icon: 'mdi-gauge',
-    description:
-      'Gráfico Donut com taxa global de disponibilidade e distribuição dos status dos monitores.',
+    description: 'Disponibilidade global e distribuição dos status dos monitores.',
   },
   {
     id: 'active_alerts',
     type: 'active_alerts',
-    title: 'Alertas Críticos Ativos',
+    title: 'Alertas ativos',
     category: 'lists',
-    cols: 12,
-    sm: 12,
-    md: 6,
-    lg: 6,
+    ...sized('half'),
     visible: true,
     order: 2,
     icon: 'mdi-bell-outline',
-    description: 'Lista dos alertas ativos com severidade crítica e ações de gerenciamento.',
+    description: 'Alertas em aberto, com verificar, reconhecer e silenciar.',
   },
-  // Linha 3: Alvos instáveis (oscilação) + Feed de eventos em tempo real
-  {
-    id: 'unstable_targets',
-    type: 'unstable_targets',
-    title: 'Alvos Instáveis',
-    category: 'lists',
-    cols: 12,
-    sm: 12,
-    md: 6,
-    lg: 6,
-    visible: true,
-    order: 3,
-    icon: 'mdi-sine-wave',
-    description:
-      'Ranking dos alvos que mais caíram e voltaram na janela — quem oscila não aparece na lista de alertas ativos.',
-  },
-  {
-    id: 'events_feed',
-    type: 'events_feed',
-    title: 'Feed de Eventos Realtime',
-    category: 'lists',
-    cols: 12,
-    sm: 12,
-    md: 6,
-    lg: 6,
-    visible: true,
-    order: 4,
-    icon: 'mdi-pulse',
-    description: 'Fluxo em tempo real dos eventos e mudanças de status via SSE.',
-  },
-  // Linha 4: DNS — diagnóstico de resolução (largura total para melhor leitura)
-  {
-    id: 'dns_latency',
-    type: 'dns_latency',
-    title: 'Tempo de Consulta e Benchmark DNS',
-    category: 'charts',
-    cols: 12,
-    sm: 12,
-    md: 12,
-    lg: 12,
-    visible: true,
-    order: 5,
-    icon: 'mdi-dns-outline',
-    description: 'Ranking comparativo e histórico de tempo de consulta de resolvedores DNS.',
-  },
-  // Linha 5: Lista completa de monitores (full-width para acomodar timeline)
-  {
-    id: 'network_monitors',
-    type: 'network_monitors',
-    title: 'Monitores de Rede',
-    category: 'lists',
-    cols: 12,
-    sm: 12,
-    md: 12,
-    lg: 12,
-    visible: true,
-    order: 6,
-    icon: 'mdi-chart-timeline-variant',
-    description: 'Lista interativa de monitores com barras de histórico e scroll suave (420px).',
-  },
-  // Linha 6: Gráficos de série temporal — latência e distribuição de eventos
   {
     id: 'latency_time_series',
     type: 'latency_time_series',
-    title: 'Latência & Perda de Pacotes',
+    title: 'Latência & perda de pacotes',
     category: 'charts',
-    cols: 12,
-    sm: 12,
-    md: 6,
-    lg: 6,
+    ...sized('half'),
     visible: true,
-    order: 7,
+    order: 3,
     icon: 'mdi-chart-timeline-variant',
-    description: 'Série temporal estilo Grafana com filtro de tempo (5m, 15m, 1h, 24h).',
+    description: 'Série temporal de latência ICMP com marcação de perda (5m, 15m, 1h, 24h).',
   },
   {
     id: 'event_distribution',
     type: 'event_distribution',
-    title: 'Distribuição de Eventos por Hora',
+    title: 'Eventos por hora',
     category: 'charts',
-    cols: 12,
-    sm: 12,
-    md: 6,
-    lg: 6,
+    ...sized('half'),
+    visible: true,
+    order: 4,
+    icon: 'mdi-chart-bar',
+    description: 'Histograma por hora dos eventos, por severidade.',
+  },
+  {
+    id: 'unstable_targets',
+    type: 'unstable_targets',
+    title: 'Alvos instáveis',
+    category: 'lists',
+    ...sized('half'),
+    visible: true,
+    order: 5,
+    icon: 'mdi-sine-wave',
+    description:
+      'Ranking dos alvos que mais caíram e voltaram na janela — quem oscila não aparece nos alertas ativos.',
+  },
+  {
+    id: 'events_feed',
+    type: 'events_feed',
+    title: 'Eventos em tempo real',
+    category: 'lists',
+    ...sized('half'),
+    visible: true,
+    order: 6,
+    icon: 'mdi-pulse',
+    description: 'Fluxo em tempo real das mudanças de status.',
+  },
+  {
+    id: 'network_monitors',
+    type: 'network_monitors',
+    title: 'Monitores de rede',
+    category: 'lists',
+    ...sized('full'),
+    visible: true,
+    order: 7,
+    icon: 'mdi-heart-pulse',
+    description: 'Lista dos monitores com histórico recente e teste sob demanda.',
+  },
+  {
+    id: 'docker_summary',
+    type: 'docker_summary',
+    title: 'Docker',
+    category: 'summary',
+    ...sized('full'),
     visible: true,
     order: 8,
-    icon: 'mdi-chart-bar',
-    description: 'Histograma por hora agrupando eventos por severidade (Crítico, Alerta, Info).',
+    icon: 'mdi-docker',
+    description: 'CPU, RAM e tráfego dos containers desta central (só aparece com o Docker ativo).',
+  },
+  {
+    id: 'dns_latency',
+    type: 'dns_latency',
+    title: 'Tempo de consulta DNS',
+    category: 'charts',
+    ...sized('full'),
+    visible: false,
+    order: 9,
+    icon: 'mdi-dns-outline',
+    description: 'Ranking comparativo e histórico do tempo de consulta dos resolvedores DNS.',
   },
   {
     id: 'saas_services',
     type: 'saas_services',
-    title: 'Serviços SaaS, Bancos & Nuvem',
+    title: 'Serviços SaaS, bancos & nuvem',
     category: 'lists',
-    cols: 12,
-    sm: 12,
-    md: 12,
-    lg: 12,
-    visible: true,
-    order: 9,
+    ...sized('full'),
+    visible: false,
+    order: 10,
     icon: 'mdi-bank-check',
     description:
-      'Painel de monitoramento de latência e qualidade de experiência (QoE) para bancos, fintechs e provedores SaaS.',
+      'Latência e qualidade de experiência (QoE) para bancos, fintechs e provedores SaaS.',
   },
   {
     id: 'saas_heatmap',
     type: 'saas_heatmap',
-    title: 'Mapa de Calor de Latência SaaS',
+    title: 'Mapa de calor de latência',
     category: 'charts',
-    cols: 12,
-    sm: 12,
-    md: 12,
-    lg: 12,
-    visible: true,
-    order: 10,
+    ...sized('full'),
+    visible: false,
+    order: 11,
     icon: 'mdi-chart-scatter-plot-hexbin',
-    description:
-      'Matriz horária (00h-23h) de latência por hora do dia e identificação de picos de lentidão.',
+    description: 'Matriz horária (00h–23h) de latência e identificação de picos de lentidão.',
   },
 ]
 
@@ -624,6 +633,16 @@ export const useDashboardStore = defineStore('dashboard', () => {
     }
   }
 
+  function resizeWidget(id: string, size: WidgetSize) {
+    const item = widgets.value.find((w) => w.id === id)
+    if (!item) return
+    Object.assign(item, sized(size))
+    saveLocalLayoutCache()
+    if (syncMode.value === 'server') {
+      void saveLayoutGlobally()
+    }
+  }
+
   function moveWidget(id: string, direction: 'up' | 'down') {
     const visibleList = visibleWidgets.value
     const currentIndex = visibleList.findIndex((w) => w.id === id)
@@ -695,6 +714,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
     removeWidget,
     addCustomWidget,
     updateWidgetConfig,
+    resizeWidget,
     moveWidget,
     reorderWidgets,
     resetToDefaultLayout,

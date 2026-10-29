@@ -83,7 +83,7 @@
               <span class="text-h3 font-weight-bold font-monospace text-primary">
                 {{ formatSpeedByUnit(displaySpeed, effectiveChartUnit) }}
               </span>
-              <span class="text-subtitle-1 font-weight-medium text-grey text-uppercase">
+              <span class="text-subtitle-1 font-weight-medium text-uppercase">
                 {{ getSpeedUnitLabel(effectiveChartUnit) }}
               </span>
               <v-chip
@@ -111,18 +111,24 @@
                 class="d-flex align-center ga-2"
                 style="gap: 8px"
               >
-                <span class="d-flex align-center text-caption text-primary font-weight-medium">
-                  <span class="legend-bar bg-primary mr-1"></span>
+                <span class="d-flex align-center text-caption font-weight-medium">
+                  <span
+                    class="legend-bar mr-1"
+                    :style="{ backgroundColor: SPEED_COLORS.download }"
+                  ></span>
                   Download
                 </span>
-                <span class="d-flex align-center text-caption text-purple font-weight-medium">
-                  <span class="legend-bar bg-purple mr-1"></span>
+                <span class="d-flex align-center text-caption font-weight-medium">
+                  <span
+                    class="legend-bar mr-1"
+                    :style="{ backgroundColor: SPEED_COLORS.upload }"
+                  ></span>
                   Upload
                 </span>
               </div>
             </div>
 
-            <div v-if="serverLocation" class="text-caption text-grey-darken-1 d-flex align-center">
+            <div v-if="serverLocation" class="text-caption d-flex align-center">
               <v-icon size="14" class="mr-1">mdi-map-marker-radius</v-icon>
               {{ serverName || 'Padrão' }} ({{ serverLocation }})
             </div>
@@ -130,138 +136,75 @@
 
           <!-- Área do Gráfico SVG -->
           <div class="chart-wrapper pa-2 position-relative">
-            <svg class="w-100 speed-chart-svg" viewBox="0 0 760 190" preserveAspectRatio="none">
-              <defs>
-                <linearGradient id="grad-down" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stop-color="#1976D2" stop-opacity="0.35" />
-                  <stop offset="100%" stop-color="#1976D2" stop-opacity="0.03" />
-                </linearGradient>
-                <linearGradient id="grad-up" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stop-color="#9C27B0" stop-opacity="0.35" />
-                  <stop offset="100%" stop-color="#9C27B0" stop-opacity="0.03" />
-                </linearGradient>
-              </defs>
-
-              <!-- Linhas de Grade e Marcadores Y -->
-              <line
-                x1="60"
-                y1="25"
-                x2="745"
-                y2="25"
-                stroke="#BDBDBD"
-                stroke-dasharray="3,3"
-                stroke-width="0.8"
-              />
-              <text
-                x="54"
-                y="29"
-                font-size="11"
-                fill="#757575"
-                text-anchor="end"
-                font-family="monospace"
+            <div ref="plotRef" class="speed-plot">
+              <svg
+                v-if="plotWidth > 0"
+                :width="plotWidth"
+                :height="PLOT_HEIGHT"
+                :viewBox="`0 0 ${plotWidth} ${PLOT_HEIGHT}`"
+                class="speed-plot__svg"
+                role="img"
+                aria-label="Velocidade durante o teste"
               >
-                {{ formatSpeedValue(yScaleMax, effectiveChartUnit) }}
-              </text>
+                <defs>
+                  <linearGradient
+                    v-for="s in speedSeries"
+                    :id="s.gradientId"
+                    :key="s.gradientId"
+                    x1="0"
+                    y1="0"
+                    x2="0"
+                    y2="1"
+                  >
+                    <stop offset="0%" :stop-color="s.color" stop-opacity="0.25" />
+                    <stop offset="100%" :stop-color="s.color" stop-opacity="0" />
+                  </linearGradient>
+                </defs>
 
-              <line
-                x1="60"
-                y1="85"
-                x2="745"
-                y2="85"
-                stroke="#BDBDBD"
-                stroke-dasharray="3,3"
-                stroke-width="0.8"
-              />
-              <text
-                x="54"
-                y="89"
-                font-size="11"
-                fill="#757575"
-                text-anchor="end"
-                font-family="monospace"
-              >
-                {{ formatSpeedValue(yScaleMid, effectiveChartUnit) }}
-              </text>
+                <g v-for="tick in speedTicks" :key="tick.y">
+                  <line
+                    :x1="plotArea.left"
+                    :x2="plotArea.left + plotArea.width"
+                    :y1="tick.y"
+                    :y2="tick.y"
+                    class="speed-plot__grid"
+                    :class="{ 'speed-plot__grid--base': tick.base }"
+                  />
+                  <text
+                    :x="plotArea.left - 8"
+                    :y="tick.y"
+                    class="speed-plot__label"
+                    text-anchor="end"
+                  >
+                    {{ tick.label }}
+                  </text>
+                </g>
 
-              <line
-                x1="60"
-                y1="145"
-                x2="745"
-                y2="145"
-                stroke="#BDBDBD"
-                stroke-dasharray="3,3"
-                stroke-width="0.8"
-              />
-              <text
-                x="54"
-                y="149"
-                font-size="11"
-                fill="#757575"
-                text-anchor="end"
-                font-family="monospace"
-              >
-                {{ formatSpeedValue(yScaleLow, effectiveChartUnit) }}
-              </text>
-
-              <line x1="60" y1="170" x2="745" y2="170" stroke="#9E9E9E" stroke-width="1.2" />
-              <text
-                x="54"
-                y="174"
-                font-size="11"
-                fill="#757575"
-                text-anchor="end"
-                font-family="monospace"
-              >
-                0
-              </text>
-
-              <!-- Estado Ocioso: Linha Guia e Mensagem -->
-              <g v-if="downloadSamples.length === 0 && uploadSamples.length === 0">
-                <text x="400" y="105" font-size="13" fill="#9E9E9E" text-anchor="middle">
-                  Selecione o perfil e clique em Iniciar Teste para visualizar o gráfico em tempo
-                  real
+                <text
+                  v-if="downloadSamples.length === 0 && uploadSamples.length === 0"
+                  :x="plotArea.left + plotArea.width / 2"
+                  :y="plotArea.top + plotArea.height / 2"
+                  class="speed-plot__label"
+                  text-anchor="middle"
+                >
+                  Selecione o perfil e clique em Iniciar Teste para ver o gráfico em tempo real
                 </text>
-              </g>
 
-              <!-- Área e Linha de Download -->
-              <polygon
-                v-if="downloadAreaPoints"
-                :points="downloadAreaPoints"
-                fill="url(#grad-down)"
-              />
-              <polyline
-                v-if="downloadLinePoints"
-                :points="downloadLinePoints"
-                fill="none"
-                stroke="#1976D2"
-                stroke-width="2.5"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
+                <template v-for="s in speedSeries" :key="s.id">
+                  <path v-if="s.area" :d="s.area" :fill="`url(#${s.gradientId})`" />
+                  <path :d="s.line" :stroke="s.color" class="speed-plot__line" />
+                </template>
 
-              <!-- Área e Linha de Upload -->
-              <polygon v-if="uploadAreaPoints" :points="uploadAreaPoints" fill="url(#grad-up)" />
-              <polyline
-                v-if="uploadLinePoints"
-                :points="uploadLinePoints"
-                fill="none"
-                stroke="#9C27B0"
-                stroke-width="2.5"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-
-              <!-- Ponto Ativo Mais Recente -->
-              <circle
-                v-if="activePoint"
-                :cx="activePoint.x"
-                :cy="activePoint.y"
-                r="5"
-                :fill="activePointColor"
-                stroke="#FFFFFF"
-                stroke-width="2"
-              />
-            </svg>
+                <circle
+                  v-if="activePoint"
+                  :cx="activePoint.x"
+                  :cy="activePoint.y"
+                  r="4"
+                  :fill="activePointColor"
+                  class="speed-plot__marker"
+                />
+              </svg>
+            </div>
 
             <!-- Barra de Progresso Integrada -->
             <v-progress-linear
@@ -288,7 +231,7 @@
         <v-row class="mb-4">
           <v-col cols="6" sm="3">
             <v-card variant="tonal" color="primary" class="rounded-lg pa-3 text-center">
-              <div class="text-caption text-grey font-weight-medium">Download</div>
+              <div class="text-caption font-weight-medium">Download</div>
               <div class="text-h5 font-weight-bold font-monospace text-primary">
                 {{ formatSpeedByUnit(downloadResult, speedUnit) }}
                 <span class="text-caption font-weight-regular">{{
@@ -300,7 +243,7 @@
 
           <v-col cols="6" sm="3">
             <v-card variant="tonal" color="purple" class="rounded-lg pa-3 text-center">
-              <div class="text-caption text-grey font-weight-medium">Upload</div>
+              <div class="text-caption font-weight-medium">Upload</div>
               <div class="text-h5 font-weight-bold font-monospace text-purple">
                 {{ formatSpeedByUnit(uploadResult, speedUnit) }}
                 <span class="text-caption font-weight-regular">{{
@@ -312,7 +255,7 @@
 
           <v-col cols="6" sm="3">
             <v-card variant="tonal" color="teal" class="rounded-lg pa-3 text-center">
-              <div class="text-caption text-grey font-weight-medium">Latência (Ping)</div>
+              <div class="text-caption font-weight-medium">Latência (Ping)</div>
               <div class="text-h5 font-weight-bold font-monospace text-teal">
                 {{ formatLatency(pingResult, '--') }}
               </div>
@@ -321,7 +264,7 @@
 
           <v-col cols="6" sm="3">
             <v-card variant="tonal" color="amber-darken-3" class="rounded-lg pa-3 text-center">
-              <div class="text-caption text-grey font-weight-medium">Jitter</div>
+              <div class="text-caption font-weight-medium">Jitter</div>
               <div class="text-h5 font-weight-bold font-monospace text-amber-darken-3">
                 {{ formatLatency(jitterResult, '--') }}
               </div>
@@ -368,6 +311,15 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useDiagnosticsStore } from '@/stores/diagnostics'
+import { useElementWidth } from '@/composables/useElementWidth'
+import {
+  areaPath,
+  axisTicks,
+  linePath,
+  paletteColor,
+  yAt,
+  type PlotArea,
+} from '@/utils/charts/scale'
 import {
   convertSpeedFromMbps,
   formatLatency,
@@ -504,59 +456,57 @@ const yScaleMax = computed(() => {
   return Math.ceil(maxVal / 100) * 100
 })
 
-const yScaleMid = computed(() => yScaleMax.value * 0.66)
-const yScaleLow = computed(() => yScaleMax.value * 0.33)
+/*
+ * Gráfico em pixels reais (sem esticar a caixa): o eixo X é o progresso da
+ * fase (0 → 1), não o relógio — download e upload ocupam a mesma largura.
+ */
+const SPEED_COLORS = { download: paletteColor(0), upload: paletteColor(6) }
+const PLOT_HEIGHT = 180
+const plotRef = ref<HTMLElement | null>(null)
+const plotWidth = useElementWidth(plotRef)
 
-// Mapeamento dos pontos SVG para o gráfico
-const chartBounds = {
-  left: 60,
-  right: 745,
-  top: 25,
-  bottom: 170,
-}
+const plotArea = computed<PlotArea>(() => ({
+  left: 64,
+  top: 10,
+  width: Math.max(10, plotWidth.value - 64 - 12),
+  height: PLOT_HEIGHT - 10 - 12,
+}))
+
+const speedDomain = computed(() => ({ min: 0, max: yScaleMax.value }))
+
+const speedTicks = computed(() =>
+  axisTicks(0, yScaleMax.value, 3).map((value) => ({
+    y: yAt(value, speedDomain.value, plotArea.value),
+    label: value === 0 ? '0' : formatSpeedValue(value, effectiveChartUnit.value),
+    base: value === 0,
+  }))
+)
 
 function calculatePoint(sample: SpeedSample) {
-  const width = chartBounds.right - chartBounds.left
-  const height = chartBounds.bottom - chartBounds.top
-  const x = chartBounds.left + sample.ratio * width
   const speedInUnit = convertSpeedFromMbps(sample.speed, effectiveChartUnit.value)
-  const normalizedSpeed = Math.min(Math.max(speedInUnit, 0), yScaleMax.value)
-  const y = chartBounds.bottom - (normalizedSpeed / yScaleMax.value) * height
-  return { x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 }
+  return {
+    x: plotArea.value.left + Math.min(1, Math.max(0, sample.ratio)) * plotArea.value.width,
+    y: yAt(speedInUnit, speedDomain.value, plotArea.value),
+  }
 }
 
-const downloadPoints = computed(() => {
-  return downloadSamples.value.map((s) => calculatePoint(s))
-})
+const downloadPoints = computed(() => downloadSamples.value.map((s) => calculatePoint(s)))
+const uploadPoints = computed(() => uploadSamples.value.map((s) => calculatePoint(s)))
 
-const uploadPoints = computed(() => {
-  return uploadSamples.value.map((s) => calculatePoint(s))
-})
-
-const downloadLinePoints = computed(() => {
-  if (downloadPoints.value.length === 0) return ''
-  return downloadPoints.value.map((p) => `${p.x},${p.y}`).join(' ')
-})
-
-const downloadAreaPoints = computed(() => {
-  if (downloadPoints.value.length === 0) return ''
-  const first = downloadPoints.value[0]
-  const last = downloadPoints.value[downloadPoints.value.length - 1]
-  const line = downloadPoints.value.map((p) => `${p.x},${p.y}`).join(' ')
-  return `${first.x},${chartBounds.bottom} ${line} ${last.x},${chartBounds.bottom}`
-})
-
-const uploadLinePoints = computed(() => {
-  if (uploadPoints.value.length === 0) return ''
-  return uploadPoints.value.map((p) => `${p.x},${p.y}`).join(' ')
-})
-
-const uploadAreaPoints = computed(() => {
-  if (uploadPoints.value.length === 0) return ''
-  const first = uploadPoints.value[0]
-  const last = uploadPoints.value[uploadPoints.value.length - 1]
-  const line = uploadPoints.value.map((p) => `${p.x},${p.y}`).join(' ')
-  return `${first.x},${chartBounds.bottom} ${line} ${last.x},${chartBounds.bottom}`
+const speedSeries = computed(() => {
+  const baseY = plotArea.value.top + plotArea.value.height
+  return [
+    { id: 'download', points: downloadPoints.value, color: SPEED_COLORS.download },
+    { id: 'upload', points: uploadPoints.value, color: SPEED_COLORS.upload },
+  ]
+    .filter((s) => s.points.length > 0)
+    .map((s) => ({
+      id: s.id,
+      color: s.color,
+      gradientId: `speed-grad-${s.id}`,
+      line: linePath(s.points),
+      area: areaPath(s.points, baseY),
+    }))
 })
 
 const activePoint = computed(() => {
@@ -572,10 +522,9 @@ const activePoint = computed(() => {
   return null
 })
 
-const activePointColor = computed(() => {
-  if (currentPhase.value === 'upload') return '#9C27B0'
-  return '#1976D2'
-})
+const activePointColor = computed(() =>
+  currentPhase.value === 'upload' ? SPEED_COLORS.upload : SPEED_COLORS.download
+)
 
 function onUpdateModelValue(val: boolean) {
   emit('update:modelValue', val)
@@ -775,8 +724,37 @@ function cancelTest() {
 .chart-wrapper {
   height: 200px;
 }
-.speed-chart-svg {
+.speed-plot {
+  width: 100%;
   height: 180px;
+}
+.speed-plot__svg {
+  display: block;
+  overflow: visible;
+}
+.speed-plot__grid {
+  stroke: rgba(var(--v-theme-on-surface), 0.1);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+.speed-plot__grid--base {
+  stroke: rgba(var(--v-theme-on-surface), 0.28);
+}
+.speed-plot__label {
+  fill: rgba(var(--v-theme-on-surface), 0.72);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  dominant-baseline: middle;
+}
+.speed-plot__line {
+  fill: none;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.speed-plot__marker {
+  stroke: rgb(var(--v-theme-surface));
+  stroke-width: 1.5;
 }
 .legend-bar {
   display: inline-block;

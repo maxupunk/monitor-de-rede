@@ -267,6 +267,19 @@ export function formatClockTime(value?: string | Date | null): string {
   })
 }
 
+/**
+ * Rótulo do eixo de tempo de um gráfico: "14:32" quando a janela cabe num dia,
+ * "05/08" quando passa disso. Texto que não é data sai como veio.
+ */
+export function formatAxisTime(value: string | Date, spanMs: number): string {
+  const date = toDate(value)
+  if (!date) return String(value)
+  if (spanMs > 36 * 3600 * 1000) {
+    return date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+  }
+  return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+}
+
 /** Tempo decorrido em português: "há 2 min", "há 3 dias", "nunca" */
 export function formatRelativeTime(value?: string | Date | null, emptyLabel = 'nunca'): string {
   const date = toDate(value)

@@ -28,6 +28,16 @@ pub static SYSTEM_DOCS: &[DocTopic] = &[
         content: "O NetMonitor é um sistema corporativo de monitoramento de redes e infraestrutura desenvolvido em Rust (backend Loco.rs) e Vue 3/Vuetify (frontend). Ele oferece coleta de métricas em tempo real via SSE (Server-Sent Events), monitoramento contínuo de conectividade (ICMP/TCP/UDP/SNMP), descoberta automatizada de dispositivos, topologia de rede visual, gestão de alertas com detecção de flapping, servidor WireGuard VPN integrado e diagnósticos avançados com playbooks automatizados.",
     },
     DocTopic {
+        id: "dashboard_layout",
+        title: "Layout do Dashboard (cards)",
+        keywords: &["dashboard", "painel", "card", "cards", "widget", "widgets", "layout", "tela inicial", "organizar", "reorganizar"],
+        content: "O dashboard é montado com cards (widgets) num layout compartilhado, gravado no servidor e sincronizado em tempo real entre as abas:
+- Cards únicos (resumo estatístico, saúde global, alertas ativos, latência, distribuição de eventos, alvos instáveis, feed de eventos, monitores de rede, resumo Docker, serviços SaaS) e cards que aceitam várias instâncias, cada uma com a sua configuração (banda de interface, banda vs latência, CPU, RAM, status binário, mapa de calor SaaS, latência DNS).
+- Tamanhos: um terço, metade, dois terços ou largura total.
+- Na tela: botão de edição do dashboard (mover, remover, catálogo de cards). Pelo chat: a IA lê o layout com get_dashboard_layout e propõe mudanças com update_dashboard_layout (adicionar, remover, mover, redimensionar, configurar ou restaurar o padrão) — gravadas só depois da confirmação do usuário, a cada vez.
+- Remover um card único só o oculta (volta pelo catálogo); remover uma instância a apaga.",
+    },
+    DocTopic {
         id: "monitors",
         title: "Monitores e Coleta de Métricas",
         keywords: &["monitor", "monitores", "icmp", "ping", "tcp", "udp", "snmp", "intervalo", "threshold", "perda"],

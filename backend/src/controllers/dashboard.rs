@@ -1,35 +1,20 @@
 //! Persistência do layout compartilhado do dashboard.
 
 use crate::{
-    dtos::resources::DashboardLayoutInput,
-    models::system_settings::{Model, DASHBOARD_LAYOUT},
-    services::shared::errors::AppResult,
+    dtos::resources::DashboardLayoutInput, services::dashboard, services::shared::errors::AppResult,
 };
 use loco_rs::prelude::*;
 async fn get_layout(State(ctx): State<AppContext>) -> AppResult<Response> {
-    let setting = Model::get(&ctx.db, DASHBOARD_LAYOUT).await?;
-    let updated_at = setting.as_ref().map(|row| row.updated_at.to_rfc3339());
-    let layout = setting
-        .and_then(|row| row.value)
-        .and_then(|value| serde_json::from_str::<serde_json::Value>(&value).ok())
-        .filter(serde_json::Value::is_array);
+    let stored = dashboard::stored(&ctx.db).await?;
     Ok(format::json(
-        serde_json::json!({"layout":layout,"updatedAt":updated_at}),
+        serde_json::json!({"layout":stored.layout,"updatedAt":stored.updated_at}),
     )?)
 }
 async fn save_layout(
     State(ctx): State<AppContext>,
     Json(input): Json<DashboardLayoutInput>,
 ) -> AppResult<Response> {
-    let saved =
-        Model::set(
-            &ctx.db,
-            DASHBOARD_LAYOUT,
-            Some(serde_json::to_string(&input.layout).map_err(|error| {
-                crate::services::shared::errors::AppError::Internal(error.into())
-            })?),
-        )
-        .await?;
+    let saved = dashboard::save(&ctx, &input.layout, input.client_id.as_deref()).await?;
     Ok(format::json(
         serde_json::json!({"success":true,"updatedAt":saved.updated_at.to_rfc3339()}),
     )?)

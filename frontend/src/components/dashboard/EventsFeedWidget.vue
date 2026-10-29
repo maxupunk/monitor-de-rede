@@ -1,66 +1,69 @@
 <template>
-  <v-card elevation="2" class="rounded-lg fill-height">
-    <v-card-title class="d-flex align-center justify-space-between py-3 px-4">
-      <div class="d-flex align-center">
-        <v-icon start color="info">mdi-pulse</v-icon>
-        <span class="font-weight-bold text-h6">Feed de Eventos em Tempo Real</span>
-      </div>
-      <v-chip :color="eventsStore.isConnected ? 'success' : 'error'" size="x-small" variant="flat">
-        {{ eventsStore.isConnected ? 'Ao Vivo' : 'Desconectado' }}
-      </v-chip>
-    </v-card-title>
-    <v-divider></v-divider>
-    <v-card-text class="pa-0">
-      <div v-if="eventsStore.recentEvents.length > 0">
-        <v-list max-height="360" class="overflow-y-auto pa-0">
-          <v-list-item
-            v-for="(evt, evtIdx) in eventsStore.recentEvents.slice(0, 10)"
-            :key="evtIdx"
-            :title="formatEventDetails(evt).title"
-            :subtitle="formatEventDetails(evt).message"
-            class="px-4 py-2 border-b cursor-pointer"
-            @click="emit('open-detail', evt)"
-          >
-            <template #prepend>
-              <v-avatar
-                :color="formatEventDetails(evt).color"
-                size="32"
-                variant="tonal"
-                class="mr-3"
-              >
-                <v-icon size="18">{{ formatEventDetails(evt).icon }}</v-icon>
-              </v-avatar>
-            </template>
-            <template #append>
-              <span class="text-caption text-grey">{{ formatEventDetails(evt).time }}</span>
-            </template>
-          </v-list-item>
-        </v-list>
-      </div>
-      <div v-else class="pa-6 text-center text-grey">
-        <v-icon size="44" color="grey-lighten-1" class="mb-2"> mdi-access-point-network </v-icon>
-        <div class="text-subtitle-2 font-weight-medium">Aguardando eventos em tempo real...</div>
-        <div class="text-caption">
-          Mudanças de status e verificações aparecerão aqui automaticamente.
-        </div>
-      </div>
-    </v-card-text>
-  </v-card>
+  <DashboardCard
+    title="Eventos em tempo real"
+    icon="mdi-pulse"
+    icon-color="info"
+    subtitle="Mudanças de status e verificações"
+    to="/events"
+    flush
+  >
+    <template #actions>
+      <LiveIndicator />
+    </template>
+
+    <v-list v-if="items.length > 0" max-height="360" class="overflow-y-auto py-0">
+      <v-list-item
+        v-for="item in items"
+        :key="item.key"
+        :title="item.details.title"
+        :subtitle="item.details.message"
+        class="px-5"
+        @click="openDetail(item.event)"
+      >
+        <template #prepend>
+          <v-avatar :color="item.details.color" size="32" variant="tonal" rounded="lg">
+            <v-icon size="18">{{ item.details.icon }}</v-icon>
+          </v-avatar>
+        </template>
+        <template #append>
+          <span class="text-caption font-weight-medium">{{ item.details.time }}</span>
+        </template>
+      </v-list-item>
+    </v-list>
+
+    <div v-else class="dashboard-empty">
+      <v-icon size="40" color="info">mdi-access-point-network</v-icon>
+      <div class="text-subtitle-2 font-weight-bold mt-2">Aguardando eventos…</div>
+      <div class="text-body-2">Mudanças de status aparecem aqui automaticamente.</div>
+    </div>
+
+    <EventDetailDialog v-model="detailOpen" :event="selected" />
+  </DashboardCard>
 </template>
 
 <script setup lang="ts">
+import { computed, ref } from 'vue'
+import DashboardCard from '@/components/dashboard/DashboardCard.vue'
+import EventDetailDialog from '@/components/EventDetailDialog.vue'
+import LiveIndicator from '@/components/LiveIndicator.vue'
 import { useEventsStore, type RealtimeEventPayload } from '@/stores/events'
 import { formatEventDetails } from '@/utils/eventPresentation'
 
-const emit = defineEmits<{
-  'open-detail': [event: RealtimeEventPayload]
-}>()
-
 const eventsStore = useEventsStore()
-</script>
+const detailOpen = ref(false)
+const selected = ref<RealtimeEventPayload | null>(null)
 
-<style scoped>
-.cursor-pointer {
-  cursor: pointer;
+/** Formata uma vez por evento, não três vezes por linha a cada render. */
+const items = computed(() =>
+  eventsStore.recentEvents.slice(0, 10).map((event, index) => ({
+    key: index,
+    event,
+    details: formatEventDetails(event),
+  }))
+)
+
+function openDetail(event: RealtimeEventPayload) {
+  selected.value = event
+  detailOpen.value = true
 }
-</style>
+</script>

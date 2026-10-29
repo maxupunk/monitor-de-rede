@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
-import { useDashboardStore, DEFAULT_WIDGETS } from '../../src/stores/dashboard.ts'
+import { useDashboardStore, DEFAULT_WIDGETS, widgetSizeOf } from '../../src/stores/dashboard.ts'
 
 const postMock = vi.fn()
 const getMock = vi.fn()
@@ -34,11 +34,13 @@ describe('dashboard store', () => {
     const store = useDashboardStore()
 
     expect(store.widgets).toHaveLength(DEFAULT_WIDGETS.length)
-    expect(store.visibleWidgets.map((w) => w.id)).toEqual(DEFAULT_WIDGETS.map((w) => w.id))
+    expect(store.visibleWidgets.map((w) => w.id)).toEqual(
+      DEFAULT_WIDGETS.filter((w) => w.visible).map((w) => w.id)
+    )
   })
 
   it('carrega layout salvo no localStorage e complementa com widgets padrão', () => {
-    storage['netmonitor_dashboard_layout_v1'] = JSON.stringify([
+    storage['netmonitor_dashboard_layout_v2'] = JSON.stringify([
       { id: 'stat_cards', visible: false, order: 0 },
       { id: 'health_gauge', visible: true, order: 1 },
     ])
@@ -85,7 +87,7 @@ describe('dashboard store', () => {
     store.resetToDefaultLayout()
 
     expect(store.widgets).toHaveLength(DEFAULT_WIDGETS.length)
-    expect(store.widgets.every((w) => w.visible)).toBe(true)
+    expect(store.widgets.map((w) => w.visible)).toEqual(DEFAULT_WIDGETS.map((w) => w.visible))
   })
 
   it('alterna modo de edição', () => {
@@ -97,5 +99,18 @@ describe('dashboard store', () => {
 
     store.toggleEditMode(false)
     expect(store.isEditMode).toBe(false)
+  })
+
+  it('redimensiona pelo tamanho nomeado e lê o tamanho de volta das colunas', () => {
+    const store = useDashboardStore()
+    store.resizeWidget('health_gauge', 'third')
+    const gauge = store.widgets.find((w) => w.id === 'health_gauge')!
+    expect([gauge.cols, gauge.md, gauge.lg]).toEqual([12, 6, 4])
+    expect(widgetSizeOf(gauge)).toBe('third')
+
+    store.resizeWidget('health_gauge', 'two_thirds')
+    expect(widgetSizeOf(gauge)).toBe('two_thirds')
+    expect(widgetSizeOf({ md: 12, lg: 12 })).toBe('full')
+    expect(widgetSizeOf({ md: 6, lg: 6 })).toBe('half')
   })
 })

@@ -1,69 +1,20 @@
 <template>
-  <v-row>
-    <v-col cols="12" sm="6" md="3">
-      <v-card elevation="2" class="pa-4 rounded-lg stat-card" :to="statCardLink('/devices')">
-        <div class="d-flex align-center justify-space-between mb-2">
-          <span class="text-subtitle-2 text-grey-darken-1 font-weight-bold">Dispositivos</span>
-          <v-avatar color="primary" variant="tonal" size="36">
-            <v-icon color="primary">mdi-devices</v-icon>
-          </v-avatar>
-        </div>
-        <div class="text-h4 font-weight-bold">{{ devicesStore.totalCount }}</div>
-        <div class="text-caption text-success font-weight-medium mt-1">
-          {{ devicesStore.onlineCount }} online / {{ devicesStore.offlineCount }} offline
-        </div>
-      </v-card>
-    </v-col>
-
-    <v-col cols="12" sm="6" md="3">
-      <v-card elevation="2" class="pa-4 rounded-lg stat-card" :to="statCardLink('/monitors')">
-        <div class="d-flex align-center justify-space-between mb-2">
-          <span class="text-subtitle-2 text-grey-darken-1 font-weight-bold">Monitores de Rede</span>
-          <v-avatar color="info" variant="tonal" size="36">
-            <v-icon color="info">mdi-chart-timeline-variant</v-icon>
-          </v-avatar>
-        </div>
-        <div class="text-h4 font-weight-bold">{{ monitorsStore.monitors.length }}</div>
-        <div class="text-caption text-info font-weight-medium mt-1">
-          {{ healthCounts.up }} operacionais
-          <template v-if="healthCounts.disabled > 0">
-            · {{ healthCounts.disabled }} desativado(s)
-          </template>
-        </div>
-      </v-card>
-    </v-col>
-
-    <v-col cols="12" sm="6" md="3">
+  <v-row dense>
+    <v-col v-for="tile in tiles" :key="tile.label" cols="12" sm="6" lg="3">
       <v-card
-        elevation="2"
-        class="pa-4 rounded-lg stat-card"
-        :to="statCardLink({ path: '/monitors', query: { status: 'down' } })"
+        variant="flat"
+        rounded="lg"
+        class="stat-tile dashboard-surface"
+        :to="dashboardStore.isEditMode ? undefined : tile.to"
       >
-        <div class="d-flex align-center justify-space-between mb-2">
-          <span class="text-subtitle-2 text-grey-darken-1 font-weight-bold">Disponibilidade</span>
-          <v-avatar color="success" variant="tonal" size="36">
-            <v-icon color="success">mdi-check-circle-outline</v-icon>
+        <div class="d-flex align-center justify-space-between ga-3">
+          <span class="stat-tile__label">{{ tile.label }}</span>
+          <v-avatar :color="tile.color" variant="tonal" size="36" rounded="lg">
+            <v-icon size="20">{{ tile.icon }}</v-icon>
           </v-avatar>
         </div>
-        <div class="text-h4 font-weight-bold text-success">{{ globalUptime }}%</div>
-        <div class="text-caption text-grey mt-1">
-          {{ healthCounts.up }} de {{ healthCounts.monitored }} monitor(es) ativo(s) no ar
-        </div>
-      </v-card>
-    </v-col>
-
-    <v-col cols="12" sm="6" md="3">
-      <v-card elevation="2" class="pa-4 rounded-lg stat-card" :to="statCardLink('/alerts')">
-        <div class="d-flex align-center justify-space-between mb-2">
-          <span class="text-subtitle-2 text-grey-darken-1 font-weight-bold">Alertas Ativos</span>
-          <v-avatar color="warning" variant="tonal" size="36">
-            <v-icon color="warning">mdi-bell-ring-outline</v-icon>
-          </v-avatar>
-        </div>
-        <div class="text-h4 font-weight-bold text-warning">
-          {{ alertsStore.activeAlerts.length }}
-        </div>
-        <div class="text-caption text-warning mt-1">Requerem atenção</div>
+        <div class="stat-tile__value" :class="`text-${tile.valueColor}`">{{ tile.value }}</div>
+        <div class="stat-tile__detail" :class="`text-${tile.detailColor}`">{{ tile.detail }}</div>
       </v-card>
     </v-col>
   </v-row>
@@ -78,6 +29,17 @@ import { useAlertsStore } from '@/stores/alerts'
 import { useMonitorsStore } from '@/stores/monitors'
 import { monitorHealthCounts, monitorUptimePercent } from '@/utils/monitorPresentation'
 
+interface StatTile {
+  label: string
+  icon: string
+  color: string
+  value: string
+  valueColor: string
+  detail: string
+  detailColor: string
+  to: RouteLocationRaw
+}
+
 const dashboardStore = useDashboardStore()
 const devicesStore = useDevicesStore()
 const alertsStore = useAlertsStore()
@@ -86,19 +48,91 @@ const monitorsStore = useMonitorsStore()
 const healthCounts = computed(() => monitorHealthCounts(monitorsStore.monitors))
 const globalUptime = computed(() => monitorUptimePercent(healthCounts.value))
 
-function statCardLink(target: string | RouteLocationRaw): RouteLocationRaw | undefined {
-  return dashboardStore.isEditMode ? undefined : target
-}
+/**
+ * Quatro números que respondem "está tudo bem?". A cor do valor só muda
+ * quando há algo a fazer — verde/primário é calma, laranja/vermelho é ação.
+ */
+const tiles = computed<StatTile[]>(() => {
+  const offline = devicesStore.offlineCount
+  const down = healthCounts.value.monitored - healthCounts.value.up
+  const alerts = alertsStore.activeAlerts.length
+  return [
+    {
+      label: 'Dispositivos',
+      icon: 'mdi-devices',
+      color: 'primary',
+      value: String(devicesStore.totalCount),
+      valueColor: 'high-emphasis',
+      detail: `${devicesStore.onlineCount} online · ${offline} offline`,
+      detailColor: offline > 0 ? 'error' : 'success',
+      to: '/devices',
+    },
+    {
+      label: 'Monitores',
+      icon: 'mdi-heart-pulse',
+      color: 'info',
+      value: String(monitorsStore.monitors.length),
+      valueColor: 'high-emphasis',
+      detail:
+        `${healthCounts.value.up} operacionais` +
+        (healthCounts.value.disabled > 0 ? ` · ${healthCounts.value.disabled} desativados` : ''),
+      detailColor: 'info',
+      to: '/monitors',
+    },
+    {
+      label: 'Disponibilidade',
+      icon: 'mdi-check-circle-outline',
+      color: down > 0 ? 'warning' : 'success',
+      value: `${globalUptime.value}%`,
+      valueColor: down > 0 ? 'warning' : 'success',
+      detail:
+        down > 0
+          ? `${down} de ${healthCounts.value.monitored} monitores fora do ar`
+          : `${healthCounts.value.monitored} monitores no ar`,
+      detailColor: down > 0 ? 'warning' : 'success',
+      to: { path: '/monitors', query: { status: 'down' } },
+    },
+    {
+      label: 'Alertas ativos',
+      icon: 'mdi-bell-ring-outline',
+      color: alerts > 0 ? 'error' : 'success',
+      value: String(alerts),
+      valueColor: alerts > 0 ? 'error' : 'success',
+      detail: alerts > 0 ? 'Requerem atenção' : 'Nenhum alerta aberto',
+      detailColor: alerts > 0 ? 'error' : 'success',
+      to: '/alerts',
+    },
+  ]
+})
 </script>
 
 <style scoped>
-.stat-card {
-  transition:
-    transform 0.15s ease,
-    box-shadow 0.15s ease;
+.stat-tile {
+  height: 100%;
+  padding: 16px 20px;
+  transition: transform 0.15s ease;
 }
 
-.stat-card:hover {
+.stat-tile:hover {
   transform: translateY(-2px);
+}
+
+.stat-tile__label {
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.stat-tile__value {
+  margin-top: 4px;
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-tile__detail {
+  margin-top: 2px;
+  font-size: 0.8rem;
+  font-weight: 500;
 }
 </style>

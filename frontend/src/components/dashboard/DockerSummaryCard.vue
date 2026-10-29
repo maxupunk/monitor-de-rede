@@ -1,98 +1,93 @@
 <template>
-  <v-card v-if="docker.available" rounded="xl" variant="outlined" class="docker-summary-card">
-    <v-card-text class="pa-4 pa-md-5">
-      <div class="d-flex flex-wrap align-center ga-3 mb-4">
-        <v-avatar color="primary" variant="tonal" size="44">
-          <v-icon size="26">mdi-docker</v-icon>
-        </v-avatar>
-        <div>
-          <div class="text-subtitle-1 font-weight-bold">Docker</div>
-          <div class="text-caption text-medium-emphasis">
-            {{ docker.status?.name || 'Engine ativa' }} · monitoramento em tempo real
+  <DashboardCard
+    title="Docker"
+    icon="mdi-docker"
+    :subtitle="`${docker.status?.name || 'Engine ativa'} · tempo real`"
+    to="/docker"
+    to-label="Abrir Docker"
+  >
+    <template #actions>
+      <v-chip color="success" size="small" variant="tonal" prepend-icon="mdi-play-circle-outline">
+        {{ docker.runningContainers }} ativos
+      </v-chip>
+      <v-chip
+        v-if="docker.stoppedContainers > 0"
+        color="warning"
+        size="small"
+        variant="tonal"
+        prepend-icon="mdi-stop-circle-outline"
+      >
+        {{ docker.stoppedContainers }} parados
+      </v-chip>
+    </template>
+
+    <v-row dense>
+      <v-col cols="12" md="4">
+        <div class="docker-metric">
+          <div class="docker-metric__head">
+            <span>CPU dos containers</span>
+            <strong>{{ formatPercent(current?.cpuPercent ?? 0) }}</strong>
+          </div>
+          <MonitorSparkline
+            :data="cpuHistory"
+            :color="paletteColor(0)"
+            width="100%"
+            :height="48"
+          ></MonitorSparkline>
+        </div>
+      </v-col>
+      <v-col cols="12" md="4">
+        <div class="docker-metric">
+          <div class="docker-metric__head">
+            <span>RAM dos containers</span>
+            <strong>{{ memorySummary }}</strong>
+          </div>
+          <MonitorSparkline
+            :data="memoryHistory"
+            :color="paletteColor(6)"
+            width="100%"
+            :height="48"
+            unit="bytes"
+          ></MonitorSparkline>
+        </div>
+      </v-col>
+      <v-col cols="12" md="4">
+        <div class="docker-metric">
+          <div class="docker-metric__head">
+            <span>Tráfego acumulado</span>
+          </div>
+          <div class="docker-metric__row">
+            <span><v-icon size="16" color="success">mdi-arrow-down</v-icon> Recebido</span>
+            <strong>{{ formatDecimalBytes(current?.networkReceivedBytes) }}</strong>
+          </div>
+          <div class="docker-metric__row">
+            <span><v-icon size="16" color="info">mdi-arrow-up</v-icon> Enviado</span>
+            <strong>{{ formatDecimalBytes(current?.networkTransmittedBytes) }}</strong>
           </div>
         </div>
-        <v-spacer></v-spacer>
-        <v-chip color="success" size="small" variant="tonal" prepend-icon="mdi-circle-small">
-          {{ docker.runningContainers }} ativos
-        </v-chip>
-        <v-chip v-if="docker.stoppedContainers > 0" color="warning" size="small" variant="tonal">
-          {{ docker.stoppedContainers }} parados
-        </v-chip>
-        <v-btn
-          to="/docker"
-          variant="tonal"
-          color="primary"
-          size="small"
-          append-icon="mdi-arrow-right"
-        >
-          Abrir Docker
-        </v-btn>
-      </div>
-
-      <v-row dense>
-        <v-col cols="12" md="4">
-          <div class="docker-metric pa-3 rounded-lg">
-            <div class="d-flex align-center justify-space-between ga-3 mb-2">
-              <span class="text-caption text-medium-emphasis">CPU dos containers</span>
-              <strong>{{ current?.cpuPercent.toFixed(1) ?? '0.0' }}%</strong>
-            </div>
-            <MonitorSparkline
-              :data="cpuHistory"
-              color="#2196F3"
-              width="100%"
-              :height="42"
-            ></MonitorSparkline>
-          </div>
-        </v-col>
-        <v-col cols="12" md="4">
-          <div class="docker-metric pa-3 rounded-lg">
-            <div class="d-flex align-center justify-space-between ga-3 mb-2">
-              <span class="text-caption text-medium-emphasis">RAM dos containers / Engine</span>
-              <strong>{{ memorySummary }}</strong>
-            </div>
-            <div v-if="current" class="text-caption text-medium-emphasis mb-1">
-              {{ current.memoryPercent.toFixed(1) }}% da capacidade
-            </div>
-            <MonitorSparkline
-              :data="memoryHistory"
-              color="#7E57C2"
-              width="100%"
-              :height="42"
-              unit="bytes"
-            ></MonitorSparkline>
-          </div>
-        </v-col>
-        <v-col cols="12" md="4">
-          <div class="docker-metric pa-3 rounded-lg h-100 d-flex flex-column justify-center">
-            <div class="text-caption text-medium-emphasis mb-2">Tráfego acumulado</div>
-            <div class="d-flex align-center justify-space-between ga-2">
-              <span><v-icon size="16" color="success">mdi-arrow-down</v-icon> Recebido</span>
-              <strong>{{ formatDecimalBytes(current?.networkReceivedBytes) }}</strong>
-            </div>
-            <div class="d-flex align-center justify-space-between ga-2 mt-2">
-              <span><v-icon size="16" color="info">mdi-arrow-up</v-icon> Enviado</span>
-              <strong>{{ formatDecimalBytes(current?.networkTransmittedBytes) }}</strong>
-            </div>
-          </div>
-        </v-col>
-      </v-row>
-    </v-card-text>
-  </v-card>
+      </v-col>
+    </v-row>
+  </DashboardCard>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import DashboardCard from '@/components/dashboard/DashboardCard.vue'
 import MonitorSparkline, { type SparklinePoint } from '@/components/MonitorSparkline.vue'
 import { useDockerStore } from '@/stores/docker'
-import { formatBinaryBytes, formatDecimalBytes } from '@/utils/formatters'
+import { paletteColor } from '@/utils/charts/scale'
+import { formatBinaryBytes, formatDecimalBytes, formatPercent } from '@/utils/formatters'
 
 const dockerStore = useDockerStore()
-/** O dashboard é da central: sempre o Docker dela (o agente local), qualquer que seja o host aberto na tela Docker. */
+/**
+ * O dashboard é da central: sempre o Docker dela (o agente local), qualquer
+ * que seja o host aberto na tela Docker. Sem Engine disponível o widget nem
+ * entra na grade (ver `widgetRegistry`).
+ */
 const docker = computed(() => {
   const local = dockerStore.localView
   const running = local.containers.filter((container) => container.state === 'running').length
   return {
-    available: local.status?.available === true,
     status: local.status,
     runningContainers: running,
     stoppedContainers: local.containers.length - running,
@@ -124,15 +119,35 @@ const memoryHistory = computed<SparklinePoint[]>(() =>
 </script>
 
 <style scoped>
-.docker-summary-card {
-  background:
-    radial-gradient(circle at 95% 0%, rgba(var(--v-theme-primary), 0.12), transparent 34%),
-    rgb(var(--v-theme-surface));
+.docker-metric {
+  height: 100%;
+  min-height: 96px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(var(--v-theme-primary), 0.05);
 }
 
-.docker-metric {
-  background: rgba(var(--v-theme-primary), 0.045);
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
-  min-height: 96px;
+.docker-metric__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.docker-metric__head strong,
+.docker-metric__row strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.docker-metric__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 0.85rem;
 }
 </style>

@@ -1,3 +1,4 @@
+import { CHART_PALETTE, niceCeiling } from '@/utils/charts/scale'
 /**
  * Regras puras do gráfico de consumo empilhado (CPU/RAM por container): quais
  * containers ganham faixa própria, a cor de cada um e onde cada faixa começa
@@ -29,20 +30,8 @@ export interface StackedUsage {
   peak: number
 }
 
-/**
- * Paleta categórica (passos validados para o tema escuro): azul, laranja,
- * água, amarelo, magenta, verde e violeta. Ordem fixa, nunca ciclada — o que
- * passa de 7 séries vira "Outros".
- */
-export const STACK_PALETTE = [
-  '#3987e5',
-  '#d95926',
-  '#199e70',
-  '#c98500',
-  '#d55181',
-  '#008300',
-  '#9085e9',
-] as const
+/** Paleta categórica única dos gráficos (ver `utils/charts/scale`). */
+export const STACK_PALETTE = CHART_PALETTE
 
 /** Cor do agrupamento "Outros": neutra, para não competir com as séries. */
 export const OTHERS_COLOR = '#757575'
@@ -118,21 +107,7 @@ export function buildStackedUsage(
   return { layers, totals: base, times, peak: Math.max(0, ...base) }
 }
 
-/**
- * Teto "redondo" do eixo: 1, 2, 2,5 ou 5 × baseⁿ acima do pico. Bytes usam
- * base 1024, para os rótulos saírem em GiB inteiros e não em 9,31 GiB.
- */
-export function niceCeiling(value: number, base: 10 | 1024 = 10): number {
-  if (!Number.isFinite(value) || value <= 0) return 1
-  if (base === 1024) {
-    // Dentro da unidade binária (KiB, MiB, GiB…) o arredondamento é decimal.
-    const unit = 1024 ** Math.max(0, Math.floor(Math.log(value) / Math.log(1024)))
-    return niceCeiling(value / unit) * unit
-  }
-  const magnitude = 10 ** Math.floor(Math.log10(value))
-  const step = [1, 2, 2.5, 5, 10].find((factor) => factor * magnitude >= value) ?? 10
-  return step * magnitude
-}
+export { niceCeiling }
 
 /** Máximo de séries no tooltip: acima disso vira "+N outros". */
 export const MAX_TOOLTIP_ROWS = 3

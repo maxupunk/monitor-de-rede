@@ -1,74 +1,85 @@
 <template>
   <div
-    class="dashboard-widget-wrapper fill-height"
-    :class="{ 'is-editing': isEditMode, 'is-dragging': isDragging }"
+    class="widget-wrapper"
+    :class="{ 'widget-wrapper--editing': isEditMode, 'widget-wrapper--dragging': isDragging }"
     :draggable="isEditMode"
     @dragstart="onDragStart"
     @dragover.prevent="onDragOver"
     @drop.prevent="onDrop"
-    @dragend="onDragEnd"
+    @dragend="isDragging = false"
   >
-    <div
-      v-if="isEditMode"
-      class="widget-edit-header d-flex align-center justify-space-between pa-2 border-b bg-surface-variant rounded-t-lg"
-    >
-      <div class="d-flex align-center ga-2 text-truncate">
-        <v-icon class="drag-handle cursor-grab" color="primary">mdi-drag-vertical</v-icon>
-        <v-icon size="18" color="primary">{{ widget.icon }}</v-icon>
-        <span class="text-caption font-weight-bold text-truncate">{{ widget.title }}</span>
-      </div>
+    <div v-if="isEditMode" class="widget-wrapper__toolbar">
+      <v-icon class="widget-wrapper__handle" color="primary" size="20">mdi-drag</v-icon>
+      <span class="widget-wrapper__title">{{ widget.title }}</span>
 
-      <div class="d-flex align-center ga-1">
-        <v-tooltip text="Mover para cima">
-          <template #activator="{ props: tooltipProps }">
-            <v-btn
-              v-bind="tooltipProps"
-              icon
-              size="x-small"
-              variant="text"
-              :disabled="isFirst"
-              @click="$emit('move-up')"
-            >
-              <v-icon size="18">mdi-chevron-up</v-icon>
-            </v-btn>
-          </template>
-        </v-tooltip>
+      <v-btn
+        icon
+        size="x-small"
+        variant="text"
+        color="primary"
+        :disabled="isFirst"
+        aria-label="Mover para antes"
+        @click="emit('move-up')"
+      >
+        <v-icon>mdi-arrow-left-top</v-icon>
+        <v-tooltip activator="parent" location="top">Mover para antes</v-tooltip>
+      </v-btn>
+      <v-btn
+        icon
+        size="x-small"
+        variant="text"
+        color="primary"
+        :disabled="isLast"
+        aria-label="Mover para depois"
+        @click="emit('move-down')"
+      >
+        <v-icon>mdi-arrow-right-bottom</v-icon>
+        <v-tooltip activator="parent" location="top">Mover para depois</v-tooltip>
+      </v-btn>
 
-        <v-tooltip text="Mover para baixo">
-          <template #activator="{ props: tooltipProps }">
-            <v-btn
-              v-bind="tooltipProps"
-              icon
-              size="x-small"
-              variant="text"
-              :disabled="isLast"
-              @click="$emit('move-down')"
-            >
-              <v-icon size="18">mdi-chevron-down</v-icon>
-            </v-btn>
-          </template>
-        </v-tooltip>
+      <v-menu location="bottom end">
+        <template #activator="{ props: menuProps }">
+          <v-btn
+            v-bind="menuProps"
+            icon
+            size="x-small"
+            variant="text"
+            color="primary"
+            aria-label="Largura do card"
+          >
+            <v-icon>mdi-arrow-expand-horizontal</v-icon>
+            <v-tooltip activator="parent" location="top">Largura</v-tooltip>
+          </v-btn>
+        </template>
+        <v-list density="compact" rounded="lg">
+          <v-list-item
+            v-for="(option, size) in WIDGET_SIZES"
+            :key="size"
+            :prepend-icon="option.icon"
+            :title="option.label"
+            :active="currentSize === size"
+            color="primary"
+            @click="emit('resize', size)"
+          />
+        </v-list>
+      </v-menu>
 
-        <v-tooltip :text="isCustomCard ? 'Remover Card Permanentemente' : 'Ocultar do Dashboard'">
-          <template #activator="{ props: tooltipProps }">
-            <v-btn
-              v-bind="tooltipProps"
-              icon
-              size="x-small"
-              variant="text"
-              color="error"
-              @click="$emit('remove')"
-            >
-              <v-icon size="18">
-                {{ isCustomCard ? 'mdi-delete-outline' : 'mdi-eye-off-outline' }}
-              </v-icon>
-            </v-btn>
-          </template>
+      <v-btn
+        icon
+        size="x-small"
+        variant="text"
+        color="error"
+        :aria-label="isCustomCard ? 'Remover card' : 'Ocultar card'"
+        @click="emit('remove')"
+      >
+        <v-icon>{{ isCustomCard ? 'mdi-delete-outline' : 'mdi-eye-off-outline' }}</v-icon>
+        <v-tooltip activator="parent" location="top">
+          {{ isCustomCard ? 'Remover card' : 'Ocultar (volta pelo catálogo)' }}
         </v-tooltip>
-      </div>
+      </v-btn>
     </div>
 
-    <div class="widget-body fill-height">
+    <div class="widget-wrapper__body">
       <slot></slot>
     </div>
   </div>
@@ -76,7 +87,13 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { DEFAULT_WIDGETS, type WidgetConfig } from '@/stores/dashboard'
+import {
+  DEFAULT_WIDGETS,
+  WIDGET_SIZES,
+  widgetSizeOf,
+  type WidgetConfig,
+  type WidgetSize,
+} from '@/stores/dashboard'
 
 const props = defineProps<{
   widget: WidgetConfig
@@ -88,15 +105,14 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'move-up'): void
   (e: 'move-down'): void
+  (e: 'resize', size: WidgetSize): void
   (e: 'remove'): void
   (e: 'reorder', draggedId: string, targetId: string): void
 }>()
 
 const isDragging = ref(false)
-
-const isCustomCard = computed(() => {
-  return !DEFAULT_WIDGETS.some((def) => def.id === props.widget.id)
-})
+const currentSize = computed(() => widgetSizeOf(props.widget))
+const isCustomCard = computed(() => !DEFAULT_WIDGETS.some((def) => def.id === props.widget.id))
 
 function onDragStart(e: DragEvent) {
   if (!props.isEditMode) return
@@ -108,57 +124,70 @@ function onDragStart(e: DragEvent) {
 }
 
 function onDragOver(e: DragEvent) {
-  if (!props.isEditMode) return
-  if (e.dataTransfer) {
-    e.dataTransfer.dropEffect = 'move'
-  }
+  if (props.isEditMode && e.dataTransfer) e.dataTransfer.dropEffect = 'move'
 }
 
 function onDrop(e: DragEvent) {
   if (!props.isEditMode) return
   const draggedId = e.dataTransfer?.getData('text/plain')
-  if (draggedId && draggedId !== props.widget.id) {
-    emit('reorder', draggedId, props.widget.id)
-  }
-}
-
-function onDragEnd() {
-  isDragging.value = false
+  if (draggedId && draggedId !== props.widget.id) emit('reorder', draggedId, props.widget.id)
 }
 </script>
 
 <style scoped>
-.dashboard-widget-wrapper {
+.widget-wrapper {
   position: relative;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
   transition:
-    border-color 0.2s ease,
-    box-shadow 0.2s ease;
-  border-radius: 8px;
+    outline-color 0.15s ease,
+    opacity 0.15s ease;
 }
 
-.dashboard-widget-wrapper.is-editing {
-  border: 2px dashed rgba(var(--v-theme-primary), 0.5);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+.widget-wrapper__body {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
-.dashboard-widget-wrapper.is-dragging {
-  opacity: 0.5;
-  border-color: rgba(var(--v-theme-primary), 0.9);
-}
-
-.cursor-grab {
+/* Na edição, contorno tracejado só como "alça" — sai junto com o modo. */
+.widget-wrapper--editing {
+  outline: 2px dashed rgba(var(--v-theme-primary), 0.55);
+  outline-offset: 4px;
   cursor: grab;
 }
 
-.cursor-grab:active {
-  cursor: grabbing;
+.widget-wrapper--editing .widget-wrapper__body {
+  pointer-events: none;
 }
 
-.ga-1 {
-  gap: 4px;
+.widget-wrapper--dragging {
+  opacity: 0.45;
 }
 
-.ga-2 {
-  gap: 8px;
+.widget-wrapper__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-bottom: 8px;
+  padding: 2px 4px 2px 8px;
+  border-radius: 8px;
+  background: rgba(var(--v-theme-primary), 0.1);
+}
+
+.widget-wrapper__handle {
+  cursor: grab;
+}
+
+.widget-wrapper__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-left: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8rem;
+  font-weight: 700;
 }
 </style>

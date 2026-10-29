@@ -338,7 +338,7 @@ const tooltip = computed(() => {
 .stacked-usage__total {
   fill: none;
   stroke: rgb(var(--v-theme-on-surface));
-  stroke-width: 2;
+  stroke-width: 1.5;
   stroke-linejoin: round;
   vector-effect: non-scaling-stroke;
 }

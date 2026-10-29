@@ -1,139 +1,102 @@
 <template>
-  <v-card elevation="2" class="rounded-lg fill-height d-flex flex-column">
-    <v-card-title class="d-flex align-center justify-space-between py-3 px-4">
-      <div class="d-flex align-center ga-2">
-        <v-icon color="success">mdi-gauge</v-icon>
-        <span class="font-weight-bold text-h6">Saúde Global da Rede</span>
-      </div>
-      <v-chip color="success" size="x-small" variant="tonal" class="font-weight-medium">
-        Tempo Real
-      </v-chip>
-    </v-card-title>
-    <v-divider></v-divider>
-
-    <v-card-text class="pa-4 flex-grow-1 d-flex align-center justify-center">
-      <div class="w-100 d-flex flex-column flex-sm-row align-center justify-space-around ga-4">
-        <!-- SVG Donut Chart -->
-        <div class="relative gauge-container d-flex align-center justify-center">
-          <svg viewBox="0 0 160 160" class="gauge-svg">
-            <!-- Background Ring -->
-            <circle
-              cx="80"
-              cy="80"
-              r="62"
-              fill="none"
-              stroke="rgba(148, 163, 184, 0.2)"
-              stroke-width="14"
-            />
-            <!-- Status Segments -->
-            <circle
-              v-for="(seg, idx) in strokeSegments"
-              :key="idx"
-              cx="80"
-              cy="80"
-              r="62"
-              fill="none"
-              :stroke="seg.color"
-              stroke-width="14"
-              :stroke-dasharray="`${seg.dash} ${seg.gap}`"
-              :stroke-dashoffset="seg.offset"
-              stroke-linecap="round"
-              class="gauge-circle cursor-pointer"
-              @click="navigateToStatus(seg.status)"
-            >
-              <title>Ver monitores {{ seg.label }}</title>
-            </circle>
-          </svg>
-
-          <!-- Central Text -->
-          <div class="absolute-center text-center">
-            <div class="text-h4 font-weight-bold text-success">{{ globalUptime }}%</div>
-            <div class="text-caption text-grey font-weight-medium">Disponibilidade</div>
-          </div>
-        </div>
-
-        <!-- Legend / Stats breakdown -->
-        <div class="legend-box d-flex flex-column ga-2 w-100 w-sm-auto">
-          <div
-            class="d-flex align-center justify-space-between ga-4 pa-2 rounded bg-surface-variant cursor-pointer hover-card"
-            @click="navigateToStatus('up')"
+  <DashboardCard
+    title="Saúde Global da Rede"
+    icon="mdi-gauge"
+    icon-color="success"
+    subtitle="Disponibilidade dos monitores ativos, em tempo real"
+  >
+    <div class="gauge-widget">
+      <!-- Anel em pixels reais: 1 unidade do SVG = 1 px na tela -->
+      <div class="gauge-widget__ring">
+        <svg
+          :width="SIZE"
+          :height="SIZE"
+          :viewBox="`0 0 ${SIZE} ${SIZE}`"
+          class="gauge-widget__svg"
+          role="img"
+          :aria-label="`Disponibilidade global de ${globalUptime}%`"
+        >
+          <circle
+            :cx="CENTER"
+            :cy="CENTER"
+            :r="RADIUS"
+            fill="none"
+            :stroke-width="RING"
+            class="gauge-widget__track"
+          />
+          <circle
+            v-for="seg in strokeSegments"
+            :key="seg.status"
+            :cx="CENTER"
+            :cy="CENTER"
+            :r="RADIUS"
+            fill="none"
+            :stroke="seg.color"
+            :stroke-width="RING"
+            :stroke-dasharray="`${seg.dash} ${seg.gap}`"
+            :stroke-dashoffset="seg.offset"
+            class="gauge-widget__segment"
+            @click="navigateToStatus(seg.status)"
           >
-            <div class="d-flex align-center ga-2">
-              <v-avatar color="success" size="10"></v-avatar>
-              <span class="text-caption font-weight-bold">Operacionais (Up)</span>
-            </div>
-            <span class="text-caption font-weight-bold text-success">{{ counts.up }}</span>
-          </div>
+            <title>Ver monitores: {{ seg.label }}</title>
+          </circle>
+        </svg>
 
-          <div
-            class="d-flex align-center justify-space-between ga-4 pa-2 rounded bg-surface-variant cursor-pointer hover-card"
-            @click="navigateToStatus('warning')"
-          >
-            <div class="d-flex align-center ga-2">
-              <v-avatar color="warning" size="10"></v-avatar>
-              <span class="text-caption font-weight-bold">Em Alerta (Warning)</span>
-            </div>
-            <span class="text-caption font-weight-bold text-warning">{{ counts.warning }}</span>
+        <div class="gauge-widget__center">
+          <div class="text-h4 font-weight-bold" :class="`text-${uptimeColor}`">
+            {{ globalUptime }}%
           </div>
-
-          <div
-            class="d-flex align-center justify-space-between ga-4 pa-2 rounded bg-surface-variant cursor-pointer hover-card"
-            @click="navigateToStatus('down')"
-          >
-            <div class="d-flex align-center ga-2">
-              <v-avatar color="error" size="10"></v-avatar>
-              <span class="text-caption font-weight-bold">Fora do Ar (Down)</span>
-            </div>
-            <span class="text-caption font-weight-bold text-error">{{ counts.down }}</span>
-          </div>
-
-          <div
-            class="d-flex align-center justify-space-between ga-4 pa-2 rounded bg-surface-variant cursor-pointer hover-card"
-            @click="navigateToStatus('unknown')"
-          >
-            <div class="d-flex align-center ga-2">
-              <v-avatar color="grey-darken-1" size="10"></v-avatar>
-              <span class="text-caption font-weight-bold">Desconhecido</span>
-            </div>
-            <span class="text-caption font-weight-bold text-grey">{{ counts.unknown }}</span>
-          </div>
-
-          <div
-            v-if="counts.disabled > 0"
-            class="d-flex align-center justify-space-between ga-4 pa-2 rounded bg-surface-variant cursor-pointer hover-card"
-            @click="navigateToStatus('disabled')"
-          >
-            <div class="d-flex align-center ga-2">
-              <v-avatar color="grey-lighten-1" size="10"></v-avatar>
-              <span class="text-caption font-weight-bold">Desativados</span>
-              <v-tooltip activator="parent" location="top">
-                Monitores desligados pelo operador — fora da conta de disponibilidade
-              </v-tooltip>
-            </div>
-            <span class="text-caption font-weight-bold text-grey">{{ counts.disabled }}</span>
-          </div>
+          <div class="text-caption font-weight-medium">Disponibilidade</div>
         </div>
       </div>
-    </v-card-text>
-  </v-card>
+
+      <v-list density="compact" class="gauge-widget__legend pa-0" bg-color="transparent">
+        <v-list-item
+          v-for="row in legendRows"
+          :key="row.status"
+          rounded="lg"
+          class="px-2"
+          @click="navigateToStatus(row.status)"
+        >
+          <template #prepend>
+            <span class="gauge-widget__swatch" :style="{ backgroundColor: row.color }"></span>
+          </template>
+          <v-list-item-title class="text-body-2 font-weight-medium">
+            {{ row.label }}
+          </v-list-item-title>
+          <template #append>
+            <span class="text-body-2 font-weight-bold">{{ row.count }}</span>
+          </template>
+          <v-tooltip v-if="row.hint" activator="parent" location="top">{{ row.hint }}</v-tooltip>
+        </v-list-item>
+      </v-list>
+    </div>
+  </DashboardCard>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
+import DashboardCard from '@/components/dashboard/DashboardCard.vue'
 import { useMonitorsStore } from '@/stores/monitors'
+import { CHART_STATUS_COLORS } from '@/utils/charts/scale'
 import {
   monitorHealthCounts,
   monitorUptimePercent,
   type MonitorHealthBucket,
 } from '@/utils/monitorPresentation'
 
+const SIZE = 168
+const CENTER = SIZE / 2
+const RING = 14
+const RADIUS = CENTER - RING / 2 - 2
+/** Folga, em px, entre fatias vizinhas do anel. */
+const SEGMENT_GAP = 3
+
 const router = useRouter()
 const monitorsStore = useMonitorsStore()
 
-type StatusKey = MonitorHealthBucket
-
-function navigateToStatus(status: StatusKey) {
+function navigateToStatus(status: MonitorHealthBucket) {
   router.push({ path: '/monitors', query: { status } })
 }
 
@@ -141,101 +104,117 @@ const counts = computed(() => monitorHealthCounts(monitorsStore.monitors))
 
 const globalUptime = computed(() => monitorUptimePercent(counts.value))
 
+const uptimeColor = computed(() => {
+  const value = Number(globalUptime.value)
+  if (value >= 99) return 'success'
+  if (value >= 95) return 'warning'
+  return 'error'
+})
+
+const SEGMENTS: Array<{ status: MonitorHealthBucket; label: string; color: string }> = [
+  { status: 'up', label: 'Operacionais', color: CHART_STATUS_COLORS.ok },
+  { status: 'warning', label: 'Em alerta', color: CHART_STATUS_COLORS.warning },
+  { status: 'down', label: 'Fora do ar', color: CHART_STATUS_COLORS.critical },
+  { status: 'unknown', label: 'Desconhecidos', color: CHART_STATUS_COLORS.muted },
+]
+
+const legendRows = computed(() => [
+  ...SEGMENTS.map((seg) => ({ ...seg, count: counts.value[seg.status], hint: '' })),
+  ...(counts.value.disabled > 0
+    ? [
+        {
+          status: 'disabled' as MonitorHealthBucket,
+          label: 'Desativados',
+          color: CHART_STATUS_COLORS.muted,
+          count: counts.value.disabled,
+          hint: 'Monitores desligados pelo operador — fora da conta de disponibilidade',
+        },
+      ]
+    : []),
+])
+
 /**
- * Calculates SVG stroke-dasharray and stroke-dashoffset for each arc segment on a circle with radius 62.
- * Circumference = 2 * PI * 62 ≈ 389.56
+ * Fatias do anel por `stroke-dasharray`. O anel mostra o que está sendo
+ * verificado: monitor desativado não ocupa fatia, do mesmo jeito que não
+ * entra na disponibilidade do centro.
  */
 const strokeSegments = computed(() => {
-  const R = 62
-  const C = 2 * Math.PI * R
-  // O anel mostra o que está sendo verificado: monitor desativado não ocupa
-  // fatia, do mesmo jeito que não entra na disponibilidade do centro.
+  const circumference = 2 * Math.PI * RADIUS
   const total = counts.value.monitored || 1
+  const visible = SEGMENTS.filter((seg) => counts.value[seg.status] > 0)
+  const gap = visible.length > 1 ? SEGMENT_GAP : 0
 
-  const items: Array<{ count: number; color: string; status: StatusKey; label: string }> = [
-    { count: counts.value.up, color: '#22c55e', status: 'up', label: 'Operacionais' },
-    { count: counts.value.warning, color: '#f59e0b', status: 'warning', label: 'Em Alerta' },
-    { count: counts.value.down, color: '#ef4444', status: 'down', label: 'Fora do Ar' },
-    { count: counts.value.unknown, color: '#64748b', status: 'unknown', label: 'Desconhecidos' },
-  ]
-
-  let currentOffset = 0
-  const result = []
-
-  for (const item of items) {
-    if (item.count <= 0) continue
-    const ratio = item.count / total
-    const dash = Math.max(0, ratio * C - 4) // 4px gap between segments
-    const gap = C - dash
-    const offset = -currentOffset
-
-    result.push({
-      color: item.color,
-      status: item.status,
-      label: item.label,
-      dash: dash.toFixed(1),
-      gap: gap.toFixed(1),
-      offset: offset.toFixed(1),
-    })
-
-    currentOffset += ratio * C
-  }
-
-  return result
+  let consumed = 0
+  return visible.map((seg) => {
+    const length = (counts.value[seg.status] / total) * circumference
+    const dash = Math.max(0, length - gap)
+    const result = {
+      ...seg,
+      dash: dash.toFixed(2),
+      gap: (circumference - dash).toFixed(2),
+      offset: (-consumed).toFixed(2),
+    }
+    consumed += length
+    return result
+  })
 })
 </script>
 
 <style scoped>
-.gauge-container {
-  width: 170px;
-  height: 170px;
-  position: relative;
+.gauge-widget {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-around;
+  gap: 16px;
+  height: 100%;
 }
 
-.gauge-svg {
-  width: 100%;
-  height: 100%;
+.gauge-widget__ring {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.gauge-widget__svg {
+  display: block;
   transform: rotate(-90deg);
 }
 
-.gauge-circle {
+.gauge-widget__track {
+  stroke: rgba(var(--v-theme-on-surface), 0.08);
+}
+
+.gauge-widget__segment {
+  cursor: pointer;
   transition:
     stroke-dasharray 0.5s ease,
     stroke-dashoffset 0.5s ease,
-    stroke-width 0.2s ease;
+    opacity 0.15s ease;
 }
 
-.gauge-circle:hover {
-  stroke-width: 18;
+.gauge-widget__segment:hover {
+  opacity: 0.8;
 }
 
-.hover-card {
-  transition:
-    transform 0.15s ease,
-    background-color 0.15s ease;
-}
-
-.hover-card:hover {
-  transform: translateX(4px);
-  background-color: rgba(255, 255, 255, 0.08) !important;
-}
-
-.absolute-center {
+.gauge-widget__center {
   position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   pointer-events: none;
 }
 
-.legend-box {
-  min-width: 200px;
+.gauge-widget__legend {
+  flex: 1 1 200px;
+  max-width: 280px;
 }
 
-.ga-2 {
-  gap: 8px;
-}
-.ga-4 {
-  gap: 16px;
+.gauge-widget__swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 10px;
 }
 </style>

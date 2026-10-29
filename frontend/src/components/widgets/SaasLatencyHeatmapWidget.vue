@@ -1,58 +1,55 @@
 <template>
-  <v-card elevation="2" class="rounded-lg fill-height d-flex flex-column">
-    <!-- Cabeçalho do Card -->
-    <v-card-title
-      class="d-flex align-center justify-space-between py-2.5 px-3 px-sm-4 flex-wrap ga-2 border-b"
-    >
-      <div class="d-flex align-center ga-3">
-        <v-avatar color="primary" variant="tonal" size="36" rounded="lg">
-          <v-icon color="primary" size="20">mdi-chart-scatter-plot-hexbin</v-icon>
-        </v-avatar>
-        <div>
-          <div class="text-subtitle-1 font-weight-bold">Mapa de Calor de Latência</div>
-          <div class="text-caption text-medium-emphasis">
-            Variação horária (00h-23h) e identificação de períodos de lentidão na rede
-          </div>
-        </div>
-      </div>
+  <DashboardCard
+    title="Mapa de Calor de Latência"
+    icon="mdi-chart-scatter-plot-hexbin"
+    subtitle="Variação horária (00h-23h) e períodos de lentidão na rede"
+    :loading="loading"
+  >
+    <template #actions>
+      <v-select
+        v-model="selectedScope"
+        :items="scopeOptions"
+        item-title="title"
+        item-value="value"
+        density="compact"
+        variant="outlined"
+        hide-details
+        aria-label="Alvos"
+        class="heatmap-widget__select"
+      ></v-select>
 
-      <!-- Filtros e Seletores -->
-      <div class="d-flex align-center ga-2 flex-wrap w-100 w-sm-auto justify-start justify-sm-end">
-        <v-select
-          v-model="selectedScope"
-          :items="scopeOptions"
-          item-title="title"
-          item-value="value"
-          density="compact"
-          variant="outlined"
-          hide-details
-          style="min-width: 170px; max-width: 260px"
-          class="text-caption flex-grow-1 flex-sm-grow-0"
-        ></v-select>
+      <v-btn-toggle
+        v-model="timeframeDays"
+        density="compact"
+        variant="tonal"
+        color="primary"
+        rounded="lg"
+        divided
+        mandatory
+        aria-label="Período"
+      >
+        <v-btn :value="1" size="small">24h</v-btn>
+        <v-btn :value="7" size="small">7d</v-btn>
+        <v-btn :value="14" size="small">14d</v-btn>
+        <v-btn :value="30" size="small">30d</v-btn>
+      </v-btn-toggle>
 
-        <v-btn-toggle
-          v-model="timeframeDays"
-          density="compact"
-          variant="outlined"
-          divided
-          mandatory
-        >
-          <v-btn :value="1" size="x-small">24h</v-btn>
-          <v-btn :value="7" size="x-small">7d</v-btn>
-          <v-btn :value="14" size="x-small">14d</v-btn>
-          <v-btn :value="30" size="x-small">30d</v-btn>
-        </v-btn-toggle>
-
-        <v-btn icon="mdi-refresh" variant="text" size="small" :loading="loading" @click="loadData">
-          <v-tooltip activator="parent" location="bottom">Atualizar mapa de calor</v-tooltip>
-        </v-btn>
-      </div>
-    </v-card-title>
+      <v-btn
+        icon="mdi-refresh"
+        variant="text"
+        color="primary"
+        size="small"
+        :loading="loading"
+        @click="loadData"
+      >
+        <v-tooltip activator="parent" location="bottom">Atualizar mapa de calor</v-tooltip>
+      </v-btn>
+    </template>
 
     <!-- Indicador de Carregamento -->
     <div v-if="loading && !heatmapData" class="d-flex align-center justify-center flex-grow-1 pa-8">
       <v-progress-circular indeterminate color="primary" size="42"></v-progress-circular>
-      <span class="text-caption text-medium-emphasis ml-3">Calculando matriz horária...</span>
+      <span class="text-caption ml-3">Calculando matriz horária...</span>
     </div>
 
     <!-- Estado Vazio / Sem Monitores -->
@@ -67,7 +64,7 @@
         <v-icon size="32">mdi-cloud-search-outline</v-icon>
       </v-avatar>
       <div class="text-subtitle-1 font-weight-bold">Nenhum dado de latência no período</div>
-      <div class="text-caption text-medium-emphasis mb-4" style="max-width: 420px">
+      <div class="text-caption mb-4" style="max-width: 420px">
         Provisione alvos de monitoramento SaaS (Google, Cloudflare, Microsoft, etc.) para mapear a
         qualidade da sua conexão.
       </div>
@@ -82,7 +79,7 @@
     </div>
 
     <!-- Conteúdo Principal do Heatmap -->
-    <v-card-text v-else class="pa-3 pa-sm-4 flex-grow-1 d-flex flex-column ga-3">
+    <div v-else class="d-flex flex-column ga-3">
       <!-- Destaques e KPIs de Análise -->
       <v-row dense>
         <v-col cols="12" sm="4">
@@ -98,9 +95,7 @@
                   : 'Estável'
               }}
             </div>
-            <div class="text-caption text-medium-emphasis">
-              Pico médio de latência no período analisado
-            </div>
+            <div class="text-caption">Pico médio de latência no período analisado</div>
           </v-card>
         </v-col>
 
@@ -117,7 +112,7 @@
                   : 'Estável'
               }}
             </div>
-            <div class="text-caption text-medium-emphasis">Menor latência média observada</div>
+            <div class="text-caption">Menor latência média observada</div>
           </v-card>
         </v-col>
 
@@ -130,28 +125,28 @@
             <div class="text-h6 font-weight-bold mt-1">
               {{
                 heatmapData?.overallAvgLatencyMs
-                  ? `${heatmapData.overallAvgLatencyMs.toFixed(1)} ms`
+                  ? formatLatency(heatmapData.overallAvgLatencyMs)
                   : '--'
               }}
-              <span class="text-caption font-weight-regular text-medium-emphasis">
-                · {{ heatmapData?.overallUptimePercentage.toFixed(1) }}% up
+              <span class="text-caption font-weight-regular">
+                · {{ formatPercent(heatmapData?.overallUptimePercentage) }} up
               </span>
             </div>
-            <div class="text-caption text-medium-emphasis">
-              {{ heatmapData?.totalChecks.toLocaleString('pt-BR') }} checagens consolidadas
+            <div class="text-caption">
+              {{ formatCompactCount(heatmapData?.totalChecks) }} checagens consolidadas
             </div>
           </v-card>
         </v-col>
       </v-row>
 
       <!-- Dica visual mobile -->
-      <div class="d-flex d-md-none align-center ga-1 text-caption text-grey">
+      <div class="d-flex d-md-none align-center ga-1 text-caption">
         <v-icon size="14">mdi-gesture-swipe-horizontal</v-icon>
         Arraste a tabela para ver todas as 24 horas (00h às 23h)
       </div>
 
       <!-- Grade do Mapa de Calor (Heatmap Grid) -->
-      <div class="heatmap-scroll-area border rounded-lg pa-2 pa-sm-3 bg-surface overflow-x-auto">
+      <div class="heatmap-scroll-area overflow-x-auto">
         <div class="heatmap-inner-content" style="min-width: 590px">
           <!-- Cabeçalho das Horas (00h às 23h) -->
           <div class="heatmap-grid-header mb-1">
@@ -159,7 +154,7 @@
             <div
               v-for="h in 24"
               :key="h - 1"
-              class="hour-col-header text-caption text-medium-emphasis"
+              class="hour-col-header text-caption"
               :title="`Hora ${h - 1}:00`"
             >
               {{ (h - 1) % 3 === 0 ? `${h - 1}h` : '' }}
@@ -192,23 +187,21 @@
                   <div v-if="cell.totalChecks > 0">
                     <div>
                       <strong>Latência Média:</strong>
-                      {{ cell.avgLatencyMs ? `${cell.avgLatencyMs.toFixed(1)} ms` : '--' }}
+                      {{ formatLatency(cell.avgLatencyMs, '--') }}
                     </div>
                     <div v-if="cell.minLatencyMs !== null && cell.maxLatencyMs !== null">
-                      <strong>Variação:</strong> {{ cell.minLatencyMs.toFixed(1) }}ms ~
-                      {{ cell.maxLatencyMs.toFixed(1) }}ms
+                      <strong>Variação:</strong> {{ formatLatency(cell.minLatencyMs) }} ~
+                      {{ formatLatency(cell.maxLatencyMs) }}
                     </div>
                     <div>
-                      <strong>Disponibilidade:</strong> {{ cell.uptimePercentage.toFixed(1) }}%
+                      <strong>Disponibilidade:</strong> {{ formatPercent(cell.uptimePercentage) }}
                     </div>
                     <div>
                       <strong>Checagens:</strong> {{ cell.totalChecks }} ({{ cell.upChecks }} up,
                       {{ cell.downChecks }} down)
                     </div>
                   </div>
-                  <div v-else class="text-grey-lighten-1">
-                    Nenhuma medição registrada neste intervalo
-                  </div>
+                  <div v-else>Nenhuma medição registrada neste intervalo</div>
                 </div>
               </v-tooltip>
             </div>
@@ -219,7 +212,7 @@
       <!-- Resumo Consolidado do Perfil Diário (24 Horas) -->
       <div class="mt-2">
         <div class="d-flex align-center justify-space-between mb-2 flex-wrap ga-2">
-          <div class="text-caption font-weight-bold text-medium-emphasis d-flex align-center ga-1">
+          <div class="text-caption font-weight-bold d-flex align-center ga-1">
             <v-icon size="14">mdi-chart-line</v-icon>
             Perfil Médio Consolidado por Hora do Dia (00h - 23h)
           </div>
@@ -243,7 +236,7 @@
           </div>
         </div>
 
-        <div class="heatmap-scroll-area border rounded-lg pa-2 bg-surface overflow-x-auto">
+        <div class="heatmap-scroll-area overflow-x-auto">
           <div class="hourly-summary-grid" style="min-width: 590px">
             <div class="row-label text-caption font-weight-bold text-truncate d-flex align-center">
               Média 24h
@@ -266,10 +259,8 @@
               <v-tooltip activator="parent" location="bottom" density="compact">
                 <div class="pa-1 text-caption">
                   <div class="font-weight-bold">{{ String(h.hour).padStart(2, '0') }}:00h</div>
-                  <div>
-                    Latência Média: {{ h.avgLatencyMs ? `${h.avgLatencyMs.toFixed(1)} ms` : '--' }}
-                  </div>
-                  <div>Disponibilidade: {{ h.uptimePercentage.toFixed(1) }}%</div>
+                  <div>Latência Média: {{ formatLatency(h.avgLatencyMs, '--') }}</div>
+                  <div>Disponibilidade: {{ formatPercent(h.uptimePercentage) }}</div>
                   <div>Total de Amostras: {{ h.totalChecks }}</div>
                 </div>
               </v-tooltip>
@@ -277,11 +268,11 @@
           </div>
         </div>
       </div>
-    </v-card-text>
+    </div>
 
     <!-- Dialog de Catálogo SaaS -->
     <SaasPresetsDialog v-model="saasCatalogDialog" @provisioned="loadData"></SaasPresetsDialog>
-  </v-card>
+  </DashboardCard>
 </template>
 
 <script setup lang="ts">
@@ -291,6 +282,8 @@ import type { HourlyHeatmapResponse } from '@/bindings/HourlyHeatmapResponse'
 import type { HourlyHeatmapCell } from '@/bindings/HourlyHeatmapCell'
 import type { HourOfDaySummary } from '@/bindings/HourOfDaySummary'
 import SaasPresetsDialog from '@/components/monitors/SaasPresetsDialog.vue'
+import DashboardCard from '@/components/dashboard/DashboardCard.vue'
+import { formatCompactCount, formatLatency, formatPercent } from '@/utils/formatters'
 
 const props = defineProps<{
   monitorId?: number
@@ -431,6 +424,11 @@ function formatDateFull(dateStr: string): string {
 </script>
 
 <style scoped>
+.heatmap-widget__select {
+  min-width: 170px;
+  max-width: 260px;
+}
+
 .heatmap-scroll-area {
   width: 100%;
   -webkit-overflow-scrolling: touch;
@@ -458,7 +456,6 @@ function formatDateFull(dateStr: string): string {
 
 .row-label-header {
   font-weight: 600;
-  color: rgba(var(--v-theme-on-surface), 0.6);
 }
 
 .hour-col-header {

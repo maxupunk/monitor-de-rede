@@ -55,6 +55,7 @@ const ACTION_TOOLS = new Set([
   'update_scheduled_task',
   'run_scheduled_task',
   'delete_scheduled_task',
+  'update_dashboard_layout',
   'ask_user',
 ])
 
@@ -273,6 +274,16 @@ const TOOL_META: Record<string, AiToolLook> = {
     label: 'Excluir Tarefa Agendada',
     icon: 'mdi-calendar-remove',
     color: 'error',
+  },
+  get_dashboard_layout: {
+    label: 'Layout do Dashboard',
+    icon: 'mdi-view-dashboard-outline',
+    color: 'primary',
+  },
+  update_dashboard_layout: {
+    label: 'Ajustar Dashboard',
+    icon: 'mdi-view-dashboard-edit-outline',
+    color: 'primary',
   },
 }
 

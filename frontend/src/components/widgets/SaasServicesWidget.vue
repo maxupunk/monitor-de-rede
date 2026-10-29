@@ -1,51 +1,45 @@
 <template>
-  <v-card elevation="2" class="rounded-lg fill-height d-flex flex-column">
-    <!-- Cabeçalho do Card -->
-    <v-card-title
-      class="d-flex align-center justify-space-between py-3 px-4 flex-wrap ga-2 border-b"
-    >
-      <div class="d-flex align-center ga-3">
-        <v-avatar color="primary" variant="tonal" size="38" rounded="lg">
-          <v-icon color="primary" size="22">mdi-bank-check</v-icon>
-        </v-avatar>
-        <div>
-          <div class="text-subtitle-1 font-weight-bold">Serviços SaaS, Bancos & Nuvem</div>
-          <div class="text-caption text-medium-emphasis">
-            Qualidade de experiência (QoE) e tempo de resposta de alvos externos
-          </div>
-        </div>
-      </div>
+  <DashboardCard
+    title="Serviços SaaS, Bancos & Nuvem"
+    icon="mdi-bank-check"
+    subtitle="Qualidade de experiência (QoE) e tempo de resposta de alvos externos"
+    :loading="loading"
+  >
+    <template #actions>
+      <v-select
+        v-model="selectedCategory"
+        :items="categoryFilterOptions"
+        item-title="title"
+        item-value="value"
+        density="compact"
+        variant="outlined"
+        hide-details
+        aria-label="Categoria"
+        class="saas-widget__select"
+      ></v-select>
 
-      <!-- Ações e Filtros de Categoria -->
-      <div class="d-flex align-center ga-2 flex-wrap">
-        <v-select
-          v-model="selectedCategory"
-          :items="categoryFilterOptions"
-          item-title="title"
-          item-value="value"
-          density="compact"
-          variant="outlined"
-          hide-details
-          style="min-width: 170px"
-          class="text-caption"
-        ></v-select>
+      <v-btn
+        color="primary"
+        variant="tonal"
+        size="small"
+        prepend-icon="mdi-plus"
+        @click="saasCatalogDialog = true"
+      >
+        <span class="hidden-xs">Catálogo SaaS</span>
+        <span class="hidden-sm-and-up">SaaS</span>
+      </v-btn>
 
-        <v-btn
-          color="primary"
-          variant="tonal"
-          size="small"
-          prepend-icon="mdi-plus"
-          @click="saasCatalogDialog = true"
-        >
-          <span class="hidden-xs">Catálogo SaaS</span>
-          <span class="hidden-sm-and-up">SaaS</span>
-        </v-btn>
-
-        <v-btn icon="mdi-refresh" variant="text" size="small" :loading="loading" @click="refresh">
-          <v-tooltip activator="parent" location="bottom">Atualizar status</v-tooltip>
-        </v-btn>
-      </div>
-    </v-card-title>
+      <v-btn
+        icon="mdi-refresh"
+        variant="text"
+        color="primary"
+        size="small"
+        :loading="loading"
+        @click="refresh"
+      >
+        <v-tooltip activator="parent" location="bottom">Atualizar status</v-tooltip>
+      </v-btn>
+    </template>
 
     <!-- Indicador de Carregamento -->
     <div
@@ -53,9 +47,7 @@
       class="d-flex align-center justify-center flex-grow-1 pa-8"
     >
       <v-progress-circular indeterminate color="primary" size="40"></v-progress-circular>
-      <span class="text-caption text-medium-emphasis ml-3"
-        >Verificando latência dos serviços...</span
-      >
+      <span class="text-caption ml-3">Verificando latência dos serviços...</span>
     </div>
 
     <!-- Estado Vazio: Nenhum SaaS Provisionado -->
@@ -67,7 +59,7 @@
         <v-icon size="32">mdi-cloud-plus-outline</v-icon>
       </v-avatar>
       <div class="text-subtitle-1 font-weight-bold">Nenhum serviço SaaS ou banco monitorado</div>
-      <div class="text-caption text-medium-emphasis mb-4" style="max-width: 440px">
+      <div class="text-caption mb-4" style="max-width: 440px">
         Acompanhe a disponibilidade e a latência de ponta a ponta para Nubank, Itaú, Bradesco,
         OpenAI, Google, AWS, Microsoft 365 e outros serviços essenciais.
       </div>
@@ -82,10 +74,10 @@
     </div>
 
     <!-- Conteúdo Principal com Monitores Ativos -->
-    <v-card-text v-else class="pa-4 flex-grow-1 d-flex flex-column ga-3">
+    <div v-else class="d-flex flex-column ga-3">
       <!-- Mini Indicadores de Resumo Superior -->
       <div
-        class="d-flex align-center justify-space-between flex-wrap ga-2 py-1 px-3 bg-surface-light rounded-lg border"
+        class="d-flex align-center justify-space-between flex-wrap ga-2 py-2 px-3 saas-widget__summary rounded-lg"
       >
         <div class="d-flex align-center ga-3 text-caption">
           <span>
@@ -101,7 +93,7 @@
           </span>
         </div>
 
-        <div class="text-caption text-medium-emphasis d-flex align-center ga-2">
+        <div class="text-caption d-flex align-center ga-2">
           <span>Média Global:</span>
           <v-chip
             size="x-small"
@@ -109,7 +101,7 @@
             variant="tonal"
             class="font-weight-bold"
           >
-            {{ avgLatency ? `${avgLatency.toFixed(1)} ms` : '--' }}
+            {{ formatLatency(avgLatency, '--') }}
           </v-chip>
         </div>
       </div>
@@ -127,7 +119,7 @@
             class="pa-1"
           >
             <v-card
-              variant="outlined"
+              variant="flat"
               class="pa-3 rounded-lg saas-item-card transition-all cursor-pointer h-100 d-flex flex-column justify-space-between"
               :class="`status-border-${mon.status || 'unknown'}`"
               @click="openMonitorDetail(mon.id)"
@@ -160,16 +152,16 @@
 
                 <!-- Alvo do Monitor -->
                 <div
-                  class="text-caption text-medium-emphasis text-truncate mb-2 font-family-monospace"
+                  class="text-caption text-truncate mb-2 font-family-monospace"
                   :title="mon.target"
                 >
                   {{ mon.target }}
                 </div>
 
                 <!-- Gráfico Sparkline de Histórico do Serviço -->
-                <div class="saas-sparkline-box my-1 pa-1 rounded bg-surface-light border">
+                <div class="saas-sparkline-box my-1 pa-1">
                   <div
-                    class="d-flex align-center justify-space-between text-caption px-1 mb-1 text-medium-emphasis"
+                    class="d-flex align-center justify-space-between text-caption px-1 mb-1"
                     style="font-size: 10px"
                   >
                     <span>Histórico de Latência</span>
@@ -177,11 +169,7 @@
                       class="font-weight-bold font-family-monospace"
                       :class="`text-${getLatencyColor(mon.lastLatencyMs)}`"
                     >
-                      {{
-                        mon.lastLatencyMs !== null && mon.lastLatencyMs !== undefined
-                          ? `${mon.lastLatencyMs.toFixed(1)} ms`
-                          : '--'
-                      }}
+                      {{ formatLatency(mon.lastLatencyMs, '--') }}
                     </span>
                   </div>
                   <div class="w-100 d-flex align-center justify-center" style="height: 32px">
@@ -207,18 +195,12 @@
               </div>
 
               <!-- Rodapé do Card do Serviço: Categoria e Total de Amostras -->
-              <div class="d-flex align-center justify-space-between pt-2 border-t mt-2">
-                <span
-                  class="text-caption text-medium-emphasis text-truncate"
-                  style="max-width: 110px"
-                >
+              <div class="d-flex align-center justify-space-between pt-2 mt-2">
+                <span class="text-caption text-truncate" style="max-width: 110px">
                   {{ getCategoryLabel(mon) }}
                 </span>
 
-                <div
-                  class="d-flex align-center ga-1 text-caption text-medium-emphasis"
-                  style="font-size: 11px"
-                >
+                <div class="d-flex align-center ga-1 text-caption" style="font-size: 11px">
                   <span v-if="mon.stats?.uptimePercentage !== undefined" class="font-weight-medium">
                     {{ mon.stats.uptimePercentage }}% uptime
                   </span>
@@ -233,7 +215,7 @@
           </v-col>
         </v-row>
       </div>
-    </v-card-text>
+    </div>
 
     <!-- Dialog de Catálogo SaaS -->
     <SaasPresetsDialog v-model="saasCatalogDialog" @provisioned="refresh"></SaasPresetsDialog>
@@ -243,7 +225,7 @@
       v-model="detailDialog"
       :monitor-id="selectedMonitorId"
     ></MonitorDetailDialog>
-  </v-card>
+  </DashboardCard>
 </template>
 
 <script setup lang="ts">
@@ -253,6 +235,7 @@ import MonitorSparkline, { type SparklinePoint } from '@/components/MonitorSpark
 import SaasPresetsDialog from '@/components/monitors/SaasPresetsDialog.vue'
 import MonitorDetailDialog from '@/components/monitors/MonitorDetailDialog.vue'
 import { formatLatency } from '@/utils/formatters'
+import DashboardCard from '@/components/dashboard/DashboardCard.vue'
 
 const monitorsStore = useMonitorsStore()
 
@@ -439,15 +422,24 @@ function openMonitorDetail(id: number) {
 </script>
 
 <style scoped>
+.saas-widget__select {
+  min-width: 170px;
+}
+
+.saas-widget__summary,
 .saas-item-card {
-  background-color: rgb(var(--v-theme-surface));
-  border-color: rgba(var(--v-border-color), var(--v-border-opacity));
+  background-color: rgba(var(--v-theme-primary), 0.05);
+}
+
+.saas-item-card {
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
 .saas-item-card:hover {
   transform: translateY(-2px);
-  border-color: rgba(var(--v-theme-primary), 0.5);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
 }
 
 .status-border-down {

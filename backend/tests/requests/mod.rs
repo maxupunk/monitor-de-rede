@@ -6,6 +6,7 @@ mod ai_analysis;
 mod ai_approvals;
 mod ai_context;
 mod ai_conversations;
+mod ai_dashboard;
 mod ai_decider;
 mod ai_decider_cloud;
 mod ai_device_plugins;

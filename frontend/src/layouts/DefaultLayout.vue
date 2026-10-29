@@ -21,43 +21,51 @@
       <v-divider class="mb-2" />
 
       <v-list v-model:opened="openedGroups" density="compact" nav class="px-2">
-        <template v-for="item in navItems" :key="item.title">
-          <v-list-item
-            v-if="!item.children"
-            :prepend-icon="item.icon"
-            :title="item.title"
-            :to="item.to"
-            :exact="item.to === '/'"
-            color="primary"
-            rounded="lg"
-            class="mb-1 font-weight-medium"
-            @click="item.click ? item.click() : undefined"
-          />
-
-          <v-list-group v-else :value="item.title">
-            <template #activator="{ props }">
-              <v-list-item
-                v-bind="props"
-                :prepend-icon="item.icon"
-                :title="item.title"
-                rounded="lg"
-                class="mb-1 font-weight-medium"
-              />
-            </template>
-
+        <template v-for="(section, sectionIndex) in navSections" :key="section.title">
+          <v-list-subheader
+            class="nav-section-title font-weight-bold text-uppercase"
+            :class="{ 'mt-2': sectionIndex > 0 }"
+          >
+            {{ section.title }}
+          </v-list-subheader>
+          <template v-for="item in section.items" :key="item.title">
             <v-list-item
-              v-for="sub in item.children"
-              :key="sub.title"
-              :prepend-icon="sub.icon"
-              :title="sub.title"
-              :to="sub.to"
-              :exact="sub.to ? true : undefined"
+              v-if="!item.children"
+              :prepend-icon="item.icon"
+              :title="item.title"
+              :to="item.to"
+              :exact="item.to === '/'"
               color="primary"
               rounded="lg"
-              class="mb-1 font-weight-medium pl-6"
-              @click="sub.click ? sub.click() : undefined"
+              class="mb-1 font-weight-medium"
+              @click="item.click ? item.click() : undefined"
             />
-          </v-list-group>
+
+            <v-list-group v-else :value="item.title">
+              <template #activator="{ props }">
+                <v-list-item
+                  v-bind="props"
+                  :prepend-icon="item.icon"
+                  :title="item.title"
+                  rounded="lg"
+                  class="mb-1 font-weight-medium"
+                />
+              </template>
+
+              <v-list-item
+                v-for="sub in item.children"
+                :key="sub.title"
+                :prepend-icon="sub.icon"
+                :title="sub.title"
+                :to="sub.to"
+                :exact="sub.to ? true : undefined"
+                color="primary"
+                rounded="lg"
+                class="mb-1 font-weight-medium pl-6"
+                @click="sub.click ? sub.click() : undefined"
+              />
+            </v-list-group>
+          </template>
         </template>
       </v-list>
       <template #append>
@@ -284,6 +292,12 @@ interface NavItem {
   children?: NavSubItem[]
 }
 
+/** Bloco do menu com título; seções sem itens (ex.: sem permissão) somem. */
+interface NavSection {
+  title: string
+  items: NavItem[]
+}
+
 const display = useDisplay()
 const drawer = ref(!display.mdAndDown.value)
 const tracerouteDialog = ref(false)
@@ -328,134 +342,156 @@ async function handleNotificationClick() {
   }
 }
 
-const navItems = computed<NavItem[]>(() => [
-  { title: 'Dashboard', icon: 'mdi-view-dashboard', to: '/' },
-  { title: 'Dispositivos', icon: 'mdi-devices', to: '/devices' },
-  { title: 'Monitores', icon: 'mdi-heart-pulse', to: '/monitors' },
-  { title: 'Alertas', icon: 'mdi-bell-outline', to: '/alerts' },
-  { title: 'Manutenção', icon: 'mdi-wrench-clock', to: '/maintenance-windows' },
-  { title: 'Eventos', icon: 'mdi-history', to: '/events' },
-  { title: 'Logs', icon: 'mdi-text-box-search-outline', to: '/logs' },
-  {
-    title: 'Docker',
-    icon: 'mdi-docker',
-    children: [
-      { title: 'Visão geral', icon: 'mdi-view-dashboard-outline', to: '/docker' },
-      { title: 'Containers', icon: 'mdi-cube-outline', to: '/docker/containers' },
-      { title: 'Volumes', icon: 'mdi-database-outline', to: '/docker/volumes' },
-      { title: 'Redes', icon: 'mdi-lan', to: '/docker/networks' },
-      { title: 'Imagens', icon: 'mdi-layers-outline', to: '/docker/images' },
-      { title: 'Projetos', icon: 'mdi-file-cabinet', to: '/docker/compose' },
-      { title: 'Histórico', icon: 'mdi-chart-timeline-variant', to: '/docker/history' },
-    ],
-  },
-  /*
-   * A rede monitorada: as faixas IP ficam ao lado da varredura que as usa.
-   * Servidores DNS e endereços deste servidor são configuração do próprio
-   * NetMonitor — moram em Configurações › Rede, não aqui.
-   */
-  {
-    title: 'Rede',
-    icon: 'mdi-lan',
-    children: [
-      { title: 'Descoberta', icon: 'mdi-radar', to: '/discovery' },
-      { title: 'Redes IP', icon: 'mdi-ip-network-outline', to: '/networks' },
-      { title: 'Sites', icon: 'mdi-domain', to: '/sites' },
-      { title: 'Topologia', icon: 'mdi-sitemap', to: '/topology' },
-      { title: 'Testes de velocidade', icon: 'mdi-speedometer', to: '/link-tests' },
-      { title: 'Sinais Wi-Fi', icon: 'mdi-wifi', to: '/wifi' },
-    ],
-  },
-  // Quem mede de fora da central.
-  {
-    title: 'Coleta remota',
-    icon: 'mdi-server-network',
-    children: [
-      { title: 'Servidores remotos', icon: 'mdi-server', to: '/remote-servers' },
-      { title: 'Sondas de rede', icon: 'mdi-access-point-network', to: '/probes' },
-    ],
-  },
-  {
-    title: 'Diagnóstico',
-    icon: 'mdi-stethoscope',
-    children: [
-      {
-        title: 'Assistente IA',
-        icon: 'mdi-robot-outline',
-        to: '/ai-chat',
-      },
-      {
-        title: 'Benchmark dos modelos',
-        icon: 'mdi-podium',
-        to: '/ai-benchmark',
-      },
-      {
-        title: 'Playbooks',
-        icon: 'mdi-clipboard-play-outline',
-        click: () => {
-          playbookDialog.value = true
-        },
-      },
-      {
-        title: 'Traceroute ICMP',
-        icon: 'mdi-routes',
-        click: () => {
-          tracerouteDialog.value = true
-        },
-      },
-      {
-        // "Testes de velocidade" (Rede) mede entre equipamentos; este mede do navegador.
-        title: 'Velocidade do navegador',
-        icon: 'mdi-speedometer-medium',
-        click: () => {
-          speedTestDialog.value = true
-        },
-      },
-    ],
-  },
-  ...(pluginAppsStore.apps.length > 0
-    ? [
+/*
+ * O menu é lido de cima para baixo pela frequência de uso: o que se consulta o
+ * dia todo (painel, topologia, alertas) vem primeiro; as ferramentas de
+ * investigação logo depois — Diagnóstico à frente, por ser a mais usada —; a
+ * infraestrutura que se configura uma vez e a administração ficam no fim.
+ */
+const navSections = computed<NavSection[]>(() =>
+  [
+    {
+      title: 'Monitoramento',
+      items: [
+        { title: 'Dashboard', icon: 'mdi-view-dashboard', to: '/' },
+        { title: 'Topologia', icon: 'mdi-sitemap', to: '/topology' },
+        { title: 'Dispositivos', icon: 'mdi-devices', to: '/devices' },
+        { title: 'Monitores', icon: 'mdi-heart-pulse', to: '/monitors' },
+        { title: 'Alertas', icon: 'mdi-bell-outline', to: '/alerts' },
+        { title: 'Eventos', icon: 'mdi-history', to: '/events' },
+        { title: 'Logs', icon: 'mdi-text-box-search-outline', to: '/logs' },
+      ],
+    },
+    {
+      title: 'Ferramentas',
+      items: [
         {
-          title: 'Aplicativos',
-          icon: 'mdi-apps',
-          children: pluginAppsStore.apps.map((app) => ({
-            title: app.title,
-            icon: app.icon,
-            to: '/apps/' + app.id,
-          })),
+          title: 'Diagnóstico',
+          icon: 'mdi-stethoscope',
+          children: [
+            { title: 'Assistente IA', icon: 'mdi-robot-outline', to: '/ai-chat' },
+            {
+              title: 'Playbooks',
+              icon: 'mdi-clipboard-play-outline',
+              click: () => {
+                playbookDialog.value = true
+              },
+            },
+            {
+              title: 'Traceroute ICMP',
+              icon: 'mdi-routes',
+              click: () => {
+                tracerouteDialog.value = true
+              },
+            },
+            {
+              // "Testes de velocidade" (Rede) mede entre equipamentos; este mede do navegador.
+              title: 'Velocidade do navegador',
+              icon: 'mdi-speedometer-medium',
+              click: () => {
+                speedTestDialog.value = true
+              },
+            },
+            { title: 'Benchmark dos modelos', icon: 'mdi-podium', to: '/ai-benchmark' },
+          ],
         },
-      ]
-    : []),
-  {
-    title: 'VPN WireGuard',
-    icon: 'mdi-shield-lock-outline',
-    children: [
-      { title: 'Servidor VPN', icon: 'mdi-server-security', to: '/vpn' },
-      { title: 'Dispositivos VPN', icon: 'mdi-lan-connect', to: '/vpn/devices' },
-    ],
-  },
-  ...(authStore.isAdmin
-    ? [
-        { title: 'Usuários e acessos', icon: 'mdi-account-multiple-outline', to: '/users' },
-        { title: 'Trilha de auditoria', icon: 'mdi-shield-account-outline', to: '/audit' },
-        { title: 'Plugins de dispositivo', icon: 'mdi-puzzle-outline', to: '/plugins' },
-        { title: 'Backup', icon: 'mdi-backup-restore', to: '/backup' },
-      ]
-    : []),
-  { title: 'Tarefas agendadas', icon: 'mdi-calendar-clock', to: '/scheduled-tasks' },
-  { title: 'Configurações', icon: 'mdi-cog', to: '/settings' },
-  ...(canInstall.value && !isInstalled.value
-    ? [
+        /*
+         * A rede monitorada: as faixas IP ficam ao lado da varredura que as usa.
+         * Servidores DNS e endereços deste servidor são configuração do próprio
+         * NetMonitor — moram em Configurações › Rede, não aqui.
+         */
         {
-          title: 'Instalar aplicativo',
-          icon: 'mdi-cellphone-arrow-down',
-          click: () => {
-            void promptInstall()
-          },
+          title: 'Rede',
+          icon: 'mdi-lan',
+          children: [
+            { title: 'Descoberta', icon: 'mdi-radar', to: '/discovery' },
+            { title: 'Redes IP', icon: 'mdi-ip-network-outline', to: '/networks' },
+            { title: 'Sites', icon: 'mdi-domain', to: '/sites' },
+            { title: 'Testes de velocidade', icon: 'mdi-speedometer', to: '/link-tests' },
+            { title: 'Sinais Wi-Fi', icon: 'mdi-wifi', to: '/wifi' },
+          ],
         },
-      ]
-    : []),
-])
+        {
+          title: 'Docker',
+          icon: 'mdi-docker',
+          children: [
+            { title: 'Visão geral', icon: 'mdi-view-dashboard-outline', to: '/docker' },
+            { title: 'Containers', icon: 'mdi-cube-outline', to: '/docker/containers' },
+            { title: 'Volumes', icon: 'mdi-database-outline', to: '/docker/volumes' },
+            { title: 'Redes', icon: 'mdi-lan', to: '/docker/networks' },
+            { title: 'Imagens', icon: 'mdi-layers-outline', to: '/docker/images' },
+            { title: 'Projetos', icon: 'mdi-file-cabinet', to: '/docker/compose' },
+            { title: 'Histórico', icon: 'mdi-chart-timeline-variant', to: '/docker/history' },
+          ],
+        },
+        ...(pluginAppsStore.apps.length > 0
+          ? [
+              {
+                title: 'Aplicativos',
+                icon: 'mdi-apps',
+                children: pluginAppsStore.apps.map((app) => ({
+                  title: app.title,
+                  icon: app.icon,
+                  to: '/apps/' + app.id,
+                })),
+              },
+            ]
+          : []),
+      ],
+    },
+    {
+      title: 'Infraestrutura',
+      items: [
+        // Quem mede de fora da central.
+        {
+          title: 'Coleta remota',
+          icon: 'mdi-server-network',
+          children: [
+            { title: 'Servidores remotos', icon: 'mdi-server', to: '/remote-servers' },
+            { title: 'Sondas de rede', icon: 'mdi-access-point-network', to: '/probes' },
+          ],
+        },
+        {
+          title: 'VPN WireGuard',
+          icon: 'mdi-shield-lock-outline',
+          children: [
+            { title: 'Servidor VPN', icon: 'mdi-server-security', to: '/vpn' },
+            { title: 'Dispositivos VPN', icon: 'mdi-lan-connect', to: '/vpn/devices' },
+          ],
+        },
+        { title: 'Manutenção', icon: 'mdi-wrench-clock', to: '/maintenance-windows' },
+        { title: 'Tarefas agendadas', icon: 'mdi-calendar-clock', to: '/scheduled-tasks' },
+      ],
+    },
+    {
+      title: 'Administração',
+      items: [
+        ...(authStore.isAdmin
+          ? [
+              { title: 'Usuários e acessos', icon: 'mdi-account-multiple-outline', to: '/users' },
+              { title: 'Trilha de auditoria', icon: 'mdi-shield-account-outline', to: '/audit' },
+              { title: 'Plugins de dispositivo', icon: 'mdi-puzzle-outline', to: '/plugins' },
+              { title: 'Backup', icon: 'mdi-backup-restore', to: '/backup' },
+            ]
+          : []),
+        { title: 'Configurações', icon: 'mdi-cog', to: '/settings' },
+        ...(canInstall.value && !isInstalled.value
+          ? [
+              {
+                title: 'Instalar aplicativo',
+                icon: 'mdi-cellphone-arrow-down',
+                click: () => {
+                  void promptInstall()
+                },
+              },
+            ]
+          : []),
+      ],
+    },
+  ].filter((section) => section.items.length > 0)
+)
+
+const navItems = computed<NavItem[]>(() => navSections.value.flatMap((section) => section.items))
 
 /** Grupos abertos no menu; o da página atual abre sozinho ao navegar. */
 const openedGroups = ref<string[]>([])
@@ -502,6 +538,12 @@ async function handleLogout() {
 <style scoped>
 .lh-1 {
   line-height: 1.2;
+}
+.nav-section-title {
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  min-height: 28px;
+  color: rgb(var(--v-theme-primary));
 }
 .max-w-1600 {
   max-width: 1600px;

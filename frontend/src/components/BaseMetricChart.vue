@@ -1,158 +1,211 @@
 <template>
-  <div
-    ref="chartContainerRef"
-    class="base-metric-chart-container relative pa-2 border rounded-lg bg-surface"
-    @mousemove="handleMouseMove"
-    @mouseleave="handleMouseLeave"
-    @touchmove.passive="handleTouchMove"
-    @touchend="handleMouseLeave"
-    @touchcancel="handleMouseLeave"
-  >
-    <svg
-      v-if="seriesList.length > 0 && maxPointCount > 0"
-      ref="svgRef"
-      class="w-100 base-metric-svg"
-      viewBox="0 0 800 240"
-      preserveAspectRatio="none"
+  <div class="metric-chart">
+    <div
+      ref="plotRef"
+      class="metric-chart__plot"
+      :class="{ 'metric-chart__plot--clickable': clickable }"
+      :style="{ height: `${height}px` }"
+      role="img"
+      :aria-label="ariaLabel"
+      @mousemove="onPointer"
+      @mouseleave="hoverIndex = null"
+      @touchmove.passive="onTouch"
+      @touchend="hoverIndex = null"
+      @click="onClick"
     >
-      <defs>
-        <linearGradient
-          v-for="s in seriesList"
-          :id="`grad-${s.id}`"
-          :key="`grad-${s.id}`"
-          x1="0"
-          y1="0"
-          x2="0"
-          y2="1"
+      <svg
+        v-if="hasData && width > 0"
+        class="metric-chart__svg"
+        :width="width"
+        :height="height"
+        :viewBox="`0 0 ${width} ${height}`"
+      >
+        <defs>
+          <linearGradient
+            v-for="s in drawn"
+            :id="s.gradientId"
+            :key="s.gradientId"
+            x1="0"
+            y1="0"
+            x2="0"
+            y2="1"
+          >
+            <stop offset="0%" :stop-color="s.color" stop-opacity="0.22" />
+            <stop offset="100%" :stop-color="s.color" stop-opacity="0" />
+          </linearGradient>
+        </defs>
+
+        <!-- Grade horizontal e rótulos do eixo -->
+        <g v-for="tick in leftTicks" :key="`l-${tick.y}`">
+          <line
+            :x1="area.left"
+            :x2="area.left + area.width"
+            :y1="tick.y"
+            :y2="tick.y"
+            class="metric-chart__grid"
+            :class="{ 'metric-chart__grid--base': tick.base }"
+          />
+          <text :x="area.left - 8" :y="tick.y" class="metric-chart__label" text-anchor="end">
+            {{ tick.label }}
+          </text>
+        </g>
+        <text
+          v-for="tick in rightTicks"
+          :key="`r-${tick.y}`"
+          :x="area.left + area.width + 8"
+          :y="tick.y"
+          class="metric-chart__label"
+          text-anchor="start"
         >
-          <stop offset="0%" :stop-color="s.color" stop-opacity="0.35" />
-          <stop offset="100%" :stop-color="s.color" stop-opacity="0.0" />
-        </linearGradient>
-      </defs>
+          {{ tick.label }}
+        </text>
 
-      <!-- Linhas de Grade de Fundo (Grid Lines) -->
-      <line x1="75" y1="30" x2="785" y2="30" stroke="#E0E0E0" stroke-dasharray="3,3" />
-      <text x="68" y="34" font-size="11" fill="#9E9E9E" text-anchor="end">
-        {{ formattedMaxVal }}
-      </text>
+        <!-- Eixo de tempo -->
+        <text
+          v-for="tick in timeTicks"
+          :key="`t-${tick.x}`"
+          :x="tick.x"
+          :y="height - 4"
+          class="metric-chart__label"
+          :text-anchor="tick.anchor"
+        >
+          {{ tick.label }}
+        </text>
 
-      <line x1="75" y1="110" x2="785" y2="110" stroke="#E0E0E0" stroke-dasharray="3,3" />
-      <text x="68" y="114" font-size="11" fill="#9E9E9E" text-anchor="end">
-        {{ formattedMidVal }}
-      </text>
+        <!-- Limiares (aviso/crítico) e média -->
+        <g v-for="line in referenceLines" :key="`ref-${line.label}`">
+          <line
+            :x1="area.left"
+            :x2="area.left + area.width"
+            :y1="line.y"
+            :y2="line.y"
+            :stroke="line.color"
+            class="metric-chart__reference"
+          />
+        </g>
 
-      <line x1="75" y1="190" x2="785" y2="190" stroke="#E0E0E0" stroke-width="1.5" />
-      <text x="68" y="194" font-size="11" fill="#9E9E9E" text-anchor="end">
-        {{ formattedMinVal }}
-      </text>
-
-      <!-- Linha Média Tracejada (opcional) -->
-      <line
-        v-if="showAvgLine && avgY !== null"
-        x1="75"
-        :y1="avgY"
-        x2="785"
-        :y2="avgY"
-        stroke="#FF9800"
-        stroke-width="1.5"
-        stroke-dasharray="4,4"
-      />
-
-      <!-- Linha Guia Vertical (Crosshair Indicator) -->
-      <line
-        v-if="activeHoverIndex !== null && crosshairX !== null"
-        :x1="crosshairX"
-        y1="30"
-        :x2="crosshairX"
-        y2="190"
-        stroke="#38BDF8"
-        stroke-dasharray="3,3"
-        stroke-width="1.5"
-      />
-
-      <!-- Áreas sob as Curvas com Gradiente -->
-      <g v-for="s in seriesList" :key="`area-${s.id}`">
-        <polygon
-          v-if="s.fillArea && s.areaPoints"
-          :points="s.areaPoints"
-          :fill="`url(#grad-${s.id})`"
+        <!-- Áreas, depois linhas: a linha nunca fica sob o preenchimento de outra série -->
+        <path
+          v-for="s in drawn"
+          v-show="s.fillArea"
+          :key="`a-${s.id}`"
+          :d="s.area"
+          :fill="`url(#${s.gradientId})`"
         />
-      </g>
-
-      <!-- Linhas Principais dos Gráficos -->
-      <polyline
-        v-for="s in seriesList"
-        :key="`line-${s.id}`"
-        :points="s.polylinePoints"
-        fill="none"
-        :stroke="s.color"
-        stroke-width="2.5"
-        stroke-linecap="round"
-      />
-
-      <!-- Pontos de Amostragem (Data Circles) -->
-      <g v-for="s in seriesList" :key="`points-${s.id}`">
-        <circle
-          v-for="(pt, idx) in s.chartPoints"
-          :key="idx"
-          :cx="pt.x"
-          :cy="pt.y"
-          :r="activeHoverIndex === idx ? 7 : 4"
-          :fill="pt.color || s.color"
-          stroke="#FFFFFF"
-          stroke-width="2"
-          class="chart-point"
+        <path
+          v-for="s in drawn"
+          :key="`l-${s.id}`"
+          :d="s.line"
+          :stroke="s.color"
+          class="metric-chart__line"
+          :class="{ 'metric-chart__line--dashed': s.dashed }"
         />
-      </g>
-    </svg>
 
-    <div v-else class="text-center text-grey py-10">
-      <v-icon size="40" color="grey-lighten-1">mdi-chart-line-variant</v-icon>
-      <div class="mt-2 text-subtitle-2">Nenhum dado disponível para o gráfico.</div>
+        <!-- Amostras destacadas pela própria série (ex.: perda de pacote) -->
+        <template v-for="s in drawn" :key="`m-${s.id}`">
+          <circle
+            v-for="marker in s.markers"
+            :key="marker.index"
+            :cx="marker.x"
+            :cy="marker.y"
+            r="3"
+            :fill="marker.color"
+            class="metric-chart__marker"
+          />
+        </template>
+
+        <!-- Cursor -->
+        <template v-if="hover">
+          <line
+            :x1="hover.x"
+            :x2="hover.x"
+            :y1="area.top"
+            :y2="area.top + area.height"
+            class="metric-chart__crosshair"
+          />
+          <circle
+            v-for="dot in hover.dots"
+            :key="dot.id"
+            :cx="hover.x"
+            :cy="dot.y"
+            r="4"
+            :fill="dot.color"
+            class="metric-chart__marker"
+          />
+        </template>
+      </svg>
+
+      <div v-else-if="!hasData" class="metric-chart__empty">
+        <v-icon size="32" color="primary">mdi-chart-line-variant</v-icon>
+        <div class="text-body-2 mt-1">{{ emptyText }}</div>
+      </div>
+
+      <ChartTooltipCard
+        v-if="hover && tooltipStyle"
+        :rows="hover.rows"
+        :footer="hover.footer"
+        :position-style="tooltipStyle"
+      />
     </div>
 
-    <!-- Tooltip Card Flutuante com Rastreamento Inteligente ao Lado do Mouse -->
-    <v-card
-      v-if="activeHoverIndex !== null && activeItems.length > 0 && mousePos"
-      elevation="8"
-      class="active-point-tooltip pa-3 rounded-lg border text-white pointer-events-none"
-      :style="tooltipStyle"
-    >
-      <div
-        v-for="(item, idx) in activeItems"
-        :key="idx"
-        class="font-weight-bold mb-1 d-flex align-center ga-2"
-        style="font-size: 13px"
+    <!-- Legenda: a identidade da série nunca depende só da cor -->
+    <div v-if="legendVisible" class="metric-chart__legend">
+      <span v-for="s in drawn" :key="`lg-${s.id}`" class="metric-chart__legend-item">
+        <span
+          class="metric-chart__legend-swatch"
+          :class="{ 'metric-chart__legend-swatch--dashed': s.dashed }"
+          :style="{ borderColor: s.color }"
+        ></span>
+        {{ s.label }}
+        <strong v-if="s.latestLabel">{{ s.latestLabel }}</strong>
+      </span>
+      <span
+        v-for="line in referenceLines"
+        :key="`lgr-${line.label}`"
+        class="metric-chart__legend-item"
       >
         <span
-          class="status-indicator-dot"
-          :style="{ backgroundColor: item.color || '#2196F3' }"
+          class="metric-chart__legend-swatch metric-chart__legend-swatch--dashed"
+          :style="{ borderColor: line.color }"
         ></span>
-        <span style="color: #38bdf8">{{ item.label || 'Valor' }}:</span>
-        <span class="text-white">{{ item.formattedValue }}</span>
-      </div>
-
-      <div style="font-size: 11px; color: #cbd5e1" class="mt-1 d-flex align-center ga-1">
-        <v-icon size="12" color="#94a3b8">mdi-clock-outline</v-icon>
-        <span>Data e Hora: {{ activeItems[0]?.time }}</span>
-      </div>
-      <div v-if="activeItems[0]?.status" style="font-size: 11px; color: #94a3b8" class="mt-1">
-        Status: {{ activeItems[0].status.toUpperCase() }}
-      </div>
-    </v-card>
+        {{ line.label }}
+      </span>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { formatBps, formatBytes, formatLatency } from '@/utils/formatters'
+import { computed, ref } from 'vue'
+import ChartTooltipCard, { type ChartTooltipRow } from '@/components/charts/ChartTooltipCard.vue'
+import { useElementWidth } from '@/composables/useElementWidth'
 import { chartTooltipStyle } from '@/utils/chartTooltip'
+import {
+  CHART_STATUS_COLORS,
+  areaPath,
+  axisTicks,
+  linePath,
+  nearestIndex,
+  xAt,
+  yAt,
+  yDomain,
+  type PlotArea,
+} from '@/utils/charts/scale'
+import {
+  formatAxisTime,
+  formatBps,
+  formatBytes,
+  formatLatency,
+  formatPercent,
+  formatShortDateTime,
+} from '@/utils/formatters'
 
 export interface ChartDataPoint {
   time: string
-  value: number
+  /** `null` marca falta de amostra: a linha quebra ali. */
+  value: number | null
   formattedValue?: string
   status?: string
+  /** Cor própria destaca a amostra com um marcador (ex.: perda de pacote). */
   color?: string
 }
 
@@ -161,272 +214,394 @@ export interface ChartSeriesInput {
   label: string
   color: string
   fillArea?: boolean
+  dashed?: boolean
+  /** Série no eixo da direita (gráficos de duas unidades). */
+  axis?: 'left' | 'right'
   data: ChartDataPoint[]
 }
+
+export interface ChartReferenceLine {
+  value: number
+  label: string
+  color?: string
+}
+
+type UnitType = 'bandwidth' | 'bytes' | 'latency' | 'percentage' | 'generic' | 'boolean' | 'state'
 
 const props = withDefaults(
   defineProps<{
     series: ChartSeriesInput[]
-    unitType?: 'bandwidth' | 'bytes' | 'latency' | 'percentage' | 'generic' | 'boolean' | 'state'
+    unitType?: UnitType
     customUnit?: string
+    formatValue?: (val: number) => string
+    /** Unidade e formato do eixo da direita. */
+    rightUnitType?: UnitType
+    rightFormatValue?: (val: number) => string
     showAvgLine?: boolean
     avgValue?: number
-    formatValue?: (val: number) => string
+    thresholds?: ChartReferenceLine[]
+    height?: number
+    curve?: 'linear' | 'step'
+    /** Teto mínimo do eixo esquerdo. */
+    minCeiling?: number
+    showLegend?: boolean
+    clickable?: boolean
+    emptyText?: string
+    ariaLabel?: string
   }>(),
   {
     unitType: 'generic',
     customUnit: '',
+    formatValue: undefined,
+    rightUnitType: 'generic',
+    rightFormatValue: undefined,
     showAvgLine: false,
     avgValue: undefined,
-    formatValue: undefined,
+    thresholds: () => [],
+    height: 220,
+    curve: undefined,
+    minCeiling: 0,
+    showLegend: undefined,
+    clickable: false,
+    emptyText: 'Nenhum dado disponível para o gráfico.',
+    ariaLabel: 'Gráfico de série temporal',
   }
 )
 
-const chartContainerRef = ref<HTMLElement | null>(null)
-const mousePos = ref<{ x: number; y: number } | null>(null)
-const activeHoverIndex = ref<number | null>(null)
+const emit = defineEmits<{ (e: 'point-click', index: number): void }>()
 
-// Registra movimentação do mouse no container do gráfico
-function handleMouseMove(e: MouseEvent) {
-  if (!chartContainerRef.value) return
-  const rect = chartContainerRef.value.getBoundingClientRect()
-  const mouseX = e.clientX - rect.left
-  const mouseY = e.clientY - rect.top
+const plotRef = ref<HTMLElement | null>(null)
+const width = useElementWidth(plotRef)
+const hoverIndex = ref<number | null>(null)
+const pointer = ref<{ x: number; y: number } | null>(null)
+const uid = Math.random().toString(36).slice(2, 8)
 
-  updateHoverPosition(mouseX, mouseY, rect.width)
-}
+const leftSeries = computed(() => props.series.filter((s) => s.axis !== 'right'))
+const rightSeries = computed(() => props.series.filter((s) => s.axis === 'right'))
+const count = computed(() => Math.max(0, ...props.series.map((s) => s.data.length)))
+const hasData = computed(() => count.value > 0)
 
-function handleTouchMove(e: TouchEvent) {
-  if (!chartContainerRef.value || e.touches.length === 0) return
-  const touch = e.touches[0]
-  const rect = chartContainerRef.value.getBoundingClientRect()
-  const mouseX = touch.clientX - rect.left
-  const mouseY = touch.clientY - rect.top
+const resolvedCurve = computed(
+  () =>
+    props.curve ?? (props.unitType === 'boolean' || props.unitType === 'state' ? 'step' : 'linear')
+)
 
-  updateHoverPosition(mouseX, mouseY, rect.width)
-}
-
-function updateHoverPosition(mouseX: number, mouseY: number, svgWidth: number) {
-  mousePos.value = { x: mouseX, y: mouseY }
-
-  if (svgWidth <= 0) return
-
-  const marginX = (75 / 800) * svgWidth
-  const contentWidth = ((785 - 75) / 800) * svgWidth
-
-  const pointCount = maxPointCount.value
-  if (pointCount === 0) return
-
-  let relX = mouseX - marginX
-  if (relX < 0) relX = 0
-  if (relX > contentWidth) relX = contentWidth
-
-  const step = pointCount > 1 ? contentWidth / (pointCount - 1) : 0
-  const index = step > 0 ? Math.round(relX / step) : 0
-
-  activeHoverIndex.value = Math.min(pointCount - 1, Math.max(0, index))
-}
-
-function handleMouseLeave() {
-  mousePos.value = null
-  activeHoverIndex.value = null
-}
-
-// Coleta todos os pontos numéricos de todas as séries
-const allValues = computed(() => {
-  const vals: number[] = []
-  for (const s of props.series) {
-    for (const d of s.data) {
-      if (d.value !== undefined && d.value !== null && !isNaN(d.value)) {
-        vals.push(d.value)
-      }
-    }
+function formatterFor(unit: UnitType, custom?: (v: number) => string) {
+  return (val: number): string => {
+    if (custom) return custom(val)
+    if (unit === 'bandwidth') return formatBps(val)
+    if (unit === 'bytes') return formatBytes(val)
+    if (unit === 'latency') return formatLatency(val)
+    if (unit === 'percentage') return formatPercent(val, val >= 10 ? 0 : 1)
+    if (unit === 'boolean') return val >= 0.5 ? 'Ligado' : 'Desligado'
+    const rounded = Number.isInteger(val) ? String(val) : val.toFixed(1)
+    return props.customUnit ? `${rounded} ${props.customUnit}` : rounded
   }
-  return vals
-})
+}
 
-const maxPointCount = computed(() => {
-  let max = 0
-  for (const s of props.series) {
-    if (s.data.length > max) max = s.data.length
+const formatLeft = computed(() => formatterFor(props.unitType, props.formatValue))
+const formatRight = computed(() => formatterFor(props.rightUnitType, props.rightFormatValue))
+
+function valuesOf(list: ChartSeriesInput[]): number[] {
+  return list.flatMap((s) => s.data.map((d) => d.value).filter((v): v is number => v !== null))
+}
+
+function domainFor(list: ChartSeriesInput[], unit: UnitType, extra: number[] = []) {
+  if (unit === 'boolean') return { min: 0, max: 1 }
+  return yDomain([...valuesOf(list), ...extra], {
+    minCeiling: unit === 'percentage' ? 100 : props.minCeiling,
+    base: unit === 'bytes' ? 1024 : 10,
+  })
+}
+
+const referenceLines = computed(() => {
+  const lines = props.thresholds.map((t, i) => ({
+    ...t,
+    color: t.color ?? (i === 0 ? CHART_STATUS_COLORS.warning : CHART_STATUS_COLORS.critical),
+  }))
+  if (props.showAvgLine && props.avgValue !== undefined && props.avgValue !== null) {
+    lines.push({ value: props.avgValue, label: 'Média', color: CHART_STATUS_COLORS.warning })
   }
-  return max
+  return lines.map((line) => ({ ...line, y: yAt(line.value, leftDomain.value, area.value) }))
 })
 
-const maxVal = computed(() => {
-  if (props.unitType === 'boolean') return 1
-  if (allValues.value.length === 0) return 100
-  const max = Math.max(...allValues.value)
-  if (props.unitType === 'percentage') return Math.max(100, max > 0 ? max * 1.15 : 100)
-  if (props.unitType === 'state') return Math.max(1, max)
-  return max > 0 ? max * 1.15 : 100
-})
-
-const minVal = computed(() => {
-  if (props.unitType === 'boolean' || props.unitType === 'state') return 0
-  if (allValues.value.length === 0) return 0
-  const min = Math.min(...allValues.value)
-  return min < 0 ? min : 0
-})
-
-function getSvgY(val: number): number {
-  const svgTop = 30
-  const svgBottom = 190
-  const svgHeight = svgBottom - svgTop
-  const range = maxVal.value - minVal.value
-  const ratio = range > 0 ? (val - minVal.value) / range : 0
-  return svgBottom - ratio * svgHeight
-}
-
-const avgY = computed(() => {
-  if (!props.showAvgLine || props.avgValue === undefined || props.avgValue === null) return null
-  return getSvgY(props.avgValue)
-})
-
-function formatUnitValue(val: number): string {
-  if (props.formatValue) return props.formatValue(val)
-  if (props.unitType === 'bandwidth') return formatBps(val)
-  if (props.unitType === 'bytes') return formatBytes(val)
-  if (props.unitType === 'latency') return formatLatency(val)
-  if (props.unitType === 'percentage') return `${val.toFixed(1)}%`
-  if (props.unitType === 'boolean') return val >= 0.5 ? '1' : '0'
-  const rounded = val % 1 === 0 ? val.toFixed(0) : (Math.round(val * 10) / 10).toFixed(1)
-  return props.customUnit ? `${rounded} ${props.customUnit}`.trim() : rounded
-}
-
-const formattedMaxVal = computed(() =>
-  props.unitType === 'boolean' ? '1 (Ligado)' : formatUnitValue(maxVal.value)
+const leftDomain = computed(() =>
+  domainFor(
+    leftSeries.value,
+    props.unitType,
+    props.thresholds.map((t) => t.value)
+  )
 )
-const formattedMidVal = computed(() =>
-  props.unitType === 'boolean' ? '' : formatUnitValue((maxVal.value + minVal.value) / 2)
-)
-const formattedMinVal = computed(() =>
-  props.unitType === 'boolean' ? '0 (Desligado)' : formatUnitValue(minVal.value)
+const rightDomain = computed(() => domainFor(rightSeries.value, props.rightUnitType))
+
+/** Margens fixas em pixels: espaço para os rótulos, nunca proporcional ao tamanho. */
+const area = computed<PlotArea>(() => {
+  const left = 64
+  const right = rightSeries.value.length > 0 ? 64 : 12
+  const top = 10
+  const bottom = 24
+  return {
+    left,
+    top,
+    width: Math.max(10, width.value - left - right),
+    height: Math.max(10, props.height - top - bottom),
+  }
+})
+
+const leftTicks = computed(() => {
+  if (props.unitType === 'boolean') {
+    return [
+      { y: yAt(0, leftDomain.value, area.value), label: 'Desligado', base: true },
+      { y: yAt(1, leftDomain.value, area.value), label: 'Ligado', base: false },
+    ]
+  }
+  return axisTicks(leftDomain.value.min, leftDomain.value.max, 4).map((value) => ({
+    y: yAt(value, leftDomain.value, area.value),
+    label: formatLeft.value(value),
+    base: value === leftDomain.value.min,
+  }))
+})
+
+const rightTicks = computed(() =>
+  rightSeries.value.length === 0
+    ? []
+    : axisTicks(rightDomain.value.min, rightDomain.value.max, 4).map((value) => ({
+        y: yAt(value, rightDomain.value, area.value),
+        label: formatRight.value(value),
+      }))
 )
 
-const seriesList = computed(() => {
-  const svgLeft = 75
-  const svgRight = 785
-  const maxCount = maxPointCount.value
+/** Série de referência para o eixo de tempo: a mais longa. */
+const timeline = computed(
+  () =>
+    props.series.reduce<ChartSeriesInput | null>(
+      (longest, s) => (!longest || s.data.length > longest.data.length ? s : longest),
+      null
+    )?.data ?? []
+)
 
-  return props.series.map((s) => {
-    const list = s.data
-    const step = maxCount > 1 ? (svgRight - svgLeft) / (maxCount - 1) : 0
+const timeTicks = computed(() => {
+  const data = timeline.value
+  if (data.length === 0) return []
+  const first = Date.parse(data[0].time)
+  const last = Date.parse(data[data.length - 1].time)
+  const span = Number.isFinite(first) && Number.isFinite(last) ? Math.abs(last - first) : 0
+  // Um rótulo a cada ~110 px, no mínimo o primeiro e o último.
+  const slots = Math.max(2, Math.min(data.length, Math.floor(area.value.width / 110) + 1))
+  const indexes = Array.from(
+    new Set(
+      Array.from({ length: slots }, (_, i) =>
+        Math.round((i * (data.length - 1)) / (slots - 1 || 1))
+      )
+    )
+  )
+  return indexes.map((index, i) => ({
+    x: xAt(index, count.value, area.value),
+    label: formatAxisTime(data[index].time, span),
+    anchor: (i === 0 && indexes.length > 1
+      ? 'start'
+      : i === indexes.length - 1 && indexes.length > 1
+        ? 'end'
+        : 'middle') as 'start' | 'middle' | 'end',
+  }))
+})
 
-    const chartPoints = list.map((d, idx) => {
-      const x = maxCount === 1 ? (svgLeft + svgRight) / 2 : svgLeft + idx * step
-      const y = getSvgY(d.value)
-      return {
-        x,
-        y,
-        value: d.value,
-        formattedValue: d.formattedValue || formatUnitValue(d.value),
-        time: d.time,
-        status: d.status,
-        color: d.color || s.color,
-      }
-    })
-
-    const polylinePoints = chartPoints
-      .map((pt) => `${pt.x.toFixed(1)},${pt.y.toFixed(1)}`)
-      .join(' ')
-
-    let areaPoints = ''
-    if (chartPoints.length > 0) {
-      const firstX = chartPoints[0].x.toFixed(1)
-      const lastX = chartPoints[chartPoints.length - 1].x.toFixed(1)
-      areaPoints = `${firstX},190 ${polylinePoints} ${lastX},190`
-    }
-
+const drawn = computed(() =>
+  props.series.map((s) => {
+    const domain = s.axis === 'right' ? rightDomain.value : leftDomain.value
+    const format = s.axis === 'right' ? formatRight.value : formatLeft.value
+    const points = s.data.map((d, index) => ({
+      x: xAt(index, count.value, area.value),
+      y: d.value === null ? null : yAt(d.value, domain, area.value),
+    }))
+    const baseY = yAt(Math.max(domain.min, 0), domain, area.value)
+    const latest = [...s.data].reverse().find((d) => d.value !== null)
     return {
       id: s.id,
       label: s.label,
       color: s.color,
-      fillArea: s.fillArea !== false,
-      chartPoints,
-      polylinePoints,
-      areaPoints,
+      dashed: s.dashed === true,
+      fillArea: s.fillArea !== false && props.series.length <= 2,
+      gradientId: `mc-${uid}-${s.id}`,
+      line: linePath(points, resolvedCurve.value),
+      area: areaPath(points, baseY, resolvedCurve.value),
+      latestLabel:
+        latest && latest.value !== null ? (latest.formattedValue ?? format(latest.value)) : '',
+      markers: s.data.flatMap((d, index) => {
+        const y = points[index].y
+        return d.color && d.color !== s.color && y !== null
+          ? [{ index, x: points[index].x, y, color: d.color }]
+          : []
+      }),
+      points,
+      format,
     }
+  })
+)
+
+const legendVisible = computed(
+  () =>
+    (props.showLegend ?? (props.series.length > 1 || referenceLines.value.length > 0)) &&
+    hasData.value
+)
+
+const hover = computed(() => {
+  const index = hoverIndex.value
+  if (index === null || !hasData.value) return null
+  const rows: ChartTooltipRow[] = []
+  const dots: { id: string; y: number; color: string }[] = []
+  let time = ''
+  let status = ''
+  drawn.value.forEach((s, i) => {
+    const datum = props.series[i].data[index]
+    const y = s.points[index]?.y
+    if (!datum) return
+    time ||= datum.time
+    status ||= datum.status ?? ''
+    rows.push({
+      label: s.label,
+      color: datum.color ?? s.color,
+      value: datum.value === null ? 'sem amostra' : (datum.formattedValue ?? s.format(datum.value)),
+    })
+    if (y !== null && y !== undefined) dots.push({ id: s.id, y, color: s.color })
+  })
+  const footer = [formatShortDateTime(time), status ? status.toUpperCase() : '']
+    .filter(Boolean)
+    .join(' · ')
+  return { x: xAt(index, count.value, area.value), rows, dots, footer }
+})
+
+const tooltipStyle = computed(() => {
+  if (!pointer.value || !hover.value) return null
+  return chartTooltipStyle({
+    x: pointer.value.x,
+    y: pointer.value.y,
+    containerWidth: width.value,
+    containerHeight: props.height,
+    estimatedHeight: 30 + hover.value.rows.length * 18,
   })
 })
 
-const crosshairX = computed(() => {
-  if (activeHoverIndex.value === null) return null
-  const s = seriesList.value[0]
-  if (!s || !s.chartPoints[activeHoverIndex.value]) return null
-  return s.chartPoints[activeHoverIndex.value].x
-})
+function track(clientX: number, clientY: number) {
+  const el = plotRef.value
+  if (!el || !hasData.value) return
+  const rect = el.getBoundingClientRect()
+  const x = clientX - rect.left
+  pointer.value = { x, y: clientY - rect.top }
+  hoverIndex.value = nearestIndex(x, count.value, area.value)
+}
 
-const activeItems = computed(() => {
-  if (activeHoverIndex.value === null) return []
-  const idx = activeHoverIndex.value
-  const items = []
+function onPointer(e: MouseEvent) {
+  track(e.clientX, e.clientY)
+}
 
-  for (const s of seriesList.value) {
-    const pt = s.chartPoints[idx]
-    if (pt) {
-      items.push({
-        label: s.label,
-        color: pt.color || s.color,
-        formattedValue: pt.formattedValue,
-        time: pt.time,
-        status: pt.status,
-      })
-    }
-  }
-  return items
-})
+function onTouch(e: TouchEvent) {
+  const touch = e.touches[0]
+  if (touch) track(touch.clientX, touch.clientY)
+}
 
-// Tooltip com Rastreamento Inteligente ao Lado do Cursor (Flips laterais e verticais)
-const tooltipStyle = computed(() => {
-  if (!mousePos.value || !chartContainerRef.value) return {}
-  const { x, y } = mousePos.value
-  const rect = chartContainerRef.value.getBoundingClientRect()
-
-  return {
-    ...chartTooltipStyle({
-      x,
-      y,
-      containerWidth: rect.width,
-      containerHeight: rect.height,
-      estimatedHeight: 62 + activeItems.value.length * 28,
-    }),
-    zIndex: 30,
-    background: '#0F172A',
-    borderColor: '#0284C7',
-    boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5)',
-    transition:
-      'left 0.08s ease-out, right 0.08s ease-out, top 0.08s ease-out, bottom 0.08s ease-out',
-  }
-})
+function onClick() {
+  if (props.clickable && hoverIndex.value !== null) emit('point-click', hoverIndex.value)
+}
 </script>
 
 <style scoped>
-.base-metric-chart-container {
-  position: relative;
-  min-height: 250px;
+.metric-chart {
+  width: 100%;
   user-select: none;
 }
 
-.base-metric-svg {
-  height: 240px;
+.metric-chart__plot {
+  position: relative;
+  width: 100%;
+}
+
+.metric-chart__plot--clickable {
+  cursor: pointer;
+}
+
+.metric-chart__svg {
+  display: block;
   overflow: visible;
 }
 
-.chart-point {
-  transition:
-    r 0.15s ease,
-    fill 0.15s ease;
+.metric-chart__grid {
+  stroke: rgba(var(--v-theme-on-surface), 0.1);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
 }
 
-.status-indicator-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  display: inline-block;
+.metric-chart__grid--base {
+  stroke: rgba(var(--v-theme-on-surface), 0.28);
 }
 
-.pointer-events-none {
-  pointer-events: none;
+.metric-chart__label {
+  fill: rgba(var(--v-theme-on-surface), 0.72);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  dominant-baseline: middle;
+}
+
+.metric-chart__line {
+  fill: none;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.metric-chart__line--dashed {
+  stroke-dasharray: 5 4;
+}
+
+.metric-chart__reference {
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+  shape-rendering: crispEdges;
+}
+
+.metric-chart__crosshair {
+  stroke: rgba(var(--v-theme-on-surface), 0.4);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  shape-rendering: crispEdges;
+}
+
+.metric-chart__marker {
+  stroke: rgb(var(--v-theme-surface));
+  stroke-width: 1.5;
+}
+
+.metric-chart__empty {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.metric-chart__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin-top: 8px;
+  padding-left: 64px;
+  font-size: 12px;
+}
+
+.metric-chart__legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.metric-chart__legend-swatch {
+  width: 14px;
+  border-top: 2px solid;
+}
+
+.metric-chart__legend-swatch--dashed {
+  border-top-style: dashed;
 }
 </style>

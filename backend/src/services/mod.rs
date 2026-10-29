@@ -10,6 +10,7 @@ pub mod alerts;
 pub mod audit;
 pub mod auth;
 pub mod backup;
+pub mod dashboard;
 pub mod databases;
 pub mod devices;
 pub mod discovery;

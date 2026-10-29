@@ -245,3 +245,26 @@ body,
   color: rgb(var(--v-theme-primary));
   text-decoration: underline;
 }
+
+/*
+ * Superfície dos cards do Dashboard: sem borda, separação só pela sombra
+ * suave. Um lugar só — card, bloco de KPI e resumo do Docker usam a mesma.
+ */
+.dashboard-surface {
+  background: rgb(var(--v-theme-surface));
+  border: none !important;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.06),
+    0 4px 16px rgba(15, 23, 42, 0.06) !important;
+}
+
+/* Estado vazio dos widgets do Dashboard: centralizado, texto legível. */
+.dashboard-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 24px 20px;
+  text-align: center;
+}

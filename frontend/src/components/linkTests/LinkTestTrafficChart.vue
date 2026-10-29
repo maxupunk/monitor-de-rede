@@ -142,6 +142,7 @@ import {
   type MeasuredStep,
 } from '@/utils/linkTests/health'
 import { compactBps } from '@/utils/linkTests/presentation'
+import { paletteColor } from '@/utils/charts/scale'
 import { HEALTH_HIGH_PERCENT } from '@/utils/topology/presentation'
 
 const props = withDefaults(
@@ -157,8 +158,8 @@ const props = withDefaults(
   { health: () => [], names: () => ({}), order: () => [] }
 )
 
-const FORWARD_COLOR = '#4ade80'
-const REVERSE_COLOR = '#38bdf8'
+const FORWARD_COLOR = paletteColor(2)
+const REVERSE_COLOR = paletteColor(0)
 const TRAFFIC_HEIGHT = 72
 const CPU_HEIGHT = 36
 /** CPU a partir do qual a faixa fica amarela (o vermelho é o `HEALTH_HIGH_PERCENT`). */
@@ -432,7 +433,8 @@ svg {
 }
 .line {
   fill: none;
-  stroke-width: 2;
+  stroke-width: 1.5;
+  stroke-linecap: round;
   stroke-linejoin: round;
 }
 .cursor {

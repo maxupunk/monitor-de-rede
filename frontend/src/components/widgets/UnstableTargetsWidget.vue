@@ -1,13 +1,16 @@
 <template>
-  <v-card elevation="2" class="rounded-lg fill-height">
-    <v-card-title class="d-flex align-center justify-space-between py-3 px-4 flex-wrap ga-2">
-      <div class="d-flex align-center">
-        <v-icon start color="warning">mdi-sine-wave</v-icon>
-        <span class="font-weight-bold text-h6">Alvos Instáveis</span>
-        <v-chip v-if="targets.length" size="x-small" color="warning" class="ml-2" variant="tonal">
-          {{ targets.length }}
-        </v-chip>
-      </div>
+  <DashboardCard
+    title="Alvos Instáveis"
+    icon="mdi-sine-wave"
+    icon-color="warning"
+    subtitle="Quem mais caiu e voltou na janela"
+    :loading="loading"
+    flush
+  >
+    <template #actions>
+      <v-chip v-if="targets.length" size="small" color="warning" variant="tonal">
+        {{ targets.length }}
+      </v-chip>
       <v-select
         v-model="hours"
         :items="RANGES"
@@ -16,55 +19,49 @@
         density="compact"
         variant="outlined"
         hide-details
-        style="max-width: 160px"
+        aria-label="Janela"
+        class="unstable-widget__select"
       ></v-select>
-    </v-card-title>
-    <v-divider></v-divider>
+    </template>
 
-    <v-card-text class="pa-0">
-      <div v-if="loading" class="pa-6 text-center">
-        <v-progress-circular indeterminate color="primary" size="28"></v-progress-circular>
-      </div>
+    <v-list v-if="targets.length" lines="two" bg-color="transparent" class="py-0">
+      <v-list-item
+        v-for="target in targets"
+        :key="target.scopeKey"
+        :title="labelOf(target.scopeKey)"
+        class="px-5"
+        :class="{ 'cursor-pointer': monitorIdOf(target.scopeKey) != null }"
+        @click="open(target.scopeKey)"
+      >
+        <template #prepend>
+          <v-avatar :color="target.flapping ? 'warning' : 'info'" variant="tonal" size="36">
+            <v-icon>mdi-sine-wave</v-icon>
+          </v-avatar>
+        </template>
+        <template #subtitle>
+          <span>
+            {{ target.oscillations }}
+            {{ target.oscillations === 1 ? 'queda' : 'quedas' }} ·
+            {{ target.episodes }}
+            {{ target.episodes === 1 ? 'episódio' : 'episódios' }}
+            <template v-if="target.lastProblemAt">
+              · último {{ formatRelativeTime(target.lastProblemAt) }}
+            </template>
+          </span>
+        </template>
+        <template #append>
+          <v-chip v-if="target.flapping" size="x-small" color="warning" variant="flat">
+            Oscilando
+          </v-chip>
+        </template>
+      </v-list-item>
+    </v-list>
 
-      <v-list v-else-if="targets.length" lines="two">
-        <v-list-item
-          v-for="target in targets"
-          :key="target.scopeKey"
-          :title="labelOf(target.scopeKey)"
-          class="px-4 py-2 border-b"
-          :class="{ 'cursor-pointer': monitorIdOf(target.scopeKey) != null }"
-          @click="open(target.scopeKey)"
-        >
-          <template #prepend>
-            <v-avatar :color="target.flapping ? 'warning' : 'grey'" size="36">
-              <v-icon color="white">mdi-sine-wave</v-icon>
-            </v-avatar>
-          </template>
-          <template #subtitle>
-            <span>
-              {{ target.oscillations }}
-              {{ target.oscillations === 1 ? 'queda' : 'quedas' }} ·
-              {{ target.episodes }}
-              {{ target.episodes === 1 ? 'episódio' : 'episódios' }}
-              <template v-if="target.lastProblemAt">
-                · último {{ formatRelativeTime(target.lastProblemAt) }}
-              </template>
-            </span>
-          </template>
-          <template #append>
-            <v-chip v-if="target.flapping" size="x-small" color="warning" variant="flat">
-              Oscilando
-            </v-chip>
-          </template>
-        </v-list-item>
-      </v-list>
-
-      <div v-else class="pa-8 text-center text-grey">
-        <v-icon size="42" color="success">mdi-check-circle-outline</v-icon>
-        <div class="mt-2 text-body-2">Nenhum alvo oscilando no período.</div>
-      </div>
-    </v-card-text>
-  </v-card>
+    <div v-else-if="!loading" class="pa-8 text-center">
+      <v-icon size="42" color="success">mdi-check-circle-outline</v-icon>
+      <div class="mt-2 text-body-2">Nenhum alvo oscilando no período.</div>
+    </div>
+  </DashboardCard>
 
   <!--
     O alvo instável abre o **mesmo** diálogo de detalhe das outras listas de
@@ -88,6 +85,7 @@ import { useMonitorDetail } from '@/composables/useMonitorDetail'
 import { useAlertsStore, type ScopeInstability } from '@/stores/alerts'
 import { useMonitorsStore } from '@/stores/monitors'
 import { formatRelativeTime } from '@/utils/formatters'
+import DashboardCard from '@/components/dashboard/DashboardCard.vue'
 
 const RANGES = [
   { value: 6, title: 'Últimas 6h' },
@@ -152,3 +150,9 @@ onMounted(() => {
 })
 watch(hours, load)
 </script>
+
+<style scoped>
+.unstable-widget__select {
+  max-width: 170px;
+}
+</style>

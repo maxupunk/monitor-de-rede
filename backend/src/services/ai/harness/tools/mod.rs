@@ -24,6 +24,8 @@
 //! - [`schedules`]: tarefas agendadas — rodar uma destas ferramentas num
 //!   horário (cron), listar, mudar, pausar e excluir. O catálogo do que pode
 //!   ser agendado é o [`UnattendedTools`].
+//! - [`dashboard`]: o layout do dashboard — ler e, com confirmação a cada
+//!   chamada, mudar os cards.
 //! - [`ask`]: a IA pergunta ao usuário antes de prosseguir.
 //! - [`plugins`]: plugins de dispositivo — acessar o equipamento (SSH/HTTP),
 //!   criar, testar e executar scripts. Todo acesso passa pelo usuário.
@@ -38,6 +40,7 @@ mod args;
 mod ask;
 mod audit;
 mod charts;
+mod dashboard;
 mod diagnostics;
 mod docker;
 mod grep;
@@ -118,11 +121,12 @@ pub enum ToolGroup {
     Devices,
     Audit,
     Schedules,
+    Dashboard,
 }
 
 impl ToolGroup {
     /// Os grupos que podem ser carregados sob demanda, na ordem do catálogo.
-    pub const DEFERRED: [Self; 12] = [
+    pub const DEFERRED: [Self; 13] = [
         Self::History,
         Self::Analysis,
         Self::Charts,
@@ -135,6 +139,7 @@ impl ToolGroup {
         Self::Devices,
         Self::Audit,
         Self::Schedules,
+        Self::Dashboard,
     ];
 
     #[must_use]
@@ -153,6 +158,7 @@ impl ToolGroup {
             Self::Devices => "devices",
             Self::Audit => "audit",
             Self::Schedules => "schedules",
+            Self::Dashboard => "dashboard",
         }
     }
 
@@ -173,6 +179,7 @@ impl ToolGroup {
             Self::Devices => "equipamento por SSH/HTTP e plugins",
             Self::Audit => "auditoria: quem mudou o quê",
             Self::Schedules => "tarefas agendadas",
+            Self::Dashboard => "cards do dashboard",
         }
     }
 
@@ -195,6 +202,7 @@ impl ToolGroup {
             Self::Devices => "The user wants to access a device over SSH or its web interface, run a command or change a setting on it, install a package, or list, create, test or use a device plugin, app, driver or script.",
             Self::Audit => "The message is about the audit log: who changed what and when, or which configuration change came before a problem.",
             Self::Schedules => "The user wants something to run automatically at a given time or periodically, or asks about scheduled tasks: list, change, pause, run or delete them.",
+            Self::Dashboard => "The user wants to see or change the dashboard layout: add, remove, move, resize or configure dashboard cards or widgets.",
         }
     }
 
@@ -456,6 +464,21 @@ impl ToolOutput {
     }
 }
 
+/// Erro de validação volta à IA como dado, para ela corrigir.
+fn as_output<T>(result: AppResult<T>) -> AppResult<Result<T, ToolOutput>> {
+    match result {
+        Ok(value) => Ok(Ok(value)),
+        Err(
+            error @ (AppError::Validation(_)
+            | AppError::NotFound(_)
+            | AppError::Forbidden(_)
+            | AppError::Conflict(_)
+            | AppError::BusinessRule(_)),
+        ) => Ok(Err(ToolOutput::not_found(error.to_string()))),
+        Err(error) => Err(error),
+    }
+}
+
 #[async_trait]
 pub trait AiToolHandler: Send + Sync {
     fn name(&self) -> &'static str;
@@ -588,6 +611,8 @@ fn all_handlers() -> Vec<Box<dyn AiToolHandler>> {
         Box::new(schedules::UpdateScheduledTask),
         Box::new(schedules::RunScheduledTask),
         Box::new(schedules::DeleteScheduledTask),
+        Box::new(dashboard::GetDashboardLayout),
+        Box::new(dashboard::UpdateDashboardLayout),
         Box::new(ask::AskUser),
     ]
 }

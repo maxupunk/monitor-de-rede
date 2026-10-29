@@ -299,7 +299,7 @@ const numericValues = computed(() => {
   const vals: number[] = []
   for (const s of chartSeries.value) {
     for (const d of s.data) {
-      vals.push(d.value)
+      if (d.value !== null) vals.push(d.value)
     }
   }
   return vals

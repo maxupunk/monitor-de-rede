@@ -1,264 +1,100 @@
 <template>
-  <v-card elevation="2" class="rounded-lg fill-height d-flex flex-column">
-    <v-card-title class="d-flex align-center justify-space-between py-3 px-4 flex-wrap ga-2">
-      <div>
-        <div class="d-flex align-center ga-2">
-          <v-icon color="deep-purple">mdi-chart-multiaxis</v-icon>
-          <span class="font-weight-bold text-h6">{{
-            widget.title || 'Consumo de Banda vs Latência'
-          }}</span>
-        </div>
-        <div class="text-caption text-grey mt-1 d-flex align-center ga-1">
-          <v-icon size="14" color="deep-purple">mdi-information-outline</v-icon>
-          <span
-            >Eixo Duplo: Tráfego (Mbps) x Latência de Ping (ms) · Alvo:
-            {{ selectedPingTargetLabel }}</span
-          >
-        </div>
-      </div>
-
-      <div class="d-flex align-center ga-2 flex-wrap">
-        <v-btn
-          v-if="!hasDnsPingMonitors && dnsServersStore.servers.length > 0"
-          size="small"
-          variant="tonal"
-          color="deep-purple"
-          prepend-icon="mdi-dns"
-          :loading="provisioningDnsPing"
-          class="text-caption"
-          @click="provisionDnsPing"
-        >
-          Adicionar Ping para DNS
-          <v-tooltip activator="parent" location="top">
-            Provisiona monitores de Ping ICMP para os servidores DNS compararem com a banda
-          </v-tooltip>
-        </v-btn>
-
-        <v-combobox
-          v-model="selectedPingTarget"
-          :items="pingTargetOptions"
-          item-title="title"
-          item-value="value"
-          :return-object="false"
-          density="compact"
-          variant="outlined"
-          hide-details
-          style="min-width: 200px; max-width: 260px"
-          class="text-caption"
-          placeholder="Alvo de Ping / IP / DNS"
-        >
-          <template #item="{ props: itemProps, item }">
-            <v-list-item
-              v-bind="itemProps"
-              :title="itemField(item, 'title')"
-              :subtitle="itemField(item, 'subtitle')"
-              :prepend-icon="itemField(item, 'icon')"
-            ></v-list-item>
-          </template>
-        </v-combobox>
-
-        <v-select
-          v-model="selectedDeviceId"
-          :items="deviceOptions"
-          item-title="name"
-          item-value="id"
-          density="compact"
-          variant="outlined"
-          hide-details
-          style="min-width: 170px; max-width: 200px"
-          class="text-caption"
-          placeholder="Equipamento"
-        ></v-select>
-
-        <v-btn-toggle v-model="timeframe" density="compact" variant="outlined" divided mandatory>
-          <v-btn value="5m" size="x-small">5m</v-btn>
-          <v-btn value="15m" size="x-small">15m</v-btn>
-          <v-btn value="1h" size="x-small">1h</v-btn>
-          <v-btn value="24h" size="x-small">24h</v-btn>
-        </v-btn-toggle>
-      </div>
-    </v-card-title>
-    <v-divider></v-divider>
-
-    <v-card-text class="pa-3 flex-grow-1 relative">
-      <v-alert
-        v-if="hasSaturationCorrelation"
-        type="warning"
+  <DashboardCard
+    :title="widget.title || 'Consumo de Banda vs Latência'"
+    icon="mdi-chart-multiaxis"
+    icon-color="deep-purple"
+    :subtitle="`Tráfego × latência de ping · Alvo: ${selectedPingTargetLabel}`"
+    :loading="loading"
+  >
+    <template #actions>
+      <v-btn
+        v-if="!hasDnsPingMonitors && dnsServersStore.servers.length > 0"
+        size="small"
         variant="tonal"
+        color="deep-purple"
+        prepend-icon="mdi-dns"
+        :loading="provisioningDnsPing"
+        @click="provisionDnsPing"
+      >
+        Adicionar Ping para DNS
+        <v-tooltip activator="parent" location="top">
+          Provisiona monitores de Ping ICMP para os servidores DNS compararem com a banda
+        </v-tooltip>
+      </v-btn>
+
+      <v-combobox
+        v-model="selectedPingTarget"
+        :items="pingTargetOptions"
+        item-title="title"
+        item-value="value"
+        :return-object="false"
         density="compact"
-        class="mb-3 rounded-lg"
-        prepend-icon="mdi-alert-decagram"
+        variant="outlined"
+        hide-details
+        aria-label="Alvo de ping"
+        class="bvl-widget__target"
+        placeholder="Alvo de Ping / IP / DNS"
       >
-        <span class="font-weight-bold">Alerta de Saturação de Banda:</span>
-        Picos de latência estão se correlacionando com alto tráfego na interface.
-      </v-alert>
+        <template #item="{ props: itemProps, item }">
+          <v-list-item
+            v-bind="itemProps"
+            :title="itemField(item, 'title')"
+            :subtitle="itemField(item, 'subtitle')"
+            :prepend-icon="itemField(item, 'icon')"
+          ></v-list-item>
+        </template>
+      </v-combobox>
 
-      <div
-        ref="chartContainerRef"
-        class="chart-box w-100 relative pa-2 rounded bg-surface"
-        @mousemove="onMouseMove"
-        @mouseleave="onMouseLeave"
-      >
-        <svg
-          v-if="samples.length > 0"
-          class="w-100 chart-svg"
-          viewBox="0 0 800 220"
-          preserveAspectRatio="none"
-        >
-          <defs>
-            <linearGradient id="bwGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.3" />
-              <stop offset="100%" stop-color="#3b82f6" stop-opacity="0.0" />
-            </linearGradient>
-            <linearGradient id="latGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.25" />
-              <stop offset="100%" stop-color="#f59e0b" stop-opacity="0.0" />
-            </linearGradient>
-          </defs>
+      <v-select
+        v-model="selectedDeviceId"
+        :items="deviceOptions"
+        item-title="name"
+        item-value="id"
+        density="compact"
+        variant="outlined"
+        hide-details
+        aria-label="Equipamento"
+        class="bvl-widget__device"
+        placeholder="Equipamento"
+      ></v-select>
 
-          <!-- Left Axis Grid & Labels (Banda) -->
-          <line
-            x1="70"
-            y1="20"
-            x2="730"
-            y2="20"
-            stroke="rgba(148, 163, 184, 0.2)"
-            stroke-dasharray="3,3"
-          />
-          <text x="62" y="24" font-size="10" fill="#3b82f6" text-anchor="end">
-            {{ formatBps(maxBwRate) }}
-          </text>
-          <text x="738" y="24" font-size="10" fill="#f59e0b" text-anchor="start">
-            {{ maxLatency.toFixed(0) }} ms
-          </text>
+      <TimeframeToggle v-model="timeframe" />
+    </template>
 
-          <line
-            x1="70"
-            y1="110"
-            x2="730"
-            y2="110"
-            stroke="rgba(148, 163, 184, 0.2)"
-            stroke-dasharray="3,3"
-          />
-          <text x="62" y="114" font-size="10" fill="#3b82f6" text-anchor="end">
-            {{ formatBps(maxBwRate / 2) }}
-          </text>
-          <text x="738" y="114" font-size="10" fill="#f59e0b" text-anchor="start">
-            {{ (maxLatency / 2).toFixed(0) }} ms
-          </text>
-
-          <line
-            x1="70"
-            y1="200"
-            x2="730"
-            y2="200"
-            stroke="rgba(148, 163, 184, 0.3)"
-            stroke-width="1.5"
-          />
-          <text x="62" y="204" font-size="10" fill="#94a3b8" text-anchor="end">0 bps</text>
-          <text x="738" y="204" font-size="10" fill="#94a3b8" text-anchor="start">0 ms</text>
-
-          <!-- Crosshair vertical line -->
-          <line
-            v-if="hoverIndex !== null && crosshairX !== null"
-            :x1="crosshairX"
-            y1="20"
-            :x2="crosshairX"
-            y2="200"
-            stroke="#a855f7"
-            stroke-dasharray="4,4"
-            stroke-width="1.5"
-          />
-
-          <!-- Area fills -->
-          <polygon v-if="bwAreaPoints" :points="bwAreaPoints" fill="url(#bwGrad)" />
-          <polygon v-if="latAreaPoints" :points="latAreaPoints" fill="url(#latGrad)" />
-
-          <!-- Lines -->
-          <polyline
-            :points="bwPolylinePoints"
-            fill="none"
-            stroke="#3b82f6"
-            stroke-width="2.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-          <polyline
-            :points="latPolylinePoints"
-            fill="none"
-            stroke="#f59e0b"
-            stroke-width="2.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-
-          <!-- Dots for Hover -->
-          <circle
-            v-if="hoverIndex !== null && currentHoverItem"
-            :cx="currentHoverItem.x"
-            :cy="currentHoverItem.bwY"
-            r="5"
-            fill="#3b82f6"
-            stroke="#ffffff"
-            stroke-width="1.5"
-          />
-          <circle
-            v-if="hoverIndex !== null && currentHoverItem"
-            :cx="currentHoverItem.x"
-            :cy="currentHoverItem.latY"
-            r="5"
-            fill="#f59e0b"
-            stroke="#ffffff"
-            stroke-width="1.5"
-          />
-        </svg>
-
-        <div v-else class="pa-8 text-center text-grey">
-          <v-icon size="40" color="grey-lighten-1" class="mb-2">mdi-chart-line-variant-off</v-icon>
-          <div class="text-subtitle-2 font-weight-medium">Sem dados correlacionados no período</div>
-        </div>
-
-        <!-- Tooltip -->
-        <v-card
-          v-if="hoverIndex !== null && currentHoverItem"
-          elevation="8"
-          class="active-point-tooltip pa-2 rounded border text-white pointer-events-none"
-          :style="tooltipStyle"
-        >
-          <div class="text-caption font-weight-bold text-blue">
-            Tráfego Banda: {{ formatBps(currentHoverItem.bwBps) }}
-          </div>
-          <div class="text-caption font-weight-bold text-amber">
-            Latência Ping: {{ formatLatency(currentHoverItem.latency) }}
-          </div>
-          <div class="text-caption text-grey-lighten-1 mt-1">Hora: {{ currentHoverItem.time }}</div>
-        </v-card>
-      </div>
-    </v-card-text>
-
-    <!-- Footer Legend -->
-    <v-divider></v-divider>
-    <v-card-actions
-      class="px-4 py-2 bg-surface-variant d-flex align-center justify-space-between text-caption flex-wrap ga-2"
+    <v-alert
+      v-if="hasSaturationCorrelation"
+      type="warning"
+      variant="tonal"
+      density="compact"
+      class="mb-3 rounded-lg"
+      prepend-icon="mdi-alert-decagram"
     >
-      <div class="d-flex align-center ga-4">
-        <div class="d-flex align-center ga-1">
-          <span class="dot-indicator bg-blue"></span>
-          <span>Banda: {{ formatBps(currentBw) }} (Pico: {{ formatBps(peakBw) }})</span>
-        </div>
-        <div class="d-flex align-center ga-1">
-          <span class="dot-indicator bg-amber"></span>
-          <span
-            >Latência: {{ formatLatency(currentLatency) }} (Média:
-            {{ formatLatency(avgLatency) }})</span
-          >
-        </div>
+      <span class="font-weight-bold">Alerta de Saturação de Banda:</span>
+      Picos de latência estão se correlacionando com alto tráfego na interface.
+    </v-alert>
+
+    <BaseMetricChart
+      :series="chartSeries"
+      unit-type="bandwidth"
+      right-unit-type="latency"
+      :height="240"
+      empty-text="Sem dados correlacionados no período."
+      aria-label="Tráfego de banda comparado à latência de ping"
+    />
+
+    <template #footer>
+      <div class="d-flex align-center justify-space-between flex-wrap ga-2 text-caption">
+        <span>
+          Banda <strong>{{ formatBps(currentBw) }}</strong> (pico {{ formatBps(peakBw) }}) ·
+          Latência <strong>{{ formatLatency(currentLatency) }}</strong> (média
+          {{ formatLatency(avgLatency) }})
+        </span>
+        <span>
+          Índice de correlação <strong>{{ correlationScore }}%</strong>
+        </span>
       </div>
-      <span class="text-grey font-weight-medium">
-        Índice de Correlação: {{ correlationScore }}%
-      </span>
-    </v-card-actions>
-  </v-card>
+    </template>
+  </DashboardCard>
 </template>
 
 <script setup lang="ts">
@@ -274,7 +110,11 @@ import { useDnsPerformanceStore } from '@/stores/dnsPerformance'
 import { useEventsStore } from '@/stores/events'
 import type { WidgetConfig } from '@/stores/dashboard'
 import { formatLatency, formatBps } from '@/utils/formatters'
-import { chartTooltipStyle } from '@/utils/chartTooltip'
+import { paletteColor } from '@/utils/charts/scale'
+import BaseMetricChart, { type ChartSeriesInput } from '@/components/BaseMetricChart.vue'
+import DashboardCard from '@/components/dashboard/DashboardCard.vue'
+import TimeframeToggle from '@/components/dashboard/TimeframeToggle.vue'
+import { useWidgetTimeframe } from '@/composables/useWidgetTimeframe'
 
 const props = defineProps<{
   widget: WidgetConfig
@@ -286,7 +126,7 @@ const dnsServersStore = useDnsServersStore()
 const dnsPerformanceStore = useDnsPerformanceStore()
 const eventsStore = useEventsStore()
 
-const timeframe = ref<'5m' | '15m' | '1h' | '24h'>('15m')
+const timeframe = useWidgetTimeframe(() => props.widget, '15m')
 const initialPingTarget =
   props.widget.config?.targetHost || (props.widget.config?.monitorId as any) || 'all'
 const selectedPingTarget = ref<number | 'all' | string>(initialPingTarget)
@@ -318,10 +158,6 @@ async function provisionDnsPing() {
     provisioningDnsPing.value = false
   }
 }
-
-const chartContainerRef = ref<HTMLElement | null>(null)
-const mousePos = ref<{ x: number; y: number } | null>(null)
-const hoverIndex = ref<number | null>(null)
 
 let unbindMetricEvent: (() => void) | null = null
 let unbindMonitorEvent: (() => void) | null = null
@@ -530,17 +366,6 @@ const avgLatency = computed(() => {
   return valid.reduce((a, b) => a + b.latency, 0) / valid.length
 })
 
-const maxLatency = computed(() => {
-  if (samples.value.length === 0) return 100
-  const max = Math.max(...samples.value.map((s) => s.latency))
-  return max > 0 ? Math.ceil(max * 1.25) : 100
-})
-
-const maxBwRate = computed(() => {
-  if (samples.value.length === 0) return 1000000
-  return Math.ceil(peakBw.value * 1.25)
-})
-
 const hasSaturationCorrelation = computed(() => {
   if (serverResponse.value) {
     return serverResponse.value.hasSaturationCorrelation
@@ -563,111 +388,28 @@ const correlationScore = computed(() => {
   return hasSaturationCorrelation.value ? 82 : 15
 })
 
-const chartPoints = computed(() => {
-  const left = 70
-  const right = 730
-  const top = 20
-  const bottom = 200
-  const height = bottom - top
-  const count = samples.value.length
-
-  if (count === 0) return []
-  const step = count > 1 ? (right - left) / (count - 1) : 0
-
-  return samples.value.map((s, idx) => {
-    const x = count === 1 ? (left + right) / 2 : left + idx * step
-    const bwRatio = maxBwRate.value > 0 ? Math.min(1, s.bwBps / maxBwRate.value) : 0
-    const latRatio = maxLatency.value > 0 ? Math.min(1, s.latency / maxLatency.value) : 0
-
-    return {
-      x,
-      bwY: bottom - bwRatio * height,
-      latY: bottom - latRatio * height,
-      bwBps: s.bwBps,
-      latency: s.latency,
-      time: s.time,
-    }
-  })
-})
-
-const bwPolylinePoints = computed(() =>
-  chartPoints.value.map((pt) => `${pt.x.toFixed(1)},${pt.bwY.toFixed(1)}`).join(' ')
-)
-const latPolylinePoints = computed(() =>
-  chartPoints.value.map((pt) => `${pt.x.toFixed(1)},${pt.latY.toFixed(1)}`).join(' ')
-)
-
-const bwAreaPoints = computed(() => {
-  if (chartPoints.value.length === 0) return ''
-  const firstX = chartPoints.value[0].x.toFixed(1)
-  const lastX = chartPoints.value[chartPoints.value.length - 1].x.toFixed(1)
-  return `${firstX},200 ${bwPolylinePoints.value} ${lastX},200`
-})
-
-const latAreaPoints = computed(() => {
-  if (chartPoints.value.length === 0) return ''
-  const firstX = chartPoints.value[0].x.toFixed(1)
-  const lastX = chartPoints.value[chartPoints.value.length - 1].x.toFixed(1)
-  return `${firstX},200 ${latPolylinePoints.value} ${lastX},200`
-})
-
-const crosshairX = computed(() => {
-  if (hoverIndex.value === null || !chartPoints.value[hoverIndex.value]) return null
-  return chartPoints.value[hoverIndex.value].x
-})
-
-const currentHoverItem = computed(() => {
-  if (hoverIndex.value === null) return null
-  return chartPoints.value[hoverIndex.value] || null
-})
-
-function onMouseMove(e: MouseEvent) {
-  if (!chartContainerRef.value || samples.value.length === 0) return
-  const rect = chartContainerRef.value.getBoundingClientRect()
-  const mouseX = e.clientX - rect.left
-  const mouseY = e.clientY - rect.top
-  mousePos.value = { x: mouseX, y: mouseY }
-
-  const marginX = (70 / 800) * rect.width
-  const contentW = ((730 - 70) / 800) * rect.width
-  const count = samples.value.length
-
-  let relX = mouseX - marginX
-  if (relX < 0) relX = 0
-  if (relX > contentW) relX = contentW
-
-  const step = count > 1 ? contentW / (count - 1) : 0
-  const idx = step > 0 ? Math.round(relX / step) : 0
-  hoverIndex.value = Math.min(count - 1, Math.max(0, idx))
-}
-
-function onMouseLeave() {
-  mousePos.value = null
-  hoverIndex.value = null
-}
-
-const tooltipStyle = computed(() => {
-  if (!mousePos.value || !chartContainerRef.value) return {}
-  const { x, y } = mousePos.value
-  const rect = chartContainerRef.value.getBoundingClientRect()
-
-  return {
-    ...chartTooltipStyle({
-      x,
-      y,
-      containerWidth: rect.width,
-      containerHeight: rect.height,
-      maxWidth: 240,
-      estimatedHeight: 75,
-      offset: 12,
-      padding: 4,
-    }),
-    zIndex: 20,
-    background: '#0F172A',
-    borderColor: '#A855F7',
-    boxShadow: '0 8px 20px rgba(0,0,0,0.4)',
-  }
-})
+/** Banda no eixo esquerdo, latência no direito: cada um na sua unidade. */
+const chartSeries = computed<ChartSeriesInput[]>(() => [
+  {
+    id: 'bandwidth',
+    label: 'Tráfego de banda',
+    color: paletteColor(0),
+    data: samples.value.map((s) => ({
+      time: new Date(s.timestamp).toISOString(),
+      value: s.bwBps,
+    })),
+  },
+  {
+    id: 'latency',
+    label: 'Latência de ping',
+    color: paletteColor(1),
+    axis: 'right',
+    data: samples.value.map((s) => ({
+      time: new Date(s.timestamp).toISOString(),
+      value: s.latency,
+    })),
+  },
+])
 
 function itemField(item: unknown, field: string): string | undefined {
   if (!item || typeof item !== 'object') return undefined
@@ -685,34 +427,13 @@ function itemField(item: unknown, field: string): string | undefined {
 </script>
 
 <style scoped>
-.chart-box {
-  min-height: 230px;
-  position: relative;
+.bvl-widget__target {
+  min-width: 200px;
+  max-width: 260px;
 }
 
-.chart-svg {
-  height: 220px;
-  overflow: visible;
-}
-
-.dot-indicator {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  display: inline-block;
-}
-
-.pointer-events-none {
-  pointer-events: none;
-}
-
-.ga-1 {
-  gap: 4px;
-}
-.ga-2 {
-  gap: 8px;
-}
-.ga-4 {
-  gap: 16px;
+.bvl-widget__device {
+  min-width: 170px;
+  max-width: 200px;
 }
 </style>

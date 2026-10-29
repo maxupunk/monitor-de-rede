@@ -252,10 +252,12 @@ fn o_detalhe_do_monitor_so_abre_em_dialogo() {
 fn quem_lista_monitor_usa_a_mesma_regra_de_abrir() {
     // A Fase 4 nasceu de três listas de monitor com regras de clique próprias.
     // O `useMonitorDetail` é a resposta: quem lista monitor pega dali o estado
-    // do diálogo e a função de abrir, em vez de inventar a sua.
+    // do diálogo e a função de abrir, em vez de inventar a sua. No painel,
+    // quem lista monitor são os widgets — cada um monta o próprio diálogo.
     for tela in [
         "components/MonitorsTable.vue",
-        "pages/DashboardPage.vue",
+        "components/dashboard/NetworkMonitorsWidget.vue",
+        "components/dashboard/ActiveAlertsWidget.vue",
         "components/widgets/UnstableTargetsWidget.vue",
         "components/widgets/LatencyTimeSeriesWidget.vue",
     ] {
