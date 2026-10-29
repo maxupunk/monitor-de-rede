@@ -31,7 +31,8 @@ import { DEVICE_TYPE_OPTIONS, deviceTypeMeta } from '@/utils/deviceTypes'
 import { formatBps, formatLinkSpeed } from '@/utils/formatters'
 import type { TopologyEdge, TopologyNode } from '@/stores/topology'
 
-export type ThemeColorToken = 'primary' | 'secondary' | 'success' | 'error' | 'warning' | 'info'
+export type ThemeColorToken =
+  'primary' | 'secondary' | 'success' | 'error' | 'warning' | 'caution' | 'info'
 
 // --- Nós -------------------------------------------------------------------
 
@@ -311,7 +312,8 @@ export function hasTraffic(edge: Pick<TopologyEdge, 'inBps' | 'outBps'>): boolea
 /** "↓ 15 Mbps ↑ 45 Mbps" — `null` quando o enlace não tem medição. */
 export function edgeTrafficLabel(edge: Pick<TopologyEdge, 'inBps' | 'outBps'>): string | null {
   if (!hasTraffic(edge)) return null
-  return `↓ ${formatBps(edge.inBps ?? 0)} ↑ ${formatBps(edge.outBps ?? 0)}`
+  const { in: down, out: up } = TRAFFIC_DIRECTIONS
+  return `${down.arrow} ${formatBps(edge.inBps ?? 0)} ${up.arrow} ${formatBps(edge.outBps ?? 0)}`
 }
 
 export function edgeSpeedLabel(edge: TopologyEdge): string {
@@ -334,8 +336,59 @@ export function edgeEndpoints(
   }
 }
 
-/** Uso a partir do qual a linha de saúde do nó ganha o alerta. */
+/** Uso (CPU/RAM) a partir do qual o valor fica laranja. */
+export const HEALTH_WARNING_PERCENT = 70
+/** Uso a partir do qual a linha de saúde do nó ganha o alerta (vermelho). */
 export const HEALTH_HIGH_PERCENT = 90
+
+export type HealthLevel = 'normal' | 'high' | 'critical'
+
+/** Cor de cada faixa de uso de CPU/memória — mapa, inspetor e teste de velocidade. */
+export const HEALTH_LEVELS: Record<HealthLevel, { label: string; color: ThemeColorToken }> = {
+  normal: { label: `Folgado (< ${HEALTH_WARNING_PERCENT}%)`, color: 'success' },
+  high: { label: `Alto (≥ ${HEALTH_WARNING_PERCENT}%)`, color: 'caution' },
+  critical: { label: `No limite (≥ ${HEALTH_HIGH_PERCENT}%)`, color: 'error' },
+}
+
+export function healthLevel(percent: number): HealthLevel {
+  if (percent >= HEALTH_HIGH_PERCENT) return 'critical'
+  if (percent >= HEALTH_WARNING_PERCENT) return 'high'
+  return 'normal'
+}
+
+export interface HealthMetric {
+  key: 'cpu' | 'memory'
+  label: string
+  percent: number
+  level: HealthLevel
+}
+
+/** CPU e memória com coleta, cada um com a sua faixa. Vazio sem coleta. */
+export function nodeHealthMetrics(
+  node: Partial<Pick<TopologyNode, 'cpuPercent' | 'memoryPercent'>>
+): HealthMetric[] {
+  const metrics: HealthMetric[] = []
+  const push = (key: HealthMetric['key'], label: string, value: number | null | undefined) => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return
+    const percent = Math.round(value)
+    metrics.push({ key, label, percent, level: healthLevel(value) })
+  }
+  push('cpu', 'CPU', node.cpuPercent)
+  push('memory', 'RAM', node.memoryPercent)
+  return metrics
+}
+
+/**
+ * Sentidos do tráfego de um enlace: a mesma cor no selo do mapa, no tooltip,
+ * no inspetor e na legenda (`↓` desce da origem ao destino, `↑` sobe).
+ */
+export const TRAFFIC_DIRECTIONS = {
+  in: { arrow: '↓', label: 'Download', icon: 'mdi-arrow-down-bold', color: 'success' },
+  out: { arrow: '↑', label: 'Upload', icon: 'mdi-arrow-up-bold', color: 'info' },
+} as const satisfies Record<
+  'in' | 'out',
+  { arrow: string; label: string; icon: string; color: ThemeColorToken }
+>
 
 /**
  * A linha de saúde sob o nome do nó: "CPU 37% · RAM 62%" (só o que há de
@@ -345,17 +398,8 @@ export const HEALTH_HIGH_PERCENT = 90
 export function nodeHealthText(
   node: Partial<Pick<TopologyNode, 'cpuPercent' | 'memoryPercent'>>
 ): string | null {
-  const parts: string[] = []
-  const values: number[] = []
-  if (typeof node.cpuPercent === 'number') {
-    parts.push(`CPU ${Math.round(node.cpuPercent)}%`)
-    values.push(node.cpuPercent)
-  }
-  if (typeof node.memoryPercent === 'number') {
-    parts.push(`RAM ${Math.round(node.memoryPercent)}%`)
-    values.push(node.memoryPercent)
-  }
-  if (parts.length === 0) return null
-  const high = values.some((value) => value >= HEALTH_HIGH_PERCENT)
-  return `${high ? '⚠ ' : ''}${parts.join(' · ')}`
+  const metrics = nodeHealthMetrics(node)
+  if (metrics.length === 0) return null
+  const high = metrics.some((metric) => metric.level === 'critical')
+  return `${high ? '⚠ ' : ''}${metrics.map((m) => `${m.label} ${m.percent}%`).join(' · ')}`
 }

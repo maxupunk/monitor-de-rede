@@ -56,9 +56,10 @@ export const SEVERITY_OPTIONS = [
 /** Janelas oferecidas na tela. O backend recusa qualquer coisa além de 7 dias. */
 export const WINDOW_OPTIONS = [
   { value: 1, label: 'Última hora' },
-  { value: 6, label: 'Últimas 6 horas' },
-  { value: 24, label: 'Últimas 24 horas' },
-  { value: 24 * 7, label: 'Últimos 7 dias' },
+  // Curtos: o campo já se chama "Período" e fica estreito na barra de filtros.
+  { value: 6, label: '6 horas' },
+  { value: 24, label: '24 horas' },
+  { value: 24 * 7, label: '7 dias' },
 ] as const
 
 /**

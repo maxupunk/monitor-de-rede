@@ -38,7 +38,7 @@
               "
               size="small"
               variant="tonal"
-              class="font-weight-bold"
+              class="font-weight-bold flex-shrink-0 ml-2"
             >
               {{ permissionState.toUpperCase() }}
             </v-chip>
@@ -63,7 +63,7 @@
               :color="!isWebPushSupported ? 'grey' : isSubscribed ? 'success' : 'warning'"
               size="small"
               variant="tonal"
-              class="font-weight-bold"
+              class="font-weight-bold flex-shrink-0 ml-2"
             >
               {{ !isWebPushSupported ? 'INDISPONÍVEL' : isSubscribed ? 'ATIVO' : 'INATIVO' }}
             </v-chip>

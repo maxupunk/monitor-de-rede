@@ -89,7 +89,10 @@ export function nodeElement(
 ): TopologyElement {
   const overlay = input.overlay ?? EMPTY_OVERLAY
   const ip = nodeIp(node)
-  const health = input.healthLabels?.[node.id] ?? (input.showHealth ? nodeHealthText(node) : null)
+  const override = input.healthLabels?.[node.id]
+  // A linha do mapa (não a do teste) leva os números: a camada de selos a pinta por faixa.
+  const mapHealth = override === undefined && input.showHealth ? nodeHealthText(node) : null
+  const health = override ?? mapHealth
   const lines = [node.name, ip, health].filter((line): line is string => Boolean(line))
   const nodeOverlay = overlay.nodeOverlays[node.id]
   const classes = [
@@ -119,6 +122,10 @@ export function nodeElement(
     midLabel: health ? `${node.name}\n${health}` : node.name,
     iconKey: nodeIconKey(node),
   }
+  // Sempre presentes (nulos sem a linha): a sincronização só troca dado que existe.
+  data.health = mapHealth
+  data.cpuPercent = mapHealth ? (node.cpuPercent ?? null) : null
+  data.memoryPercent = mapHealth ? (node.memoryPercent ?? null) : null
   if (input.groupBySite) data.parent = siteElementId(node.siteId)
 
   const element: TopologyElement = { group: 'nodes', data, classes: classes.join(' ') }
@@ -171,6 +178,9 @@ export function edgeElement(
       source: nodeElementId(source),
       target: nodeElementId(target),
       trafficLabel: edgeTrafficLabel(edge) ?? '',
+      // Os números do rótulo: a camada de selos lê daqui.
+      inBps: edge.inBps ?? null,
+      outBps: edge.outBps ?? null,
       overlayLabel: edgeOverlay?.label ?? '',
     },
     classes: classes.join(' '),

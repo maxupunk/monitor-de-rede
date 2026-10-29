@@ -18,6 +18,9 @@ import {
   speedTier,
   utilizationLevel,
   nodeHealthText,
+  healthLevel,
+  nodeHealthMetrics,
+  TRAFFIC_DIRECTIONS,
 } from '@/utils/topology/presentation'
 import { edge, node } from './fixtures'
 
@@ -109,5 +112,23 @@ describe('linha de saúde do nó', () => {
     expect(nodeHealthText({ cpuPercent: 90 })).toBe('⚠ CPU 90%')
     expect(nodeHealthText({})).toBeNull()
     expect(nodeHealthText({ cpuPercent: null, memoryPercent: null })).toBeNull()
+  })
+
+  it('pinta cada métrica pela faixa: verde, laranja a partir de 70%, vermelho de 90%', () => {
+    expect(healthLevel(0)).toBe('normal')
+    expect(healthLevel(69.9)).toBe('normal')
+    expect(healthLevel(70)).toBe('high')
+    expect(healthLevel(89.9)).toBe('high')
+    expect(healthLevel(90)).toBe('critical')
+    expect(nodeHealthMetrics({ cpuPercent: 72.4, memoryPercent: 12 })).toEqual([
+      { key: 'cpu', label: 'CPU', percent: 72, level: 'high' },
+      { key: 'memory', label: 'RAM', percent: 12, level: 'normal' },
+    ])
+    expect(nodeHealthMetrics({ cpuPercent: Number.NaN, memoryPercent: null })).toEqual([])
+  })
+
+  it('download e upload têm cor própria, a mesma do inspetor e das partículas', () => {
+    expect(TRAFFIC_DIRECTIONS.in.color).not.toBe(TRAFFIC_DIRECTIONS.out.color)
+    expect(edgeTrafficLabel({ inBps: 1000, outBps: 2_000_000 })).toMatch(/^↓ .+ ↑ .+$/)
   })
 })

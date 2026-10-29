@@ -1,6 +1,8 @@
 <template>
   <div class="picker-map" :style="{ height: `${height}px` }">
-    <div ref="container" class="canvas" role="img" :aria-label="`Mapa da rede. ${hint}`"></div>
+    <div class="canvas-area">
+      <div ref="container" class="canvas" role="img" :aria-label="`Mapa da rede. ${hint}`"></div>
+    </div>
     <div class="hint text-body-small">
       <v-icon size="16" color="info">mdi-gesture-tap</v-icon>
       {{ hint }}
@@ -113,29 +115,31 @@ const hint = computed(() =>
 
 <style scoped>
 .picker-map {
-  position: relative;
+  display: flex;
+  flex-direction: column;
   width: 100%;
   border-radius: 12px;
   border: 1px solid rgba(var(--v-theme-on-surface), 0.18);
   background: rgb(var(--v-theme-surface));
   overflow: hidden;
 }
+.canvas-area {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
 .canvas {
   position: absolute;
   inset: 0;
 }
+/* Rodapé, não sobreposição: a dica nunca cobre um equipamento do mapa. */
 .hint {
-  position: absolute;
-  left: 8px;
-  bottom: 8px;
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
-  border-radius: 8px;
-  background: rgb(var(--v-theme-surface));
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.2);
+  gap: 6px;
+  padding: 6px 10px;
+  border-top: 1px solid rgba(var(--v-theme-on-surface), 0.18);
   color: rgb(var(--v-theme-on-surface));
-  pointer-events: none;
 }
 </style>

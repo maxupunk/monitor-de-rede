@@ -47,6 +47,12 @@ export const DEFAULT_PREFS: TopologyPrefs = {
   tipsDismissed: false,
 }
 
+/** As chaves do menu "Exibir": todas liga/desliga. */
+export type ViewPrefKey =
+  'legendOpen' | 'groupBySite' | 'orthogonalEdges' | 'alwaysDetail' | 'showHealth'
+
+export type ViewPrefs = Pick<TopologyPrefs, ViewPrefKey>
+
 const MINIMAP_PREFS: MinimapPref[] = ['auto', 'on', 'off']
 
 export function minimapVisible(pref: MinimapPref, nodeCount: number): boolean {

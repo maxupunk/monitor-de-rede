@@ -16,6 +16,7 @@
       <div v-if="node.vendor || node.model" class="meta">
         {{ [node.vendor, node.model].filter(Boolean).join(' ') }}
       </div>
+      <HealthChips :node="node" class="mt-1" />
       <div v-if="nodeOverlayLabel" class="meta font-weight-bold">{{ nodeOverlayLabel }}</div>
     </template>
     <template v-else-if="edge">
@@ -33,9 +34,9 @@
         {{ edgeStatus.label }} · {{ linkKindPresentation(edge.linkType).label }}
       </div>
       <div class="meta">Velocidade: {{ edgeSpeedLabel(edge) }}</div>
-      <div v-if="traffic" class="meta">
-        {{ traffic }}
-        <span v-if="utilization !== null"> · {{ formatPercent(utilization * 100, 0) }}</span>
+      <div v-if="measured" class="meta d-flex align-center flex-wrap ga-2">
+        <TrafficRates :in-bps="edge.inBps" :out-bps="edge.outBps" dense />
+        <span v-if="utilization !== null">uso {{ formatPercent(utilization * 100, 0) }}</span>
       </div>
     </template>
   </div>
@@ -50,14 +51,16 @@ import {
   EDGE_STATUS,
   edgeSpeedLabel,
   edgeStatusKey,
-  edgeTrafficLabel,
   edgeUtilization,
+  hasTraffic,
   linkKindPresentation,
   nodeIcon,
   nodeIp,
   nodeStatusPresentation,
   nodeTypeLabel,
 } from '@/utils/topology/presentation'
+import HealthChips from './live/HealthChips.vue'
+import TrafficRates from './live/TrafficRates.vue'
 
 const props = defineProps<{
   node?: TopologyNode | null
@@ -75,7 +78,7 @@ const edgeStatus = computed(() =>
   props.edge ? EDGE_STATUS[edgeStatusKey(props.edge)] : EDGE_STATUS.unknown
 )
 const ip = computed(() => (props.node ? nodeIp(props.node) : null))
-const traffic = computed(() => (props.edge ? edgeTrafficLabel(props.edge) : null))
+const measured = computed(() => (props.edge ? hasTraffic(props.edge) : false))
 const utilization = computed(() => (props.edge ? edgeUtilization(props.edge) : null))
 const style = computed(() => ({ left: `${props.x}px`, top: `${props.y}px` }))
 </script>

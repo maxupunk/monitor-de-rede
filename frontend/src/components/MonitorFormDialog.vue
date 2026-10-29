@@ -61,7 +61,7 @@
                 :label="
                   definition.requiresDevice
                     ? 'Equipamento consultado (opcional)'
-                    : 'Vincular a um equipamento (opcional)'
+                    : 'Equipamento (opcional)'
                 "
                 prepend-inner-icon="mdi-router-network"
                 variant="outlined"

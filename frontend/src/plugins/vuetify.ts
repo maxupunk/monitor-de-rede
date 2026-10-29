@@ -25,6 +25,13 @@ export default createVuetify({
           info: '#2196F3',
           success: '#4CAF50',
           warning: '#FFC107',
+          /** Uso alto (CPU/memória ≥ 70%): laranja, entre o aviso e o erro. */
+          caution: '#FF9100',
+        },
+      },
+      light: {
+        colors: {
+          caution: '#E65100',
         },
       },
     },

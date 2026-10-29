@@ -59,18 +59,7 @@
             Exibir
           </v-btn>
         </template>
-        <TopologyViewOptions
-          :legend-open="legendOpen"
-          :group-by-site="groupBySite"
-          :always-detail="alwaysDetail"
-          :orthogonal-edges="orthogonalEdges"
-          :show-health="showHealth"
-          @update:show-health="$emit('update:showHealth', $event)"
-          @update:legend-open="$emit('update:legendOpen', $event)"
-          @update:group-by-site="$emit('update:groupBySite', $event)"
-          @update:always-detail="$emit('update:alwaysDetail', $event)"
-          @update:orthogonal-edges="$emit('update:orthogonalEdges', $event)"
-        />
+        <TopologyViewOptions :view="view" @set="(key, value) => $emit('set-view', key, value)" />
       </v-menu>
     </template>
 
@@ -226,6 +215,7 @@ import type { Site } from '@/stores/sites'
 import type { TopologyNode } from '@/stores/topology'
 import type { TopologyFilters } from '@/utils/topology/filters'
 import type { LayoutKind } from '@/utils/topology/layouts'
+import type { ViewPrefKey, ViewPrefs } from '@/utils/topology/prefs'
 import { READ_ONLY_REASON } from '@/utils/topology/inspectorRegistry'
 import TopologyFilterPanel from './TopologyFilterPanel.vue'
 import TopologyLayoutList from './TopologyLayoutList.vue'
@@ -240,11 +230,8 @@ const props = defineProps<{
   filterCount: number
   editMode: boolean
   canWrite: boolean
-  legendOpen: boolean
-  groupBySite: boolean
-  alwaysDetail: boolean
-  orthogonalEdges: boolean
-  showHealth: boolean
+  /** O que o menu "Exibir" liga e desliga. */
+  view: ViewPrefs
   computing: LayoutKind | null
   newCount: number
   fullscreen: boolean
@@ -256,11 +243,7 @@ defineEmits<{
   'update:siteId': [value: number | null]
   'update:filters': [value: TopologyFilters]
   'update:editMode': [value: boolean]
-  'update:legendOpen': [value: boolean]
-  'update:groupBySite': [value: boolean]
-  'update:alwaysDetail': [value: boolean]
-  'update:orthogonalEdges': [value: boolean]
-  'update:showHealth': [value: boolean]
+  'set-view': [key: ViewPrefKey, value: boolean]
   search: []
   layout: [kind: LayoutKind]
   'arrange-new': []

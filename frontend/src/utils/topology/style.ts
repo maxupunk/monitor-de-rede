@@ -4,7 +4,12 @@
  * é fixa no código, e o contraste vale no claro e no escuro (AGENTS §12).
  */
 import type { StylesheetJson, StylesheetStyle } from 'cytoscape'
-import { NODE_ICON_PATHS, type NodeIconKey } from './presentation'
+import {
+  NODE_ICON_PATHS,
+  TRAFFIC_DIRECTIONS,
+  type HealthLevel,
+  type NodeIconKey,
+} from './presentation'
 
 export interface TopologyPalette {
   dark: boolean
@@ -16,6 +21,8 @@ export interface TopologyPalette {
   success: string
   error: string
   warning: string
+  /** Laranja do uso alto (token `caution` do tema). */
+  caution: string
   info: string
 }
 
@@ -29,6 +36,7 @@ const FALLBACK: TopologyPalette = {
   success: '#4CAF50',
   error: '#FF5252',
   warning: '#FFC107',
+  caution: '#FF9100',
   info: '#2196F3',
 }
 
@@ -51,6 +59,7 @@ export function paletteFromTheme(theme: {
     success: c.success ?? FALLBACK.success,
     error: c.error ?? FALLBACK.error,
     warning: c.warning ?? FALLBACK.warning,
+    caution: c.caution ?? FALLBACK.caution,
     info: c.info ?? FALLBACK.info,
   }
 }
@@ -78,6 +87,46 @@ export function mix(a: string, b: string, amount: number): string {
 export function iconDataUri(path: string, color: string): string {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48"><path fill="${color}" d="${path}"/></svg>`
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`
+}
+
+/** Fundo e borda das pílulas de rótulo (Cytoscape) — a camada HTML usa os mesmos. */
+export function labelColors(p: TopologyPalette): { background: string; border: string } {
+  const background = p.dark ? mix(p.background, p.surface, 0.5) : '#FFFFFF'
+  return { background, border: mix(p.onSurface, background, 0.8) }
+}
+
+/** Cor de texto legível sobre o fundo do rótulo: no claro, o tom escurece. */
+function readable(p: TopologyPalette, color: string): string {
+  return p.dark ? color : mix(color, '#000000', 0.32)
+}
+
+/**
+ * Cores dos selos sobre o mapa: os sentidos do tráfego e as faixas de
+ * CPU/memória.
+ */
+export interface LiveColors {
+  labelBackground: string
+  labelBorder: string
+  text: string
+  trafficIn: string
+  trafficOut: string
+  health: Record<HealthLevel, string>
+}
+
+export function liveColors(p: TopologyPalette = FALLBACK): LiveColors {
+  const label = labelColors(p)
+  return {
+    labelBackground: label.background,
+    labelBorder: label.border,
+    text: p.onSurface,
+    trafficIn: readable(p, p[TRAFFIC_DIRECTIONS.in.color]),
+    trafficOut: readable(p, p[TRAFFIC_DIRECTIONS.out.color]),
+    health: {
+      normal: readable(p, p.success),
+      high: readable(p, p.caution),
+      critical: readable(p, p.error),
+    },
+  }
 }
 
 /** Zoom a partir do qual todo enlace mostra o tráfego. */
@@ -191,7 +240,7 @@ function lodBlocks(): StylesheetStyle[] {
 export function buildStylesheet(p: TopologyPalette = FALLBACK): StylesheetJson {
   const nodeFill = p.dark ? mix(p.surface, '#FFFFFF', 0.1) : '#FFFFFF'
   const iconColor = p.dark ? mix(p.onSurface, p.surface, 0.06) : mix(p.onSurface, '#FFFFFF', 0.15)
-  const labelBg = p.dark ? mix(p.background, p.surface, 0.5) : '#FFFFFF'
+  const { background: labelBg, border: edgeLabelBorder } = labelColors(p)
   const edgeNeutral = mix(p.onSurface, p.background, p.dark ? 0.45 : 0.5)
 
   const iconBlocks = (Object.keys(NODE_ICON_PATHS) as NodeIconKey[]).map((key) =>
@@ -332,7 +381,7 @@ export function buildStylesheet(p: TopologyPalette = FALLBACK): StylesheetJson {
       'text-background-padding': '3px',
       'text-background-shape': 'roundrectangle',
       'text-border-width': 1,
-      'text-border-color': mix(p.onSurface, labelBg, 0.8),
+      'text-border-color': edgeLabelBorder,
       'text-border-opacity': 1,
       'min-zoomed-font-size': 6,
       'overlay-color': p.primary,

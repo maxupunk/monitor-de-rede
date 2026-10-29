@@ -261,7 +261,7 @@
               <v-col cols="12">
                 <v-text-field
                   v-model="formModel.gateway"
-                  label="Gateway (IP do Roteador / Switch Core)"
+                  label="Gateway"
                   placeholder="192.168.1.1"
                   variant="outlined"
                   density="comfortable"

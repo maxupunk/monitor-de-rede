@@ -2,14 +2,7 @@
   <div class="traffic">
     <template v-if="measured">
       <div class="d-flex align-center flex-wrap ga-3 rates">
-        <span class="rate">
-          <v-icon size="16" color="success">mdi-arrow-down-bold</v-icon>
-          {{ formatBps(edge.inBps ?? 0) }}
-        </span>
-        <span class="rate">
-          <v-icon size="16" color="info">mdi-arrow-up-bold</v-icon>
-          {{ formatBps(edge.outBps ?? 0) }}
-        </span>
+        <TrafficRates :in-bps="edge.inBps" :out-bps="edge.outBps" />
         <v-spacer></v-spacer>
         <span class="speed">{{ edgeSpeedLabel(edge) }}</span>
       </div>
@@ -39,7 +32,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { TopologyEdge } from '@/stores/topology'
-import { formatBps, formatPercent } from '@/utils/formatters'
+import { formatPercent } from '@/utils/formatters'
+import TrafficRates from '../live/TrafficRates.vue'
 import {
   edgeSpeedLabel,
   edgeUtilization,
@@ -59,12 +53,6 @@ const level = computed(() => utilizationLevel(utilization.value))
 .traffic {
   font-size: 0.85rem;
   color: rgb(var(--v-theme-on-surface));
-}
-.rate {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  font-weight: 700;
 }
 .speed,
 .usage,

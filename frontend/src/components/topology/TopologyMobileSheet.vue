@@ -32,16 +32,8 @@
           </v-window-item>
           <v-window-item value="view">
             <TopologyViewOptions
-              :legend-open="legendOpen"
-              :group-by-site="groupBySite"
-              :always-detail="alwaysDetail"
-              :orthogonal-edges="orthogonalEdges"
-              :show-health="showHealth"
-              @update:show-health="$emit('update:showHealth', $event)"
-              @update:legend-open="$emit('update:legendOpen', $event)"
-              @update:group-by-site="$emit('update:groupBySite', $event)"
-              @update:always-detail="$emit('update:alwaysDetail', $event)"
-              @update:orthogonal-edges="$emit('update:orthogonalEdges', $event)"
+              :view="view"
+              @set="(key, value) => $emit('set-view', key, value)"
             />
             <div class="d-flex flex-wrap ga-2 pa-2">
               <v-btn color="info" variant="flat" prepend-icon="mdi-image-move" @click="onExport">
@@ -59,6 +51,7 @@
 import { ref } from 'vue'
 import type { TopologyNode } from '@/stores/topology'
 import type { TopologyFilters } from '@/utils/topology/filters'
+import type { ViewPrefKey, ViewPrefs } from '@/utils/topology/prefs'
 import TopologyFilterPanel from './TopologyFilterPanel.vue'
 import TopologyViewOptions from './TopologyViewOptions.vue'
 
@@ -66,21 +59,14 @@ defineProps<{
   modelValue: boolean
   nodes: readonly TopologyNode[]
   filters: TopologyFilters
-  legendOpen: boolean
-  groupBySite: boolean
-  alwaysDetail: boolean
-  orthogonalEdges: boolean
-  showHealth: boolean
+  /** O que a aba "Exibir" liga e desliga. */
+  view: ViewPrefs
 }>()
 
 const emit = defineEmits<{
   'update:modelValue': [value: boolean]
   'update:filters': [value: TopologyFilters]
-  'update:legendOpen': [value: boolean]
-  'update:groupBySite': [value: boolean]
-  'update:alwaysDetail': [value: boolean]
-  'update:orthogonalEdges': [value: boolean]
-  'update:showHealth': [value: boolean]
+  'set-view': [key: ViewPrefKey, value: boolean]
   export: []
 }>()
 

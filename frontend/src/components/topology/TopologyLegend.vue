@@ -101,6 +101,25 @@
         </div>
       </div>
       <div class="legend-hint">Espessura = velocidade (≤100M, 1G, ≥10G)</div>
+
+      <div class="legend-title">Tráfego e saúde</div>
+      <div class="legend-grid">
+        <div v-for="(direction, key) in TRAFFIC_DIRECTIONS" :key="key" class="legend-row">
+          <v-icon size="16" :color="direction.color">{{ direction.icon }}</v-icon>
+          {{ direction.label }}
+        </div>
+        <div v-for="(level, key) in HEALTH_LEVELS" :key="key" class="legend-row">
+          <span
+            class="chip"
+            :style="{
+              color: `rgb(var(--v-theme-${level.color}))`,
+              background: `rgba(var(--v-theme-${level.color}), 0.18)`,
+            }"
+            >CPU</span
+          >
+          {{ level.label }}
+        </div>
+      </div>
     </div>
   </v-card>
 </template>
@@ -108,8 +127,10 @@
 <script setup lang="ts">
 import { TOPOLOGY_LEGEND_WIDTH } from '@/utils/topology/canvasTypes'
 import {
+  HEALTH_LEVELS,
   LINK_KINDS,
   NODE_STATUS,
+  TRAFFIC_DIRECTIONS,
   UTILIZATION_LEVELS,
   type LinkKind,
 } from '@/utils/topology/presentation'
@@ -190,6 +211,13 @@ svg {
 }
 .stale {
   opacity: 0.6;
+}
+.chip {
+  font-size: 0.62rem;
+  font-weight: 700;
+  padding: 0 4px;
+  border-radius: 999px;
+  flex-shrink: 0;
 }
 .legend-hint {
   margin-top: 8px;

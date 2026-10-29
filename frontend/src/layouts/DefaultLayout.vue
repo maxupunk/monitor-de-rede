@@ -20,7 +20,7 @@
 
       <v-divider class="mb-2" />
 
-      <v-list v-model:opened="openedGroups" density="compact" nav class="px-2">
+      <v-list v-model:opened="openedGroups" density="compact" nav class="nav-list px-2">
         <template v-for="(section, sectionIndex) in navSections" :key="section.title">
           <v-list-subheader
             class="nav-section-title font-weight-bold text-uppercase"
@@ -536,6 +536,11 @@ async function handleLogout() {
 </script>
 
 <style scoped>
+/* Item de submenu recuado não cabe numa linha ("Velocidade do navegador"): quebra em vez de "…". */
+.nav-list :deep(.v-list-item-title) {
+  white-space: normal;
+  line-height: 1.25;
+}
 .lh-1 {
   line-height: 1.2;
 }

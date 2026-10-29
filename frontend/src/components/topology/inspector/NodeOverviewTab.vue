@@ -31,6 +31,10 @@
           ></v-btn>
         </dd>
       </div>
+      <div v-if="hasHealth" class="fact">
+        <dt>CPU e memória</dt>
+        <dd><HealthChips :node="node" /></dd>
+      </div>
       <div class="fact">
         <dt>Tipo</dt>
         <dd>{{ nodeTypeLabel(node) }}</dd>
@@ -92,9 +96,11 @@ import {
   edgeEndpoints,
   edgeStatusKey,
   isUnmanagedSwitch,
+  nodeHealthMetrics,
   nodeIp,
   nodeTypeLabel,
 } from '@/utils/topology/presentation'
+import HealthChips from '../live/HealthChips.vue'
 
 const props = defineProps<{ target: TopologyTarget; host: TopologyHost }>()
 
@@ -104,6 +110,7 @@ const devices = useDevicesStore()
 
 const node = computed(() => (props.target.kind === 'node' ? props.target.node : null))
 const ip = computed(() => (node.value ? nodeIp(node.value) : null))
+const hasHealth = computed(() => (node.value ? nodeHealthMetrics(node.value).length > 0 : false))
 const unmanaged = computed(() => (node.value ? isUnmanagedSwitch(node.value) : false))
 const device = computed(() => devices.devices.find((item) => item.id === node.value?.id) ?? null)
 

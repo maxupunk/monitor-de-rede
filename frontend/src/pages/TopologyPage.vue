@@ -3,11 +3,7 @@
     <TopologyToolbar
       v-model:site-id="prefs.siteId"
       v-model:filters="prefs.filters"
-      v-model:legend-open="prefs.legendOpen"
-      v-model:group-by-site="prefs.groupBySite"
-      v-model:always-detail="prefs.alwaysDetail"
-      v-model:orthogonal-edges="prefs.orthogonalEdges"
-      v-model:show-health="prefs.showHealth"
+      :view="prefs"
       :edit-mode="editMode"
       :sites="sites.sites"
       :nodes="store.nodes"
@@ -17,6 +13,7 @@
       :new-count="layout.autoPlaced.value.size"
       :fullscreen="cmd.fullscreen.value"
       :compact="compact"
+      @set-view="setViewPref"
       @update:edit-mode="cmd.setEditMode"
       @search="cmd.searchOpen.value = true"
       @layout="cmd.runLayout"
@@ -150,12 +147,9 @@
       v-if="compact"
       v-model="moreOpen"
       v-model:filters="prefs.filters"
-      v-model:legend-open="prefs.legendOpen"
-      v-model:group-by-site="prefs.groupBySite"
-      v-model:always-detail="prefs.alwaysDetail"
-      v-model:orthogonal-edges="prefs.orthogonalEdges"
-      v-model:show-health="prefs.showHealth"
+      :view="prefs"
       :nodes="store.nodes"
+      @set-view="setViewPref"
       @export="cmd.exportPng"
     />
     <TopologyDialogs :site-id="prefs.siteId" @saved="notify" />
@@ -188,7 +182,7 @@ import {
   type CanvasPointerEvent,
   type CanvasViewport,
 } from '@/utils/topology/canvasTypes'
-import { minimapVisible } from '@/utils/topology/prefs'
+import { minimapVisible, type ViewPrefKey } from '@/utils/topology/prefs'
 import { useTopologyPrefs } from '@/composables/topology/useTopologyPrefs'
 import { useTopologyPalette } from '@/composables/topology/useTopologyPalette'
 import { useTopologyView } from '@/composables/topology/useTopologyView'
@@ -251,6 +245,10 @@ const moreOpen = computed({
   set: (open) => (open ? sheets.open('options') : sheets.close('options')),
 })
 const editMode = computed(() => prefs.editMode && auth.canWrite)
+
+function setViewPref(key: ViewPrefKey, value: boolean) {
+  prefs[key] = value
+}
 const hasNodes = computed(() => store.nodes.length > 0)
 const minimapOpen = computed(
   () => !smAndDown.value && minimapVisible(prefs.minimap, store.nodes.length)

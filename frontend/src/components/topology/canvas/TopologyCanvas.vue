@@ -1,9 +1,12 @@
 <template>
-  <div
-    ref="container"
-    class="topology-canvas"
-    :class="{ 'is-connecting': connectSourceId !== null }"
-  ></div>
+  <div class="topology-canvas-wrap">
+    <div
+      ref="container"
+      class="topology-canvas"
+      :class="{ 'is-connecting': connectSourceId !== null }"
+    ></div>
+    <TopologyLiveBadges :badges="badges" :zoom="view.zoom" :pan="view.pan" :colors="colors" />
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -15,7 +18,7 @@
  * por diferença: dado e classe que mudaram, nó novo, nó que saiu. Posição só
  * muda por `applyPositions` (layout, outra aba) ou pelo arraste do usuário.
  */
-import { onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import type {
   Core,
   EdgeCollection,
@@ -26,12 +29,14 @@ import type {
 } from 'cytoscape'
 import type { TopologyPosition } from '@/stores/topology'
 import { antsAnimator } from '@/utils/topology/ants'
+import { edgePath } from '@/utils/topology/edgeGeometry'
+import { collectLiveBadges, type LiveBadge } from '@/utils/topology/liveBadges'
+import TopologyLiveBadges from './TopologyLiveBadges.vue'
 import { syncElements as applyElements } from '@/utils/topology/elementSync'
 import { parseElementId, type TopologyElement } from '@/utils/topology/elements'
 import {
   pathAnchors,
   polylineBoxes,
-  quadraticPoints,
   resolveLabelOverlaps,
   type LabelRect,
   type LabelShift,
@@ -41,6 +46,7 @@ import {
 import {
   buildStylesheet,
   edgeRouteClass,
+  liveColors,
   lodLevel,
   LOD_CLASSES,
   ROUTE_CLASSES,
@@ -248,17 +254,6 @@ function setLabelShift(edge: EdgeSingular, shift: LabelShift) {
   }
 }
 
-/** O traçado do enlace como linha quebrada: pontas, dobras ou a curva amostrada. */
-function edgePath(edge: EdgeSingular): Point[] {
-  const source = edge.sourceEndpoint()
-  const target = edge.targetEndpoint()
-  const bends = edge.segmentPoints()
-  if (bends?.length) return [source, ...bends, target]
-  const controls = edge.controlPoints()
-  if (controls?.length === 1) return quadraticPoints(source, controls[0], target)
-  return [source, ...(controls ?? []), target]
-}
-
 /**
  * Afasta os rótulos de enlace que se cobrem, deslizando cada um sobre o
  * próprio traçado (ver `utils/topology/labelLayout`).
@@ -309,6 +304,8 @@ function layoutEdgeLabels(core: Core) {
   core.batch(() => {
     shifts.forEach((shift, id) => setLabelShift(core.getElementById(id) as EdgeSingular, shift))
   })
+  // Os selos coloridos seguem o rótulo para onde o arranjo o levou.
+  scheduleLive()
 }
 
 function scheduleScene() {
@@ -329,6 +326,32 @@ const ants = antsAnimator(() => (destroyed ? null : cy.value))
 
 function updateAnts() {
   ants.update()
+}
+
+// --- Camada viva: selos coloridos ---------------------------------------------
+
+const colors = computed(() => liveColors(props.palette))
+const badges = shallowRef<LiveBadge[]>([])
+const view = shallowRef({ zoom: 1, pan: { x: 0, y: 0 } })
+let liveFrame = 0
+
+/**
+ * Remede os selos no próximo quadro (um só por quadro): quando muda
+ * dado, classe (zoom, foco, filtro), posição ou o arranjo dos rótulos. Pan e
+ * zoom puros só movem a camada (`view`).
+ */
+function scheduleLive() {
+  if (liveFrame || destroyed) return
+  liveFrame = requestAnimationFrame(() => {
+    liveFrame = 0
+    const core = cy.value
+    if (!core) return
+    badges.value = collectLiveBadges(core)
+  })
+}
+
+function syncView(core: Core) {
+  view.value = { zoom: core.zoom(), pan: { ...core.pan() } }
 }
 
 // --- Cabo em andamento (modo conectar) -------------------------------------------
@@ -398,6 +421,7 @@ async function init() {
   })
   cy.value = core
   syncElements(core, props.elements)
+  syncView(core)
 
   core.on('tap', 'node', (event) => {
     const node = event.target as NodeSingular
@@ -472,6 +496,8 @@ async function init() {
   core.on('free', 'node', () => emit('drag-state', false))
   core.on('zoom', () => updateLod(core))
   core.on('viewport position', scheduleScene)
+  core.on('viewport', () => syncView(core))
+  core.on('add remove data position class select unselect', scheduleLive)
   // Seleção e hover mostram o rótulo de um enlace: entra no arranjo.
   core.on('select unselect mouseover mouseout', 'edge', scheduleLabels)
   core.on('add remove', scheduleScene)
@@ -479,9 +505,11 @@ async function init() {
   resizeObserver = new ResizeObserver(() => {
     core.resize()
     scheduleScene()
+    scheduleLive()
   })
   resizeObserver.observe(container.value)
   applySelection()
+  scheduleLive()
   emit('ready')
 }
 
@@ -518,6 +546,7 @@ onBeforeUnmount(() => {
   if (sceneFrame) cancelAnimationFrame(sceneFrame)
   ants.stop()
   if (labelsFrame) cancelAnimationFrame(labelsFrame)
+  if (liveFrame) cancelAnimationFrame(liveFrame)
   resizeObserver?.disconnect()
   sceneListeners.clear()
   cy.value?.destroy()
@@ -534,7 +563,10 @@ watch(
 )
 watch(
   () => props.palette,
-  (palette) => cy.value?.style(buildStylesheet(palette))
+  (palette) => {
+    cy.value?.style(buildStylesheet(palette))
+    scheduleLive()
+  }
 )
 watch(
   () => props.editable,
@@ -754,6 +786,11 @@ defineExpose({ ...api, minimapSource })
 </script>
 
 <style scoped>
+.topology-canvas-wrap {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
 .topology-canvas {
   position: absolute;
   inset: 0;

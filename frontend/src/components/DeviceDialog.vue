@@ -142,7 +142,7 @@
                 :items="availableParentDevices"
                 item-title="name"
                 item-value="id"
-                label="Está atrás de (Dispositivo Pai)"
+                label="Dispositivo pai"
                 variant="outlined"
                 density="comfortable"
                 clearable

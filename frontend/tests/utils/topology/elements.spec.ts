@@ -46,8 +46,17 @@ describe('buildElements', () => {
     // Sem IP, a saúde é a segunda linha.
     expect(byId(on, 'n3').data.label).toBe('Hub\nCPU 5%')
 
+    // Os números vão no dado: a camada de selos pinta cada um pela faixa.
+    expect(byId(on, 'n1').data).toMatchObject({
+      health: '⚠ CPU 37% · RAM 91%',
+      cpuPercent: 37.4,
+      memoryPercent: 91,
+    })
+    expect(byId(on, 'n2').data.health).toBeNull()
+
     const off = buildElements({ nodes: withHealth, edges: [], positions: {}, showHealth: false })
     expect(byId(off, 'n1').data.label).toBe('BORDA\n10.0.0.1')
+    expect(byId(off, 'n1').data).toMatchObject({ health: null, cpuPercent: null })
     expect(classesOf(off, 'n1')).toContain('two-line')
   })
 
@@ -85,6 +94,7 @@ describe('buildElements', () => {
       expect.arrayContaining(['kind-fiber', 'status-up', 'tier-fast', 'util-critical'])
     )
     expect(byId(elements, 'e10').data.trafficLabel).toBe('↓ 9.5 Gbps ↑ 1 Mbps')
+    expect(byId(elements, 'e10').data).toMatchObject({ inBps: 9_500_000_000, outBps: 1_000_000 })
     expect(classesOf(elements, 'e11')).toEqual(
       expect.arrayContaining(['kind-ethernet', 'status-down', 'stale', 'tier-unknown'])
     )

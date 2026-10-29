@@ -143,7 +143,7 @@ import {
 } from '@/utils/linkTests/health'
 import { compactBps } from '@/utils/linkTests/presentation'
 import { paletteColor } from '@/utils/charts/scale'
-import { HEALTH_HIGH_PERCENT } from '@/utils/topology/presentation'
+import { HEALTH_HIGH_PERCENT, HEALTH_LEVELS, healthLevel } from '@/utils/topology/presentation'
 
 const props = withDefaults(
   defineProps<{
@@ -162,8 +162,6 @@ const FORWARD_COLOR = paletteColor(2)
 const REVERSE_COLOR = paletteColor(0)
 const TRAFFIC_HEIGHT = 72
 const CPU_HEIGHT = 36
-/** CPU a partir do qual a faixa fica amarela (o vermelho é o `HEALTH_HIGH_PERCENT`). */
-const CPU_WARNING_PERCENT = 70
 
 const plot = ref<HTMLElement | null>(null)
 const width = useElementWidth(plot)
@@ -243,9 +241,7 @@ const flowPaths = computed(() =>
  * teto — as cores do tema, as mesmas na faixa e na leitura do instante.
  */
 function levelColor(peak: number | null): string {
-  if (peak !== null && peak >= HEALTH_HIGH_PERCENT) return 'rgb(var(--v-theme-error))'
-  if (peak !== null && peak >= CPU_WARNING_PERCENT) return 'rgb(var(--v-theme-warning))'
-  return 'rgb(var(--v-theme-success))'
+  return `rgb(var(--v-theme-${HEALTH_LEVELS[healthLevel(peak ?? 0)].color}))`
 }
 
 const lanes = computed(() =>
