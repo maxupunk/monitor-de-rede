@@ -2,6 +2,7 @@
 import type { ItemAction } from "./ItemAction";
 import type { ItemColumn } from "./ItemColumn";
 import type { ItemLayout } from "./ItemLayout";
+import type { WifiQr } from "./WifiQr";
 
 /**
  * A lista de itens de um plugin.
@@ -63,4 +64,8 @@ edit?: ItemAction, remove?: ItemAction,
 /**
  * Outras ações sobre o item.
  */
-rowActions?: Array<ItemAction>, };
+rowActions?: Array<ItemAction>, 
+/**
+ * O item é uma rede Wi-Fi: a tela oferece o QR code para entrar nela.
+ */
+wifiQr?: WifiQr, };

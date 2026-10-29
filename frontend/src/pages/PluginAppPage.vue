@@ -11,7 +11,7 @@
           variant="flat"
           prepend-icon="mdi-refresh"
           :loading="reading"
-          :disabled="readyIds.length === 0"
+          :disabled="!view || view.members.length === 0"
           @click="refresh"
         >
           Atualizar
@@ -104,6 +104,7 @@
             @action="(target, row) => openItemAction(target, row)"
             @toolbar="(id) => openAction(id)"
             @refresh="refresh"
+            @qr="openQr"
           />
         </v-window-item>
 
@@ -210,6 +211,15 @@
       />
     </template>
 
+    <WifiQrDialog
+      v-if="view && list?.wifiQr"
+      v-model="qr.open"
+      :plugin-id="view.plugin.id"
+      :spec="list.wifiQr"
+      :item="qr.row?.item ?? null"
+      :devices="qrDevices"
+    />
+
     <PluginRunDialog
       v-model="transcript.open"
       :device-id="transcript.deviceId"
@@ -251,14 +261,15 @@ import FleetBatchCard from '@/components/plugins/fleet/FleetBatchCard.vue'
 import FleetItems from '@/components/plugins/fleet/FleetItems.vue'
 import FleetMembers from '@/components/plugins/fleet/FleetMembers.vue'
 import FleetTools from '@/components/plugins/fleet/FleetTools.vue'
+import WifiQrDialog from '@/components/plugins/items/WifiQrDialog.vue'
 import SettingsForm from '@/components/plugins/settings/SettingsForm.vue'
 import { confirm } from '@/composables/useConfirm'
-import { askMemberAccess, rerunAfterAccess } from '@/composables/useFleetAccess'
+import { askFleetAccess, askMemberAccess, rerunAfterAccess } from '@/composables/useFleetAccess'
 import { useAuthStore } from '@/stores/auth'
 import type { Device } from '@/stores/devices'
 import { usePluginAppsStore } from '@/stores/pluginApps'
 import { outputsByDevice, toolsOf, type FlowRequest } from '@/utils/fleetContext'
-import { fleetRows, paramsFromItem, type ItemRow } from '@/utils/itemList'
+import { fleetRows, isReadyAction, paramsFromItem, type ItemRow } from '@/utils/itemList'
 import { formatDateTime, formatRelativeTime } from '@/utils/formatters'
 import {
   batchStatusPresentation,
@@ -280,6 +291,7 @@ const draft = ref<Record<string, unknown>>({})
 const saving = ref(false)
 const feedback = reactive({ show: false, text: '', color: 'success' })
 const flow = reactive({ open: false, request: null as FlowRequest | null })
+const qr = reactive({ open: false, row: null as ItemRow | null })
 /** Por lote, quem teve o acesso salvo mas só roda de novo pelo formulário. */
 const formNeeded = reactive<Record<number, number[]>>({})
 const transcript = reactive({
@@ -363,16 +375,36 @@ const STALE_MS = 10 * 60 * 1000
  * a ação de estado roda uma vez (só leitura; o resultado chega pelo SSE).
  */
 function readIfStale() {
-  if (!authStore.isAdmin || reading.value) return
+  // Sem nenhum acesso, abrir a página não abre a janela de senha sozinho.
+  if (!authStore.isAdmin || reading.value || readyIds.value.length === 0) return
   const finished = statusBatch.value?.finishedAt
   const age = finished ? Date.now() - new Date(finished).getTime() : Infinity
-  if (age >= STALE_MS) refresh()
+  if (age >= STALE_MS) void refresh()
+}
+
+/**
+ * Nenhum equipamento com acesso: pede o acesso ali mesmo (a janela de login e
+ * senha), em vez de mandar o operador procurar. `false` quando continua sem
+ * nenhum (não há equipamento, o perfil não pode cadastrar ou "Agora não").
+ */
+async function ensureFleetAccess(): Promise<boolean> {
+  if (readyIds.value.length > 0) return true
+  if (!view.value || view.value.members.length === 0) {
+    tab.value = 'members'
+    notify('Adicione um equipamento ao aplicativo para começar.', 'info')
+    return false
+  }
+  if (!authStore.canManagePlugins) {
+    notify('Peça a um administrador para cadastrar o acesso aos equipamentos.', 'warning')
+    return false
+  }
+  return askFleetAccess(pluginId.value)
 }
 
 /** Lê os equipamentos de novo (só leitura). */
-function refresh() {
+async function refresh() {
   const statusAction = spec.value?.statusAction
-  if (!statusAction || readyIds.value.length === 0) return
+  if (!statusAction || !(await ensureFleetAccess())) return
   void store
     .runAction(pluginId.value, statusAction, readyIds.value, false)
     .catch((err: unknown) => notify(describe(err, 'Falha ao ler os equipamentos'), 'error'))
@@ -398,17 +430,18 @@ function kindOf(id: string): OutputKind | undefined {
   return deviceActionOf(fleetActionOf(id))?.output
 }
 
-function openAction(
+async function openAction(
   id: string,
-  options: { title?: string; params?: Record<string, unknown>; devices?: number[] } = {}
+  options: {
+    title?: string
+    params?: Record<string, unknown>
+    devices?: number[]
+    direct?: boolean
+  } = {}
 ) {
   const fleetAction = fleetActionOf(id)
   const action = deviceActionOf(fleetAction)
-  if (!fleetAction || !action) return
-  if (readyIds.value.length === 0) {
-    notify('Nenhum equipamento com acesso cadastrado. Veja a aba Equipamentos.', 'warning')
-    return
-  }
+  if (!fleetAction || !action || !(await ensureFleetAccess())) return
   flow.request = {
     fleetAction,
     action,
@@ -416,6 +449,7 @@ function openAction(
     title: options.title ?? fleetAction.title,
     initialParams: options.params,
     initialDevices: options.devices,
+    direct: options.direct,
   }
   flow.open = true
 }
@@ -423,7 +457,7 @@ function openAction(
 const itemName = computed(() => list.value?.itemName ?? 'item')
 
 function addItem() {
-  if (list.value?.add) openAction(list.value.add, { title: `Adicionar ${itemName.value}` })
+  if (list.value?.add) void openAction(list.value.add, { title: `Adicionar ${itemName.value}` })
 }
 
 /**
@@ -433,18 +467,33 @@ function addItem() {
 function openItemAction(target: ItemAction | null | undefined, row: ItemRow, verb?: string) {
   if (!target) return
   const label = verb ?? target.label ?? fleetActionOf(target.action)?.title ?? target.action
-  openAction(target.action, {
+  void openAction(target.action, {
     title: verb ? `${label} ${itemName.value} “${row.key}”` : `${label} — ${row.key}`,
     params: paramsFromItem(target, row.item),
     devices: row.entries.map((entry) => entry.deviceId),
+    direct: isReadyAction(target),
   })
+}
+
+/** Quem tem a rede, os com acesso primeiro: a senha do QR é lida do primeiro que responde. */
+const qrDevices = computed(() => {
+  const entries = qr.row?.entries ?? []
+  const ready = new Set(readyIds.value)
+  return [...entries]
+    .sort((a, b) => Number(ready.has(b.deviceId)) - Number(ready.has(a.deviceId)))
+    .map((entry) => ({ deviceId: entry.deviceId, name: entry.name }))
+})
+
+function openQr(row: ItemRow) {
+  qr.row = row
+  qr.open = true
 }
 
 function configureDevice(deviceId: number) {
   const id = spec.value?.deviceAction
   const member = view.value?.members.find((item) => item.deviceId === deviceId)
   if (!id || !member) return
-  openAction(id, {
+  void openAction(id, {
     title: `${deviceFleetAction.value?.title ?? 'Configurar'} — ${member.name}`,
     devices: [deviceId],
   })
@@ -529,7 +578,7 @@ async function retryWithAccess(batch: PluginBatchView, device: BatchDevice) {
 function openRerunForm(batch: PluginBatchView, device: BatchDevice) {
   const owner = spec.value?.actions?.find((item) => item.preview === batch.action)
   const id = owner?.id ?? batch.action
-  openAction(id, {
+  void openAction(id, {
     title: `${fleetActionOf(id)?.title ?? batch.title} — ${device.deviceName}`,
     devices: [device.deviceId],
   })

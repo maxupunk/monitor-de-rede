@@ -103,8 +103,13 @@ escolhe e configura peças, e o resultado sai igual ao do resto do sistema.
   item ("Adicionar pacote"), de onde vêm os itens (`source` no equipamento; a
   `statusAction` na frota, com `field`), `key`, `subtitle`, `state`,
   `detail`, `columns`, `searchParam`, `toolbar`, `add` e os botões do item
-  (`edit`, `remove`, `rowActions`, com o mapa parâmetro → campo e
-  `showWhen`/`hideWhen`). O formato antigo (`panel`, `fleet.matrix`) continua
+  (`edit`, `remove`, `rowActions`, com o mapa parâmetro → campo,
+  `showWhen`/`hideWhen` e `values` — parâmetros de valor fixo, como o
+  `enabled: false` do "Desativar rede", que levam a ação da frota direto à
+  revisão, sem formulário). `wifiQr` (`ssid`, `encryption`, `hidden`,
+  `secret` e a ação `reveal`, que precisa ser `reveals`) dá ao item o botão
+  **QR code do Wi-Fi**: a senha é lida na hora, como na edição, e o código é
+  gerado no navegador. O formato antigo (`panel`, `fleet.matrix`) continua
   aceito e é convertido na leitura — o JSON gravado não muda, então o checksum
   de quem já instalou também não.
 - **A saída**: `labels` (título de cada chave), `order` (a ordem das chaves

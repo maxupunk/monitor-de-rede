@@ -232,11 +232,13 @@ const emit = defineEmits<{
   action: [target: ItemAction, row: ItemRow]
   toolbar: [actionId: string]
   search: [term: string]
+  /** O QR code da rede Wi-Fi (`list.wifiQr`). */
+  qr: [row: ItemRow]
 }>()
 
 interface Button {
   key: string
-  kind: 'edit' | 'row' | 'remove'
+  kind: 'edit' | 'row' | 'remove' | 'qr'
   target: ItemAction
   label: string
   icon: string
@@ -262,9 +264,9 @@ const toolbar = computed(() =>
 const DEFAULT_ICON = { edit: 'mdi-pencil-outline', row: 'mdi-play', remove: 'mdi-delete-outline' }
 const DEFAULT_LABEL = { edit: 'Editar', row: '', remove: 'Remover' }
 
-/** Os botões que valem para o item, na ordem: editar, outras ações, remover. */
+/** Os botões que valem para o item, na ordem: editar, outras ações, QR, remover. */
 function buttonsFor(row: ItemRow): Button[] {
-  return itemActionsOf(props.list)
+  const buttons: Button[] = itemActionsOf(props.list)
     .filter(({ target }) => appliesTo(target, row.item) && infoOf(target.action) !== undefined)
     .map(({ kind, target }, index) => {
       const info = infoOf(target.action)
@@ -277,6 +279,20 @@ function buttonsFor(row: ItemRow): Button[] {
         color: kind === 'remove' ? 'error' : info?.effect === 'write' ? 'warning' : 'primary',
       }
     })
+  const qr = props.list.wifiQr
+  if (qr) {
+    const button: Button = {
+      key: 'qr',
+      kind: 'qr',
+      target: qr.reveal,
+      label: 'QR code do Wi-Fi',
+      icon: 'mdi-qrcode',
+      color: 'primary',
+    }
+    const removeAt = buttons.findIndex((item) => item.kind === 'remove')
+    buttons.splice(removeAt < 0 ? buttons.length : removeAt, 0, button)
+  }
+  return buttons
 }
 
 function canEdit(row: ItemRow): boolean {
@@ -286,6 +302,7 @@ function canEdit(row: ItemRow): boolean {
 function press(button: Button, row: ItemRow) {
   if (button.kind === 'edit') emit('edit', row)
   else if (button.kind === 'remove') emit('remove', row)
+  else if (button.kind === 'qr') emit('qr', row)
   else emit('action', button.target, row)
 }
 

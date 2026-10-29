@@ -96,6 +96,50 @@ describe('PluginItemList.vue', () => {
     expect(wrapper.emitted('remove')).toHaveLength(1)
   })
 
+  it('a rede Wi-Fi ganha "Desativar" (só se ligada) e o QR code antes de remover', async () => {
+    const edit = { action: 'network', params: { ssid: 'ssid' } }
+    const list: ItemList = {
+      key: 'ssid',
+      layout: 'cards',
+      edit,
+      remove: { action: 'remove_network', params: { ssid: 'ssid' } },
+      rowActions: [
+        { ...edit, label: 'Desativar rede', values: { enabled: false }, showWhen: 'enabled' },
+        { ...edit, label: 'Ativar rede', values: { enabled: true }, hideWhen: 'enabled' },
+      ],
+      wifiQr: {
+        ssid: 'ssid',
+        encryption: 'encryption',
+        secret: 'key',
+        reveal: { action: 'reveal_key', params: { ssid: 'ssid' } },
+      },
+    }
+    const wrapper = mount(PluginItemList, {
+      props: {
+        list,
+        rows: [row('Loja', { ssid: 'Loja', enabled: true })],
+        actions: [
+          { id: 'network', title: 'Rede', effect: 'write' },
+          { id: 'remove_network', title: 'Remover rede', effect: 'write' },
+        ],
+        canWrite: true,
+      },
+      global: { stubs },
+    })
+
+    const items = wrapper.findAll('.menu-item')
+    expect(items.map((item) => item.text())).toEqual([
+      'Editar',
+      'Desativar rede',
+      'QR code do Wi-Fi',
+      'Remover',
+    ])
+    await items[1]?.trigger('click')
+    expect(wrapper.emitted('action')?.[0]?.[0]).toMatchObject({ values: { enabled: false } })
+    await items[2]?.trigger('click')
+    expect(wrapper.emitted('qr')?.[0]?.[0]).toMatchObject({ key: 'Loja' })
+  })
+
   it('em tabela, o item escolhido mostra só os botões que valem para ele', async () => {
     const list: ItemList = {
       title: 'Pacotes',

@@ -79,9 +79,8 @@
                 v-for="member in members"
                 :key="member.deviceId"
                 :title="member.name"
-                :subtitle="member.credentialsReady ? (member.ip ?? '') : 'Sem acesso cadastrado'"
-                :disabled="!member.credentialsReady"
-                @click="toggle(member.deviceId)"
+                :subtitle="member.credentialsReady ? (member.ip ?? '') : 'Sem acesso liberado'"
+                @click="member.credentialsReady && toggle(member.deviceId)"
               >
                 <template #prepend>
                   <v-checkbox-btn
@@ -90,6 +89,15 @@
                     color="primary"
                     @click.stop="toggle(member.deviceId)"
                   ></v-checkbox-btn>
+                </template>
+                <template v-if="!member.credentialsReady" #append>
+                  <DeviceAccessButton
+                    :device-id="member.deviceId"
+                    :transport="member.missingAccess ?? 'ssh'"
+                    :reason="accessNeededReason(member.name, member.missingAccess ?? 'ssh')"
+                    label="Liberar acesso"
+                    @saved="accessSaved(member.deviceId)"
+                  />
                 </template>
               </v-list-item>
             </v-list>
@@ -272,6 +280,8 @@ import SettingsForm from '../settings/SettingsForm.vue'
 import WriteConfirm from '../WriteConfirm.vue'
 import FleetBatchCard from './FleetBatchCard.vue'
 import FleetCurrentValues from './FleetCurrentValues.vue'
+import DeviceAccessButton from '@/components/devices/access/DeviceAccessButton.vue'
+import { accessNeededReason } from '@/utils/deviceCredentials'
 import { withAccess } from '@/composables/useDeviceAccess'
 
 type Step = 'form' | 'review' | 'running' | 'done'
@@ -475,6 +485,11 @@ watch(
     choosing.value = selected.value.length !== readyIds.value.length
     values.value = startingValues()
     secrets.reset()
+    if (request.direct && request.fleetAction.preview && selected.value.length > 0) {
+      // Nada a perguntar: a revisão já mostra o que muda (e "Voltar" abre o formulário).
+      void review()
+      return
+    }
     if (request.initialParams && selected.value.length > 0) void revealSecrets(request)
     if (request.action.effect === 'read' && !hasFields.value) void runFromForm()
   },
@@ -552,6 +567,14 @@ function toggle(deviceId: number) {
   const index = selected.value.indexOf(deviceId)
   if (index >= 0) selected.value.splice(index, 1)
   else selected.value.push(deviceId)
+}
+
+/** O acesso liberado aqui: a frota é relida e o equipamento já entra marcado. */
+async function accessSaved(deviceId: number) {
+  await store.loadFleet(props.pluginId).catch(() => undefined)
+  if (readyIds.value.includes(deviceId) && !selected.value.includes(deviceId)) {
+    selected.value.push(deviceId)
+  }
 }
 
 async function readNow() {

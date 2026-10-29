@@ -6,6 +6,7 @@ import {
   deviceRows,
   fleetRows,
   itemActionsOf,
+  isReadyAction,
   itemsIn,
   paramsFromItem,
 } from '@/utils/itemList'
@@ -90,6 +91,16 @@ describe('lista de itens', () => {
         { ssid: 'Loja' }
       )
     ).toEqual({ ssid: 'Loja', original_ssid: 'Loja' })
+  })
+
+  it('o valor fixo do botão vai por cima do item e dispensa o formulário', () => {
+    const desativar = { params: { ssid: 'ssid', enabled: 'enabled' }, values: { enabled: false } }
+    expect(paramsFromItem(desativar, { ssid: 'Loja', enabled: true })).toEqual({
+      ssid: 'Loja',
+      enabled: false,
+    })
+    expect(isReadyAction(desativar)).toBe(true)
+    expect(isReadyAction({ params: {} })).toBe(false)
   })
 
   it('os botões ficam na ordem editar, ações, remover — e a lista diz que ações usa', () => {

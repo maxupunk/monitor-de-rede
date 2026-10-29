@@ -13,7 +13,7 @@ import FleetBatchCard from '@/components/plugins/fleet/FleetBatchCard.vue'
 import FleetMembers from '@/components/plugins/fleet/FleetMembers.vue'
 import { confirm } from '@/composables/useConfirm'
 import { settleAccess, useDeviceAccess } from '@/composables/useDeviceAccess'
-import { askMemberAccess, rerunAfterAccess } from '@/composables/useFleetAccess'
+import { askFleetAccess, askMemberAccess, rerunAfterAccess } from '@/composables/useFleetAccess'
 import { apiService } from '@/services/apiService'
 import { usePluginAppsStore } from '@/stores/pluginApps'
 import { button, mountWith, setRole, setupDom, teardownDom } from './domHarness'
@@ -129,6 +129,40 @@ describe('aplicativo de frota: o acesso que falta, pedido ali mesmo', () => {
     store.fleets[3] = fleet([member({ credentialsReady: true, missingAccess: null })])
     await expect(askMemberAccess(3, 7)).resolves.toBe(false)
     expect(useDeviceAccess().state.open).toBe(false)
+  })
+
+  it('nenhum com acesso: a janela pede um por vez e "Agora não" encerra a fila', async () => {
+    setRole('admin')
+    const store = usePluginAppsStore()
+    const outro = member({ deviceId: 8, name: 'AP-sala' })
+    store.fleets[3] = fleet([member(), outro])
+    const get = vi
+      .spyOn(apiService, 'get')
+      .mockResolvedValue(fleet([member({ credentialsReady: true, missingAccess: null }), outro]))
+    const asked = askFleetAccess(3)
+    await flushPromises()
+    const { state } = useDeviceAccess()
+    expect(state.request).toMatchObject({
+      deviceId: 7,
+      reason: 'Para gerenciar AP-terraço o NetMonitor precisa do acesso SSH dele. (1 de 2)',
+    })
+    settleAccess(sshSaved())
+    await flushPromises()
+    expect(state.request).toMatchObject({ deviceId: 8 })
+    settleAccess(null)
+    await expect(asked).resolves.toBe(true)
+    expect(get).toHaveBeenCalledWith('/plugins/3/fleet')
+  })
+
+  it('"Agora não" no primeiro: nada é relido e a ação não abre', async () => {
+    setRole('admin')
+    usePluginAppsStore().fleets[3] = fleet([member()])
+    const get = vi.spyOn(apiService, 'get')
+    const asked = askFleetAccess(3)
+    await flushPromises()
+    settleAccess(null)
+    await expect(asked).resolves.toBe(false)
+    expect(get).not.toHaveBeenCalled()
   })
 })
 

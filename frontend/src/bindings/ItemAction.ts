@@ -17,6 +17,12 @@ label?: string, icon?: string,
  */
 params: { [key in string]: string }, 
 /**
+ * Parâmetros com valor fixo, por cima dos do item ("Desativar" manda
+ * `enabled: false`). Com eles o botão é uma ação pronta: na frota vai
+ * direto à revisão, sem formulário.
+ */
+values?: Record<string, unknown>, 
+/**
  * Só aparece quando o campo do item é verdadeiro.
  */
 showWhen?: string, 

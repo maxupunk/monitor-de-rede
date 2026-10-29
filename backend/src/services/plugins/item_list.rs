@@ -55,6 +55,12 @@ pub struct ItemAction {
     /// Parâmetro da ação → campo do item que o preenche.
     #[serde(default)]
     pub params: BTreeMap<String, String>,
+    /// Parâmetros com valor fixo, por cima dos do item ("Desativar" manda
+    /// `enabled: false`). Com eles o botão é uma ação pronta: na frota vai
+    /// direto à revisão, sem formulário.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[ts(type = "Record<string, unknown>", optional)]
+    pub values: BTreeMap<String, Value>,
     /// Só aparece quando o campo do item é verdadeiro.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -141,6 +147,30 @@ pub struct ItemList {
     /// Outras ações sobre o item.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub row_actions: Vec<ItemAction>,
+    /// O item é uma rede Wi-Fi: a tela oferece o QR code para entrar nela.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub wifi_qr: Option<WifiQr>,
+}
+
+/// De onde vem cada parte do QR code de uma rede Wi-Fi (`WIFI:T:…;S:…;P:…;;`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct WifiQr {
+    /// Campo do item com o nome da rede.
+    pub ssid: String,
+    /// Campo com a segurança (`none`, `owe`, `psk2`, `sae`…).
+    pub encryption: String,
+    /// Campo verdadeiro quando a rede não anuncia o nome.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub hidden: Option<String>,
+    /// A ação `reveals` do plugin que lê a senha, com os parâmetros vindos do
+    /// item. Roda na hora, para quem pediu o QR, sem gravar nada (ADR 012).
+    pub reveal: ItemAction,
+    /// Campo da saída de `reveal` com a senha.
+    pub secret: String,
 }
 
 impl From<&PanelRowAction> for ItemAction {
@@ -150,6 +180,7 @@ impl From<&PanelRowAction> for ItemAction {
             label: Some(row.label.clone()),
             icon: row.icon.clone(),
             params: row.params.clone(),
+            values: BTreeMap::new(),
             show_when: row.show_when.clone(),
             hide_when: row.hide_when.clone(),
         }
@@ -163,6 +194,7 @@ impl From<&MatrixAction> for ItemAction {
             label: None,
             icon: None,
             params: target.params.clone(),
+            values: BTreeMap::new(),
             show_when: None,
             hide_when: None,
         }
@@ -197,6 +229,7 @@ impl From<&PluginPanel> for ItemList {
             edit: None,
             remove: None,
             row_actions: panel.row_actions.iter().map(ItemAction::from).collect(),
+            wifi_qr: None,
         }
     }
 }
@@ -222,6 +255,7 @@ impl From<&FleetMatrix> for ItemList {
             edit: matrix.edit.as_ref().map(ItemAction::from),
             remove: matrix.remove.as_ref().map(ItemAction::from),
             row_actions: Vec::new(),
+            wifi_qr: None,
         }
     }
 }
@@ -255,6 +289,12 @@ impl<'a> ListScope<'a> {
                 .iter()
                 .find(|action| action.id == id)
                 .and_then(|action| manifest.action(&action.action)),
+        }
+    }
+
+    fn manifest(self) -> &'a PluginManifest {
+        match self {
+            Self::Device(manifest) | Self::Fleet(manifest, _) => manifest,
         }
     }
 
@@ -346,7 +386,7 @@ pub fn validate(list: &ItemList, scope: ListScope, at: &str, problems: &mut Vec<
             continue;
         };
         let (names, required) = param_names(action);
-        for param in target.params.keys() {
+        for param in target.params.keys().chain(target.values.keys()) {
             if !names.contains(param) {
                 problems.push(format!(
                     "`{at}.{label}`: `{param}` não é parâmetro de `{}`",
@@ -359,7 +399,7 @@ pub fn validate(list: &ItemList, scope: ListScope, at: &str, problems: &mut Vec<
         let runs_directly = matches!(scope, ListScope::Device(_)) && label != "edit";
         if runs_directly {
             for name in required {
-                if !target.params.contains_key(&name) {
+                if !target.params.contains_key(&name) && !target.values.contains_key(&name) {
                     problems.push(format!(
                         "`{at}.{label}`: o parâmetro obrigatório `{name}` de `{}` não vem do item",
                         target.action
@@ -375,6 +415,50 @@ pub fn validate(list: &ItemList, scope: ListScope, at: &str, problems: &mut Vec<
             problems.push(format!(
                 "`{at}.{label}`: o `label` de `{}` está vazio",
                 target.action
+            ));
+        }
+    }
+    if let Some(qr) = &list.wifi_qr {
+        validate_wifi_qr(qr, scope.manifest(), at, problems);
+    }
+}
+
+/// A senha do QR só sai por uma ação que revela (ADR 012), que é sempre do
+/// plugin — também na frota, onde roda no equipamento que tem a rede.
+fn validate_wifi_qr(qr: &WifiQr, manifest: &PluginManifest, at: &str, problems: &mut Vec<String>) {
+    for (label, field) in [
+        ("ssid", &qr.ssid),
+        ("encryption", &qr.encryption),
+        ("secret", &qr.secret),
+    ] {
+        if field.trim().is_empty() {
+            problems.push(format!("`{at}.wifiQr.{label}` é obrigatório"));
+        }
+    }
+    let id = &qr.reveal.action;
+    let Some(action) = manifest.action(id) else {
+        problems.push(format!(
+            "`{at}.wifiQr.reveal` cita `{id}`, que não é ação do plugin"
+        ));
+        return;
+    };
+    if !action.reveals || action.effect != Effect::Read {
+        problems.push(format!(
+            "`{at}.wifiQr.reveal`: `{id}` precisa ser de leitura com `reveals: true`"
+        ));
+    }
+    let (names, required) = param_names(action);
+    for param in qr.reveal.params.keys().chain(qr.reveal.values.keys()) {
+        if !names.contains(param) {
+            problems.push(format!(
+                "`{at}.wifiQr.reveal`: `{param}` não é parâmetro de `{id}`"
+            ));
+        }
+    }
+    for name in required {
+        if !qr.reveal.params.contains_key(&name) && !qr.reveal.values.contains_key(&name) {
+            problems.push(format!(
+                "`{at}.wifiQr.reveal`: o parâmetro obrigatório `{name}` de `{id}` não vem do item"
             ));
         }
     }
@@ -516,6 +600,54 @@ mod tests {
                 "faltou {esperado}: {problems:?}"
             );
         }
+    }
+
+    #[test]
+    fn valor_fixo_conta_como_parametro_e_precisa_existir_na_acao() {
+        let manifest = manifesto(json!({}));
+        let lista: ItemList = serde_json::from_value(json!({
+            "source": "list_packages", "key": "name",
+            "rowActions": [
+                { "action": "install_package", "values": { "name": "vim" } },
+                { "action": "install_package", "params": { "name": "name" },
+                  "values": { "force": true } }
+            ]
+        }))
+        .unwrap();
+        assert_eq!(
+            problemas(&manifest, &lista),
+            vec!["`list.rowActions`: `force` não é parâmetro de `install_package`".to_string()]
+        );
+    }
+
+    #[test]
+    fn o_qr_do_wifi_so_le_a_senha_por_acao_que_revela() {
+        let manifest = manifesto(json!({ "actions": [
+            { "id": "list_packages", "title": "Listar", "effect": "read", "output": "table" },
+            { "id": "senha", "title": "Senha", "effect": "read", "reveals": true,
+              "params": { "type": "object", "properties": { "ssid": { "type": "string" } },
+                          "required": ["ssid"] } },
+            { "id": "comum", "title": "Comum", "effect": "read" }
+        ]}));
+        let lista = |reveal: Value| -> ItemList {
+            serde_json::from_value(json!({
+                "source": "list_packages", "key": "ssid",
+                "wifiQr": { "ssid": "ssid", "encryption": "encryption", "secret": "key",
+                            "reveal": reveal }
+            }))
+            .unwrap()
+        };
+        let certa = lista(json!({ "action": "senha", "params": { "ssid": "ssid" } }));
+        assert!(
+            problemas(&manifest, &certa).is_empty(),
+            "{:?}",
+            problemas(&manifest, &certa)
+        );
+
+        let sem_parametro = problemas(&manifest, &lista(json!({ "action": "senha" })));
+        assert!(sem_parametro[0].contains("`ssid`"), "{sem_parametro:?}");
+        let sem_revelar = problemas(&manifest, &lista(json!({ "action": "comum" })));
+        assert!(sem_revelar[0].contains("reveals: true"), "{sem_revelar:?}");
     }
 
     #[test]

@@ -1,58 +1,70 @@
 <template>
-  <PluginItemList
-    :list="list"
-    :rows="rows"
-    :actions="actionInfo"
-    :can-write="!disabled"
-    :loading="loading"
-    :search-label="searchLabel"
-    :presentation="sourceAction"
-    @add="runById(list.add, {})"
-    @edit="(row) => runTarget(list.edit, row)"
-    @remove="(row) => runTarget(list.remove, row)"
-    @action="(target, row) => runTarget(target, row)"
-    @toolbar="(id) => runById(id, {})"
-    @search="load"
-  >
-    <template #status>
-      <div class="d-flex align-center flex-wrap ga-2 mb-2">
-        <span class="text-body-2">{{ scopeText }}</span>
-        <v-spacer></v-spacer>
-        <v-btn
-          v-if="!list.searchParam"
-          size="small"
-          color="primary"
-          variant="tonal"
-          prepend-icon="mdi-refresh"
-          :loading="loading"
-          :disabled="disabled"
-          @click="load('')"
-        >
-          {{ listRun ? 'Atualizar' : 'Carregar' }}
-        </v-btn>
-      </div>
-      <v-alert v-if="listRun?.error" type="error" variant="tonal" density="compact" class="mb-3">
-        {{ listRun.error }}
-      </v-alert>
-    </template>
-    <template #empty>
-      <template v-if="listRun?.status === 'succeeded'">
-        Nada encontrado.
-        <span v-if="toolbarTitle">Lista vazia? Use “{{ toolbarTitle }}” e busque de novo.</span>
+  <div>
+    <PluginItemList
+      :list="list"
+      :rows="rows"
+      :actions="actionInfo"
+      :can-write="!disabled"
+      :loading="loading"
+      :search-label="searchLabel"
+      :presentation="sourceAction"
+      @add="runById(list.add, {})"
+      @edit="(row) => runTarget(list.edit, row)"
+      @remove="(row) => runTarget(list.remove, row)"
+      @action="(target, row) => runTarget(target, row)"
+      @toolbar="(id) => runById(id, {})"
+      @search="load"
+      @qr="openQr"
+    >
+      <template #status>
+        <div class="d-flex align-center flex-wrap ga-2 mb-2">
+          <span class="text-body-2">{{ scopeText }}</span>
+          <v-spacer></v-spacer>
+          <v-btn
+            v-if="!list.searchParam"
+            size="small"
+            color="primary"
+            variant="tonal"
+            prepend-icon="mdi-refresh"
+            :loading="loading"
+            :disabled="disabled"
+            @click="load('')"
+          >
+            {{ listRun ? 'Atualizar' : 'Carregar' }}
+          </v-btn>
+        </div>
+        <v-alert v-if="listRun?.error" type="error" variant="tonal" density="compact" class="mb-3">
+          {{ listRun.error }}
+        </v-alert>
       </template>
-      <template v-else>
-        {{ list.searchParam ? 'Busque ou carregue a lista.' : 'Carregue a lista.' }}
+      <template #empty>
+        <template v-if="listRun?.status === 'succeeded'">
+          Nada encontrado.
+          <span v-if="toolbarTitle">Lista vazia? Use “{{ toolbarTitle }}” e busque de novo.</span>
+        </template>
+        <template v-else>
+          {{ list.searchParam ? 'Busque ou carregue a lista.' : 'Carregue a lista.' }}
+        </template>
       </template>
-    </template>
-  </PluginItemList>
+    </PluginItemList>
+    <WifiQrDialog
+      v-if="list.wifiQr"
+      v-model="qr.open"
+      :plugin-id="pluginId"
+      :spec="list.wifiQr"
+      :item="qr.row?.item ?? null"
+      :devices="[{ deviceId, name: 'o equipamento' }]"
+    />
+  </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import type { ItemAction } from '@/bindings/ItemAction'
 import type { ItemList } from '@/bindings/ItemList'
 import type { PluginAction } from '@/bindings/PluginAction'
 import PluginItemList from '@/components/plugins/items/PluginItemList.vue'
+import WifiQrDialog from '@/components/plugins/items/WifiQrDialog.vue'
 import { usePluginsStore } from '@/stores/plugins'
 import { withAccess } from '@/composables/useDeviceAccess'
 import { deviceRows, paramsFromItem, type ItemRow, type ListActionInfo } from '@/utils/itemList'
@@ -83,6 +95,7 @@ const store = usePluginsStore()
 const listRunId = ref<number | null>(null)
 const starting = ref(false)
 const searched = ref('')
+const qr = reactive({ open: false, row: null as ItemRow | null })
 
 const listRun = computed(() => store.runById(props.deviceId, listRunId.value))
 const loading = computed(() => starting.value || listRun.value?.status === 'running')
@@ -116,6 +129,11 @@ function actionOf(id: string | null | undefined): PluginAction | null {
 function runById(id: string | null | undefined, params: Record<string, unknown>) {
   const action = actionOf(id)
   if (action) emit('run', action, params)
+}
+
+function openQr(row: ItemRow) {
+  qr.row = row
+  qr.open = true
 }
 
 function runTarget(target: ItemAction | null | undefined, row: ItemRow) {

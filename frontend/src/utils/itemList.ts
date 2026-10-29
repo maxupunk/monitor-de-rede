@@ -114,13 +114,24 @@ export function fleetRows(
   return [...rows.values()]
 }
 
-/** Os parâmetros de um botão a partir do item (mapa parâmetro → campo). */
-export function paramsFromItem(target: Pick<ItemAction, 'params'>, item: Item): Item {
-  return Object.fromEntries(
-    Object.entries(target.params)
-      .filter(([, field]) => item[field] !== undefined)
-      .map(([param, field]) => [param, item[field]])
-  )
+/**
+ * Os parâmetros de um botão a partir do item (mapa parâmetro → campo), com os
+ * valores fixos do botão por cima ("Desativar" manda `enabled: false`).
+ */
+export function paramsFromItem(target: Pick<ItemAction, 'params' | 'values'>, item: Item): Item {
+  return {
+    ...Object.fromEntries(
+      Object.entries(target.params)
+        .filter(([, field]) => item[field] !== undefined)
+        .map(([param, field]) => [param, item[field]])
+    ),
+    ...(target.values ?? {}),
+  }
+}
+
+/** O botão já traz o que muda (`values`): não precisa de formulário. */
+export function isReadyAction(target: Pick<ItemAction, 'values'>): boolean {
+  return Object.keys(target.values ?? {}).length > 0
 }
 
 /** O botão vale para este item (`showWhen`/`hideWhen`)? */

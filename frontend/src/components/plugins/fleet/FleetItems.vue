@@ -12,6 +12,7 @@
     @remove="(row) => emit('remove', row)"
     @action="(target, row) => emit('action', target, row)"
     @toolbar="(id) => emit('toolbar', id)"
+    @qr="(row) => emit('qr', row)"
   >
     <template #status>
       <v-alert v-if="!statusBatch && !reading" type="warning" variant="tonal" class="mb-4">
@@ -57,6 +58,7 @@ const emit = defineEmits<{
   action: [target: ItemAction, row: ItemRow]
   toolbar: [fleetActionId: string]
   refresh: []
+  qr: [row: ItemRow]
 }>()
 
 const store = usePluginAppsStore()

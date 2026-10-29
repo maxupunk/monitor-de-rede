@@ -29,6 +29,35 @@ export async function askMemberAccess(pluginId: number, deviceId: number): Promi
 }
 
 /**
+ * Nenhum equipamento do aplicativo tem o acesso e o operador pediu uma ação:
+ * em vez de mandá-lo à aba Equipamentos, a janela do acesso abre ali mesmo,
+ * um equipamento por vez ("2 de 3"); "Agora não" encerra a fila. Salvo algum,
+ * a frota é relida. `true` quando ao menos um ficou pronto.
+ */
+export async function askFleetAccess(pluginId: number): Promise<boolean> {
+  const store = usePluginAppsStore()
+  if (!useAuthStore().canManagePlugins) return false
+  const missing = (store.fleets[pluginId]?.members ?? []).filter(
+    (member) => !member.credentialsReady && member.missingAccess
+  )
+  let saved = 0
+  for (const [index, member] of missing.entries()) {
+    const transport = member.missingAccess ?? 'ssh'
+    const position = missing.length > 1 ? ` (${index + 1} de ${missing.length})` : ''
+    const credential = await requestAccess({
+      deviceId: member.deviceId,
+      transport,
+      reason: accessNeededReason(member.name, transport) + position,
+    })
+    if (!credential) break
+    saved += 1
+  }
+  if (saved === 0) return false
+  await store.loadFleet(pluginId)
+  return (store.fleets[pluginId]?.members ?? []).some((member) => member.credentialsReady)
+}
+
+/**
  * Depois de salvar o acesso que faltava a um equipamento do lote:
  *
  * * `started` — a ação rodou de novo só nele (direto numa leitura, depois de

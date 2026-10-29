@@ -84,6 +84,11 @@ export interface FlowRequest {
   initialParams?: Record<string, unknown>
   /** Só estes; sem lista, todos os que têm acesso. */
   initialDevices?: number[]
+  /**
+   * O pedido já diz o que muda (um botão com `values`, como "Desativar rede"):
+   * o fluxo vai direto à revisão, sem formulário.
+   */
+  direct?: boolean
 }
 
 /**

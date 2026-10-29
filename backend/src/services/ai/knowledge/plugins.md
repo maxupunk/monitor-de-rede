@@ -293,7 +293,8 @@ de todo plugin que gerencia "coisas".
 | `columns` | colunas da tabela `[{ key, label }]`, na ordem |
 | `searchParam`, `toolbar` | busca (parâmetro da ação de lista); botões da barra (ações sem parâmetro obrigatório) |
 | `add` | ação do botão "Adicionar …" |
-| `edit`, `remove`, `rowActions` | botões do item: `{ action, label?, icon?, params: { param: campo_do_item }, showWhen?, hideWhen? }`. `edit` abre ao clicar no item, com o formulário preenchido |
+| `edit`, `remove`, `rowActions` | botões do item: `{ action, label?, icon?, params: { param: campo_do_item }, values?: { param: valor_fixo }, showWhen?, hideWhen? }`. `edit` abre ao clicar no item, com o formulário preenchido. Com `values` (ex.: `{ "enabled": false }` no "Desativar rede") a ação está pronta: na frota vai direto à revisão |
+| `wifiQr` | o item é uma rede Wi-Fi: `{ ssid, encryption, hidden?, secret, reveal: { action, params } }` (campos do item; `reveal` é uma ação `reveals: true` e `secret` o campo da saída com a senha). A tela ganha "QR code do Wi-Fi" |
 
 No equipamento os botões citam ações do plugin; na frota, ações de frota. O
 formato antigo (`panel`, `fleet.matrix`) ainda é lido, mas escreva `list`.
