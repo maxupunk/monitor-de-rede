@@ -1,13 +1,14 @@
 //! Pergunta ao agente sem tela: mesmo loop do chat, só com ferramentas de
 //! leitura e resposta no modo direto.
 
+use async_trait::async_trait;
 use loco_rs::prelude::AppContext;
 
 use crate::{
     dtos::ai::ChatMessageInput,
     services::{
         ai::{
-            drivers::{create_driver, traits::AiDriver},
+            drivers::{self, traits::AiDriver},
             harness::{
                 agent::{
                     collect_answer, run_agent_loop, AgentAnswer, AgentRequest, ConversationMemory,
@@ -25,19 +26,21 @@ use crate::{
 
 /// De onde vem o driver. Em produção, do provedor configurado; nos testes,
 /// de um driver que responde sem rede.
+#[async_trait]
 pub trait DriverFactory: Send + Sync {
     /// # Errors
     ///
     /// Provedor não configurado.
-    fn create(&self, settings: &AiSettings) -> AppResult<Box<dyn AiDriver>>;
+    async fn create(&self, settings: &AiSettings) -> AppResult<Box<dyn AiDriver>>;
 }
 
 /// O provedor escolhido nas configurações.
 pub struct ProviderDrivers;
 
+#[async_trait]
 impl DriverFactory for ProviderDrivers {
-    fn create(&self, settings: &AiSettings) -> AppResult<Box<dyn AiDriver>> {
-        create_driver(settings)
+    async fn create(&self, settings: &AiSettings) -> AppResult<Box<dyn AiDriver>> {
+        drivers::connect(settings).await
     }
 }
 
@@ -58,7 +61,7 @@ pub async fn ask(
 ) -> AppResult<AgentAnswer> {
     let mut settings = settings.clone();
     settings.response_style = AiResponseStyle::Concise;
-    let driver = drivers.create(&settings)?;
+    let driver = drivers.create(&settings).await?;
     let stream = run_agent_loop(
         ctx.clone(),
         settings,

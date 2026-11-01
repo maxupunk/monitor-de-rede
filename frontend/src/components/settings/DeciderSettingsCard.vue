@@ -147,14 +147,6 @@
               Carregar agora
             </v-btn>
           </template>
-          <v-chip
-            v-else-if="selectedSpec?.bundled"
-            color="warning"
-            variant="tonal"
-            prepend-icon="mdi-package-variant-closed"
-          >
-            Vem com o NetMonitor
-          </v-chip>
           <v-btn
             v-else-if="serverOnline && !deciderStore.pulling"
             color="warning"
@@ -192,17 +184,6 @@
             {{ fact.label }}
           </v-chip>
         </div>
-        <v-alert
-          v-if="managesModels && serverOnline && selectedSpec?.bundled && !modelReady"
-          type="warning"
-          variant="tonal"
-          density="compact"
-          class="mt-2 text-body-2"
-        >
-          Este modelo vem com o NetMonitor e não está no registro do Ollaya: quem o instala é o
-          serviço <code>ollaya-models</code> do compose. No servidor, rode
-          <code>docker compose up -d ollaya-models</code> e atualize esta tela.
-        </v-alert>
         <v-alert
           v-if="selectedSpec?.language === 'english'"
           type="info"

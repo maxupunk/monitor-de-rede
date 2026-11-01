@@ -83,6 +83,10 @@ services:
       # Chave do Ollaya, lida pela API (Decisor) no ponto de uso — o mesmo valor
       # vai ao serviço `ollaya` abaixo, então não se digita em tela nenhuma.
       OLLAYA_API_KEY: ${OLLAYA_API_KEY:-}
+      # Origem opcional das releases de modelos da IA (baixados sob demanda na tela):
+      DECIDER_MODELS_URL: ${DECIDER_MODELS_URL:-}
+      CHAT_MODELS_URL: ${CHAT_MODELS_URL:-}
+      OLLAYA_MODELS_DIR: /ollaya-models/models
       TZ: ${TZ:-America/Fortaleza}
       # Porta real da API dentro do container. No modo host é também a porta que
       # o navegador acessa; na bridge, `APP_EXTERNAL_PORT` pode ser diferente.
@@ -185,6 +189,8 @@ services:
       - netmonitor-data:/data
       # Só o token do agente local: a API escreve, o agente lê.
       - netmonitor-local-agent:/local-agent
+      # Volume do Ollaya: permite instalar o modelo de decisão sob demanda pela tela.
+      - ollaya-models:/ollaya-models
     restart: unless-stopped
     read_only: true
     tmpfs:
@@ -262,16 +268,12 @@ services:
         max-file: '3'
 
   # Ollaya: serve os modelos de decisão do Decisor (escolhas rápidas da IA,
-  # sem tokens). Sobe sempre junto — parado, sem modelo carregado, ocupa
-  # ~150 MB. Só pesa quando o Decisor é ligado em Configurações → IA e um
-  # modelo é carregado; `OLLAYA_KEEP_ALIVE` o descarrega depois do tempo
-  # ocioso. Quanto pesa depende do modelo; a tela lista só os medidos no
-  # benchmark das decisões do NetMonitor (página Benchmark dos modelos):
-  #   - netmonitor/decima-network:v11 (padrão): 0,5 GB, ajustado nas decisões
-  #     do NetMonitor — 93% no benchmark dele, 0,6 s por decisão em CPU. Vem
-  #     instalado pelo serviço `ollaya-models` (abaixo);
-  #   - kev:0.8b: 1,8 GB, 61% no benchmark, só inglês, segundos em CPU;
-  #   - decider:0.8b: 1,5 GB, 59,5% no benchmark, só inglês, segundos em CPU.
+  # sem tokens). Sobe junto e vazio — parado, sem modelo carregado, ocupa
+  # ~150 MB. O modelo é baixado sob demanda apenas quando solicitado em
+  # Configurações → IA → Decisor (ex.: `netmonitor/decima-network:v11`, 0,5 GB,
+  # 93% no benchmark das decisões do NetMonitor, 0,6 s em CPU, baixado da
+  # release `decider-models` do GitHub); `OLLAYA_KEEP_ALIVE` o descarrega
+  # depois do tempo ocioso.
   # Sem RAM ou GPU sobrando aqui? Na mesma tela dá para apontar para um Ollaya
   # em outra máquina ou para um provedor na nuvem (TypeSafe, OpenRouter,
   # Cloudflare, OpenAI) — aí este serviço pode até ser removido.
@@ -306,21 +308,35 @@ services:
         max-size: 10m
         max-file: '3'
 
-  # Instala no volume do Ollaya os modelos que vêm com o NetMonitor
-  # (`docker/ollaya-models/`, hoje o netmonitor/decima-network:v11) e sai. Roda
-  # a cada `up`: modelo já instalado não baixa nada, todo blob é conferido pelo
-  # sha256 e o manifesto vai por último — o Ollaya só lista modelo completo.
-  # Os pesos vêm de `docker/ollaya-models/<modelo>/blobs/` quando estão lá
-  # (instalação sem internet) ou de `DECIDER_MODELS_URL`.
-  ollaya-models:
-    build: ./docker/ollaya-models
-    image: netmonitor-ollaya-models:latest
+  # Ollama: o LLM do chat da IA rodando nesta máquina, para usar o assistente
+  # sem internet. Sobe junto e vazio — parado, sem modelo carregado, ocupa
+  # pouca RAM. O modelo padrão (`lfm3-netmonitor:latest`, 1,8 GB, ajustado para
+  # redes, equipamentos, Docker, fibra óptica, Wi-Fi IEEE 802.11 e as 61
+  # ferramentas do NetMonitor) é baixado sob demanda direto da release
+  # `chat-models` do GitHub em Configurações → IA → Ollama e fica no volume
+  # `ollama-models`; `OLLAMA_KEEP_ALIVE` o descarrega depois do tempo ocioso.
+  # A API fala com ele pela rede interna (`http://ollama:11434/v1`), sem porta
+  # publicada; no modo host o override o põe no loopback e define
+  # `OLLAMA_URL`. Montado de outro jeito, a API procura sozinha em
+  # 127.0.0.1:11434 e host.docker.internal:11434 (`ai/local_server.rs`).
+  # GPU NVIDIA? Acrescente `gpus: all` (a imagem já traz o CUDA).
+  ollama:
+    image: ollama/ollama:latest
     environment:
-      # Vazio: a release do projeto (o padrão fica no install.sh).
-      DECIDER_MODELS_URL: ${DECIDER_MODELS_URL:-}
+      OLLAMA_HOST: 0.0.0.0:11434
+      # Tempo ocioso até descarregar o modelo e devolver a RAM.
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-30m}
+      # Janela de contexto de todo modelo. O chat fala o protocolo OpenAI
+      # (`/v1`), que ignora o `num_ctx` da tela: sem isto o Ollama usa a
+      # padrão dele (4096 com pouca VRAM) e corta em silêncio o prompt — as
+      # ferramentas somem e o modelo responde que "não existe função" para o
+      # que foi pedido. 16384 é a janela padrão de Configurações → IA.
+      OLLAMA_CONTEXT_LENGTH: ${OLLAMA_CONTEXT_LENGTH:-16384}
     volumes:
-      - ollaya-models:/ollaya
-    restart: 'no'
+      - ollama-models:/root/.ollama
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     logging:
       driver: json-file
       options:
@@ -332,3 +348,4 @@ volumes:
   netmonitor-local-agent:
   netmonitor-agent-state:
   ollaya-models:
+  ollama-models:

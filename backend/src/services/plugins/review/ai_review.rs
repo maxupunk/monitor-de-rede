@@ -183,7 +183,9 @@ pub async fn review<C: ConnectionTrait>(
     if !settings.enabled {
         return Err("o Assistente IA está desligado; a revisão foi só estática".into());
     }
-    let driver = drivers::create_driver(&settings).map_err(|error| error.to_string())?;
+    let driver = drivers::connect(&settings)
+        .await
+        .map_err(|error| error.to_string())?;
     review_with(driver.as_ref(), package, static_findings).await
 }
 

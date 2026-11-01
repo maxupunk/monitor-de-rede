@@ -816,6 +816,37 @@ e, a cada minuto, classifica o que ficou sem categoria. A correção do operador
 (`user_category`) vence o palpite e nunca é sobrescrita. Só linhas de syslog
 ganham padrão — classificar o log da própria aplicação realimentaria o laço.
 
+## 11-D. Chat offline — o Ollama do compose
+
+O chat da IA pode rodar sem internet num **Ollama desta máquina**: o serviço
+`ollama` do compose sobe junto e vazio, e o modelo se instala em
+Configurações → IA → Ollama (o instalador mostra o progresso; os recomendados
+saem de `ollama.rs`). A API fala com ele em `http://ollama:11434/v1` (protocolo
+OpenAI, o mesmo driver dos provedores na nuvem).
+
+- **Achar o servidor.** O Ollama e o Ollaya usam a mesma procura
+  (`services/ai/local_server.rs`): enquanto a URL da tela apontar para esta
+  máquina — o nome do serviço, o loopback ou o host do Docker —, a API tenta a
+  URL da tela, a variável da instalação (`OLLAMA_URL`/`OLLAYA_URL`, que o
+  `docker-compose.host.yml` define), o nome do serviço, `127.0.0.1` e
+  `host.docker.internal`, e lembra o achado por 5 min. A URL de outra máquina
+  nunca é trocada. Quem conversa pede o driver por `drivers::connect`, que faz
+  a procura; `create_driver` só monta.
+- **Janela de contexto.** O `/v1` do Ollama ignora o `num_ctx` do pedido: a
+  janela que vale é a `OLLAMA_CONTEXT_LENGTH` do serviço (16.384, a padrão da
+  tela). Sem ela o Ollama usa a dele (4.096 com pouca VRAM) e corta o prompt em
+  silêncio — as ferramentas somem.
+- **Raciocínio.** "Raciocinar antes de responder" (`ollama_reasoning`) vem
+  desligado: o driver envia `reasoning_effort: none`. Ligado, nada é enviado
+  (o modelo pensa) e o `max_tokens` sobe para no mínimo 4.096, porque o
+  raciocínio conta no teto (`ollama::reasoning_effort`, `min_output_tokens`).
+- **Contrato do chat.** `backend/contracts/ai_chat.json` é o chat como o modelo
+  o vê — os dois prompts de sistema, o bloco `<contexto>`, o núcleo, o
+  `load_tools` e os grupos sob demanda —, gerado pelo `cargo test`
+  (`harness/contract.rs`), como os bindings. O Laya-tuning o lê para medir
+  modelos de chat fora daqui (benchmark de chat offline) e o `chat sync` de lá
+  acusa quando ele muda.
+
 
 
 Registrar o que **não** foi construído evita que alguém procure por uma peça

@@ -12,7 +12,7 @@ export type AiDriver = 'opencode' | 'openrouter' | 'ollama'
 /** Endpoint fixo do OpenCode Zen (não há campo para trocá-lo). */
 export const OPENCODE_BASE_URL = 'https://opencode.ai/zen/v1'
 
-export const OLLAMA_DEFAULT_BASE_URL = 'http://localhost:11434/v1'
+export const OLLAMA_DEFAULT_BASE_URL = 'http://ollama:11434/v1'
 
 export const DEFAULT_OLLAMA_NUM_CTX = 16384
 
@@ -20,7 +20,7 @@ export const DEFAULT_OLLAMA_NUM_CTX = 16384
 export const DEFAULT_MODELS: Record<AiDriver, string> = {
   opencode: 'muse-spark-1.3-contributor-free',
   openrouter: 'openrouter/free',
-  ollama: 'ornith-1.5:9b',
+  ollama: 'lfm3-netmonitor:latest',
 }
 
 export const DRIVER_LABELS: Record<AiDriver, string> = {
@@ -71,6 +71,7 @@ export function defaultAiSettings(): AiSettings {
     ollamaBaseUrl: OLLAMA_DEFAULT_BASE_URL,
     ollamaModel: DEFAULT_MODELS.ollama,
     ollamaNumCtx: DEFAULT_OLLAMA_NUM_CTX,
+    ollamaReasoning: false,
     allowActiveTools: true,
     requireToolConfirmation: false,
     actionMode: 'off',
@@ -122,6 +123,7 @@ export function normalizeAiSettings(settings: AiSettings): AiSettings {
     openrouterModel: openrouterModel(settings.openrouterModel),
     ollamaModel: extractModelId(settings.ollamaModel),
     ollamaNumCtx: settings.ollamaNumCtx || DEFAULT_OLLAMA_NUM_CTX,
+    ollamaReasoning: settings.ollamaReasoning ?? false,
     proactive,
   }
 }

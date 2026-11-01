@@ -113,8 +113,76 @@ pub static SYSTEM_DOCS: &[DocTopic] = &[
         title: "Syslog e Monitoramento Docker",
         keywords: &["syslog", "log", "docker", "nat", "container", "containers", "imagem", "volume"],
         content: "Syslog e Docker:
-- Servidor Syslog nativo escutando em UDP/TCP 514 com detecção automática de conexões NAT e vinculação a dispositivos.
-- Monitoramento de Docker Engine: monitora containers (CPU, memória, status de saúde), imagens e volumes em tempo real. Todo host Docker é atendido por um agente NetMonitor: o desta central é o agente local (serviço netmonitor-agent, dono do socket), os demais são agentes remotos.",
+- Servidor Syslog nativo escutando em UDP/TCP 514 (ou 5514 no container) com detecção automática de conexões NAT e vinculação a dispositivos.
+- Monitoramento de Docker Engine: monitora containers (CPU, memória, status de saúde, OOMKilled exit 137), imagens e volumes em tempo real. Todo host Docker é atendido por um agente NetMonitor: o desta central é o agente local (serviço netmonitor-agent, protegido pela label com.netmonitor.protected=true), os demais são agentes remotos.",
+    },
+    DocTopic {
+        id: "backups_storage",
+        title: "Sistema de Backup, Bancos de Dados e Destinos de Storage",
+        keywords: &[
+            "backup", "backups", "restore", "restauracao", "postgres", "postgresql", "mysql",
+            "mariadb", "dump", "sql.gz", "storage", "s3", "minio", "r2", "gcs", "azure", "sftp",
+            "retencao", "sha256", "checksum",
+        ],
+        content: "O NetMonitor possui dois subsistemas de backup e uma camada unificada de Storage:
+- Backup de Configuração do NetMonitor (services::backup): exporta e restaura o cadastro do sistema (dispositivos, monitores, credenciais cifradas, regras de alerta, topologia, destinos de storage) com simulação prévia (plan), agendamento e retenção automática (retention_count). Durante o restore, o coletor de monitores é pausado automaticamente.
+- Backup de Bancos de Dados Externos (services::databases): realiza dumps lógicos nativos em Rust comprimidos em .sql.gz com hash SHA-256 sem depender de binários externos (não usa pg_dump nem mysqldump):
+  * PostgreSQL (porta 5432): usa protocolo nativo e COPY TO STDOUT.
+  * MySQL e MariaDB (porta 3306): usa SHOW CREATE TABLE e streaming binário de linhas.
+  * Ponte via Agente Remoto (ADR 013, campo 'via'): quando o banco fica em rede privada sem rota direta do servidor central, o agente remoto abre o túnel TCP até o banco enquanto o servidor central executa o dump e grava no storage.
+  * Modos de Restore: NewDatabase (cria banco novo) ou Replace (substitui o banco existente).
+- Destinos de Storage (services::storage): suporta 'local' (diretório controlado por STORAGE_LOCAL_ROOT, padrão /data/storage no container), 'aws_s3', 'minio' (requer force_path_style), 'cloudflare_r2', 's3_compatible', 'google_gcs', 'azure_blob' e 'sftp' (SSH nativo via russh na porta 22).",
+    },
+    DocTopic {
+        id: "wifi_signals_80211",
+        title: "Monitoramento de Sinais Wi-Fi e Padrões IEEE 802.11",
+        keywords: &[
+            "wifi", "wi-fi", "wireless", "802.11", "802.11n", "802.11ac", "802.11ax", "802.11be",
+            "rssi", "snr", "ruido", "retransmissao", "retries", "openwrt-wifi", "power_save",
+            "ofdma", "mu-mimo", "canal", "dfs",
+        ],
+        content: "Monitoramento de Sinais Wi-Fi (docs/monitoramento_wifi_sinais.md) e Padrões IEEE 802.11:
+- Coleta passiva a cada 60s via plugin 'openwrt-wifi' (papéis 'clients' com iwinfo/ubus/ARP e 'ping' sob demanda) ou SNMP/SSH.
+- Classificação de Sinal (RSSI em dBm): Excelente (>= -60 dBm), Bom (-61 a -70 dBm), Atenção (-71 a -78 dBm), Ruim (-79 a -84 dBm) e Crítico (<= -85 dBm).
+- Relação Sinal-Ruído (SNR = signal_dbm - noise_dbm): Excelente (>= 30 dB), Bom (25 a 29 dB), Atenção (15 a 24 dB), Ruim (10 a 14 dB) e Crítico (< 10 dB).
+- Taxa de Retransmissão (tx_retries / (tx_packets + tx_retries) * 100): Excelente (< 10%), Aceitável (10% a 25%), Degradado (> 25%). Quando o sinal é bom (>= -70 dBm) mas a retransmissão passa de 25%, o diagnóstico é 'high_retries' (interferência co-canal, canal 2.4 GHz congestionado fora do 1/6/11 ou colisão de pacotes).
+- Diagnósticos automáticos (WifiHealth): 'healthy', 'power_save' (inativo > 10s com sinal >= -72 dBm, economia de bateria normal de smartphones), 'weak_signal', 'high_retries' e 'stale' (inativo > 60s).
+- Clientes Vigiados (watched): geram alertas 'wifi_watched_offline' (ausente >= 600s / 10 min) e 'wifi_watched_poor_signal' (sinal ruim/crítico sustentado por 15 min).
+- Padrões IEEE 802.11: 802.11n (Wi-Fi 4, 2.4/5 GHz, MIMO 40 MHz), 802.11ac (Wi-Fi 5, 5 GHz, 80/160 MHz, 256-QAM, DL MU-MIMO), 802.11ax (Wi-Fi 6/6E, 2.4/5/6 GHz, OFDMA, UL/DL MU-MIMO, 1024-QAM, BSS Coloring, TWT) e 802.11be (Wi-Fi 7, 320 MHz, 4096-QAM, MLO).",
+    },
+    DocTopic {
+        id: "optical_fiber_gpon",
+        title: "Sinais de Fibra Óptica, GPON/EPON e Transceivers SFP/SFP+",
+        keywords: &[
+            "fibra", "optica", "gpon", "epon", "xgs-pon", "olt", "onu", "ont", "dbm", "sfp",
+            "atenuacao", "splitter", "los", "dying gasp", "1310", "1490", "1550", "pon",
+        ],
+        content: "Referência de Sinais Ópticos (GPON / EPON / enlaces PtP SFP+) no monitoramento de OLTs, switches e roteadores:
+- Unidades: 'dBm' mede potência óptica absoluta referenciada a 1 mW; 'dB' mede perda/atenuação relativa (orçamento óptico).
+- Comprimentos de onda GPON: 1490 nm no downstream (OLT -> ONU, atenuação ~0,22 dB/km), 1310 nm no upstream (ONU -> OLT, atenuação ~0,35 dB/km) e 1550 nm (RF/DWDM, muito sensível a macrocurvatura/dobras no cordão óptico).
+- Perda típica de inserção de splitters ópticos PLC balanceados: 1:2 (~3,5 dB), 1:4 (~7,2 dB), 1:8 (~10,5 dB), 1:16 (~13,8 dB), 1:32 (~17,2 dB) e 1:64 (~20,5 dB). Fusão: ~0,05 a 0,1 dB; conector SC/APC ou SC/UPC: ~0,3 a 0,5 dB.
+- Faixas de Potência RX na ONU (Classe B+ / C+):
+  * Normal / Ideal: -15 dBm a -24 dBm.
+  * Atenção / Limiar de degradação: -25 dBm a -27 dBm (sujeito a erros de FEC/CRC e quedas térmicas).
+  * Crítico / Queda de link (LOS): <= -28 dBm.
+  * Saturação / Sobrecarga do fotodiodo: > -8 dBm (exige atenuador óptico).
+- Diagnóstico de Alarme: 'Dying Gasp' indica falta de energia elétrica na ONU do cliente (desligamento gracioso anunciado antes de apagar), enquanto 'LOS' (Loss of Signal) ou 'LOFi' sem Dying Gasp indica rompimento de fibra, conector sujo/desconectado ou atenuação extrema.",
+    },
+    DocTopic {
+        id: "link_tests_btest",
+        title: "Testes de Capacidade de Link e BTest (ADR 015)",
+        keywords: &["btest", "bandwidth test", "link", "capacidade", "throughput", "porta 2000", "mikrotik"],
+        content: "Testes de Capacidade de Enlace (ADR 015):
+- O NetMonitor suporta testes de banda ativos entre roteadores MikroTik (Bandwidth Test / btest na porta TCP/UDP 2000) e testes WAN/LAN.
+- Como testes ativos de throughput podem saturar links em produção e elevar latência/perda temporariamente, eles exigem janela curta controlada e verificação prévia do tráfego das interfaces.",
+    },
+    DocTopic {
+        id: "web_search_frontend",
+        title: "Pesquisa Web Assistida pelo Frontend (web_search)",
+        keywords: &["web_search", "pesquisa web", "internet", "cve", "firmware", "bug", "fabricante", "forum"],
+        content: "Ferramenta 'web_search' (docs/pesquisa_web_ia_frontend.md):
+- Quando o diagnóstico encontra um código de erro específico de fabricante, bug de firmware recente (RouterOS, OpenWrt, Huawei VRP, Cisco IOS-XE) ou CVE que não consta na base interna (search_system_docs), a IA aciona 'web_search(query, domain)'.
+- A busca é executada pelo navegador do operador no frontend (AiWebSearchCard.vue / useAiWebSearch.ts) e os trechos sanitizados retornam para a IA concluir a análise sem exigir saída direta de internet no container do backend.",
     },
 ];
 

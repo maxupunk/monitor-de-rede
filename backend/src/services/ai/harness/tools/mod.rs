@@ -580,6 +580,7 @@ fn all_handlers() -> Vec<Box<dyn AiToolHandler>> {
         Box::new(platform::Topology),
         Box::new(audit::AuditLog),
         Box::new(inventory::SearchDocs),
+        Box::new(inventory::WebSearch),
         Box::new(diagnostics::Ping),
         Box::new(diagnostics::Traceroute),
         Box::new(diagnostics::ScanPorts),
@@ -811,7 +812,9 @@ impl ToolRegistry {
         tools
     }
 
-    fn group_definitions(&self, group: ToolGroup) -> Vec<AiTool> {
+    /// Os contratos de um grupo, na ordem do catálogo.
+    #[must_use]
+    pub fn group_definitions(&self, group: ToolGroup) -> Vec<AiTool> {
         self.handlers
             .iter()
             .filter(|handler| handler.group() == group)

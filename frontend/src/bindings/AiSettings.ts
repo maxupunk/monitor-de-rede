@@ -14,6 +14,13 @@ activeDriver: string, opencodeBaseUrl: string | null, opencodeApiKey: string | n
  */
 ollamaNumCtx: number | null, 
 /**
+ * Deixa o modelo raciocinar antes de responder (modelos que pensam, como
+ * o `lfm3`). Desligado por padrão: no benchmark de chat do Laya-tuning o
+ * raciocínio deixou a resposta ~7× mais lenta e gastava o teto de tokens
+ * do estilo Direto, saindo vazia.
+ */
+ollamaReasoning: boolean, 
+/**
  * Permite executar ferramentas ativas (ping, traceroute, scan de portas)
  */
 allowActiveTools: boolean, 

@@ -2,6 +2,7 @@ pub mod agent;
 pub mod approval;
 pub mod compaction;
 pub mod confirmation;
+pub mod contract;
 pub mod grounding;
 pub mod lean;
 pub mod prompt;

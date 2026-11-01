@@ -6,6 +6,7 @@ pub mod drivers;
 pub mod harness;
 pub mod knowledge;
 pub mod local_models;
+pub mod local_server;
 pub mod mentions;
 pub mod ollama;
 pub mod opencode;

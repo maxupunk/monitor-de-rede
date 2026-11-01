@@ -57,6 +57,7 @@ const ACTION_TOOLS = new Set([
   'delete_scheduled_task',
   'update_dashboard_layout',
   'ask_user',
+  'web_search',
 ])
 
 /** Rótulo, ícone e cor de cada ferramenta da IA exibida no chat. */
@@ -240,6 +241,11 @@ const TOOL_META: Record<string, AiToolLook> = {
     label: 'Base de Conhecimento',
     icon: 'mdi-book-open-page-variant-outline',
     color: 'green',
+  },
+  web_search: {
+    label: 'Pesquisa na Web',
+    icon: 'mdi-web',
+    color: 'primary',
   },
   ping_host: { label: 'ICMP Ping', icon: 'mdi-pulse', color: 'primary' },
   traceroute: { label: 'Traceroute', icon: 'mdi-routes', color: 'info' },

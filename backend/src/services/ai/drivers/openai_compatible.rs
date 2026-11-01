@@ -33,6 +33,10 @@ pub struct OpenAiCompatibleDriver {
     /// Onde o provedor informa a janela de contexto dos modelos.
     window_lookup: Option<Arc<dyn WindowLookup>>,
     num_ctx: Option<u64>,
+    /// `reasoning_effort` do protocolo OpenAI (`none` desliga o raciocínio).
+    reasoning_effort: Option<&'static str>,
+    /// Piso do `max_tokens` pedido (o raciocínio conta no teto).
+    min_output_tokens: Option<u32>,
 }
 
 impl OpenAiCompatibleDriver {
@@ -61,6 +65,8 @@ impl OpenAiCompatibleDriver {
             client,
             window_lookup: None,
             num_ctx: None,
+            reasoning_effort: None,
+            min_output_tokens: None,
         }
     }
 
@@ -75,6 +81,20 @@ impl OpenAiCompatibleDriver {
     #[must_use]
     pub fn with_num_ctx(mut self, num_ctx: u64) -> Self {
         self.num_ctx = Some(num_ctx);
+        self
+    }
+
+    /// Quanto o modelo raciocina antes de responder; `None` não envia nada.
+    #[must_use]
+    pub fn with_reasoning_effort(mut self, effort: Option<&'static str>) -> Self {
+        self.reasoning_effort = effort;
+        self
+    }
+
+    /// Nenhum `max_tokens` abaixo deste valor; `None` mantém o pedido.
+    #[must_use]
+    pub fn with_min_output_tokens(mut self, floor: Option<u32>) -> Self {
+        self.min_output_tokens = floor;
         self
     }
 
@@ -463,7 +483,10 @@ impl AiDriver for OpenAiCompatibleDriver {
             with_cache_breakpoints(&mut body["messages"]);
         }
         if let Some(max_tokens) = options.max_tokens {
-            body["max_tokens"] = json!(max_tokens);
+            body["max_tokens"] = json!(max_tokens.max(self.min_output_tokens.unwrap_or(0)));
+        }
+        if let Some(effort) = self.reasoning_effort {
+            body["reasoning_effort"] = json!(effort);
         }
 
         let mut res = self

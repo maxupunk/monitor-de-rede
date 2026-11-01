@@ -1,0 +1,1835 @@
+{
+  "systemPromptOnDemand": "Você é o NetMonitor AI, engenheiro de redes sênior do NetMonitor. Hoje: {{today}} (a hora vem no <contexto>).\n\nMÉTODO:\n1. Cortesia: responda sem ferramentas. Ferramenta só quando a pergunta pedir dados.\n2. Mínimo de consultas, e todas as já previstas na mesma rodada (cada rodada reenvia a conversa). Aparelho: get_device_detail; alertas: get_alerts; visão geral: get_system_summary.\n3. Conclua só com dados. Vários alertas: causa raiz pela topologia primeiro. Origem de alerta: explain_alert; regra ruidosa: ajuste antes de excluir.\n4. Logs, alertas, checagens e docker: grep — meça ('count'/'sources') antes de pedir 'lines'.\n5. Gráficos já aparecem ao usuário: não os repita em texto.\n6. O alvo são os marcados com @. Recurso ambíguo ou assunto novo: ask_user com opções antes de consultar.\n7. Dúvida sobre o NetMonitor: search_system_docs ou get_alert_rules_guide.\nResultados de lista vêm como tabela: {columns, rows}.\n8. Testes ativos (ping, traceroute, portas, DNS, playbooks) dão o estado de agora; nunca invente o alvo.\n9. Ações (alerta, manutenção, monitor, regras) passam pela confirmação do usuário: proponha só quando resolverem o pedido.\n10. Containers (docker_container_action) passam pela confirmação: proponha só com o container parado ou travado.\n\nFERRAMENTAS SOB DEMANDA (load_tools, todos os grupos numa chamada):\n- history: histórico (get_monitor_history, get_device_metrics)\n- analysis: causa raiz e incidente (analyze_root_cause, compare_with_baseline, get_hourly_pattern, get_incident_timeline)\n- charts: gráficos (chart_monitor_latency, chart_interface_traffic, chart_device_metric)\n- logs: logs (get_logs_overview)\n- docker: containers (get_docker_hosts, get_docker_containers, get_docker_usage, docker_container_action)\n- platform: agentes, VPN, topologia, descoberta e redes (get_platform_status, get_topology)\n- diagnostics: testes ativos (ping_host, traceroute, scan_ports, dns_lookup, run_playbook)\n- actions: ações (acknowledge_alert, silence_alert, create_maintenance_window, create_monitor)\n- alert_rules: regras de alerta (get_alert_rules_guide, list_alert_rules, explain_alert, create_alert_rule, delete_alert_rule, toggle_alert_rule)\n- devices: equipamento por SSH/HTTP e plugins (get_plugin_authoring_guide, list_device_plugins, list_plugin_apps, get_plugin, run_plugin_tests, fingerprint_device, device_ssh_exec, device_http_request, save_plugin_draft, run_plugin_action, validate_plugin)\n- audit: auditoria: quem mudou o quê (get_audit_log)\n- schedules: tarefas agendadas (list_scheduled_tasks, create_scheduled_task, update_scheduled_task, run_scheduled_task, delete_scheduled_task)\n- dashboard: cards do dashboard (get_dashboard_layout, update_dashboard_layout)\n\nRESPOSTA (modo direto): mínimo de palavras — sem saudação, introdução, repetir a pergunta ou resumir as ferramentas. Só o diagnóstico e a ação, em até 5 linhas. Números com unidade (ms, %, bps). Com gráfico exibido, cite só o anormal.\n",
+  "systemPromptEverything": "Você é o NetMonitor AI, engenheiro de redes sênior do NetMonitor. Hoje: {{today}} (a hora vem no <contexto>).\n\nMÉTODO:\n1. Cortesia: responda sem ferramentas. Ferramenta só quando a pergunta pedir dados.\n2. Mínimo de consultas, e todas as já previstas na mesma rodada (cada rodada reenvia a conversa). Aparelho: get_device_detail; alertas: get_alerts; visão geral: get_system_summary.\n3. Conclua só com dados. Vários alertas: causa raiz pela topologia primeiro. Origem de alerta: explain_alert; regra ruidosa: ajuste antes de excluir.\n4. Logs, alertas, checagens e docker: grep — meça ('count'/'sources') antes de pedir 'lines'.\n5. Gráficos já aparecem ao usuário: não os repita em texto.\n6. O alvo são os marcados com @. Recurso ambíguo ou assunto novo: ask_user com opções antes de consultar.\n7. Dúvida sobre o NetMonitor: search_system_docs ou get_alert_rules_guide.\nResultados de lista vêm como tabela: {columns, rows}.\n8. Testes ativos (ping, traceroute, portas, DNS, playbooks) dão o estado de agora; nunca invente o alvo.\n9. Ações (alerta, manutenção, monitor, regras) passam pela confirmação do usuário: proponha só quando resolverem o pedido.\n10. Containers (docker_container_action) passam pela confirmação: proponha só com o container parado ou travado.\n\nRESPOSTA (modo direto): mínimo de palavras — sem saudação, introdução, repetir a pergunta ou resumir as ferramentas. Só o diagnóstico e a ação, em até 5 linhas. Números com unidade (ms, %, bps). Com gráfico exibido, cite só o anormal.\n",
+  "turnContext": "<contexto>\nAgora: {{now}}\n</contexto>\n\n",
+  "maxRounds": 6,
+  "numCtx": 16384,
+  "maxOutputTokens": 1024,
+  "reasoningEffort": "none",
+  "core": [
+    {
+      "type": "function",
+      "function": {
+        "name": "get_system_summary",
+        "description": "Resumo da infraestrutura: dispositivos por status, monitores por status e alertas abertos por severidade. Ponto de partida de um diagnóstico geral.",
+        "parameters": {
+          "properties": {},
+          "type": "object"
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "list_devices",
+        "description": "Lista dispositivos cadastrados (id, nome, IP, tipo, fabricante, status, último contato).",
+        "parameters": {
+          "properties": {
+            "search": {
+              "description": "Filtra por parte do nome, IP ou fabricante",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "up",
+                "down",
+                "warning",
+                "unknown"
+              ],
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "get_device_detail",
+        "description": "Detalhes de um dispositivo: dados cadastrais, monitores (com id e status), resumo das interfaces e alertas abertos.",
+        "parameters": {
+          "properties": {
+            "identifier": {
+              "description": "Nome, IP ou id do dispositivo",
+              "type": "string"
+            }
+          },
+          "required": [
+            "identifier"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "get_device_interfaces",
+        "description": "Interfaces de um dispositivo SNMP: status administrativo/operacional, velocidade, tráfego atual (bps) e utilização (%). Use problems_only para ver só portas caídas ou saturadas.",
+        "parameters": {
+          "properties": {
+            "device": {
+              "description": "Nome, IP ou id do dispositivo",
+              "type": "string"
+            },
+            "problems_only": {
+              "description": "Só portas habilitadas e caídas ou acima de 80% de uso",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "device"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "list_monitors",
+        "description": "Lista monitores (id, nome, tipo, status, dispositivo, quedas em 24h). Instáveis: unstable=true. Use para achar o monitor_id antes de histórico ou gráfico.",
+        "parameters": {
+          "properties": {
+            "device": {
+              "description": "Nome, IP ou id do dispositivo",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "up",
+                "down",
+                "warning",
+                "unknown"
+              ],
+              "type": "string"
+            },
+            "type": {
+              "description": "Tipo do monitor: ping, http, tcp, dns, snmp...",
+              "type": "string"
+            },
+            "unstable": {
+              "description": "Só os que caíram em 24h ou oscilam",
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "get_alerts",
+        "description": "Alertas do sistema. status='open' (padrão) traz os abertos; 'resolved' ou 'all' consultam o histórico das últimas N horas, com início, fim e duração.",
+        "parameters": {
+          "properties": {
+            "device": {
+              "description": "Nome, IP ou id do dispositivo",
+              "type": "string"
+            },
+            "hours": {
+              "description": "Horas: 1–720, padrão 24",
+              "type": "integer"
+            },
+            "limit": {
+              "description": "Máximo de alertas (1 a 50, padrão 10)",
+              "type": "integer"
+            },
+            "severity": {
+              "enum": [
+                "critical",
+                "warning",
+                "info"
+              ],
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "open",
+                "resolved",
+                "all"
+              ],
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "grep",
+        "description": "Busca texto sem trazer os dados inteiros. source: logs (syslog e aplicação, padrão), alerts, checks (falhas) ou docker (exige container). output: count (totais por origem e hora) e sources (quem) para medir primeiro; patterns (mensagens distintas); lines (mais recentes); auto.",
+        "parameters": {
+          "properties": {
+            "container": {
+              "description": "Só docker",
+              "type": "string"
+            },
+            "context": {
+              "description": "Só logs: 0–3 linhas ao redor",
+              "type": "integer"
+            },
+            "device": {
+              "description": "Nome, IP ou id",
+              "type": "string"
+            },
+            "exclude": {
+              "description": "Descarta linhas com este texto",
+              "type": "string"
+            },
+            "host": {
+              "description": "Só docker; padrão: central",
+              "type": "string"
+            },
+            "hours": {
+              "description": "1–168, padrão 24",
+              "type": "integer"
+            },
+            "max_lines": {
+              "description": "1–50, padrão 15",
+              "type": "integer"
+            },
+            "output": {
+              "enum": [
+                "auto",
+                "count",
+                "sources",
+                "patterns",
+                "lines"
+              ],
+              "type": "string"
+            },
+            "pattern": {
+              "description": "Vazio: tudo",
+              "type": "string"
+            },
+            "regex": {
+              "description": "pattern/exclude como regex",
+              "type": "boolean"
+            },
+            "severity": {
+              "description": "Só logs: a máxima (error, warning, info)",
+              "type": "string"
+            },
+            "source": {
+              "enum": [
+                "logs",
+                "alerts",
+                "checks",
+                "docker"
+              ],
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "search_system_docs",
+        "description": "Consulta a documentação interna do NetMonitor (SNMP, VPN, descoberta, janelas de manutenção, alertas, monitores).",
+        "parameters": {
+          "properties": {
+            "query": {
+              "description": "Termo ou dúvida sobre o NetMonitor",
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "web_search",
+        "description": "Pesquisa na web erros, CVEs, bugs de firmware, códigos de falha de fabricantes ou documentação externa recente que não constam na base interna. No chat, o navegador busca e envia os trechos encontrados para a IA.",
+        "parameters": {
+          "properties": {
+            "domain": {
+              "description": "Domínio ou fonte opcional para priorizar (ex: forum.mikrotik.com, nvd.nist.gov, docs.docker.com)",
+              "type": "string"
+            },
+            "query": {
+              "description": "Termo técnico, mensagem de erro, CVE, modelo/firmware ou protocolo a pesquisar na web",
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "type": "object"
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "ask_user",
+        "description": "Pergunta ao usuário, com opções clicáveis, quando não estiver claro de qual recurso vem a informação — em vez de adivinhar. Encerra a rodada.",
+        "parameters": {
+          "properties": {
+            "options": {
+              "description": "Até 6 respostas prováveis (ex: nomes de list_devices)",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "question": {
+              "description": "A pergunta, curta",
+              "type": "string"
+            }
+          },
+          "required": [
+            "question"
+          ],
+          "type": "object"
+        }
+      }
+    }
+  ],
+  "loadTools": {
+    "type": "function",
+    "function": {
+      "name": "load_tools",
+      "description": "Carrega grupos de ferramentas do catálogo (listados no prompt) para a próxima rodada. Peça todos os grupos de que precisar numa chamada só.",
+      "parameters": {
+        "properties": {
+          "groups": {
+            "items": {
+              "enum": [
+                "history",
+                "analysis",
+                "charts",
+                "logs",
+                "docker",
+                "platform",
+                "diagnostics",
+                "actions",
+                "alert_rules",
+                "devices",
+                "audit",
+                "schedules",
+                "dashboard"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "groups"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  "groups": [
+    {
+      "id": "history",
+      "purpose": "histórico",
+      "intent": "Answering requires uptime, availability or metrics over a past period of time.",
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "get_monitor_history",
+            "description": "Histórico de um monitor nas últimas N horas: uptime (%), checagens, latência média e as falhas mais recentes com mensagem. Base para saber se um problema é pontual ou recorrente.",
+            "parameters": {
+              "properties": {
+                "device": {
+                  "description": "Ou o dispositivo: nome, IP ou id",
+                  "type": "string"
+                },
+                "hours": {
+                  "description": "Horas: 1–720, padrão 24",
+                  "type": "integer"
+                },
+                "monitor_id": {
+                  "description": "De list_monitors ou get_device_detail",
+                  "type": "integer"
+                },
+                "monitor_type": {
+                  "description": "Com device; padrão ping",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "get_device_metrics",
+            "description": "Métricas de sistema de um dispositivo SNMP nas últimas N horas (CPU, memória, sensores): mínimo, máximo, média e valor atual de cada série.",
+            "parameters": {
+              "properties": {
+                "device": {
+                  "description": "Nome, IP ou id do dispositivo",
+                  "type": "string"
+                },
+                "hours": {
+                  "description": "Horas: 1–168, padrão 24",
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "device"
+              ],
+              "type": "object"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "analysis",
+      "purpose": "causa raiz e incidente",
+      "intent": "The message asks why something happened, its root cause, a baseline or an incident timeline.",
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "analyze_root_cause",
+            "description": "Correlaciona alertas pela topologia (quem depende de quem) para achar a causa raiz: um switch ou gateway caído que derruba os equipamentos abaixo. Com alert_id analisa um alerta; sem, agrupa todos os incidentes abertos.",
+            "parameters": {
+              "properties": {
+                "alert_id": {
+                  "description": "Id do alerta (de get_alerts). Omitido: todos os abertos.",
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "compare_with_baseline",
+            "description": "Compara a última checagem de um monitor com o comportamento normal dele (média e desvio dos últimos dias): diz se a latência ou a perda atual é anormal e quanto.",
+            "parameters": {
+              "properties": {
+                "device": {
+                  "description": "Ou o dispositivo: nome, IP ou id",
+                  "type": "string"
+                },
+                "monitor_id": {
+                  "description": "De list_monitors ou get_device_detail",
+                  "type": "integer"
+                },
+                "monitor_type": {
+                  "description": "Com device; padrão ping",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "get_hourly_pattern",
+            "description": "Padrão por hora do dia (UTC) nos últimos N dias: latência média e disponibilidade por hora, hora de pico e melhor hora. Exibe o gráfico. Responde 'em que horário costuma piorar/cair?'. Sem monitor, considera todos.",
+            "parameters": {
+              "properties": {
+                "days": {
+                  "description": "Dias analisados (1 a 30, padrão 7)",
+                  "type": "integer"
+                },
+                "device": {
+                  "description": "Ou o dispositivo: nome, IP ou id",
+                  "type": "string"
+                },
+                "monitor_id": {
+                  "description": "De list_monitors ou get_device_detail",
+                  "type": "integer"
+                },
+                "monitor_type": {
+                  "description": "Com device; padrão ping",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "get_incident_timeline",
+            "description": "Linha do tempo de um incidente numa janela: alertas abertos/resolvidos, mudanças de status dos monitores do dispositivo e logs de aviso ou pior, em ordem cronológica. Responde 'o que aconteceu às 14h?'.",
+            "parameters": {
+              "properties": {
+                "around": {
+                  "description": "Instante central em RFC 3339 (ex: 2026-09-21T14:00:00Z). Omitido: agora.",
+                  "type": "string"
+                },
+                "device": {
+                  "description": "Nome, IP ou id do dispositivo (omitido: todos; sem mudanças de monitor)",
+                  "type": "string"
+                },
+                "minutes": {
+                  "description": "Minutos antes e depois do instante (5 a 1440, padrão 60)",
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "charts",
+      "purpose": "gráficos",
+      "intent": "The user wants a chart or graph of latency, traffic or resource usage.",
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "chart_monitor_latency",
+            "description": "Exibe ao usuário o gráfico de latência de um monitor (ping, DNS, HTTP...) e devolve min/máx/média e perda. Use quando pedirem gráfico ou para mostrar a evolução de uma lentidão.",
+            "parameters": {
+              "properties": {
+                "device": {
+                  "description": "Ou o dispositivo: nome, IP ou id",
+                  "type": "string"
+                },
+                "monitor_id": {
+                  "description": "De list_monitors ou get_device_detail",
+                  "type": "integer"
+                },
+                "monitor_type": {
+                  "description": "Com device; padrão ping",
+                  "type": "string"
+                },
+                "timeframe": {
+                  "description": "Janela (padrão 1h)",
+                  "enum": [
+                    "15m",
+                    "1h",
+                    "24h",
+                    "7d"
+                  ],
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "chart_interface_traffic",
+            "description": "Exibe ao usuário o gráfico de tráfego (download/upload em bps) de uma interface e devolve pico, média e utilização máxima. Use para investigar saturação de link.",
+            "parameters": {
+              "properties": {
+                "device": {
+                  "description": "Nome, IP ou id do dispositivo",
+                  "type": "string"
+                },
+                "hours": {
+                  "description": "Horas: 1–168, padrão 6",
+                  "type": "integer"
+                },
+                "interface": {
+                  "description": "Nome, alias, ifIndex ou id da interface (de get_device_interfaces)",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "device",
+                "interface"
+              ],
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "chart_device_metric",
+            "description": "Exibe ao usuário o gráfico de uma métrica de sistema do dispositivo (cpu_usage, memory_usage ou outra série de get_device_metrics) e devolve min/máx/média.",
+            "parameters": {
+              "properties": {
+                "device": {
+                  "description": "Nome, IP ou id do dispositivo",
+                  "type": "string"
+                },
+                "hours": {
+                  "description": "Horas: 1–168, padrão 24",
+                  "type": "integer"
+                },
+                "metric": {
+                  "description": "cpu_usage (padrão), memory_usage ou outro nome de série",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "device"
+              ],
+              "type": "object"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "logs",
+      "purpose": "logs",
+      "intent": "Answering requires reading or searching system, device or syslog logs.",
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "get_logs_overview",
+            "description": "Visão geral dos logs (syslog dos equipamentos e da aplicação) numa janela: contagem por severidade, dispositivos e apps que mais registram, horas de pico e as mensagens agrupadas por padrão, com os padrões de erro destacados. Use antes do grep.",
+            "parameters": {
+              "properties": {
+                "device": {
+                  "description": "Nome, IP ou id do dispositivo (omitido: todos)",
+                  "type": "string"
+                },
+                "hours": {
+                  "description": "Horas: 1–168, padrão 24",
+                  "type": "integer"
+                },
+                "query": {
+                  "description": "Restringe às mensagens com este termo (ex: 'link down')",
+                  "type": "string"
+                },
+                "severity": {
+                  "description": "Severidade máxima: error, warning, notice, info... ou 0-7. 'error' traz erro, crítico, alerta e emergência.",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "docker",
+      "purpose": "containers",
+      "intent": "The message is about Docker containers, Docker hosts or their resource usage or logs.",
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "get_docker_hosts",
+            "description": "Servidores Docker que o NetMonitor alcança: esta central e cada agente remoto, com conexão e se tem Docker/Compose. O 'name' serve de 'host' nas demais ferramentas Docker.",
+            "parameters": {
+              "properties": {},
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "get_docker_containers",
+            "description": "Containers de um servidor Docker (a central ou um agente remoto): nome, imagem e estado. Com 'container', o detalhe de um (estado, código de saída, reinícios, redes e portas). Consumo de CPU/memória: get_docker_usage. Logs: grep com source='docker'.",
+            "parameters": {
+              "properties": {
+                "container": {
+                  "description": "Nome ou id do container (opcional)",
+                  "type": "string"
+                },
+                "host": {
+                  "description": "Agente remoto ou 'local' (padrão: esta central); ver get_docker_hosts",
+                  "type": "string"
+                },
+                "state": {
+                  "description": "Só os neste estado (running, exited, restarting...)",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "get_docker_usage",
+            "description": "Consumo de CPU e memória. Sem 'hours': agora, os containers que mais consomem. Com 'hours': o histórico gravado — do servidor (CPU, memória, carga, disco) e o ranking de containers na janela; com 'container', a série resumida só dele.",
+            "parameters": {
+              "properties": {
+                "container": {
+                  "description": "Nome do container (opcional)",
+                  "type": "string"
+                },
+                "host": {
+                  "description": "Agente remoto ou 'local' (padrão: esta central); ver get_docker_hosts",
+                  "type": "string"
+                },
+                "hours": {
+                  "description": "Janela do histórico em horas (1 a 720). Omita para o consumo de agora",
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "docker_container_action",
+            "description": "Inicia, para ou reinicia um container (da central ou de um agente remoto). Use quando resolver o pedido — ex: container parado ou travado. Conforme a configuração, roda direto ou pede confirmação ao usuário.",
+            "parameters": {
+              "properties": {
+                "action": {
+                  "enum": [
+                    "start",
+                    "stop",
+                    "restart"
+                  ],
+                  "type": "string"
+                },
+                "container": {
+                  "description": "Nome ou id do container",
+                  "type": "string"
+                },
+                "host": {
+                  "description": "Agente remoto ou 'local' (padrão: esta central); ver get_docker_hosts",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "action",
+                "container"
+              ],
+              "type": "object"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "platform",
+      "purpose": "agentes, VPN, topologia, descoberta e redes",
+      "intent": "The message is about monitoring agents, the VPN, network topology, discovery or networks.",
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "get_platform_status",
+            "description": "Estado do próprio NetMonitor por área: 'agents' (agentes remotos: conexão, versão, host), 'vpn' (servidor WireGuard e peers: handshake, tráfego), 'discovery' (varreduras recentes e em andamento), 'networks' (redes/CIDR, sites e servidores DNS), 'maintenance' (janelas ativas e futuras), e 'notifications' (envios recentes, pendentes e suprimidos, com hours).",
+            "parameters": {
+              "properties": {
+                "area": {
+                  "enum": [
+                    "agents",
+                    "vpn",
+                    "discovery",
+                    "networks",
+                    "maintenance",
+                    "notifications"
+                  ],
+                  "type": "string"
+                },
+                "hours": {
+                  "description": "Janela para notifications e discovery (1 a 720, padrão 24)",
+                  "type": "integer"
+                },
+                "limit": {
+                  "description": "Itens na lista (1 a 50, padrão 20)",
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "area"
+              ],
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "get_topology",
+            "description": "Topologia física/lógica. Com 'device': o equipamento acima dele (uplink) e os vizinhos, com portas dos dois lados, estado e tráfego do enlace. Sem 'device': totais e os enlaces que não estão 'up'.",
+            "parameters": {
+              "properties": {
+                "device": {
+                  "description": "Nome, IP ou id do dispositivo (opcional)",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "diagnostics",
+      "purpose": "testes ativos",
+      "intent": "The user wants a live network test such as ping, traceroute, port scan or DNS lookup.",
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "ping_host",
+            "description": "Ping ICMP agora: RTT mínimo/médio/máximo, jitter e perda de pacotes.",
+            "parameters": {
+              "properties": {
+                "count": {
+                  "description": "Pacotes (1 a 5, padrão 3)",
+                  "type": "integer"
+                },
+                "target": {
+                  "description": "IP ou hostname",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "target"
+              ],
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "traceroute",
+            "description": "Traceroute até o destino: saltos com IP, hostname e latência.",
+            "parameters": {
+              "properties": {
+                "max_hops": {
+                  "description": "Máximo de saltos (1 a 20, padrão 12)",
+                  "type": "integer"
+                },
+                "target": {
+                  "description": "IP ou hostname",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "target"
+              ],
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "scan_ports",
+            "description": "Testa conexão TCP em portas do alvo e diz quais estão abertas.",
+            "parameters": {
+              "properties": {
+                "ports": {
+                  "description": "Portas TCP (ex: [80, 443, 22]). Omitido: portas comuns.",
+                  "items": {
+                    "type": "integer"
+                  },
+                  "type": "array"
+                },
+                "target": {
+                  "description": "IP ou hostname",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "target"
+              ],
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "dns_lookup",
+            "description": "Resolve um hostname (registro A) medindo o tempo de resposta do DNS.",
+            "parameters": {
+              "properties": {
+                "hostname": {
+                  "description": "Hostname a resolver (ex: 'google.com')",
+                  "type": "string"
+                },
+                "server": {
+                  "description": "Servidor DNS 'IP:porta' (padrão '1.1.1.1:53')",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "hostname"
+              ],
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "run_playbook",
+            "description": "Checklist automatizado de diagnóstico: 'internet_health' (saída WAN) ou 'device_reachability' (alcance de um dispositivo, exige target IP).",
+            "parameters": {
+              "properties": {
+                "playbook_type": {
+                  "enum": [
+                    "internet_health",
+                    "device_reachability"
+                  ],
+                  "type": "string"
+                },
+                "target": {
+                  "description": "IP do dispositivo (para 'device_reachability')",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "playbook_type"
+              ],
+              "type": "object"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "actions",
+      "purpose": "ações",
+      "intent": "The user wants to change something: acknowledge or silence an alert, schedule maintenance or create a monitor.",
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "acknowledge_alert",
+            "description": "Propõe reconhecer um alerta aberto (o operador está ciente).",
+            "parameters": {
+              "properties": {
+                "alert_id": {
+                  "description": "Id do alerta (de get_alerts)",
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "alert_id"
+              ],
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "silence_alert",
+            "description": "Propõe silenciar as notificações de um alerta por alguns minutos.",
+            "parameters": {
+              "properties": {
+                "alert_id": {
+                  "description": "Id do alerta (de get_alerts)",
+                  "type": "integer"
+                },
+                "minutes": {
+                  "description": "Duração em minutos (5 a 1440, padrão 60)",
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "alert_id"
+              ],
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "create_maintenance_window",
+            "description": "Propõe uma janela de manutenção para um dispositivo (alertas dele não notificam no período).",
+            "parameters": {
+              "properties": {
+                "device": {
+                  "description": "Nome, IP ou id do dispositivo",
+                  "type": "string"
+                },
+                "duration_minutes": {
+                  "description": "Duração (15 a 10080, padrão 60)",
+                  "type": "integer"
+                },
+                "name": {
+                  "description": "Nome da janela (opcional)",
+                  "type": "string"
+                },
+                "reason": {
+                  "description": "Motivo (opcional)",
+                  "type": "string"
+                },
+                "starts_in_minutes": {
+                  "description": "Começa daqui a N minutos (padrão 0 = agora)",
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "device"
+              ],
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "create_monitor",
+            "description": "Propõe criar um monitor (ping, http, https, tcp ou dns) para um dispositivo.",
+            "parameters": {
+              "properties": {
+                "device": {
+                  "description": "Nome, IP ou id do dispositivo",
+                  "type": "string"
+                },
+                "name": {
+                  "description": "Nome do monitor (opcional)",
+                  "type": "string"
+                },
+                "port": {
+                  "description": "Porta (para tcp)",
+                  "type": "integer"
+                },
+                "target": {
+                  "description": "Alvo (padrão: IP do dispositivo; URL para http/https; domínio para dns)",
+                  "type": "string"
+                },
+                "type": {
+                  "enum": [
+                    "ping",
+                    "http",
+                    "https",
+                    "tcp",
+                    "dns"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "device"
+              ],
+              "type": "object"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "alert_rules",
+      "purpose": "regras de alerta",
+      "intent": "The message is about alert rules: where an alert comes from, thresholds, or creating, deleting or toggling a rule.",
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "get_alert_rules_guide",
+            "description": "Guia das regras de alerta: como um alerta nasce, ciclo de vida, todos os campos (condition.field), operadores, receitas prontas e como diagnosticar a origem de um alerta. Leia antes de criar uma regra.",
+            "parameters": {
+              "properties": {},
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "list_alert_rules",
+            "description": "Regras de alerta cadastradas: condição, severidade, escopo, se está ativa, alertas abertos e disparos nas últimas 24 h (ruidosa = muitos disparos).",
+            "parameters": {
+              "properties": {
+                "device": {
+                  "description": "Só as regras deste dispositivo (nome, IP ou id) e as globais",
+                  "type": "string"
+                },
+                "enabled_only": {
+                  "type": "boolean"
+                },
+                "limit": {
+                  "description": "Máximo de regras (1 a 50, padrão 20)",
+                  "type": "integer"
+                },
+                "search": {
+                  "description": "Trecho do nome ou do campo da condição",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "explain_alert",
+            "description": "De onde vem um alerta: a regra que disparou (condição, janelas, escopo), o alvo (monitor, interface, túnel VPN), os fatos que casaram, disparos da regra nas últimas 24 h e outros alertas abertos no mesmo dispositivo.",
+            "parameters": {
+              "properties": {
+                "alert_id": {
+                  "description": "Id do alerta (de get_alerts)",
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "alert_id"
+              ],
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "create_alert_rule",
+            "description": "Propõe criar uma regra de alerta (o usuário confirma no chat). field vem de get_alert_rules_guide; confira list_alert_rules para não duplicar.",
+            "parameters": {
+              "properties": {
+                "device": {
+                  "description": "Nome, IP ou id; ausente = global",
+                  "type": "string"
+                },
+                "duration_seconds": {
+                  "description": "Quanto a condição dura (0–86400)",
+                  "type": "integer"
+                },
+                "field": {
+                  "description": "Campo do guia (ex.: latencyMs, status)",
+                  "type": "string"
+                },
+                "monitor_id": {
+                  "type": "integer"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "notification_cooldown_seconds": {
+                  "description": "Intervalo entre notificações",
+                  "type": "integer"
+                },
+                "operator": {
+                  "enum": [
+                    "eq",
+                    "neq",
+                    "gt",
+                    "gte",
+                    "lt",
+                    "lte",
+                    "contains"
+                  ],
+                  "type": "string"
+                },
+                "recovery_window_seconds": {
+                  "description": "Estabilidade para resolver",
+                  "type": "integer"
+                },
+                "severity": {
+                  "enum": [
+                    "critical",
+                    "warning",
+                    "info"
+                  ],
+                  "type": "string"
+                },
+                "value": {
+                  "description": "Número ou texto (ex.: 150, \"down\")"
+                }
+              },
+              "required": [
+                "name",
+                "field",
+                "operator",
+                "value"
+              ],
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "delete_alert_rule",
+            "description": "Propõe excluir uma regra de alerta — o histórico de alertas dela é apagado junto. Para só parar os avisos, sugira desativar a regra com toggle_alert_rule ou em /alerts.",
+            "parameters": {
+              "properties": {
+                "alert_id": {
+                  "description": "Opcional: id de um alerta cuja regra deve ser excluída",
+                  "type": "integer"
+                },
+                "rule_id": {
+                  "description": "Id da regra (de list_alert_rules ou explain_alert)",
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "toggle_alert_rule",
+            "description": "Propõe ativar ou desativar uma regra de alerta existente, preservando o histórico de alertas.",
+            "parameters": {
+              "properties": {
+                "alert_id": {
+                  "description": "Opcional: id de um alerta cuja regra deve ser ativada/desativada",
+                  "type": "integer"
+                },
+                "enabled": {
+                  "description": "true para ativar a regra, false para desativar",
+                  "type": "boolean"
+                },
+                "rule_id": {
+                  "description": "Id da regra (de list_alert_rules ou explain_alert)",
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "enabled"
+              ],
+              "type": "object"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "devices",
+      "purpose": "equipamento por SSH/HTTP e plugins",
+      "intent": "The user wants to access a device over SSH or its web interface, run a command or change a setting on it, install a package, or list, create, test or use a device plugin, app, driver or script.",
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "get_plugin_authoring_guide",
+            "description": "Skill de autoria de plugins de dispositivo: fluxo obrigatório, formato do pacote, API do script (Rhai), testes e boas práticas. Leia ANTES de criar ou alterar um plugin.",
+            "parameters": {
+              "properties": {},
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "list_device_plugins",
+            "description": "Plugins aplicáveis a um dispositivo, com compatibilidade (validated/likely/possible/incompatible), ações, status, credenciais cadastradas (sem senha) e agentes. Use antes de criar um plugin novo.",
+            "parameters": {
+              "properties": {
+                "device": {
+                  "description": "Dispositivo: id, nome ou IP",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "device"
+              ],
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "list_plugin_apps",
+            "description": "Aplicativos e plugins do sistema: os aplicativos (páginas /apps/{id}, plugins de frota que agem em vários equipamentos, com quantos membros) e todos os plugins cadastrados (/plugins: versão, status, escopo, origem e ações). 'search' filtra por nome, slug ou descrição. O conteúdo de um plugin (manifesto e script) vem de get_plugin.",
+            "parameters": {
+              "properties": {
+                "search": {
+                  "description": "Parte do nome, slug ou descrição",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "get_plugin",
+            "description": "Um plugin completo: manifesto, script, uso (como usar cada ação), compatibilidade validada, testes, status e risco da revisão de segurança.",
+            "parameters": {
+              "properties": {
+                "plugin": {
+                  "description": "Id ou slug do plugin",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "plugin"
+              ],
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "run_plugin_tests",
+            "description": "Roda os testes unitários de um plugin (script de verdade contra as respostas gravadas nas fixtures, sem tocar o equipamento) e devolve problemas de validação e falhas.",
+            "parameters": {
+              "properties": {
+                "plugin": {
+                  "description": "Id ou slug do plugin",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "plugin"
+              ],
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "fingerprint_device",
+            "description": "Reconhece o equipamento sem credencial e sem alterar nada: portas de gerência abertas, banner SSH, título e servidor da página web, plataforma deduzida e plugins que casam. Acessa o equipamento: pede aprovação.",
+            "parameters": {
+              "properties": {
+                "device": {
+                  "description": "Dispositivo: id, nome ou IP",
+                  "type": "string"
+                },
+                "reason": {
+                  "description": "Por que este acesso é necessário, numa frase — o usuário lê antes de aprovar",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "device",
+                "reason"
+              ],
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "device_ssh_exec",
+            "description": "Executa UM comando no equipamento por SSH (ou Telnet) com a credencial cadastrada — para explorar enquanto escreve um plugin. Prefira comandos de leitura. Use {{password}} se precisar da senha (ex.: sudo -S). Cada chamada pede aprovação do usuário.",
+            "parameters": {
+              "properties": {
+                "command": {
+                  "description": "Comando exato, uma linha",
+                  "type": "string"
+                },
+                "device": {
+                  "description": "Dispositivo: id, nome ou IP",
+                  "type": "string"
+                },
+                "effect": {
+                  "description": "read = só lê; write = altera o equipamento. Declare com honestidade: o sistema reclassifica e vale o mais restritivo",
+                  "enum": [
+                    "read",
+                    "write"
+                  ],
+                  "type": "string"
+                },
+                "reason": {
+                  "description": "Por que este acesso é necessário, numa frase — o usuário lê antes de aprovar",
+                  "type": "string"
+                },
+                "transport": {
+                  "description": "Padrão: ssh",
+                  "enum": [
+                    "ssh",
+                    "telnet"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "device",
+                "command",
+                "effect",
+                "reason"
+              ],
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "device_http_request",
+            "description": "Uma requisição HTTP à interface web do equipamento (caminho relativo, ex.: /cgi-bin/luci). Cookies de login são guardados só nesta chamada. Use {{username}}/{{password}} no form de login e login=true nele. Cada chamada pede aprovação do usuário.",
+            "parameters": {
+              "properties": {
+                "basic_auth": {
+                  "description": "Envia a credencial HTTP como Basic Auth",
+                  "type": "boolean"
+                },
+                "body": {
+                  "description": "Corpo cru",
+                  "type": "string"
+                },
+                "device": {
+                  "description": "Dispositivo: id, nome ou IP",
+                  "type": "string"
+                },
+                "effect": {
+                  "description": "read = só lê; write = altera o equipamento. Declare com honestidade: o sistema reclassifica e vale o mais restritivo",
+                  "enum": [
+                    "read",
+                    "write"
+                  ],
+                  "type": "string"
+                },
+                "form": {
+                  "description": "Campos de formulário (application/x-www-form-urlencoded)",
+                  "type": "object"
+                },
+                "headers": {
+                  "description": "Cabeçalhos extras",
+                  "type": "object"
+                },
+                "https": {
+                  "type": "boolean"
+                },
+                "json": {
+                  "description": "Corpo JSON"
+                },
+                "login": {
+                  "description": "true só no POST de autenticação",
+                  "type": "boolean"
+                },
+                "method": {
+                  "description": "GET, POST, PUT, DELETE… (padrão GET)",
+                  "type": "string"
+                },
+                "path": {
+                  "description": "Caminho relativo começando com /",
+                  "type": "string"
+                },
+                "reason": {
+                  "description": "Por que este acesso é necessário, numa frase — o usuário lê antes de aprovar",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "device",
+                "path",
+                "effect",
+                "reason"
+              ],
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "save_plugin_draft",
+            "description": "Grava um plugin como RASCUNHO (nunca ativo) e roda os testes unitários na hora. Para alterar um existente, informe plugin_id (suba a versão). exclusive_device grava como exclusivo de um equipamento. Pede aprovação do usuário.",
+            "parameters": {
+              "properties": {
+                "device": {
+                  "description": "Dispositivo em que o plugin está sendo criado (contexto do modo automático)",
+                  "type": "string"
+                },
+                "exclusive_device": {
+                  "description": "Dispositivo (id, nome ou IP) quando o plugin é só dele",
+                  "type": "string"
+                },
+                "package": {
+                  "description": "O pacote completo: format, manifest, script, usage, tests (ver o guia)",
+                  "type": "object"
+                },
+                "plugin_id": {
+                  "description": "Atualizar este plugin em vez de criar",
+                  "type": "integer"
+                },
+                "reason": {
+                  "description": "Por que este acesso é necessário, numa frase — o usuário lê antes de aprovar",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "package",
+                "reason"
+              ],
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "run_plugin_action",
+            "description": "Executa uma ação de um plugin no equipamento real e espera o resultado. Plugin que não está ativo pede aprovação a cada acesso durante a execução. Pede aprovação do usuário.",
+            "parameters": {
+              "properties": {
+                "action": {
+                  "description": "Id da ação",
+                  "type": "string"
+                },
+                "device": {
+                  "description": "Dispositivo: id, nome ou IP",
+                  "type": "string"
+                },
+                "params": {
+                  "description": "Parâmetros da ação, conforme o esquema do manifesto",
+                  "type": "object"
+                },
+                "plugin": {
+                  "description": "Id ou slug do plugin",
+                  "type": "string"
+                },
+                "reason": {
+                  "description": "Por que este acesso é necessário, numa frase — o usuário lê antes de aprovar",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "device",
+                "plugin",
+                "action",
+                "reason"
+              ],
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "validate_plugin",
+            "description": "Roda os testes funcionais do plugin no equipamento real (só ações de leitura) e registra o resultado na lista de compatibilidade (modelo/firmware validados). Pede aprovação do usuário.",
+            "parameters": {
+              "properties": {
+                "device": {
+                  "description": "Dispositivo: id, nome ou IP",
+                  "type": "string"
+                },
+                "plugin": {
+                  "description": "Id ou slug do plugin",
+                  "type": "string"
+                },
+                "reason": {
+                  "description": "Por que este acesso é necessário, numa frase — o usuário lê antes de aprovar",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "device",
+                "plugin",
+                "reason"
+              ],
+              "type": "object"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "audit",
+      "purpose": "auditoria: quem mudou o quê",
+      "intent": "The message is about the audit log: who changed what and when, or which configuration change came before a problem.",
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "get_audit_log",
+            "description": "Trilha de auditoria: quem criou, alterou, excluiu ou executou o quê e quando, com o antes/depois de cada alteração. Use 'until' (o instante em que o problema começou) e 'hours' para ver o que mudou antes dele; 'search' procura na descrição e no nome do recurso; 'resource_type' (device, monitor, alert_rule, plugin, system_setting, vpn_peer…) e 'action' filtram.",
+            "parameters": {
+              "properties": {
+                "action": {
+                  "enum": [
+                    "create",
+                    "update",
+                    "delete",
+                    "login",
+                    "logout",
+                    "execute"
+                  ],
+                  "type": "string"
+                },
+                "hours": {
+                  "description": "Horas antes de 'until' (1 a 720, padrão 24)",
+                  "type": "integer"
+                },
+                "limit": {
+                  "description": "Entradas (1 a 50, padrão 20), da mais recente para a mais antiga",
+                  "type": "integer"
+                },
+                "resource_type": {
+                  "description": "Tipo do recurso (device, monitor, alert_rule, plugin, system_setting, vpn_peer, network…)",
+                  "type": "string"
+                },
+                "search": {
+                  "description": "Texto na descrição ou no nome do recurso alterado",
+                  "type": "string"
+                },
+                "until": {
+                  "description": "Fim da janela em RFC 3339 (ex: 2026-09-21T14:00:00Z). Omitido: agora.",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "schedules",
+      "purpose": "tarefas agendadas",
+      "intent": "The user wants something to run automatically at a given time or periodically, or asks about scheduled tasks: list, change, pause, run or delete them.",
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "list_scheduled_tasks",
+            "description": "Tarefas agendadas: o que roda, quando, próxima execução e último resultado. Com task_id, também as últimas execuções dela.",
+            "parameters": {
+              "properties": {
+                "search": {
+                  "description": "Trecho do nome ou da ferramenta",
+                  "type": "string"
+                },
+                "task_id": {
+                  "description": "Detalha uma tarefa com as últimas execuções",
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "create_scheduled_task",
+            "description": "Propõe agendar uma ferramenta para rodar sozinha num horário (o usuário confirma). Vale consulta, teste ativo, ação ou container; acesso a equipamento não. arguments segue o contrato da ferramenta.",
+            "parameters": {
+              "properties": {
+                "arguments": {
+                  "description": "Argumentos da ferramenta",
+                  "type": "object"
+                },
+                "cron": {
+                  "description": "Cron de 5 campos na hora local: minuto hora dia mês dia-da-semana. Ex.: '0 3 * * *' todo dia 03:00; '*/15 * * * *' a cada 15 min; '0 8 * * 1-5' seg–sex 08:00",
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "name": {
+                  "description": "Nome curto da tarefa",
+                  "type": "string"
+                },
+                "tool": {
+                  "description": "Nome exato da ferramenta (ex.: ping_host, get_system_summary)",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "tool",
+                "cron"
+              ],
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "update_scheduled_task",
+            "description": "Propõe mudar uma tarefa agendada: horário (cron), argumentos, nome, ou pausar/retomar com enabled. Só o que vier muda.",
+            "parameters": {
+              "properties": {
+                "arguments": {
+                  "description": "Novos argumentos (substituem os atuais)",
+                  "type": "object"
+                },
+                "cron": {
+                  "description": "Cron de 5 campos na hora local: minuto hora dia mês dia-da-semana. Ex.: '0 3 * * *' todo dia 03:00; '*/15 * * * *' a cada 15 min; '0 8 * * 1-5' seg–sex 08:00",
+                  "type": "string"
+                },
+                "enabled": {
+                  "description": "false pausa; true retoma",
+                  "type": "boolean"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "task_id": {
+                  "description": "Id (de list_scheduled_tasks)",
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "task_id"
+              ],
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "run_scheduled_task",
+            "description": "Propõe rodar uma tarefa agendada agora, fora do horário, e devolve o resultado.",
+            "parameters": {
+              "properties": {
+                "task_id": {
+                  "description": "Id (de list_scheduled_tasks)",
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "task_id"
+              ],
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "delete_scheduled_task",
+            "description": "Propõe excluir uma tarefa agendada e o histórico dela. Para só parar, prefira update_scheduled_task com enabled=false.",
+            "parameters": {
+              "properties": {
+                "task_id": {
+                  "description": "Id (de list_scheduled_tasks)",
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "task_id"
+              ],
+              "type": "object"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "dashboard",
+      "purpose": "cards do dashboard",
+      "intent": "The user wants to see or change the dashboard layout: add, remove, move, resize or configure dashboard cards or widgets.",
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "get_dashboard_layout",
+            "description": "Layout do dashboard (compartilhado): os cards na ordem, com id, tipo, título, tamanho, visibilidade e configuração, e o catálogo de cards que podem entrar. Consulte antes de update_dashboard_layout.",
+            "parameters": {
+              "properties": {},
+              "type": "object"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "update_dashboard_layout",
+            "description": "Propõe mudanças no layout do dashboard; só grava depois que o usuário confirmar, e vale para todos que usam o layout do servidor. As operações rodam em ordem, tudo ou nada. Pegue ids e tipos em get_dashboard_layout.",
+            "parameters": {
+              "properties": {
+                "operations": {
+                  "items": {
+                    "properties": {
+                      "config": {
+                        "description": "add/configure: timeframe, monitorId, deviceId, interfaceId, interfaceName, dnsServerIds, warningThreshold, criticalThreshold. timeframe: 5m|15m|1h|24h. Ids numéricos ou \"all\"; null remove a chave",
+                        "type": "object"
+                      },
+                      "id": {
+                        "description": "Card alvo (remove, move, resize, configure)",
+                        "type": "string"
+                      },
+                      "op": {
+                        "enum": [
+                          "add",
+                          "remove",
+                          "move",
+                          "resize",
+                          "configure",
+                          "reset"
+                        ],
+                        "type": "string"
+                      },
+                      "position": {
+                        "description": "Entre os visíveis, a partir de 0 (add, move)",
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "size": {
+                        "enum": [
+                          "third",
+                          "half",
+                          "two_thirds",
+                          "full"
+                        ],
+                        "type": "string"
+                      },
+                      "title": {
+                        "description": "add/configure; vazio volta ao padrão",
+                        "type": "string"
+                      },
+                      "type": {
+                        "description": "Tipo do card novo (add)",
+                        "enum": [
+                          "stat_cards",
+                          "health_gauge",
+                          "active_alerts",
+                          "latency_time_series",
+                          "event_distribution",
+                          "unstable_targets",
+                          "events_feed",
+                          "network_monitors",
+                          "docker_summary",
+                          "dns_latency",
+                          "saas_services",
+                          "saas_heatmap",
+                          "ether_bandwidth",
+                          "bandwidth_vs_latency",
+                          "cpu_usage",
+                          "ram_usage",
+                          "binary_status"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "op"
+                    ],
+                    "type": "object"
+                  },
+                  "minItems": 1,
+                  "type": "array"
+                }
+              },
+              "required": [
+                "operations"
+              ],
+              "type": "object"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

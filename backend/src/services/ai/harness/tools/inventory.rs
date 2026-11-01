@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 use super::{
     lookup::{device_interfaces_of, device_matches, device_names, find_device},
     series::round2,
-    AiToolHandler, ToolArgs, ToolOutput,
+    AiToolHandler, ToolArgs, ToolKind, ToolOutput,
 };
 use crate::{
     models::_entities::{alert_events, device_interfaces, devices, monitors},
@@ -527,6 +527,68 @@ impl AiToolHandler for SearchDocs {
         Ok(ToolOutput::data(
             json!({ "query": query, "results": results }),
         ))
+    }
+}
+
+pub struct WebSearch;
+
+#[async_trait]
+impl AiToolHandler for WebSearch {
+    fn name(&self) -> &'static str {
+        "web_search"
+    }
+
+    fn kind(&self) -> ToolKind {
+        ToolKind::Interactive
+    }
+
+    fn schedulable(&self) -> bool {
+        false
+    }
+
+    fn description(&self) -> &'static str {
+        "Pesquisa na web erros, CVEs, bugs de firmware, códigos de falha de fabricantes ou documentação externa recente que não constam na base interna. No chat, o navegador busca e envia os trechos encontrados para a IA."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Termo técnico, mensagem de erro, CVE, modelo/firmware ou protocolo a pesquisar na web"
+                },
+                "domain": {
+                    "type": "string",
+                    "description": "Domínio ou fonte opcional para priorizar (ex: forum.mikrotik.com, nvd.nist.gov, docs.docker.com)"
+                }
+            },
+            "required": ["query"]
+        })
+    }
+
+    async fn execute(&self, _ctx: &AppContext, args: &ToolArgs) -> AppResult<ToolOutput> {
+        let query = args.text("query").unwrap_or_default().trim().to_string();
+        if query.is_empty() {
+            return Ok(ToolOutput::not_found(
+                "Informe o termo técnico em `query` para pesquisar na web.",
+            ));
+        }
+        let domain = args
+            .text("domain")
+            .map(|d| d.trim().to_string())
+            .filter(|d| !d.is_empty());
+        let search_query = match &domain {
+            Some(d) => format!("site:{d} {query}"),
+            None => query.clone(),
+        };
+        Ok(ToolOutput::awaiting_user(json!({
+            "status": "awaiting_web_results",
+            "query": query,
+            "domain": domain,
+            "search_query": search_query,
+            "hint": "O navegador executa a busca externa e envia os trechos relevantes na próxima mensagem da conversa."
+        })))
     }
 }
 

@@ -57,7 +57,7 @@ fn tool_error(err: &AppError) -> serde_json::Value {
 }
 
 /// Rodadas de raciocínio (chamada ao provedor + ferramentas) por pergunta.
-const MAX_ITERATIONS: usize = 6;
+pub const MAX_ITERATIONS: usize = 6;
 
 /// Mensagens anteriores enviadas ao provedor. O histórico inteiro seria
 /// reenviado a cada pergunta; as últimas trocas bastam para manter o assunto.

@@ -73,6 +73,8 @@ export interface AiSettings {
   ollamaBaseUrl?: string | null
   ollamaModel?: string | null
   ollamaNumCtx?: number | null
+  /** Deixa o modelo do Ollama raciocinar antes de responder (mais lento). */
+  ollamaReasoning?: boolean
   allowActiveTools: boolean
   requireToolConfirmation: boolean
   /** Ações (alertas, manutenção, monitores, regras): desligado, com confirmação ou automático. */

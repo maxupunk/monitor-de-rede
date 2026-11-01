@@ -54,6 +54,8 @@ services:
       # Fora da rede do compose o nome `ollaya` não resolve: a API alcança o
       # Ollaya no loopback do host, logo abaixo.
       OLLAYA_URL: http://127.0.0.1:${OLLAYA_HOST_PORT:-11435}
+      # O mesmo para o Ollama do chat.
+      OLLAMA_URL: http://127.0.0.1:${OLLAMA_HOST_PORT:-11434}
 
   # Com a API na rede do host o nome `netmonitor` não resolve: o agente local
   # vai junto para a rede do host e a alcança no loopback, sem publicação no
@@ -73,3 +75,9 @@ services:
     network_mode: host
     environment:
       OLLAYA_HOST: 127.0.0.1:${OLLAYA_HOST_PORT:-11435}
+
+  # O Ollama do chat, pelo mesmo motivo do Ollaya: rede do host, só no loopback.
+  ollama:
+    network_mode: host
+    environment:
+      OLLAMA_HOST: 127.0.0.1:${OLLAMA_HOST_PORT:-11434}

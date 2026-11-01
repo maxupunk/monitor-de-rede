@@ -78,8 +78,9 @@ impl AiDriver for Resposta {
 
 struct Falso(&'static str);
 
+#[async_trait]
 impl DriverFactory for Falso {
-    fn create(&self, _settings: &AiSettings) -> AppResult<Box<dyn AiDriver>> {
+    async fn create(&self, _settings: &AiSettings) -> AppResult<Box<dyn AiDriver>> {
         Ok(Box::new(Resposta(self.0)))
     }
 }

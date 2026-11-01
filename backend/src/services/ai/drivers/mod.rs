@@ -8,7 +8,8 @@ use crate::{
         context_window::sources::{
             ModelsDevLookup, OllamaLookup, OpenRouterLookup, MODELS_DEV_URL,
         },
-        settings::AiSettings,
+        ollama,
+        settings::{AiSettings, DEFAULT_OLLAMA_BASE_URL, DEFAULT_OLLAMA_MODEL},
     },
     services::shared::errors::{AppError, AppResult},
 };
@@ -16,6 +17,30 @@ use openai_compatible::OpenAiCompatibleDriver;
 use traits::AiDriver;
 
 const OPENROUTER_BASE_URL: &str = "https://openrouter.ai/api/v1";
+
+/// O driver do provedor configurado, falando com o Ollama onde ele de fato
+/// está quando a URL da tela aponta para esta máquina
+/// ([`crate::services::ai::ollama::locate_openai_base`]). É a porta de entrada
+/// de quem vai conversar; [`create_driver`] só monta, sem rede.
+///
+/// # Errors
+///
+/// Provedor desconhecido ou não configurado.
+pub async fn connect(settings: &AiSettings) -> AppResult<Box<dyn AiDriver>> {
+    if settings.active_driver != "ollama" {
+        return create_driver(settings);
+    }
+    let configured = settings
+        .ollama_base_url
+        .as_deref()
+        .filter(|url| !url.trim().is_empty())
+        .unwrap_or(DEFAULT_OLLAMA_BASE_URL);
+    let located = AiSettings {
+        ollama_base_url: Some(ollama::locate_openai_base(configured).await),
+        ..settings.clone()
+    };
+    create_driver(&located)
+}
 
 pub fn create_driver(settings: &AiSettings) -> AppResult<Box<dyn AiDriver>> {
     match settings.active_driver.as_str() {
@@ -95,13 +120,13 @@ pub fn create_driver(settings: &AiSettings) -> AppResult<Box<dyn AiDriver>> {
                 .ollama_base_url
                 .clone()
                 .filter(|u| !u.trim().is_empty())
-                .unwrap_or_else(|| "http://localhost:11434/v1".to_string());
+                .unwrap_or_else(|| DEFAULT_OLLAMA_BASE_URL.to_string());
 
             let model = settings
                 .ollama_model
                 .clone()
                 .filter(|m| !m.trim().is_empty())
-                .unwrap_or_else(|| "llama3.2".to_string());
+                .unwrap_or_else(|| DEFAULT_OLLAMA_MODEL.to_string());
 
             let num_ctx = settings
                 .ollama_num_ctx
@@ -119,6 +144,8 @@ pub fn create_driver(settings: &AiSettings) -> AppResult<Box<dyn AiDriver>> {
                     vec![],
                 )
                 .with_num_ctx(num_ctx)
+                .with_reasoning_effort(ollama::reasoning_effort(settings))
+                .with_min_output_tokens(ollama::min_output_tokens(settings))
                 .with_window_lookup(lookup),
             ))
         }

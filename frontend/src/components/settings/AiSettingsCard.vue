@@ -47,6 +47,7 @@
           v-model:base-url="form.ollamaBaseUrl"
           v-model:model="form.ollamaModel"
           v-model:num-ctx="form.ollamaNumCtx"
+          v-model:reasoning="form.ollamaReasoning"
           @open-catalog="showModelSearchDialog = true"
           @install="installOllamaModel"
         />

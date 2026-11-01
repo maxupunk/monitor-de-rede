@@ -71,7 +71,7 @@
             :return-object="false"
             :custom-filter="filterModelChoices"
             label="Modelo para baixar"
-            placeholder="Ex.: ornith-1.5:9b, qwen3.8:27b, mistral"
+            placeholder="Ex.: lfm3-netmonitor:latest, ornith-1.5:9b, qwen3.8:27b"
             variant="outlined"
             density="compact"
             hide-details="auto"

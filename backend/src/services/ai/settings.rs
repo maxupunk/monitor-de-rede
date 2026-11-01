@@ -23,8 +23,8 @@ pub const MASKED_KEY: &str = "********";
 
 pub const OPENCODE_DEFAULT_BASE_URL: &str = "https://opencode.ai/zen/v1";
 pub const DEFAULT_OPENCODE_MODEL: &str = "muse-spark-1.3-contributor-free";
-pub const DEFAULT_OLLAMA_BASE_URL: &str = "http://localhost:11434/v1";
-pub const DEFAULT_OLLAMA_MODEL: &str = "ornith-1.5:9b";
+pub const DEFAULT_OLLAMA_BASE_URL: &str = "http://ollama:11434/v1";
+pub const DEFAULT_OLLAMA_MODEL: &str = "lfm3-netmonitor:latest";
 pub const DEFAULT_OLLAMA_NUM_CTX: u64 = 16_384;
 pub const DEFAULT_OPENROUTER_MODEL: &str = "openrouter/free";
 
@@ -97,6 +97,8 @@ struct AiSettingsHelper {
     ollama_model: Option<String>,
     #[serde(default = "default_ollama_num_ctx")]
     ollama_num_ctx: Option<u64>,
+    #[serde(default)]
+    ollama_reasoning: bool,
     #[serde(default = "default_true")]
     allow_active_tools: bool,
     #[serde(default)]
@@ -164,6 +166,12 @@ pub struct AiSettings {
     #[ts(type = "number | null")]
     pub ollama_num_ctx: Option<u64>,
 
+    /// Deixa o modelo raciocinar antes de responder (modelos que pensam, como
+    /// o `lfm3`). Desligado por padrão: no benchmark de chat do Laya-tuning o
+    /// raciocínio deixou a resposta ~7× mais lenta e gastava o teto de tokens
+    /// do estilo Direto, saindo vazia.
+    pub ollama_reasoning: bool,
+
     /// Permite executar ferramentas ativas (ping, traceroute, scan de portas)
     pub allow_active_tools: bool,
 
@@ -208,6 +216,7 @@ impl<'de> Deserialize<'de> for AiSettings {
             ollama_base_url: h.ollama_base_url,
             ollama_model: h.ollama_model,
             ollama_num_ctx: h.ollama_num_ctx,
+            ollama_reasoning: h.ollama_reasoning,
             allow_active_tools: h.allow_active_tools,
             require_tool_confirmation: h.require_tool_confirmation,
             action_mode: h.action_mode.unwrap_or(if h.allow_actions {
@@ -269,6 +278,7 @@ impl Default for AiSettings {
             ollama_base_url: default_ollama_base_url(),
             ollama_model: default_ollama_model(),
             ollama_num_ctx: Some(DEFAULT_OLLAMA_NUM_CTX),
+            ollama_reasoning: false,
             allow_active_tools: true,
             require_tool_confirmation: false,
             action_mode: AiAutomationMode::Off,

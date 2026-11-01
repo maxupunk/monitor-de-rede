@@ -25,7 +25,7 @@ use crate::{
         DeciderModelLanguage::{self, English, Multilingual},
         DeciderModelOption, DeciderModelSpecView, DeciderModelsResponse,
     },
-    services::ai::local_models,
+    services::ai::local_models::{self, BundledStoreLayer, BundledStoreModel},
 };
 
 /// Prazo de carregamento de um modelo fora do catálogo.
@@ -128,7 +128,7 @@ pub const KNOWN_MODELS: &[ModelSpec] = &[
         name: "netmonitor/decima-network:v11",
         aliases: &["decima-network", "netmonitor/decima-network"],
         family: "Decima Network",
-        description: "Decima Network (NetMonitor): o decima:small ajustado nas decisões de rede do NetMonitor, em português — o mais preciso no benchmark das decisões e o mais rápido em CPU. Vem instalado com o NetMonitor",
+        description: "Decima Network (NetMonitor): o decima:small ajustado nas decisões de rede do NetMonitor, em português — o mais preciso no benchmark das decisões e o mais rápido em CPU. Baixado sob demanda da release do NetMonitor",
         language: Multilingual,
         download_mb: Some(510),
         recommended: true,
@@ -162,10 +162,136 @@ fn same_tag(a: &str, b: &str) -> bool {
     normalize(a) == normalize(b)
 }
 
-/// O que fazer quando falta um modelo que vem com o NetMonitor.
-pub const BUNDLED_HINT: &str = "Ele vem com o NetMonitor e é instalado pelo serviço `ollaya-models`: rode `docker compose up -d ollaya-models` no servidor.";
+/// Pacotes OCI dos modelos ajustados do NetMonitor para instalação sob demanda no Ollaya.
+pub static BUNDLED_STORE_MODELS: &[BundledStoreModel] = &[BundledStoreModel {
+    canonical_name: "netmonitor/decima-network:v11",
+    aliases: &[
+        "decima-network",
+        "netmonitor/decima-network",
+        "ollaya.dev/netmonitor/decima-network:v11",
+    ],
+    manifest_rel_path: "manifests/ollaya.dev/netmonitor/decima-network/v11",
+    manifest_json: r#"{
+  "schemaVersion": 2,
+  "mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+  "config": {
+    "mediaType": "application/vnd.ollaya.config.v1+json",
+    "digest": "sha256:6a42ffd329be28d2cb5e330c9c46124d6598c81c95c57c20e5227f5fae65f588",
+    "size": 541,
+    "urls": [
+      "https://ollaya.dev/blobs/sha256-6a42ffd329be28d2cb5e330c9c46124d6598c81c95c57c20e5227f5fae65f588"
+    ]
+  },
+  "layers": [
+    {
+      "mediaType": "application/vnd.ollaya.graph.onnx",
+      "digest": "sha256:3ead250e6a342c1966bac2f7c74aea049794e2eaadba6f6d55432ada00a5836f",
+      "size": 3340536,
+      "annotations": {
+        "org.ollaya.precision": "fp32"
+      }
+    },
+    {
+      "mediaType": "application/vnd.ollaya.weights",
+      "digest": "sha256:44e380c5b48bfc7c548062e578180033843dbfeb805b3fba705cfcc9eebd6d87",
+      "size": 470637416
+    },
+    {
+      "mediaType": "application/vnd.ollaya.weights",
+      "digest": "sha256:b452876f7d1b5b72925fee245db27a7531e09e99f6d2d91eb2490a383d551d0f",
+      "size": 18945996
+    },
+    {
+      "mediaType": "application/vnd.ollaya.tokenizer",
+      "digest": "sha256:255f5e32cb320b4dc2b31e0f203832fecafe87ca4cc87c3c41eb8ccae73f441a",
+      "size": 17082987,
+      "urls": [
+        "https://huggingface.co/amyrmahdy/decima-small/resolve/2e7f4d0757df0215f48f2a9b2b589e1f3a6348ed/pytorch/encoder/tokenizer.json"
+      ]
+    },
+    {
+      "mediaType": "application/vnd.ollaya.decision",
+      "digest": "sha256:f9f995481ae1ec4a10e1601f9bcd1e17eedabd58f54fa89993974352217552d8",
+      "size": 2661,
+      "urls": [
+        "https://ollaya.dev/blobs/sha256-f9f995481ae1ec4a10e1601f9bcd1e17eedabd58f54fa89993974352217552d8"
+      ]
+    },
+    {
+      "mediaType": "application/vnd.ollaya.calibration",
+      "digest": "sha256:eb3ca5d619708a1c9a2b77c1dfde2600271615ab809a8ff4164bc2f50890a081",
+      "size": 291,
+      "urls": [
+        "https://ollaya.dev/blobs/sha256-eb3ca5d619708a1c9a2b77c1dfde2600271615ab809a8ff4164bc2f50890a081"
+      ]
+    },
+    {
+      "mediaType": "application/vnd.ollaya.license",
+      "digest": "sha256:6e583cb7b1fd1e71700cd26f4d83d80ba9e61df69718948429bc487a93310b44",
+      "size": 10756,
+      "urls": [
+        "https://ollaya.dev/blobs/sha256-6e583cb7b1fd1e71700cd26f4d83d80ba9e61df69718948429bc487a93310b44"
+      ]
+    }
+  ]
+}
+"#,
+    release_url_env: "DECIDER_MODELS_URL",
+    default_release_url:
+        "https://github.com/maxupunk/monitor-de-rede/releases/download/decider-models",
+    store_dir_env: "OLLAYA_MODELS_DIR",
+    default_store_dir: "/ollaya-models/models",
+    layers: &[
+        BundledStoreLayer {
+            digest: "sha256:6a42ffd329be28d2cb5e330c9c46124d6598c81c95c57c20e5227f5fae65f588",
+            size: 541,
+            explicit_url: Some("https://ollaya.dev/blobs/sha256-6a42ffd329be28d2cb5e330c9c46124d6598c81c95c57c20e5227f5fae65f588"),
+        },
+        BundledStoreLayer {
+            digest: "sha256:3ead250e6a342c1966bac2f7c74aea049794e2eaadba6f6d55432ada00a5836f",
+            size: 3_340_536,
+            explicit_url: None,
+        },
+        BundledStoreLayer {
+            digest: "sha256:44e380c5b48bfc7c548062e578180033843dbfeb805b3fba705cfcc9eebd6d87",
+            size: 470_637_416,
+            explicit_url: None,
+        },
+        BundledStoreLayer {
+            digest: "sha256:b452876f7d1b5b72925fee245db27a7531e09e99f6d2d91eb2490a383d551d0f",
+            size: 18_945_996,
+            explicit_url: None,
+        },
+        BundledStoreLayer {
+            digest: "sha256:255f5e32cb320b4dc2b31e0f203832fecafe87ca4cc87c3c41eb8ccae73f441a",
+            size: 17_082_987,
+            explicit_url: Some("https://huggingface.co/amyrmahdy/decima-small/resolve/2e7f4d0757df0215f48f2a9b2b589e1f3a6348ed/pytorch/encoder/tokenizer.json"),
+        },
+        BundledStoreLayer {
+            digest: "sha256:f9f995481ae1ec4a10e1601f9bcd1e17eedabd58f54fa89993974352217552d8",
+            size: 2_661,
+            explicit_url: Some("https://ollaya.dev/blobs/sha256-f9f995481ae1ec4a10e1601f9bcd1e17eedabd58f54fa89993974352217552d8"),
+        },
+        BundledStoreLayer {
+            digest: "sha256:eb3ca5d619708a1c9a2b77c1dfde2600271615ab809a8ff4164bc2f50890a081",
+            size: 291,
+            explicit_url: Some("https://ollaya.dev/blobs/sha256-eb3ca5d619708a1c9a2b77c1dfde2600271615ab809a8ff4164bc2f50890a081"),
+        },
+        BundledStoreLayer {
+            digest: "sha256:6e583cb7b1fd1e71700cd26f4d83d80ba9e61df69718948429bc487a93310b44",
+            size: 10_756,
+            explicit_url: Some("https://ollaya.dev/blobs/sha256-6e583cb7b1fd1e71700cd26f4d83d80ba9e61df69718948429bc487a93310b44"),
+        },
+    ],
+}];
 
-/// Vem instalado com o NetMonitor: não está no registro do Ollaya.
+/// Localiza o pacote OCI de um modelo ajustado do NetMonitor, se houver.
+#[must_use]
+pub fn bundled_store_model(model: &str) -> Option<&'static BundledStoreModel> {
+    BUNDLED_STORE_MODELS.iter().find(|spec| spec.matches(model))
+}
+
+/// Modelo ajustado do NetMonitor hospedado na release do GitHub (`DECIDER_MODELS_URL`).
 #[must_use]
 pub fn is_bundled(model: &str) -> bool {
     spec(model).is_some_and(|spec| spec.bundled)

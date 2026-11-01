@@ -8,6 +8,7 @@
         variant="outlined"
         density="compact"
         prepend-inner-icon="mdi-server"
+        hint="O padrão é o Ollama que sobe com o NetMonitor. Em outra máquina: http://IP:11434/v1"
         hide-details="auto"
         @blur="baseUrl && refresh()"
       />
@@ -39,6 +40,18 @@
         density="compact"
         prepend-inner-icon="mdi-memory"
         hint="16k a 32k atende a maioria dos modelos locais. O novo limite vale depois de Salvar."
+        persistent-hint
+      />
+    </v-col>
+
+    <v-col cols="12">
+      <v-switch
+        v-model="reasoning"
+        color="primary"
+        density="compact"
+        inset
+        label="Raciocinar antes de responder"
+        hint="Para modelos que pensam (ex.: lfm3). Desligado responde em segundos; ligado pode levar mais de 30 s e, no estilo Direto, ficar sem resposta."
         persistent-hint
       />
     </v-col>
@@ -87,6 +100,7 @@ import { DEFAULT_MODELS, OLLAMA_DEFAULT_BASE_URL, OLLAMA_NUM_CTX_OPTIONS } from 
 const baseUrl = defineModel<string | null | undefined>('baseUrl', { required: true })
 const model = defineModel<string | null | undefined>('model', { required: true })
 const numCtx = defineModel<number | null | undefined>('numCtx', { required: true })
+const reasoning = defineModel<boolean | undefined>('reasoning', { default: false })
 
 const emit = defineEmits<{
   (e: 'open-catalog'): void

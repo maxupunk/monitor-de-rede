@@ -26,14 +26,14 @@ use crate::{
                 catalog, client::DeciderClient, config::AiDeciderSettings, decisions_benchmark,
                 diagnostics, providers, runtime::DeciderRuntime,
             },
-            drivers::{create_driver, openai_compatible::OpenAiCompatibleDriver, traits::AiDriver},
+            drivers::{self, openai_compatible::OpenAiCompatibleDriver, traits::AiDriver},
             harness::{
                 agent::{run_agent_loop, AgentRequest},
                 confirmation,
             },
             mentions, ollama, opencode, openrouter,
             proactive::{digest, incident, runner::ProviderDrivers, schedule::period_hours},
-            settings::{self, AiSettings},
+            settings::{self, AiSettings, DEFAULT_OLLAMA_BASE_URL},
         },
         audit::AuditActor,
         docker::hosts,
@@ -122,10 +122,11 @@ async fn test_connection(
             ))
         }
         "ollama" => {
-            let base_url = input
+            let configured = input
                 .base_url
                 .filter(|u| !u.trim().is_empty())
-                .unwrap_or_else(|| "http://localhost:11434/v1".to_string());
+                .unwrap_or_else(|| DEFAULT_OLLAMA_BASE_URL.to_string());
+            let base_url = ollama::locate_openai_base(&configured).await;
             Box::new(OpenAiCompatibleDriver::new(
                 "ollama",
                 "Ollama Local",
@@ -162,7 +163,7 @@ async fn chat_stream(
         ));
     }
 
-    let driver = create_driver(&settings)?;
+    let driver = drivers::connect(&settings).await?;
     let actor = AuditActor::from_headers(&headers, &ctx.db)
         .await
         .unwrap_or_default();
@@ -306,7 +307,7 @@ async fn list_ollama_models(
         .base_url
         .filter(|u| !u.trim().is_empty())
         .or(settings.ollama_base_url)
-        .unwrap_or_else(|| "http://localhost:11434".to_string());
+        .unwrap_or_else(|| DEFAULT_OLLAMA_BASE_URL.to_string());
 
     let models = ollama::list_models(&base_url).await?;
     Ok(format::json(models)?)
@@ -322,7 +323,7 @@ async fn pull_ollama_model(
         .base_url
         .filter(|u| !u.trim().is_empty())
         .or(settings.ollama_base_url)
-        .unwrap_or_else(|| "http://localhost:11434".to_string());
+        .unwrap_or_else(|| DEFAULT_OLLAMA_BASE_URL.to_string());
 
     let progress_stream = ollama::pull_model_stream(&base_url, &input.model).await?;
     Ok(pull_progress_sse(progress_stream))
