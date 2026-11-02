@@ -32,9 +32,11 @@ pub const LOCAL_SUFFIXES: &[&str] = &[
 /// Chaves da configuração de um monitor que guardam o alvo.
 const MONITOR_TARGET_KEYS: &[&str] = &["host", "domain", "url"];
 
-/// Minúsculas, sem espaços nem colchetes de IPv6.
+/// Minúsculas, sem espaços, arroba de menção nem colchetes de IPv6.
 fn normalize(target: &str) -> String {
     target
+        .trim()
+        .trim_start_matches('@')
         .trim()
         .trim_start_matches('[')
         .trim_end_matches(']')
@@ -116,11 +118,9 @@ async fn registered<C: ConnectionTrait>(db: &C, target: &str) -> AppResult<bool>
         value == wanted || mentions(&value, &wanted)
     };
     let devices = devices::Entity::find().all(db).await?;
-    if devices
-        .iter()
-        .filter_map(|device| device.ip_address.as_deref())
-        .any(same)
-    {
+    if devices.iter().any(|device| {
+        same(&device.name) || device.ip_address.as_deref().is_some_and(same)
+    }) {
         return Ok(true);
     }
     let monitors = monitors::Entity::find().all(db).await?;

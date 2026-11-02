@@ -5,10 +5,11 @@ use std::{net::IpAddr, time::Duration};
 
 use async_trait::async_trait;
 use loco_rs::prelude::AppContext;
+use sea_orm::ConnectionTrait;
 use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 
-use super::{AiToolHandler, RiskAssessment, ToolArgs, ToolKind, ToolOutput};
+use super::{lookup, AiToolHandler, RiskAssessment, ToolArgs, ToolKind, ToolOutput};
 use crate::services::{
     network_tools::{
         dns::latency::{measure_dns_lookup, DnsLookupOptions, DnsProtocol},
@@ -24,13 +25,24 @@ const DEFAULT_PORTS: [u16; 8] = [80, 443, 22, 53, 8080, 3389, 445, 161];
 /// Acima disso o scan deixa de ser um teste pontual e vira varredura.
 const WIDE_SCAN_PORTS: usize = 20;
 
-/// IP literal ou resolvido por DNS; a falha de resolução volta como dado
-/// para a IA, não como erro da ferramenta.
-async fn resolve_target(target: &str) -> Result<IpAddr, ToolOutput> {
-    if let Ok(ip) = target.parse() {
+/// IP literal, dispositivo cadastrado no inventário (por nome ou ID, ex.:
+/// `BORDA` ou `@BORDA` → `10.0.0.1`) ou hostname resolvido por DNS; a falha de
+/// resolução volta como dado para a IA, não como erro da ferramenta.
+async fn resolve_target<C: ConnectionTrait>(db: &C, target: &str) -> Result<IpAddr, ToolOutput> {
+    let clean = target.trim().trim_start_matches('@').trim();
+    if let Ok(ip) = clean.parse() {
         return Ok(ip);
     }
-    match tokio::net::lookup_host((target, 0)).await {
+    if let Ok(Some(device)) = lookup::find_device(db, clean).await {
+        if let Some(ip) = device
+            .ip_address
+            .as_deref()
+            .and_then(|raw| raw.trim().parse().ok())
+        {
+            return Ok(ip);
+        }
+    }
+    match tokio::net::lookup_host((clean, 0)).await {
         Ok(mut addresses) => addresses.next().map(|address| address.ip()).ok_or_else(|| {
             ToolOutput::not_found(format!("Não foi possível resolver o hostname '{target}'"))
         }),
@@ -84,9 +96,9 @@ impl AiToolHandler for Ping {
         ))
     }
 
-    async fn execute(&self, _ctx: &AppContext, args: &ToolArgs) -> AppResult<ToolOutput> {
+    async fn execute(&self, ctx: &AppContext, args: &ToolArgs) -> AppResult<ToolOutput> {
         let target = args.required_text("target", "Alvo (target) não informado para o ping")?;
-        let ip = match resolve_target(&target).await {
+        let ip = match resolve_target(&ctx.db, &target).await {
             Ok(ip) => ip,
             Err(output) => return Ok(output),
         };
@@ -140,10 +152,10 @@ impl AiToolHandler for Traceroute {
         ))
     }
 
-    async fn execute(&self, _ctx: &AppContext, args: &ToolArgs) -> AppResult<ToolOutput> {
+    async fn execute(&self, ctx: &AppContext, args: &ToolArgs) -> AppResult<ToolOutput> {
         let target =
             args.required_text("target", "Alvo (target) não informado para o traceroute")?;
-        let ip = match resolve_target(&target).await {
+        let ip = match resolve_target(&ctx.db, &target).await {
             Ok(ip) => ip,
             Err(output) => return Ok(output),
         };
@@ -232,12 +244,12 @@ impl AiToolHandler for ScanPorts {
         ))
     }
 
-    async fn execute(&self, _ctx: &AppContext, args: &ToolArgs) -> AppResult<ToolOutput> {
+    async fn execute(&self, ctx: &AppContext, args: &ToolArgs) -> AppResult<ToolOutput> {
         let target = args.required_text(
             "target",
             "Alvo (target) não informado para o scan de portas",
         )?;
-        let ip = match resolve_target(&target).await {
+        let ip = match resolve_target(&ctx.db, &target).await {
             Ok(ip) => ip,
             Err(output) => return Ok(output),
         };
@@ -374,7 +386,7 @@ impl AiToolHandler for Playbook {
         })
     }
 
-    async fn execute(&self, _ctx: &AppContext, args: &ToolArgs) -> AppResult<ToolOutput> {
+    async fn execute(&self, ctx: &AppContext, args: &ToolArgs) -> AppResult<ToolOutput> {
         let playbook = args
             .text("playbook_type")
             .unwrap_or_else(|| "internet_health".into());
@@ -392,9 +404,10 @@ impl AiToolHandler for Playbook {
                     "target",
                     "Alvo (target) não informado para o playbook de dispositivo",
                 )?;
-                let ip: IpAddr = target.parse().map_err(|_| {
-                    AppError::validation("Endereço IP inválido para o playbook de dispositivo")
-                })?;
+                let ip = match resolve_target(&ctx.db, &target).await {
+                    Ok(ip) => ip,
+                    Err(output) => return Ok(output),
+                };
                 let summary = run_device_reachability_playbook(ip, None, sender, cancel).await;
                 while receiver.recv().await.is_some() {}
                 json!(summary)
