@@ -27,6 +27,8 @@
 //! - [`dashboard`]: o layout do dashboard — ler e, com confirmação a cada
 //!   chamada, mudar os cards.
 //! - [`ask`]: a IA pergunta ao usuário antes de prosseguir.
+//! - [`web`]: pesquisa na web pela central (erro de fabricante, firmware,
+//!   CVE) — no chat e nas rotinas automáticas.
 //! - [`plugins`]: plugins de dispositivo — acessar o equipamento (SSH/HTTP),
 //!   criar, testar e executar scripts. Todo acesso passa pelo usuário.
 //! - [`risk`]: o risco de cada chamada, que decide se o modo automático roda
@@ -55,6 +57,7 @@ pub mod risk;
 mod schedules;
 mod series;
 mod timeline;
+mod web;
 
 use async_trait::async_trait;
 use loco_rs::prelude::AppContext;
@@ -506,6 +509,13 @@ pub trait AiToolHandler: Send + Sync {
 
     async fn execute(&self, ctx: &AppContext, args: &ToolArgs) -> AppResult<ToolOutput>;
 
+    /// Existe nesta instalação? Desligada (por exemplo, `AI_WEB_SEARCH=off`)
+    /// fica fora de todo catálogo — chat, rotinas e tarefas agendadas — e não
+    /// custa tokens. A política decide o resto.
+    fn enabled(&self) -> bool {
+        true
+    }
+
     /// O risco desta chamada, com o motivo. Nunca falha: sem como avaliar
     /// melhor (alvo não encontrado, por exemplo), vale o padrão do tipo — e a
     /// execução recusa o argumento inválido do mesmo jeito.
@@ -580,7 +590,7 @@ fn all_handlers() -> Vec<Box<dyn AiToolHandler>> {
         Box::new(platform::Topology),
         Box::new(audit::AuditLog),
         Box::new(inventory::SearchDocs),
-        Box::new(inventory::WebSearch),
+        Box::new(web::WebSearch),
         Box::new(diagnostics::Ping),
         Box::new(diagnostics::Traceroute),
         Box::new(diagnostics::ScanPorts),
@@ -655,7 +665,9 @@ impl UnattendedTools {
         let policy = ToolPolicy::unattended();
         let handlers = all_handlers()
             .into_iter()
-            .filter(|handler| policy.allows(handler.kind()) && handler.schedulable())
+            .filter(|handler| {
+                handler.enabled() && policy.allows(handler.kind()) && handler.schedulable()
+            })
             .collect();
         Self { handlers }
     }
@@ -760,12 +772,12 @@ pub struct ToolRegistry {
 }
 
 impl ToolRegistry {
-    /// Monta o registro só com o que a política libera.
+    /// Monta o registro só com o que existe na instalação e a política libera.
     #[must_use]
     pub fn new(policy: ToolPolicy) -> Self {
         let handlers = all_handlers()
             .into_iter()
-            .filter(|handler| policy.allows(handler.kind()))
+            .filter(|handler| handler.enabled() && policy.allows(handler.kind()))
             .collect();
         Self { handlers, policy }
     }
@@ -1077,6 +1089,10 @@ mod tests {
             .collect();
         assert!(nomes.contains(&"chart_monitor_latency".to_string()));
         assert!(nomes.contains(&"get_device_interfaces".to_string()));
+        assert!(
+            nomes.contains(&"web_search".to_string()),
+            "resumo de incidente também pesquisa na web"
+        );
         assert!(!nomes.contains(&"ping_host".to_string()));
 
         assert!(!nomes.contains(&"silence_alert".to_string()));
@@ -1152,6 +1168,7 @@ mod tests {
             "toggle_alert_rule",
             "docker_container_action",
             "get_audit_log",
+            "web_search",
         ] {
             assert!(nomes.contains(&agendavel), "{agendavel}");
         }

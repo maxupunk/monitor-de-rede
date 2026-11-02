@@ -25,34 +25,69 @@ use crate::{
 /// instalação (o override de host a define).
 pub static OLLAMA: LocalServer = LocalServer::new("Ollama", "ollama", 11434, "OLLAMA_URL");
 
+const CHAT_MODELS_RELEASE_URL: &str =
+    "https://github.com/maxupunk/monitor-de-rede/releases/download/chat-models";
+
+fn lfm3_default_parameters() -> serde_json::Value {
+    serde_json::json!({
+        "temperature": 0.1,
+        "top_p": 0.1,
+        "top_k": 50,
+        "repeat_penalty": 1.05,
+    })
+}
+
 /// Modelos de chat empacotados pelo NetMonitor: quando o usuário pede o pull
 /// pela tela (ou em um Ollama sem o volume pré-populado), os pesos GGUF vêm
-/// direto da release do GitHub do NetMonitor (`CHAT_MODELS_URL`).
-pub static BUNDLED_MODELS: &[BundledOllamaModel] = &[BundledOllamaModel {
-    canonical_name: "lfm3-netmonitor:latest",
-    aliases: &[
-        "lfm3-netmonitor",
-        "netmonitor/lfm3-netmonitor",
-        "netmonitor/lfm3-netmonitor:latest",
-    ],
-    release_url_env: "CHAT_MODELS_URL",
-    default_release_url:
-        "https://github.com/maxupunk/monitor-de-rede/releases/download/chat-models",
-    gguf_filename: "lfm3-netmonitor-q8_0.gguf",
-    gguf_digest: "sha256:a1ff35a978ca9f9dc09d1ecf062a66596c1dd1c4c835c4b127778fe5581cd00d",
-    gguf_size: 1_846_237_728,
-    template: "{{ .Prompt }}",
-    renderer: "lfm3",
-    parser: "lfm3",
-    create_parameters: || {
-        serde_json::json!({
-            "temperature": 0.1,
-            "top_p": 0.1,
-            "top_k": 50,
-            "repeat_penalty": 1.05,
-        })
+/// direto da release do GitHub do NetMonitor (`CHAT_MODELS_URL`), disponíveis
+/// em 3 quantizações (`Q8_0` / `Q8_K`, `Q5_K_M` e `Q4_K_M`).
+pub static BUNDLED_MODELS: &[BundledOllamaModel] = &[
+    BundledOllamaModel {
+        canonical_name: "lfm3-netmonitor:latest",
+        aliases: &[
+            "lfm3-netmonitor:q8_0",
+            "lfm3-netmonitor:q8_k",
+            "netmonitor/lfm3-netmonitor:latest",
+            "netmonitor/lfm3-netmonitor:q8_0",
+            "netmonitor/lfm3-netmonitor:q8_k",
+        ],
+        release_url_env: "CHAT_MODELS_URL",
+        default_release_url: CHAT_MODELS_RELEASE_URL,
+        gguf_filename: "lfm3-netmonitor-q8_0.gguf",
+        gguf_digest: "sha256:a1ff35a978ca9f9dc09d1ecf062a66596c1dd1c4c835c4b127778fe5581cd00d",
+        gguf_size: 1_846_237_728,
+        template: "{{ .Prompt }}",
+        renderer: "lfm3",
+        parser: "lfm3",
+        create_parameters: lfm3_default_parameters,
     },
-}];
+    BundledOllamaModel {
+        canonical_name: "lfm3-netmonitor:q5_k_m",
+        aliases: &["netmonitor/lfm3-netmonitor:q5_k_m"],
+        release_url_env: "CHAT_MODELS_URL",
+        default_release_url: CHAT_MODELS_RELEASE_URL,
+        gguf_filename: "lfm3-netmonitor-q5_k_m.gguf",
+        gguf_digest: "sha256:0ea6e2dfe9e40cae66732b1e6df358c66c8b1410fdc5f8accaa548700647bb54",
+        gguf_size: 1_258_662_432,
+        template: "{{ .Prompt }}",
+        renderer: "lfm3",
+        parser: "lfm3",
+        create_parameters: lfm3_default_parameters,
+    },
+    BundledOllamaModel {
+        canonical_name: "lfm3-netmonitor:q4_k_m",
+        aliases: &["netmonitor/lfm3-netmonitor:q4_k_m"],
+        release_url_env: "CHAT_MODELS_URL",
+        default_release_url: CHAT_MODELS_RELEASE_URL,
+        gguf_filename: "lfm3-netmonitor-q4_k_m.gguf",
+        gguf_digest: "sha256:0605111c42c2bb0fecbcde214e455fa63538ef534981d5237a20caaf734dc8ee",
+        gguf_size: 1_099_627_040,
+        template: "{{ .Prompt }}",
+        renderer: "lfm3",
+        parser: "lfm3",
+        create_parameters: lfm3_default_parameters,
+    },
+];
 
 /// Localiza a receita empacotada para um modelo do NetMonitor, se houver.
 #[must_use]
@@ -64,8 +99,22 @@ pub fn bundled_model(model: &str) -> Option<&'static BundledOllamaModel> {
 pub static RECOMMENDED_MODELS: &[(&str, &str, &str, &str, bool)] = &[
     (
         "lfm3-netmonitor:latest",
-        "LFM3 NetMonitor 1.7B — Agente especialista ajustado para redes (ICMP/TCP/UDP, Wi-Fi IEEE 802.11, fibra óptica GPON/SFP+), roteadores, Docker, sistema de backup, dashboard e as 61 ferramentas do NetMonitor (incluindo web_search via frontend): 1,8 GB (Q8_0), resposta em ~2s sem internet",
-        "1.7B",
+        "LFM3 NetMonitor 1.7B (Q8_0 / Q8_K — Máxima precisão, padrão) — Especialista nas 61 ferramentas do NetMonitor (redes, Wi-Fi IEEE 802.11, fibra óptica GPON/SFP+, roteadores, Docker, backups, dashboard e web_search): 1,85 GB, 99,4% em ferramentas (nota 95,7 blind / 93,5 bench)",
+        "1.7B · Q8_0",
+        "256k",
+        true,
+    ),
+    (
+        "lfm3-netmonitor:q5_k_m",
+        "LFM3 NetMonitor 1.7B (Q5_K_M — Equilibrado) — Mesma especialização em redes e nas 61 ferramentas do NetMonitor com 32% menos memória: 1,26 GB, 100% segurança no blind (nota 95,8 blind / 94,1 bench, p95 2,9s)",
+        "1.7B · Q5_K_M",
+        "256k",
+        true,
+    ),
+    (
+        "lfm3-netmonitor:q4_k_m",
+        "LFM3 NetMonitor 1.7B (Q4_K_M — Ultraleve / Rápido) — Versão compacta de 4 bits para servidores com pouca RAM/CPU: 1,10 GB, ~61 tok/s (nota 95,2 blind / 94,5 bench, p95 2,8s)",
+        "1.7B · Q4_K_M",
         "256k",
         true,
     ),
@@ -283,7 +332,7 @@ pub async fn list_models(base_url: &str) -> AppResult<OllamaModelsResponse> {
     let (installed_items, is_online, error_message) = match response {
         Ok(res) if res.status().is_success() => {
             if let Ok(tags) = res.json::<OllamaTagsResponse>().await {
-                let items = tags
+                let mut items: Vec<OllamaModelItem> = tags
                     .models
                     .unwrap_or_default()
                     .into_iter()
@@ -294,6 +343,12 @@ pub async fn list_models(base_url: &str) -> AppResult<OllamaModelsResponse> {
                         modified_at: m.modified_at,
                     })
                     .collect();
+                items.sort_by_key(|m| {
+                    BUNDLED_MODELS
+                        .iter()
+                        .position(|spec| spec.matches(&m.name))
+                        .unwrap_or(usize::MAX)
+                });
                 (items, true, None)
             } else {
                 (Vec::new(), true, None)
@@ -426,5 +481,27 @@ mod tests {
             locate_openai_base("http://10.0.0.5:11434/v1").await,
             "http://10.0.0.5:11434/v1"
         );
+    }
+
+    #[test]
+    fn resolve_tres_quantizacoes_do_lfm3_netmonitor() {
+        let q8 = bundled_model("lfm3-netmonitor:latest").expect("Q8_0 padrão");
+        assert_eq!(q8.gguf_filename, "lfm3-netmonitor-q8_0.gguf");
+        assert_eq!(
+            bundled_model("lfm3-netmonitor:q8_0").map(|s| s.gguf_filename),
+            Some("lfm3-netmonitor-q8_0.gguf")
+        );
+        assert_eq!(
+            bundled_model("lfm3-netmonitor:q8_k").map(|s| s.gguf_filename),
+            Some("lfm3-netmonitor-q8_0.gguf")
+        );
+
+        let q5 = bundled_model("lfm3-netmonitor:q5_k_m").expect("Q5_K_M");
+        assert_eq!(q5.gguf_filename, "lfm3-netmonitor-q5_k_m.gguf");
+        assert_eq!(q5.gguf_size, 1_258_662_432);
+
+        let q4 = bundled_model("lfm3-netmonitor:q4_k_m").expect("Q4_K_M");
+        assert_eq!(q4.gguf_filename, "lfm3-netmonitor-q4_k_m.gguf");
+        assert_eq!(q4.gguf_size, 1_099_627_040);
     }
 }

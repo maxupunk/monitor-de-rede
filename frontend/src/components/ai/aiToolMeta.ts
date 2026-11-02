@@ -57,7 +57,6 @@ const ACTION_TOOLS = new Set([
   'delete_scheduled_task',
   'update_dashboard_layout',
   'ask_user',
-  'web_search',
 ])
 
 /** Rótulo, ícone e cor de cada ferramenta da IA exibida no chat. */

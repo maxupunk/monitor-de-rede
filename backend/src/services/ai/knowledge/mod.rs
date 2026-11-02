@@ -177,12 +177,14 @@ pub static SYSTEM_DOCS: &[DocTopic] = &[
 - Como testes ativos de throughput podem saturar links em produção e elevar latência/perda temporariamente, eles exigem janela curta controlada e verificação prévia do tráfego das interfaces.",
     },
     DocTopic {
-        id: "web_search_frontend",
-        title: "Pesquisa Web Assistida pelo Frontend (web_search)",
-        keywords: &["web_search", "pesquisa web", "internet", "cve", "firmware", "bug", "fabricante", "forum"],
+        id: "web_search",
+        title: "Pesquisa Web da IA (web_search)",
+        keywords: &["web_search", "pesquisa web", "internet", "cve", "firmware", "bug", "fabricante", "forum", "searxng"],
         content: "Ferramenta 'web_search' (docs/pesquisa_web_ia_frontend.md):
-- Quando o diagnóstico encontra um código de erro específico de fabricante, bug de firmware recente (RouterOS, OpenWrt, Huawei VRP, Cisco IOS-XE) ou CVE que não consta na base interna (search_system_docs), a IA aciona 'web_search(query, domain)'.
-- A busca é executada pelo navegador do operador no frontend (AiWebSearchCard.vue / useAiWebSearch.ts) e os trechos sanitizados retornam para a IA concluir a análise sem exigir saída direta de internet no container do backend.",
+- Quando o diagnóstico encontra um código de erro de fabricante, bug de firmware (RouterOS, OpenWrt, Huawei VRP, Cisco IOS-XE) ou CVE que não consta na base interna (search_system_docs), a IA aciona 'web_search(query, domain)'.
+- A própria central pesquisa, no chat e nas rotinas automáticas (resumo de incidente, resumo periódico, tarefas agendadas): DuckDuckGo por padrão, ou um SearXNG próprio em AI_WEB_SEARCH_URL; CVEs citados vêm também do NVD (descrição e nota CVSS).
+- Antes de sair, o termo perde IPs internos, MACs, credenciais, e-mails e chaves; os resultados voltam como texto puro (até 5, com título, url e trecho) e ficam 1 h em memória.
+- Sem internet, a ferramenta avisa na hora e a IA segue com os dados do NetMonitor. AI_WEB_SEARCH=off desliga a pesquisa.",
     },
 ];
 

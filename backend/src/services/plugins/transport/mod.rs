@@ -280,23 +280,7 @@ pub fn bytes_to_text(bytes: &[u8]) -> String {
 /// engano de cadastro, nem por um script que tente sair da rede administrada.
 #[must_use]
 pub fn is_reachable_target(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(v4) => {
-            let [a, b, ..] = v4.octets();
-            v4.is_private()
-                || v4.is_loopback()
-                || v4.is_link_local()
-                // 100.64.0.0/10 (CGNAT) — comum em link de operadora e VPN.
-                || (a == 100 && (64..=127).contains(&b))
-        }
-        IpAddr::V6(v6) => {
-            let first = v6.segments()[0];
-            v6.is_loopback()
-                // fc00::/7 (ULA) e fe80::/10 (link-local).
-                || (first & 0xfe00) == 0xfc00
-                || (first & 0xffc0) == 0xfe80
-        }
-    }
+    crate::services::shared::cidr::is_internal_address(ip)
 }
 
 /// [`is_reachable_target`] e, quando há lista, dentro de uma das faixas.

@@ -135,12 +135,21 @@ describe('aiModelCatalog', () => {
     expect(findRecommendedOllamaModel([recommended], 'ornith-1.5:9b')?.name).toBe('ornith-1.5:9b')
   })
 
-  it('une instalados e recomendados sem repetir', () => {
+  it('une instalados e recomendados sem repetir e mantém lfm3-netmonitor em primeiro', () => {
+    const lfm3: OllamaRecommendedModel = {
+      name: 'lfm3-netmonitor:latest',
+      description: 'Agente NetMonitor',
+      parameterSize: '1.7B',
+      contextWindow: '256k',
+      isInstalled: false,
+      toolCallingOptimized: true,
+    }
     const choices = ollamaChoices(
       [{ name: 'ornith-1.5:9b', size: 5_000_000_000 }, { name: 'llama3:8b' }],
-      [recommended]
+      [lfm3, recommended]
     )
-    expect(choices).toHaveLength(2)
+    expect(choices).toHaveLength(3)
+    expect(choices[0].id).toBe('lfm3-netmonitor:latest')
     const ornith = choices.find((item) => item.id === 'ornith-1.5:9b')
     expect(ornith).toMatchObject({ isInstalled: true, isRecommended: true, size: '5 GB' })
   })

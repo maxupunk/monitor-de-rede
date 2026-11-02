@@ -14,3 +14,4 @@ pub mod openrouter;
 pub mod proactive;
 pub mod response_style;
 pub mod settings;
+pub mod web_search;

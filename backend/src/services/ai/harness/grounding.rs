@@ -18,7 +18,7 @@ use crate::{
 };
 
 /// Sufixos de nome que só resolvem dentro da rede do usuário.
-const LOCAL_SUFFIXES: &[&str] = &[
+pub const LOCAL_SUFFIXES: &[&str] = &[
     ".local",
     ".lan",
     ".home",

@@ -110,15 +110,15 @@ impl LocalServer {
         } else {
             reqwest::Url::parse(&format!("http://{url}"))
         };
-        parsed
-            .ok()
-            .and_then(|url| url.host_str().map(str::to_owned))
-            .is_some_and(|host| {
-                is_loopback_host(&host)
-                    || [self.service, DOCKER_HOST_ALIAS, "host.containers.internal"]
-                        .iter()
-                        .any(|name| host.eq_ignore_ascii_case(name))
-            })
+        parsed.ok().is_some_and(|url| {
+            url.port().is_none_or(|port| port == self.port)
+                && url.host_str().is_some_and(|host| {
+                    is_loopback_host(host)
+                        || [self.service, DOCKER_HOST_ALIAS, "host.containers.internal"]
+                            .iter()
+                            .any(|name| host.eq_ignore_ascii_case(name))
+                })
+        })
     }
 
     fn remembered(&self, configured: &str) -> Option<String> {
@@ -229,7 +229,8 @@ mod tests {
             assert!(OLLAYA.means_this_machine(local), "{local}");
         }
         assert!(!OLLAYA.means_this_machine("http://10.0.0.5:11435"));
-        // O nome do serviço é do servidor: `ollama` não é o Ollaya.
+        // O nome do serviço e a porta são do servidor: `ollama` ou outra porta local não são o Ollaya.
         assert!(!OLLAYA.means_this_machine("http://ollama:11434"));
+        assert!(!OLLAYA.means_this_machine("http://127.0.0.1:9"));
     }
 }

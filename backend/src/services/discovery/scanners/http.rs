@@ -18,7 +18,10 @@ use tokio_util::sync::CancellationToken;
 
 use crate::services::{
     discovery::{fingerprints::WEB_PORTS, merger::DiscoveredHost},
-    shared::errors::{AppError, AppResult},
+    shared::{
+        errors::{AppError, AppResult},
+        text::{collapse_whitespace, decode_html_entities},
+    },
 };
 
 /// Hosts visitados ao mesmo tempo.
@@ -193,17 +196,12 @@ fn capture(pattern: &Regex, text: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-/// Entidades comuns decodificadas, espaços colapsados e tamanho limitado.
+/// Entidades decodificadas, espaços colapsados e tamanho limitado.
 fn clean(text: &str) -> String {
-    let decoded = text
-        .replace("&nbsp;", " ")
-        .replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&#39;", "'");
-    let collapsed = decoded.split_whitespace().collect::<Vec<_>>().join(" ");
-    collapsed.chars().take(MAX_TEXT).collect()
+    collapse_whitespace(&decode_html_entities(text))
+        .chars()
+        .take(MAX_TEXT)
+        .collect()
 }
 
 /// Títulos genéricos de páginas de erro HTTP (ex: 401 Unauthorized, 403 Forbidden)

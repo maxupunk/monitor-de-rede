@@ -86,6 +86,9 @@ services:
       # Origem opcional das releases de modelos da IA (baixados sob demanda na tela):
       DECIDER_MODELS_URL: ${DECIDER_MODELS_URL:-}
       CHAT_MODELS_URL: ${CHAT_MODELS_URL:-}
+      # Pesquisa web da IA: `off` desliga; a URL troca o DuckDuckGo por um SearXNG.
+      AI_WEB_SEARCH: ${AI_WEB_SEARCH:-}
+      AI_WEB_SEARCH_URL: ${AI_WEB_SEARCH_URL:-}
       OLLAYA_MODELS_DIR: /ollaya-models/models
       TZ: ${TZ:-America/Fortaleza}
       # Porta real da API dentro do container. No modo host é também a porta que

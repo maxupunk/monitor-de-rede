@@ -847,6 +847,32 @@ OpenAI, o mesmo driver dos provedores na nuvem).
   modelos de chat fora daqui (benchmark de chat offline) e o `chat sync` de lá
   acusa quando ele muda.
 
+## 11-E. Pesquisa web da IA (`web_search`)
+
+A IA pesquisa na web pela **própria central** — erro de fabricante, bug de
+firmware, CVE —, no chat e nas rotinas sem tela (resumo de incidente, resumo
+periódico, tarefas agendadas). É uma consulta (`ToolKind::Passive`): resolve na
+mesma rodada do agente, sem devolver a vez a ninguém. Detalhes em
+[pesquisa_web_ia_frontend.md](pesquisa_web_ia_frontend.md).
+
+- **Peças.** `harness/tools/web.rs` só traz o contrato; a regra fica em
+  `services/ai/web_search/`: `query.rs` (limpeza do termo e do site),
+  `providers/` (um `SearchProvider` por fonte: DuckDuckGo HTML, SearXNG e NVD),
+  `untrusted.rs` (o que volta vira texto puro), `cache.rs` (1 h em memória) e
+  `mod.rs` (o `WebSearchService` que junta tudo).
+- **Nada interno sai.** IP interno, MAC, credencial, e-mail e chave saem do
+  termo antes de qualquer requisição; o resultado diz o que saiu (`redacted`).
+  A central nunca abre os links dos resultados — repassa título, url e trecho —,
+  então a pesquisa não serve de ponte para um endereço interno.
+- **Conteúdo externo é dado.** Sem HTML, caracteres invisíveis e marcadores de
+  papel ou de ferramenta; a descrição pede à IA que cite a url e não siga
+  instruções dos trechos. As confirmações do agente valem de qualquer forma.
+- **Sem internet.** Prazo de 5 s por fonte; sem rota, a central responde "sem
+  internet" na hora por 2 min, e a IA segue com os dados do NetMonitor.
+- **Configuração** (variáveis, não tela): `AI_WEB_SEARCH=off` tira a ferramenta
+  de todo catálogo; `AI_WEB_SEARCH_URL` troca o DuckDuckGo por um SearXNG — e
+  aí as pesquisas gerais não saem para buscador público. CVEs vêm do NVD.
+
 
 
 Registrar o que **não** foi construído evita que alguém procure por uma peça

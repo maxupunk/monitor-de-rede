@@ -61,15 +61,19 @@ export function defaultDeciderSettings(): AiDeciderSettings {
 
 /**
  * O modelo pedido está entre os instalados? Mesma regra do backend
- * (`local_models::is_installed`): `laya` casa `laya:latest` e `laya:en`.
+ * (`local_models::is_installed`): `laya` casa `laya:latest` e `laya:en`,
+ * enquanto tags explícitas (`:latest`, `:q5_k_m`, `:q4_k_m`) só casam a própria tag.
  */
 export function isModelInstalled(installed: readonly string[], wanted: string): boolean {
   const target = wanted.trim().toLowerCase()
   if (!target) return false
+  const hasExplicitTag = target.includes(':')
   const bare = target.endsWith(':latest') ? target.slice(0, -':latest'.length) : target
   return installed.some((name) => {
     const current = name.toLowerCase()
-    return current === target || current === bare || current.startsWith(`${bare}:`)
+    return (
+      current === target || current === bare || (!hasExplicitTag && current.startsWith(`${bare}:`))
+    )
   })
 }
 

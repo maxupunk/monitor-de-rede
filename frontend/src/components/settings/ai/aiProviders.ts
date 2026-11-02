@@ -40,7 +40,8 @@ export const OLLAMA_NUM_CTX_OPTIONS: { title: string; value: number }[] = [
   { title: '16.384 tokens (16k — recomendado)', value: 16384 },
   { title: '32.768 tokens (32k — médio)', value: 32768 },
   { title: '65.536 tokens (64k — amplo)', value: 65536 },
-  { title: '131.072 tokens (128k — máximo)', value: 131072 },
+  { title: '131.072 tokens (128k — estendido)', value: 131072 },
+  { title: '262.144 tokens (256k — máximo)', value: 262144 },
 ]
 
 /** Antigo padrão gratuito do OpenRouter, retirado do ar: vira o roteador gratuito. */

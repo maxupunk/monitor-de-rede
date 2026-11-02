@@ -47,11 +47,7 @@ pub struct PullTarget<'a> {
 /// Verifica se `model` corresponde ao nome canônico ou a algum apelido
 /// (com `:latest` implícito e sem diferenciar caixa).
 #[must_use]
-pub fn matches_model_or_alias(
-    canonical_name: &str,
-    aliases: &[&str],
-    model: &str,
-) -> bool {
+pub fn matches_model_or_alias(canonical_name: &str, aliases: &[&str], model: &str) -> bool {
     let normalize = |tag: &str| {
         let clean = tag.trim().to_ascii_lowercase();
         clean
@@ -175,14 +171,22 @@ struct PullLine {
 }
 
 /// O modelo pedido está entre os instalados? Aceita a tag implícita
-/// (`laya` casa `laya:latest`) e qualquer variante (`laya` casa `laya:en`).
+/// (`laya` casa `laya:latest`) e, quando o pedido não tem `:tag`, qualquer
+/// variante (`laya` casa `laya:en`). Tags explícitas (inclusive `:latest`,
+/// `:q5_k_m`, `:q4_k_m`) só casam com a mesma tag (ou sem tag quando `:latest`).
 #[must_use]
 pub fn is_installed<S: AsRef<str>>(installed: &[S], wanted: &str) -> bool {
     let wanted = wanted.trim().to_lowercase();
+    if wanted.is_empty() {
+        return false;
+    }
+    let has_explicit_tag = wanted.contains(':');
     let bare = wanted.strip_suffix(":latest").unwrap_or(&wanted);
     installed.iter().any(|name| {
         let name = name.as_ref().to_lowercase();
-        name == wanted || name == bare || name.starts_with(&format!("{bare}:"))
+        name == wanted
+            || name == bare
+            || (!has_explicit_tag && name.starts_with(&format!("{bare}:")))
     })
 }
 
@@ -390,9 +394,7 @@ pub async fn stream_bundled_ollama_install(
                     let _ = tx
                         .send(ModelPullProgress::failed(
                             "Falha de rede",
-                            format!(
-                                "Não foi possível baixar os pesos em '{download_url}': {e}"
-                            ),
+                            format!("Não foi possível baixar os pesos em '{download_url}': {e}"),
                         ))
                         .await;
                     return;
@@ -490,9 +492,10 @@ pub async fn stream_bundled_ollama_install(
         let trimmed_req = requested_name.trim();
         if !trimmed_req.is_empty()
             && !trimmed_req.eq_ignore_ascii_case(spec.canonical_name)
-            && !trimmed_req
-                .strip_suffix(":latest")
-                .is_some_and(|b| spec.canonical_name.eq_ignore_ascii_case(&format!("{b}:latest")))
+            && !trimmed_req.strip_suffix(":latest").is_some_and(|b| {
+                spec.canonical_name
+                    .eq_ignore_ascii_case(&format!("{b}:latest"))
+            })
         {
             targets.push(trimmed_req.to_string());
         }
@@ -699,10 +702,7 @@ pub async fn stream_bundled_store_install(
                     last_reported_bytes = completed_bytes;
                     let _ = tx
                         .send(ModelPullProgress {
-                            status: format!(
-                                "Baixando sha256-{}...",
-                                &hex[..12.min(hex.len())]
-                            ),
+                            status: format!("Baixando sha256-{}...", &hex[..12.min(hex.len())]),
                             digest: Some(layer.digest.to_string()),
                             total: Some(total_bytes),
                             completed: Some(completed_bytes),
@@ -745,7 +745,10 @@ pub async fn stream_bundled_store_install(
                 let _ = tx
                     .send(ModelPullProgress::failed(
                         "Erro de disco",
-                        format!("Não foi possível mover blob para '{}': {e}", blob_path.display()),
+                        format!(
+                            "Não foi possível mover blob para '{}': {e}",
+                            blob_path.display()
+                        ),
                     ))
                     .await;
                 return;
@@ -791,15 +794,25 @@ mod tests {
         assert!(is_installed(&installed, "LLAMA3.2:latest"));
         assert!(!is_installed(&installed, "laya-typed"));
         assert!(!is_installed(&installed, "ornith-1.5:3b"));
+
+        let quants = ["lfm3-netmonitor:q4_k_m"];
+        assert!(is_installed(&quants, "lfm3-netmonitor:q4_k_m"));
+        assert!(!is_installed(&quants, "lfm3-netmonitor:q5_k_m"));
+        assert!(!is_installed(&quants, "lfm3-netmonitor:latest"));
+        assert!(!is_installed(&quants, "lfm3-netmonitor:q8_0"));
     }
 
     #[test]
     fn reconhece_modelo_empacotado_e_monta_url_da_release() {
         static TEST_SPEC: BundledOllamaModel = BundledOllamaModel {
             canonical_name: "lfm3-netmonitor:latest",
-            aliases: &["netmonitor/lfm3-netmonitor", "netmonitor/lfm3-netmonitor:latest"],
+            aliases: &[
+                "netmonitor/lfm3-netmonitor",
+                "netmonitor/lfm3-netmonitor:latest",
+            ],
             release_url_env: "CHAT_MODELS_URL_TEST_NONEXISTENT",
-            default_release_url: "https://github.com/maxupunk/monitor-de-rede/releases/download/chat-models",
+            default_release_url:
+                "https://github.com/maxupunk/monitor-de-rede/releases/download/chat-models",
             gguf_filename: "lfm3-netmonitor-q8_0.gguf",
             gguf_digest: "sha256:a1ff35a978ca9f9dc09d1ecf062a66596c1dd1c4c835c4b127778fe5581cd00d",
             gguf_size: 1_846_237_728,

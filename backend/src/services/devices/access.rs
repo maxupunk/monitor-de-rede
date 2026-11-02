@@ -307,21 +307,7 @@ fn contem(cidr: &str, ip: IpAddr) -> bool {
 /// operadora entrega em link residencial — e um equipamento ali não é alcançável
 /// de fora, que é justamente o que esta pergunta quer saber.
 fn privado(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(v4) => {
-            v4.is_private()
-                || v4.is_loopback()
-                || v4.is_link_local()
-                || (v4.octets()[0] == 100 && (64..128).contains(&v4.octets()[1]))
-        }
-        IpAddr::V6(v6) => {
-            // ULA (fc00::/7) e link-local (fe80::/10) — o equivalente das faixas
-            // privadas em IPv6. `is_global` ainda não é estável.
-            v6.is_loopback()
-                || (v6.segments()[0] & 0xfe00) == 0xfc00
-                || (v6.segments()[0] & 0xffc0) == 0xfe80
-        }
-    }
+    crate::services::shared::cidr::is_internal_address(ip)
 }
 
 #[cfg(test)]

@@ -88,6 +88,10 @@ export function recommendedOllamaChoice(model: OllamaRecommendedModel): AiModelC
   })
 }
 
+function isNetmonitorModel(name: string): boolean {
+  return name.toLowerCase().includes('lfm3-netmonitor')
+}
+
 /** Instalados no Ollama mais os recomendados, sem repetir quem é as duas coisas. */
 export function ollamaChoices(
   installed: readonly OllamaModelItem[],
@@ -105,7 +109,7 @@ export function ollamaChoices(
         size: model.size ? formatDecimalBytes(model.size) : null,
         parameterSize: model.parameterSize ?? null,
         description: `Instalado no Ollama (${model.parameterSize || 'tamanho não informado'})`,
-        supportsTools: lower.includes('tool') || lower.includes('groq'),
+        supportsTools: lower.includes('tool') || lower.includes('groq') || isNetmonitorModel(lower),
       })
     )
   }
@@ -124,7 +128,12 @@ export function ollamaChoices(
         : suggestion
     )
   }
-  return Array.from(byName.values())
+  const netmonitorRank = (id: string): number => {
+    if (!isNetmonitorModel(id)) return Number.MAX_SAFE_INTEGER
+    const idx = recommended.findIndex((model) => model.name.toLowerCase() === id.toLowerCase())
+    return idx >= 0 ? idx : recommended.length
+  }
+  return Array.from(byName.values()).sort((a, b) => netmonitorRank(a.id) - netmonitorRank(b.id))
 }
 
 /** Inclui na lista o modelo digitado à mão, para ele aparecer como escolhido. */

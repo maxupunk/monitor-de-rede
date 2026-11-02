@@ -250,6 +250,27 @@ pub fn is_scannable_cidr(cidr: &str) -> bool {
     parse_discovery_cidr(cidr).is_ok()
 }
 
+/// Endereço que não trafega pela internet: as faixas privadas da RFC 1918, a
+/// CGNAT (100.64.0.0/10, o que a operadora entrega em link residencial),
+/// link-local e loopback; em IPv6, ULA (fc00::/7), link-local (fe80::/10) e
+/// loopback. `Ipv6Addr::is_global` ainda não é estável, daí as máscaras.
+#[must_use]
+pub fn is_internal_address(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            let [a, b, ..] = v4.octets();
+            v4.is_private()
+                || v4.is_loopback()
+                || v4.is_link_local()
+                || (a == 100 && (64..=127).contains(&b))
+        }
+        IpAddr::V6(v6) => {
+            let first = v6.segments()[0];
+            v6.is_loopback() || (first & 0xfe00) == 0xfc00 || (first & 0xffc0) == 0xfe80
+        }
+    }
+}
+
 /// Expande os endereços utilizáveis de uma faixa CIDR.
 pub fn expand_cidr(cidr: &str, max_hosts: usize) -> Result<Vec<IpAddr>, AppError> {
     expand_cidr_batch(cidr, 0, max_hosts)

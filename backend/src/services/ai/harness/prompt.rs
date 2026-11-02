@@ -313,18 +313,19 @@ mod tests {
     use crate::services::ai::harness::{compaction::estimate_tokens, tools::ToolGroups};
 
     /// O que toda pergunta de verdade paga em cada rodada, antes de qualquer
-    /// dado: o system prompt e o núcleo de ferramentas. Medido em 2.727
-    /// tokens (era 3.038, depois 2.795, 2.589 e 2.675). Subir o teto é
+    /// dado: o system prompt e o núcleo de ferramentas. Medido em 2.970
+    /// tokens (era 3.038, depois 2.795, 2.589, 2.675 e 2.727). Subir o teto é
     /// decisão, não acidente: cada token a mais aqui se paga em toda rodada de
-    /// toda pergunta. Última subida (2.750 → 2.775): o grupo `dashboard`
-    /// (layout do dashboard) no catálogo e no `enum` do `load_tools`, ~10
-    /// tokens. Antes (2.700 → 2.750): o grupo `schedules`
+    /// toda pergunta. Última subida (2.775 → 2.975): a ferramenta `web_search`
+    /// no núcleo (`ToolGroup::Core`), ~195 tokens. Antes (2.750 → 2.775): o
+    /// grupo `dashboard` (layout do dashboard) no catálogo e no `enum` do
+    /// `load_tools`, ~10 tokens. Antes (2.700 → 2.750): o grupo `schedules`
     /// (tarefas agendadas) no catálogo, ~50 tokens — a linha com os cinco
     /// nomes é o que deixa a IA agendar sem um `load_tools` às cegas. Antes
     /// (2.650 → 2.700): o grupo `audit` e a `list_plugin_apps`, ~25 tokens.
     #[test]
     fn custo_fixo_por_rodada_cabe_no_orcamento() {
-        const BUDGET: u64 = 2_775;
+        const BUDGET: u64 = 2_975;
         let settings = AiSettings {
             action_mode: AiAutomationMode::Auto,
             container_actions: AiAutomationMode::Auto,
