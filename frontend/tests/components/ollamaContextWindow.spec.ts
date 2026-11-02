@@ -21,6 +21,7 @@ const recommended: OllamaRecommendedModel[] = [
     contextLength: 262144,
     isInstalled: false,
     toolCallingOptimized: true,
+    netmonitorTrained: true,
   },
   {
     name: 'phi4:14b',
@@ -30,6 +31,7 @@ const recommended: OllamaRecommendedModel[] = [
     contextLength: 16384,
     isInstalled: false,
     toolCallingOptimized: false,
+    netmonitorTrained: false,
   },
 ]
 
@@ -55,6 +57,17 @@ describe('janela de contexto do Ollama', () => {
     )
     expect(findOllamaChoice(choices, 'phi4:14b')?.contextLength).toBe(32768)
     expect(findOllamaChoice(choices, 'lfm3-netmonitor:latest')?.contextLength).toBe(262144)
+  })
+
+  it('leva o selo de treinado com o NetMonitor do backend para a escolha', () => {
+    const choices = ollamaChoices(
+      [{ name: 'lfm3-netmonitor:minha-tag', netmonitorTrained: true }, { name: 'qwen3:8b' }],
+      recommended
+    )
+    expect(findOllamaChoice(choices, 'lfm3-netmonitor:latest')?.netmonitorTrained).toBe(true)
+    expect(findOllamaChoice(choices, 'lfm3-netmonitor:minha-tag')?.netmonitorTrained).toBe(true)
+    expect(findOllamaChoice(choices, 'qwen3:8b')?.netmonitorTrained).toBe(false)
+    expect(findOllamaChoice(choices, 'phi4:14b')?.netmonitorTrained).toBe(false)
   })
 
   it('acha o modelo pelo nome curto e devolve nada para o digitado sem janela', () => {

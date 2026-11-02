@@ -48,6 +48,7 @@
           v-model:model="form.ollamaModel"
           v-model:num-ctx="form.ollamaNumCtx"
           v-model:reasoning="form.ollamaReasoning"
+          v-model:netmonitor-trained="form.ollamaNetmonitorTrained"
           @open-catalog="showModelSearchDialog = true"
           @install="installOllamaModel"
         />

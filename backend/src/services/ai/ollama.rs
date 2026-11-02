@@ -105,6 +105,10 @@ pub struct RecommendedModel {
     /// Janela nativa do modelo, em tokens (a `*.context_length` do GGUF).
     pub context_length: u64,
     pub tool_calling_optimized: bool,
+    /// Ajustado com as ferramentas do NetMonitor: conhece o catálogo e o
+    /// `load_tools`, então o chat dispensa o roteamento do Decisor e manda o
+    /// prompt enxuto (o Decisor continua revisando as ações).
+    pub netmonitor_trained: bool,
 }
 
 /// Modelos recomendados para execução no Ollama com o NetMonitor.
@@ -115,6 +119,7 @@ pub static RECOMMENDED_MODELS: &[RecommendedModel] = &[
         parameter_size: "1.7B · Q8_0",
         context_length: 262_144,
         tool_calling_optimized: true,
+        netmonitor_trained: true,
     },
     RecommendedModel {
         name: "lfm3-netmonitor:q5_k_m",
@@ -122,6 +127,7 @@ pub static RECOMMENDED_MODELS: &[RecommendedModel] = &[
         parameter_size: "1.7B · Q5_K_M",
         context_length: 262_144,
         tool_calling_optimized: true,
+        netmonitor_trained: true,
     },
     RecommendedModel {
         name: "lfm3-netmonitor:q4_k_m",
@@ -129,6 +135,7 @@ pub static RECOMMENDED_MODELS: &[RecommendedModel] = &[
         parameter_size: "1.7B · Q4_K_M",
         context_length: 262_144,
         tool_calling_optimized: true,
+        netmonitor_trained: true,
     },
     RecommendedModel {
         name: "ornith-1.5:9b",
@@ -136,6 +143,7 @@ pub static RECOMMENDED_MODELS: &[RecommendedModel] = &[
         parameter_size: "9B",
         context_length: 262_144,
         tool_calling_optimized: true,
+        netmonitor_trained: false,
     },
     RecommendedModel {
         name: "lfm3:latest",
@@ -143,6 +151,7 @@ pub static RECOMMENDED_MODELS: &[RecommendedModel] = &[
         parameter_size: "1.7B",
         context_length: 262_144,
         tool_calling_optimized: false,
+        netmonitor_trained: false,
     },
     RecommendedModel {
         name: "llama3-groq-tool-use:8b",
@@ -150,6 +159,7 @@ pub static RECOMMENDED_MODELS: &[RecommendedModel] = &[
         parameter_size: "8B",
         context_length: 8_192,
         tool_calling_optimized: true,
+        netmonitor_trained: false,
     },
     RecommendedModel {
         name: "llama3.2:3b",
@@ -157,6 +167,7 @@ pub static RECOMMENDED_MODELS: &[RecommendedModel] = &[
         parameter_size: "3B",
         context_length: 131_072,
         tool_calling_optimized: false,
+        netmonitor_trained: false,
     },
     RecommendedModel {
         name: "llama3.2:1b",
@@ -164,6 +175,7 @@ pub static RECOMMENDED_MODELS: &[RecommendedModel] = &[
         parameter_size: "1B",
         context_length: 131_072,
         tool_calling_optimized: false,
+        netmonitor_trained: false,
     },
     RecommendedModel {
         name: "llama3.3:70b",
@@ -171,6 +183,7 @@ pub static RECOMMENDED_MODELS: &[RecommendedModel] = &[
         parameter_size: "70B",
         context_length: 131_072,
         tool_calling_optimized: true,
+        netmonitor_trained: false,
     },
     RecommendedModel {
         name: "deepseek-r1:8b",
@@ -178,6 +191,7 @@ pub static RECOMMENDED_MODELS: &[RecommendedModel] = &[
         parameter_size: "8B",
         context_length: 131_072,
         tool_calling_optimized: false,
+        netmonitor_trained: false,
     },
     RecommendedModel {
         name: "deepseek-r1:14b",
@@ -185,6 +199,7 @@ pub static RECOMMENDED_MODELS: &[RecommendedModel] = &[
         parameter_size: "14B",
         context_length: 131_072,
         tool_calling_optimized: false,
+        netmonitor_trained: false,
     },
     RecommendedModel {
         name: "qwen2.5-coder:7b",
@@ -192,6 +207,7 @@ pub static RECOMMENDED_MODELS: &[RecommendedModel] = &[
         parameter_size: "7B",
         context_length: 32_768,
         tool_calling_optimized: true,
+        netmonitor_trained: false,
     },
     RecommendedModel {
         name: "gemma4:e2b",
@@ -199,6 +215,7 @@ pub static RECOMMENDED_MODELS: &[RecommendedModel] = &[
         parameter_size: "2B",
         context_length: 131_072,
         tool_calling_optimized: false,
+        netmonitor_trained: false,
     },
     RecommendedModel {
         name: "gemma4:e4b",
@@ -206,6 +223,7 @@ pub static RECOMMENDED_MODELS: &[RecommendedModel] = &[
         parameter_size: "4B",
         context_length: 131_072,
         tool_calling_optimized: false,
+        netmonitor_trained: false,
     },
     RecommendedModel {
         name: "qwen3:8b",
@@ -213,6 +231,7 @@ pub static RECOMMENDED_MODELS: &[RecommendedModel] = &[
         parameter_size: "8B",
         context_length: 40_960,
         tool_calling_optimized: false,
+        netmonitor_trained: false,
     },
     RecommendedModel {
         name: "qwen3.8:27b",
@@ -220,6 +239,7 @@ pub static RECOMMENDED_MODELS: &[RecommendedModel] = &[
         parameter_size: "27B",
         context_length: 262_144,
         tool_calling_optimized: true,
+        netmonitor_trained: false,
     },
     RecommendedModel {
         name: "granite4.2:latest",
@@ -227,6 +247,7 @@ pub static RECOMMENDED_MODELS: &[RecommendedModel] = &[
         parameter_size: "8B",
         context_length: 131_072,
         tool_calling_optimized: false,
+        netmonitor_trained: false,
     },
     RecommendedModel {
         name: "mixtral:8x7b",
@@ -234,6 +255,7 @@ pub static RECOMMENDED_MODELS: &[RecommendedModel] = &[
         parameter_size: "46.7B",
         context_length: 32_768,
         tool_calling_optimized: false,
+        netmonitor_trained: false,
     },
     RecommendedModel {
         name: "phi4:14b",
@@ -241,8 +263,30 @@ pub static RECOMMENDED_MODELS: &[RecommendedModel] = &[
         parameter_size: "14B",
         context_length: 16_384,
         tool_calling_optimized: false,
+        netmonitor_trained: false,
     },
 ];
+
+/// Família de um modelo do Ollama: sem a tag e sem o namespace
+/// (`netmonitor/lfm3-netmonitor:q4_k_m` ➔ `lfm3-netmonitor`).
+fn model_family(model: &str) -> String {
+    let name = model.trim().to_ascii_lowercase();
+    let base = name.rsplit('/').next().unwrap_or(&name);
+    base.split(':').next().unwrap_or(base).to_string()
+}
+
+/// `true` quando o modelo é de uma família treinada com as ferramentas do
+/// NetMonitor no catálogo ([`RecommendedModel::netmonitor_trained`]): vale
+/// para qualquer quantização ou tag da família (`lfm3-netmonitor:q5_k_m`,
+/// `lfm3-netmonitor:minha-tag`, `netmonitor/lfm3-netmonitor:latest`).
+#[must_use]
+pub fn is_known_netmonitor_trained(model: &str) -> bool {
+    let family = model_family(model);
+    !family.is_empty()
+        && RECOMMENDED_MODELS
+            .iter()
+            .any(|known| known.netmonitor_trained && model_family(known.name) == family)
+}
 
 /// Normaliza a URL base do Ollama, removendo sufixos `/v1` e barras finais.
 pub fn normalize_ollama_base_url(raw: &str) -> String {
@@ -384,6 +428,7 @@ pub async fn list_models(base_url: &str) -> AppResult<OllamaModelsResponse> {
                     .unwrap_or_default()
                     .into_iter()
                     .map(|m| OllamaModelItem {
+                        netmonitor_trained: is_known_netmonitor_trained(&m.name),
                         name: m.name,
                         size: m.size,
                         parameter_size: m.details.and_then(|d| d.parameter_size),
@@ -440,6 +485,7 @@ pub async fn list_models(base_url: &str) -> AppResult<OllamaModelsResponse> {
                 context_length: model.context_length,
                 is_installed,
                 tool_calling_optimized: model.tool_calling_optimized,
+                netmonitor_trained: model.netmonitor_trained,
             }
         })
         .collect();
@@ -529,6 +575,23 @@ mod tests {
             locate_openai_base("http://10.0.0.5:11434/v1").await,
             "http://10.0.0.5:11434/v1"
         );
+    }
+
+    #[test]
+    fn familia_lfm3_netmonitor_e_treinada_com_o_netmonitor() {
+        for model in [
+            "lfm3-netmonitor:latest",
+            "lfm3-netmonitor:q5_k_m",
+            "lfm3-netmonitor:q4_k_m",
+            "LFM3-NetMonitor",
+            "netmonitor/lfm3-netmonitor:q8_0",
+            "lfm3-netmonitor:minha-tag",
+        ] {
+            assert!(is_known_netmonitor_trained(model), "{model}");
+        }
+        for model in ["qwen2.5:7b", "lfm3:latest", "llama3.2:3b", "", "  "] {
+            assert!(!is_known_netmonitor_trained(model), "{model:?}");
+        }
     }
 
     #[test]

@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use super::{
-    decider::config::AiDeciderSettings, proactive::config::AiProactiveSettings,
+    decider::config::AiDeciderSettings, ollama, proactive::config::AiProactiveSettings,
     response_style::AiResponseStyle,
 };
 use crate::{
@@ -99,6 +99,8 @@ struct AiSettingsHelper {
     ollama_num_ctx: Option<u64>,
     #[serde(default)]
     ollama_reasoning: bool,
+    #[serde(default)]
+    ollama_netmonitor_trained: Option<bool>,
     #[serde(default = "default_true")]
     allow_active_tools: bool,
     #[serde(default)]
@@ -172,6 +174,12 @@ pub struct AiSettings {
     /// do estilo Direto, saindo vazia.
     pub ollama_reasoning: bool,
 
+    /// O modelo do Ollama foi treinado com as ferramentas do NetMonitor?
+    /// `None` (padrão) detecta pelo nome ([`ollama::is_known_netmonitor_trained`]);
+    /// `Some` é a escolha da tela, para um modelo que a própria pessoa ajustou.
+    /// A tela volta para `None` ao trocar de modelo.
+    pub ollama_netmonitor_trained: Option<bool>,
+
     /// Permite executar ferramentas ativas (ping, traceroute, scan de portas)
     pub allow_active_tools: bool,
 
@@ -217,6 +225,7 @@ impl<'de> Deserialize<'de> for AiSettings {
             ollama_model: h.ollama_model,
             ollama_num_ctx: h.ollama_num_ctx,
             ollama_reasoning: h.ollama_reasoning,
+            ollama_netmonitor_trained: h.ollama_netmonitor_trained,
             allow_active_tools: h.allow_active_tools,
             require_tool_confirmation: h.require_tool_confirmation,
             action_mode: h.action_mode.unwrap_or(if h.allow_actions {
@@ -279,6 +288,7 @@ impl Default for AiSettings {
             ollama_model: default_ollama_model(),
             ollama_num_ctx: Some(DEFAULT_OLLAMA_NUM_CTX),
             ollama_reasoning: false,
+            ollama_netmonitor_trained: None,
             allow_active_tools: true,
             require_tool_confirmation: false,
             action_mode: AiAutomationMode::Off,
@@ -292,6 +302,21 @@ impl Default for AiSettings {
 }
 
 impl AiSettings {
+    /// O modelo de chat ativo foi treinado com as ferramentas do NetMonitor:
+    /// o chat dispensa o roteamento do Decisor e manda o prompt enxuto. Só o
+    /// Ollama tem essa família; a revisão das ações não muda.
+    #[must_use]
+    pub fn is_netmonitor_trained(&self) -> bool {
+        if self.active_driver != "ollama" {
+            return false;
+        }
+        self.ollama_netmonitor_trained.unwrap_or_else(|| {
+            ollama::is_known_netmonitor_trained(
+                self.ollama_model.as_deref().unwrap_or(DEFAULT_OLLAMA_MODEL),
+            )
+        })
+    }
+
     /// Devolve uma cópia segura para ser enviada ao frontend, com chaves secretas mascaradas.
     pub fn masked_view(&self) -> Self {
         let mut view = self.clone();
@@ -599,6 +624,46 @@ mod tests {
         assert_eq!(antiga.decider.model, "laya:en");
         let gravada = serde_json::to_value(&antiga).unwrap();
         assert!(gravada.get("decider").is_some() && gravada.get("laya").is_none());
+    }
+
+    #[test]
+    fn modelo_treinado_com_o_netmonitor_detecta_pelo_nome_ou_obedece_a_tela() {
+        let padrao = AiSettings::default();
+        assert!(
+            padrao.is_netmonitor_trained(),
+            "o padrão é o lfm3-netmonitor"
+        );
+
+        let generico = AiSettings {
+            ollama_model: Some("qwen2.5:7b".into()),
+            ..AiSettings::default()
+        };
+        assert!(!generico.is_netmonitor_trained());
+
+        let marcado = AiSettings {
+            ollama_netmonitor_trained: Some(true),
+            ..generico.clone()
+        };
+        assert!(
+            marcado.is_netmonitor_trained(),
+            "modelo ajustado pela pessoa"
+        );
+
+        let desmarcado = AiSettings {
+            ollama_netmonitor_trained: Some(false),
+            ..AiSettings::default()
+        };
+        assert!(!desmarcado.is_netmonitor_trained());
+
+        let nuvem = AiSettings {
+            active_driver: "openrouter".into(),
+            ollama_netmonitor_trained: Some(true),
+            ..AiSettings::default()
+        };
+        assert!(!nuvem.is_netmonitor_trained(), "só vale para o Ollama");
+
+        let antiga: AiSettings = serde_json::from_str(r#"{ "enabled": true }"#).unwrap();
+        assert_eq!(antiga.ollama_netmonitor_trained, None);
     }
 
     #[test]

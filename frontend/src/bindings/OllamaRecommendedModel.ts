@@ -8,4 +8,9 @@ contextWindow: string,
 /**
  * Janela nativa do modelo em tokens: o `num_ctx` que a tela assume.
  */
-contextLength: number, isInstalled: boolean, toolCallingOptimized: boolean, };
+contextLength: number, isInstalled: boolean, toolCallingOptimized: boolean, 
+/**
+ * Treinado com as ferramentas do NetMonitor: o chat manda o prompt
+ * enxuto, sem o roteamento do Decisor.
+ */
+netmonitorTrained: boolean, };

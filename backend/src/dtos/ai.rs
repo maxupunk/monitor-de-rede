@@ -539,6 +539,9 @@ pub struct OllamaModelItem {
     #[serde(default)]
     #[ts(type = "number | null")]
     pub context_length: Option<u64>,
+    /// Da família treinada com as ferramentas do NetMonitor (prompt enxuto).
+    #[serde(default)]
+    pub netmonitor_trained: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -555,6 +558,9 @@ pub struct OllamaRecommendedModel {
     pub context_length: u64,
     pub is_installed: bool,
     pub tool_calling_optimized: bool,
+    /// Treinado com as ferramentas do NetMonitor: o chat manda o prompt
+    /// enxuto, sem o roteamento do Decisor.
+    pub netmonitor_trained: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

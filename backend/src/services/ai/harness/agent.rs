@@ -652,9 +652,15 @@ pub async fn run_agent_loop(
             .last()
             .map_or("", |message| message.content.as_str());
         let configured_model = driver.model().unwrap_or_default().to_string();
+        // Modelo treinado com as ferramentas do NetMonitor conhece o catálogo
+        // e o `load_tools`: dispensa o roteamento do Decisor (a revisão das
+        // ações, no `reviewer`, continua).
+        let trained =
+            request.tool_loading == ToolLoading::OnDemand && settings.is_netmonitor_trained();
         // O Decisor decide enquanto a janela de contexto é consultada: as duas
         // são chamadas de rede e nenhuma depende da outra.
-        let consult_decider = request.tool_loading == ToolLoading::OnDemand && !small_talk;
+        let consult_decider =
+            request.tool_loading == ToolLoading::OnDemand && !small_talk && !trained;
         let (routed, mut window) = tokio::join!(
             async {
                 if consult_decider {
@@ -672,25 +678,30 @@ pub async fn run_agent_loop(
             context_window::resolve(driver.as_ref(), &configured_model)
         );
         let everything = || available.iter().copied().collect::<ToolGroups>();
+        // O que a pessoa marcou (`@container`, o alerta da tela) vai sempre.
+        let marked = || {
+            context_groups(
+                &request.context.mentions,
+                request.context.alert_id.is_some() || request.context.rule_id.is_some(),
+            )
+        };
         let preselected: ToolGroups = match (request.tool_loading, routed) {
             (ToolLoading::Everything, _) => everything(),
             (ToolLoading::OnDemand, _) if small_talk => ToolGroups::new(),
+            // Prompt enxuto: núcleo e o marcado; o resto, pelo `load_tools`.
+            (ToolLoading::OnDemand, _) if trained => marked(),
             // Sem Decisor não há quem escolha: vai o catálogo inteiro.
             (ToolLoading::OnDemand, None) => everything(),
-            // O Decisor escolhe; o que a pessoa marcou (`@container`, o
-            // alerta da tela) entra junto.
+            // O Decisor escolhe; o marcado entra junto.
             (ToolLoading::OnDemand, Some(decided)) => {
-                let mut groups = context_groups(
-                    &request.context.mentions,
-                    request.context.alert_id.is_some() || request.context.rule_id.is_some(),
-                );
+                let mut groups = marked();
                 groups.extend(decided.iter());
                 groups
-                    .iter()
-                    .filter(|group| available.contains(group))
-                    .collect()
             }
-        };
+        }
+        .iter()
+        .filter(|group| available.contains(group))
+        .collect();
         // O que a conversa já carregou vem primeiro, na mesma ordem: a lista
         // de ferramentas repete a da pergunta anterior e o cache vale.
         let mut loaded: ToolGroups = request

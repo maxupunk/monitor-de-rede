@@ -47,6 +47,31 @@
 
     <v-col cols="12">
       <v-switch
+        :model-value="trainedInUse"
+        color="success"
+        density="compact"
+        inset
+        label="Modelo treinado com as ferramentas do NetMonitor"
+        :hint="trainedHint"
+        persistent-hint
+        @update:model-value="pickTrained"
+      >
+        <template v-if="trainedByHand" #append>
+          <v-btn
+            variant="text"
+            size="small"
+            color="primary"
+            prepend-icon="mdi-auto-fix"
+            @click="netmonitorTrained = null"
+          >
+            Detectar pelo modelo
+          </v-btn>
+        </template>
+      </v-switch>
+    </v-col>
+
+    <v-col cols="12">
+      <v-switch
         v-model="reasoning"
         color="primary"
         density="compact"
@@ -104,6 +129,7 @@ import {
 import {
   DEFAULT_MODELS,
   DEFAULT_OLLAMA_NUM_CTX,
+  NETMONITOR_TRAINED_HINT,
   OLLAMA_DEFAULT_BASE_URL,
   ollamaNumCtxFor,
   ollamaNumCtxOptions,
@@ -114,6 +140,10 @@ const baseUrl = defineModel<string | null | undefined>('baseUrl', { required: tr
 const model = defineModel<string | null | undefined>('model', { required: true })
 const numCtx = defineModel<number | null | undefined>('numCtx', { required: true })
 const reasoning = defineModel<boolean | undefined>('reasoning', { default: false })
+/** `null`: detecta pelo modelo; `true`/`false`: escolhido à mão para este modelo. */
+const netmonitorTrained = defineModel<boolean | null | undefined>('netmonitorTrained', {
+  default: null,
+})
 
 const emit = defineEmits<{
   (e: 'open-catalog'): void
@@ -130,10 +160,27 @@ const choices = computed(() =>
   )
 )
 
+const selectedChoice = computed(() => findOllamaChoice(choices.value, model.value))
 /** Janela nativa do modelo escolhido; `null` quando nem a tabela nem o Ollama a informam. */
-const modelWindow = computed(
-  () => findOllamaChoice(choices.value, model.value)?.contextLength ?? null
-)
+const modelWindow = computed(() => selectedChoice.value?.contextLength ?? null)
+
+/** Detectado pelo backend para o modelo escolhido (família `lfm3-netmonitor`). */
+const trainedDetected = computed(() => selectedChoice.value?.netmonitorTrained ?? false)
+const trainedByHand = computed(() => typeof netmonitorTrained.value === 'boolean')
+const trainedInUse = computed(() => netmonitorTrained.value ?? trainedDetected.value)
+const trainedHint = computed(() => {
+  const origin = trainedByHand.value
+    ? 'Escolhido à mão para este modelo.'
+    : trainedDetected.value
+      ? 'Detectado pelo modelo escolhido.'
+      : 'Não detectado: ligue se você ajustou este modelo para o NetMonitor.'
+  return `${origin} ${NETMONITOR_TRAINED_HINT}`
+})
+
+/** Igual à detecção, volta ao automático: assim a próxima troca de modelo acerta sozinha. */
+function pickTrained(value: boolean | null) {
+  netmonitorTrained.value = value === trainedDetected.value ? null : Boolean(value)
+}
 const numCtxOptions = computed(() => ollamaNumCtxOptions(modelWindow.value, numCtx.value))
 
 const numCtxHint = computed(() => {
@@ -171,6 +218,8 @@ function pickNumCtx(value: number | null) {
 watch(model, () => {
   followModelWindow = true
   applyModelWindow()
+  // A escolha à mão era para o modelo anterior: o novo é detectado.
+  netmonitorTrained.value = null
 })
 watch(modelWindow, () => {
   if (followModelWindow) applyModelWindow()

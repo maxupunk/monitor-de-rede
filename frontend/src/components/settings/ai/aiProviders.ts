@@ -17,6 +17,11 @@ export const OLLAMA_DEFAULT_BASE_URL = 'http://ollama:11434/v1'
 
 export const DEFAULT_OLLAMA_NUM_CTX = 16384
 
+/** O que muda no chat com um modelo treinado com as ferramentas do NetMonitor. */
+export const NETMONITOR_TRAINED_HINT =
+  'Envia o prompt enxuto direto ao modelo, sem o roteamento de ferramentas do Ollaya. ' +
+  'O Ollaya continua verificando a segurança dos comandos e pedindo a sua confirmação quando necessário.'
+
 /** Modelo usado quando o provedor está configurado sem modelo escolhido. */
 export const DEFAULT_MODELS: Record<AiDriver, string> = {
   opencode: 'muse-spark-1.3-contributor-free',
@@ -124,6 +129,7 @@ export function defaultAiSettings(): AiSettings {
     ollamaModel: DEFAULT_MODELS.ollama,
     ollamaNumCtx: DEFAULT_OLLAMA_NUM_CTX,
     ollamaReasoning: false,
+    ollamaNetmonitorTrained: null,
     allowActiveTools: true,
     requireToolConfirmation: false,
     actionMode: 'off',
@@ -176,6 +182,7 @@ export function normalizeAiSettings(settings: AiSettings): AiSettings {
     ollamaModel: extractModelId(settings.ollamaModel),
     ollamaNumCtx: settings.ollamaNumCtx || DEFAULT_OLLAMA_NUM_CTX,
     ollamaReasoning: settings.ollamaReasoning ?? false,
+    ollamaNetmonitorTrained: settings.ollamaNetmonitorTrained ?? null,
     proactive,
   }
 }

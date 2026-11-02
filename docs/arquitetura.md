@@ -791,11 +791,24 @@ cada falha encheria o banco com o próprio aviso.
 
 | Frente | Onde entra | Quando consulta | Onde a sugestão aparece |
 |---|---|---|---|
-| Ferramentas do chat | `harness/agent.rs`, junto da janela de contexto | cada pergunta | invisível: escolhe os grupos que vão ao chat (núcleo e o que foi marcado com `@` sempre vão); sem Decisor no ar, vai o catálogo inteiro |
+| Ferramentas do chat | `harness/agent.rs`, junto da janela de contexto | cada pergunta | invisível: escolhe os grupos que vão ao chat (núcleo e o que foi marcado com `@` sempre vão); sem Decisor no ar, vai o catálogo inteiro; com modelo treinado com as ferramentas do NetMonitor, não consulta (ver abaixo) |
 | Identificação | `discovery/decider_identity.rs`, depois de gravar a execução | host `unknown`/`web_device` ou sem sistema | chip na Descoberta (pelo snapshot `discovery:scan`) e no cadastro (`/devices/identify`) |
 | Interfaces | `snmp/decider_interfaces.rs` (`POST /api/snmp/interfaces/suggestions`) | ao mostrar a lista de interfaces | "Uplink sugerido", "Vale monitorar", "Selecionar sugeridas" |
 | Eventos de log | `syslog/categorizer.rs`, worker fora do caminho quente | uma vez por **padrão** novo (não por linha) | chip e filtro em `/logs`; "Criar alerta" abre o catálogo |
 | Triagem proativa | `proactive/triage.rs`, antes do teto por hora | cada alerta que abriria resumo | "Resumo pulado pelo Decisor" + "Gerar resumo agora" |
+
+**Modelo treinado com as ferramentas do NetMonitor.** A família
+`lfm3-netmonitor` (`netmonitor_trained` em `RECOMMENDED_MODELS`, `ollama.rs`)
+conhece o catálogo e o `load_tools`: com ela o chat **não** consulta o Decisor
+para escolher ferramentas e manda o prompt enxuto — núcleo, o que foi marcado
+com `@` e o catálogo `FERRAMENTAS SOB DEMANDA` no prompt de sistema. O resto
+chega pelo `load_tools` ou pela chamada direta pelo nome. Quem decide é
+`AiSettings::is_netmonitor_trained`: `ollama_netmonitor_trained` `None` detecta
+pela família do modelo (`ollama::is_known_netmonitor_trained`, qualquer tag ou
+quantização); `Some` é a chave da tela, para um modelo que a pessoa ajustou, e
+volta a `None` ao trocar de modelo. Só vale no Ollama. A **revisão das ações**
+(`approval::decide` com o `ActionReviewer`) e as frentes de fundo do Decisor
+não mudam: a ação de risco médio no automático continua passando pelo Decisor.
 
 **Modelo frio** (só no Ollaya; na nuvem o modelo está sempre pronto). Tirar o
 modelo do disco leva de segundos a minutos; o "tempo máximo por pergunta" vale

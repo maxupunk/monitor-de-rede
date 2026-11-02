@@ -75,6 +75,11 @@ export interface AiSettings {
   ollamaNumCtx?: number | null
   /** Deixa o modelo do Ollama raciocinar antes de responder (mais lento). */
   ollamaReasoning?: boolean
+  /**
+   * Modelo do Ollama treinado com as ferramentas do NetMonitor: `null` detecta
+   * pelo nome; `true`/`false` é a escolha da tela (volta a `null` ao trocar de modelo).
+   */
+  ollamaNetmonitorTrained?: boolean | null
   allowActiveTools: boolean
   requireToolConfirmation: boolean
   /** Ações (alertas, manutenção, monitores, regras): desligado, com confirmação ou automático. */
@@ -108,6 +113,8 @@ export interface OllamaModelItem {
   modifiedAt?: string | null
   /** Janela nativa em tokens, lida do `/api/show` (ausente se o Ollama não informou). */
   contextLength?: number | null
+  /** Da família treinada com as ferramentas do NetMonitor (prompt enxuto). */
+  netmonitorTrained?: boolean
 }
 
 export interface OllamaRecommendedModel {
@@ -119,6 +126,8 @@ export interface OllamaRecommendedModel {
   contextLength: number
   isInstalled: boolean
   toolCallingOptimized: boolean
+  /** Treinado com as ferramentas do NetMonitor: o chat dispensa o roteamento do Decisor. */
+  netmonitorTrained: boolean
 }
 
 export interface OllamaModelsResponse {

@@ -15,6 +15,16 @@
       <v-chip v-if="item.parameterSize" size="x-small" color="secondary" variant="tonal">
         {{ item.parameterSize }}
       </v-chip>
+      <v-chip
+        v-if="item.netmonitorTrained"
+        size="x-small"
+        color="success"
+        variant="flat"
+        :title="NETMONITOR_TRAINED_HINT"
+      >
+        <v-icon start size="12">mdi-school</v-icon>
+        Treinado p/ NetMonitor • Prompt puro
+      </v-chip>
     </template>
     <template v-else>
       <v-chip v-if="item.isFree" size="x-small" color="success" variant="tonal">
@@ -48,7 +58,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { contextLabel, type AiModelChoice } from './aiModelCatalog'
-import { DEFAULT_MODELS, type AiDriver } from './aiProviders'
+import { DEFAULT_MODELS, NETMONITOR_TRAINED_HINT, type AiDriver } from './aiProviders'
 
 /** Selos de um modelo (gratuito, instalado, contexto, ferramentas), iguais em toda a tela. */
 const props = defineProps<{

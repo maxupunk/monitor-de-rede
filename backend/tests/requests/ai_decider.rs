@@ -4,7 +4,8 @@
 //! de `OLLAYA_API_KEY`, nunca da tela; o autocomplete junta o catálogo ao que
 //! está instalado; o teste da tela mostra a probabilidade de cada grupo; e no
 //! chat, um grupo que as palavras-chave não acharam chega ao provedor porque
-//! o Decisor o indicou.
+//! o Decisor o indicou. Com um modelo treinado com as ferramentas do
+//! NetMonitor, o roteamento é pulado, mas a revisão das ações continua.
 
 use std::sync::{Arc, Mutex};
 
@@ -12,26 +13,31 @@ use async_trait::async_trait;
 use backend::{
     app::App,
     dtos::ai::{
-        ChatMessageInput, DeciderModelsResponse, TestConnectionResponse, TestDeciderResponse,
+        AiMention, AiMentionKind, ChatMessageInput, DeciderModelsResponse, TestConnectionResponse,
+        TestDeciderResponse,
     },
+    models::_entities::devices,
     services::{
         ai::{
             decider::config::AiDeciderSettings,
             drivers::traits::{
-                AiChatChunk, AiChatOptions, AiChunkStream, AiDriver, AiMessage, AiTool,
+                AiChatChunk, AiChatOptions, AiChunkStream, AiDriver, AiMessage, AiTool, AiToolCall,
             },
             harness::{
-                agent::{run_agent_loop, AgentRequest, ConversationMemory, ToolLoading},
+                agent::{
+                    run_agent_loop, AgentRequest, ConversationMemory, HarnessEvent, ToolLoading,
+                },
                 prompt::ChatContext,
                 tools::{ToolGroup, ToolPolicy},
             },
-            settings::{self, AiSettings},
+            settings::{self, AiAutomationMode, AiSettings},
         },
         shared::errors::AppResult,
     },
 };
 use futures::StreamExt;
 use loco_rs::testing::prelude::*;
+use sea_orm::{ActiveModelTrait, Set};
 use serde_json::json;
 use serial_test::serial;
 
@@ -139,6 +145,16 @@ async fn teste_da_tela_usa_a_chave_do_ambiente_e_mostra_cada_grupo() {
     .await;
 }
 
+/// Um modelo genérico: sem treino com as ferramentas do NetMonitor, é ele
+/// que passa pelo roteamento do Decisor (o padrão, `lfm3-netmonitor`, pula).
+fn generic(decider: AiDeciderSettings) -> AiSettings {
+    AiSettings {
+        ollama_model: Some("qwen2.5:7b".into()),
+        decider,
+        ..AiSettings::default()
+    }
+}
+
 /// Anota as ferramentas recebidas e responde texto.
 struct Anota(Arc<Mutex<Vec<String>>>);
 
@@ -186,6 +202,15 @@ async fn tools_sent(
     settings: AiSettings,
     question: &str,
 ) -> Vec<String> {
+    tools_sent_with(ctx, settings, question, ChatContext::default()).await
+}
+
+async fn tools_sent_with(
+    ctx: &loco_rs::app::AppContext,
+    settings: AiSettings,
+    question: &str,
+    context: ChatContext,
+) -> Vec<String> {
     let tools = Arc::new(Mutex::new(Vec::new()));
     run_agent_loop(
         ctx.clone(),
@@ -196,7 +221,7 @@ async fn tools_sent(
                 role: "user".into(),
                 content: question.into(),
             }],
-            context: ChatContext::default(),
+            context,
             policy: ToolPolicy::from_settings(&settings),
             tool_loading: ToolLoading::OnDemand,
             memory: ConversationMemory::default(),
@@ -215,10 +240,7 @@ async fn tools_sent(
 async fn com_decisor_so_vai_o_que_ele_escolheu() {
     request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
         with_key();
-        let settings = AiSettings {
-            decider: decider(fake_ollaya().await),
-            ..AiSettings::default()
-        };
+        let settings = generic(decider(fake_ollaya().await));
         let tools = tools_sent(&ctx, settings, "a aplicação do financeiro está de pé?").await;
         assert!(
             tools.iter().any(|name| name == "get_docker_containers"),
@@ -249,10 +271,7 @@ async fn sem_decisor_vai_o_catalogo_inteiro() {
             ..AiDeciderSettings::default()
         };
         for decider in [AiDeciderSettings::default(), fora_do_ar] {
-            let settings = AiSettings {
-                decider,
-                ..AiSettings::default()
-            };
+            let settings = generic(decider);
             let tools = tools_sent(&ctx, settings, "a aplicação do financeiro está de pé?").await;
             for esperada in [
                 "get_docker_containers",
@@ -270,6 +289,163 @@ async fn sem_decisor_vai_o_catalogo_inteiro() {
                 "não sobra nada a carregar: {tools:?}"
             );
         }
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn modelo_treinado_pula_o_roteamento_e_recebe_o_prompt_enxuto() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
+        with_key();
+        let ollaya = fake_ollaya::start(by_keyword(&[("", "docker")])).await;
+        // O padrão é o `lfm3-netmonitor`, treinado com as ferramentas.
+        let settings = AiSettings {
+            decider: ollaya.settings(),
+            ..AiSettings::default()
+        };
+        assert!(settings.is_netmonitor_trained());
+
+        let tools = tools_sent(
+            &ctx,
+            settings.clone(),
+            "a aplicação do financeiro está de pé?",
+        )
+        .await;
+        assert_eq!(ollaya.calls(), 0, "o Decisor não foi consultado");
+        for nucleo in ["load_tools", "list_devices", "get_system_summary"] {
+            assert!(
+                tools.iter().any(|name| name == nucleo),
+                "{nucleo}: {tools:?}"
+            );
+        }
+        for fora in [
+            "get_docker_containers",
+            "get_monitor_history",
+            "get_audit_log",
+        ] {
+            assert!(!tools.iter().any(|name| name == fora), "{fora}: {tools:?}");
+        }
+
+        // O que a pessoa marcou com `@` vai junto.
+        let marcado = ChatContext {
+            mentions: vec![AiMention {
+                kind: AiMentionKind::Source,
+                id: "docker".into(),
+                label: "Docker".into(),
+                detail: None,
+            }],
+            ..ChatContext::default()
+        };
+        let tools = tools_sent_with(&ctx, settings, "e os containers?", marcado).await;
+        assert!(
+            tools.iter().any(|name| name == "get_docker_containers"),
+            "{tools:?}"
+        );
+        assert_eq!(ollaya.calls(), 0);
+    })
+    .await;
+}
+
+/// Chama a ferramenta na primeira rodada e encerra na segunda.
+struct Roteiro(Mutex<Vec<AiChatChunk>>);
+
+#[async_trait]
+impl AiDriver for Roteiro {
+    fn id(&self) -> &'static str {
+        "fake"
+    }
+
+    fn display_name(&self) -> &'static str {
+        "Fake"
+    }
+
+    async fn chat_stream(
+        &self,
+        _messages: &[AiMessage],
+        _tools: &[AiTool],
+        _options: AiChatOptions,
+    ) -> AppResult<AiChunkStream> {
+        let resposta = self.0.lock().unwrap().pop().unwrap_or(AiChatChunk {
+            text_delta: Some("pronto".into()),
+            ..AiChatChunk::default()
+        });
+        Ok(Box::pin(futures::stream::iter(vec![Ok(resposta)])))
+    }
+
+    async fn test_connection(&self) -> AppResult<TestConnectionResponse> {
+        Ok(TestConnectionResponse {
+            success: true,
+            latency_ms: 0.0,
+            message: String::new(),
+            model: None,
+        })
+    }
+}
+
+#[tokio::test]
+#[serial]
+async fn modelo_treinado_continua_com_a_revisao_das_acoes() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
+        with_key();
+        // Toda ação proposta parece perigosa para este Decisor.
+        let ollaya = fake_ollaya::start(by_keyword(&[("", "dangerous")])).await;
+        devices::ActiveModel {
+            name: Set("BORDA".into()),
+            r#type: Set("router".into()),
+            status: Set("online".into()),
+            ip_address: Set(Some("127.0.0.1".into())),
+            ..Default::default()
+        }
+        .insert(&ctx.db)
+        .await
+        .unwrap();
+        // Automático: o risco médio rodaria sozinho, não fosse o Decisor.
+        let settings = AiSettings {
+            action_mode: AiAutomationMode::Auto,
+            decider: ollaya.settings(),
+            ..AiSettings::default()
+        };
+        assert!(settings.is_netmonitor_trained());
+        // O modelo treinado chama a ferramenta pelo nome, sem `load_tools`.
+        let chamada = AiChatChunk {
+            tool_calls: vec![AiToolCall {
+                id: "c-1".into(),
+                name: "create_maintenance_window".into(),
+                arguments: json!({ "device": "BORDA", "duration_minutes": 30 }).to_string(),
+            }],
+            ..AiChatChunk::default()
+        };
+        let eventos: Vec<HarnessEvent> = run_agent_loop(
+            ctx.clone(),
+            settings.clone(),
+            Box::new(Roteiro(Mutex::new(vec![chamada]))),
+            AgentRequest {
+                messages: vec![ChatMessageInput {
+                    role: "user".into(),
+                    content: "coloque a BORDA em manutenção".into(),
+                }],
+                context: ChatContext::default(),
+                policy: ToolPolicy::from_settings(&settings),
+                tool_loading: ToolLoading::OnDemand,
+                memory: ConversationMemory::default(),
+                actor: backend::services::audit::AuditActor::default(),
+            },
+        )
+        .await
+        .collect()
+        .await;
+
+        assert!(
+            eventos.iter().any(|evento| matches!(
+                evento,
+                HarnessEvent::ConfirmationRequired { name, .. } if name == "create_maintenance_window"
+            )),
+            "a ação volta ao usuário para confirmar"
+        );
+        assert_eq!(ollaya.calls(), 1, "só a revisão da ação, sem roteamento");
+        let estados = ollaya.states.lock().unwrap().clone();
+        assert!(estados[0].contains("Proposed action"), "{estados:?}");
     })
     .await;
 }

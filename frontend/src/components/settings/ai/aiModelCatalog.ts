@@ -27,6 +27,8 @@ export interface AiModelChoice {
   size: string | null
   /** Fornecedor no OpenRouter (`google/...` ➔ `google`). */
   vendor: string | null
+  /** Treinado com as ferramentas do NetMonitor (Ollama): o chat manda o prompt enxuto. */
+  netmonitorTrained: boolean
 }
 
 function choice(base: Pick<AiModelChoice, 'id'> & Partial<AiModelChoice>): AiModelChoice {
@@ -42,6 +44,7 @@ function choice(base: Pick<AiModelChoice, 'id'> & Partial<AiModelChoice>): AiMod
     isRecommended: false,
     size: null,
     vendor: null,
+    netmonitorTrained: false,
     ...base,
   }
 }
@@ -82,6 +85,7 @@ export function recommendedOllamaChoice(model: OllamaRecommendedModel): AiModelC
     isInstalled: model.isInstalled,
     isRecommended: true,
     supportsTools: model.toolCallingOptimized,
+    netmonitorTrained: model.netmonitorTrained,
     contextLength: model.contextLength || null,
     contextWindow: model.contextWindow,
     parameterSize: model.parameterSize,
@@ -111,6 +115,7 @@ export function ollamaChoices(
         parameterSize: model.parameterSize ?? null,
         contextLength: model.contextLength || null,
         contextWindow: model.contextLength ? formatContextWindow(model.contextLength) : null,
+        netmonitorTrained: model.netmonitorTrained ?? false,
         description: `Instalado no Ollama (${model.parameterSize || 'tamanho não informado'})`,
         supportsTools: lower.includes('tool') || lower.includes('groq') || isNetmonitorModel(lower),
       })

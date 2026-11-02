@@ -141,6 +141,9 @@ async fn conversar(
             timeout_ms: 5_000,
             ..AiDeciderSettings::default()
         },
+        // Modelo genérico: é ele que passa pelo roteamento do Decisor (o
+        // padrão, `lfm3-netmonitor`, é treinado e recebe o prompt enxuto).
+        ollama_model: Some("qwen2.5:7b".into()),
         ..AiSettings::default()
     };
     let eventos: Vec<HarnessEvent> = run_agent_loop(

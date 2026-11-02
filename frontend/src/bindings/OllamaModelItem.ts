@@ -4,4 +4,8 @@ export type OllamaModelItem = { name: string, size: bigint | null, parameterSize
 /**
  * Janela nativa do modelo em tokens (`*.context_length` do `/api/show`).
  */
-contextLength: number | null, };
+contextLength: number | null, 
+/**
+ * Da família treinada com as ferramentas do NetMonitor (prompt enxuto).
+ */
+netmonitorTrained: boolean, };

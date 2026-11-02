@@ -21,6 +21,13 @@ ollamaNumCtx: number | null,
  */
 ollamaReasoning: boolean, 
 /**
+ * O modelo do Ollama foi treinado com as ferramentas do NetMonitor?
+ * `None` (padrão) detecta pelo nome ([`ollama::is_known_netmonitor_trained`]);
+ * `Some` é a escolha da tela, para um modelo que a própria pessoa ajustou.
+ * A tela volta para `None` ao trocar de modelo.
+ */
+ollamaNetmonitorTrained: boolean | null, 
+/**
  * Permite executar ferramentas ativas (ping, traceroute, scan de portas)
  */
 allowActiveTools: boolean, 
