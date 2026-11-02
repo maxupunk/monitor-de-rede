@@ -3,7 +3,7 @@ import type { OpenCodeModelItem } from '@/bindings/OpenCodeModelItem'
 import type { OpenRouterModelItem } from '@/bindings/OpenRouterModelItem'
 import type { OllamaModelItem, OllamaRecommendedModel } from '@/stores/ai'
 import { isModelInstalled } from '@/stores/aiDecider'
-import { formatCompactCount, formatDecimalBytes } from '@/utils/formatters'
+import { formatCompactCount, formatContextWindow, formatDecimalBytes } from '@/utils/formatters'
 
 /**
  * Forma única de um modelo na tela, qualquer que seja o provedor: o seletor
@@ -82,6 +82,7 @@ export function recommendedOllamaChoice(model: OllamaRecommendedModel): AiModelC
     isInstalled: model.isInstalled,
     isRecommended: true,
     supportsTools: model.toolCallingOptimized,
+    contextLength: model.contextLength || null,
     contextWindow: model.contextWindow,
     parameterSize: model.parameterSize,
     description: model.description,
@@ -108,6 +109,8 @@ export function ollamaChoices(
         isInstalled: true,
         size: model.size ? formatDecimalBytes(model.size) : null,
         parameterSize: model.parameterSize ?? null,
+        contextLength: model.contextLength || null,
+        contextWindow: model.contextLength ? formatContextWindow(model.contextLength) : null,
         description: `Instalado no Ollama (${model.parameterSize || 'tamanho não informado'})`,
         supportsTools: lower.includes('tool') || lower.includes('groq') || isNetmonitorModel(lower),
       })
@@ -123,6 +126,9 @@ export function ollamaChoices(
             ...suggestion,
             isInstalled: true,
             size: existing.size,
+            // A janela lida do modelo instalado vale mais que a da tabela.
+            contextLength: existing.contextLength ?? suggestion.contextLength,
+            contextWindow: existing.contextWindow ?? suggestion.contextWindow,
             description: model.description || existing.description,
           }
         : suggestion
@@ -155,6 +161,20 @@ export function isOllamaModelInstalled(
   return isModelInstalled(
     installed.map((model) => model.name),
     name ?? ''
+  )
+}
+
+/** A escolha do Ollama para o nome digitado: `qwen3` acha `qwen3:latest`. */
+export function findOllamaChoice(
+  choices: readonly AiModelChoice[],
+  name: string | null | undefined
+): AiModelChoice | null {
+  const target = (name ?? '').trim()
+  if (!target) return null
+  return (
+    choices.find((item) => item.id === target) ??
+    choices.find((item) => isModelInstalled([item.id], target)) ??
+    null
   )
 }
 

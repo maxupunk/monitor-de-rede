@@ -1,5 +1,6 @@
 import type { AiSettings } from '@/stores/ai'
 import type { AiProactiveSettings } from '@/bindings/AiProactiveSettings'
+import { formatContextWindow } from '@/utils/formatters'
 
 /**
  * Fonte única dos padrões dos provedores de IA: endpoint, modelo, janela de
@@ -35,14 +36,64 @@ export const DRIVER_OPTIONS: { title: string; value: AiDriver }[] = [
   { title: 'OpenCode Go / Zen', value: 'opencode' },
 ]
 
-export const OLLAMA_NUM_CTX_OPTIONS: { title: string; value: number }[] = [
-  { title: '8.192 tokens (8k — econômico)', value: 8192 },
-  { title: '16.384 tokens (16k — recomendado)', value: 16384 },
-  { title: '32.768 tokens (32k — médio)', value: 32768 },
-  { title: '65.536 tokens (64k — amplo)', value: 65536 },
-  { title: '131.072 tokens (128k — estendido)', value: 131072 },
-  { title: '262.144 tokens (256k — máximo)', value: 262144 },
-]
+/** Degraus da janela do Ollama e o que cada um significa para quem escolhe. */
+const OLLAMA_NUM_CTX_STEPS: ReadonlyMap<number, string> = new Map([
+  [8192, 'econômico'],
+  [DEFAULT_OLLAMA_NUM_CTX, 'recomendado'],
+  [32768, 'médio'],
+  [65536, 'amplo'],
+  [131072, 'estendido'],
+  [262144, 'máximo'],
+])
+
+export interface NumCtxOption {
+  title: string
+  value: number
+}
+
+function positiveTokens(value: number | null | undefined): number | null {
+  return value && Number.isFinite(value) && value > 0 ? value : null
+}
+
+/**
+ * A janela que o campo assume ao escolher um modelo: a nativa dele (tabela
+ * de recomendados ou `/api/show` do instalado) ou, sem essa informação, a
+ * recomendada — a mesma `OLLAMA_CONTEXT_LENGTH` padrão do servidor.
+ */
+export function ollamaNumCtxFor(modelWindow: number | null | undefined): number {
+  return positiveTokens(modelWindow) ?? DEFAULT_OLLAMA_NUM_CTX
+}
+
+function numCtxTag(value: number, modelWindow: number | null): string | undefined {
+  if (modelWindow !== null && value === modelWindow) {
+    return value === DEFAULT_OLLAMA_NUM_CTX ? 'recomendado · máximo do modelo' : 'máximo do modelo'
+  }
+  if (modelWindow !== null && value > modelWindow) return 'acima do máximo do modelo'
+  return OLLAMA_NUM_CTX_STEPS.get(value)
+}
+
+/**
+ * Opções do campo `num_ctx` para o modelo escolhido: os degraus que cabem na
+ * janela dele, a própria janela (ex.: 40k do `qwen3`) e o valor atual, para
+ * ele nunca sumir da lista. Sem janela conhecida, todos os degraus.
+ */
+export function ollamaNumCtxOptions(
+  modelWindow: number | null | undefined,
+  current: number | null | undefined
+): NumCtxOption[] {
+  const max = positiveTokens(modelWindow)
+  const values = new Set([...OLLAMA_NUM_CTX_STEPS.keys()].filter((v) => max === null || v <= max))
+  if (max !== null) values.add(max)
+  const selected = positiveTokens(current)
+  if (selected !== null) values.add(selected)
+  return [...values]
+    .sort((a, b) => a - b)
+    .map((value) => {
+      const tag = numCtxTag(value, max)
+      const label = formatContextWindow(value, true)
+      return { value, title: tag ? `${label} — ${tag}` : label }
+    })
+}
 
 /** Antigo padrão gratuito do OpenRouter, retirado do ar: vira o roteador gratuito. */
 const RETIRED_OPENROUTER_MODEL = 'meta-llama/llama-3.3-70b-instruct:free'

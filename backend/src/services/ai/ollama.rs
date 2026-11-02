@@ -12,6 +12,7 @@ use serde::Deserialize;
 use tokio_stream::wrappers::ReceiverStream;
 
 use super::{
+    context_window::sources::parse_ollama_show,
     local_models::{self, BundledOllamaModel, PullTarget},
     local_server::LocalServer,
     settings::AiSettings,
@@ -95,141 +96,152 @@ pub fn bundled_model(model: &str) -> Option<&'static BundledOllamaModel> {
     BUNDLED_MODELS.iter().find(|spec| spec.matches(model))
 }
 
+/// Um modelo do catálogo recomendado: a tabela que a tela mostra e de onde
+/// sai a janela de contexto que o campo `num_ctx` assume ao escolher o modelo.
+pub struct RecommendedModel {
+    pub name: &'static str,
+    pub description: &'static str,
+    pub parameter_size: &'static str,
+    /// Janela nativa do modelo, em tokens (a `*.context_length` do GGUF).
+    pub context_length: u64,
+    pub tool_calling_optimized: bool,
+}
+
 /// Modelos recomendados para execução no Ollama com o NetMonitor.
-pub static RECOMMENDED_MODELS: &[(&str, &str, &str, &str, bool)] = &[
-    (
-        "lfm3-netmonitor:latest",
-        "LFM3 NetMonitor 1.7B (Q8_0 / Q8_K — Máxima precisão, padrão) — Especialista nas 61 ferramentas do NetMonitor (redes, Wi-Fi IEEE 802.11, fibra óptica GPON/SFP+, roteadores, Docker, backups, dashboard e web_search): 1,85 GB, 99,4% em ferramentas (nota 95,7 blind / 93,5 bench)",
-        "1.7B · Q8_0",
-        "256k",
-        true,
-    ),
-    (
-        "lfm3-netmonitor:q5_k_m",
-        "LFM3 NetMonitor 1.7B (Q5_K_M — Equilibrado) — Mesma especialização em redes e nas 61 ferramentas do NetMonitor com 32% menos memória: 1,26 GB, 100% segurança no blind (nota 95,8 blind / 94,1 bench, p95 2,9s)",
-        "1.7B · Q5_K_M",
-        "256k",
-        true,
-    ),
-    (
-        "lfm3-netmonitor:q4_k_m",
-        "LFM3 NetMonitor 1.7B (Q4_K_M — Ultraleve / Rápido) — Versão compacta de 4 bits para servidores com pouca RAM/CPU: 1,10 GB, ~61 tok/s (nota 95,2 blind / 94,5 bench, p95 2,8s)",
-        "1.7B · Q4_K_M",
-        "256k",
-        true,
-    ),
-    (
-        "ornith-1.5:9b",
-        "Ornith 1.5 9B — Modelo recomendado de grande porte: autoaperfeiçoamento, raciocínio avançado, ferramentas de rede e janela nativa de 256k",
-        "9B",
-        "256k",
-        true,
-    ),
-    (
-        "lfm3:latest",
-        "LFM3 1.7B — Modelo base tri-híbrido para agentes locais: 1,1 GB, roda em CPU e chama ferramentas (76,8% no benchmark de chat antes do ajuste)",
-        "1.7B",
-        "256k",
-        false,
-    ),
-    (
-        "llama3-groq-tool-use:8b",
-        "Llama 3 Groq Tool Use 8B — Especialista em execução de ferramentas de rede e diagnósticos (Function Calling)",
-        "8B",
-        "128k",
-        true,
-    ),
-    (
-        "llama3.2:3b",
-        "Llama 3.2 3B — Modelo ultraleve e veloz da Meta, excelente relação entre consumo e acurácia",
-        "3B",
-        "128k",
-        false,
-    ),
-    (
-        "llama3.2:1b",
-        "Llama 3.2 1B — Modelo mais compacto da Meta, consome menos de 2GB de RAM",
-        "1B",
-        "128k",
-        false,
-    ),
-    (
-        "llama3.3:70b",
-        "Llama 3.3 70B — Estado da arte da Meta em raciocínio, diagnóstico e código",
-        "70B",
-        "128k",
-        true,
-    ),
-    (
-        "deepseek-r1:8b",
-        "DeepSeek R1 8B — Especialista em raciocínio lógico avançado e arquitetura de redes",
-        "8B",
-        "128k",
-        false,
-    ),
-    (
-        "deepseek-r1:14b",
-        "DeepSeek R1 14B — Raciocínio profundo com alta capacidade analítica para sistemas",
-        "14B",
-        "128k",
-        false,
-    ),
-    (
-        "qwen2.5-coder:7b",
-        "Qwen 2.5 Coder 7B — Especialista em automação técnica, scripts e infraestrutura",
-        "7B",
-        "32k",
-        true,
-    ),
-    (
-        "gemma4:e2b",
-        "Gemma 4 e2b — Modelo ultraleve do Google, ideal para respostas instantâneas em servidores com recursos modestos",
-        "2B",
-        "128k",
-        false,
-    ),
-    (
-        "gemma4:e4b",
-        "Gemma 4 e4b — Equilíbrio ideal entre consumo de memória e capacidade de resolução de problemas",
-        "4B",
-        "128k",
-        false,
-    ),
-    (
-        "qwen3:8b",
-        "Qwen 3 8B — Excelente raciocínio lógico, análise estruturada e alta precisão em língua portuguesa",
-        "8B",
-        "128k",
-        false,
-    ),
-    (
-        "qwen3.8:27b",
-        "Qwen 3.8 27B — Alta precisão, raciocínio técnico avançado, suporte a ferramentas e janela de 262k",
-        "27B",
-        "262k",
-        true,
-    ),
-    (
-        "granite4.2:latest",
-        "Granite 4.2 — Modelo corporativo da IBM otimizado para operações de TI, automação e infraestrutura",
-        "8B",
-        "128k",
-        false,
-    ),
-    (
-        "mixtral:8x7b",
-        "Mixtral 8x7B — Arquitetura Mixture-of-Experts para análises complexas e correlações avançadas de rede",
-        "46.7B",
-        "32k",
-        false,
-    ),
-    (
-        "phi4:14b",
-        "Phi-4 14B — Modelo da Microsoft com excepcional raciocínio sintético e síntese técnica",
-        "14B",
-        "16k",
-        false,
-    ),
+pub static RECOMMENDED_MODELS: &[RecommendedModel] = &[
+    RecommendedModel {
+        name: "lfm3-netmonitor:latest",
+        description: "LFM3 NetMonitor 1.7B (Q8_0 / Q8_K — Máxima precisão, padrão) — Especialista nas 61 ferramentas do NetMonitor (redes, Wi-Fi IEEE 802.11, fibra óptica GPON/SFP+, roteadores, Docker, backups, dashboard e web_search): 1,85 GB, 99,4% em ferramentas (nota 95,7 blind / 93,5 bench)",
+        parameter_size: "1.7B · Q8_0",
+        context_length: 262_144,
+        tool_calling_optimized: true,
+    },
+    RecommendedModel {
+        name: "lfm3-netmonitor:q5_k_m",
+        description: "LFM3 NetMonitor 1.7B (Q5_K_M — Equilibrado) — Mesma especialização em redes e nas 61 ferramentas do NetMonitor com 32% menos memória: 1,26 GB, 100% segurança no blind (nota 95,8 blind / 94,1 bench, p95 2,9s)",
+        parameter_size: "1.7B · Q5_K_M",
+        context_length: 262_144,
+        tool_calling_optimized: true,
+    },
+    RecommendedModel {
+        name: "lfm3-netmonitor:q4_k_m",
+        description: "LFM3 NetMonitor 1.7B (Q4_K_M — Ultraleve / Rápido) — Versão compacta de 4 bits para servidores com pouca RAM/CPU: 1,10 GB, ~61 tok/s (nota 95,2 blind / 94,5 bench, p95 2,8s)",
+        parameter_size: "1.7B · Q4_K_M",
+        context_length: 262_144,
+        tool_calling_optimized: true,
+    },
+    RecommendedModel {
+        name: "ornith-1.5:9b",
+        description: "Ornith 1.5 9B — Modelo recomendado de grande porte: autoaperfeiçoamento, raciocínio avançado, ferramentas de rede e janela nativa de 256k",
+        parameter_size: "9B",
+        context_length: 262_144,
+        tool_calling_optimized: true,
+    },
+    RecommendedModel {
+        name: "lfm3:latest",
+        description: "LFM3 1.7B — Modelo base tri-híbrido para agentes locais: 1,1 GB, roda em CPU e chama ferramentas (76,8% no benchmark de chat antes do ajuste)",
+        parameter_size: "1.7B",
+        context_length: 262_144,
+        tool_calling_optimized: false,
+    },
+    RecommendedModel {
+        name: "llama3-groq-tool-use:8b",
+        description: "Llama 3 Groq Tool Use 8B — Especialista em execução de ferramentas de rede e diagnósticos (Function Calling)",
+        parameter_size: "8B",
+        context_length: 8_192,
+        tool_calling_optimized: true,
+    },
+    RecommendedModel {
+        name: "llama3.2:3b",
+        description: "Llama 3.2 3B — Modelo ultraleve e veloz da Meta, excelente relação entre consumo e acurácia",
+        parameter_size: "3B",
+        context_length: 131_072,
+        tool_calling_optimized: false,
+    },
+    RecommendedModel {
+        name: "llama3.2:1b",
+        description: "Llama 3.2 1B — Modelo mais compacto da Meta, consome menos de 2GB de RAM",
+        parameter_size: "1B",
+        context_length: 131_072,
+        tool_calling_optimized: false,
+    },
+    RecommendedModel {
+        name: "llama3.3:70b",
+        description: "Llama 3.3 70B — Estado da arte da Meta em raciocínio, diagnóstico e código",
+        parameter_size: "70B",
+        context_length: 131_072,
+        tool_calling_optimized: true,
+    },
+    RecommendedModel {
+        name: "deepseek-r1:8b",
+        description: "DeepSeek R1 8B — Especialista em raciocínio lógico avançado e arquitetura de redes",
+        parameter_size: "8B",
+        context_length: 131_072,
+        tool_calling_optimized: false,
+    },
+    RecommendedModel {
+        name: "deepseek-r1:14b",
+        description: "DeepSeek R1 14B — Raciocínio profundo com alta capacidade analítica para sistemas",
+        parameter_size: "14B",
+        context_length: 131_072,
+        tool_calling_optimized: false,
+    },
+    RecommendedModel {
+        name: "qwen2.5-coder:7b",
+        description: "Qwen 2.5 Coder 7B — Especialista em automação técnica, scripts e infraestrutura",
+        parameter_size: "7B",
+        context_length: 32_768,
+        tool_calling_optimized: true,
+    },
+    RecommendedModel {
+        name: "gemma4:e2b",
+        description: "Gemma 4 e2b — Modelo ultraleve do Google, ideal para respostas instantâneas em servidores com recursos modestos",
+        parameter_size: "2B",
+        context_length: 131_072,
+        tool_calling_optimized: false,
+    },
+    RecommendedModel {
+        name: "gemma4:e4b",
+        description: "Gemma 4 e4b — Equilíbrio ideal entre consumo de memória e capacidade de resolução de problemas",
+        parameter_size: "4B",
+        context_length: 131_072,
+        tool_calling_optimized: false,
+    },
+    RecommendedModel {
+        name: "qwen3:8b",
+        description: "Qwen 3 8B — Excelente raciocínio lógico, análise estruturada e alta precisão em língua portuguesa",
+        parameter_size: "8B",
+        context_length: 40_960,
+        tool_calling_optimized: false,
+    },
+    RecommendedModel {
+        name: "qwen3.8:27b",
+        description: "Qwen 3.8 27B — Alta precisão, raciocínio técnico avançado, suporte a ferramentas e janela de 256k",
+        parameter_size: "27B",
+        context_length: 262_144,
+        tool_calling_optimized: true,
+    },
+    RecommendedModel {
+        name: "granite4.2:latest",
+        description: "Granite 4.2 — Modelo corporativo da IBM otimizado para operações de TI, automação e infraestrutura",
+        parameter_size: "8B",
+        context_length: 131_072,
+        tool_calling_optimized: false,
+    },
+    RecommendedModel {
+        name: "mixtral:8x7b",
+        description: "Mixtral 8x7B — Arquitetura Mixture-of-Experts para análises complexas e correlações avançadas de rede",
+        parameter_size: "46.7B",
+        context_length: 32_768,
+        tool_calling_optimized: false,
+    },
+    RecommendedModel {
+        name: "phi4:14b",
+        description: "Phi-4 14B — Modelo da Microsoft com excepcional raciocínio sintético e síntese técnica",
+        parameter_size: "14B",
+        context_length: 16_384,
+        tool_calling_optimized: false,
+    },
 ];
 
 /// Normaliza a URL base do Ollama, removendo sufixos `/v1` e barras finais.
@@ -317,6 +329,41 @@ struct OllamaTagsResponse {
     models: Option<Vec<OllamaTagItem>>,
 }
 
+/// Rótulo curto de uma janela de contexto: `262_144` ➔ `256k`, `40_960` ➔ `40k`.
+#[must_use]
+pub fn context_window_label(tokens: u64) -> String {
+    if tokens < 1024 {
+        tokens.to_string()
+    } else {
+        format!("{}k", tokens / 1024)
+    }
+}
+
+/// A janela nativa de cada modelo instalado, pelo `/api/show` (em paralelo:
+/// o `/api/tags` não a informa). Quem não responder fica sem — a tela usa a
+/// do catálogo ou a recomendada.
+async fn fill_context_lengths(
+    client: &reqwest::Client,
+    root_url: &str,
+    items: &mut [OllamaModelItem],
+) {
+    let show_url = format!("{root_url}/api/show");
+    let lengths = futures::future::join_all(items.iter().map(|item| {
+        let request = client
+            .post(&show_url)
+            .json(&serde_json::json!({ "model": item.name }));
+        async move {
+            let response = request.send().await.ok()?.error_for_status().ok()?;
+            let show = response.json::<serde_json::Value>().await.ok()?;
+            parse_ollama_show(&show).0
+        }
+    }))
+    .await;
+    for (item, length) in items.iter_mut().zip(lengths) {
+        item.context_length = length;
+    }
+}
+
 /// Consulta os modelos instalados no Ollama e retorna cruzados com os recomendados.
 pub async fn list_models(base_url: &str) -> AppResult<OllamaModelsResponse> {
     let root_url = locate_root(base_url).await;
@@ -341,8 +388,10 @@ pub async fn list_models(base_url: &str) -> AppResult<OllamaModelsResponse> {
                         size: m.size,
                         parameter_size: m.details.and_then(|d| d.parameter_size),
                         modified_at: m.modified_at,
+                        context_length: None,
                     })
                     .collect();
+                fill_context_lengths(&client, &root_url, &mut items).await;
                 items.sort_by_key(|m| {
                     BUNDLED_MODELS
                         .iter()
@@ -375,25 +424,24 @@ pub async fn list_models(base_url: &str) -> AppResult<OllamaModelsResponse> {
 
     let recommended: Vec<OllamaRecommendedModel> = RECOMMENDED_MODELS
         .iter()
-        .map(
-            |&(name, desc, param_size, context_window, tool_optimized)| {
-                let is_installed = local_models::is_installed(&installed_names, name)
-                    || bundled_model(name).is_some_and(|spec| {
-                        spec.aliases
-                            .iter()
-                            .any(|alias| local_models::is_installed(&installed_names, alias))
-                    });
+        .map(|model| {
+            let is_installed = local_models::is_installed(&installed_names, model.name)
+                || bundled_model(model.name).is_some_and(|spec| {
+                    spec.aliases
+                        .iter()
+                        .any(|alias| local_models::is_installed(&installed_names, alias))
+                });
 
-                OllamaRecommendedModel {
-                    name: name.to_string(),
-                    description: desc.to_string(),
-                    parameter_size: param_size.to_string(),
-                    context_window: context_window.to_string(),
-                    is_installed,
-                    tool_calling_optimized: tool_optimized,
-                }
-            },
-        )
+            OllamaRecommendedModel {
+                name: model.name.to_string(),
+                description: model.description.to_string(),
+                parameter_size: model.parameter_size.to_string(),
+                context_window: context_window_label(model.context_length),
+                context_length: model.context_length,
+                is_installed,
+                tool_calling_optimized: model.tool_calling_optimized,
+            }
+        })
         .collect();
 
     Ok(OllamaModelsResponse {
@@ -481,6 +529,25 @@ mod tests {
             locate_openai_base("http://10.0.0.5:11434/v1").await,
             "http://10.0.0.5:11434/v1"
         );
+    }
+
+    #[test]
+    fn rotulo_da_janela_em_k_binario() {
+        assert_eq!(context_window_label(262_144), "256k");
+        assert_eq!(context_window_label(131_072), "128k");
+        assert_eq!(context_window_label(40_960), "40k");
+        assert_eq!(context_window_label(512), "512");
+    }
+
+    #[test]
+    fn todo_recomendado_tem_janela_que_a_tela_aceita() {
+        for model in RECOMMENDED_MODELS {
+            assert!(
+                model.context_length >= 4096,
+                "{} sem janela de contexto plausível",
+                model.name
+            );
+        }
     }
 
     #[test]

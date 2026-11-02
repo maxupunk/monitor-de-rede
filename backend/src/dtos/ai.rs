@@ -535,6 +535,10 @@ pub struct OllamaModelItem {
     pub parameter_size: Option<String>,
     #[serde(default)]
     pub modified_at: Option<String>,
+    /// Janela nativa do modelo em tokens (`*.context_length` do `/api/show`).
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub context_length: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -544,7 +548,11 @@ pub struct OllamaRecommendedModel {
     pub name: String,
     pub description: String,
     pub parameter_size: String,
+    /// Rótulo da janela (ex.: `128k`), derivado de `context_length`.
     pub context_window: String,
+    /// Janela nativa do modelo em tokens: o `num_ctx` que a tela assume.
+    #[ts(type = "number")]
+    pub context_length: u64,
     pub is_installed: bool,
     pub tool_calling_optimized: bool,
 }

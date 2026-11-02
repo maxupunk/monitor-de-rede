@@ -836,6 +836,16 @@ OpenAI, o mesmo driver dos provedores na nuvem).
   janela que vale é a `OLLAMA_CONTEXT_LENGTH` do serviço (16.384, a padrão da
   tela). Sem ela o Ollama usa a dele (4.096 com pouca VRAM) e corta o prompt em
   silêncio — as ferramentas somem.
+  O campo "Janela de contexto (num_ctx)" acompanha o modelo escolhido: vale a
+  janela nativa dele — a da tabela `RECOMMENDED_MODELS` (`context_length`, em
+  tokens) ou, para o instalado, a `*.context_length` do `/api/show` (que vale
+  mais que a tabela) — e, sem nenhuma das duas, a recomendada (16.384, a mesma
+  `OLLAMA_CONTEXT_LENGTH` padrão). A lista só oferece degraus que cabem no
+  modelo; o valor salvo só muda quando se troca de modelo
+  (`aiProviders.ts`: `ollamaNumCtxFor`/`ollamaNumCtxOptions`). Como o `/v1`
+  não obedece o `num_ctx`, o chat nunca conta com mais janela do que a do
+  modelo carregado (`/api/ps`) nem que o máximo do modelo
+  (`ollama_effective_window`).
 - **Raciocínio.** "Raciocinar antes de responder" (`ollama_reasoning`) vem
   desligado: o driver envia `reasoning_effort: none`. Ligado, nada é enviado
   (o modelo pensa) e o `max_tokens` sobe para no mínimo 4.096, porque o

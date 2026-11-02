@@ -106,6 +106,8 @@ export interface OllamaModelItem {
   size?: number | null
   parameterSize?: string | null
   modifiedAt?: string | null
+  /** Janela nativa em tokens, lida do `/api/show` (ausente se o Ollama não informou). */
+  contextLength?: number | null
 }
 
 export interface OllamaRecommendedModel {
@@ -113,6 +115,8 @@ export interface OllamaRecommendedModel {
   description: string
   parameterSize: string
   contextWindow: string
+  /** Janela nativa em tokens: o `num_ctx` que a tela assume ao escolher o modelo. */
+  contextLength: number
   isInstalled: boolean
   toolCallingOptimized: boolean
 }

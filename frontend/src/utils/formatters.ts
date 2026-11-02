@@ -193,6 +193,17 @@ export function formatCompactCount(value?: number | null, fallback = '—'): str
   return `${(value / divisor).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} ${suffix}`
 }
 
+/**
+ * Janela de contexto de modelo local, em k binário como o Ollama a anuncia:
+ * `262144` ➔ `256k`, `40960` ➔ `40k`. Com `detailed`, junta o número exato:
+ * `16.384 tokens (16k)`.
+ */
+export function formatContextWindow(tokens?: number | null, detailed = false): string {
+  if (tokens === null || tokens === undefined || !Number.isFinite(tokens) || tokens <= 0) return '—'
+  const short = tokens < 1024 ? String(tokens) : `${Math.floor(tokens / 1024)}k`
+  return detailed ? `${tokens.toLocaleString('pt-BR')} tokens (${short})` : short
+}
+
 /** Hora cheia do dia (0–23) como relógio: `8` ➔ `08:00` (agendas diárias). */
 export function formatHourOfDay(hour: number): string {
   return `${String(hour).padStart(2, '0')}:00`

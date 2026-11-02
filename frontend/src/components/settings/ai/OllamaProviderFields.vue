@@ -31,16 +31,17 @@
 
     <v-col cols="12" md="6">
       <v-select
-        v-model="numCtx"
+        :model-value="numCtx"
         label="Janela de contexto (num_ctx)"
-        :items="OLLAMA_NUM_CTX_OPTIONS"
+        :items="numCtxOptions"
         item-title="title"
         item-value="value"
         variant="outlined"
         density="compact"
         prepend-inner-icon="mdi-memory"
-        hint="16k a 32k atende a maioria dos modelos locais. O novo limite vale depois de Salvar."
+        :hint="numCtxHint"
         persistent-hint
+        @update:model-value="pickNumCtx"
       />
     </v-col>
 
@@ -89,12 +90,24 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, watch } from 'vue'
 import { useAiStore } from '@/stores/ai'
 import AiModelPicker from './AiModelPicker.vue'
 import OllamaModelInstaller from './OllamaModelInstaller.vue'
-import { isOllamaModelInstalled, ollamaChoices, withTypedModel } from './aiModelCatalog'
-import { DEFAULT_MODELS, OLLAMA_DEFAULT_BASE_URL, OLLAMA_NUM_CTX_OPTIONS } from './aiProviders'
+import { formatContextWindow } from '@/utils/formatters'
+import {
+  findOllamaChoice,
+  isOllamaModelInstalled,
+  ollamaChoices,
+  withTypedModel,
+} from './aiModelCatalog'
+import {
+  DEFAULT_MODELS,
+  DEFAULT_OLLAMA_NUM_CTX,
+  OLLAMA_DEFAULT_BASE_URL,
+  ollamaNumCtxFor,
+  ollamaNumCtxOptions,
+} from './aiProviders'
 
 /** Campos do Ollama local. Montar é escolher o provedor: consulta o servidor. */
 const baseUrl = defineModel<string | null | undefined>('baseUrl', { required: true })
@@ -116,6 +129,52 @@ const choices = computed(() =>
     isOllamaModelInstalled(aiStore.installedOllamaModels, model.value)
   )
 )
+
+/** Janela nativa do modelo escolhido; `null` quando nem a tabela nem o Ollama a informam. */
+const modelWindow = computed(
+  () => findOllamaChoice(choices.value, model.value)?.contextLength ?? null
+)
+const numCtxOptions = computed(() => ollamaNumCtxOptions(modelWindow.value, numCtx.value))
+
+const numCtxHint = computed(() => {
+  const parts = [
+    modelWindow.value
+      ? `Este modelo aceita até ${formatContextWindow(modelWindow.value)} tokens; menos gasta menos memória.`
+      : `Janela do modelo não informada: vale a recomendada (${formatContextWindow(DEFAULT_OLLAMA_NUM_CTX)}).`,
+  ]
+  if ((numCtx.value ?? 0) > DEFAULT_OLLAMA_NUM_CTX) {
+    parts.push(
+      `Acima de ${formatContextWindow(DEFAULT_OLLAMA_NUM_CTX)}, suba também a OLLAMA_CONTEXT_LENGTH do servidor.`
+    )
+  }
+  parts.push('Vale depois de Salvar.')
+  return parts.join(' ')
+})
+
+/**
+ * Trocar o modelo leva a janela junto: a do modelo, ou a recomendada. Se a
+ * janela só chega depois (lista ainda carregando, modelo recém-instalado),
+ * ela é aplicada quando chegar — até a pessoa escolher outra à mão. O valor
+ * salvo não é tocado ao abrir a tela: só uma troca de modelo o altera.
+ */
+let followModelWindow = false
+
+function applyModelWindow() {
+  numCtx.value = ollamaNumCtxFor(modelWindow.value)
+}
+
+function pickNumCtx(value: number | null) {
+  followModelWindow = false
+  numCtx.value = value
+}
+
+watch(model, () => {
+  followModelWindow = true
+  applyModelWindow()
+})
+watch(modelWindow, () => {
+  if (followModelWindow) applyModelWindow()
+})
 
 function refresh() {
   void aiStore.loadOllamaModels(baseUrl.value)

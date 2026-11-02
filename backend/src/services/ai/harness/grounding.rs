@@ -118,9 +118,10 @@ async fn registered<C: ConnectionTrait>(db: &C, target: &str) -> AppResult<bool>
         value == wanted || mentions(&value, &wanted)
     };
     let devices = devices::Entity::find().all(db).await?;
-    if devices.iter().any(|device| {
-        same(&device.name) || device.ip_address.as_deref().is_some_and(same)
-    }) {
+    if devices
+        .iter()
+        .any(|device| same(&device.name) || device.ip_address.as_deref().is_some_and(same))
+    {
         return Ok(true);
     }
     let monitors = monitors::Entity::find().all(db).await?;

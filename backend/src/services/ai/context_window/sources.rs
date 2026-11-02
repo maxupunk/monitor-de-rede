@@ -221,8 +221,11 @@ pub fn parse_ollama_show(show: &Value) -> (Option<u64>, Option<u64>) {
 
 /// A janela que o Ollama vai usar, em ordem:
 ///
-/// 1. `forced`: o `num_ctx` da tela, que o driver manda em toda requisição —
-///    o Ollama recarrega o modelo com ele, então é certo;
+/// 1. `forced`: o `num_ctx` da tela, que o driver manda em toda requisição,
+///    limitado ao modelo carregado e ao máximo do modelo — o `/v1` do Ollama
+///    ignora o `num_ctx` e quem manda é a `OLLAMA_CONTEXT_LENGTH`, então a
+///    janela da tela (que acompanha o modelo escolhido) nunca promete mais
+///    do que o servidor de fato abriu;
 /// 2. `running`: a janela do modelo carregado agora (`/api/ps`), que já
 ///    reflete Modelfile, `OLLAMA_CONTEXT_LENGTH` e o ajuste por VRAM;
 /// 3. sem modelo carregado, o `num_ctx` do Modelfile (`/api/show`) ou o
@@ -238,7 +241,11 @@ pub fn ollama_effective_window(
     modelfile_num_ctx: Option<u64>,
 ) -> Option<LearnedWindow> {
     if let Some(configured) = forced {
-        return Some(LearnedWindow::confident(configured));
+        let tokens = [running, max]
+            .into_iter()
+            .flatten()
+            .fold(configured, u64::min);
+        return Some(LearnedWindow::confident(tokens));
     }
     if let Some(tokens) = running {
         return Some(LearnedWindow::confident(tokens));
@@ -378,9 +385,19 @@ mod tests {
             Some(LearnedWindow::confident(8192))
         );
         assert_eq!(
-            ollama_effective_window(Some(16_384), Some(8192), Some(131_072), Some(4096)),
+            ollama_effective_window(Some(16_384), None, Some(131_072), Some(4096)),
             Some(LearnedWindow::confident(16_384)),
-            "o num_ctx da tela vai em toda requisição: vale mais que tudo"
+            "o num_ctx da tela vai em toda requisição: vale mais que o Modelfile"
+        );
+        assert_eq!(
+            ollama_effective_window(Some(262_144), Some(16_384), Some(262_144), None),
+            Some(LearnedWindow::confident(16_384)),
+            "a tela não promete mais que a janela que o servidor abriu"
+        );
+        assert_eq!(
+            ollama_effective_window(Some(262_144), None, Some(131_072), None),
+            Some(LearnedWindow::confident(131_072)),
+            "nem mais que o máximo do modelo"
         );
         assert_eq!(
             ollama_effective_window(None, Some(16_384), Some(131_072), Some(8192)),
