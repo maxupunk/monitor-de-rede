@@ -27,7 +27,7 @@ use super::{
         target_device_id, AiToolRisk, RiskAssessment, ToolArgs, ToolGroup, ToolGroups, ToolKind,
         ToolPolicy, ToolRegistry, LOAD_TOOLS,
     },
-    turn::{compact_for_model, context_groups, is_small_talk, requested_groups},
+    turn::{compact_for_model, context_groups, is_small_talk, question_groups, requested_groups},
 };
 use crate::{
     dtos::ai::{AiChart, ChatMessageInput, ChatStreamRequest},
@@ -688,8 +688,13 @@ pub async fn run_agent_loop(
         let preselected: ToolGroups = match (request.tool_loading, routed) {
             (ToolLoading::Everything, _) => everything(),
             (ToolLoading::OnDemand, _) if small_talk => ToolGroups::new(),
-            // Prompt enxuto: núcleo e o marcado; o resto, pelo `load_tools`.
-            (ToolLoading::OnDemand, _) if trained => marked(),
+            // Prompt enxuto: núcleo, o marcado e até 3 grupos claros da
+            // pergunta; o resto entra sob demanda pelo `load_tools`.
+            (ToolLoading::OnDemand, _) if trained => {
+                let mut groups = marked();
+                groups.extend(question_groups(question).iter());
+                groups
+            }
             // Sem Decisor não há quem escolha: vai o catálogo inteiro.
             (ToolLoading::OnDemand, None) => everything(),
             // O Decisor escolhe; o marcado entra junto.

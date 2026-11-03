@@ -64,7 +64,7 @@ use loco_rs::prelude::AppContext;
 use serde_json::{json, Value};
 
 pub use args::ToolArgs;
-pub use lookup::device_matches;
+pub use lookup::{device_ip, device_matches, device_not_found, fill_device_ip, monitor_target};
 pub use plugins::target_device_id;
 pub use risk::{AiToolRisk, Approval, RiskAssessment};
 
@@ -479,6 +479,19 @@ fn as_output<T>(result: AppResult<T>) -> AppResult<Result<T, ToolOutput>> {
             | AppError::BusinessRule(_)),
         ) => Ok(Err(ToolOutput::not_found(error.to_string()))),
         Err(error) => Err(error),
+    }
+}
+
+/// Texto do preview de uma ação ou o motivo da recusa de validação.
+pub(super) fn preview_or_error(result: Result<String, ToolOutput>) -> String {
+    match result {
+        Ok(text) => text,
+        Err(output) => format!(
+            "Ação inválida: {}",
+            output.data["error"]
+                .as_str()
+                .unwrap_or("argumentos incompletos")
+        ),
     }
 }
 

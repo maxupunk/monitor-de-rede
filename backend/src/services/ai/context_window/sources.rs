@@ -285,10 +285,58 @@ impl OllamaLookup {
     }
 }
 
+/// Preserva os parâmetros atuais do Modelfile (`/api/show`) e atualiza `num_ctx`,
+/// para que o `/v1/chat/completions` do Ollama — que ignora `num_ctx` no corpo
+/// da requisição — carregue o modelo com a janela escolhida na tela.
+#[must_use]
+pub fn merged_ollama_parameters(show: &Value, num_ctx: u64) -> serde_json::Map<String, Value> {
+    let mut params = serde_json::Map::new();
+    if let Some(raw) = show["parameters"].as_str() {
+        for line in raw.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let Some((key, rest)) = trimmed.split_once(char::is_whitespace) else {
+                continue;
+            };
+            let key = key.trim();
+            if key == "num_ctx" {
+                continue;
+            }
+            let val_str = rest.trim().trim_matches('"');
+            let parsed = if let Ok(int_val) = val_str.parse::<i64>() {
+                json!(int_val)
+            } else if let Ok(float_val) = val_str.parse::<f64>() {
+                json!(float_val)
+            } else if let Ok(bool_val) = val_str.parse::<bool>() {
+                json!(bool_val)
+            } else {
+                json!(val_str)
+            };
+            match params.get_mut(key) {
+                Some(Value::Array(items)) => items.push(parsed),
+                Some(existing) => {
+                    let prev = existing.take();
+                    *existing = Value::Array(vec![prev, parsed]);
+                }
+                None => {
+                    params.insert(key.to_string(), parsed);
+                }
+            }
+        }
+    }
+    params.insert("num_ctx".to_string(), json!(num_ctx));
+    params
+}
+
 #[async_trait]
 impl WindowLookup for OllamaLookup {
     fn cache_key(&self) -> String {
-        format!("ollama:{}", self.base_url)
+        match self.num_ctx {
+            Some(num_ctx) => format!("ollama:{}:{num_ctx}", self.base_url),
+            None => format!("ollama:{}", self.base_url),
+        }
     }
 
     /// Curto: carregar outro modelo ou mudar `num_ctx` muda a janela.
@@ -297,24 +345,49 @@ impl WindowLookup for OllamaLookup {
     }
 
     async fn fetch(&self, model: &str) -> HashMap<String, LearnedWindow> {
-        let running = get_json(&format!("{}/api/ps", self.base_url), None)
+        let mut running = get_json(&format!("{}/api/ps", self.base_url), None)
             .await
             .and_then(|ps| parse_ollama_ps(&ps, model));
-        let (max, num_ctx) = match client() {
+        let show = match client() {
             Some(client) => match client
                 .post(format!("{}/api/show", self.base_url))
                 .json(&json!({ "model": model }))
                 .send()
                 .await
             {
-                Ok(response) if response.status().is_success() => response
-                    .json::<Value>()
-                    .await
-                    .map_or((None, None), |show| parse_ollama_show(&show)),
-                _ => (None, None),
+                Ok(response) if response.status().is_success() => {
+                    response.json::<Value>().await.ok()
+                }
+                _ => None,
             },
-            None => (None, None),
+            None => None,
         };
+        let (max, mut num_ctx) = show.as_ref().map_or((None, None), parse_ollama_show);
+
+        if let (Some(forced), Some(show_json), Some(http)) = (self.num_ctx, show.as_ref(), client())
+        {
+            let desired = max.map_or(forced, |limit| forced.min(limit));
+            if num_ctx != Some(desired) {
+                let parameters = merged_ollama_parameters(show_json, desired);
+                if let Ok(res) = http
+                    .post(format!("{}/api/create", self.base_url))
+                    .json(&json!({
+                        "model": model,
+                        "from": model,
+                        "parameters": parameters,
+                        "stream": false,
+                    }))
+                    .send()
+                    .await
+                {
+                    if res.status().is_success() {
+                        num_ctx = Some(desired);
+                        running = None;
+                    }
+                }
+            }
+        }
+
         ollama_effective_window(self.num_ctx, running, max, num_ctx)
             .map(|window| HashMap::from([(model.to_string(), window)]))
             .unwrap_or_default()
@@ -437,6 +510,30 @@ mod tests {
         assert_eq!(
             OllamaLookup::from_openai_base("http://gpu:11434").base_url,
             "http://gpu:11434"
+        );
+        assert_ne!(
+            OllamaLookup::from_openai_base("http://localhost:11434/v1")
+                .with_num_ctx(Some(16_384))
+                .cache_key(),
+            OllamaLookup::from_openai_base("http://localhost:11434/v1")
+                .with_num_ctx(Some(262_144))
+                .cache_key(),
+            "trocar num_ctx invalida o cache da janela"
+        );
+    }
+
+    #[test]
+    fn preserva_parametros_do_modelfile_ao_atualizar_num_ctx() {
+        let show = json!({
+            "parameters": "temperature                    0.1\ntop_k                          50\nstop                           \"<|im_end|>\"\nstop                           \"<|endoftext|>\"\nnum_ctx                        16384"
+        });
+        let merged = merged_ollama_parameters(&show, 65_536);
+        assert_eq!(merged.get("num_ctx"), Some(&json!(65_536)));
+        assert_eq!(merged.get("temperature"), Some(&json!(0.1)));
+        assert_eq!(merged.get("top_k"), Some(&json!(50)));
+        assert_eq!(
+            merged.get("stop"),
+            Some(&json!(["<|im_end|>", "<|endoftext|>"]))
         );
     }
 }

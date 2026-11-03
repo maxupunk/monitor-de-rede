@@ -152,21 +152,28 @@ pub fn worth_folding(folded: &[ChatMessageInput], force: bool) -> bool {
     }
 }
 
-/// Aviso quando a parte fixa (instruções e ferramentas) sozinha já passa da
-/// meta da janela: nenhuma compactação resolve, só uma janela maior.
+/// Aviso quando a parte fixa (instruções e ferramentas) sozinha já consome a
+/// maior parte da janela: nenhuma compactação resolve, só uma janela maior.
 #[must_use]
 pub fn small_window_notice(
     budget: &ContextBudget,
     fixed_tokens: u64,
     driver_id: &str,
 ) -> Option<String> {
-    if fixed_tokens <= budget.target() {
+    if fixed_tokens <= fraction(budget.window, 0.65).min(budget.trigger()) {
         return None;
     }
-    let hint = if driver_id == "ollama" {
-        " No Ollama, configure a 'Janela de Contexto (num_ctx)' nas Configurações de IA (ex: 16384 ou mais) ou a variável OLLAMA_CONTEXT_LENGTH no servidor."
+    let suggested = if budget.window >= 16_384 {
+        budget.window.saturating_mul(2)
     } else {
-        " Escolha um modelo com janela maior."
+        16_384
+    };
+    let hint = if driver_id == "ollama" {
+        format!(
+            " No Ollama, configure a 'Janela de Contexto (num_ctx)' nas Configurações de IA (ex: {suggested} ou mais) ou a variável OLLAMA_CONTEXT_LENGTH no servidor."
+        )
+    } else {
+        " Escolha um modelo com janela maior.".to_string()
     };
     Some(format!(
         "A janela de contexto do modelo ({} tokens) mal comporta as instruções e ferramentas (~{fixed_tokens} tokens): as respostas podem sair incompletas e a conversa não tem espaço para crescer.{hint}",
@@ -474,6 +481,11 @@ mod tests {
         assert!(aviso.contains("4096") && aviso.contains("OLLAMA_CONTEXT_LENGTH"));
         assert!(small_window_notice(&pequena, 3_800, "openrouter")
             .is_some_and(|aviso| !aviso.contains("OLLAMA")));
+        assert_eq!(
+            small_window_notice(&ContextBudget::new(16_384, Some(600)), 9_368, "ollama"),
+            None,
+            "janela de 16k comporta o catálogo completo (~9.3k estimados) sem falso alarme"
+        );
         assert_eq!(
             small_window_notice(&ContextBudget::new(32_768, Some(1_024)), 3_800, "ollama"),
             None

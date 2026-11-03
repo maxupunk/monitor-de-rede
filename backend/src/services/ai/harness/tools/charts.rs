@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 
 use super::{
     history::{metric_samples, monitor_selector_schema},
-    lookup::{device_interfaces_of, find_device, find_monitor, pick_interface},
+    lookup::{device_interfaces_of, device_not_found, find_device, find_monitor, pick_interface},
     series::{chart_points, round2, stats, Sample},
     AiToolHandler, ToolArgs, ToolGroup, ToolOutput,
 };
@@ -232,9 +232,7 @@ impl AiToolHandler for InterfaceTrafficChart {
         let identifier = args.required_text("device", "Informe o dispositivo")?;
         let wanted = args.required_text("interface", "Informe a interface")?;
         let Some(device) = find_device(&ctx.db, &identifier).await? else {
-            return Ok(ToolOutput::not_found(format!(
-                "Dispositivo '{identifier}' não encontrado ou ambíguo; use list_devices"
-            )));
+            return Ok(device_not_found(&identifier));
         };
         let interfaces = device_interfaces_of(&ctx.db, device.id).await?;
         let Some(iface) = pick_interface(&interfaces, &wanted) else {
@@ -335,9 +333,7 @@ impl AiToolHandler for DeviceMetricChart {
     async fn execute(&self, ctx: &AppContext, args: &ToolArgs) -> AppResult<ToolOutput> {
         let identifier = args.required_text("device", "Informe o dispositivo")?;
         let Some(device) = find_device(&ctx.db, &identifier).await? else {
-            return Ok(ToolOutput::not_found(format!(
-                "Dispositivo '{identifier}' não encontrado ou ambíguo; use list_devices"
-            )));
+            return Ok(device_not_found(&identifier));
         };
         let metric = args.text("metric").unwrap_or_else(|| "cpu_usage".into());
         let hours = args.integer_in("hours", 24, 1, 168);

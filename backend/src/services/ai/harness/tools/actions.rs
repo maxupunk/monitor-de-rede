@@ -8,7 +8,10 @@ use loco_rs::prelude::AppContext;
 use sea_orm::EntityTrait;
 use serde_json::{json, Value};
 
-use super::{lookup::find_device, AiToolHandler, RiskAssessment, ToolArgs, ToolKind, ToolOutput};
+use super::{
+    lookup::{device_not_found, find_device},
+    preview_or_error, AiToolHandler, RiskAssessment, ToolArgs, ToolKind, ToolOutput,
+};
 use crate::{
     dtos::resources::MonitorInput,
     models::{alert_events, devices},
@@ -79,18 +82,6 @@ async fn load_alert(
         device.unwrap_or_default()
     );
     Ok(Ok((event, label)))
-}
-
-fn preview_or_error(result: Result<String, ToolOutput>) -> String {
-    match result {
-        Ok(text) => text,
-        Err(output) => format!(
-            "Ação inválida: {}",
-            output.data["error"]
-                .as_str()
-                .unwrap_or("argumentos incompletos")
-        ),
-    }
 }
 
 fn alert_schema(extra: Value) -> Value {
@@ -224,9 +215,7 @@ async fn plan_window(
         return Ok(Err(ToolOutput::not_found("Informe o dispositivo")));
     };
     let Some(device) = find_device(&ctx.db, &identifier).await? else {
-        return Ok(Err(ToolOutput::not_found(format!(
-            "Dispositivo '{identifier}' não encontrado ou ambíguo; use list_devices"
-        ))));
+        return Ok(Err(device_not_found(&identifier)));
     };
     let duration = args.integer_in("duration_minutes", 60, WINDOW_MIN, WINDOW_MAX);
     let starts_in = args.integer_in("starts_in_minutes", 0, 0, WINDOW_MAX);
@@ -359,9 +348,7 @@ async fn plan_monitor(
         return Ok(Err(ToolOutput::not_found("Informe o dispositivo")));
     };
     let Some(device) = find_device(&ctx.db, &identifier).await? else {
-        return Ok(Err(ToolOutput::not_found(format!(
-            "Dispositivo '{identifier}' não encontrado ou ambíguo; use list_devices"
-        ))));
+        return Ok(Err(device_not_found(&identifier)));
     };
     let kind = args
         .text("type")

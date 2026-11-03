@@ -11,7 +11,10 @@ use async_trait::async_trait;
 use loco_rs::prelude::AppContext;
 use serde_json::{json, Value};
 
-use super::{as_output, AiToolHandler, RiskAssessment, ToolArgs, ToolGroup, ToolKind, ToolOutput};
+use super::{
+    as_output, preview_or_error, AiToolHandler, RiskAssessment, ToolArgs, ToolGroup, ToolKind,
+    ToolOutput,
+};
 use crate::services::{
     dashboard::{
         self,
@@ -197,25 +200,17 @@ impl AiToolHandler for UpdateDashboardLayout {
             Ok(operations) => dashboard::preview(&ctx.db, &operations).await,
             Err(error) => Err(error),
         };
-        Ok(match as_output(changes)? {
-            Ok(changes) => {
-                let lines: Vec<String> = changes
-                    .iter()
-                    .enumerate()
-                    .map(|(index, change)| format!("{}. {change}", index + 1))
-                    .collect();
-                format!(
-                    "Alterar o layout do dashboard (vale para todos que usam o layout do servidor):\n{}",
-                    lines.join("\n")
-                )
-            }
-            Err(output) => format!(
-                "Ação inválida: {}",
-                output.data["error"]
-                    .as_str()
-                    .unwrap_or("argumentos incompletos")
-            ),
-        })
+        Ok(preview_or_error(as_output(changes)?.map(|changes| {
+            let lines: Vec<String> = changes
+                .iter()
+                .enumerate()
+                .map(|(index, change)| format!("{}. {change}", index + 1))
+                .collect();
+            format!(
+                "Alterar o layout do dashboard (vale para todos que usam o layout do servidor):\n{}",
+                lines.join("\n")
+            )
+        })))
     }
 
     async fn execute(&self, ctx: &AppContext, args: &ToolArgs) -> AppResult<ToolOutput> {

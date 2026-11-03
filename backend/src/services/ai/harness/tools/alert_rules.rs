@@ -13,7 +13,8 @@ use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
 use serde_json::{json, Value};
 
 use super::{
-    lookup::find_device, AiToolHandler, RiskAssessment, ToolArgs, ToolGroup, ToolKind, ToolOutput,
+    lookup::{device_not_found, fill_device_ip, find_device, monitor_target},
+    preview_or_error, AiToolHandler, RiskAssessment, ToolArgs, ToolGroup, ToolKind, ToolOutput,
 };
 use crate::{
     dtos::resources::AlertRuleInput,
@@ -170,9 +171,7 @@ impl AiToolHandler for ListAlertRules {
         }
         if let Some(identifier) = args.text("device") {
             let Some(device) = find_device(&ctx.db, &identifier).await? else {
-                return Ok(ToolOutput::not_found(format!(
-                    "Dispositivo '{identifier}' não encontrado ou ambíguo; use list_devices"
-                )));
+                return Ok(device_not_found(&identifier));
             };
             let monitor_ids: Vec<i64> = monitors::Entity::find()
                 .filter(monitors::Column::DeviceId.eq(device.id))
@@ -262,6 +261,7 @@ async fn describe_target(ctx: &AppContext, scope_key: Option<&str>) -> AppResult
                 "id": monitor.id,
                 "name": monitor.name,
                 "type": monitor.r#type,
+                "target": monitor_target(&monitor.configuration),
                 "status": monitor.status,
                 "interval_s": monitor.interval_seconds,
                 "enabled": monitor.enabled,
@@ -286,14 +286,17 @@ async fn describe_target(ctx: &AppContext, scope_key: Option<&str>) -> AppResult
             None => json!({ "kind": "vpn_peer", "id": id, "missing": true }),
         },
         "device" => match devices::Entity::find_by_id(id).one(&ctx.db).await? {
-            Some(device) => json!({
-                "kind": "device",
-                "id": device.id,
-                "name": device.name,
-                "ip": device.ip_address,
-                "type": device.r#type,
-                "status": device.status,
-            }),
+            Some(mut device) => {
+                fill_device_ip(&ctx.db, &mut device).await;
+                json!({
+                    "kind": "device",
+                    "id": device.id,
+                    "name": device.name,
+                    "ip": device.ip_address,
+                    "type": device.r#type,
+                    "status": device.status,
+                })
+            }
             None => json!({ "kind": "device", "id": id, "missing": true }),
         },
         other => json!({ "kind": other, "id": id }),
@@ -371,10 +374,13 @@ impl AiToolHandler for ExplainAlert {
             None => json!(null),
         };
 
-        let device = match event.device_id {
+        let mut device = match event.device_id {
             Some(device_id) => devices::Entity::find_by_id(device_id).one(&ctx.db).await?,
             None => None,
         };
+        if let Some(ref mut d) = device {
+            fill_device_ip(&ctx.db, d).await;
+        }
         let monitor = match event.monitor_id {
             Some(monitor_id) => {
                 monitors::Entity::find_by_id(monitor_id)
@@ -390,6 +396,7 @@ impl AiToolHandler for ExplainAlert {
                     "id": m.id,
                     "name": m.name,
                     "type": m.r#type,
+                    "target": monitor_target(&m.configuration),
                     "status": m.status,
                     "interval_s": m.interval_seconds,
                     "enabled": m.enabled,
@@ -441,6 +448,7 @@ impl AiToolHandler for ExplainAlert {
                 "id": m.id,
                 "name": m.name,
                 "type": m.r#type,
+                "target": monitor_target(&m.configuration),
                 "status": m.status,
                 "interval_s": m.interval_seconds,
             })),
@@ -487,9 +495,7 @@ async fn plan_rule(ctx: &AppContext, args: &ToolArgs) -> AppResult<Result<RulePl
     let device_id = match args.text("device") {
         Some(identifier) => {
             let Some(device) = find_device(&ctx.db, &identifier).await? else {
-                return Ok(Err(ToolOutput::not_found(format!(
-                    "Dispositivo '{identifier}' não encontrado ou ambíguo; use list_devices"
-                ))));
+                return Ok(Err(device_not_found(&identifier)));
             };
             scope.push(format!("no dispositivo {}", device.name));
             Some(device.id)
@@ -540,18 +546,6 @@ async fn plan_rule(ctx: &AppContext, args: &ToolArgs) -> AppResult<Result<RulePl
         },
         summary,
     }))
-}
-
-fn preview_or_error(result: Result<String, ToolOutput>) -> String {
-    match result {
-        Ok(text) => text,
-        Err(output) => format!(
-            "Ação inválida: {}",
-            output.data["error"]
-                .as_str()
-                .unwrap_or("argumentos incompletos")
-        ),
-    }
 }
 
 pub struct CreateAlertRule;

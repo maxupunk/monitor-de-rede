@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use super::{
     history::monitor_selector_schema,
     log_digest::collapse_repeats,
-    lookup::{device_names, find_device, find_monitor},
+    lookup::{device_names, device_not_found, find_device, find_monitor},
     series::round2,
     timeline::{merge, status_transitions, EntryKind, TimelineEntry},
     AiToolHandler, ToolArgs, ToolGroup, ToolOutput,
@@ -491,11 +491,7 @@ impl AiToolHandler for IncidentTimeline {
         let device = match args.text("device") {
             Some(identifier) => match find_device(&ctx.db, &identifier).await? {
                 Some(device) => Some(device),
-                None => {
-                    return Ok(ToolOutput::not_found(format!(
-                        "Dispositivo '{identifier}' não encontrado ou ambíguo; use list_devices"
-                    )))
-                }
+                None => return Ok(device_not_found(&identifier)),
             },
             None => None,
         };

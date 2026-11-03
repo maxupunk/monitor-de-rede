@@ -29,9 +29,6 @@ pub const LOCAL_SUFFIXES: &[&str] = &[
     ".home.arpa",
 ];
 
-/// Chaves da configuração de um monitor que guardam o alvo.
-const MONITOR_TARGET_KEYS: &[&str] = &["host", "domain", "url"];
-
 /// Minúsculas, sem espaços, arroba de menção nem colchetes de IPv6.
 fn normalize(target: &str) -> String {
     target
@@ -126,10 +123,8 @@ async fn registered<C: ConnectionTrait>(db: &C, target: &str) -> AppResult<bool>
     }
     let monitors = monitors::Entity::find().all(db).await?;
     Ok(monitors.iter().any(|monitor| {
-        MONITOR_TARGET_KEYS
-            .iter()
-            .filter_map(|key| monitor.configuration.get(key)?.as_str())
-            .any(same)
+        same(&monitor.name)
+            || super::tools::monitor_target(&monitor.configuration).is_some_and(same)
     }))
 }
 

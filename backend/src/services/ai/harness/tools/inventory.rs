@@ -10,7 +10,10 @@ use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
 use serde_json::{json, Value};
 
 use super::{
-    lookup::{device_interfaces_of, device_matches, device_names, find_device},
+    lookup::{
+        device_interfaces_of, device_ip, device_matches, device_names, device_not_found,
+        find_device, monitor_target,
+    },
     series::round2,
     AiToolHandler, ToolArgs, ToolOutput,
 };
@@ -31,12 +34,6 @@ use crate::{
 const MAX_LIST_ROWS: usize = 50;
 
 const DEVICE_ARG: &str = "Nome, IP ou id do dispositivo";
-
-fn device_not_found(identifier: &str) -> ToolOutput {
-    ToolOutput::not_found(format!(
-        "Dispositivo '{identifier}' não encontrado ou ambíguo; use list_devices"
-    ))
-}
 
 pub struct SystemSummary;
 
@@ -92,6 +89,20 @@ impl AiToolHandler for SystemSummary {
     }
 }
 
+/// `devices.status` persiste `"online"` / `"offline"` (`DeviceStatus::as_str`),
+/// enquanto `monitors.status` e o contrato das ferramentas usam `"up"` / `"down"`.
+/// Aceita ambos os vocabulários e também considera o dispositivo caído quando
+/// possui monitor habilitado em `"down"`.
+#[must_use]
+fn device_status_matches(device_status: &str, requested: &str, has_down_monitor: bool) -> bool {
+    let status = device_status.trim().to_lowercase();
+    match requested.trim().to_lowercase().as_str() {
+        "down" | "offline" => matches!(status.as_str(), "down" | "offline") || has_down_monitor,
+        "up" | "online" => matches!(status.as_str(), "up" | "online") && !has_down_monitor,
+        other => status == other,
+    }
+}
+
 pub struct ListDevices;
 
 #[async_trait]
@@ -115,30 +126,85 @@ impl AiToolHandler for ListDevices {
     }
 
     async fn execute(&self, ctx: &AppContext, args: &ToolArgs) -> AppResult<ToolOutput> {
-        let mut query = devices::Entity::find().order_by_asc(devices::Column::Name);
-        if let Some(status) = args.text("status") {
-            query = query.filter(devices::Column::Status.eq(status));
-        }
-        let search = args.text("search").unwrap_or_default();
-        let matching: Vec<devices::Model> = query
+        let all_devices = devices::Entity::find()
+            .order_by_asc(devices::Column::Name)
             .all(&ctx.db)
-            .await?
+            .await?;
+        let all_monitors = monitors::Entity::find()
+            .order_by_asc(monitors::Column::Name)
+            .all(&ctx.db)
+            .await?;
+        let mut monitors_by_device: HashMap<i64, Vec<monitors::Model>> = HashMap::new();
+        for monitor in all_monitors {
+            if let Some(device_id) = monitor.device_id {
+                monitors_by_device
+                    .entry(device_id)
+                    .or_default()
+                    .push(monitor);
+            }
+        }
+
+        let requested_status = args.text("status");
+        let search = args.text("search").unwrap_or_default();
+        let search_folded = search.trim().to_lowercase();
+
+        let matching: Vec<devices::Model> = all_devices
             .into_iter()
-            .filter(|device| device_matches(device, &search))
+            .filter(|device| {
+                let dev_monitors = monitors_by_device
+                    .get(&device.id)
+                    .map_or(&[][..], Vec::as_slice);
+                let has_down_monitor = dev_monitors.iter().any(|monitor| {
+                    monitor.enabled && matches!(monitor.status.as_str(), "down" | "offline")
+                });
+                if let Some(ref wanted_status) = requested_status {
+                    if !device_status_matches(&device.status, wanted_status, has_down_monitor) {
+                        return false;
+                    }
+                }
+                if search_folded.is_empty() || device_matches(device, &search) {
+                    return true;
+                }
+                dev_monitors.iter().any(|monitor| {
+                    monitor.name.to_lowercase().contains(&search_folded)
+                        || monitor_target(&monitor.configuration)
+                            .is_some_and(|target| target.to_lowercase().contains(&search_folded))
+                })
+            })
             .collect();
 
         let rows: Vec<Value> = matching
             .iter()
             .take(MAX_LIST_ROWS)
             .map(|device| {
+                let dev_monitors = monitors_by_device
+                    .get(&device.id)
+                    .map_or(&[][..], Vec::as_slice);
+                let ip = device_ip(device, dev_monitors);
+                let failing_monitors: Vec<Value> = dev_monitors
+                    .iter()
+                    .filter(|monitor| {
+                        monitor.enabled && !matches!(monitor.status.as_str(), "up" | "online")
+                    })
+                    .map(|monitor| {
+                        json!({
+                            "id": monitor.id,
+                            "name": monitor.name,
+                            "type": monitor.r#type,
+                            "target": monitor_target(&monitor.configuration),
+                            "status": monitor.status,
+                        })
+                    })
+                    .collect();
                 json!({
                     "id": device.id,
                     "name": device.name,
-                    "ip": device.ip_address,
+                    "ip": ip,
                     "type": device.r#type,
                     "vendor": device.vendor,
                     "status": device.status,
                     "last_seen": device.last_seen_at,
+                    "failing_monitors": failing_monitors,
                 })
             })
             .collect();
@@ -189,6 +255,7 @@ impl AiToolHandler for DeviceDetail {
                     "id": monitor.id,
                     "name": monitor.name,
                     "type": monitor.r#type,
+                    "target": monitor_target(&monitor.configuration),
                     "status": monitor.status,
                     "enabled": monitor.enabled,
                     "interval_s": monitor.interval_seconds,
@@ -369,7 +436,13 @@ impl AiToolHandler for ListMonitors {
             query = query.filter(monitors::Column::Type.eq(kind));
         }
         if let Some(status) = args.text("status") {
-            query = query.filter(monitors::Column::Status.eq(status));
+            query = match status.trim().to_lowercase().as_str() {
+                "down" | "offline" => {
+                    query.filter(monitors::Column::Status.is_in(["down", "offline"]))
+                }
+                "up" | "online" => query.filter(monitors::Column::Status.is_in(["up", "online"])),
+                _ => query.filter(monitors::Column::Status.eq(status)),
+            };
         }
 
         let instability: HashMap<String, ScopeInstability> =
@@ -394,6 +467,7 @@ impl AiToolHandler for ListMonitors {
                     "id": monitor.id,
                     "name": monitor.name,
                     "type": monitor.r#type,
+                    "target": monitor_target(&monitor.configuration),
                     "status": monitor.status,
                     "enabled": monitor.enabled,
                     "device": monitor.device_id.and_then(|id| names.get(&id)),
@@ -542,5 +616,21 @@ mod tests {
         );
         assert_eq!(utilization_pct(Some(1.0), None, None), None);
         assert_eq!(utilization_pct(Some(1.0), None, Some(0)), None);
+    }
+
+    #[test]
+    fn filtro_de_status_de_dispositivo_aceita_offline_online_e_monitor_caido() {
+        assert!(device_status_matches("offline", "down", false));
+        assert!(device_status_matches("down", "down", false));
+        assert!(device_status_matches("offline", "offline", false));
+        assert!(device_status_matches("warning", "down", true));
+        assert!(device_status_matches("unknown", "down", true));
+        assert!(!device_status_matches("online", "down", false));
+
+        assert!(device_status_matches("online", "up", false));
+        assert!(device_status_matches("up", "up", false));
+        assert!(device_status_matches("online", "online", false));
+        assert!(!device_status_matches("online", "up", true));
+        assert!(!device_status_matches("offline", "up", false));
     }
 }

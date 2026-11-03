@@ -28,8 +28,10 @@ use self::{
     sources::{source_for, GrepFilter, GrepSource, SOURCE_NAMES},
 };
 use super::{
-    log_digest::parse_severity, logs::MAX_HOURS, lookup::find_device, AiToolHandler, ToolArgs,
-    ToolOutput,
+    log_digest::parse_severity,
+    logs::MAX_HOURS,
+    lookup::{device_not_found, find_device},
+    AiToolHandler, ToolArgs, ToolOutput,
 };
 use crate::services::shared::errors::AppResult;
 
@@ -116,11 +118,7 @@ impl AiToolHandler for Grep {
         let device = match args.text("device") {
             Some(identifier) => match find_device(&ctx.db, &identifier).await? {
                 Some(device) => Some(device),
-                None => {
-                    return Ok(ToolOutput::not_found(format!(
-                        "Dispositivo '{identifier}' não encontrado ou ambíguo; use list_devices"
-                    )))
-                }
+                None => return Ok(device_not_found(&identifier)),
             },
             None => None,
         };

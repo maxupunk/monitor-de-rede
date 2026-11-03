@@ -16,7 +16,7 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use serde_json::{json, Value};
 
 use super::{
-    lookup::{device_names, find_device},
+    lookup::{device_names, device_not_found, find_device},
     AiToolHandler, ToolArgs, ToolGroup, ToolOutput,
 };
 use crate::{
@@ -395,7 +395,7 @@ Sem 'device': totais e os enlaces que não estão 'up'."
             let degraded: Vec<Value> = graph
                 .edges
                 .iter()
-                .filter(|edge| edge.status != "up")
+                .filter(|edge| !matches!(edge.status.as_str(), "up" | "online"))
                 .take(MAX_LIMIT as usize)
                 .map(|edge| {
                     json!({
@@ -413,9 +413,7 @@ Sem 'device': totais e os enlaces que não estão 'up'."
             })));
         };
         let Some(device) = find_device(&ctx.db, &identifier).await? else {
-            return Ok(ToolOutput::not_found(format!(
-                "Dispositivo '{identifier}' não encontrado ou ambíguo; use list_devices"
-            )));
+            return Ok(device_not_found(&identifier));
         };
         let node = graph.nodes.iter().find(|node| node.id == device.id);
         let parent = node

@@ -10,7 +10,7 @@ use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder
 use serde_json::{json, Value};
 
 use super::{
-    lookup::{find_device, find_monitor},
+    lookup::{device_not_found, find_device, find_monitor},
     series::{round2, stats, Sample},
     AiToolHandler, ToolArgs, ToolGroup, ToolOutput,
 };
@@ -182,9 +182,7 @@ impl AiToolHandler for DeviceMetrics {
     async fn execute(&self, ctx: &AppContext, args: &ToolArgs) -> AppResult<ToolOutput> {
         let identifier = args.required_text("device", "Informe o dispositivo")?;
         let Some(device) = find_device(&ctx.db, &identifier).await? else {
-            return Ok(ToolOutput::not_found(format!(
-                "Dispositivo '{identifier}' não encontrado ou ambíguo; use list_devices"
-            )));
+            return Ok(device_not_found(&identifier));
         };
         let hours = args.integer_in("hours", 24, 1, 168);
         let since = Utc::now() - Duration::hours(hours);

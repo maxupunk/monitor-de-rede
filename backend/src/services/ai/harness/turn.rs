@@ -113,6 +113,177 @@ pub fn context_groups(mentions: &[AiMention], alert_or_rule: bool) -> ToolGroups
     groups
 }
 
+/// Máximo de grupos pré-carregados por palavras-chave na pergunta quando o
+/// modelo é treinado no NetMonitor (sem consultar o Decisor).
+const MAX_QUESTION_GROUPS: usize = 3;
+
+/// Grupos óbvios pelo vocabulário da pergunta para modelos treinados no
+/// NetMonitor: evita uma rodada extra de `load_tools` nos casos mais comuns
+/// mantendo o prompt enxuto (até 3 grupos) e sem chamar o Decisor.
+#[must_use]
+pub fn question_groups(question: &str) -> ToolGroups {
+    let folded = fold(question);
+    let tokens = words(question);
+    let has_word = |candidates: &[&str]| {
+        tokens
+            .iter()
+            .any(|token| candidates.contains(&token.as_str()))
+    };
+    let has_phrase = |phrases: &[&str]| phrases.iter().any(|phrase| folded.contains(phrase));
+
+    let rules: &[(ToolGroup, &[&str], &[&str])] = &[
+        (
+            ToolGroup::Diagnostics,
+            &[
+                "ping",
+                "pinga",
+                "pingar",
+                "traceroute",
+                "tracerouter",
+                "tracert",
+                "mtr",
+                "scan",
+                "porta",
+                "portas",
+                "dns",
+                "nslookup",
+                "dig",
+                "playbook",
+                "testar",
+                "testa",
+                "alcancavel",
+            ],
+            &["teste ativo", "saude da internet", "internet_health"],
+        ),
+        (
+            ToolGroup::Docker,
+            &["docker", "container", "containers", "compose"],
+            &[],
+        ),
+        (
+            ToolGroup::Charts,
+            &["grafico", "graficos", "chart", "plote", "plotar", "desenha"],
+            &[],
+        ),
+        (
+            ToolGroup::History,
+            &[
+                "historico",
+                "uptime",
+                "disponibilidade",
+                "sla",
+                "metrica",
+                "metricas",
+                "cpu",
+                "memoria",
+                "ram",
+                "temperatura",
+                "dbm",
+                "optico",
+                "optica",
+            ],
+            &["ultimas 24", "ultimas 168", "ultima hora"],
+        ),
+        (
+            ToolGroup::Analysis,
+            &["baseline", "anomalia", "heatmap", "timeline", "correlacao"],
+            &["causa raiz", "linha do tempo", "padrao por hora"],
+        ),
+        (ToolGroup::Logs, &["log", "logs", "syslog"], &[]),
+        (
+            ToolGroup::Actions,
+            &[
+                "silencia",
+                "silenciar",
+                "reconhece",
+                "reconhecer",
+                "ack",
+                "manutencao",
+            ],
+            &["criar monitor", "cria um monitor", "novo monitor"],
+        ),
+        (
+            ToolGroup::AlertRules,
+            &["regra", "regras", "limiar", "threshold"],
+            &["explica o alerta", "origem do alerta", "por que disparou"],
+        ),
+        (
+            ToolGroup::Platform,
+            &[
+                "topologia",
+                "uplink",
+                "vizinho",
+                "vizinhos",
+                "vpn",
+                "wireguard",
+                "peer",
+                "peers",
+                "agente",
+                "agentes",
+                "descoberta",
+                "varredura",
+                "cidr",
+                "vlan",
+                "notificacao",
+                "notificacoes",
+            ],
+            &[],
+        ),
+        (
+            ToolGroup::Devices,
+            &[
+                "plugin",
+                "plugins",
+                "app",
+                "apps",
+                "aplicativo",
+                "aplicativos",
+                "ssh",
+                "fingerprint",
+                "rhai",
+                "script",
+            ],
+            &[],
+        ),
+        (
+            ToolGroup::Audit,
+            &["auditoria", "audit"],
+            &["quem mudou", "quem alterou", "quem excluiu", "quem criou"],
+        ),
+        (
+            ToolGroup::Schedules,
+            &[
+                "agenda",
+                "agendar",
+                "agendada",
+                "agendadas",
+                "agendamento",
+                "tarefa",
+                "tarefas",
+                "cron",
+                "periodicamente",
+            ],
+            &["todo dia", "toda hora"],
+        ),
+        (
+            ToolGroup::Dashboard,
+            &["dashboard", "widget", "widgets", "card", "cards", "layout"],
+            &[],
+        ),
+    ];
+
+    let mut groups = ToolGroups::new();
+    for &(group, word_list, phrase_list) in rules {
+        if has_word(word_list) || has_phrase(phrase_list) {
+            groups.insert(group);
+            if groups.ids().len() >= MAX_QUESTION_GROUPS {
+                break;
+            }
+        }
+    }
+    groups
+}
+
 /// Os grupos pedidos no `load_tools`, sem repetir e sem inventar.
 #[must_use]
 pub fn requested_groups(arguments: &Value) -> Vec<ToolGroup> {
@@ -317,6 +488,25 @@ mod tests {
         assert_eq!(
             requested_groups(&json!({ "groups": "history" })),
             vec![ToolGroup::History]
+        );
+    }
+
+    #[test]
+    fn grupos_da_pergunta_reconhecem_dominios_com_teto() {
+        assert_eq!(
+            question_groups("vamos testar @BORDA o ping e fazer o tracerouter para 8.8.8.8"),
+            ToolGroups::from([ToolGroup::Diagnostics])
+        );
+        assert_eq!(
+            question_groups("Qual container está consumindo mais memória?"),
+            ToolGroups::from([ToolGroup::Docker, ToolGroup::History])
+        );
+        assert!(question_groups("vamos verificar quais equipamentos estão caídos").is_empty());
+        assert_eq!(
+            question_groups("ping no container com gráfico de cpu e log de regra na topologia")
+                .ids()
+                .len(),
+            MAX_QUESTION_GROUPS
         );
     }
 

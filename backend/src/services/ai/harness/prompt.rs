@@ -4,7 +4,7 @@
 use chrono::Utc;
 use sea_orm::{ConnectionTrait, EntityTrait};
 
-use super::tools::{ToolPolicy, ToolRegistry};
+use super::tools::{fill_device_ip, monitor_target, ToolPolicy, ToolRegistry};
 use crate::{
     dtos::ai::{AiMention, AiMentionKind},
     models::{alert_events, alert_rules, devices, monitors},
@@ -111,7 +111,8 @@ pub fn build_small_talk_prompt(settings: &AiSettings) -> String {
 }
 
 async fn device_section<C: ConnectionTrait>(db: &C, id: i64) -> Option<String> {
-    let device = devices::Entity::find_by_id(id).one(db).await.ok()??;
+    let mut device = devices::Entity::find_by_id(id).one(db).await.ok()??;
+    fill_device_ip(db, &mut device).await;
     Some(format!(
         "- Dispositivo #{}: {} ({}), IP {}, fabricante {}, status {}, último contato {}",
         device.id,
@@ -128,8 +129,11 @@ async fn device_section<C: ConnectionTrait>(db: &C, id: i64) -> Option<String> {
 
 async fn monitor_section<C: ConnectionTrait>(db: &C, id: i64) -> Option<String> {
     let monitor = monitors::Entity::find_by_id(id).one(db).await.ok()??;
+    let target = monitor_target(&monitor.configuration)
+        .map(|target| format!(", alvo {target}"))
+        .unwrap_or_default();
     Some(format!(
-        "- Monitor #{}: {} (tipo {}, status {}, intervalo {}s{})",
+        "- Monitor #{}: {} (tipo {}{target}, status {}, intervalo {}s{})",
         monitor.id,
         monitor.name,
         monitor.r#type,

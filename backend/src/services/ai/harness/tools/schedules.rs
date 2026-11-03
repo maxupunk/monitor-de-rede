@@ -13,8 +13,8 @@ use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
 use serde_json::{json, Value};
 
 use super::{
-    as_output, AiToolHandler, RiskAssessment, ToolArgs, ToolGroup, ToolKind, ToolOutput,
-    UnattendedTools,
+    as_output, preview_or_error, AiToolHandler, RiskAssessment, ToolArgs, ToolGroup, ToolKind,
+    ToolOutput, UnattendedTools,
 };
 use crate::{
     models::{scheduled_task_runs, scheduled_tasks},
@@ -70,18 +70,6 @@ async fn chat_author(ctx: &AppContext, args: &ToolArgs) -> Result<Author, ToolOu
     Author::load(&ctx.db, args.actor().clone(), ScheduledTaskOrigin::Ai)
         .await
         .map_err(|error| ToolOutput::not_found(error.to_string()))
-}
-
-fn preview_or_error(result: Result<String, ToolOutput>) -> String {
-    match result {
-        Ok(text) => text,
-        Err(output) => format!(
-            "Ação inválida: {}",
-            output.data["error"]
-                .as_str()
-                .unwrap_or("argumentos incompletos")
-        ),
-    }
 }
 
 /// A frase da agenda conferida: "todo dia às 03:00 (próxima: 24/10 03:00)".

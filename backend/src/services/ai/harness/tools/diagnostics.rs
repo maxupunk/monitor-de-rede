@@ -52,6 +52,23 @@ async fn resolve_target<C: ConnectionTrait>(db: &C, target: &str) -> Result<IpAd
     }
 }
 
+async fn resolve_dns_server<C: ConnectionTrait>(db: &C, raw: &str) -> Result<String, ToolOutput> {
+    let trimmed = raw.trim();
+    if let Ok(addr) = trimmed.parse::<std::net::SocketAddr>() {
+        return Ok(addr.to_string());
+    }
+    if let Some((host, port_raw)) = trimmed.rsplit_once(':') {
+        if !host.contains(':') {
+            if let Ok(port) = port_raw.parse::<u16>() {
+                let ip = resolve_target(db, host).await?;
+                return Ok(std::net::SocketAddr::new(ip, port).to_string());
+            }
+        }
+    }
+    let ip = resolve_target(db, trimmed).await?;
+    Ok(ip.to_string())
+}
+
 fn target_schema(extra: Value) -> Value {
     let mut properties = json!({
         "target": { "type": "string", "description": "IP ou hostname" }
@@ -321,12 +338,19 @@ impl AiToolHandler for DnsLookup {
         ))
     }
 
-    async fn execute(&self, _ctx: &AppContext, args: &ToolArgs) -> AppResult<ToolOutput> {
+    async fn execute(&self, ctx: &AppContext, args: &ToolArgs) -> AppResult<ToolOutput> {
         let hostname =
             args.required_text("hostname", "Hostname não informado para a consulta DNS")?;
+        let server = match args.text("server") {
+            Some(raw) => match resolve_dns_server(&ctx.db, &raw).await {
+                Ok(resolved) => Some(resolved),
+                Err(output) => return Ok(output),
+            },
+            None => None,
+        };
         let sample = measure_dns_lookup(DnsLookupOptions {
             hostname: hostname.clone(),
-            server: args.text("server"),
+            server,
             protocol: DnsProtocol::Udp,
             record_type: hickory_proto::rr::RecordType::A,
             doh_url: None,

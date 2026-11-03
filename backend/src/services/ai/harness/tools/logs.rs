@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 
 use super::{
     log_digest::{parse_severity, summarize},
-    lookup::{device_names, find_device},
+    lookup::{device_names, device_not_found, find_device},
     AiToolHandler, ToolArgs, ToolGroup, ToolOutput,
 };
 use crate::{
@@ -48,11 +48,7 @@ async fn build_query(ctx: &AppContext, args: &ToolArgs) -> AppResult<Result<LogQ
     let device_id = match args.text("device") {
         Some(identifier) => match find_device(&ctx.db, &identifier).await? {
             Some(device) => Some(device.id),
-            None => {
-                return Ok(Err(ToolOutput::not_found(format!(
-                    "Dispositivo '{identifier}' não encontrado ou ambíguo; use list_devices"
-                ))))
-            }
+            None => return Ok(Err(device_not_found(&identifier))),
         },
         None => None,
     };

@@ -36,12 +36,117 @@ pub fn device_matches(device: &devices::Model, term: &str) -> bool {
     .any(|field| fold(field).contains(&term))
 }
 
+/// Extrai o alvo (IP, hostname ou URL) da configuração JSON de um monitor.
+#[must_use]
+pub fn monitor_target(config: &serde_json::Value) -> Option<&str> {
+    ["host", "target", "domain", "url"]
+        .into_iter()
+        .find_map(|key| config.get(key)?.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+/// IP efetivo do dispositivo: `ip_address` cadastrado ou, quando ausente,
+/// o primeiro alvo (`host`/`target`/`domain`/`url`) de seus monitores.
+#[must_use]
+pub fn device_ip<'a>(
+    device: &'a devices::Model,
+    monitors: &'a [monitors::Model],
+) -> Option<&'a str> {
+    device
+        .ip_address
+        .as_deref()
+        .map(str::trim)
+        .filter(|ip| !ip.is_empty())
+        .or_else(|| {
+            monitors
+                .iter()
+                .find_map(|monitor| monitor_target(&monitor.configuration))
+        })
+}
+
+/// Preenche `device.ip_address` com o alvo do primeiro monitor se estiver vazio.
+pub async fn fill_device_ip<C: ConnectionTrait>(db: &C, device: &mut devices::Model) {
+    if device
+        .ip_address
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or_default()
+        .is_empty()
+    {
+        if let Ok(device_monitors) = monitors::Entity::find()
+            .filter(monitors::Column::DeviceId.eq(device.id))
+            .all(db)
+            .await
+        {
+            if let Some(target) = device_ip(device, &device_monitors) {
+                device.ip_address = Some(target.to_string());
+            }
+        }
+    }
+}
+
+/// Mensagem padrão devolvida à IA quando o dispositivo não existe ou é ambíguo.
+#[must_use]
+pub fn device_not_found(identifier: &str) -> super::ToolOutput {
+    super::ToolOutput::not_found(format!(
+        "Dispositivo '{identifier}' não encontrado ou ambíguo; use list_devices"
+    ))
+}
+
+/// Escolhe o dispositivo pelos seus monitores (alvo exato ou nome exato do
+/// monitor primeiro; depois substring única), quando o IP ou o nome citado está
+/// no monitor e não no cadastro de `devices`.
+#[must_use]
+pub fn pick_device_by_monitor<'a>(
+    devices: &'a [devices::Model],
+    monitors: &[monitors::Model],
+    identifier: &str,
+) -> Option<&'a devices::Model> {
+    let wanted = fold(identifier.trim().trim_start_matches('@'));
+    if wanted.is_empty() {
+        return None;
+    }
+    let unique_device = |matching: HashSet<i64>| -> Option<&'a devices::Model> {
+        if matching.len() == 1 {
+            let only_id = *matching.iter().next()?;
+            devices.iter().find(|device| device.id == only_id)
+        } else {
+            None
+        }
+    };
+    let exact_ids: HashSet<i64> = monitors
+        .iter()
+        .filter(|monitor| {
+            monitor_target(&monitor.configuration).is_some_and(|target| fold(target) == wanted)
+                || fold(&monitor.name) == wanted
+        })
+        .filter_map(|monitor| monitor.device_id)
+        .collect();
+    if let Some(device) = unique_device(exact_ids.clone()) {
+        return Some(device);
+    }
+    if !exact_ids.is_empty() {
+        return None;
+    }
+    let partial_ids: HashSet<i64> = monitors
+        .iter()
+        .filter(|monitor| {
+            monitor_target(&monitor.configuration)
+                .is_some_and(|target| fold(target).contains(&wanted))
+                || fold(&monitor.name).contains(&wanted)
+        })
+        .filter_map(|monitor| monitor.device_id)
+        .collect();
+    unique_device(partial_ids)
+}
+
 /// Escolhe o dispositivo: id exato, depois nome/IP exatos, depois substring
 /// única. Ambiguidade devolve `None` — melhor a IA perguntar do que olhar o
 /// aparelho errado.
 #[must_use]
 pub fn pick_device<'a>(list: &'a [devices::Model], identifier: &str) -> Option<&'a devices::Model> {
-    let wanted = fold(identifier);
+    let wanted = fold(identifier.trim().trim_start_matches('@'));
     if wanted.is_empty() {
         return None;
     }
@@ -97,7 +202,15 @@ pub async fn find_device<C: ConnectionTrait>(
     identifier: &str,
 ) -> AppResult<Option<devices::Model>> {
     let list = devices::Entity::find().all(db).await?;
-    Ok(pick_device(&list, identifier).cloned())
+    let mut found = pick_device(&list, identifier).cloned();
+    if found.is_none() {
+        let monitors = monitors::Entity::find().all(db).await?;
+        found = pick_device_by_monitor(&list, &monitors, identifier).cloned();
+    }
+    if let Some(ref mut device) = found {
+        fill_device_ip(db, device).await;
+    }
+    Ok(found)
 }
 
 /// Escolhe a interface por id, nome, alias, descrição ou `ifIndex`.
@@ -156,7 +269,8 @@ pub async fn device_interfaces_of<C: ConnectionTrait>(
 }
 
 /// Monitor por id ou, dado um dispositivo, o primeiro do tipo pedido
-/// (`ping` quando o tipo não vem — é o que mede latência).
+/// (`ping` quando o tipo não vem — é o que mede latência; ou o único monitor
+/// do aparelho quando não há `ping`).
 ///
 /// # Errors
 ///
@@ -179,16 +293,33 @@ pub async fn find_monitor<C: ConnectionTrait>(
         ));
     };
     let Some(device) = find_device(db, identifier).await? else {
+        let wanted = fold(identifier.trim().trim_start_matches('@'));
+        if !wanted.is_empty() {
+            let all = monitors::Entity::find().all(db).await?;
+            if let Some(found) = all.into_iter().find(|m| fold(&m.name) == wanted) {
+                return Ok(Ok(found));
+            }
+        }
         return Ok(Err(format!(
             "Dispositivo '{identifier}' não encontrado ou ambíguo; use list_devices"
         )));
     };
-    let kind = monitor_type.unwrap_or("ping");
-    let found = monitors::Entity::find()
+    let device_monitors = monitors::Entity::find()
         .filter(monitors::Column::DeviceId.eq(device.id))
-        .filter(monitors::Column::Type.eq(kind))
-        .one(db)
+        .all(db)
         .await?;
+    let kind = monitor_type.unwrap_or("ping");
+    let found = device_monitors
+        .iter()
+        .find(|monitor| monitor.r#type.eq_ignore_ascii_case(kind))
+        .cloned()
+        .or_else(|| {
+            if monitor_type.is_none() && device_monitors.len() == 1 {
+                device_monitors.into_iter().next()
+            } else {
+                None
+            }
+        });
     Ok(found.ok_or_else(|| {
         format!(
             "'{}' não tem monitor do tipo '{kind}'; use get_device_detail para ver os monitores",
@@ -301,5 +432,53 @@ mod tests {
         assert_eq!(pick_interface(&list, "12").map(|i| i.id), Some(12));
         assert_eq!(pick_interface(&list, "sfp").map(|i| i.id), Some(12));
         assert_eq!(pick_interface(&list, "ether"), None, "ambíguo");
+    }
+
+    fn monitor(id: i64, device_id: Option<i64>, name: &str, host: &str) -> monitors::Model {
+        let now = Utc::now().into();
+        monitors::Model {
+            id,
+            device_id,
+            interface_id: None,
+            probe_id: None,
+            name: name.into(),
+            r#type: "ping".into(),
+            configuration: serde_json::json!({ "host": host }),
+            interval_seconds: 60,
+            timeout_seconds: 5,
+            retry_count: 3,
+            enabled: true,
+            status: "up".into(),
+            next_run_at: None,
+            last_run_at: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[test]
+    fn dispositivo_pelo_alvo_ou_nome_do_monitor_prefere_casamento_exato() {
+        let mut borda = device(1, "BORDA", "");
+        borda.ip_address = None;
+        let mut sw10 = device(10, "SW-10", "");
+        sw10.ip_address = None;
+        let mut ap = device(4, "AP-Terraço", "");
+        ap.ip_address = None;
+        let devices = vec![borda.clone(), sw10, ap];
+        let monitors = vec![
+            monitor(2, Some(1), "Ping BORDA", "10.0.0.1"),
+            monitor(3, Some(10), "Ping SW-10", "10.0.0.10"),
+            monitor(4, Some(4), "Ping AP-Terraço", "10.0.0.3"),
+        ];
+        // "10.0.0.1" é exato no monitor 2, mesmo sendo prefixo de "10.0.0.10".
+        assert_eq!(
+            pick_device_by_monitor(&devices, &monitors, "10.0.0.1").map(|d| d.id),
+            Some(1)
+        );
+        assert_eq!(
+            pick_device_by_monitor(&devices, &monitors, "@Ping AP-Terraço").map(|d| d.id),
+            Some(4)
+        );
+        assert_eq!(device_ip(&borda, &monitors[..1]), Some("10.0.0.1"));
     }
 }

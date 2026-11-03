@@ -35,6 +35,7 @@ fn lfm3_default_parameters() -> serde_json::Value {
         "top_p": 0.1,
         "top_k": 50,
         "repeat_penalty": 1.05,
+        "num_ctx": 262144,
     })
 }
 
