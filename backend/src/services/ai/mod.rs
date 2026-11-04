@@ -1,4 +1,5 @@
 pub mod approvals;
+pub mod chat_benchmark;
 pub mod context_window;
 pub mod conversations;
 pub mod decider;

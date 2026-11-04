@@ -125,7 +125,7 @@ impl ModelSpec {
 pub const KNOWN_MODELS: &[ModelSpec] = &[
     // ── NetMonitor: ajustado nas decisões dele, o padrão ──
     ModelSpec {
-        name: "netmonitor/decima-network:v11",
+        name: "netmonitor/decima-network:v13",
         aliases: &["decima-network", "netmonitor/decima-network"],
         family: "Decima Network",
         description: "Decima Network (NetMonitor): o decima:small ajustado nas decisões de rede do NetMonitor, em português — o mais preciso no benchmark das decisões e o mais rápido em CPU. Baixado sob demanda da release do NetMonitor",
@@ -164,13 +164,13 @@ fn same_tag(a: &str, b: &str) -> bool {
 
 /// Pacotes OCI dos modelos ajustados do NetMonitor para instalação sob demanda no Ollaya.
 pub static BUNDLED_STORE_MODELS: &[BundledStoreModel] = &[BundledStoreModel {
-    canonical_name: "netmonitor/decima-network:v11",
+    canonical_name: "netmonitor/decima-network:v13",
     aliases: &[
         "decima-network",
         "netmonitor/decima-network",
-        "ollaya.dev/netmonitor/decima-network:v11",
+        "ollaya.dev/netmonitor/decima-network:v13",
     ],
-    manifest_rel_path: "manifests/ollaya.dev/netmonitor/decima-network/v11",
+    manifest_rel_path: "manifests/ollaya.dev/netmonitor/decima-network/v13",
     manifest_json: r#"{
   "schemaVersion": 2,
   "mediaType": "application/vnd.docker.distribution.manifest.v2+json",
@@ -185,7 +185,7 @@ pub static BUNDLED_STORE_MODELS: &[BundledStoreModel] = &[BundledStoreModel {
   "layers": [
     {
       "mediaType": "application/vnd.ollaya.graph.onnx",
-      "digest": "sha256:3ead250e6a342c1966bac2f7c74aea049794e2eaadba6f6d55432ada00a5836f",
+      "digest": "sha256:36e44593143ef754e22ccd0e9ba58feb74b67fb43509c5cf3481d46f50455fef",
       "size": 3340536,
       "annotations": {
         "org.ollaya.precision": "fp32"
@@ -193,12 +193,12 @@ pub static BUNDLED_STORE_MODELS: &[BundledStoreModel] = &[BundledStoreModel {
     },
     {
       "mediaType": "application/vnd.ollaya.weights",
-      "digest": "sha256:44e380c5b48bfc7c548062e578180033843dbfeb805b3fba705cfcc9eebd6d87",
+      "digest": "sha256:47f2c5807a5bffc9942bc72c7dca42e34df282f47c7025efe40cb70229527da9",
       "size": 470637416
     },
     {
       "mediaType": "application/vnd.ollaya.weights",
-      "digest": "sha256:b452876f7d1b5b72925fee245db27a7531e09e99f6d2d91eb2490a383d551d0f",
+      "digest": "sha256:7a5cee4658291e2647d7516c82b3d3abe26e15d8d96532be8bf147000f4760f8",
       "size": 18945996
     },
     {
@@ -248,17 +248,17 @@ pub static BUNDLED_STORE_MODELS: &[BundledStoreModel] = &[BundledStoreModel {
             explicit_url: Some("https://ollaya.dev/blobs/sha256-6a42ffd329be28d2cb5e330c9c46124d6598c81c95c57c20e5227f5fae65f588"),
         },
         BundledStoreLayer {
-            digest: "sha256:3ead250e6a342c1966bac2f7c74aea049794e2eaadba6f6d55432ada00a5836f",
+            digest: "sha256:36e44593143ef754e22ccd0e9ba58feb74b67fb43509c5cf3481d46f50455fef",
             size: 3_340_536,
             explicit_url: None,
         },
         BundledStoreLayer {
-            digest: "sha256:44e380c5b48bfc7c548062e578180033843dbfeb805b3fba705cfcc9eebd6d87",
+            digest: "sha256:47f2c5807a5bffc9942bc72c7dca42e34df282f47c7025efe40cb70229527da9",
             size: 470_637_416,
             explicit_url: None,
         },
         BundledStoreLayer {
-            digest: "sha256:b452876f7d1b5b72925fee245db27a7531e09e99f6d2d91eb2490a383d551d0f",
+            digest: "sha256:7a5cee4658291e2647d7516c82b3d3abe26e15d8d96532be8bf147000f4760f8",
             size: 18_945_996,
             explicit_url: None,
         },
@@ -457,9 +457,9 @@ mod tests {
     }
 
     #[test]
-    fn padrao_e_o_decima_network_v11_e_vem_instalado() {
+    fn padrao_e_o_decima_network_v13_e_vem_instalado() {
         let padrao = spec(DEFAULT_DECIDER_MODEL).unwrap();
-        assert_eq!(padrao.name, "netmonitor/decima-network:v11");
+        assert_eq!(padrao.name, "netmonitor/decima-network:v13");
         assert!(padrao.recommended && padrao.bundled);
         assert!(
             padrao
@@ -490,7 +490,7 @@ mod tests {
         let nomes: Vec<&str> = ordem.iter().map(|spec| spec.name).collect();
         assert_eq!(
             nomes,
-            ["netmonitor/decima-network:v11", "kev:0.8b", "decider:0.8b"]
+            ["netmonitor/decima-network:v13", "kev:0.8b", "decider:0.8b"]
         );
     }
 
@@ -521,7 +521,7 @@ mod tests {
     fn apelido_resolve_para_o_modelo() {
         assert_eq!(
             spec("decima-network").map(|spec| spec.name),
-            Some("netmonitor/decima-network:v11")
+            Some("netmonitor/decima-network:v13")
         );
         assert_eq!(spec("KEV:0.8b").map(|spec| spec.name), Some("kev:0.8b"));
         assert!(spec("kev").is_none(), "o kev sem tag é outro tamanho");
@@ -534,12 +534,12 @@ mod tests {
         assert!(!is_available(&["kev:4b"], "kev:0.8b"), "o 4B não é o 0.8B");
         assert!(!is_available(&["kev:latest"], "kev:0.8b"));
         assert!(is_available(
-            &["netmonitor/decima-network:v11"],
+            &["netmonitor/decima-network:v13"],
             "decima-network"
         ));
         assert!(
             !is_available(&["netmonitor/decima-network:v9"], DEFAULT_DECIDER_MODEL),
-            "a v9 não é a v11"
+            "a v9 não é a v13"
         );
         assert!(is_available(&["laya:latest"], "laya"), "fora do catálogo");
         assert!(is_available(&["meu-modelo"], "meu-modelo"));

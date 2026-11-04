@@ -22,6 +22,7 @@ use crate::{
     },
     services::{
         ai::{
+            chat_benchmark,
             decider::{
                 catalog, client::DeciderClient, config::AiDeciderSettings, decisions_benchmark,
                 diagnostics, providers, runtime::DeciderRuntime,
@@ -406,6 +407,14 @@ async fn show_decider_benchmark() -> AppResult<Response> {
     Ok(format::json(report)?)
 }
 
+/// `GET /api/ai/chat/benchmark` — os modelos de chat (Ollama local) medidos
+/// nos cenários oficiais e cegos de NOC/ISP do NetMonitor.
+async fn show_chat_benchmark() -> AppResult<Response> {
+    let report = chat_benchmark::report()
+        .ok_or_else(|| AppError::NotFound("benchmark dos modelos de chat indisponível".into()))?;
+    Ok(format::json(report)?)
+}
+
 /// `POST /api/ai/decider/test` — o Ollaya responde, o modelo está lá, e o que ele
 /// decide para a pergunta de exemplo.
 async fn test_decider(
@@ -503,6 +512,7 @@ pub fn routes() -> Routes {
         .add("/openrouter/models", get(list_openrouter_models))
         .add("/ollama/models", get(list_ollama_models))
         .add("/ollama/pull", post(pull_ollama_model))
+        .add("/chat/benchmark", get(show_chat_benchmark))
         .add("/decider", get(show_decider).put(update_decider))
         .add("/decider/providers", get(list_decider_providers))
         .add("/decider/models", post(list_decider_models))

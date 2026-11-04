@@ -45,7 +45,7 @@ export function defaultDeciderSettings(): AiDeciderSettings {
     provider: 'ollaya',
     customProtocol: 'systemone',
     baseUrl: 'http://ollaya:11435',
-    model: 'netmonitor/decima-network:v11',
+    model: 'netmonitor/decima-network:v13',
     minConfidence: 60,
     timeoutMs: 4000,
     features: {
@@ -193,7 +193,7 @@ export const useAiDeciderStore = defineStore('aiDecider', () => {
 
   /**
    * Para o do catálogo vale o veredito do backend, que conhece os apelidos
-   * (`decima-network` é o `netmonitor/decima-network:v11`); o resto, pela
+   * (`decima-network` é o `netmonitor/decima-network:v13`); o resto, pela
    * regra de nomes.
    */
   function installed(model: string): boolean {

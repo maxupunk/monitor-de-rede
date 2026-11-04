@@ -9,6 +9,7 @@ import type { AiChart } from '@/bindings/AiChart'
 import type { AiProactiveSettings } from '@/bindings/AiProactiveSettings'
 import type { AiResponseStyle } from '@/bindings/AiResponseStyle'
 import type { AiAutomationMode } from '@/bindings/AiAutomationMode'
+import type { ChatBenchmarkReport } from '@/bindings/ChatBenchmarkReport'
 import type { ExecuteToolResponse } from '@/bindings/ExecuteToolResponse'
 import {
   applyChatEvent,
@@ -56,6 +57,7 @@ export type {
   AiProactiveSettings,
   AiResponseStyle,
   AiToolCallState,
+  ChatBenchmarkReport,
   OpenCodeModelItem,
   OpenCodeModelsResponse,
   OpenRouterModelItem,
@@ -157,6 +159,10 @@ export const useAiStore = defineStore('ai', () => {
   const pullProgress = ref<OllamaPullProgress | null>(null)
   const pullError = ref<string | null>(null)
   let activePullAbortController: AbortController | null = null
+
+  const chatBenchmarkReport = ref<ChatBenchmarkReport | null>(null)
+  const loadingChatBenchmark = ref(false)
+  const chatBenchmarkError = ref<string | null>(null)
 
   const opencodeModels = ref<OpenCodeModelItem[]>([])
   const loadingOpencodeModels = ref(false)
@@ -737,6 +743,22 @@ export const useAiStore = defineStore('ai', () => {
     pullingModelName.value = null
   }
 
+  /** As notas dos modelos de chat no benchmark do NetMonitor (página `/ai-benchmark`). */
+  async function loadChatBenchmark() {
+    loadingChatBenchmark.value = true
+    chatBenchmarkError.value = null
+    try {
+      chatBenchmarkReport.value = await apiService.get<ChatBenchmarkReport>('/ai/chat/benchmark')
+    } catch (err) {
+      chatBenchmarkError.value = errorMessage(
+        err,
+        'Falha ao carregar o benchmark dos modelos de chat'
+      )
+    } finally {
+      loadingChatBenchmark.value = false
+    }
+  }
+
   return {
     settings,
     loadingSettings,
@@ -751,6 +773,10 @@ export const useAiStore = defineStore('ai', () => {
     pullingModelName,
     pullProgress,
     pullError,
+    chatBenchmarkReport,
+    loadingChatBenchmark,
+    chatBenchmarkError,
+    loadChatBenchmark,
     messages,
     compactNext,
     requestCompaction,

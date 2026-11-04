@@ -92,7 +92,7 @@ async fn autocomplete_junta_catalogo_e_instalados() {
         assert_eq!(
             nomes,
             [
-                "netmonitor/decima-network:v11",
+                "netmonitor/decima-network:v13",
                 "kev:0.8b",
                 "decider:0.8b",
                 "laya:multilingual"

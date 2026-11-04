@@ -1,0 +1,289 @@
+{
+  "source": "Laya-tuning",
+  "measuredOn": "2026-11-03",
+  "hardware": "NVIDIA GeForce RTX 4050 Laptop GPU, 6141 MiB · Intel64 Family 6 Model 186 Stepping 2, GenuineIntel (20 threads)",
+  "numCtx": 16384,
+  "timeoutMs": 30000,
+  "minScore": 0.8,
+  "minSafety": 0.95,
+  "minTools": 0.8,
+  "benchCases": 26,
+  "blindCases": 45,
+  "contract": "sha256:2a2f370659759657",
+  "domains": [
+    "diagnostico",
+    "redes_equipamentos",
+    "monitoramento_alertas",
+    "operacao_infra",
+    "conhecimento_web",
+    "seguranca_rigor"
+  ],
+  "models": [
+    {
+      "model": "lfm3-netmonitor:latest",
+      "bench": {
+        "run": "2026-11-02-chat-bench-v3-quants",
+        "cases": 26,
+        "overall": 0.9375,
+        "overallLow": 0.8971,
+        "overallHigh": 0.9779,
+        "tools": 0.9808,
+        "answer": 0.8462,
+        "safety": 1.0,
+        "perfect": 0.8077,
+        "errors": 0,
+        "turnP50Ms": 6183.5,
+        "turnP95Ms": 8987.4,
+        "tokensPerS": 12.2,
+        "fit": true,
+        "domains": {
+          "diagnostico": 0.9179,
+          "redes_equipamentos": 1.0,
+          "monitoramento_alertas": 0.93,
+          "operacao_infra": 0.9125,
+          "conhecimento_web": 1.0,
+          "seguranca_rigor": 0.93
+        }
+      },
+      "blind": {
+        "run": "2026-11-02-chat-blind-v3-quants",
+        "cases": 45,
+        "overall": 0.9743,
+        "overallLow": 0.9563,
+        "overallHigh": 0.9922,
+        "tools": 0.9889,
+        "answer": 0.9407,
+        "safety": 1.0,
+        "perfect": 0.8889,
+        "errors": 0,
+        "turnP50Ms": 6547.8,
+        "turnP95Ms": 13773.4,
+        "tokensPerS": 13.8,
+        "fit": true,
+        "domains": {
+          "diagnostico": 1.0,
+          "redes_equipamentos": 0.9611,
+          "monitoramento_alertas": 1.0,
+          "operacao_infra": 1.0,
+          "conhecimento_web": 0.9146,
+          "seguranca_rigor": 0.93
+        }
+      },
+      "fit": true
+    },
+    {
+      "model": "lfm3-netmonitor:q4_k_m",
+      "bench": {
+        "run": "2026-11-02-chat-bench-v3-quants",
+        "cases": 26,
+        "overall": 0.9346,
+        "overallLow": 0.8817,
+        "overallHigh": 0.9798,
+        "tools": 0.9615,
+        "answer": 0.8846,
+        "safety": 0.9615,
+        "perfect": 0.8077,
+        "errors": 0,
+        "turnP50Ms": 4522.4,
+        "turnP95Ms": 7125.2,
+        "tokensPerS": 15.6,
+        "fit": true,
+        "domains": {
+          "diagnostico": 0.8607,
+          "redes_equipamentos": 1.0,
+          "monitoramento_alertas": 1.0,
+          "operacao_infra": 1.0,
+          "conhecimento_web": 0.825,
+          "seguranca_rigor": 0.89
+        }
+      },
+      "blind": {
+        "run": "2026-11-02-chat-blind-v3-quants",
+        "cases": 45,
+        "overall": 0.9768,
+        "overallLow": 0.9562,
+        "overallHigh": 0.9948,
+        "tools": 0.9944,
+        "answer": 0.9407,
+        "safety": 1.0,
+        "perfect": 0.8889,
+        "errors": 0,
+        "turnP50Ms": 5073.7,
+        "turnP95Ms": 9164.0,
+        "tokensPerS": 18.1,
+        "fit": true,
+        "domains": {
+          "diagnostico": 0.9833,
+          "redes_equipamentos": 0.9806,
+          "monitoramento_alertas": 1.0,
+          "operacao_infra": 1.0,
+          "conhecimento_web": 0.9135,
+          "seguranca_rigor": 0.93
+        }
+      },
+      "fit": true
+    },
+    {
+      "model": "lfm3-netmonitor:q5_k_m",
+      "bench": {
+        "run": "2026-11-02-chat-bench-v3-quants",
+        "cases": 26,
+        "overall": 0.9452,
+        "overallLow": 0.8971,
+        "overallHigh": 0.9846,
+        "tools": 0.9231,
+        "answer": 0.9423,
+        "safety": 1.0,
+        "perfect": 0.8462,
+        "errors": 0,
+        "turnP50Ms": 4989.0,
+        "turnP95Ms": 7542.2,
+        "tokensPerS": 13.6,
+        "fit": true,
+        "domains": {
+          "diagnostico": 0.9107,
+          "redes_equipamentos": 1.0,
+          "monitoramento_alertas": 0.91,
+          "operacao_infra": 0.9125,
+          "conhecimento_web": 1.0,
+          "seguranca_rigor": 1.0
+        }
+      },
+      "blind": {
+        "run": "2026-11-02-chat-blind-v3-quants",
+        "cases": 45,
+        "overall": 0.9421,
+        "overallLow": 0.8978,
+        "overallHigh": 0.9769,
+        "tools": 0.9611,
+        "answer": 0.9037,
+        "safety": 0.9667,
+        "perfect": 0.8,
+        "errors": 0,
+        "turnP50Ms": 5858.0,
+        "turnP95Ms": 10903.4,
+        "tokensPerS": 15.6,
+        "fit": true,
+        "domains": {
+          "diagnostico": 1.0,
+          "redes_equipamentos": 0.9611,
+          "monitoramento_alertas": 1.0,
+          "operacao_infra": 0.9182,
+          "conhecimento_web": 0.9719,
+          "seguranca_rigor": 0.775
+        }
+      },
+      "fit": true
+    },
+    {
+      "model": "lfm3:latest",
+      "bench": {
+        "run": "2026-10-29-chat-bench-lfm3",
+        "cases": 26,
+        "overall": 0.8668,
+        "overallLow": 0.7856,
+        "overallHigh": 0.9394,
+        "tools": 0.7788,
+        "answer": 0.9038,
+        "safety": 1.0,
+        "perfect": 0.6923,
+        "errors": 0,
+        "turnP50Ms": 1888.1,
+        "turnP95Ms": 4802.1,
+        "tokensPerS": 70.1,
+        "fit": false,
+        "domains": {
+          "diagnostico": 0.8946,
+          "redes_equipamentos": 0.6,
+          "monitoramento_alertas": 0.91,
+          "operacao_infra": 1.0,
+          "conhecimento_web": 1.0,
+          "seguranca_rigor": 0.865
+        }
+      },
+      "blind": {
+        "run": "2026-10-31-chat-blind-v1",
+        "cases": 30,
+        "overall": 0.7675,
+        "overallLow": 0.6717,
+        "overallHigh": 0.8575,
+        "tools": 0.7333,
+        "answer": 0.7167,
+        "safety": 0.9333,
+        "perfect": 0.5667,
+        "errors": 0,
+        "turnP50Ms": 3094.5,
+        "turnP95Ms": 15071.7,
+        "tokensPerS": 68.2,
+        "fit": false,
+        "domains": {
+          "diagnostico": 0.5964,
+          "redes_equipamentos": 0.9125,
+          "monitoramento_alertas": 0.8292,
+          "operacao_infra": 0.8464,
+          "conhecimento_web": 1.0,
+          "seguranca_rigor": 0.66
+        }
+      },
+      "fit": false
+    },
+    {
+      "model": "llama3.2:3b",
+      "bench": {
+        "run": "2026-10-30-chat-bench-candidatos",
+        "cases": 26,
+        "overall": 0.6683,
+        "overallLow": 0.5644,
+        "overallHigh": 0.7615,
+        "tools": 0.5962,
+        "answer": 0.6154,
+        "safety": 0.9231,
+        "perfect": 0.4231,
+        "errors": 0,
+        "turnP50Ms": 3028.8,
+        "turnP95Ms": 5580.7,
+        "tokensPerS": 26.5,
+        "fit": false,
+        "domains": {
+          "diagnostico": 0.6,
+          "redes_equipamentos": 0.9563,
+          "monitoramento_alertas": 0.795,
+          "operacao_infra": 0.4937,
+          "conhecimento_web": 1.0,
+          "seguranca_rigor": 0.48
+        }
+      },
+      "blind": null,
+      "fit": false
+    },
+    {
+      "model": "qwen3:4b",
+      "bench": {
+        "run": "2026-10-30-chat-bench-candidatos",
+        "cases": 8,
+        "overall": 0.1938,
+        "overallLow": 0.0,
+        "overallHigh": 0.3875,
+        "tools": 0.125,
+        "answer": 0.25,
+        "safety": 0.25,
+        "perfect": 0.125,
+        "errors": 6,
+        "turnP50Ms": 0.0,
+        "turnP95Ms": 225596.8,
+        "tokensPerS": 4.8,
+        "fit": false,
+        "domains": {
+          "diagnostico": 0.0,
+          "redes_equipamentos": 0.25,
+          "monitoramento_alertas": 0.0,
+          "operacao_infra": 0.0,
+          "conhecimento_web": 0.0,
+          "seguranca_rigor": 0.1833
+        }
+      },
+      "blind": null,
+      "fit": false
+    }
+  ]
+}

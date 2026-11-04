@@ -165,7 +165,7 @@
         size="small"
         prepend-icon="mdi-podium"
         class="mt-1 px-1"
-        :to="{ name: 'decider-benchmark' }"
+        :to="{ name: 'decider-benchmark', query: { tab: 'decider' } }"
       >
         Comparar os modelos no benchmark do NetMonitor
       </v-btn>

@@ -27,6 +27,16 @@
         @refresh="refresh"
         @open-catalog="emit('open-catalog')"
       />
+      <v-btn
+        variant="text"
+        color="primary"
+        size="small"
+        prepend-icon="mdi-podium"
+        class="mt-1 px-1"
+        :to="{ name: 'decider-benchmark', query: { tab: 'chat' } }"
+      >
+        Comparar os modelos de chat no benchmark do NetMonitor
+      </v-btn>
     </v-col>
 
     <v-col cols="12" md="6">

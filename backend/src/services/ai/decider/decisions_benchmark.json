@@ -2,7 +2,7 @@
   "source": "Laya-tuning",
   "reference": "2026-10-22-selecao-bench-v2.3",
   "cases": 471,
-  "measuredOn": "2026-10-24",
+  "measuredOn": "2026-11-03",
   "hardware": "12th Gen Intel(R) Core(TM) i7-1255U · 12 threads",
   "ollaya": "0.15.0",
   "timeoutMs": 4000,
@@ -16,18 +16,18 @@
   ],
   "models": [
     {
-      "model": "netmonitor/decima-network:v11",
-      "overall": 0.9321,
-      "overallLow": 0.9167,
-      "overallHigh": 0.9472,
-      "screen": 0.8948,
+      "model": "netmonitor/decima-network:v13",
+      "overall": 0.9326,
+      "overallLow": 0.9197,
+      "overallHigh": 0.9495,
+      "screen": 0.9076,
       "tasks": {
-        "action_review": 0.8966,
-        "device_identity": 0.968,
-        "incident_triage": 0.9549,
-        "interfaces": 0.8251,
-        "log_category": 0.98,
-        "tool_routing": 0.9678
+        "action_review": 0.9189,
+        "device_identity": 0.9799,
+        "incident_triage": 0.946,
+        "interfaces": 0.8115,
+        "log_category": 0.96,
+        "tool_routing": 0.9792
       },
       "p50Ms": 574.5,
       "p95Ms": 980.6,
@@ -71,5 +71,5 @@
       "overTimeout": 0.4221
     }
   ],
-  "contract": "bdd516fa292f"
+  "contract": "9e80fa82f155"
 }

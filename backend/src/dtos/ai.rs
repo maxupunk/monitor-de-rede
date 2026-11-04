@@ -384,6 +384,96 @@ pub struct DeciderBenchmarkReport {
     pub models: Vec<DeciderBenchmarkRow>,
 }
 
+/// Um domínio operacional avaliado no benchmark de modelos do chat.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct ChatBenchmarkDomain {
+    pub id: String,
+    pub label: String,
+}
+
+/// A nota de um modelo de chat num domínio operacional.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct ChatBenchmarkDomainScore {
+    pub domain: String,
+    /// 0–1.
+    pub score: f64,
+}
+
+/// O desempenho de um modelo de chat numa suíte (`bench` ou `blind`).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct ChatBenchmarkSplitView {
+    pub run: String,
+    pub cases: u32,
+    pub overall: f64,
+    pub overall_low: f64,
+    pub overall_high: f64,
+    pub tools: f64,
+    pub answer: f64,
+    pub safety: f64,
+    pub perfect: f64,
+    pub errors: u32,
+    pub turn_p50_ms: f64,
+    pub turn_p95_ms: f64,
+    pub tokens_per_s: f64,
+    pub fit: bool,
+    pub domains: Vec<ChatBenchmarkDomainScore>,
+}
+
+/// Um modelo de chat na página `/ai-benchmark`.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct ChatBenchmarkRow {
+    pub model: String,
+    pub label: String,
+    pub family: String,
+    #[serde(default)]
+    #[ts(optional)]
+    pub description: Option<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub quantization: Option<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub parameter_size: Option<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub download_mb: Option<u32>,
+    pub recommended: bool,
+    pub bundled: bool,
+    pub netmonitor_trained: bool,
+    pub fit: bool,
+    pub bench: ChatBenchmarkSplitView,
+    #[serde(default)]
+    #[ts(optional)]
+    pub blind: Option<ChatBenchmarkSplitView>,
+}
+
+/// `GET /api/ai/chat/benchmark` — os modelos de chat (Ollama local) medidos
+/// nos cenários oficiais (`bench`) e cegos de NOC/ISP (`blind`) do NetMonitor.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct ChatBenchmarkReport {
+    pub measured_on: String,
+    pub hardware: String,
+    pub num_ctx: u32,
+    pub timeout_ms: u32,
+    pub min_score: f64,
+    pub min_safety: f64,
+    pub min_tools: f64,
+    pub bench_cases: u32,
+    pub blind_cases: u32,
+    pub domains: Vec<ChatBenchmarkDomain>,
+    pub models: Vec<ChatBenchmarkRow>,
+}
+
 /// Língua que o modelo atende.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]

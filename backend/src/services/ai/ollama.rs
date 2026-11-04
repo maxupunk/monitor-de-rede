@@ -56,7 +56,7 @@ pub static BUNDLED_MODELS: &[BundledOllamaModel] = &[
         release_url_env: "CHAT_MODELS_URL",
         default_release_url: CHAT_MODELS_RELEASE_URL,
         gguf_filename: "lfm3-netmonitor-q8_0.gguf",
-        gguf_digest: "sha256:a1ff35a978ca9f9dc09d1ecf062a66596c1dd1c4c835c4b127778fe5581cd00d",
+        gguf_digest: "sha256:3d4541f19c0f66c22ff3cb71de4bc2e8e66d8080f38b34845493baba7b29e1df",
         gguf_size: 1_846_237_728,
         template: "{{ .Prompt }}",
         renderer: "lfm3",
@@ -69,7 +69,7 @@ pub static BUNDLED_MODELS: &[BundledOllamaModel] = &[
         release_url_env: "CHAT_MODELS_URL",
         default_release_url: CHAT_MODELS_RELEASE_URL,
         gguf_filename: "lfm3-netmonitor-q5_k_m.gguf",
-        gguf_digest: "sha256:0ea6e2dfe9e40cae66732b1e6df358c66c8b1410fdc5f8accaa548700647bb54",
+        gguf_digest: "sha256:e1498c11993cbf3951a9057bbab07953c0d4f836ecaff4d00dcc023b6fdce201",
         gguf_size: 1_258_662_432,
         template: "{{ .Prompt }}",
         renderer: "lfm3",
@@ -82,7 +82,7 @@ pub static BUNDLED_MODELS: &[BundledOllamaModel] = &[
         release_url_env: "CHAT_MODELS_URL",
         default_release_url: CHAT_MODELS_RELEASE_URL,
         gguf_filename: "lfm3-netmonitor-q4_k_m.gguf",
-        gguf_digest: "sha256:0605111c42c2bb0fecbcde214e455fa63538ef534981d5237a20caaf734dc8ee",
+        gguf_digest: "sha256:480ef9bf9fcc8975a0576677ec9a1b6304eb2468e878e44e07539b5133eb05db",
         gguf_size: 1_099_627_040,
         template: "{{ .Prompt }}",
         renderer: "lfm3",
@@ -116,7 +116,7 @@ pub struct RecommendedModel {
 pub static RECOMMENDED_MODELS: &[RecommendedModel] = &[
     RecommendedModel {
         name: "lfm3-netmonitor:latest",
-        description: "LFM3 NetMonitor 1.7B (Q8_0 / Q8_K — Máxima precisão, padrão) — Especialista nas 61 ferramentas do NetMonitor (redes, Wi-Fi IEEE 802.11, fibra óptica GPON/SFP+, roteadores, Docker, backups, dashboard e web_search): 1,85 GB, 99,4% em ferramentas (nota 95,7 blind / 93,5 bench)",
+        description: "LFM3 NetMonitor 1.7B (Q8_0 / Q8_K — Máxima precisão, padrão) — Especialista nas 61 ferramentas do NetMonitor (redes, Wi-Fi IEEE 802.11, fibra óptica GPON/SFP+, roteadores, Docker, backups, dashboard e web_search): 1,85 GB, 98,9% em ferramentas e 100% em segurança (nota 97,4 blind / 93,8 bench)",
         parameter_size: "1.7B · Q8_0",
         context_length: 262_144,
         tool_calling_optimized: true,
@@ -124,7 +124,7 @@ pub static RECOMMENDED_MODELS: &[RecommendedModel] = &[
     },
     RecommendedModel {
         name: "lfm3-netmonitor:q5_k_m",
-        description: "LFM3 NetMonitor 1.7B (Q5_K_M — Equilibrado) — Mesma especialização em redes e nas 61 ferramentas do NetMonitor com 32% menos memória: 1,26 GB, 100% segurança no blind (nota 95,8 blind / 94,1 bench, p95 2,9s)",
+        description: "LFM3 NetMonitor 1.7B (Q5_K_M — Equilibrado) — Mesma especialização em redes e nas 61 ferramentas do NetMonitor com 32% menos memória: 1,26 GB, 100% segurança no bench (nota 94,2 blind / 94,5 bench)",
         parameter_size: "1.7B · Q5_K_M",
         context_length: 262_144,
         tool_calling_optimized: true,
@@ -132,7 +132,7 @@ pub static RECOMMENDED_MODELS: &[RecommendedModel] = &[
     },
     RecommendedModel {
         name: "lfm3-netmonitor:q4_k_m",
-        description: "LFM3 NetMonitor 1.7B (Q4_K_M — Ultraleve / Rápido) — Versão compacta de 4 bits para servidores com pouca RAM/CPU: 1,10 GB, ~61 tok/s (nota 95,2 blind / 94,5 bench, p95 2,8s)",
+        description: "LFM3 NetMonitor 1.7B (Q4_K_M — Ultraleve / Rápido) — Versão compacta de 4 bits para servidores com pouca RAM/CPU: 1,10 GB, 99,4% em ferramentas e 100% segurança no blind (nota 97,7 blind / 93,5 bench)",
         parameter_size: "1.7B · Q4_K_M",
         context_length: 262_144,
         tool_calling_optimized: true,

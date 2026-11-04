@@ -200,7 +200,7 @@ describe('benchmark do NetMonitor', () => {
 
   it('o padrão é o Decima Network, que vem com o NetMonitor', () => {
     expect(defaultDeciderSettings().model).toBe(RECOMMENDED_MODEL)
-    expect(RECOMMENDED_MODEL).toBe('netmonitor/decima-network:v11')
+    expect(RECOMMENDED_MODEL).toBe('netmonitor/decima-network:v13')
     expect(defaultDeciderSettings().timeoutMs).toBe(4000)
   })
 })
