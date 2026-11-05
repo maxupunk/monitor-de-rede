@@ -15,7 +15,6 @@ use crate::services::{
             host_resources::{HostResourcesChecker, HostResourcesConfig},
             http::{HttpChecker, HttpConfig},
             ping::{PingChecker, PingConfig},
-            snmp::{SnmpChecker, SnmpCheckerConfig},
             system_health::{SystemHealthChecker, SystemHealthConfig},
             tcp::{TcpChecker, TcpConfig},
         },
@@ -100,11 +99,6 @@ pub async fn run_monitor_with(
                 )?)
                 .await
         }
-        "snmp" => {
-            SnmpChecker
-                .execute(parse_config::<SnmpCheckerConfig>(&configuration, "snmp")?)
-                .await
-        }
         // Sem este ramo o agendador devolveria "tipo de monitor desconhecido"
         // a cada ciclo do monitor gerenciado do servidor — e o dispositivo
         // ficaria eternamente em `unknown`.
@@ -116,7 +110,7 @@ pub async fn run_monitor_with(
                 )?)
                 .await
         }
-        // Tipos das áreas (container, na área Servidores).
+        // Tipos das áreas (snmp, na Rede; container, em Servidores).
         other => {
             let Some(checker) = deps.checkers.find(other) else {
                 return Err(AppError::business_rule(format!(

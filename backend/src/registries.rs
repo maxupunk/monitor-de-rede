@@ -47,11 +47,14 @@ pub fn area_policies() -> Vec<Box<dyn AreaPolicy>> {
     ]
 }
 
-/// Os tipos de monitor das áreas. A Docker Engine só existe no agente
+/// Os tipos de monitor das áreas (o `snmp` da Rede, o `container` de
+/// Servidores). A Docker Engine só existe no agente
 /// (ADR 014): a central passa `None`.
 #[must_use]
 pub fn monitor_checkers(docker: Option<Arc<dyn DockerEngine>>) -> MonitorCheckers {
-    MonitorCheckers::new(netmonitor_servers::monitor_checkers(docker))
+    let mut checkers = netmonitor_network::monitor_checkers();
+    checkers.extend(netmonitor_servers::monitor_checkers(docker));
+    MonitorCheckers::new(checkers)
 }
 
 /// O que a área VPN pede ao resto da central: o motor de alertas, a
@@ -300,5 +303,6 @@ mod tests {
     #[test]
     fn o_monitor_de_container_esta_registrado() {
         assert!(monitor_checkers(None).find("container").is_some());
+        assert!(monitor_checkers(None).find("snmp").is_some());
     }
 }

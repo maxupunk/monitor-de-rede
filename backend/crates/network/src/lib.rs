@@ -11,7 +11,8 @@
 //! * [`discovery`] — varredura das redes, identificação e conflitos;
 //! * [`vendors`] — a base OUI dos fabricantes;
 //! * [`port_scanner`] — a varredura de portas TCP/UDP;
-//! * [`snmp`] — coleta, interfaces e a observação do estado delas;
+//! * [`snmp`] — coleta, interfaces, a observação do estado delas e o monitor
+//!   `snmp` ([`SnmpMonitor`], registrado como `MonitorChecker`);
 //! * [`topology`] — o mapa, os enlaces e o layout;
 //! * [`controllers`], [`dtos`] — as rotas da área.
 
@@ -25,4 +26,15 @@ pub mod snmp;
 pub mod topology;
 pub mod vendors;
 
+use std::sync::Arc;
+
+use netmonitor_core::monitoring::MonitorChecker;
+
 pub use area_policy::NetworkPolicy;
+pub use snmp::checker::SnmpMonitor;
+
+/// Os tipos de monitor desta área, para o registro do núcleo.
+#[must_use]
+pub fn monitor_checkers() -> Vec<Arc<dyn MonitorChecker>> {
+    vec![Arc::new(SnmpMonitor)]
+}

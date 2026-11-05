@@ -4,6 +4,5 @@ pub mod dns;
 pub mod host_resources;
 pub mod http;
 pub mod ping;
-pub mod snmp;
 pub mod system_health;
 pub mod tcp;

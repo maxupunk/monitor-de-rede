@@ -15,18 +15,16 @@ use serde::Deserialize;
 
 use netmonitor_core::classifier::{
     self,
-    device_identity::{DeviceFacts, DeviceIdentity, IdentitySuggestion},
+    device_identity::{
+        DeviceFacts, DeviceIdentity, IdentitySuggestion, DECIDER_KEY, LEGACY_DECIDER_KEY,
+    },
     ClassifierFeature, Lane,
 };
 
 use super::{access::AccessContext, systems};
 use crate::{
     models::_entities::discovery_results,
-    services::{
-        discovery::decider_identity::{DECIDER_KEY, LEGACY_DECIDER_KEY},
-        shared::errors::AppResult,
-        syslog::hints,
-    },
+    services::{shared::errors::AppResult, syslog::hints},
 };
 
 /// Corpo de `POST /api/devices/identify`.

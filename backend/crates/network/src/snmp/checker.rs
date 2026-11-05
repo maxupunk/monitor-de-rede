@@ -3,16 +3,15 @@
 use chrono::Utc;
 use serde::Deserialize;
 
-use crate::services::{
-    monitoring::{
-        contracts::{CheckMetric, CheckResult, Checker, MonitorStatus},
-        health::series,
-    },
-    snmp::{
-        client::{SnmpClient, SnmpConfig, SnmpError, SnmpVersion},
-        collectors::{collect_cpu, collect_memory, status_label, OID_SYS_UPTIME},
-        profiles::format_sensor_value,
-    },
+use crate::snmp::{
+    client::{SnmpClient, SnmpConfig, SnmpError, SnmpVersion},
+    collectors::{collect_cpu, collect_memory, status_label, OID_SYS_UPTIME},
+    profiles::format_sensor_value,
+};
+use agent_protocol::monitoring::{CheckMetric, CheckResult, MonitorStatus};
+use netmonitor_core::{
+    monitoring::{parse_config, series, Checker, MonitorChecker},
+    shared::errors::AppResult,
 };
 
 const OID_IF_ADMIN_STATUS: &str = "1.3.6.1.2.1.2.2.1.7";
@@ -51,8 +50,7 @@ pub struct SnmpCheckerConfig {
     #[serde(default)]
     pub data_type: Option<String>,
     #[serde(default)]
-    pub states:
-        Option<std::collections::HashMap<String, crate::services::snmp::profiles::SensorStateSpec>>,
+    pub states: Option<std::collections::HashMap<String, crate::snmp::profiles::SensorStateSpec>>,
 }
 fn default_version() -> String {
     "v2c".into()
@@ -392,9 +390,7 @@ async fn resolve_interface_index(
         .into_iter()
         .chain(base_descr.unwrap_or_default());
     for entry in entries {
-        if let Some((_, index)) =
-            crate::services::snmp::collectors::oid_column_and_index(&entry.oid)
-        {
+        if let Some((_, index)) = crate::snmp::collectors::oid_column_and_index(&entry.oid) {
             let name = entry.value.text();
             if name.trim().eq_ignore_ascii_case(target_name) {
                 return Ok(index);
@@ -407,7 +403,7 @@ async fn resolve_interface_index(
 }
 
 fn value(
-    values: &std::collections::BTreeMap<String, Option<crate::services::snmp::client::SnmpValue>>,
+    values: &std::collections::BTreeMap<String, Option<crate::snmp::client::SnmpValue>>,
     oid: &str,
 ) -> Result<u64, SnmpError> {
     values
@@ -426,6 +422,29 @@ fn interface_monitor_status(admin: u64, oper: u64) -> MonitorStatus {
         MonitorStatus::Down
     } else {
         MonitorStatus::Warning
+    }
+}
+
+/// Tipo do monitor SNMP (`monitors.type`).
+pub const SNMP_MONITOR: &str = "snmp";
+
+/// O monitor `snmp` no registro do núcleo (ADR 017, `MonitorChecker`): roda
+/// na central e no agente (monitor com `probe_id`), como antes.
+pub struct SnmpMonitor;
+
+#[async_trait::async_trait]
+impl MonitorChecker for SnmpMonitor {
+    fn kind(&self) -> &'static str {
+        SNMP_MONITOR
+    }
+
+    async fn check(&self, configuration: &serde_json::Value) -> AppResult<CheckResult> {
+        Ok(SnmpChecker
+            .execute(parse_config::<SnmpCheckerConfig>(
+                configuration,
+                SNMP_MONITOR,
+            )?)
+            .await)
     }
 }
 

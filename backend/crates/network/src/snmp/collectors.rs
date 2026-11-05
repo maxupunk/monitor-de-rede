@@ -440,7 +440,7 @@ fn counter_diff(previous: u64, current: u64, counter_bits: u8) -> u64 {
     }
 }
 
-pub fn oid_column_and_index(oid: &str) -> Option<(u32, i32)> {
+pub(crate) fn oid_column_and_index(oid: &str) -> Option<(u32, i32)> {
     let mut parts = oid.rsplit('.');
     let index = parts.next()?.parse().ok()?;
     let column = parts.next()?.parse().ok()?;

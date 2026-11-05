@@ -3,16 +3,14 @@
 use loco_rs::prelude::*;
 use sea_orm::EntityTrait;
 
-use crate::{
+use crate::snmp::{
+    client::{SnmpConfig, SnmpVersion},
+    service,
+};
+use netmonitor_core::{
     models::devices,
-    services::{
-        monitoring::execution_guard::try_acquire_snmp_device,
-        shared::errors::{AppError, AppResult},
-        snmp::{
-            client::{SnmpConfig, SnmpVersion},
-            service,
-        },
-    },
+    monitoring::execution_guard::try_acquire_snmp_device,
+    shared::errors::{AppError, AppResult},
 };
 
 #[derive(Debug, serde::Deserialize)]
@@ -176,20 +174,20 @@ async fn interface_suggestions(
     State(ctx): State<AppContext>,
     Json(input): Json<crate::dtos::snmp::InterfaceSuggestionsInput>,
 ) -> AppResult<Response> {
-    let suggestions = crate::services::snmp::decider_interfaces::suggest(&ctx, &input).await;
+    let suggestions = crate::snmp::decider_interfaces::suggest(&ctx, &input).await;
     Ok(format::json(suggestions)?)
 }
 
 async fn list_profiles(State(ctx): State<AppContext>) -> AppResult<Response> {
-    let profiles = crate::services::snmp::profiles::load_all_profiles(&ctx.db).await?;
+    let profiles = crate::snmp::profiles::load_all_profiles(&ctx.db).await?;
     Ok(format::json(profiles)?)
 }
 
 async fn save_profile(
     State(ctx): State<AppContext>,
-    Json(profile): Json<crate::services::snmp::profiles::SnmpDeviceProfile>,
+    Json(profile): Json<crate::snmp::profiles::SnmpDeviceProfile>,
 ) -> AppResult<Response> {
-    let saved = crate::services::snmp::profiles::save_custom_profile(&ctx.db, profile).await?;
+    let saved = crate::snmp::profiles::save_custom_profile(&ctx.db, profile).await?;
     Ok(format::json(saved)?)
 }
 
@@ -197,7 +195,7 @@ async fn delete_profile(
     State(ctx): State<AppContext>,
     Path(profile_id): Path<String>,
 ) -> AppResult<Response> {
-    crate::services::snmp::profiles::delete_custom_profile(&ctx.db, &profile_id).await?;
+    crate::snmp::profiles::delete_custom_profile(&ctx.db, &profile_id).await?;
     Ok(format::json(serde_json::json!({
         "message": "Perfil removido com sucesso",
     }))?)

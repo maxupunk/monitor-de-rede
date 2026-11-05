@@ -49,7 +49,6 @@ const EXCECOES: &[(&str, &str)] = &[
     ("agent_runtime", "plugins"),
     ("agents", "discovery"),
     ("agents", "plugins"),
-    ("devices", "discovery"),
     ("devices", "wifi"),
     ("maintenance", "link_tests"),
     ("monitoring", "link_tests"),

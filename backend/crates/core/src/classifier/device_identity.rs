@@ -8,6 +8,11 @@ use serde_json::Value;
 
 use super::suggestion::DeciderSuggestion;
 
+/// Chave do palpite em `details` do resultado e em `data` do host ao vivo.
+pub const DECIDER_KEY: &str = "decider";
+/// A mesma chave em varreduras gravadas antes do renome para Decisor.
+pub const LEGACY_DECIDER_KEY: &str = "laya";
+
 /// O que se sabe do aparelho. Campos vazios não vão ao estado.
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]

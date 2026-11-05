@@ -181,8 +181,10 @@ impl Hooks for App {
             .add_route(
                 netmonitor_network::controllers::discovery::routes().layer(business_auth.clone()),
             )
-            .add_route(controllers::topology::routes().layer(business_auth.clone()))
-            .add_route(controllers::snmp::routes().layer(business_auth.clone()))
+            .add_route(
+                netmonitor_network::controllers::topology::routes().layer(business_auth.clone()),
+            )
+            .add_route(netmonitor_network::controllers::snmp::routes().layer(business_auth.clone()))
             .add_route(controllers::probes::routes().layer(business_auth.clone()))
             .add_route(controllers::agents::routes().layer(business_auth.clone()))
             .add_route(

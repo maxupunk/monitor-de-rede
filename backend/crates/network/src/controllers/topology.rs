@@ -5,14 +5,14 @@ use loco_rs::prelude::*;
 use std::collections::BTreeMap;
 
 use crate::{
-    dtos::resources::{
+    dtos::topology::{
         TopologyLayoutInput, TopologyLinkInput, TopologyLinkUpdateInput, UnmanagedSwitchInput,
     },
-    services::{
-        events::EventBus,
-        shared::errors::{AppError, AppResult},
-        topology::{layout, service},
-    },
+    topology::{layout, service},
+};
+use netmonitor_core::{
+    events::EventBus,
+    shared::errors::{AppError, AppResult},
 };
 
 fn parse_device_id(query: &BTreeMap<String, String>, key: &str) -> AppResult<i64> {

@@ -2,4 +2,6 @@
 
 pub mod discovery;
 pub mod port_scan;
+pub mod snmp;
+pub mod topology;
 pub mod vendors;

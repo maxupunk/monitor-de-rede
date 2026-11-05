@@ -25,9 +25,7 @@ pub mod scheduled_tasks;
 pub mod server_addresses;
 pub mod settings;
 pub mod sites;
-pub mod snmp;
 pub mod storages;
-pub mod topology;
 pub mod users;
 pub mod wifi;
 

@@ -20,10 +20,9 @@ use netmonitor_core::classifier::{
 use super::{device_identifier::scores, merger::DiscoveredHost, service::ScanSessionService};
 use netmonitor_core::{models::discovery_results, shared::errors::AppResult};
 
-/// Chave do palpite em `details` do resultado e em `data` do host ao vivo.
-pub const DECIDER_KEY: &str = "decider";
-/// A mesma chave em varreduras gravadas antes do renome para Decisor.
-pub const LEGACY_DECIDER_KEY: &str = "laya";
+/// As chaves do palpite moram no núcleo (a identificação de dispositivo
+/// também as lê).
+pub use netmonitor_core::classifier::device_identity::{DECIDER_KEY, LEGACY_DECIDER_KEY};
 /// Uma rede grande não vira uma fila de minutos no Ollaya.
 const MAX_HOSTS_PER_RUN: usize = 64;
 
