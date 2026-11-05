@@ -29,6 +29,8 @@ const AREAS: &[(&str, &str)] = &[
     ("wifi", "network"),
     ("plugins", "network"),
     ("package_mirror", "network"),
+    // O crate da área (`netmonitor_network::…`) fora de um módulo conhecido.
+    ("network", "network"),
     ("docker", "servers"),
     ("databases", "servers"),
     // O crate da área (`netmonitor_servers::…`).
@@ -69,6 +71,9 @@ const CRATES_DE_AREA: &[(&str, &str)] = &[
     // O crate do assistente conta como o módulo `ai` (área `assistant`).
     ("netmonitor_assistant::", "ai"),
 ];
+
+/// O crate da área Rede, que conta pelo módulo seguinte.
+const CRATE_DA_REDE: &str = "netmonitor_network::";
 
 fn area_of(module: &str) -> &'static str {
     AREAS
@@ -208,6 +213,22 @@ fn dependencias(source: &str) -> BTreeSet<String> {
             deps.insert((*area).to_owned());
         }
     }
+    // O crate da Rede conta pelo módulo (`netmonitor_network::snmp::…` é o
+    // módulo `snmp`), para as exceções continuarem dizendo o que acoplam.
+    let mut resto = code.as_str();
+    while let Some(pos) = resto.find(CRATE_DA_REDE) {
+        let depois = &resto[pos + CRATE_DA_REDE.len()..];
+        let nome: String = depois
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+            .collect();
+        let modulo = AREAS
+            .iter()
+            .find(|(modulo, area)| *modulo == nome && *area == "network")
+            .map_or("network", |(modulo, _)| modulo);
+        deps.insert(modulo.to_owned());
+        resto = depois;
+    }
     deps
 }
 
@@ -288,6 +309,14 @@ fn o_detector_enxerga_use_agrupado_e_caminho_inline() {
     assert!(
         dependencias("use netmonitor_assistant::settings;").contains("ai"),
         "e o do assistente, que conta como o módulo `ai`"
+    );
+    assert!(
+        dependencias("use netmonitor_network::snmp::client;").contains("snmp"),
+        "o da Rede conta pelo módulo"
+    );
+    assert!(
+        dependencias("use netmonitor_network::NetworkPolicy;").contains("network"),
+        "e, fora de um módulo conhecido, pela área"
     );
     assert!(deps.contains("shared"));
     assert!(deps.contains("wifi"));

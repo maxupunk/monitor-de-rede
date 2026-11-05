@@ -178,12 +178,16 @@ impl Hooks for App {
             .add_route(controllers::networks::routes().layer(business_auth.clone()))
             .add_route(controllers::devices::routes().layer(business_auth.clone()))
             .add_route(controllers::monitors::routes().layer(business_auth.clone()))
-            .add_route(controllers::discovery::routes().layer(business_auth.clone()))
+            .add_route(
+                netmonitor_network::controllers::discovery::routes().layer(business_auth.clone()),
+            )
             .add_route(controllers::topology::routes().layer(business_auth.clone()))
             .add_route(controllers::snmp::routes().layer(business_auth.clone()))
             .add_route(controllers::probes::routes().layer(business_auth.clone()))
             .add_route(controllers::agents::routes().layer(business_auth.clone()))
-            .add_route(controllers::port_scan::routes().layer(business_auth.clone()))
+            .add_route(
+                netmonitor_network::controllers::port_scan::routes().layer(business_auth.clone()),
+            )
             .add_route(controllers::diagnostics::routes().layer(business_auth.clone()))
             .add_route(controllers::dns::routes().layer(business_auth.clone()))
             .add_route(controllers::dns_servers::routes().layer(business_auth.clone()))
@@ -193,7 +197,9 @@ impl Hooks for App {
             .add_route(controllers::server_addresses::routes().layer(business_auth.clone()))
             .add_route(controllers::settings::routes().layer(business_auth.clone()))
             .add_route(controllers::users::routes().layer(business_auth.clone()))
-            .add_route(controllers::vendors::routes().layer(business_auth.clone()))
+            .add_route(
+                netmonitor_network::controllers::vendors::routes().layer(business_auth.clone()),
+            )
             .add_route(controllers::events::routes().layer(business_auth.clone()))
             .add_route(controllers::logs::routes().layer(business_auth.clone()))
             .add_route(controllers::maintenance_windows::routes().layer(business_auth.clone()))

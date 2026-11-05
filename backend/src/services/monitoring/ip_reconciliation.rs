@@ -22,15 +22,10 @@ use crate::{
         },
         network_tools::neighbor_cache::{self, normalize_mac},
         shared::errors::AppResult,
-        syslog::nat::NatDetector,
     },
 };
 
-/// Informa se o processo atual possui visão L2 da rede local (modo `host` ou fora do container).
-#[must_use]
-pub fn can_inspect_l2() -> bool {
-    !NatDetector::detect().bridged_container()
-}
+pub use netmonitor_core::network_tools::nat::can_inspect_l2;
 
 /// Recupera todos os endereços MAC conhecidos associados a um dispositivo.
 pub async fn get_device_mac_addresses(

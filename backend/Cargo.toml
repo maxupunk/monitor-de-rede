@@ -1,8 +1,8 @@
 [workspace]
-members = [".", "migration", "crates/core", "crates/agent-protocol", "crates/servers", "crates/vpn", "crates/assistant"]
+members = [".", "migration", "crates/core", "crates/agent-protocol", "crates/servers", "crates/vpn", "crates/assistant", "crates/network"]
 # Sem isto, `cargo test`/`cargo clippy` na raiz só cobririam o pacote raiz:
 # os testes que se mudam para um crate sairiam da suíte sem ninguém notar.
-default-members = [".", "migration", "crates/core", "crates/agent-protocol", "crates/servers", "crates/vpn", "crates/assistant"]
+default-members = [".", "migration", "crates/core", "crates/agent-protocol", "crates/servers", "crates/vpn", "crates/assistant", "crates/network"]
 
 [package]
 name = "backend"
@@ -79,11 +79,16 @@ reqwest = { version = "0.12", default-features = false, features = [
   "json",
   "stream",
 ] }
+# ICMP nativo (ADR 003). O `socket2` acompanha a major que o `surge-ping`
+# pede — ver o comentário em `[dependencies]`.
+surge-ping = { version = "0.8" }
+socket2 = { version = "0.6" }
 netmonitor-core = { path = "crates/core" }
 netmonitor-agent-protocol = { path = "crates/agent-protocol" }
 netmonitor-servers = { path = "crates/servers" }
 netmonitor-vpn = { path = "crates/vpn" }
 netmonitor-assistant = { path = "crates/assistant" }
+netmonitor-network = { path = "crates/network" }
 
 [dependencies]
 loco-rs = { workspace = true  }
@@ -114,6 +119,7 @@ netmonitor-agent-protocol = { workspace = true }
 netmonitor-servers = { workspace = true }
 netmonitor-vpn = { workspace = true }
 netmonitor-assistant = { workspace = true }
+netmonitor-network = { workspace = true }
 sea-orm = { workspace = true }
 chrono = { workspace = true }
 # Expressões cron das tarefas agendadas (próximas execuções na hora local do
@@ -141,11 +147,11 @@ ts-rs = { workspace = true }
 include_dir = { version = "0.7" }
 
 # --- rede: ICMP nativo (substitui execFile('ping'), §3.2) ---
-surge-ping = { version = "0.8" }
+surge-ping = { workspace = true }
 # 0.6, e não o 0.5 do rascunho da §3.1: `surge-ping` 0.8 pede `socket2 ^0.6`, e
 # `sock_type_hint` recebe o `socket2::Type` **daquela** versão. Com duas majors
 # na árvore o tipo não unifica e o ICMP DGRAM não compila (SPIKE-03).
-socket2 = { version = "0.6" }          # sock_type_hint / fallback DGRAM
+socket2 = { workspace = true }          # sock_type_hint / fallback DGRAM
 rand = { workspace = true }
 
 # --- rede: DNS (wire format + DoH, §3.4 SPIKE-04) ---

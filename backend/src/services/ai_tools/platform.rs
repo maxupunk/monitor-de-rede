@@ -18,6 +18,9 @@ use loco_rs::prelude::AppContext;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use serde_json::{json, Value};
 
+/// O teto das listas e os nomes das redes moram no núcleo (a topologia e a
+/// seção da descoberta, da área Rede, também os usam).
+pub use netmonitor_core::ai::platform::{network_names, MAX_LIMIT};
 use netmonitor_core::ai::platform::{rfc3339, PlatformSection};
 
 use super::{lookup::device_names, AiToolHandler, ToolArgs, ToolGroup, ToolOutput};
@@ -42,8 +45,6 @@ const AREAS: [&str; 6] = [
     "notifications",
 ];
 const DEFAULT_LIMIT: i64 = 20;
-/// Teto das listas — também o da topologia.
-pub const MAX_LIMIT: i64 = 50;
 /// O estado do próprio NetMonitor. As seções `vpn` e `discovery` são
 /// contribuídas pelas áreas ([`PlatformSection`]), no ponto de montagem.
 pub struct PlatformStatus {
@@ -158,20 +159,6 @@ async fn agents(ctx: &AppContext, limit: usize) -> AppResult<Value> {
         })).collect::<Vec<_>>(),
         "omitted": views.len().saturating_sub(limit),
     }))
-}
-
-/// `id → "nome (cidr)"` das redes — também a seção da descoberta usa.
-///
-/// # Errors
-///
-/// Falha do banco.
-pub async fn network_names(ctx: &AppContext) -> AppResult<HashMap<i64, String>> {
-    Ok(networks::Entity::find()
-        .all(&ctx.db)
-        .await?
-        .into_iter()
-        .map(|network| (network.id, format!("{} ({})", network.name, network.cidr)))
-        .collect())
 }
 
 async fn networks_overview(ctx: &AppContext, limit: usize) -> AppResult<Value> {

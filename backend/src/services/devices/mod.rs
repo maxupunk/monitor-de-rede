@@ -3,7 +3,6 @@
 pub mod access;
 pub mod capabilities;
 pub mod identify;
-pub mod systems;
 
 /// Plataformas e dispositivo do sistema moram no núcleo (a VPN também os usa).
-pub use netmonitor_core::devices::{adapters, kinds, system_device};
+pub use netmonitor_core::devices::{adapters, kinds, system_device, systems};

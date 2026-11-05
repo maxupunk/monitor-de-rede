@@ -12,7 +12,6 @@ pub mod correlation;
 pub mod datasets;
 pub mod episode;
 pub mod evaluator;
-pub mod fields;
 pub mod hysteresis;
 pub mod inhibition;
 pub mod instability;
@@ -26,6 +25,6 @@ pub mod state_machine;
 pub mod vpn_peer_watcher;
 
 /// Contratos e feed SSE dos alertas moram no núcleo (a IA também os usa).
-pub use netmonitor_core::alerts::{contracts, feed};
+pub use netmonitor_core::alerts::{contracts, feed, fields};
 
 pub use contracts::{AlertEvaluationContext, AlertEvaluationScope, AlertScopeKey};

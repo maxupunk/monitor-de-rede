@@ -5,14 +5,13 @@
 
 /// Barramento de eventos e utilidades transversais moram no núcleo
 /// (`crates/core`); os caminhos `services::events` e `services::shared` continuam.
-pub use netmonitor_core::{events, shared};
+pub use netmonitor_core::{events, preferences, shared};
 
 pub mod agent_runtime;
 pub mod agents;
 pub mod ai;
 pub mod ai_tools;
 pub mod alerts;
-pub mod area_policies;
 pub mod audit;
 pub mod auth;
 pub mod backup;
@@ -30,7 +29,6 @@ pub mod notifications;
 pub mod onboarding;
 pub mod package_mirror;
 pub mod plugins;
-pub mod preferences;
 pub mod probes;
 pub mod scheduled_tasks;
 pub mod server_addresses;

@@ -6,7 +6,15 @@
 //! montagem. Assim o motor não conhece área nenhuma — e todo checker é
 //! compilado e registrado sempre: área desligada não para monitor.
 
+pub mod check_deps;
+pub mod device_status;
+pub mod execution_guard;
+pub mod link_speed;
+pub mod metrics_repository;
 pub mod reachability;
+pub mod series;
+
+pub use check_deps::CheckDeps;
 
 use std::sync::Arc;
 

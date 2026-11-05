@@ -37,11 +37,11 @@ fn syslog_nao_mantem_catalogo_ou_match_paralelo() {
 
 #[test]
 fn consumidores_de_dispositivo_dependem_do_registro() {
-    let systems = production_part("backend/src/services/devices/systems.rs");
+    let systems = production_part("backend/crates/core/src/devices/systems.rs");
     assert!(!systems.contains("const CATALOGO"));
     assert!(systems.contains("adapters::{registry"));
 
-    let discovery = production_part("backend/src/services/discovery/device_identifier.rs");
+    let discovery = production_part("backend/crates/network/src/discovery/device_identifier.rs");
     assert!(discovery.contains("adapters::registry"));
 
     let peers = production_part("backend/crates/vpn/src/peer_service.rs");

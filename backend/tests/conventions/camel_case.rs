@@ -8,7 +8,8 @@
 //! tela, quando o Vue lê `undefined` de `perPage`.
 //!
 //! Escopo: `src/dtos/`, `src/views/`, os mesmos diretórios no crate de cada
-//! área (`crates/servers/src/{dtos,views}`, `crates/vpn/src/views.rs`,
+//! área (`crates/servers/src/{dtos,views}`, `crates/network/src/dtos`,
+//! `crates/vpn/src/views.rs`,
 //! `crates/assistant/src/dtos.rs`), os contratos do núcleo
 //! (paginação, áreas, agentes, histórico de métricas) e os DTOs Docker do
 //! contrato de fio. Structs de request/response do Loco que
@@ -28,6 +29,7 @@ fn arquivos_de_contrato() -> Vec<PathBuf> {
         "src/views",
         "crates/servers/src/dtos",
         "crates/servers/src/views",
+        "crates/network/src/dtos",
     ] {
         colete_rs(&raiz.join(dir), &mut arquivos);
     }

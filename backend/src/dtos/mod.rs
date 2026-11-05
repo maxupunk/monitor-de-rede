@@ -12,13 +12,14 @@ pub mod plugins;
 pub mod resources;
 pub mod saas;
 pub mod server_addresses;
-pub mod snmp;
 pub mod storages;
 pub mod users;
 pub mod wifi;
 
 /// O leitor de corpo opcional mora no núcleo, para as áreas usarem o mesmo.
 pub use netmonitor_core::shared::body::optional_body;
+/// Os contratos do SNMP são da área Rede (crate `network`).
+pub use netmonitor_network::dtos::snmp;
 
 #[cfg(test)]
 mod tests {

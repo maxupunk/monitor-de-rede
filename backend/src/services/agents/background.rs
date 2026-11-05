@@ -164,10 +164,9 @@ async fn run_discovery(ctx: AppContext, session: Arc<AgentSession>, task: ProbeD
     let task_id = task.id.clone();
     let result = session.request(Command::Discovery { task }, timeout).await;
     let payload = match result.and_then(|value| {
-        serde_json::from_value::<Vec<crate::services::discovery::merger::DiscoveredHost>>(value)
-            .map_err(|error| {
-                RemoteError::new(super::protocol::ErrorCode::Internal, error.to_string())
-            })
+        serde_json::from_value::<Vec<agent_protocol::probes::DiscoveredHost>>(value).map_err(
+            |error| RemoteError::new(super::protocol::ErrorCode::Internal, error.to_string()),
+        )
     }) {
         Ok(hosts) => ProbeDiscoveryResultPayload {
             run_id,

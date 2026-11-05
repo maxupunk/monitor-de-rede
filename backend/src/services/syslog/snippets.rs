@@ -348,4 +348,25 @@ mod tests {
         // O nome chega da tela, e caixa não pode decidir se funciona.
         assert!(commands_for("RouterOS", "10.0.0.5", 514).is_some());
     }
+
+    #[test]
+    fn o_catalogo_cobre_as_receitas_de_syslog() {
+        use crate::services::devices::adapters::registry;
+
+        for receita in systems() {
+            let adapter =
+                registry::find(receita).unwrap_or_else(|| panic!("receita {receita} sem adapter"));
+            assert!(
+                adapter.syslog().is_some(),
+                "{receita} tem receita mas o adapter diz que não"
+            );
+        }
+        for adapter in registry::with_syslog() {
+            assert!(
+                systems().contains(&adapter.platform().id),
+                "{} promete receita de syslog que não existe",
+                adapter.platform().id
+            );
+        }
+    }
 }

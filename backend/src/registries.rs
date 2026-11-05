@@ -11,9 +11,11 @@ use netmonitor_assistant::{
     mentions::{ContainerDirectory, MentionContainer},
 };
 use netmonitor_core::{
-    ai::tools::AiToolHandler, areas::AreaPolicy, classifier::Classifier, models::devices,
-    monitoring::MonitorCheckers, notifications::NotificationMessage, shared::errors::AppError,
+    ai::tools::AiToolHandler, alerts::contracts::AlertEvaluationContext, areas::AreaPolicy,
+    classifier::Classifier, models::devices, monitoring::MonitorCheckers,
+    notifications::NotificationMessage, shared::errors::AppError,
 };
+use netmonitor_network::central as network;
 use netmonitor_vpn::central::{Central, CentralServices};
 use sea_orm::DatabaseConnection;
 use serde_json::Value;
@@ -25,15 +27,12 @@ use crate::{
             actions, alert_rules, analysis, ask, audit, charts, dashboard, diagnostics, grep,
             history, inventory, logs, platform, schedules,
         },
-        alerts::{inhibition, vpn_peer_watcher},
-        area_policies::NetworkPolicy,
-        discovery::ai_tools::DiscoveryStatus,
+        alerts::{inhibition, manager as alert_manager, vpn_peer_watcher},
         docker::{engine, hosts, source::DockerEngine},
         notifications::NotificationService,
         plugins::{ai_tools as plugins, auto_accept, credentials},
         server_addresses,
         shared::errors::AppResult,
-        topology::ai_tools::Topology,
         webpush::{deliver, Audience},
     },
 };
@@ -42,7 +41,7 @@ use crate::{
 #[must_use]
 pub fn area_policies() -> Vec<Box<dyn AreaPolicy>> {
     vec![
-        Box::new(NetworkPolicy),
+        Box::new(netmonitor_network::NetworkPolicy),
         Box::new(netmonitor_servers::ServersPolicy),
         Box::new(netmonitor_vpn::VpnPolicy),
     ]
@@ -89,6 +88,26 @@ pub fn vpn_central() -> Central {
     Central::new(Arc::new(VpnCentral))
 }
 
+/// O que a área Rede pede ao resto da central: o motor de alertas.
+struct NetworkCentral;
+
+#[async_trait]
+impl network::CentralServices for NetworkCentral {
+    async fn evaluate_alert(
+        &self,
+        ctx: &AppContext,
+        context: &AlertEvaluationContext,
+    ) -> AppResult<()> {
+        alert_manager::evaluate(ctx, context).await
+    }
+}
+
+/// Os serviços da central para a Rede, para o `shared_store`.
+#[must_use]
+pub fn network_central() -> network::Central {
+    network::Central::new(Arc::new(NetworkCentral))
+}
+
 /// O classificador do processo (ADR 017, `Classifier`): o Decisor do
 /// assistente. Sem ele, o núcleo usa a heurística.
 #[must_use]
@@ -128,9 +147,9 @@ pub fn ai_tool_catalog() -> Vec<Box<dyn AiToolHandler>> {
         Box::new(docker::DockerContainerAction),
         Box::new(platform::PlatformStatus::new(vec![
             Box::new(netmonitor_vpn::ai_tools::VpnStatus),
-            Box::new(DiscoveryStatus),
+            Box::new(netmonitor_network::discovery::ai_tools::DiscoveryStatus),
         ])),
-        Box::new(Topology),
+        Box::new(netmonitor_network::topology::ai_tools::Topology),
         Box::new(audit::AuditLog),
         Box::new(inventory::SearchDocs),
         Box::new(netmonitor_assistant::tools::WebSearch),

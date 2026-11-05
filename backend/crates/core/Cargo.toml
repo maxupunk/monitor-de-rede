@@ -33,6 +33,10 @@ netmonitor-agent-protocol = { workspace = true }
 # Destinos de armazenamento (backups do sistema e dos bancos).
 opendal = { workspace = true }
 russh-sftp = { workspace = true }
+# Socket ICMP DGRAM sem privilégio (ADR 003): o cliente do processo e a
+# sonda usada pelos checkers e pela área Rede.
+surge-ping = { workspace = true }
+socket2 = { workspace = true }
 # Severidade canônica do syslog nos adapters de plataforma.
 syslog_loose = { workspace = true }
 

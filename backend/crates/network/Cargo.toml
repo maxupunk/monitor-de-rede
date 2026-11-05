@@ -1,0 +1,45 @@
+[package]
+name = "netmonitor-network"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Área Rede do NetMonitor (ADR 017): descoberta, fabricantes, varredura de portas, SNMP e topologia. Depende só do núcleo e do contrato de fio."
+
+[lib]
+name = "netmonitor_network"
+
+[dependencies]
+netmonitor-core = { workspace = true }
+netmonitor-agent-protocol = { workspace = true }
+loco-rs = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tokio-stream = { version = "0.1", features = ["sync"] }
+futures = { workspace = true }
+async-trait = { workspace = true }
+axum = { workspace = true }
+tracing = { workspace = true }
+sea-orm = { workspace = true }
+chrono = { workspace = true }
+ts-rs = { workspace = true }
+regex = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+sha2 = { workspace = true }
+rand = { workspace = true }
+reqwest = { workspace = true }
+surge-ping = { workspace = true }
+# Nomes por mDNS/NBNS na descoberta (wire format, §3.4 SPIKE-04).
+hickory-proto = { version = "0.24", default-features = false }
+# SNMP (§3.4 SPIKE-01).
+async-snmp = { version = "0.16", default-features = false, features = ["crypto-rustcrypto"] }
+phf = { version = "0.11", features = ["macros"] }
+
+[dev-dependencies]
+# O agente SNMP de teste (os testes do cliente sobem um em 127.0.0.1).
+async-snmp = { version = "0.16", default-features = false, features = ["agent", "crypto-rustcrypto"] }
+migration = { path = "../../migration" }
+loco-rs = { workspace = true, features = ["testing"] }
+serial_test = { version = "3.1.1" }

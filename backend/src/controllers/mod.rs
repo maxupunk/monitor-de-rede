@@ -8,7 +8,6 @@ pub mod backup;
 pub mod dashboard;
 pub mod devices;
 pub mod diagnostics;
-pub mod discovery;
 pub mod dns;
 pub mod dns_servers;
 pub mod events;
@@ -19,7 +18,6 @@ pub mod monitors;
 pub mod networks;
 pub mod package_mirror;
 pub mod plugins;
-pub mod port_scan;
 pub mod probes;
 pub mod push;
 pub mod root;
@@ -31,7 +29,6 @@ pub mod snmp;
 pub mod storages;
 pub mod topology;
 pub mod users;
-pub mod vendors;
 pub mod wifi;
 
 /// As rotas do assistente moram no crate dele (`netmonitor-assistant`).

@@ -29,7 +29,8 @@ pub mod ingest;
 pub mod listener;
 pub mod login;
 pub mod matcher;
-pub mod nat;
+/// A detecção de NAT do container é um primitivo de rede do núcleo.
+pub use netmonitor_core::network_tools::nat;
 pub mod parser;
 pub mod provision;
 pub mod queue;

@@ -52,6 +52,10 @@ pub fn install(ctx: &AppContext) {
     // O que a área VPN pede ao resto da central (motor de alertas,
     // apresentação de dispositivo, endereços): o scheduler avalia os túneis.
     ctx.shared_store.insert(crate::registries::vpn_central());
+    // O que a área Rede pede ao resto da central (motor de alertas): o
+    // scheduler coleta o SNMP e avalia as interfaces.
+    ctx.shared_store
+        .insert(crate::registries::network_central());
     // A IA (ADR 017, Fase 8): o classificador do núcleo pelo Decisor, o que o
     // assistente pede ao resto da central e o catálogo de ferramentas que as
     // áreas contribuem. Aqui, e não num initializer: o scheduler classifica

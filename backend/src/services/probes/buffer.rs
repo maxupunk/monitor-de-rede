@@ -24,7 +24,7 @@ pub struct BufferedResult {
 pub struct BufferedDiscoveryResult {
     pub task_id: String,
     pub run_id: i64,
-    pub hosts: Vec<crate::services::discovery::merger::DiscoveredHost>,
+    pub hosts: Vec<agent_protocol::probes::DiscoveredHost>,
     pub error: Option<String>,
     pub timestamp: String,
 }

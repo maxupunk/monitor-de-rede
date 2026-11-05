@@ -5,7 +5,7 @@
 //! preenche (ADR 017). O motor não conhece área nenhuma.
 
 use loco_rs::app::AppContext;
-use netmonitor_core::monitoring::{parse_config, MonitorCheckers};
+use netmonitor_core::monitoring::parse_config;
 use serde_json::Value;
 
 use crate::services::{
@@ -14,7 +14,7 @@ use crate::services::{
             dns::{DnsChecker, DnsConfig},
             host_resources::{HostResourcesChecker, HostResourcesConfig},
             http::{HttpChecker, HttpConfig},
-            ping::{PingChecker, PingClient, PingClientCell, PingConfig},
+            ping::{PingChecker, PingConfig},
             snmp::{SnmpChecker, SnmpCheckerConfig},
             system_health::{SystemHealthChecker, SystemHealthConfig},
             tcp::{TcpChecker, TcpConfig},
@@ -45,42 +45,9 @@ pub fn merge_timeout(config: &Value, timeout_ms: Option<u64>) -> Value {
     merged
 }
 
-/// Dependências de processo que os checkers usam. O servidor as tira do
-/// `AppContext`; o agente remoto as monta direto, sem subir o Loco nem banco.
-#[derive(Clone, Default)]
-pub struct CheckDeps {
-    /// Opcional porque só o ping precisa dele: sem o socket ICMP, os demais
-    /// tipos continuam rodando e só o ping falha — como antes do refactor.
-    /// A célula tenta abrir de novo a cada uso (ver [`PingClientCell`]).
-    pub ping: Option<PingClientCell>,
-    /// Os checkers das áreas (`MonitorChecker`). Na central vêm do
-    /// `shared_store` (montados em `process_deps`); no agente, do cliente,
-    /// com a Docker Engine local.
-    pub checkers: MonitorCheckers,
-}
-
-impl CheckDeps {
-    #[must_use]
-    pub fn from_context(ctx: &AppContext) -> Self {
-        Self {
-            ping: ctx.shared_store.get::<PingClientCell>(),
-            checkers: ctx
-                .shared_store
-                .get::<MonitorCheckers>()
-                .unwrap_or_default(),
-        }
-    }
-
-    /// Cliente ICMP ou o mesmo erro que `PingClient::from_context` devolveria.
-    pub fn ping_client(&self) -> AppResult<PingClient> {
-        self.ping
-            .as_ref()
-            .ok_or_else(|| {
-                AppError::ServiceUnavailable("Ping não habilitado neste processo".to_string())
-            })?
-            .client()
-    }
-}
+/// As dependências de processo dos checkers moram no núcleo (a descoberta
+/// da área Rede também as usa); o caminho antigo continua valendo.
+pub use netmonitor_core::monitoring::CheckDeps;
 
 /// Executa o checker do tipo informado sem deixar regra de negócio no controller.
 pub async fn run_monitor(

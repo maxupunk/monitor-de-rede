@@ -5,14 +5,12 @@
 //! conhecem sockets, timeouts nem detalhes de wire-format.
 
 pub mod dns;
-pub mod icmp_probe;
 pub mod mactelnet;
-pub mod neighbor_cache;
 pub mod ping_capacity;
 pub mod playbook;
-pub mod port_scanner;
 pub mod speedtest;
-pub mod tcp_probe;
 pub mod throughput;
 pub mod traceroute;
-pub mod udp_probes;
+
+/// Os primitivos que os checkers do núcleo e a área Rede usam moram no núcleo.
+pub use netmonitor_core::network_tools::{icmp_probe, neighbor_cache, tcp_probe, udp_probes};

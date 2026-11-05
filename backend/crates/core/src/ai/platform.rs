@@ -7,9 +7,16 @@ use chrono::{DateTime, Utc};
 use loco_rs::prelude::AppContext;
 use serde_json::Value;
 
-use crate::shared::errors::AppResult;
+use std::collections::HashMap;
+
+use sea_orm::EntityTrait;
+
+use crate::{models::_entities::networks, shared::errors::AppResult};
 
 const MIB: f64 = 1024.0 * 1024.0;
+
+/// Teto das listas — também o da topologia.
+pub const MAX_LIMIT: i64 = 50;
 
 /// Bytes em MiB com duas casas — o tráfego que a IA lê.
 #[allow(clippy::cast_precision_loss)]
@@ -40,6 +47,20 @@ pub trait PlatformSection: Send + Sync {
         since: DateTime<Utc>,
         limit: usize,
     ) -> AppResult<Value>;
+}
+
+/// `id → "nome (cidr)"` das redes — também a seção da descoberta usa.
+///
+/// # Errors
+///
+/// Falha do banco.
+pub async fn network_names(ctx: &AppContext) -> AppResult<HashMap<i64, String>> {
+    Ok(networks::Entity::find()
+        .all(&ctx.db)
+        .await?
+        .into_iter()
+        .map(|network| (network.id, format!("{} ({})", network.name, network.cidr)))
+        .collect())
 }
 
 #[cfg(test)]

@@ -4,7 +4,9 @@
 //! continua fora do núcleo.
 
 pub mod contracts;
+pub mod datasets;
 pub mod feed;
+pub mod fields;
 
 /// Chave de `alert_events.data` com a classificação do episódio (camelCase,
 /// como `lastProblemAt`).
