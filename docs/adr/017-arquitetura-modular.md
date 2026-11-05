@@ -123,8 +123,8 @@ causa das FKs) e a tela dela pertencer à área Rede.
 
 | Área | Conteúdo visível | Pode desligar? |
 | :--- | :--- | :--- |
-| **Núcleo** | Dashboard, Dispositivos (servidor é dispositivo), Monitores de **todos** os tipos, Alertas e regras, Eventos, Logs, Manutenção, Tarefas agendadas, Assistente IA, Notificações, Sites, Servidores remotos (agentes), Usuários, Auditoria, Backup, Destinos de armazenamento, Configurações | Não |
-| **Rede** | Topologia, Descoberta, Redes IP, Testes de velocidade (ADR 015), Sinais Wi-Fi, Sondas de rede, Diagnóstico (Playbooks, Traceroute, Velocidade do navegador), Plugins de dispositivo e aplicativos de frota, configuração de Syslog dos equipamentos, servidores DNS, registro de fabricantes, widgets de banda/latência/DNS/SaaS | Sim |
+| **Núcleo** | Dashboard, Dispositivos (servidor é dispositivo), Monitores de **todos** os tipos, Alertas e regras, Eventos, Logs, Manutenção, Tarefas agendadas, Assistente IA, Notificações, Servidores remotos (agentes), Usuários, Auditoria, Backup, Destinos de armazenamento, Configurações | Não |
+| **Rede** | Topologia, Descoberta, Redes IP, Sites (a tela; a tabela é do `core`), Testes de velocidade (ADR 015), Sinais Wi-Fi, Sondas de rede, Diagnóstico (Playbooks, Traceroute, Velocidade do navegador), Plugins de dispositivo e aplicativos de frota, configuração de Syslog dos equipamentos, servidores DNS, registro de fabricantes, widgets de banda/latência/DNS/SaaS | Sim |
 | **Servidores** | Docker (containers, volumes, redes, imagens, projetos, histórico), Backup de bancos (ADR 013), widget `docker_summary`, ferramentas `docker_*` da IA, menção `@container`, modelo de tarefa de ação em container | Sim |
 | **VPN** | Servidor WireGuard, dispositivos VPN, aba VPN do dispositivo | Sim, com servidor desativado antes |
 

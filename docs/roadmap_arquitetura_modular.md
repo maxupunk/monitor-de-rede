@@ -69,7 +69,7 @@ comprometer as outras.
 
 ### Fase 0 — Navegação limpa (só frontend)
 
-- [ ] **Menu como registro e reorganizado por assunto**
+- [x] 🟢 Concluído — **Menu como registro e reorganizado por assunto**
   - **Débitos:** ARQ-01 (parcial), ARQ-03 (código morto)
   - **Esforço:** Pequeno
   - **Arquivos:** `frontend/src/layouts/DefaultLayout.vue`, novo `frontend/src/navigation.ts`, `frontend/src/stores/events.ts`
@@ -83,6 +83,7 @@ comprometer as outras.
     - Menu cai de ~36 para ~26 entradas.
     - Testes Vitest do montador: papel, plugin-apps, grupo aberto pela rota.
     - Nenhuma URL quebra.
+  - **Entregue:** `frontend/src/navigation.ts` (`buildNavSections`, `groupOfPath`, ações nomeadas que o layout executa); `pages/vpn/VpnLayout.vue` com as abas Servidor e Dispositivos; 26 entradas para admin sem plugin-apps nem PWA; o filtro por `enabledAreas` já existe e é testado, sem fonte de dados até a Fase 3. Sites ficou na área Rede (na Núcleo, quem usa só Servidores veria uma seção "Rede" só com Sites). Teste: `tests/utils/navigation.spec.ts`.
 
 ### Fase 1 — Esqueleto do workspace e base de dados
 

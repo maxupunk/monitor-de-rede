@@ -320,18 +320,6 @@ export const useEventsStore = defineStore('events', () => {
         break
       }
 
-      case 'device:updated': {
-        const devicesStore = useDevicesStore()
-        const devId = Number(data.deviceId)
-        if (devId && data.ipAddress) {
-          const dev = devicesStore.devices.find((d) => d.id === devId)
-          if (dev) {
-            dev.ipAddress = String(data.ipAddress)
-          }
-        }
-        break
-      }
-
       case 'discovery:scan': {
         // Estado inteiro da varredura ao vivo — e o snapshot de quem conecta.
         useDiscoveryStore().applyScanSnapshot(data)

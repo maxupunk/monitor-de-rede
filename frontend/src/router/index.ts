@@ -117,13 +117,19 @@ const routes = [
       { path: 'probes', name: 'probes', component: () => import('../pages/ProbesPage.vue') },
       {
         path: 'vpn',
-        name: 'vpn-server',
-        component: () => import('../pages/vpn/VpnServerPage.vue'),
-      },
-      {
-        path: 'vpn/devices',
-        name: 'vpn-devices',
-        component: () => import('../pages/vpn/VpnDevicesPage.vue'),
+        component: () => import('../pages/vpn/VpnLayout.vue'),
+        children: [
+          {
+            path: '',
+            name: 'vpn-server',
+            component: () => import('../pages/vpn/VpnServerPage.vue'),
+          },
+          {
+            path: 'devices',
+            name: 'vpn-devices',
+            component: () => import('../pages/vpn/VpnDevicesPage.vue'),
+          },
+        ],
       },
       {
         path: 'ai-chat',
