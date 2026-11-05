@@ -23,17 +23,21 @@ use std::collections::HashSet;
 use chrono::Utc;
 use futures::{stream, StreamExt};
 use loco_rs::prelude::*;
+use netmonitor_core::{
+    monitoring::MonitorGroups,
+    routines::{AreaRoutines, Cycle},
+};
 use sea_orm::{ActiveModelTrait, Set};
 
 use crate::{
     models::monitors,
     services::{
-        discovery::queue::{process_pending_runs, schedule_due_networks, spawn_pending_run},
-        monitoring::scheduler::{
-            collect_unmonitored_device, dispatch_notifications, due_unmonitored_snmp_devices,
-            execute_one, execute_snmp_device_group, local_snmp_device_id,
-            rollup_monitor_results_if_due, run_data_pruner_if_due, run_link_test_schedules_if_due,
-            run_wifi_watch_if_due, sync_vpn_traffic_if_due,
+        monitoring::{
+            result_processor::process_result,
+            scheduler::{
+                dispatch_notifications, execute_one, rollup_monitor_results_if_due,
+                run_data_pruner_if_due,
+            },
         },
         probes::liveness::mark_stale_probes_offline,
         shared::errors::AppResult,
@@ -141,7 +145,13 @@ async fn run_cycle_inner(ctx: &AppContext, detach_discovery: bool) -> AppResult<
 
     let now = Utc::now();
     let due = monitors::Entity::find_due(now.into()).all(&ctx.db).await?;
-    let local_snmp_devices: HashSet<i64> = due.iter().filter_map(local_snmp_device_id).collect();
+    // Monitores que uma área executa em grupo (os SNMP locais de um mesmo
+    // dispositivo: uma coleta só) saem do despacho individual.
+    let groups = MonitorGroups::from_context(ctx);
+    let grouped: HashSet<(usize, i64)> = due
+        .iter()
+        .filter_map(|monitor| groups.group_of(monitor))
+        .collect();
     for monitor in &due {
         // Persistir primeiro evita que dois processos do scheduler executem a
         // mesma linha quando o ciclo seguinte começar antes de a rede responder.
@@ -151,49 +161,36 @@ async fn run_cycle_inner(ctx: &AppContext, detach_discovery: bool) -> AppResult<
         ));
         active.update(&ctx.db).await?;
     }
-    stream::iter(due.iter().filter(|monitor| {
-        !local_snmp_device_id(monitor).is_some_and(|id| local_snmp_devices.contains(&id))
-    }))
+    stream::iter(
+        due.iter()
+            .filter(|monitor| groups.group_of(monitor).is_none()),
+    )
     .for_each_concurrent(MONITOR_CONCURRENCY, |monitor| async move {
         if let Err(error) = execute_one(ctx, monitor).await {
             tracing::warn!(%error, monitor_id = monitor.id, "falha ao executar monitor");
         }
     })
     .await;
-    stream::iter(local_snmp_devices)
-        .for_each_concurrent(MONITOR_CONCURRENCY, |device_id| async move {
-            if let Err(error) = execute_snmp_device_group(ctx, device_id, now).await {
-                tracing::warn!(%error, device_id, "falha ao executar coleta SNMP consolidada");
+    let groups = &groups;
+    stream::iter(grouped)
+        .for_each_concurrent(MONITOR_CONCURRENCY, |(index, key)| async move {
+            if let Err(error) = run_group(ctx, groups, index, key, now).await {
+                tracing::warn!(%error, grupo = key, "falha ao executar coleta consolidada");
             }
         })
         .await;
-    match due_unmonitored_snmp_devices(ctx, now).await {
-        Ok(devices) => {
-            stream::iter(devices)
-                .for_each_concurrent(MONITOR_CONCURRENCY, |device| async move {
-                    if let Err(error) = collect_unmonitored_device(ctx, &device).await {
-                        tracing::debug!(%error, device_id = device.id, "falha na coleta SNMP do dispositivo");
-                    }
-                })
-                .await;
-        }
-        Err(error) => tracing::warn!(%error, "falha ao listar dispositivos SNMP sem monitor"),
-    }
-    if let Err(error) = sync_vpn_traffic_if_due(ctx).await {
-        tracing::warn!(%error, "falha ao sincronizar tráfego VPN");
-    }
-    // A fila de discovery é persistente: o scheduler apenas enfileira as redes
-    // vencidas e processa uma por ciclo para não saturar a LAN.
-    if let Err(error) = schedule_due_networks(&ctx.db).await {
-        tracing::warn!(%error, "falha ao agendar discovery");
-    }
-    let discovery_result = if detach_discovery {
-        spawn_pending_run(ctx).await
-    } else {
-        process_pending_runs(ctx).await
+    // As rotinas das áreas (registro de rotinas, ADR 017): a coleta SNMP sem
+    // monitor e a varredura agendada da Rede, a telemetria dos túneis da VPN,
+    // o vigia do Wi-Fi e os testes de enlace agendados. Cada uma pausa com a
+    // própria área quando é o caso; falha de uma não interrompe as outras.
+    let cycle = Cycle {
+        now,
+        detached: detach_discovery,
     };
-    if let Err(error) = discovery_result {
-        tracing::warn!(%error, "falha ao processar discovery");
+    for routine in AreaRoutines::from_context(ctx).routines() {
+        if let Err(error) = routine.run(ctx, cycle).await {
+            tracing::warn!(%error, rotina = routine.name(), "falha na rotina da área");
+        }
     }
     // As notificações da Fase 4 saem daqui, e não do ponto onde o alerta nasce:
     // a decisão de notificar virou linha em `notification_outbox`, e é o
@@ -206,13 +203,6 @@ async fn run_cycle_inner(ctx: &AppContext, detach_discovery: bool) -> AppResult<
     }
     if let Err(error) = rollup_monitor_results_if_due(ctx).await {
         tracing::warn!(%error, "falha ao executar rollup de resultados");
-    }
-    // Clientes Wi-Fi vigiados: só lê os APs se houver aparelho vigiado.
-    run_wifi_watch_if_due(ctx);
-    // Teste de enlace agendado (ADR 015): o teste roda em segundo plano, com
-    // a mesma trava de concorrência dos pedidos da tela.
-    if let Err(error) = run_link_test_schedules_if_due(ctx).await {
-        tracing::warn!(%error, "falha ao disparar agendamentos de teste de enlace");
     }
     // Padrões de log casam na ingestão; a avaliação das janelas acontece aqui,
     // junto do resto do motor de alertas — é o que dá ao alerta de log a mesma
@@ -227,4 +217,22 @@ async fn run_cycle_inner(ctx: &AppContext, detach_discovery: bool) -> AppResult<
     // entrega a quem tem conexão SSE aberta — o servidor. Ver
     // `initializers::monitoring::spawn_event_relay`.
     Ok(due.len())
+}
+
+/// Executa um grupo de monitores e processa o resultado de cada um como o de
+/// qualquer monitor.
+async fn run_group(
+    ctx: &AppContext,
+    groups: &MonitorGroups,
+    index: usize,
+    key: i64,
+    now: chrono::DateTime<Utc>,
+) -> AppResult<()> {
+    let Some(group) = groups.get(index) else {
+        return Ok(());
+    };
+    for (monitor_id, result) in group.run(ctx, key, now).await? {
+        process_result(ctx, monitor_id, &result, None).await?;
+    }
+    Ok(())
 }

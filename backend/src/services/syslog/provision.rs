@@ -42,16 +42,17 @@ use super::{
     snippets,
     sources::{SeenSource, SourceRegistry},
 };
-/// As sessões com o equipamento (SSH, Telnet) e os prazos delas são do
-/// transporte dos plugins (área Rede), que as compartilha com esta ativação.
-use netmonitor_network::plugins::transport::shell::{
-    ssh, telnet, SILENCIO, TETO_DA_SESSAO, TETO_DE_CONEXAO, TETO_POR_COMANDO,
+/// As sessões SSH e Telnet com o equipamento são do transporte dos plugins
+/// (área Rede) e chegam pelo acesso registrado ([`DeviceAccess`]); o
+/// MAC-Telnet e os prazos de uma sessão são do núcleo.
+use agent_protocol::device_io::{Login, TransportKind};
+use netmonitor_core::devices::access::{
+    DeviceAccess, DeviceShell, SILENCIO, TETO_DA_SESSAO, TETO_DE_CONEXAO, TETO_POR_COMANDO,
 };
 
 use crate::services::{
     devices::adapters::{registry as device_adapters, DeviceAccessMethod},
     network_tools::mactelnet,
-    plugins::{manifest::TransportKind, transport::Login},
     shared::errors::{AppError, AppResult},
 };
 
@@ -166,6 +167,7 @@ pub struct ProvisionOutcome {
 /// Falha de conexão, de autenticação, ou sistema sem receita.
 pub async fn run(
     pedido: &ProvisionRequest,
+    access: Option<&dyn DeviceAccess>,
     sources: Option<&Arc<SourceRegistry>>,
     device_id: i64,
 ) -> AppResult<ProvisionOutcome> {
@@ -203,7 +205,7 @@ pub async fn run(
 
     let (transcript, identified_hostname) = timeout(
         TETO_DA_SESSAO,
-        executa(pedido, &comandos, test_command.as_deref()),
+        executa(pedido, access, &comandos, test_command.as_deref()),
     )
     .await
     .map_err(|_| {
@@ -231,22 +233,24 @@ pub async fn run(
 /// Abre a sessão do protocolo escolhido e despeja os comandos nela.
 async fn executa(
     pedido: &ProvisionRequest,
+    access: Option<&dyn DeviceAccess>,
     comandos: &[String],
     test_command: Option<&str>,
 ) -> AppResult<(String, Option<String>)> {
-    let mut sessao = match pedido.protocol {
-        Protocol::Ssh => Sessao::Ssh(Box::new(
-            ssh::abre(pedido.host, pedido.port, &pedido.login).await?,
-        )),
-        Protocol::Telnet => Sessao::Telnet(Box::new(
-            telnet::abre(
-                pedido.host,
-                pedido.port,
-                &pedido.login.username,
-                pedido.senha(),
+    let shell = |kind| async move {
+        let access = access.ok_or_else(|| {
+            AppError::ServiceUnavailable(
+                "O acesso por SSH e Telnet é da área Rede, que não está montada neste processo"
+                    .into(),
             )
-            .await?,
-        )),
+        })?;
+        access
+            .open_shell(kind, pedido.host, pedido.port, &pedido.login)
+            .await
+    };
+    let mut sessao = match pedido.protocol {
+        Protocol::Ssh => Sessao::Shell(shell(TransportKind::Ssh).await?),
+        Protocol::Telnet => Sessao::Shell(shell(TransportKind::Telnet).await?),
         Protocol::MacTelnet => {
             let mac = pedido.mac.ok_or_else(|| {
                 AppError::validation(
@@ -444,37 +448,31 @@ pub async fn associate_confirmed_source(
     Ok(())
 }
 
-/// Uma sessão aberta, de qualquer um dos dois protocolos.
-///
-/// Enum em vez de `trait` com `async fn`: são dois casos fechados, e o
-/// despacho dinâmico exigiria `async_trait` só para isso.
+/// Uma sessão aberta: SSH ou Telnet pelo acesso da Rede, ou o MAC-Telnet do
+/// núcleo.
 enum Sessao {
-    Ssh(Box<ssh::Shell>),
-    Telnet(Box<telnet::Shell>),
+    Shell(Box<dyn DeviceShell>),
     MacTelnet(Box<mactelnet::Shell>),
 }
 
 impl Sessao {
     async fn envia_linha(&mut self, linha: &str) -> AppResult<()> {
         match self {
-            Self::Ssh(shell) => shell.envia_linha(linha).await,
-            Self::Telnet(shell) => shell.envia_linha(linha).await,
+            Self::Shell(shell) => shell.send_line(linha).await,
             Self::MacTelnet(shell) => shell.envia_linha(linha).await,
         }
     }
 
     async fn le_ate_silenciar(&mut self) -> AppResult<String> {
         match self {
-            Self::Ssh(shell) => shell.le_ate_silenciar().await,
-            Self::Telnet(shell) => shell.le_ate_silenciar().await,
+            Self::Shell(shell) => shell.read_until_silent().await,
             Self::MacTelnet(shell) => shell.le_ate_silenciar(SILENCIO, TETO_POR_COMANDO).await,
         }
     }
 
     async fn encerra(self) {
         match self {
-            Self::Ssh(shell) => shell.encerra().await,
-            Self::Telnet(shell) => shell.encerra().await,
+            Self::Shell(shell) => shell.close().await,
             Self::MacTelnet(shell) => shell.encerra().await,
         }
     }
@@ -529,7 +527,9 @@ mod tests {
             server_port: 514,
         };
 
-        let error = run(&request, None, 1).await.expect_err("deveria recusar");
+        let error = run(&request, None, None, 1)
+            .await
+            .expect_err("deveria recusar");
         assert!(error
             .to_string()
             .contains("não oferece acesso por MAC-Telnet"));

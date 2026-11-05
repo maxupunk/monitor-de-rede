@@ -23,7 +23,7 @@ impl Initializer for AreasInitializer {
     }
 
     async fn before_run(&self, ctx: &AppContext) -> Result<()> {
-        let policies = crate::registries::area_policies();
+        let policies = netmonitor_core::areas::AreaPolicies::from_context(ctx);
         match (
             areas::snapshot(&ctx.db, &policies).await,
             EventBus::from_context(ctx),

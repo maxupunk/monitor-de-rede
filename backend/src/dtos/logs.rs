@@ -11,7 +11,8 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::services::plugins::{credentials::CredentialView, manifest::TransportKind};
+use agent_protocol::device_io::TransportKind;
+use netmonitor_core::devices::access::CredentialView;
 
 /// Filtros de `GET /api/logs`, como chegam na query string.
 ///

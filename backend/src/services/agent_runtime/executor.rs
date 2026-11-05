@@ -1,12 +1,10 @@
 //! Execução dos pedidos da central, no host do agente.
 //!
 //! É aqui que a política local é aplicada — a cada pedido, antes de qualquer
-//! efeito (ADR 011). As operações usam o **mesmo** código da central:
-//! `LocalEngine` para o Docker (compose incluído) e `run_monitor_with` para as
-//! checagens. Os comandos das áreas (descoberta, equipamento e vazão, da
-//! Rede) vão aos `AgentCommandHandler`s que o ponto de montagem registra.
-
-use std::sync::Arc;
+//! efeito (ADR 011). As checagens usam o **mesmo** código da central
+//! (`run_monitor_with`). Os comandos das áreas — o Docker (compose incluído),
+//! de Servidores; descoberta, equipamento e vazão, da Rede — vão aos
+//! `AgentCommandHandler`s que o binário do agente monta.
 
 use async_trait::async_trait;
 use serde::Serialize;
@@ -17,20 +15,13 @@ use tokio_util::sync::CancellationToken;
 use crate::services::{
     agents::{
         policy::Policy,
-        protocol::{Command, DockerCall, ErrorCode, RemoteError},
-    },
-    docker::{
-        engine::ContainerAction,
-        maintenance::{DockerMaintenance, Progress},
-        protection::{is_current_container, is_protected_inspect},
-        source::{DockerEngine, LocalEngine, LogChunk},
-        DockerError,
+        protocol::{Command, ErrorCode, RemoteError},
     },
     monitoring::runner::{run_monitor_with, CheckDeps, RunOptions},
     probes::agent::failed_result,
 };
 
-use netmonitor_core::agents::{command::AgentCommandHandlers, targets::DeviceNetworks};
+use netmonitor_core::agents::command::AgentCommandHandlers;
 
 /// Contrato do executor: a sessão do agente só conhece isto.
 #[async_trait]
@@ -50,198 +41,21 @@ fn to_value<T: Serialize>(value: T) -> Result<Value, RemoteError> {
         .map_err(|error| RemoteError::new(ErrorCode::Internal, error.to_string()))
 }
 
-fn docker<T: Serialize>(result: Result<T, DockerError>) -> Result<Value, RemoteError> {
-    result.map_err(RemoteError::from).and_then(to_value)
-}
-
-/// Linhas de progresso de texto viram chunks de string.
-fn progress_to_chunks(
-    chunks: mpsc::UnboundedSender<Value>,
-) -> (Progress, tokio::task::JoinHandle<()>) {
-    let (progress, mut lines) = mpsc::unbounded_channel::<String>();
-    let forward = tokio::spawn(async move {
-        while let Some(line) = lines.recv().await {
-            if chunks.send(Value::String(line)).is_err() {
-                break;
-            }
-        }
-    });
-    (progress, forward)
-}
-
 pub struct LocalExecutor {
     policy: Policy,
-    engine: Arc<LocalEngine>,
     deps: CheckDeps,
-    /// Os comandos das áreas (descoberta, equipamento, vazão), registrados
-    /// pelo ponto de montagem (ADR 017, `AgentCommandHandler`).
+    /// Os comandos das áreas (Docker, descoberta, equipamento, vazão),
+    /// montados pelo binário do agente (ADR 017, `AgentCommandHandler`).
     handlers: AgentCommandHandlers,
 }
 
 impl LocalExecutor {
     #[must_use]
-    pub fn new(policy: Policy, deps: CheckDeps) -> Self {
-        let handlers = crate::registries::agent_command_handlers(&deps, DeviceNetworks::from_env());
+    pub const fn new(policy: Policy, deps: CheckDeps, handlers: AgentCommandHandlers) -> Self {
         Self {
             policy,
-            engine: Arc::new(LocalEngine),
             deps,
             handlers,
-        }
-    }
-
-    /// Troca as redes aceitas como alvo (o padrão vem do ambiente).
-    #[must_use]
-    pub fn with_device_networks(mut self, networks: DeviceNetworks) -> Self {
-        self.handlers = crate::registries::agent_command_handlers(&self.deps, networks);
-        self
-    }
-
-    /// Troca os handlers dos comandos das áreas (testes).
-    #[must_use]
-    pub fn with_handlers(mut self, handlers: AgentCommandHandlers) -> Self {
-        self.handlers = handlers;
-        self
-    }
-
-    /// Nenhuma mutação atinge o container que executa o próprio agente nem
-    /// um container protegido da instalação (a central, ao lado do agente
-    /// local): derrubá-los cortaria a central do host sem volta (ADR 014).
-    async fn guard(&self, id: &str) -> Result<(), RemoteError> {
-        let inspected = self
-            .engine
-            .inspect_container_raw(id)
-            .await
-            .map_err(RemoteError::from)?;
-        let full_id = inspected.get("Id").and_then(Value::as_str).unwrap_or(id);
-        if is_current_container(full_id) {
-            return Err(RemoteError::new(
-                ErrorCode::Forbidden,
-                "O agente não executa ações sobre o próprio container",
-            ));
-        }
-        if is_protected_inspect(&inspected) {
-            return Err(RemoteError::new(
-                ErrorCode::Forbidden,
-                "Container protegido da instalação NetMonitor: a ação derrubaria a central",
-            ));
-        }
-        Ok(())
-    }
-
-    /// Operação longa: o progresso vira chunks de texto até o fim.
-    async fn long<T, F>(
-        chunks: mpsc::UnboundedSender<Value>,
-        operation: impl FnOnce(Progress) -> F,
-    ) -> Result<Value, RemoteError>
-    where
-        T: Serialize,
-        F: std::future::Future<Output = Result<T, DockerError>>,
-    {
-        let (progress, forward) = progress_to_chunks(chunks);
-        let result = operation(progress).await;
-        let _ = forward.await;
-        docker(result)
-    }
-
-    async fn follow(
-        &self,
-        id: &str,
-        tail: &str,
-        chunks: mpsc::UnboundedSender<Value>,
-        cancel: CancellationToken,
-    ) -> Result<Value, RemoteError> {
-        let (logs, mut received) = mpsc::unbounded_channel::<LogChunk>();
-        let forward = tokio::spawn(async move {
-            while let Some(chunk) = received.recv().await {
-                let Ok(value) = serde_json::to_value(chunk) else {
-                    continue;
-                };
-                if chunks.send(value).is_err() {
-                    break;
-                }
-            }
-        });
-        let result = self.engine.follow_logs(id, tail, logs, cancel).await;
-        let _ = forward.await;
-        docker(result.map(|()| Value::Null))
-    }
-
-    #[allow(clippy::too_many_lines)]
-    async fn docker(
-        &self,
-        call: DockerCall,
-        chunks: mpsc::UnboundedSender<Value>,
-        cancel: CancellationToken,
-    ) -> Result<Value, RemoteError> {
-        let engine = self.engine.as_ref();
-        match call {
-            DockerCall::Status => docker(engine.status_raw().await),
-            DockerCall::ListContainers => docker(engine.list_containers_raw().await),
-            DockerCall::InspectContainer { id } => docker(engine.inspect_container_raw(&id).await),
-            DockerCall::ContainerAction { id, action } => {
-                if action != ContainerAction::Start {
-                    self.guard(&id).await?;
-                }
-                docker(engine.container_action(&id, action).await)
-            }
-            DockerCall::Logs {
-                id,
-                filters,
-                max_lines,
-            } => docker(
-                engine
-                    .container_logs_raw(&id, &filters, max_lines.min(10_000))
-                    .await,
-            ),
-            DockerCall::FollowLogs { id, tail } => self.follow(&id, &tail, chunks, cancel).await,
-            DockerCall::ClearLogs { id } => docker(engine.clear_logs(&id).await),
-            DockerCall::Metrics => to_value(engine.metrics().await),
-            DockerCall::ListVolumes => docker(engine.list_volumes_raw().await),
-            DockerCall::InspectVolume { name } => docker(engine.inspect_volume_raw(&name).await),
-            DockerCall::RemoveVolume { name, force } => {
-                docker(engine.remove_volume(&name, force).await)
-            }
-            DockerCall::ListNetworks => docker(engine.list_networks_raw().await),
-            DockerCall::InspectNetwork { id } => docker(engine.inspect_network_raw(&id).await),
-            DockerCall::CreateNetwork { name, driver } => {
-                docker(engine.create_network(&name, &driver).await)
-            }
-            DockerCall::RemoveNetwork { id } => docker(engine.remove_network(&id).await),
-            DockerCall::ConnectNetwork { network, container } => {
-                docker(engine.connect_network(&network, &container).await)
-            }
-            DockerCall::DisconnectNetwork {
-                network,
-                container,
-                force,
-            } => {
-                self.guard(&container).await?;
-                docker(engine.disconnect_network(&network, &container, force).await)
-            }
-            DockerCall::ListImages => docker(engine.list_images_raw().await),
-            DockerCall::InspectImage { id } => docker(engine.inspect_image_raw(&id).await),
-            DockerCall::RemoveImage { id, force } => docker(engine.remove_image(&id, force).await),
-            DockerCall::PruneImages => docker(engine.prune_images_raw().await),
-            DockerCall::PullImage { image } => {
-                Self::long(chunks, |progress| async move {
-                    engine.pull_image(&image, progress).await
-                })
-                .await
-            }
-            DockerCall::UpdateContainer { id } => {
-                self.guard(&id).await?;
-                Self::long(chunks, |progress| async move {
-                    engine.update_container(&id, progress).await
-                })
-                .await
-            }
-            DockerCall::Compose { request } => {
-                Self::long(chunks, |progress| async move {
-                    engine.compose(&request, progress).await
-                })
-                .await
-            }
         }
     }
 }
@@ -262,7 +76,6 @@ impl CommandExecutor for LocalExecutor {
             ));
         }
         match command {
-            Command::Docker { call } => self.docker(call, chunks, cancel).await,
             Command::Monitor { task } => {
                 let result = run_monitor_with(
                     &self.deps,
@@ -283,7 +96,8 @@ impl CommandExecutor for LocalExecutor {
                 ErrorCode::Unsupported,
                 "pontes são atendidas pela sessão do agente",
             )),
-            // Os comandos das áreas: descoberta, equipamento e vazão (Rede).
+            // Os comandos das áreas: Docker (Servidores); descoberta,
+            // equipamento e vazão (Rede).
             other => match self.handlers.find(&other) {
                 Some(handler) => handler.execute(other, chunks, cancel).await,
                 None => Err(RemoteError::new(
@@ -302,77 +116,21 @@ mod tests {
         agents::{policy::Permission, protocol::DockerCall},
         probes::dispatcher::ProbeTask,
     };
-    use agent_protocol::{
-        device_io::{self, DeviceIoCall},
-        throughput::{TestDirection, TestProtocol, ThroughputEngine, ThroughputSpec},
-    };
 
-    fn vazao() -> Policy {
-        Policy::from_permissions([Permission::Throughput])
-    }
-
-    fn iperf3(target: std::net::SocketAddr, duration_s: u8) -> Command {
-        Command::Throughput {
-            target: target.ip(),
-            port: target.port(),
-            spec: ThroughputSpec {
-                engine: ThroughputEngine::Iperf3,
-                direction: TestDirection::Send,
-                protocol: TestProtocol::Tcp,
-                duration_s,
-                streams: 1,
-                limit_mbps: Some(200),
-            },
-            auth: None,
-        }
-    }
-
-    #[tokio::test]
-    async fn vazao_exige_permissao_e_alvo_permitido() {
-        let local: std::net::SocketAddr = "127.0.0.1:5201".parse().unwrap();
-        let negado = LocalExecutor::new(Policy::default(), CheckDeps::default());
-        let (chunks, _) = mpsc::unbounded_channel();
-        let error = negado
-            .execute(iperf3(local, 1), chunks, CancellationToken::new())
-            .await
-            .expect_err("sem throughput");
-        assert_eq!(error.code, ErrorCode::Forbidden);
-
-        let liberado = LocalExecutor::new(vazao(), CheckDeps::default());
-        let (chunks, _) = mpsc::unbounded_channel();
-        let error = liberado
-            .execute(
-                iperf3("8.8.8.8:5201".parse().unwrap(), 1),
-                chunks,
-                CancellationToken::new(),
-            )
-            .await
-            .expect_err("IP público");
-        assert_eq!(error.code, ErrorCode::Forbidden);
-
-        let restrito = LocalExecutor::new(vazao(), CheckDeps::default())
-            .with_device_networks(DeviceNetworks::parse("192.168.10.0/24"));
-        let (chunks, _) = mpsc::unbounded_channel();
-        let error = restrito
-            .execute(iperf3(local, 1), chunks, CancellationToken::new())
-            .await
-            .expect_err("fora de AGENT_DEVICE_CIDRS");
-        assert_eq!(error.code, ErrorCode::Forbidden);
-
-        let (chunks, _) = mpsc::unbounded_channel();
-        let error = liberado
-            .execute(iperf3(local, 0), chunks, CancellationToken::new())
-            .await
-            .expect_err("duração fora do contrato");
-        assert_eq!(error.code, ErrorCode::Validation);
+    /// Sem área nenhuma: o que se testa aqui é do executor (política local e
+    /// monitor). Os comandos das áreas são testados em
+    /// `tests/requests/agent_commands.rs`, com os handlers do ponto de montagem.
+    fn executor(policy: Policy) -> LocalExecutor {
+        LocalExecutor::new(
+            policy,
+            CheckDeps::default(),
+            AgentCommandHandlers::default(),
+        )
     }
 
     #[tokio::test]
     async fn politica_local_nega_antes_de_tocar_o_docker() {
-        let executor = LocalExecutor::new(
-            Policy::from_permissions([Permission::Read]),
-            CheckDeps::default(),
-        );
+        let executor = executor(Policy::from_permissions([Permission::Read]));
         let (chunks, _) = mpsc::unbounded_channel();
         let error = executor
             .execute(
@@ -388,47 +146,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn acesso_a_equipamento_exige_permissao_e_rede_privada() {
-        let call = |host: &str| Command::DeviceIo {
-            call: DeviceIoCall::HttpRequest {
-                endpoint: device_io::Endpoint {
-                    host: host.into(),
-                    port: 1,
-                },
-                https: false,
-                request: device_io::HttpRequest {
-                    method: "GET".into(),
-                    path: "/".into(),
-                    headers: vec![],
-                    body: None,
-                    basic_auth: None,
-                },
-                timeout_ms: 1_000,
-            },
-        };
-        let negado = LocalExecutor::new(Policy::default(), CheckDeps::default());
-        let (chunks, _) = mpsc::unbounded_channel();
-        let error = negado
-            .execute(call("127.0.0.1"), chunks, CancellationToken::new())
-            .await
-            .expect_err("sem device_io");
-        assert_eq!(error.code, ErrorCode::Forbidden);
-
-        let liberado = LocalExecutor::new(
-            Policy::from_permissions([Permission::DeviceIo]),
-            CheckDeps::default(),
-        );
-        let (chunks, _) = mpsc::unbounded_channel();
-        let error = liberado
-            .execute(call("8.8.8.8"), chunks, CancellationToken::new())
-            .await
-            .expect_err("IP público");
-        assert_eq!(error.code, ErrorCode::Forbidden);
-    }
-
-    #[tokio::test]
     async fn monitor_executa_o_mesmo_checker_da_central() {
-        let executor = LocalExecutor::new(Policy::default(), CheckDeps::default());
+        let executor = executor(Policy::default());
         let (chunks, _) = mpsc::unbounded_channel();
         let value = executor
             .execute(
@@ -451,7 +170,7 @@ mod tests {
 
     #[tokio::test]
     async fn falha_de_execucao_vira_observacao_down() {
-        let executor = LocalExecutor::new(Policy::default(), CheckDeps::default());
+        let executor = executor(Policy::default());
         let (chunks, _) = mpsc::unbounded_channel();
         let value = executor
             .execute(

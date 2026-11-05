@@ -3,20 +3,13 @@
 //! ativação do log no roteador (`services::syslog::provision`, que digita os
 //! comandos numa shell).
 
-use std::time::Duration;
-
 use netmonitor_core::shared::errors::{AppError, AppResult};
 
-/// Teto da sessão inteira. Um equipamento que não responde não pode segurar
-/// um worker do Axum indefinidamente.
-pub const TETO_DA_SESSAO: Duration = Duration::from_secs(45);
-/// Teto para o TCP abrir. Roteador desligado falha rápido, e a tela diz isso em
-/// vez de girar.
-pub const TETO_DE_CONEXAO: Duration = Duration::from_secs(8);
-/// Silêncio que declara um comando terminado. Ver a nota do módulo.
-pub const SILENCIO: Duration = Duration::from_millis(700);
-/// Teto por comando, quando o equipamento não para de falar.
-pub const TETO_POR_COMANDO: Duration = Duration::from_secs(10);
+/// Os prazos de uma sessão com o equipamento são do núcleo (o MAC-Telnet da
+/// ativação do log usa os mesmos); o caminho da área continua valendo.
+pub use netmonitor_core::devices::access::{
+    SILENCIO, TETO_DA_SESSAO, TETO_DE_CONEXAO, TETO_POR_COMANDO,
+};
 
 /// Erro de rede vira mensagem de operador, não `Internal`.
 ///

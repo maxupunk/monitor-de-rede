@@ -11,7 +11,7 @@ use std::{sync::Arc, time::Duration};
 use async_trait::async_trait;
 use chrono::Utc;
 
-use crate::services::docker::source::DockerEngine;
+use netmonitor_core::agents::host::HostDocker;
 
 use crate::services::telemetry::{
     host_metrics::HostMetricsReader,
@@ -27,16 +27,16 @@ pub trait RollupSink: Send + Sync {
 
 pub struct Sampler {
     reader: HostMetricsReader,
-    engine: Arc<dyn DockerEngine>,
+    docker: Arc<dyn HostDocker>,
     accumulator: RollupAccumulator,
 }
 
 impl Sampler {
     #[must_use]
-    pub fn new(reader: HostMetricsReader, engine: Arc<dyn DockerEngine>) -> Self {
+    pub fn new(reader: HostMetricsReader, docker: Arc<dyn HostDocker>) -> Self {
         Self {
             reader,
-            engine,
+            docker,
             accumulator: RollupAccumulator::default(),
         }
     }
@@ -44,7 +44,7 @@ impl Sampler {
     /// Uma amostra; devolve o minuto anterior quando esta abre um novo.
     pub async fn tick(&mut self) -> Option<MetricsRollup> {
         let host = self.reader.sample();
-        let metrics = self.engine.metrics().await;
+        let metrics = self.docker.metrics().await;
         let containers = if metrics.docker_available {
             ContainerSample::from_metrics(&metrics)
         } else {

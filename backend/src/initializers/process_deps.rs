@@ -56,6 +56,18 @@ pub fn install(ctx: &AppContext) {
     // scheduler coleta o SNMP e avalia as interfaces.
     ctx.shared_store
         .insert(crate::registries::network_central());
+    // O que as áreas fazem no ciclo do scheduler e na purga (registro de
+    // rotinas) e os monitores que elas executam em grupo (o SNMP).
+    ctx.shared_store.insert(crate::registries::area_routines());
+    ctx.shared_store.insert(crate::registries::monitor_groups());
+    // As políticas das áreas opcionais (o que desligar cada uma implica).
+    ctx.shared_store
+        .insert(netmonitor_core::areas::AreaPolicies::new(
+            crate::registries::area_policies(),
+        ));
+    // O acesso ao equipamento que a Rede oferece ao núcleo (identidade SNMP,
+    // Wi-Fi, credencial e shell da ativação do log).
+    netmonitor_core::devices::access::install(ctx, crate::registries::device_access());
     // O lado central dos comandos das áreas aos agentes (a varredura).
     ctx.shared_store
         .insert(crate::registries::agent_command_dispatchers());

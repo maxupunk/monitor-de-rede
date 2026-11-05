@@ -65,8 +65,15 @@ pub async fn identify(
 
     let (snmp, ssh) = match host {
         Some(endereco) => {
+            let access = netmonitor_core::devices::access::from_context(ctx);
             let consulta_snmp = async {
-                hints::identidade_snmp(endereco, comunidade, input.snmp_version.as_deref()).await
+                hints::identidade_snmp(
+                    access.as_deref(),
+                    endereco,
+                    comunidade,
+                    input.snmp_version.as_deref(),
+                )
+                .await
             };
             tokio::join!(
                 consulta_snmp,

@@ -11,11 +11,17 @@
 //! das outras, com um cuidado a mais: **evento aberto nunca é apagado**. Só o
 //! que já foi resolvido envelhece — purgar um episódio em curso apagaria da
 //! Central um alerta que o operador ainda precisa ver.
+//!
+//! As tabelas das áreas (o histórico dos testes de enlace, da Rede) têm a
+//! retenção delas, contribuída como [`netmonitor_core::routines::RetentionJob`]
+//! e chamada logo depois desta, no mesmo ciclo ([`prune_areas`]).
 
 use chrono::{Duration, Utc};
 use sea_orm::{
     ColumnTrait, Condition, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
 };
+
+use netmonitor_core::routines::AreaRoutines;
 
 use crate::{
     models::_entities::{
@@ -47,9 +53,6 @@ pub const DEFAULT_RETENTION_AUDIT_DAYS: i64 = 365;
 /// Execuções de plugin terminadas, com a transcrição do acesso ao
 /// equipamento: o mesmo prazo do histórico de incidentes.
 pub const DEFAULT_RETENTION_PLUGIN_RUNS_DAYS: i64 = 90;
-/// Testes de enlace terminados (com pernas e amostras): o mesmo prazo das
-/// execuções de plugin que cada etapa gerou.
-pub const DEFAULT_RETENTION_LINK_TESTS_DAYS: i64 = 90;
 /// Execuções de tarefas agendadas: uma tarefa de minuto em minuto grava
 /// ~43 mil por mês, então o prazo é o das métricas, não o dos incidentes.
 pub const DEFAULT_RETENTION_SCHEDULED_TASK_RUNS_DAYS: i64 = 30;
@@ -71,7 +74,6 @@ pub struct PruneStats {
     pub telemetry_deleted: u64,
     pub audit_deleted: u64,
     pub plugin_runs_deleted: u64,
-    pub link_tests_deleted: u64,
     pub scheduled_task_runs_deleted: u64,
 }
 
@@ -87,24 +89,13 @@ impl PruneStats {
             + self.telemetry_deleted
             + self.audit_deleted
             + self.plugin_runs_deleted
-            + self.link_tests_deleted
             + self.scheduled_task_runs_deleted
     }
 }
 
-/// Lê uma variável de retenção, caindo no padrão quando ausente ou inválida.
-///
-/// Valor `0` ou negativo é tratado como "use o padrão": desligar a purga por
-/// engano encheria o disco em silêncio, que é pior do que ignorar a
-/// configuração.
-#[must_use]
-pub fn retention_days(variable: &str, default: i64) -> i64 {
-    std::env::var(variable)
-        .ok()
-        .and_then(|value| value.trim().parse::<i64>().ok())
-        .filter(|value| *value > 0)
-        .unwrap_or(default)
-}
+/// A leitura das variáveis de retenção é do núcleo, para as áreas lerem as
+/// delas do mesmo jeito.
+pub use netmonitor_core::routines::retention_days;
 
 /// Apaga tudo que passou da janela de retenção.
 ///
@@ -214,16 +205,6 @@ pub async fn prune_all<C: ConnectionTrait>(db: &C) -> AppResult<PruneStats> {
     )
     .await?;
 
-    // Teste em curso não tem `finished_at` e nunca envelhece.
-    let link_tests_deleted = crate::services::link_tests::repository::prune(
-        db,
-        cutoff(
-            "RETENTION_LINK_TESTS_DAYS",
-            DEFAULT_RETENTION_LINK_TESTS_DAYS,
-        ),
-    )
-    .await?;
-
     // Execução em curso não tem `finished_at` e nunca envelhece.
     let scheduled_task_runs_deleted = delete_in_batches::<scheduled_task_runs::Entity, _>(
         db,
@@ -245,9 +226,25 @@ pub async fn prune_all<C: ConnectionTrait>(db: &C) -> AppResult<PruneStats> {
         telemetry_deleted,
         audit_deleted,
         plugin_runs_deleted,
-        link_tests_deleted,
         scheduled_task_runs_deleted,
     })
+}
+
+/// Roda a retenção que as áreas contribuíram. Falha de uma não impede as
+/// outras; devolve o que cada uma apagou.
+pub async fn prune_areas(
+    db: &sea_orm::DatabaseConnection,
+    routines: &AreaRoutines,
+) -> Vec<(&'static str, u64)> {
+    let now = Utc::now();
+    let mut deleted = Vec::new();
+    for job in routines.retention() {
+        match job.prune(db, now).await {
+            Ok(count) => deleted.push((job.name(), count)),
+            Err(error) => tracing::warn!(%error, retencao = job.name(), "falha na purga da área"),
+        }
+    }
+    deleted
 }
 
 /// Apaga, em lotes por `id`, as linhas que `filter` seleciona.
@@ -331,10 +328,9 @@ mod tests {
             telemetry_deleted: 7,
             audit_deleted: 8,
             plugin_runs_deleted: 9,
-            link_tests_deleted: 10,
-            scheduled_task_runs_deleted: 11,
+            scheduled_task_runs_deleted: 10,
         };
-        assert_eq!(stats.total(), 66);
+        assert_eq!(stats.total(), 55);
         assert_eq!(PruneStats::default().total(), 0);
     }
 

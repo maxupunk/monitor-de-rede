@@ -9,12 +9,15 @@
 //! (`AreaPolicy`), registrados pelo ponto de montagem.
 //!
 //! * [`docker`] — a Engine (só no agente) e o Docker de cada host pelo canal;
+//! * [`agent_host`] — o lado do agente: os comandos Docker
+//!   (`AgentCommandHandler`) e o Docker do host para o runtime dele;
 //! * [`ai_tools`] — as ferramentas `docker_*` da IA e a fonte `docker` do
 //!   `grep`, contribuídas ao catálogo pelo ponto de montagem;
 //! * [`databases`] — dump e restauração nativos, pela ponte do agente;
 //! * [`controllers`], [`dtos`], [`views`] — as rotas `/api/docker` e
 //!   `/api/databases`.
 
+pub mod agent_host;
 pub mod ai_tools;
 pub mod area_policy;
 pub mod container_monitor;

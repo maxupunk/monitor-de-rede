@@ -26,7 +26,7 @@ use std::{sync::OnceLock, time::Duration};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, Set,
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 use ts_rs::TS;
 
@@ -48,57 +48,9 @@ use netmonitor_core::{
 /// Quanto uma senha informada "por sessão" continua valendo.
 pub const SESSION_TTL: Duration = Duration::from_secs(30 * 60);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "snake_case")]
-#[ts(export, export_to = "../../frontend/src/bindings/")]
-pub enum SecretStorage {
-    /// Pedida na janela do acesso, só em memória.
-    Ask,
-    /// Chave do acesso dedicado, cifrada no banco (ADR 016).
-    Key,
-}
-
-impl SecretStorage {
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Ask => "ask",
-            Self::Key => "key",
-        }
-    }
-
-    fn parse(value: &str) -> Self {
-        if value == "key" {
-            Self::Key
-        } else {
-            Self::Ask
-        }
-    }
-}
-
-/// O que a tela vê. Sem senha, nunca.
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../frontend/src/bindings/")]
-pub struct CredentialView {
-    pub kind: TransportKind,
-    pub username: String,
-    pub storage: SecretStorage,
-    pub port: u16,
-    /// HTTPS em vez de HTTP (só para `http`).
-    pub https: bool,
-    #[ts(type = "number | null")]
-    pub via_probe_id: Option<i64>,
-    /// Há senha cifrada guardada.
-    pub has_stored_secret: bool,
-    /// Há senha de sessão em memória, ainda válida.
-    pub session_active: bool,
-    /// O acesso dedicado instalado no equipamento (só em `key`). Leva a chave
-    /// pública e as impressões digitais — nunca a chave privada.
-    #[ts(optional)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub dedicated: Option<DedicatedAccess>,
-}
+/// O modo de guarda e a vista de uma credencial são do núcleo (a ativação do
+/// log os devolve à tela); o caminho da área continua valendo.
+pub use netmonitor_core::devices::access::{CredentialView, SecretStorage};
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]

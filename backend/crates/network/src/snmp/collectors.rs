@@ -16,32 +16,9 @@ pub const OID_SYS_LOCATION: &str = "1.3.6.1.2.1.1.6.0";
 pub const OID_ENT_PHYSICAL_MFG_NAME: &str = "1.3.6.1.2.1.47.1.1.1.1.12.1";
 pub const OID_ENT_PHYSICAL_MODEL_NAME: &str = "1.3.6.1.2.1.47.1.1.1.1.13.1";
 
-#[derive(Debug, Default, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SnmpSystemInfo {
-    pub sys_descr: Option<String>,
-    pub sys_object_id: Option<String>,
-    pub sys_up_time: Option<u64>,
-    pub sys_contact: Option<String>,
-    pub sys_name: Option<String>,
-    pub sys_location: Option<String>,
-    /// Fabricante e modelo do chassi, quando o agente implementa ENTITY-MIB.
-    pub hardware_vendor: Option<String>,
-    pub hardware_model: Option<String>,
-}
-
-impl SnmpSystemInfo {
-    /// Houve contato real com o agente? (matriz de paridade #19)
-    ///
-    /// Só `sysDescr`, `sysName` e `sysUpTime` contam. `sysContact` e
-    /// `sysLocation` ficam de fora de propósito: são campos de texto livre que
-    /// muitos agentes devolvem vazios, e aceitá-los como prova marcaria o
-    /// equipamento "online" sem que nenhum OID de identidade tivesse respondido.
-    #[must_use]
-    pub const fn responded(&self) -> bool {
-        self.sys_descr.is_some() || self.sys_name.is_some() || self.sys_up_time.is_some()
-    }
-}
+/// A identidade SNMP é dado do núcleo (o assistente do log e a identificação
+/// de dispositivo a leem); o caminho da área continua valendo.
+pub use netmonitor_core::devices::access::SnmpSystemInfo;
 
 pub async fn collect_system(client: &SnmpClient) -> Result<SnmpSystemInfo, SnmpError> {
     let values = client

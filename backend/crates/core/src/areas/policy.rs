@@ -93,3 +93,29 @@ pub fn monitors_keep_running(count: u64, singular: &str, plural_form: &str) -> O
         ))
     })
 }
+
+/// As políticas das áreas opcionais, registradas pelo ponto de montagem no
+/// `shared_store` do processo (o `after_context`).
+#[derive(Clone, Default)]
+pub struct AreaPolicies(std::sync::Arc<Vec<Box<dyn AreaPolicy>>>);
+
+impl AreaPolicies {
+    #[must_use]
+    pub fn new(policies: Vec<Box<dyn AreaPolicy>>) -> Self {
+        Self(std::sync::Arc::new(policies))
+    }
+
+    /// As do processo; vazio quando o ponto de montagem não registrou nada.
+    #[must_use]
+    pub fn from_context(ctx: &loco_rs::app::AppContext) -> Self {
+        ctx.shared_store.get::<Self>().unwrap_or_default()
+    }
+}
+
+impl std::ops::Deref for AreaPolicies {
+    type Target = [Box<dyn AreaPolicy>];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}

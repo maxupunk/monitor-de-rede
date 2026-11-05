@@ -4,18 +4,10 @@
 //! O CGNAT é a única condição realmente impeditiva — e ele é detectável pela
 //! faixa 100.64.0.0/10 (RFC 6598).
 
-use std::{net::Ipv4Addr, time::Duration};
+use std::net::Ipv4Addr;
 
 use serde::Serialize;
 use ts_rs::TS;
-
-/// Serviços públicos usados para descobrir o IP visto pela internet.
-const PUBLIC_IP_ENDPOINTS: [&str; 2] = [
-    "https://api.ipify.org?format=json",
-    "https://ifconfig.co/json",
-];
-
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Faixa reservada ao CGNAT (RFC 6598).
 const CGNAT_RANGE: (Ipv4Addr, Ipv4Addr) = (
@@ -94,35 +86,9 @@ pub fn is_private_address(ip: Ipv4Addr) -> bool {
     PRIVATE_RANGES.iter().any(|range| in_range(ip, *range))
 }
 
-/// IP público visto pela internet.
-///
-/// Dois provedores em sequência: o primeiro que responder decide. Falha de rede
-/// devolve `None` — não é erro, é "não deu para saber".
-pub async fn detect_public_ip() -> Option<Ipv4Addr> {
-    #[derive(serde::Deserialize)]
-    struct IpPayload {
-        ip: Option<String>,
-    }
-    let client = reqwest::Client::builder()
-        .timeout(REQUEST_TIMEOUT)
-        .build()
-        .ok()?;
-
-    for endpoint in PUBLIC_IP_ENDPOINTS {
-        let Ok(response) = client.get(endpoint).send().await else {
-            continue;
-        };
-        if !response.status().is_success() {
-            continue;
-        }
-        if let Ok(payload) = response.json::<IpPayload>().await {
-            if let Some(ip) = payload.ip.and_then(|ip| ip.trim().parse::<Ipv4Addr>().ok()) {
-                return Some(ip);
-            }
-        }
-    }
-    None
-}
+/// A descoberta do IP público é do núcleo (o assistente inicial também a
+/// usa); o caminho da área continua valendo.
+pub use netmonitor_core::network_tools::public_ip::detect_public_ip;
 
 /// Resolve o host do endpoint para IPv4. Já sendo IP, devolve como está.
 async fn resolve_host(host: &str) -> Option<Ipv4Addr> {

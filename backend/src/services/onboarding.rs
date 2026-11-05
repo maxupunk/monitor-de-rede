@@ -13,12 +13,11 @@ use netmonitor_core::areas::{self, Area, AreaPolicy, AreaService, AreasSnapshot}
 
 use crate::{
     dtos::areas::OnboardingIntentInput,
-    models::{dns_servers, networks, sites, system_settings},
+    models::{dns_servers, networks, sites, system_settings, vpn_servers},
     services::{
         server_addresses,
         shared::errors::{AppError, AppResult},
         syslog::nat::NatDetector,
-        vpn::{preflight, server_service},
     },
 };
 
@@ -67,8 +66,9 @@ pub async fn get_status(
     let sites_count = sites::Entity::find().count(db).await?;
     let networks_count = networks::Entity::find().count(db).await?;
     let dns_servers_count = dns_servers::Entity::find().count(db).await?;
-    let vpn_server = server_service::find(db).await?;
-    let vpn_configured = vpn_server.is_some();
+    // A tabela é do núcleo (`models`): perguntar se há servidor não pede a
+    // área VPN.
+    let vpn_configured = vpn_servers::Entity::find().count(db).await? > 0;
 
     // Endereços detectados
     let lista_enderecos = server_addresses::list(db, detector)
@@ -85,7 +85,9 @@ pub async fn get_status(
         .and_then(|e| e.value.clone().or_else(|| e.detected.clone()))
     {
         Some(ip) => Some(ip),
-        None => preflight::detect_public_ip().await.map(|ip| ip.to_string()),
+        None => netmonitor_core::network_tools::public_ip::detect_public_ip()
+            .await
+            .map(|ip| ip.to_string()),
     };
 
     // Só cobra site e rede de quem vai gerenciar rede (ADR 017): quem escolheu

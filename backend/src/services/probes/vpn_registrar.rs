@@ -107,7 +107,7 @@ pub async fn register_with_generated_token<C: ConnectionTrait>(
         .filter(|value| !value.is_empty());
     let generated = env_token
         .is_none()
-        .then(crate::tasks::probe_register::generate_token);
+        .then(crate::services::shared::crypto::random_token);
     let token = env_token
         .clone()
         .or_else(|| generated.clone())

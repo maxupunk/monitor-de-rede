@@ -43,19 +43,7 @@ const AREAS: &[(&str, &str)] = &[
 
 /// Dependências proibidas que já existiam quando a regra nasceu.
 /// `(módulo de origem, módulo importado)`. Só pode diminuir.
-const EXCECOES: &[(&str, &str)] = &[
-    ("agent_runtime", "docker"),
-    ("devices", "wifi"),
-    ("maintenance", "link_tests"),
-    ("monitoring", "link_tests"),
-    ("monitoring", "snmp"),
-    ("monitoring", "vpn"),
-    ("monitoring", "wifi"),
-    ("onboarding", "vpn"),
-    ("probes", "discovery"),
-    ("syslog", "plugins"),
-    ("syslog", "snmp"),
-];
+const EXCECOES: &[(&str, &str)] = &[];
 
 /// Crates de área já extraídos e o nome com que contam na regra.
 const CRATES_DE_AREA: &[(&str, &str)] = &[

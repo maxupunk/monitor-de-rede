@@ -7,6 +7,7 @@ pub mod crypto;
 pub mod errors;
 pub mod incident;
 pub mod pagination;
+pub mod rate_limit;
 pub mod run_guard;
 pub mod runtime;
 pub mod secret_file;

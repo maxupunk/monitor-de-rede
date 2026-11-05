@@ -106,10 +106,6 @@ pub async fn get_pending_tasks<C: ConnectionTrait>(
     Ok(claimed)
 }
 
-/// A entrega de uma varredura remota é da área Rede; o caminho antigo
-/// continua valendo (o polling HTTP do probe).
-pub use netmonitor_network::discovery::remote::get_pending_discovery_tasks;
-
 /// Esvazia a fila de um probe — usado ao revogar ou remover o agente.
 ///
 /// # Errors

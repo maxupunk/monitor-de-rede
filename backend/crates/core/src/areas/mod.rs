@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 pub use enabled::EnabledAreas;
-pub use policy::{monitors_keep_running, AreaPolicy, Blocker, Consequence, Evidence};
+pub use policy::{monitors_keep_running, AreaPolicies, AreaPolicy, Blocker, Consequence, Evidence};
 pub use state::{
     is_enabled, load, publish, save, snapshot, AreaImpact, AreaService, AreaState, AreasSnapshot,
     EVENT, STORAGE_KEY,

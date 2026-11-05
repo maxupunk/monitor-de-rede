@@ -1,39 +1,14 @@
-//! Execução de rotinas periódicas de manutenção, tráfego VPN, outbox de notificações e retenção.
+//! Execução de rotinas periódicas de manutenção, outbox de notificações e retenção.
 
 use chrono::Utc;
 use loco_rs::app::AppContext;
-use netmonitor_core::areas::{self, Area};
+use netmonitor_core::routines::{cadence::is_due, AreaRoutines};
 
-use super::cadence::{
-    is_due, DATA_PRUNE_INTERVAL_SECONDS, LINK_TEST_SCHEDULES_INTERVAL_SECONDS,
-    ROLLUP_INTERVAL_SECONDS, VPN_STATUS_INTERVAL_SECONDS, VPN_TRAFFIC_INTERVAL_SECONDS,
-    WIFI_WATCH_INTERVAL_SECONDS,
-};
+use super::{DATA_PRUNE_INTERVAL_SECONDS, ROLLUP_INTERVAL_SECONDS};
 use crate::services::{
-    alerts::hysteresis,
-    link_tests::{schedules as link_test_schedules, LinkTestEnv},
-    maintenance::data_pruner,
-    monitoring::rollup,
-    notifications::outbox,
-    shared::errors::AppResult,
-    syslog,
-    vpn::traffic_recorder,
-    wifi,
+    alerts::hysteresis, maintenance::data_pruner, monitoring::rollup, notifications::outbox,
+    shared::errors::AppResult, syslog,
 };
-
-/// Sincroniza o status (10s) e histórico (30s) do tráfego dos túneis VPN.
-pub async fn sync_vpn_traffic_if_due(ctx: &AppContext) -> AppResult<()> {
-    let now = Utc::now();
-    if is_due("vpn_traffic", VPN_TRAFFIC_INTERVAL_SECONDS, now) {
-        traffic_recorder::record_all(ctx).await?;
-        is_due("vpn_status", VPN_STATUS_INTERVAL_SECONDS, now);
-        return Ok(());
-    }
-    if is_due("vpn_status", VPN_STATUS_INTERVAL_SECONDS, now) {
-        traffic_recorder::sync_all(ctx).await?;
-    }
-    Ok(())
-}
 
 /// Despacha notificações pendentes no outbox respeitando agrupamento e higiene.
 pub async fn dispatch_notifications(ctx: &AppContext) -> AppResult<()> {
@@ -66,10 +41,20 @@ pub async fn run_data_pruner_if_due(ctx: &AppContext) -> AppResult<()> {
             telemetria = stats.telemetry_deleted,
             auditoria = stats.audit_deleted,
             plugins = stats.plugin_runs_deleted,
-            testes_de_enlace = stats.link_tests_deleted,
             tarefas_agendadas = stats.scheduled_task_runs_deleted,
             "purga de dados antigos executada"
         );
+    }
+    for (retencao, apagadas) in
+        data_pruner::prune_areas(&ctx.db, &AreaRoutines::from_context(ctx)).await
+    {
+        if apagadas > 0 {
+            tracing::info!(
+                retencao,
+                apagadas,
+                "purga de dados antigos da área executada"
+            );
+        }
     }
     if let Ok(logs) = syslog::LogsDb::from_context(ctx) {
         match syslog::retention::prune(logs.connection()).await {
@@ -111,51 +96,6 @@ pub async fn rollup_monitor_results_if_due(ctx: &AppContext) -> AppResult<()> {
             apagadas = stats.rows_deleted,
             "rollup de resultados de monitoramento executado"
         );
-    }
-    Ok(())
-}
-
-/// Dispara o vigia dos clientes Wi-Fi vigiados. Roda em segundo plano: a
-/// leitura dos APs por SSH leva segundos e não pode atrasar os monitores.
-/// Com a área Rede desligada (ADR 017) o vigia fica pausado.
-pub fn run_wifi_watch_if_due(ctx: &AppContext) {
-    if !is_due("wifi_watch", WIFI_WATCH_INTERVAL_SECONDS, Utc::now()) {
-        return;
-    }
-    let ctx = ctx.clone();
-    tokio::spawn(async move {
-        if !areas::is_enabled(&ctx.db, Area::Network)
-            .await
-            .unwrap_or(true)
-        {
-            return;
-        }
-        if let Err(error) = wifi::watch::run(&ctx).await {
-            tracing::warn!(%error, "falha no vigia dos clientes Wi-Fi");
-        }
-    });
-}
-
-/// Dispara os agendamentos de teste de enlace vencidos (ADR 015 §5).
-///
-/// Confere a cada minuto; o teste em si roda em segundo plano, com a mesma
-/// trava de concorrência dos testes pedidos pela tela. Com a área Rede
-/// desligada (ADR 017) os agendamentos ficam pausados — não são apagados.
-pub async fn run_link_test_schedules_if_due(ctx: &AppContext) -> AppResult<()> {
-    let now = Utc::now();
-    if !is_due(
-        "link_test_schedules",
-        LINK_TEST_SCHEDULES_INTERVAL_SECONDS,
-        now,
-    ) {
-        return Ok(());
-    }
-    if !areas::is_enabled(&ctx.db, Area::Network).await? {
-        return Ok(());
-    }
-    let started = link_test_schedules::run_due(LinkTestEnv::from_context(ctx), now).await?;
-    if started > 0 {
-        tracing::info!(started, "agendamentos de teste de enlace disparados");
     }
     Ok(())
 }

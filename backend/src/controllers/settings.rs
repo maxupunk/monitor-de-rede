@@ -64,7 +64,7 @@ async fn onboarding_intent(
         "Apenas administradores escolhem o que o NetMonitor vai acompanhar.",
     )
     .await?;
-    let policies = crate::registries::area_policies();
+    let policies = netmonitor_core::areas::AreaPolicies::from_context(&ctx);
     let outcome = onboarding::apply_intent(&ctx.db, &policies, input).await?;
     for change in &outcome.changes {
         areas::record_change(

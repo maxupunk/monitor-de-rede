@@ -12,17 +12,19 @@ use netmonitor_assistant::{
 };
 use netmonitor_core::{
     agents::{
-        command::{AgentCommandDispatchers, AgentCommandHandlers},
+        command::{AgentCommandDispatchers, AgentCommandHandler, AgentCommandHandlers},
+        host::HostDocker,
         targets::DeviceNetworks,
     },
     ai::tools::AiToolHandler,
     alerts::contracts::AlertEvaluationContext,
     areas::AreaPolicy,
     classifier::Classifier,
+    devices::access::DeviceAccess,
     models::devices,
-    monitoring::CheckDeps,
-    monitoring::MonitorCheckers,
+    monitoring::{CheckDeps, MonitorCheckers, MonitorGroups},
     notifications::NotificationMessage,
+    routines::AreaRoutines,
     shared::errors::AppError,
 };
 use netmonitor_network::central as network;
@@ -43,7 +45,10 @@ use crate::{
             recovery as alert_recovery, vpn_peer_watcher,
         },
         devices::identify,
-        docker::{engine, hosts, source::DockerEngine},
+        docker::{
+            engine, hosts,
+            source::{DockerEngine, LocalEngine},
+        },
         notifications::NotificationService,
         plugins::{ai_tools as plugins, auto_accept, credentials},
         server_addresses,
@@ -233,15 +238,52 @@ impl network::CentralServices for NetworkCentral {
 }
 
 /// Os comandos das áreas no host do agente (ADR 017, `AgentCommandHandler`):
-/// descoberta, acesso a equipamento e vazão, da Rede. A política local
-/// (`AGENT_ALLOW`) continua no executor, antes deles.
+/// o Docker (compose incluído), de Servidores; descoberta, acesso a
+/// equipamento e vazão, da Rede. A política local (`AGENT_ALLOW`) continua
+/// no executor, antes deles.
 #[must_use]
 pub fn agent_command_handlers(deps: &CheckDeps, networks: DeviceNetworks) -> AgentCommandHandlers {
-    AgentCommandHandlers::new(netmonitor_network::agent_commands::handlers(
+    let mut handlers: Vec<Arc<dyn AgentCommandHandler>> = vec![Arc::new(
+        netmonitor_servers::agent_host::DockerCommands::default(),
+    )];
+    handlers.extend(netmonitor_network::agent_commands::handlers(
         deps.clone(),
         networks,
         None,
-    ))
+    ));
+    AgentCommandHandlers::new(handlers)
+}
+
+/// Os tipos de monitor no agente: os mesmos da central, com a Docker Engine
+/// deste host (ADR 014) no monitor de container.
+#[must_use]
+pub fn agent_monitor_checkers() -> MonitorCheckers {
+    monitor_checkers(Some(Arc::new(LocalEngine)))
+}
+
+/// O Docker do host do agente (Servidores): o `Hello`, o amostrador, o
+/// estado ao vivo e a exportação de volume.
+#[must_use]
+pub fn agent_host_docker() -> Arc<dyn HostDocker> {
+    Arc::new(netmonitor_servers::agent_host::LocalHostDocker)
+}
+
+/// As rotinas que as áreas contribuem ao ciclo do scheduler e à purga
+/// (ADR 017, registro de rotinas): a coleta SNMP sem monitor, a varredura, o
+/// vigia do Wi-Fi e os testes de enlace agendados, da Rede; a telemetria dos
+/// túneis, da VPN; a retenção do histórico de enlace.
+#[must_use]
+pub fn area_routines() -> AreaRoutines {
+    let mut routines = netmonitor_network::routines::routines();
+    routines.extend(netmonitor_vpn::routines::routines());
+    AreaRoutines::new(routines, netmonitor_network::routines::retention())
+}
+
+/// Os monitores que uma área executa em grupo (os SNMP locais de um mesmo
+/// dispositivo, da Rede).
+#[must_use]
+pub fn monitor_groups() -> MonitorGroups {
+    MonitorGroups::new(netmonitor_network::routines::monitor_groups())
 }
 
 /// O lado central dos comandos das áreas (ADR 017): o despacho das
@@ -257,6 +299,13 @@ pub fn agent_command_dispatchers() -> AgentCommandDispatchers {
 #[must_use]
 pub fn network_central() -> network::Central {
     network::Central::new(Arc::new(NetworkCentral))
+}
+
+/// O acesso ao equipamento que a Rede oferece ao núcleo: a identidade SNMP,
+/// o leitor de Wi-Fi, a credencial salva e a shell da ativação do log.
+#[must_use]
+pub fn device_access() -> Arc<dyn DeviceAccess> {
+    Arc::new(netmonitor_network::device_access::NetworkDeviceAccess)
 }
 
 /// O classificador do processo (ADR 017, `Classifier`): o Decisor do

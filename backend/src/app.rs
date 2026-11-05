@@ -36,6 +36,17 @@ use crate::{
     tasks::scheduler_run::{SchedulerLoop, SchedulerRun},
 };
 
+/// Os crates do workspace cujo log o filtro padrão precisa liberar.
+const WORKSPACE_CRATES: &[&str] = &[
+    "netmonitor_core",
+    "netmonitor_nucleo",
+    "netmonitor_network",
+    "netmonitor_servers",
+    "netmonitor_vpn",
+    "netmonitor_assistant",
+    "agent_protocol",
+];
+
 pub struct App;
 #[async_trait]
 impl Hooks for App {
@@ -123,8 +134,19 @@ impl Hooks for App {
             return Ok(false);
         }
 
-        let filtro =
+        let mut filtro =
             logger::init_env_filter::<Self>(config.override_filter.as_ref(), &config.level);
+        // O filtro padrão do Loco só libera os módulos dele e o crate da
+        // aplicação (`backend`). O código mora nos crates do workspace (ADR
+        // 017): sem estas diretivas, o log de todos eles some. Quem define
+        // `RUST_LOG` ou `override_filter` continua decidindo sozinho.
+        if std::env::var_os("RUST_LOG").is_none() && config.override_filter.is_none() {
+            for crate_name in WORKSPACE_CRATES {
+                if let Ok(diretiva) = format!("{crate_name}={}", config.level).parse() {
+                    filtro = filtro.add_directive(diretiva);
+                }
+            }
+        }
         tracing_subscriber::registry()
             .with(logger::init_layer(std::io::stdout, &config.format, true))
             .with(syslog::app_layer::AppLogLayer)

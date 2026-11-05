@@ -65,9 +65,11 @@ async fn linked_with(permissions: &[Permission], networks: DeviceNetworks) -> Li
         central_out,
     ));
     let deps = SessionDeps {
-        executor: Arc::new(
-            LocalExecutor::new(policy.clone(), CheckDeps::default()).with_device_networks(networks),
-        ),
+        executor: Arc::new(LocalExecutor::new(
+            policy.clone(),
+            CheckDeps::default(),
+            backend::registries::agent_command_handlers(&CheckDeps::default(), networks),
+        )),
         outbox: Arc::new(Outbox::in_memory(10)),
         live: Arc::new(NoLiveSource),
         tunnels: Arc::new(LocalTunnelOpener::new(policy.clone(), Vec::new())),

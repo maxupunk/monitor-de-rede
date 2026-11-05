@@ -1,6 +1,7 @@
 //! `backend-cli task probe_run` — o agente de coleta da LAN.
 
 use loco_rs::prelude::*;
+use netmonitor_core::{agents::targets::DeviceNetworks, monitoring::CheckDeps};
 
 use crate::services::probes::agent::{ProbeAgent, ProbeAgentOptions};
 
@@ -27,7 +28,12 @@ impl Task for ProbeRun {
             buffer_path: vars.cli_arg("buffer_path").ok().map(ToString::to_string),
             version: None,
         })
-        .map_err(|error| Error::Message(format!("agente do probe não pôde iniciar: {error}")))?;
+        .map_err(|error| Error::Message(format!("agente do probe não pôde iniciar: {error}")))?
+        // A varredura que a central entrega é da Rede (ponto de montagem).
+        .with_handlers(crate::registries::agent_command_handlers(
+            &CheckDeps::from_context(ctx),
+            DeviceNetworks::from_env(),
+        ));
 
         tracing::info!(server = agent.server_url(), "processo probe inicializado");
         agent.start(ctx).await;

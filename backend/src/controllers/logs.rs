@@ -396,7 +396,8 @@ async fn provision_device(
         },
         login::LoginChoice::Saved,
     );
-    let acesso = login::resolve(&ctx.db, id, escolha).await?;
+    let device_access = netmonitor_core::devices::access::from_context(&ctx);
+    let acesso = login::resolve(&ctx.db, device_access.as_deref(), id, escolha).await?;
     let salvar = entrada.save_credential && entrada.saved_credential.is_none();
 
     let protocolo = provision::Protocol::parse(&entrada.protocol)?;
@@ -495,13 +496,28 @@ async fn provision_device(
         server_port,
     };
 
-    let resultado = provision::run(&pedido, servico.as_ref().map(|s| &s.sources), id).await?;
+    let resultado = provision::run(
+        &pedido,
+        device_access.as_deref(),
+        servico.as_ref().map(|s| &s.sources),
+        id,
+    )
+    .await?;
 
     let mut persistence_warnings = Vec::new();
     // A sessão entrou no equipamento: só agora a senha digitada merece ser
     // guardada. Falhar aqui não desfaz a configuração já aplicada.
     let saved_credential = if salvar {
-        match login::remember(&ctx.db, id, protocolo, &acesso, porta).await {
+        match login::remember(
+            &ctx.db,
+            device_access.as_deref(),
+            id,
+            protocolo,
+            &acesso,
+            porta,
+        )
+        .await
+        {
             Ok(credencial) => {
                 audit::record(
                     &ctx.db,
@@ -630,7 +646,13 @@ async fn provision_hints(
         |_| crate::services::syslog::NatDetector::detect(),
         |servico| servico.ingestor.resolver().nat().clone(),
     );
-    let dicas = hints::collect(&ctx.db, &dispositivo, &detector).await?;
+    let dicas = hints::collect(
+        &ctx.db,
+        netmonitor_core::devices::access::from_context(&ctx).as_deref(),
+        &dispositivo,
+        &detector,
+    )
+    .await?;
 
     // A forma de acesso é resolvida uma vez e usada duas: para escolher o
     // endereço e para explicar a escolha na tela. Resolver de novo lá dentro

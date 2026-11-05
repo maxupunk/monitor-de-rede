@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use agent_protocol::{Command, RemoteError};
+use agent_protocol::{AgentEvent, Command, RemoteError};
 use async_trait::async_trait;
 use loco_rs::app::AppContext;
 use serde_json::Value;
@@ -73,6 +73,36 @@ pub trait AgentCommandDispatcher: Send + Sync {
     ///
     /// Erro do banco ao reivindicar o trabalho.
     async fn dispatch(&self, ctx: &AppContext, session: &Arc<AgentSession>) -> AppResult<()>;
+
+    /// O mesmo trabalho para o probe que busca tarefas por HTTP
+    /// (`GET /api/probes/tasks`), como comandos. Quem entrega marca o
+    /// trabalho como reivindicado. O padrão é não haver nenhum.
+    ///
+    /// # Errors
+    ///
+    /// Erro do banco ao reivindicar o trabalho.
+    async fn pending_for_probe(
+        &self,
+        _ctx: &AppContext,
+        _probe_id: i64,
+    ) -> AppResult<Vec<Command>> {
+        Ok(Vec::new())
+    }
+
+    /// Um evento do agente (ou um resultado do probe por HTTP) que é desta
+    /// área — o retorno de uma varredura. Devolve `true` quando o tratou.
+    ///
+    /// # Errors
+    ///
+    /// Erro do banco ao gravar o retorno.
+    async fn receive(
+        &self,
+        _ctx: &AppContext,
+        _probe_id: i64,
+        _event: &AgentEvent,
+    ) -> AppResult<bool> {
+        Ok(false)
+    }
 }
 
 /// Os despachantes registrados na central, no `shared_store`.
@@ -87,5 +117,47 @@ impl AgentCommandDispatchers {
 
     pub fn iter(&self) -> impl Iterator<Item = &Arc<dyn AgentCommandDispatcher>> {
         self.0.iter()
+    }
+
+    /// Os do processo; vazio quando o ponto de montagem não registrou nenhum.
+    #[must_use]
+    pub fn from_context(ctx: &AppContext) -> Self {
+        ctx.shared_store.get::<Self>().unwrap_or_default()
+    }
+
+    /// O trabalho pendente das áreas para o probe que busca por HTTP.
+    ///
+    /// # Errors
+    ///
+    /// Erro do banco ao reivindicar.
+    pub async fn pending_for_probe(
+        &self,
+        ctx: &AppContext,
+        probe_id: i64,
+    ) -> AppResult<Vec<Command>> {
+        let mut commands = Vec::new();
+        for dispatcher in self.iter() {
+            commands.extend(dispatcher.pending_for_probe(ctx, probe_id).await?);
+        }
+        Ok(commands)
+    }
+
+    /// Entrega o evento à área que o trata. `false` quando nenhuma tratou.
+    ///
+    /// # Errors
+    ///
+    /// Erro da área ao gravar o retorno.
+    pub async fn receive(
+        &self,
+        ctx: &AppContext,
+        probe_id: i64,
+        event: &AgentEvent,
+    ) -> AppResult<bool> {
+        for dispatcher in self.iter() {
+            if dispatcher.receive(ctx, probe_id, event).await? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 }

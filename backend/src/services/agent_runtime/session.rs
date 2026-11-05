@@ -23,15 +23,13 @@ use crate::{
             },
             tunnel::{pump, TunnelStream, INBOUND_CAPACITY},
         },
-        docker::{
-            realtime::{inventory_snapshot, live_snapshot},
-            source::{DockerEngine, LocalEngine},
-        },
         monitoring::contracts::CheckResult,
         probes::receiver::ProbeDiscoveryResultPayload,
     },
     views::docker::{DockerInventorySnapshot, DockerLiveSnapshot},
 };
+
+use netmonitor_core::agents::host::HostDocker;
 
 use super::{executor::CommandExecutor, outbox::Outbox, tunnel::TunnelOpener};
 
@@ -52,18 +50,17 @@ pub trait LiveSource: Send + Sync {
     async fn inventory(&self) -> Option<DockerInventorySnapshot>;
 }
 
-pub struct DockerLiveSource;
+/// O Docker deste host (Servidores, montado pelo binário do agente).
+pub struct HostLive(pub Arc<dyn HostDocker>);
 
 #[async_trait]
-impl LiveSource for DockerLiveSource {
+impl LiveSource for HostLive {
     async fn live(&self) -> Option<DockerLiveSnapshot> {
-        live_snapshot(&LocalEngine, LocalEngine.metrics())
-            .await
-            .ok()
+        self.0.live().await
     }
 
     async fn inventory(&self) -> Option<DockerInventorySnapshot> {
-        inventory_snapshot(&LocalEngine).await.ok()
+        self.0.inventory().await
     }
 }
 

@@ -28,7 +28,7 @@ fn parse_area(id: &str) -> AppResult<Area> {
 /// `GET /api/areas` — o estado de todas as áreas (qualquer usuário: é o que
 /// monta o menu). O mesmo corpo chega pelo SSE em `areas:updated`.
 async fn index(State(ctx): State<AppContext>) -> AppResult<Response> {
-    let policies = crate::registries::area_policies();
+    let policies = netmonitor_core::areas::AreaPolicies::from_context(&ctx);
     Ok(format::json(
         AreaService::new(&ctx.db, &policies).snapshot().await?,
     )?)
@@ -54,7 +54,7 @@ async fn impact(
 /// O impacto da área somado ao das tarefas agendadas — que dependem do
 /// catálogo da IA, fora do alcance das políticas.
 async fn area_impact(ctx: &AppContext, area: Area) -> AppResult<AreaImpact> {
-    let policies = crate::registries::area_policies();
+    let policies = netmonitor_core::areas::AreaPolicies::from_context(ctx);
     let mut impact = AreaService::new(&ctx.db, &policies).impact(area).await?;
     impact
         .consequences
@@ -76,7 +76,7 @@ async fn update(
     )
     .await?;
     let area = parse_area(&id)?;
-    let policies = crate::registries::area_policies();
+    let policies = netmonitor_core::areas::AreaPolicies::from_context(&ctx);
     let before = areas::is_enabled(&ctx.db, area).await?;
     let snapshot = AreaService::new(&ctx.db, &policies)
         .set(area, input.enabled)

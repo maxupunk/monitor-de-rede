@@ -16,10 +16,12 @@
 use std::{
     net::{IpAddr, SocketAddr},
     str::FromStr,
+    sync::Arc,
     time::Duration,
 };
 
 use async_trait::async_trait;
+use netmonitor_core::agents::host::{HostDocker, NoHostDocker};
 use tokio::net::TcpStream;
 
 use crate::services::{
@@ -28,7 +30,6 @@ use crate::services::{
         protocol::{ErrorCode, RemoteError},
         tunnel::TunnelStream,
     },
-    docker::{maintenance::DockerMaintenance, source::LocalEngine},
     shared::cidr::is_reachable_target,
 };
 
@@ -106,12 +107,26 @@ fn forbidden(permission: Permission) -> RemoteError {
 pub struct LocalTunnelOpener {
     policy: Policy,
     targets: Vec<TunnelTarget>,
+    /// O Docker deste host, para a exportação de volume (Servidores).
+    docker: Arc<dyn HostDocker>,
 }
 
 impl LocalTunnelOpener {
+    /// Sem Docker: a exportação de volume é recusada.
     #[must_use]
-    pub const fn new(policy: Policy, targets: Vec<TunnelTarget>) -> Self {
-        Self { policy, targets }
+    pub fn new(policy: Policy, targets: Vec<TunnelTarget>) -> Self {
+        Self {
+            policy,
+            targets,
+            docker: Arc::new(NoHostDocker),
+        }
+    }
+
+    /// O Docker deste host, que exporta os volumes.
+    #[must_use]
+    pub fn with_docker(mut self, docker: Arc<dyn HostDocker>) -> Self {
+        self.docker = docker;
+        self
     }
 
     /// O primeiro endereço de `host` que as regras deixam alcançar.
@@ -179,11 +194,7 @@ impl TunnelOpener for LocalTunnelOpener {
         if !self.policy.allows(Permission::VolumeExport) {
             return Err(forbidden(Permission::VolumeExport));
         }
-        let archive = LocalEngine
-            .export_volume(name)
-            .await
-            .map_err(RemoteError::from)?;
-        Ok(Box::new(tokio::io::join(archive.reader, tokio::io::sink())))
+        self.docker.export_volume(name).await
     }
 }
 

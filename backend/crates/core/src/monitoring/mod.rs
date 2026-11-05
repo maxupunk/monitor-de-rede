@@ -21,9 +21,14 @@ use std::sync::Arc;
 
 use agent_protocol::monitoring::CheckResult;
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
+use loco_rs::app::AppContext;
 use serde_json::Value;
 
-use crate::shared::errors::{AppError, AppResult};
+use crate::{
+    models::monitors,
+    shared::errors::{AppError, AppResult},
+};
 
 /// Abstração para checkers puros e testáveis fora do HTTP.
 #[async_trait]
@@ -68,6 +73,61 @@ impl MonitorCheckers {
             .iter()
             .find(|checker| checker.kind() == kind)
             .map(AsRef::as_ref)
+    }
+}
+
+/// Monitores que uma área executa **em grupo**: os SNMP locais de um mesmo
+/// dispositivo compartilham uma coleta só (da Rede). O ciclo do scheduler
+/// tira do despacho individual os monitores vencidos que algum grupo
+/// reivindica, chama o grupo uma vez por chave e processa cada resultado como
+/// o de qualquer monitor. Grupo nunca pausa: é monitor.
+#[async_trait]
+pub trait MonitorGroup: Send + Sync {
+    /// A chave do grupo do monitor (o dispositivo), se este grupo o executa.
+    fn group_of(&self, monitor: &monitors::Model) -> Option<i64>;
+
+    /// Executa o grupo da chave e devolve o resultado de cada monitor.
+    ///
+    /// # Errors
+    ///
+    /// Erro do banco; falha de medição é dado (`CheckResult`).
+    async fn run(
+        &self,
+        ctx: &AppContext,
+        key: i64,
+        scheduled_at: DateTime<Utc>,
+    ) -> AppResult<Vec<(i64, CheckResult)>>;
+}
+
+/// Os grupos registrados, no `shared_store` do processo.
+#[derive(Clone, Default)]
+pub struct MonitorGroups(Arc<Vec<Arc<dyn MonitorGroup>>>);
+
+impl MonitorGroups {
+    #[must_use]
+    pub fn new(groups: Vec<Arc<dyn MonitorGroup>>) -> Self {
+        Self(Arc::new(groups))
+    }
+
+    /// Os do processo; vazio quando o ponto de montagem não registrou nenhum.
+    #[must_use]
+    pub fn from_context(ctx: &AppContext) -> Self {
+        ctx.shared_store.get::<Self>().unwrap_or_default()
+    }
+
+    /// `(grupo, chave)` do monitor, se algum grupo o reivindica.
+    #[must_use]
+    pub fn group_of(&self, monitor: &monitors::Model) -> Option<(usize, i64)> {
+        self.0
+            .iter()
+            .enumerate()
+            .find_map(|(index, group)| group.group_of(monitor).map(|key| (index, key)))
+    }
+
+    /// O grupo de índice `index` (de [`Self::group_of`]).
+    #[must_use]
+    pub fn get(&self, index: usize) -> Option<&dyn MonitorGroup> {
+        self.0.get(index).map(AsRef::as_ref)
     }
 }
 

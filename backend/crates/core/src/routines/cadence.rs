@@ -1,4 +1,6 @@
-//! Gerenciador de cadência periódica em memória para tarefas auxiliares do scheduler.
+//! Gerenciador de cadência periódica em memória para as rotinas do ciclo do
+//! scheduler — as do núcleo e as que as áreas contribuem. Cada rotina guarda
+//! a própria cadência (a constante mora com ela).
 
 use std::{
     collections::HashMap,
@@ -7,25 +9,6 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
-
-/// Cadência da leitura de status dos túneis VPN.
-pub const VPN_STATUS_INTERVAL_SECONDS: i64 = 10;
-
-/// Cadência da gravação de histórico de tráfego VPN.
-pub const VPN_TRAFFIC_INTERVAL_SECONDS: i64 = 30;
-
-/// Cadência da purga de dados antigos.
-pub const DATA_PRUNE_INTERVAL_SECONDS: i64 = 3_600;
-
-/// Cadência do rollup de resultados brutos em buckets horários.
-pub const ROLLUP_INTERVAL_SECONDS: i64 = 3_600;
-
-/// Cadência da conferência dos agendamentos de teste de enlace.
-pub const LINK_TEST_SCHEDULES_INTERVAL_SECONDS: i64 = 60;
-
-/// Cadência do vigia dos clientes Wi-Fi vigiados: uma sessão SSH por AP a
-/// cada 5 min — leve para o AP e fino o bastante para a regra de 10 min.
-pub const WIFI_WATCH_INTERVAL_SECONDS: i64 = 300;
 
 /// Próximo instante de cada tarefa periódica do ciclo.
 fn next_run_at() -> &'static Mutex<HashMap<&'static str, DateTime<Utc>>> {

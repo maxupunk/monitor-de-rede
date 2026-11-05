@@ -15,7 +15,7 @@
 use serde::Serialize;
 use ts_rs::TS;
 
-use netmonitor_core::models::{vpn_peers, vpn_servers};
+use netmonitor_core::models::vpn_servers;
 
 use crate::{peer_hints::PeerHints, profiles::registry::ProfileCard, GeneratedArtifact};
 
@@ -60,52 +60,9 @@ impl From<vpn_servers::Model> for VpnServerResponse {
     }
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../frontend/src/bindings/")]
-pub struct VpnPeerResponse {
-    #[ts(type = "number")]
-    pub id: i64,
-    #[ts(type = "number")]
-    pub vpn_server_id: i64,
-    #[ts(type = "number")]
-    pub device_id: i64,
-    pub public_key: String,
-    pub device_profile: String,
-    pub persistent_keepalive: i32,
-    pub last_handshake_at: Option<String>,
-    /// Último keepalive contabilizado — é o sinal de vida que sustenta o status.
-    pub last_seen_at: Option<String>,
-    #[ts(type = "number")]
-    pub bytes_rx: i64,
-    #[ts(type = "number")]
-    pub bytes_tx: i64,
-    pub enabled: bool,
-    pub created_at: String,
-    pub updated_at: String,
-    pub connection_status: vpn_peers::VpnPeerConnectionStatus,
-}
-
-impl From<&vpn_peers::Model> for VpnPeerResponse {
-    fn from(row: &vpn_peers::Model) -> Self {
-        Self {
-            id: row.id,
-            vpn_server_id: row.vpn_server_id,
-            device_id: row.device_id,
-            public_key: row.public_key.clone(),
-            device_profile: row.device_profile.clone(),
-            persistent_keepalive: row.persistent_keepalive,
-            last_handshake_at: row.last_handshake_at.map(|value| value.to_rfc3339()),
-            last_seen_at: row.last_seen_at.map(|value| value.to_rfc3339()),
-            bytes_rx: row.bytes_rx,
-            bytes_tx: row.bytes_tx,
-            enabled: row.enabled,
-            created_at: row.created_at.to_rfc3339(),
-            updated_at: row.updated_at.to_rfc3339(),
-            connection_status: row.connection_status(),
-        }
-    }
-}
+/// O peer como as telas o veem é do núcleo (a lista de dispositivos o embute);
+/// o caminho da área continua valendo.
+pub use netmonitor_core::devices::vpn_peer::VpnPeerResponse;
 
 /// Artefato entregue ao frontend — perfis móveis já vêm com o QR Code
 /// renderizado, porque a chave privada não sobrevive a uma segunda requisição.
@@ -252,6 +209,7 @@ pub struct VpnPeerRevokedResponse {
 mod tests {
     use super::*;
     use chrono::Utc;
+    use netmonitor_core::models::vpn_peers;
 
     fn peer() -> vpn_peers::Model {
         let now = Utc::now();

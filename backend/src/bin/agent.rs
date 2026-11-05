@@ -4,7 +4,17 @@
 //! na primeira vez), amostra host e containers e mantém o canal de saída com
 //! a central. Ver `services::agent_runtime`.
 
-use backend::services::agent_runtime::{client, config::AgentConfig};
+use backend::{
+    registries,
+    services::agent_runtime::{
+        client::{self, AgentHost},
+        config::AgentConfig,
+    },
+};
+use netmonitor_core::{
+    agents::targets::DeviceNetworks, monitoring::CheckDeps,
+    network_tools::ping_client::PingClientCell,
+};
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -28,5 +38,16 @@ async fn main() {
         politica = ?config.policy.permissions(),
         "iniciando o agente NetMonitor"
     );
-    client::run_forever(config).await;
+    // As peças das áreas (ponto de montagem do agente): os tipos de monitor
+    // com a Engine local, os comandos e o Docker deste host.
+    let deps = CheckDeps {
+        ping: Some(PingClientCell::open()),
+        checkers: registries::agent_monitor_checkers(),
+    };
+    let host = AgentHost {
+        handlers: registries::agent_command_handlers(&deps, DeviceNetworks::from_env()),
+        docker: registries::agent_host_docker(),
+        deps,
+    };
+    client::run_forever(config, host).await;
 }

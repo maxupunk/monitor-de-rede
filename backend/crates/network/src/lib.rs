@@ -26,6 +26,9 @@
 //!   host do agente (`AgentCommandHandler`);
 //! * [`link_tests`] — os testes de enlace (ADR 015), orquestrados pelos
 //!   plugins e pelos motores de vazão;
+//! * [`routines`] — a coleta SNMP do ciclo, a varredura agendada, o vigia do
+//!   Wi-Fi, os testes de enlace agendados e a retenção deles (registro de
+//!   rotinas do núcleo);
 //! * [`wifi`] — as estações dos pontos de acesso e os clientes vigiados (o
 //!   dataset de alerta `wifi_client` incluso);
 //! * [`controllers`], [`dtos`] — as rotas da área.
@@ -34,12 +37,14 @@ pub mod agent_commands;
 pub mod area_policy;
 pub mod central;
 pub mod controllers;
+pub mod device_access;
 pub mod discovery;
 pub mod dtos;
 pub mod link_tests;
 pub mod package_mirror;
 pub mod plugins;
 pub mod port_scanner;
+pub mod routines;
 pub mod snmp;
 pub mod throughput;
 pub mod topology;

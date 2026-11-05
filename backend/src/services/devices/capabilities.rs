@@ -33,9 +33,9 @@ use crate::{
         devices::system_device,
         monitoring::{health::series, managed, reachability},
         shared::errors::AppResult,
-        wifi,
     },
 };
+use netmonitor_core::devices::access::DeviceAccess;
 use sea_orm::{
     ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter, QuerySelect,
 };
@@ -50,13 +50,15 @@ impl DeviceCapabilities {
     }
 }
 
-/// Calcula as capacidades de um dispositivo.
+/// Calcula as capacidades de um dispositivo. O Wi-Fi pergunta ao acesso da
+/// área Rede (`access`), quando montada.
 ///
 /// # Errors
 ///
 /// Propaga erro do banco.
 pub async fn for_device(
     db: &DatabaseConnection,
+    access: Option<&dyn DeviceAccess>,
     device: &devices::Model,
 ) -> AppResult<DeviceCapabilities> {
     let is_system = system_device::is_protected(device);
@@ -130,7 +132,11 @@ pub async fn for_device(
             .is_some_and(|ip| !ip.trim().is_empty());
     // Wi-Fi é ter quem leia: um plugin ativo e instalado com o bloco `wifi`.
     // O tipo do cadastro ("access_point") não prova nada.
-    let wifi = plugins && wifi::source::for_device(db, device.id).await?.is_some();
+    // Quem sabe ler é a área Rede (o acesso registrado); sem ela, não há.
+    let wifi = match (plugins, access) {
+        (true, Some(access)) => access.has_wifi_reader(db, device.id).await?,
+        _ => false,
+    };
 
     Ok(DeviceCapabilities {
         device_id: device.id,

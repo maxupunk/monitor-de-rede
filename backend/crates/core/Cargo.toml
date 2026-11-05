@@ -39,6 +39,8 @@ surge-ping = { workspace = true }
 # Faixas extras de alvo de equipamento (`AGENT_DEVICE_CIDRS`).
 ipnet = { version = "2.9" }
 socket2 = { workspace = true }
+# O IP público visto pela internet (pré-voo da VPN e assistente inicial).
+reqwest = { workspace = true }
 # Severidade canônica do syslog nos adapters de plataforma.
 syslog_loose = { workspace = true }
 

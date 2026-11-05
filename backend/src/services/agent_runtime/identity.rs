@@ -2,16 +2,11 @@
 
 use std::path::Path;
 
-use crate::services::{
-    agents::{
-        policy::Policy,
-        protocol::{Capability, Hello, PROTOCOL_VERSION},
-    },
-    docker::{
-        compose,
-        source::{DockerEngine, LocalEngine},
-        DockerError,
-    },
+use netmonitor_core::agents::host::HostDocker;
+
+use crate::services::agents::{
+    policy::Policy,
+    protocol::{Hello, PROTOCOL_VERSION},
 };
 
 /// `PRETTY_NAME` do `os-release`, quando existe.
@@ -39,48 +34,10 @@ fn hostname() -> String {
         .unwrap_or_else(|| "desconhecido".into())
 }
 
-async fn docker_capability() -> Capability {
-    match LocalEngine.status_raw().await {
-        Ok(raw) => Capability {
-            available: true,
-            version: raw
-                .version
-                .get("Version")
-                .and_then(serde_json::Value::as_str)
-                .map(ToString::to_string),
-            reason: None,
-        },
-        Err(DockerError::Disabled) => Capability {
-            available: false,
-            version: None,
-            reason: Some("DOCKER_ENABLED=false neste host".into()),
-        },
-        Err(_) => Capability {
-            available: false,
-            version: None,
-            reason: Some("Docker Engine inacessível pelo socket".into()),
-        },
-    }
-}
-
-async fn compose_capability() -> Capability {
-    match compose::availability().await {
-        Ok(version) => Capability {
-            available: true,
-            version: Some(version),
-            reason: None,
-        },
-        Err(reason) => Capability {
-            available: false,
-            version: None,
-            reason: Some(reason),
-        },
-    }
-}
-
 /// Monta o `Hello` com o estado atual do host.
-pub async fn hello(policy: &Policy) -> Hello {
-    let (docker, compose) = tokio::join!(docker_capability(), compose_capability());
+/// O Docker e o compose vêm do Docker do host (Servidores).
+pub async fn hello(policy: &Policy, host_docker: &dyn HostDocker) -> Hello {
+    let (docker, compose) = host_docker.capabilities().await;
     Hello {
         protocol: PROTOCOL_VERSION,
         agent_version: env!("CARGO_PKG_VERSION").to_string(),

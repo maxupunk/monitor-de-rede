@@ -43,7 +43,7 @@ fn enforce_auth_rate_limit(ctx: &AppContext, scope: &str, key: &str) -> AppResul
     if ctx.environment == loco_rs::environment::Environment::Test {
         return Ok(());
     }
-    let decision = crate::services::vpn::access_control::auth_endpoint_limiter()
+    let decision = crate::services::shared::rate_limit::auth_endpoint_limiter()
         .consume(&format!("auth:{scope}:{key}"));
     if decision.allowed {
         return Ok(());
@@ -83,7 +83,7 @@ async fn setup(
     enforce_auth_rate_limit(
         &ctx,
         "setup",
-        &crate::services::vpn::access_control::extract_client_ip(&headers),
+        &crate::services::shared::rate_limit::extract_client_ip(&headers),
     )?;
     let user = SetupService::new(&ctx.db).complete(&params).await?;
     Ok(format::json(issue_session(&ctx, &user)?)?)
@@ -165,7 +165,7 @@ async fn forgot(
     enforce_auth_rate_limit(
         &ctx,
         "forgot",
-        &crate::services::vpn::access_control::extract_client_ip(&headers),
+        &crate::services::shared::rate_limit::extract_client_ip(&headers),
     )?;
     let Ok(user) = users::Model::find_by_email(&ctx.db, &params.email).await else {
         // we don't want to expose our users email. if the email is invalid we still
@@ -194,7 +194,7 @@ async fn reset(
     enforce_auth_rate_limit(
         &ctx,
         "reset",
-        &crate::services::vpn::access_control::extract_client_ip(&headers),
+        &crate::services::shared::rate_limit::extract_client_ip(&headers),
     )?;
     validator::Validate::validate(&params)?;
 
@@ -240,7 +240,7 @@ async fn login(
     const RECUSA: &str = "E-mail ou senha inválidos.";
 
     let email = params.email.trim().to_lowercase();
-    let ip = crate::services::vpn::access_control::extract_client_ip(&headers);
+    let ip = crate::services::shared::rate_limit::extract_client_ip(&headers);
     enforce_auth_rate_limit(&ctx, "login_ip", &ip)?;
     enforce_auth_rate_limit(&ctx, "login_email", &email)?;
 
@@ -335,7 +335,7 @@ async fn magic_link(
     enforce_auth_rate_limit(
         &ctx,
         "magic_link",
-        &crate::services::vpn::access_control::extract_client_ip(&headers),
+        &crate::services::shared::rate_limit::extract_client_ip(&headers),
     )?;
 
     let Ok(user) = users::Model::find_by_email(&ctx.db, &params.email).await else {

@@ -4,12 +4,14 @@
 //! agente, autenticado pelo token do probe. Por isso as rotas saem em dois
 //! grupos — ver [`routes`] e [`agent_routes`].
 
+use agent_protocol::Command;
 use axum::{
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
 };
 use chrono::Utc;
 use loco_rs::prelude::*;
+use netmonitor_core::agents::command::AgentCommandDispatchers;
 use sea_orm::{ActiveModelTrait, EntityTrait, QueryOrder, Set};
 use serde::Deserialize;
 use uuid::Uuid;
@@ -383,14 +385,17 @@ async fn heartbeat(
 async fn tasks(State(ctx): State<AppContext>, headers: HeaderMap) -> AppResult<Response> {
     let probe = authenticate(&ctx, &headers, None).await?;
     let tasks = dispatcher::get_pending_tasks(&ctx.db, probe.id).await?;
-    let discovery_tasks = dispatcher::get_pending_discovery_tasks(&ctx.db, probe.id).await?;
-    if let Some(task) = discovery_tasks.first() {
-        if let Ok(session) =
-            crate::services::discovery::service::ScanSessionService::from_context(&ctx)
-        {
-            session.remote_started(task.run_id).await;
-        }
-    }
+    // O trabalho das áreas (a varredura, da Rede) chega pelos despachantes
+    // registrados; o probe por HTTP só entende a varredura.
+    let discovery_tasks: Vec<_> = AgentCommandDispatchers::from_context(&ctx)
+        .pending_for_probe(&ctx, probe.id)
+        .await?
+        .into_iter()
+        .filter_map(|command| match command {
+            Command::Discovery { task } => Some(task),
+            _ => None,
+        })
+        .collect();
     Ok(format::json(serde_json::json!({
         "tasks": tasks,
         "discoveryTasks": discovery_tasks,

@@ -8,12 +8,15 @@
 //! * [`identity`] — quem é agente e quem é o local;
 //! * [`registration`] / [`enrollment`] — cadastro e código de uso único;
 //! * [`routes`] — agentes que servem de rota para um recurso;
-//! * [`HostKey`] — a chave de um host Docker (`agent-<id>`).
+//! * [`HostKey`] — a chave de um host Docker (`agent-<id>`);
+//! * [`command`] / [`host`] — o que as áreas executam no host do agente
+//!   (`AgentCommandHandler`, o Docker do host).
 
 pub mod bridge;
 pub mod command;
 pub mod enrollment;
 mod errors;
+pub mod host;
 mod host_key;
 pub mod hub;
 pub mod identity;

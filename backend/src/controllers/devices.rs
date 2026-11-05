@@ -50,7 +50,7 @@ use crate::{
         snmp::service::{sync_monitor_intervals, DEFAULT_SNMP_POLL_INTERVAL_SECONDS},
     },
 };
-use netmonitor_vpn::views::VpnPeerResponse;
+use netmonitor_core::devices::vpn_peer::VpnPeerResponse;
 
 /// Serialização canônica de um dispositivo para a API.
 ///
@@ -539,17 +539,10 @@ async fn show(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<R
 
 /// Cadastro (ou troca de sistema) liga os plugins que dizem servir a este
 /// equipamento. Falhar aqui não desfaz o cadastro.
+/// Os plugins são da área Rede: quem os liga é o acesso registrado.
 async fn activate_plugins(ctx: &AppContext, device: &devices::Model) {
-    if let Err(error) =
-        crate::services::plugins::service::activate_for_device(&ctx.db, device).await
-    {
-        tracing::warn!(%error, device_id = device.id, "falha ao ligar plugins compatíveis");
-    }
-    // Sem sistema declarado, vale o que o equipamento mostrar (SSH/SNMP, ou o
-    // Decisor) — e não o fabricante do cadastro. A sonda leva segundos: em
-    // segundo plano, e o menu Aplicativos sabe pelo SSE se algo ligou.
-    if device.operating_system.is_none() {
-        crate::services::plugins::identity::refresh_in_background(ctx, device.clone());
+    if let Some(access) = netmonitor_core::devices::access::from_context(ctx) {
+        access.device_saved(ctx, device).await;
     }
 }
 
@@ -812,7 +805,12 @@ async fn device_capabilities(
         .await?
         .ok_or_else(|| AppError::not_found("Dispositivo não encontrado"))?;
     Ok(format::json(
-        capabilities::for_device(&ctx.db, &device).await?,
+        capabilities::for_device(
+            &ctx.db,
+            netmonitor_core::devices::access::from_context(&ctx).as_deref(),
+            &device,
+        )
+        .await?,
     )?)
 }
 

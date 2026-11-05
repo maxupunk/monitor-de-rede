@@ -30,6 +30,18 @@ use serde_json::Value;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
+/// O executor com os handlers que o binário do agente monta (ponto de
+/// montagem), nas redes do ambiente.
+fn executor(policy: Policy) -> LocalExecutor {
+    executor_em(policy, DeviceNetworks::from_env())
+}
+
+fn executor_em(policy: Policy, networks: DeviceNetworks) -> LocalExecutor {
+    let deps = CheckDeps::default();
+    let handlers = backend::registries::agent_command_handlers(&deps, networks);
+    LocalExecutor::new(policy, deps, handlers)
+}
+
 fn vazao() -> Policy {
     Policy::from_permissions([Permission::Throughput])
 }
@@ -53,7 +65,7 @@ fn iperf3(target: std::net::SocketAddr, duration_s: u8) -> Command {
 #[tokio::test]
 async fn vazao_manda_amostras_em_chunk_e_o_relatorio_na_resposta() {
     let server = FakeServer::start(Behavior::Normal).await;
-    let executor = LocalExecutor::new(vazao(), CheckDeps::default());
+    let executor = executor(vazao());
     let (chunks, mut received) = mpsc::unbounded_channel();
     let value = tokio::time::timeout(
         Duration::from_secs(5),
@@ -77,7 +89,7 @@ async fn vazao_manda_amostras_em_chunk_e_o_relatorio_na_resposta() {
 #[tokio::test]
 async fn vazao_cancelada_para_e_libera_a_vaga_e_um_teste_por_vez() {
     let server = FakeServer::start(Behavior::Normal).await;
-    let executor = Arc::new(LocalExecutor::new(vazao(), CheckDeps::default()));
+    let executor = Arc::new(executor(vazao()));
     let cancel = CancellationToken::new();
     let (chunks, mut received) = mpsc::unbounded_channel();
     let first = {
@@ -153,12 +165,12 @@ async fn saida_do_equipamento_vai_em_chunk_e_inteira_na_resposta() {
     let executor = LocalExecutor::new(
         Policy::from_permissions([Permission::DeviceIo]),
         CheckDeps::default(),
-    )
-    .with_handlers(AgentCommandHandlers::new(agent_commands::handlers(
-        CheckDeps::default(),
-        DeviceNetworks::default(),
-        Some(Arc::new(StreamingDevice)),
-    )));
+        AgentCommandHandlers::new(agent_commands::handlers(
+            CheckDeps::default(),
+            DeviceNetworks::default(),
+            Some(Arc::new(StreamingDevice)),
+        )),
+    );
     let (chunks, mut received) = mpsc::unbounded_channel();
     let value = executor
         .execute(
@@ -189,4 +201,79 @@ async fn saida_do_equipamento_vai_em_chunk_e_inteira_na_resposta() {
         stdout, "tx: 1Mbps\ntx: 2Mbps\n",
         "a resposta continua inteira"
     );
+}
+
+#[tokio::test]
+async fn vazao_exige_permissao_e_alvo_permitido() {
+    let local: std::net::SocketAddr = "127.0.0.1:5201".parse().unwrap();
+    let negado = executor(Policy::default());
+    let (chunks, _) = mpsc::unbounded_channel();
+    let error = negado
+        .execute(iperf3(local, 1), chunks, CancellationToken::new())
+        .await
+        .expect_err("sem throughput");
+    assert_eq!(error.code, ErrorCode::Forbidden);
+
+    let liberado = executor(vazao());
+    let (chunks, _) = mpsc::unbounded_channel();
+    let error = liberado
+        .execute(
+            iperf3("8.8.8.8:5201".parse().unwrap(), 1),
+            chunks,
+            CancellationToken::new(),
+        )
+        .await
+        .expect_err("IP público");
+    assert_eq!(error.code, ErrorCode::Forbidden);
+
+    let restrito = executor_em(vazao(), DeviceNetworks::parse("192.168.10.0/24"));
+    let (chunks, _) = mpsc::unbounded_channel();
+    let error = restrito
+        .execute(iperf3(local, 1), chunks, CancellationToken::new())
+        .await
+        .expect_err("fora de AGENT_DEVICE_CIDRS");
+    assert_eq!(error.code, ErrorCode::Forbidden);
+
+    let (chunks, _) = mpsc::unbounded_channel();
+    let error = liberado
+        .execute(iperf3(local, 0), chunks, CancellationToken::new())
+        .await
+        .expect_err("duração fora do contrato");
+    assert_eq!(error.code, ErrorCode::Validation);
+}
+
+#[tokio::test]
+async fn acesso_a_equipamento_exige_permissao_e_rede_privada() {
+    let call = |host: &str| Command::DeviceIo {
+        call: DeviceIoCall::HttpRequest {
+            endpoint: device_io::Endpoint {
+                host: host.into(),
+                port: 1,
+            },
+            https: false,
+            request: device_io::HttpRequest {
+                method: "GET".into(),
+                path: "/".into(),
+                headers: vec![],
+                body: None,
+                basic_auth: None,
+            },
+            timeout_ms: 1_000,
+        },
+    };
+    let negado = executor(Policy::default());
+    let (chunks, _) = mpsc::unbounded_channel();
+    let error = negado
+        .execute(call("127.0.0.1"), chunks, CancellationToken::new())
+        .await
+        .expect_err("sem device_io");
+    assert_eq!(error.code, ErrorCode::Forbidden);
+
+    let liberado = executor(Policy::from_permissions([Permission::DeviceIo]));
+    let (chunks, _) = mpsc::unbounded_channel();
+    let error = liberado
+        .execute(call("8.8.8.8"), chunks, CancellationToken::new())
+        .await
+        .expect_err("IP público");
+    assert_eq!(error.code, ErrorCode::Forbidden);
 }

@@ -1,6 +1,8 @@
 //! Recepção dos resultados reportados pelos probes (§8.11).
 
+use agent_protocol::AgentEvent;
 use loco_rs::app::AppContext;
+use netmonitor_core::agents::command::AgentCommandDispatchers;
 use sea_orm::EntityTrait;
 use serde::Deserialize;
 
@@ -94,9 +96,26 @@ pub async fn receive_batch_results(
     Ok(processed)
 }
 
-/// O retorno de uma varredura remota é da área Rede; o caminho antigo
-/// continua valendo (o polling HTTP do probe e a caixa de saída do agente).
-pub use netmonitor_network::discovery::remote::receive_discovery_results;
+/// Entrega à área que o trata cada retorno de varredura do probe (a Rede, pelo
+/// `AgentCommandDispatcher` registrado).
+///
+/// # Errors
+///
+/// Erro da área ao gravar o retorno.
+pub async fn receive_discovery_results(
+    ctx: &AppContext,
+    probe_id: i64,
+    payloads: &[ProbeDiscoveryResultPayload],
+) -> AppResult<()> {
+    let dispatchers = AgentCommandDispatchers::from_context(ctx);
+    for payload in payloads {
+        let event = AgentEvent::DiscoveryResult {
+            result: Box::new(payload.clone()),
+        };
+        dispatchers.receive(ctx, probe_id, &event).await?;
+    }
+    Ok(())
+}
 
 #[cfg(test)]
 mod tests {

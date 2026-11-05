@@ -48,44 +48,20 @@ use netmonitor_core::{
 /// Prazo de cada passo no equipamento.
 const STEP_TIMEOUT_MS: u64 = 20_000;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "snake_case")]
-#[ts(export, export_to = "../../frontend/src/bindings/")]
-pub enum DedicatedPlatform {
-    Mikrotik,
-    Openwrt,
-}
+/// A plataforma e o registro do acesso dedicado são do núcleo (a vista da
+/// credencial os leva); o caminho da área continua valendo.
+pub use netmonitor_core::devices::access::{DedicatedAccess, DedicatedPlatform};
 
-impl DedicatedPlatform {
-    const ALL: [Self; 2] = [Self::Openwrt, Self::Mikrotik];
+/// As plataformas, na ordem em que a detecção as tenta.
+const ALL_PLATFORMS: [DedicatedPlatform; 2] =
+    [DedicatedPlatform::Openwrt, DedicatedPlatform::Mikrotik];
 
-    fn implementation(self) -> &'static dyn Platform {
-        match self {
-            Self::Mikrotik => &mikrotik::Mikrotik,
-            Self::Openwrt => &openwrt::Openwrt,
-        }
+/// Os comandos de cada plataforma.
+fn implementation(platform: DedicatedPlatform) -> &'static dyn Platform {
+    match platform {
+        DedicatedPlatform::Mikrotik => &mikrotik::Mikrotik,
+        DedicatedPlatform::Openwrt => &openwrt::Openwrt,
     }
-}
-
-/// O que fica em `device_credentials.extra.dedicated` e o que a tela vê.
-/// Nada aqui é segredo: a chave privada mora em `secret_encrypted`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../frontend/src/bindings/")]
-pub struct DedicatedAccess {
-    pub platform: DedicatedPlatform,
-    /// `ssh-ed25519 AAAA… netmonitor-<id>`.
-    pub public_key: String,
-    /// `SHA256:…` da chave do NetMonitor.
-    pub key_fingerprint: String,
-    /// A marca da chave no equipamento (`netmonitor-<id>`).
-    pub key_comment: String,
-    /// `SHA256:…` da chave de host fixada na instalação.
-    #[ts(optional)]
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub host_key: Option<String>,
-    /// Quando a chave atual foi instalada (RFC 3339).
-    pub provisioned_at: String,
 }
 
 /// A senha do administrador, informada uma vez.
@@ -244,11 +220,10 @@ impl Device<'_> {
         login: &Login,
         requested: Option<DedicatedPlatform>,
     ) -> AppResult<(DedicatedPlatform, Option<String>)> {
-        let candidates =
-            requested.map_or(DedicatedPlatform::ALL.to_vec(), |platform| vec![platform]);
+        let candidates = requested.map_or(ALL_PLATFORMS.to_vec(), |platform| vec![platform]);
         let mut unsupported = None;
         for platform in candidates {
-            let implementation = platform.implementation();
+            let implementation = implementation(platform);
             let output = self.run(login, implementation.detect_command()).await?;
             match implementation.check_detected(&output) {
                 Ok(()) => return Ok((platform, output.host_key.filter(|key| !key.is_empty()))),
@@ -340,7 +315,7 @@ pub async fn provision_on<C: ConnectionTrait>(
         },
     };
     let (platform, host_key) = device.detect(&admin, input.platform).await?;
-    let implementation = platform.implementation();
+    let implementation = implementation(platform);
     let key = keys::generate()?;
 
     let installed = device
@@ -399,7 +374,7 @@ pub async fn rotate_on<C: ConnectionTrait>(
     target: &Target,
 ) -> AppResult<CredentialView> {
     let (current, access) = credentials::dedicated_login(db, device_id).await?;
-    let implementation = access.platform.implementation();
+    let implementation = implementation(access.platform);
     let device = Device {
         transport,
         endpoint: Endpoint {
@@ -486,7 +461,7 @@ pub async fn revoke_on<C: ConnectionTrait>(
     let (current, access) = credentials::dedicated_login(db, device_id).await?;
     let mut leftovers = Vec::new();
     if !input.local_only.unwrap_or(false) {
-        let implementation = access.platform.implementation();
+        let implementation = implementation(access.platform);
         let device = Device {
             transport,
             endpoint: Endpoint {

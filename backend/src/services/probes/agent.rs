@@ -7,8 +7,10 @@
 
 use std::time::Duration;
 
+use agent_protocol::{probes::DiscoveredHost, Command};
 use chrono::Utc;
 use loco_rs::app::AppContext;
+use netmonitor_core::agents::command::AgentCommandHandlers;
 use serde_json::json;
 
 use super::{
@@ -81,6 +83,9 @@ pub struct ProbeAgent {
     version: String,
     buffer: ProbeBuffer,
     client: reqwest::Client,
+    /// Quem executa os comandos das áreas que o probe recebe (a varredura, da
+    /// Rede), montado pela tarefa `probe_run`.
+    handlers: AgentCommandHandlers,
 }
 
 impl ProbeAgent {
@@ -106,7 +111,15 @@ impl ProbeAgent {
             client: reqwest::Client::builder()
                 .timeout(REQUEST_TIMEOUT)
                 .build()?,
+            handlers: AgentCommandHandlers::default(),
         })
+    }
+
+    /// Os comandos das áreas que este probe sabe executar (a varredura).
+    #[must_use]
+    pub fn with_handlers(mut self, handlers: AgentCommandHandlers) -> Self {
+        self.handlers = handlers;
+        self
     }
 
     #[must_use]
@@ -137,7 +150,7 @@ impl ProbeAgent {
             self.execute_and_report(ctx, &task).await;
         }
         for task in tasks.discovery {
-            self.execute_discovery_and_report(ctx, &task).await;
+            self.execute_discovery_and_report(&task).await;
         }
     }
 
@@ -215,16 +228,26 @@ impl ProbeAgent {
         }
     }
 
-    async fn execute_discovery_and_report(&self, ctx: &AppContext, task: &ProbeDiscoveryTask) {
+    async fn execute_discovery_and_report(&self, task: &ProbeDiscoveryTask) {
         let cancel = tokio_util::sync::CancellationToken::new();
-        let outcome = tokio::time::timeout(
-            Duration::from_millis(task.timeout_ms.max(1)),
-            crate::services::discovery::service::scan_network(ctx, &task.cidr, cancel),
-        )
-        .await;
+        let command = Command::Discovery { task: task.clone() };
+        // A varredura é da Rede: quem a executa é o handler registrado.
+        let scan = async {
+            let Some(handler) = self.handlers.find(&command) else {
+                return Err("este probe não executa varreduras".to_owned());
+            };
+            let (chunks, _) = tokio::sync::mpsc::unbounded_channel();
+            let value = handler
+                .execute(command.clone(), chunks, cancel)
+                .await
+                .map_err(|error| error.message)?;
+            serde_json::from_value::<Vec<DiscoveredHost>>(value).map_err(|error| error.to_string())
+        };
+        let outcome =
+            tokio::time::timeout(Duration::from_millis(task.timeout_ms.max(1)), scan).await;
         let (hosts, error) = match outcome {
             Ok(Ok(hosts)) => (hosts, None),
-            Ok(Err(error)) => (Vec::new(), Some(error.to_string())),
+            Ok(Err(error)) => (Vec::new(), Some(error)),
             Err(_) => (
                 Vec::new(),
                 Some("tempo limite do discovery remoto excedido".into()),

@@ -26,17 +26,12 @@ use std::{
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder};
 use tokio::{net::TcpStream, time::timeout};
 
+use netmonitor_core::devices::access::{DeviceAccess, SnmpSystemInfo};
+
 use super::nat::NatDetector;
 use crate::{
     models::_entities::{device_interfaces, devices, discovery_results},
-    services::{
-        devices::systems,
-        shared::errors::AppResult,
-        snmp::{
-            client::{SnmpClient, SnmpConfig, SnmpVersion},
-            collectors::{collect_hardware, collect_system, SnmpSystemInfo},
-        },
-    },
+    services::{devices::systems, shared::errors::AppResult},
 };
 
 /// Quanto se espera por uma porta antes de considerá-la fechada.
@@ -77,6 +72,7 @@ pub struct ProvisionHints {
 /// Propaga erro do banco.
 pub async fn collect(
     db: &DatabaseConnection,
+    access: Option<&dyn DeviceAccess>,
     dispositivo: &devices::Model,
     nat: &NatDetector,
 ) -> AppResult<ProvisionHints> {
@@ -91,7 +87,9 @@ pub async fn collect(
     // costuma vir do OUI do MAC, que identifica o fabricante da placa. Por isso
     // vale a consulta ao vivo quando o SNMP está ligado.
     let sistema_snmp = match host {
-        Some(endereco) if dispositivo.snmp_enabled => sistema_por_snmp(endereco, dispositivo).await,
+        Some(endereco) if dispositivo.snmp_enabled => {
+            sistema_por_snmp(access, endereco, dispositivo).await
+        }
         _ => None,
     };
 
@@ -187,15 +185,11 @@ pub async fn mac_conhecido(
         .filter(|valor| !valor.trim().is_empty()))
 }
 
-/// Lê a identidade SNMP do equipamento — `sysDescr` **e** `sysObjectId`.
-///
-/// Os dois, e não só a descrição: o `sysObjectId` é o número de empresa da
-/// IANA, e num equipamento cuja descrição é o `uname` genérico ele é a única
-/// evidência que ainda diz alguma coisa.
-///
-/// Falha vira `None` — é um palpite, e um agente SNMP fora do ar não pode
-/// impedir a tela de abrir.
+/// Lê a identidade SNMP do equipamento pelo acesso da Rede — ver
+/// `netmonitor_network::device_access::snmp_identity`. Sem a área, ou com a
+/// comunidade vazia, não há palpite.
 pub async fn identidade_snmp(
+    access: Option<&dyn DeviceAccess>,
     host: IpAddr,
     comunidade: &str,
     versao: Option<&str>,
@@ -203,29 +197,21 @@ pub async fn identidade_snmp(
     if comunidade.trim().is_empty() {
         return None;
     }
-    let mut config = SnmpConfig::v2c(host.to_string(), comunidade.to_owned(), 161);
-    if versao.map(str::trim) == Some("v1") {
-        config.version = SnmpVersion::V1;
-    }
-    // Teto curto: isto roda na abertura de um diálogo, não num ciclo de coleta.
-    config.timeout_ms = 1_500;
-    let client = SnmpClient::new(config);
-    let mut identidade = collect_system(&client).await.ok()?;
-    if let Ok((fabricante, modelo)) = collect_hardware(&client).await {
-        identidade.hardware_vendor = fabricante;
-        identidade.hardware_model = modelo;
-    }
-    Some(identidade)
+    access?.snmp_identity(host, comunidade, versao).await
 }
 
-async fn sistema_por_snmp(host: IpAddr, dispositivo: &devices::Model) -> Option<SnmpSystemInfo> {
+async fn sistema_por_snmp(
+    access: Option<&dyn DeviceAccess>,
+    host: IpAddr,
+    dispositivo: &devices::Model,
+) -> Option<SnmpSystemInfo> {
     let community = dispositivo
         .snmp_community
         .as_deref()
         .map(str::trim)
         .filter(|valor| !valor.is_empty())
         .unwrap_or(crate::services::preferences::DEFAULT_SNMP_COMMUNITY);
-    identidade_snmp(host, community, dispositivo.snmp_version.as_deref()).await
+    identidade_snmp(access, host, community, dispositivo.snmp_version.as_deref()).await
 }
 
 /// Descobre o endereço local que o sistema operacional usaria para falar com

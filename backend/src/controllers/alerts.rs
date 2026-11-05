@@ -171,7 +171,14 @@ async fn catalog_index(
                 .one(&ctx.db)
                 .await?
                 .ok_or_else(|| AppError::not_found("Dispositivo não encontrado"))?;
-            Some(capabilities::for_device(&ctx.db, &device).await?)
+            Some(
+                capabilities::for_device(
+                    &ctx.db,
+                    netmonitor_core::devices::access::from_context(&ctx).as_deref(),
+                    &device,
+                )
+                .await?,
+            )
         }
         None => None,
     };

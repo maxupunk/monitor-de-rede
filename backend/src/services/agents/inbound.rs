@@ -9,7 +9,8 @@ use chrono::{DateTime, Duration, Utc};
 use loco_rs::app::AppContext;
 
 use netmonitor_core::agents::{
-    HostKey, DOCKER_INVENTORY_EVENT as INVENTORY_EVENT, DOCKER_LIVE_EVENT as LIVE_EVENT,
+    command::AgentCommandDispatchers, HostKey, DOCKER_INVENTORY_EVENT as INVENTORY_EVENT,
+    DOCKER_LIVE_EVENT as LIVE_EVENT,
 };
 
 use crate::services::{
@@ -70,8 +71,11 @@ pub async fn handle(ctx: &AppContext, probe_id: i64, event: AgentEvent) {
                 tracing::warn!(%error, probe_id, "falha ao processar resultado reenviado pelo agente");
             }
         }
-        AgentEvent::DiscoveryResult { result } => {
-            if let Err(error) = receiver::receive_discovery_results(ctx, probe_id, &[*result]).await
+        event @ AgentEvent::DiscoveryResult { .. } => {
+            // A varredura é da Rede: vai ao despachante que a trata.
+            if let Err(error) = AgentCommandDispatchers::from_context(ctx)
+                .receive(ctx, probe_id, &event)
+                .await
             {
                 tracing::warn!(%error, probe_id, "falha ao processar discovery reenviado pelo agente");
             }

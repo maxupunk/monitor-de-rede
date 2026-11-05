@@ -7,7 +7,7 @@ use std::{sync::Arc, time::Duration};
 use agent_protocol::{
     policy::Permission,
     probes::{DiscoveredHost, ProbeDiscoveryResultPayload, ProbeDiscoveryTask},
-    Command, ErrorCode, RemoteError,
+    AgentEvent, Command, ErrorCode, RemoteError,
 };
 use async_trait::async_trait;
 use chrono::Utc;
@@ -147,6 +147,32 @@ impl AgentCommandDispatcher for DiscoveryDispatch {
             tokio::spawn(run_discovery(ctx.clone(), session.clone(), task));
         }
         Ok(())
+    }
+
+    async fn pending_for_probe(&self, ctx: &AppContext, probe_id: i64) -> AppResult<Vec<Command>> {
+        let tasks = get_pending_discovery_tasks(&ctx.db, probe_id).await?;
+        if let Some(task) = tasks.first() {
+            if let Ok(scan) = ScanSessionService::from_context(ctx) {
+                scan.remote_started(task.run_id).await;
+            }
+        }
+        Ok(tasks
+            .into_iter()
+            .map(|task| Command::Discovery { task })
+            .collect())
+    }
+
+    async fn receive(
+        &self,
+        ctx: &AppContext,
+        probe_id: i64,
+        event: &AgentEvent,
+    ) -> AppResult<bool> {
+        let AgentEvent::DiscoveryResult { result } = event else {
+            return Ok(false);
+        };
+        receive_discovery_results(ctx, probe_id, std::slice::from_ref(result.as_ref())).await?;
+        Ok(true)
     }
 }
 

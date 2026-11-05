@@ -30,6 +30,7 @@ pub mod peer_service;
 pub mod peer_status;
 pub mod preflight;
 pub mod profiles;
+pub mod routines;
 pub mod server_service;
 pub mod shell_escape;
 pub mod traffic_recorder;

@@ -14,11 +14,11 @@ use tokio_tungstenite::tungstenite::{
     client::IntoClientRequest, http::HeaderValue, protocol::Message,
 };
 
+use netmonitor_core::agents::{command::AgentCommandHandlers, host::HostDocker};
+
 use crate::{
     services::{
-        docker::source::LocalEngine,
-        monitoring::{checkers::ping::PingClientCell, runner::CheckDeps},
-        shared::secret_file,
+        monitoring::runner::CheckDeps, shared::secret_file,
         telemetry::host_metrics::HostMetricsReader,
     },
     views::agents::AgentEnrollResponse,
@@ -30,9 +30,19 @@ use super::{
     identity,
     outbox::Outbox,
     sampler,
-    session::{self, DockerLiveSource, OutboxSink, SessionDeps},
+    session::{self, HostLive, OutboxSink, SessionDeps},
     tunnel::LocalTunnelOpener,
 };
+
+/// O que as áreas contribuem ao agente, montado pelo binário
+/// (`netmonitor-agent`, ponto de montagem do agente): as dependências dos
+/// checkers (com os tipos de monitor das áreas), os comandos das áreas e o
+/// Docker deste host.
+pub struct AgentHost {
+    pub deps: CheckDeps,
+    pub handlers: AgentCommandHandlers,
+    pub docker: Arc<dyn HostDocker>,
+}
 
 const TOKEN_HEADER: &str = "x-probe-token";
 const BACKOFF_MIN: Duration = Duration::from_secs(1);
@@ -110,26 +120,24 @@ async fn wait_for_token(config: &AgentConfig) -> String {
 }
 
 /// Roda o agente para sempre.
-pub async fn run_forever(config: AgentConfig) {
+pub async fn run_forever(config: AgentConfig, host: AgentHost) {
     let outbox = Arc::new(Outbox::open(config.outbox_path(), config.outbox_max));
     let deps = SessionDeps {
         executor: Arc::new(LocalExecutor::new(
             config.policy.clone(),
-            CheckDeps {
-                ping: Some(PingClientCell::open()),
-                checkers: crate::registries::monitor_checkers(Some(Arc::new(LocalEngine))),
-            },
+            host.deps,
+            host.handlers,
         )),
         outbox: outbox.clone(),
-        live: Arc::new(DockerLiveSource),
-        tunnels: Arc::new(LocalTunnelOpener::new(
-            config.policy.clone(),
-            config.database_targets.clone(),
-        )),
+        live: Arc::new(HostLive(host.docker.clone())),
+        tunnels: Arc::new(
+            LocalTunnelOpener::new(config.policy.clone(), config.database_targets.clone())
+                .with_docker(host.docker.clone()),
+        ),
     };
     if sampler::enabled() {
         sampler::spawn(
-            sampler::Sampler::new(HostMetricsReader::from_env(), Arc::new(LocalEngine)),
+            sampler::Sampler::new(HostMetricsReader::from_env(), host.docker.clone()),
             Arc::new(OutboxSink(outbox)),
         );
     } else {
@@ -140,7 +148,7 @@ pub async fn run_forever(config: AgentConfig) {
     loop {
         let token = wait_for_token(&config).await;
         let started = tokio::time::Instant::now();
-        match connect_once(&config, &token, deps.clone()).await {
+        match connect_once(&config, &token, deps.clone(), host.docker.as_ref()).await {
             Ok(()) => tracing::warn!("conexão com a central encerrada"),
             Err(error) => tracing::warn!(%error, "falha ao conectar na central"),
         }
@@ -154,7 +162,12 @@ pub async fn run_forever(config: AgentConfig) {
     }
 }
 
-async fn connect_once(config: &AgentConfig, token: &str, deps: SessionDeps) -> Result<(), String> {
+async fn connect_once(
+    config: &AgentConfig,
+    token: &str,
+    deps: SessionDeps,
+    docker: &dyn HostDocker,
+) -> Result<(), String> {
     let mut request = config
         .websocket_url()
         .into_client_request()
@@ -207,7 +220,7 @@ async fn connect_once(config: &AgentConfig, token: &str, deps: SessionDeps) -> R
         let _ = sink.close().await;
     });
 
-    let hello = identity::hello(&config.policy).await;
+    let hello = identity::hello(&config.policy, docker).await;
     let result = session::run(deps, hello, incoming_rx, outgoing_tx)
         .await
         .map(|_| ())
