@@ -10,6 +10,7 @@ pub mod pagination;
 pub mod run_guard;
 pub mod runtime;
 pub mod secret_file;
+pub mod secret_store;
 pub mod sql_like;
 pub mod ssh;
 pub mod text;

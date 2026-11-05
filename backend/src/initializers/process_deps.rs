@@ -49,6 +49,9 @@ pub fn install(ctx: &AppContext) {
     // Docker daqui é do agente local quando a execução local de reserva o roda.
     ctx.shared_store
         .insert(crate::registries::monitor_checkers(None));
+    // O que a área VPN pede ao resto da central (motor de alertas,
+    // apresentação de dispositivo, endereços): o scheduler avalia os túneis.
+    ctx.shared_store.insert(crate::registries::vpn_central());
 
     // O socket ICMP é a única peça que pode falhar, e falha por configuração do
     // ambiente, não por bug: sem `net.ipv4.ping_group_range` liberado, o

@@ -49,8 +49,8 @@ use crate::{
         },
         snmp::service::{sync_monitor_intervals, DEFAULT_SNMP_POLL_INTERVAL_SECONDS},
     },
-    views::vpn::VpnPeerResponse,
 };
+use netmonitor_vpn::views::VpnPeerResponse;
 
 /// Serialização canônica de um dispositivo para a API.
 ///

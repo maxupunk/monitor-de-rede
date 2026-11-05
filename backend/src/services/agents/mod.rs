@@ -16,7 +16,6 @@
 
 pub mod background;
 pub mod connection;
-pub mod enrollment;
 pub mod inbound;
 pub mod install;
 pub mod install_address;
@@ -28,7 +27,7 @@ pub mod throughput;
 /// central (sessões, hub, pontes, rotas) é do núcleo. Os caminhos antigos
 /// continuam valendo.
 pub use agent_protocol::{policy, tunnel};
-pub use netmonitor_core::agents::{bridge, hub, routes, session};
+pub use netmonitor_core::agents::{bridge, enrollment, hub, routes, session};
 
 pub mod protocol {
     //! O contrato de fio (`agent-protocol`), pelo caminho antigo.

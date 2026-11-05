@@ -5,6 +5,7 @@ pub mod buffer;
 pub mod dispatcher;
 pub mod liveness;
 pub mod receiver;
+pub mod vpn_registrar;
 
 pub use dispatcher::{ProbeTask, TASK_TTL_SECONDS};
 pub use liveness::{is_probe_alive, PROBE_OFFLINE_AFTER_SECONDS};
@@ -14,6 +15,6 @@ pub use liveness::{is_probe_alive, PROBE_OFFLINE_AFTER_SECONDS};
 /// ⚠️ É **compartilhado de propósito**: o container `vpn-probe` sobe sem
 /// configuração e precisa se autenticar. É também a razão de
 /// `probes.token_hash` não ter índice único (§6 #03) — mais de um agente pode
-/// responder pelo mesmo hash. O registrador da Fase 8 (`vpn_probe_registrar`)
+/// responder pelo mesmo hash. O registrador ([`vpn_registrar`])
 /// reutiliza esta constante em vez de redeclará-la.
 pub const DEFAULT_VPN_PROBE_TOKEN: &str = "default_vpn_probe_token";

@@ -52,9 +52,11 @@ use crate::{
     },
     services::{
         devices::access,
-        shared::errors::{AppError, AppResult},
+        shared::{
+            cidr::first_usable_address,
+            errors::{AppError, AppResult},
+        },
         syslog::{hints, nat::NatDetector},
-        vpn::cidr::first_usable_address,
     },
 };
 

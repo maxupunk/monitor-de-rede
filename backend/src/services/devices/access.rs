@@ -40,7 +40,7 @@ use sea_orm::{ConnectionTrait, EntityTrait};
 
 use crate::{
     models::_entities::{devices, networks, vpn_peers, vpn_servers},
-    services::{shared::errors::AppResult, vpn::cidr::parse_cidr},
+    services::{shared::cidr::parse_vpn_cidr as parse_cidr, shared::errors::AppResult},
 };
 
 /// As três situações que mudam o endereço a ser gravado no equipamento.

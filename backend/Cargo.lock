@@ -701,10 +701,10 @@ dependencies = [
  "netmonitor-agent-protocol",
  "netmonitor-core",
  "netmonitor-servers",
+ "netmonitor-vpn",
  "num_cpus",
  "p256 0.13.2",
  "phf 0.11.3",
- "qrcode",
  "rand 0.8.7",
  "regex",
  "reqwest 0.12.28",
@@ -735,7 +735,6 @@ dependencies = [
  "ts-rs",
  "uuid",
  "validator",
- "x25519-dalek",
 ]
 
 [[package]]
@@ -4043,6 +4042,7 @@ dependencies = [
  "serde_json",
  "serial_test",
  "sha2 0.10.9",
+ "syslog_loose",
  "tempfile",
  "thiserror 2.0.20",
  "tokio",
@@ -4083,6 +4083,31 @@ dependencies = [
  "tracing",
  "ts-rs",
  "uuid",
+]
+
+[[package]]
+name = "netmonitor-vpn"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "base64 0.22.1",
+ "chrono",
+ "insta",
+ "loco-rs",
+ "netmonitor-core",
+ "qrcode",
+ "rand 0.8.7",
+ "reqwest 0.12.28",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "tokio",
+ "tracing",
+ "ts-rs",
+ "x25519-dalek",
 ]
 
 [[package]]

@@ -8,7 +8,7 @@
 //! tela, quando o Vue lê `undefined` de `perPage`.
 //!
 //! Escopo: `src/dtos/`, `src/views/`, os mesmos diretórios no crate de cada
-//! área (`crates/servers/src/{dtos,views}`), os contratos do núcleo
+//! área (`crates/servers/src/{dtos,views}`, `crates/vpn/src/views.rs`), os contratos do núcleo
 //! (paginação, áreas, agentes, histórico de métricas) e os DTOs Docker do
 //! contrato de fio. Structs de request/response do Loco que
 //! o frontend não consome (fixtures, seeds) ficam de fora por não serem
@@ -39,6 +39,8 @@ fn arquivos_de_contrato() -> Vec<PathBuf> {
     arquivos.push(raiz.join("crates/core/src/agents/views.rs"));
     arquivos.push(raiz.join("crates/core/src/telemetry/views.rs"));
     arquivos.push(raiz.join("crates/agent-protocol/src/docker/views.rs"));
+    // A área VPN serializa num arquivo só.
+    arquivos.push(raiz.join("crates/vpn/src/views.rs"));
     arquivos
 }
 

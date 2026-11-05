@@ -140,7 +140,7 @@ confundido com arquivo — e é por isso que a identificação do serviço saiu 
 backend/                 workspace Cargo; o pacote raiz é o crate transitório e a montagem
 ├── src/
 │   ├── app.rs           Hooks do Loco: monta rotas, initializers e os registros
-│   ├── registries.rs    registros que o ponto de montagem preenche (políticas, checkers)
+│   ├── registries.rs    registros que o ponto de montagem preenche (políticas, checkers, serviços da central para a VPN)
 │   ├── controllers/     extrai, valida, delega, serializa — sem regra de negócio
 │   ├── services/        o domínio ainda não extraído, testável sem HTTP
 │   ├── views/           serialização de saída
@@ -150,11 +150,16 @@ backend/                 workspace Cargo; o pacote raiz é o crate transitório 
 │   ├── mailers/         templates de e-mail
 │   └── bin/             entrypoints (central e `netmonitor-agent`)
 ├── crates/
-│   ├── core/            núcleo: models, shared, events, areas, agents (sessões, hub,
-│   │                    pontes), audit, storage, telemetry, monitoring (MonitorChecker)
+│   ├── core/            núcleo: models, shared (+ cofre efêmero), events, areas, agents
+│   │                    (sessões, hub, pontes, cadastro, enrollment), audit, storage,
+│   │                    telemetry, monitoring (MonitorChecker, reachability), devices
+│   │                    (adapters, dispositivo do sistema), maintenance, vpn_probe
 │   ├── agent-protocol/  contrato de fio central ↔ agente; não depende de crate do workspace
-│   └── servers/         área Servidores: docker, databases, monitor de container,
-│                        política da área, rotas /api/docker e /api/databases
+│   ├── servers/         área Servidores: docker, databases, monitor de container,
+│   │                    política da área, rotas /api/docker e /api/databases
+│   └── vpn/             área VPN: servidor, peers, IPAM, chaves, config/status do watcher,
+│                        perfis de cliente, telemetria dos túneis, política da área,
+│                        rotas /api/vpn
 ├── migration/           uma migration por tabela + helpers em shared.rs
 ├── config/              development.yaml, test.yaml, production.yaml
 ├── examples/spikes/     protótipos que sustentam as ADRs
@@ -164,7 +169,8 @@ backend/                 workspace Cargo; o pacote raiz é o crate transitório 
 `src/services/` é onde o que ainda não foi extraído vive. Os módulos estão
 agrupados pela área a que pertencem no [ADR 017](adr/017-arquitetura-modular.md).
 A área Servidores já mora no seu crate (`crates/servers`, que só depende do
-`core` e do `agent-protocol`); `services/docker` e `services/databases` são
+`core` e do `agent-protocol`) e a VPN no dela (`crates/vpn`, que só depende do
+`core`); `services/docker`, `services/databases` e `services/vpn` são
 reexportações do caminho antigo. As dependências na direção errada que restam
 (ARQ-02 em [`debitos_tecnicos.md`](debitos_tecnicos.md)) estão congeladas no
 teste de arquitetura.
@@ -205,7 +211,7 @@ services/
 ├── docker/           → crate `servers`: fonte (`DockerEngine`), operações, compose, logs, proteção
 ├── databases/        → crate `servers`: backup de bancos de terceiros (ADR 013)
 │  ── VPN ──
-└── vpn/              peers, chaves, config_builder/writer, preflight, telemetria
+└── vpn               → crate `vpn`: peers, chaves, config_builder/writer, preflight, telemetria
 ```
 
 O alvo — um workspace com um crate por área e pontos de extensão no `core` —
@@ -600,6 +606,13 @@ exatamente esse o bug corrigido pela [ADR 007](adr/007-scheduler-processo-unico.
 
 ## 10. Módulo VPN
 
+- O código da área mora em `crates/vpn` (`netmonitor_vpn`, depende só do
+  `core`). O que é do núcleo por natureza ficou nele: o cofre efêmero
+  (`netmonitor_core::shared::secret_store`, também usado pelo enrollment dos
+  agentes e pelas senhas de sessão dos plugins), a topologia e o nome do
+  `vpn-probe` (`netmonitor_core::vpn_probe`) e o registrador dele
+  (`services/probes/vpn_registrar.rs`). A avaliação da transição de cada túnel
+  pelo motor de alertas é `services/alerts/vpn_peer_watcher.rs`.
 - O `server` gera as chaves em Rust puro (`x25519-dalek`), sem depender do
   binário `wg` e sem `NET_ADMIN`.
 - A **chave privada de um peer nunca vai ao banco**: vive num cofre em memória
@@ -946,7 +959,7 @@ Decididas no [ADR 017](adr/017-arquitetura-modular.md). Quatro áreas: Núcleo
 | Peça | Onde | Efeito da área desligada |
 | :--- | :--- | :--- |
 | Estado, validação, publicação | `crates/core/src/areas/` | `areas:updated` no SSE, também no snapshot de quem conecta |
-| O que cada área sabe de si (evidência, consequências, bloqueio) | `AreaPolicy` no crate da área (`netmonitor_servers::ServersPolicy`) ou em `services/area_policies/` (Rede, VPN); registro em `src/registries.rs` | VPN com servidor ativo não desliga (409) |
+| O que cada área sabe de si (evidência, consequências, bloqueio) | `AreaPolicy` no crate da área (`netmonitor_servers::ServersPolicy`, `netmonitor_vpn::VpnPolicy`) ou em `services/area_policies/` (Rede); registro em `src/registries.rs` | VPN com servidor ativo não desliga (409) |
 | API | `controllers/areas.rs`, `POST /api/settings/onboarding/intent` | só admin muda; auditado |
 | Ferramentas da IA | `AiToolHandler::area()` + `ToolPolicy::with_areas` | saem do chat, das rotinas e das tarefas; tarefa agendada vira `skipped` |
 | Rotinas | `discovery::queue`, `maintenance_runner`, `agents::background` | varredura, enlaces agendados e vigia de Wi-Fi pausados; snapshot Docker só com Servidores ligada **e** alguma aba com `?interest=docker` |
@@ -954,10 +967,13 @@ Decididas no [ADR 017](adr/017-arquitetura-modular.md). Quatro áreas: Núcleo
 | SPA | `frontend/src/areas/`, `router/areaGuard.ts`, `AreaOffPage.vue` | menu, rotas, cards e handlers SSE da área saem; link profundo mostra "Área desligada" |
 
 A fronteira de código entre as áreas é verificada pelo compilador onde a área
-já tem crate (`crates/servers` só depende de `core` e `agent-protocol`) e, no
-código ainda não extraído, por `tests/conventions/architecture.rs` (exceções
-congeladas, a lista só diminui; `netmonitor_servers::` conta como a área
-Servidores).
+já tem crate (`crates/servers` só depende de `core` e `agent-protocol`;
+`crates/vpn`, só de `core`) e, no código ainda não extraído, por
+`tests/conventions/architecture.rs` (exceções congeladas, a lista só diminui;
+`netmonitor_servers::` conta como a área Servidores e `netmonitor_vpn::` como a
+VPN). O que a VPN pede ao resto da central — motor de alertas, apresentação de
+dispositivo, endereços da central — chega por `netmonitor_vpn::central::CentralServices`,
+implementado em `src/registries.rs` e guardado no `shared_store`.
 
 ## 12. O que não existe
 

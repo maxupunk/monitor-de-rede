@@ -30,20 +30,26 @@ use crate::{
             errors::{AppError, AppResult},
         },
         telemetry,
-        vpn::monitor_provisioner::vpn_probe_name,
     },
     views::agents::{AgentCapabilityView, AgentHostInfo, AgentView},
 };
 
-use netmonitor_core::agents::{identity, HostKey};
+use netmonitor_core::{
+    agents::{
+        identity,
+        registration::{self, validate_name},
+        HostKey,
+    },
+    vpn_probe::vpn_probe_name,
+};
 
 use super::{enrollment, local, protocol::Hello};
 
 pub use netmonitor_core::agents::identity::{is_agent, ROLE_AGENT};
-const STATUS_PENDING: &str = "pending";
+/// O cadastro e a URL vista do túnel moram no núcleo (a VPN também os usa).
+pub use netmonitor_core::agents::registration::tunnel_server_url;
 /// Validade do código de enrollment, igual à do cofre (15 minutos).
 pub const ENROLLMENT_TTL_SECONDS: u64 = 15 * 60;
-const MAX_NAME: usize = 120;
 
 fn enforce_tunnel_ip(probe: &probes::Model) -> bool {
     probe
@@ -52,16 +58,6 @@ fn enforce_tunnel_ip(probe: &probes::Model) -> bool {
         .and_then(|value| value.get("enforceTunnelIp"))
         .and_then(Value::as_bool)
         .unwrap_or(true)
-}
-
-fn validate_name(name: &str) -> AppResult<String> {
-    let name = name.trim();
-    if name.is_empty() || name.chars().count() > MAX_NAME || name.chars().any(char::is_control) {
-        return Err(AppError::validation(
-            "Nome do agente deve ter entre 1 e 120 caracteres",
-        ));
-    }
-    Ok(name.to_string())
 }
 
 /// A conexão de um agente vinculado a um dispositivo da VPN precisa vir do IP
@@ -196,14 +192,7 @@ impl<'a> AgentService<'a> {
     }
 
     async fn ensure_device(&self, device_id: Option<i64>) -> AppResult<Option<devices::Model>> {
-        let Some(device_id) = device_id else {
-            return Ok(None);
-        };
-        devices::Entity::find_by_id(device_id)
-            .one(self.db)
-            .await?
-            .map(Some)
-            .ok_or_else(|| AppError::validation("Dispositivo informado não existe"))
+        registration::ensure_device(self.db, device_id).await
     }
 
     /// Cadastra o agente e emite o primeiro código de enrollment.
@@ -215,24 +204,14 @@ impl<'a> AgentService<'a> {
     ///
     /// Validação do nome ou do dispositivo; erro do banco.
     pub async fn create(&self, input: &AgentCreateInput) -> AppResult<(probes::Model, String)> {
-        let name = validate_name(&input.name)?;
-        self.ensure_device(input.device_id).await?;
-        let saved = probes::ActiveModel {
-            site_id: Set(input.site_id),
-            name: Set(name),
-            token_hash: Set(sha256_hex(&random_token())),
-            status: Set(STATUS_PENDING.into()),
-            device_id: Set(input.device_id),
-            configuration: Set(Some(json!({
-                "role": ROLE_AGENT,
-                "enforceTunnelIp": input.enforce_tunnel_ip.unwrap_or(true),
-            }))),
-            ..Default::default()
-        }
-        .insert(self.db)
-        .await?;
-        let code = enrollment::issue(saved.id);
-        Ok((saved, code))
+        registration::create(
+            self.db,
+            &input.name,
+            input.site_id,
+            input.device_id,
+            input.enforce_tunnel_ip,
+        )
+        .await
     }
 
     /// Agente criado junto com o peer da VPN: já nasce vinculado ao
@@ -247,18 +226,7 @@ impl<'a> AgentService<'a> {
         site_id: Option<i64>,
         device_id: i64,
     ) -> AppResult<probes::Model> {
-        if let Some(existing) = self.for_device(device_id).await? {
-            return Ok(existing);
-        }
-        let (probe, _code) = self
-            .create(&AgentCreateInput {
-                name: name.to_string(),
-                site_id,
-                device_id: Some(device_id),
-                enforce_tunnel_ip: Some(true),
-            })
-            .await?;
-        Ok(probe)
+        registration::create_for_device(self.db, name, site_id, device_id).await
     }
 
     /// Agente ativo vinculado ao dispositivo.
@@ -267,14 +235,7 @@ impl<'a> AgentService<'a> {
     ///
     /// Propaga erro do banco.
     pub async fn for_device(&self, device_id: i64) -> AppResult<Option<probes::Model>> {
-        Ok(probes::Entity::find()
-            .filter(probes::Column::DeviceId.eq(device_id))
-            .filter(probes::Column::Status.ne(probes::STATUS_REVOKED))
-            .order_by_asc(probes::Column::Id)
-            .all(self.db)
-            .await?
-            .into_iter()
-            .find(is_agent))
+        registration::for_device(self.db, device_id).await
     }
 
     /// # Errors
@@ -487,23 +448,6 @@ impl<'a> AgentService<'a> {
     }
 }
 
-/// URL da central vista de dentro do túnel: `AGENT_SERVER_URL` explícita ou
-/// o IP da central na VPN com a porta da API (`APP_PORT`, 3333 por padrão).
-#[must_use]
-pub fn tunnel_server_url(server_vpn_address: &str) -> String {
-    if let Ok(url) = std::env::var("AGENT_SERVER_URL") {
-        let url = url.trim().trim_end_matches('/').to_string();
-        if !url.is_empty() {
-            return url;
-        }
-    }
-    let port = std::env::var("APP_PORT")
-        .ok()
-        .and_then(|port| port.trim().parse::<u16>().ok())
-        .unwrap_or(3333);
-    format!("http://{server_vpn_address}:{port}")
-}
-
 /// Publica `probe:status` para a tela de agentes e probes.
 pub async fn publish_status(ctx: &AppContext, probe: &probes::Model) {
     // O mesmo evento dos probes, mais o que o servidor anunciou ao conectar
@@ -569,12 +513,5 @@ mod tests {
         assert!(docker.ends_with("registry.exemplo/netmonitor-agent:1.0"));
         let (padrao, _) = install_commands("http://10.8.0.1:3333", "nma_abc");
         assert!(padrao.ends_with(DEFAULT_AGENT_IMAGE));
-    }
-
-    #[test]
-    fn nome_vazio_ou_com_controle_e_recusado() {
-        assert!(validate_name("  ").is_err());
-        assert!(validate_name("srv\u{0}").is_err());
-        assert_eq!(validate_name(" srv-01 ").expect("nome"), "srv-01");
     }
 }

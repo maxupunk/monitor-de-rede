@@ -14,14 +14,15 @@ use loco_rs::{
     Result,
 };
 
+use netmonitor_core::vpn_probe::probe_is_external;
+
 use crate::{
     services::{
         agents::{background as agents_background, local as local_agent},
         alerts::catalog::service as alert_catalog,
         events::relay::relay_pending,
         network_tools::dns::registry::DnsServerRegistry,
-        vpn::probe_is_external,
-        vpn::probe_registrar as vpn_probe_registrar,
+        probes::vpn_registrar as vpn_probe_registrar,
     },
     tasks::scheduler_run,
 };

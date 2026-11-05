@@ -9,4 +9,3 @@ pub mod maintenance_windows;
 pub mod storages;
 pub mod telemetry;
 pub mod users;
-pub mod vpn;

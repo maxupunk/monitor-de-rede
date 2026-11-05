@@ -6,14 +6,17 @@
 //! * [`session`] / [`hub`] — conexões vivas e correlação de pedidos;
 //! * [`bridge`] — pontes de bytes pelo canal (banco, volume);
 //! * [`identity`] — quem é agente e quem é o local;
+//! * [`registration`] / [`enrollment`] — cadastro e código de uso único;
 //! * [`routes`] — agentes que servem de rota para um recurso;
 //! * [`HostKey`] — a chave de um host Docker (`agent-<id>`).
 
 pub mod bridge;
+pub mod enrollment;
 mod errors;
 mod host_key;
 pub mod hub;
 pub mod identity;
+pub mod registration;
 pub mod routes;
 pub mod session;
 pub mod views;

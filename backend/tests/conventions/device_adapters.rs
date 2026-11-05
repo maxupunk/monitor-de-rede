@@ -44,7 +44,7 @@ fn consumidores_de_dispositivo_dependem_do_registro() {
     let discovery = production_part("backend/src/services/discovery/device_identifier.rs");
     assert!(discovery.contains("adapters::registry"));
 
-    let peers = production_part("backend/src/services/vpn/peer_service.rs");
+    let peers = production_part("backend/crates/vpn/src/peer_service.rs");
     assert!(peers.contains("adapters::registry::by_vpn_profile"));
     assert!(!peers.contains("payload.profile =="));
 }

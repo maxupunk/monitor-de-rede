@@ -38,12 +38,10 @@ use super::{
 };
 use crate::{
     models::{device_credentials, probes},
-    services::{
-        shared::{
-            crypto,
-            errors::{AppError, AppResult},
-        },
-        vpn::secret_store::EphemeralSecretStore,
+    services::shared::{
+        crypto,
+        errors::{AppError, AppResult},
+        secret_store::EphemeralSecretStore,
     },
 };
 

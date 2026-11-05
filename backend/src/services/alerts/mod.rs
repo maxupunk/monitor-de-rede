@@ -25,5 +25,6 @@ pub mod repository;
 pub mod rules;
 pub mod silence;
 pub mod state_machine;
+pub mod vpn_peer_watcher;
 
 pub use contracts::{AlertEvaluationContext, AlertEvaluationScope, AlertScopeKey};

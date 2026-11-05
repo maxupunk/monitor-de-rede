@@ -222,12 +222,13 @@ comprometer as outras.
 
 ### Fase 7 — Crate `vpn`
 
-- [ ] **Extrair a área VPN**
-  - **Débitos:** ARQ-06
+- [x] 🟢 Concluído — **Extrair a área VPN**
+  - **Débitos:** ARQ-06, ARQ-02 (parte)
   - **Esforço:** Pequeno
   - **Arquivos:** `services/vpn/`, `controllers/{vpn_servers,vpn_peers}.rs`, `frontend/src/areas/vpn/`
   - **Entregas:** `crates/vpn`; o contrato com o watcher (`<iface>.conf`/`<iface>.status` em `WG_CONFIG_DIR`) e o cofre de chaves em memória **inalterados** (AGENTS §7); o dataset de alerta `vpn_peer` registrado como `AlertDataset`.
   - **Aceite:** `vpn` depende só de `core`; snapshots `insta` dos artefatos sem diff; testes `#[serial]` do cofre intactos.
+  - **Entregue:** `crates/vpn` (`netmonitor_vpn`, depende **só** do `netmonitor-core`): servidor, peers, IPAM, chaves, `config_builder`/`config_writer`/`peer_status` (o contrato com o watcher — só mudaram os `use`), pré-voo, perfis de cliente e scripts, telemetria dos túneis, `access_control`, `VpnPolicy`, as rotas `/api/vpn/{server,peers}` e as views. Snapshots `insta` renomeados para o caminho do crate, com o corpo intacto; `services/vpn` virou reexportação do crate (IA, onboarding e scheduler até as Fases 8 e 10). **Núcleo primeiro:** foram para o `core` o cofre efêmero (`shared::secret_store`, byte a byte — o enrollment dos agentes e as senhas de sessão dos plugins também o usam), o enrollment e o cadastro dos agentes (`agents::{enrollment, registration}`; o `AgentService` delega), `devices::{adapters, system_device}`, `maintenance::resource_cleanup`, `monitoring::reachability` e `vpn_probe` (`probe_is_external`, `vpn_probe_name`). **Fica no pacote raiz, de propósito:** o registrador do `vpn-probe` (`services/probes/vpn_registrar.rs` — é cadastro de probe, usado no boot, na troca de banco e pelo `task vpn_probe_register`; o fallback `DEFAULT_VPN_PROBE_TOKEN` intacto) e o observador da transição dos túneis (`services/alerts/vpn_peer_watcher.rs`, junto do dataset `vpn_peer`, que o motor de alertas já tratava como um dataset qualquer — sem `match` nem import de VPN, então não houve `AlertDataset` a criar). O que a área pede ao resto da central (motor de alertas, apresentação de dispositivo, endereços da central) entra por um único trait da área, `netmonitor_vpn::central::CentralServices`, implementado em `src/registries.rs` e posto no `shared_store` pelo `after_context` (vale para o scheduler). Exceções do teste de arquitetura: **34 → 29** (`agents → vpn`, `devices → vpn`, `plugins → vpn`, `server_addresses → vpn`, `settings → vpn`); o detector conta `netmonitor_vpn::` como a área VPN. **Ficou para depois:** `ai → vpn` (ferramentas da IA, Fase 8), `monitoring → vpn` (o `maintenance_runner` chama a telemetria dos túneis — sai com um registro de rotinas por área) e `onboarding → vpn` (pré-voo e servidor no assistente inicial).
 
 ### Fase 8 — Crate `assistant`
 

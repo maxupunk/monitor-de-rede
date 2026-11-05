@@ -1,8 +1,8 @@
 [workspace]
-members = [".", "migration", "crates/core", "crates/agent-protocol", "crates/servers"]
+members = [".", "migration", "crates/core", "crates/agent-protocol", "crates/servers", "crates/vpn"]
 # Sem isto, `cargo test`/`cargo clippy` na raiz só cobririam o pacote raiz:
 # os testes que se mudam para um crate sairiam da suíte sem ninguém notar.
-default-members = [".", "migration", "crates/core", "crates/agent-protocol", "crates/servers"]
+default-members = [".", "migration", "crates/core", "crates/agent-protocol", "crates/servers", "crates/vpn"]
 
 [package]
 name = "backend"
@@ -70,9 +70,19 @@ opendal = { version = "0.57", default-features = false, features = [
   "services-azblob",
   "reqwest-rustls-tls",
 ] }
+# Parser de syslog (RFC 3164/5424) — o dialeto de cada plataforma de
+# dispositivo (`netmonitor_core::devices::adapters`) e o receptor da Rede.
+syslog_loose = { version = "0.23" }
+# HTTP de saída (DoH, IP público do pré-voo da VPN, webhooks).
+reqwest = { version = "0.12", default-features = false, features = [
+  "rustls-tls",
+  "json",
+  "stream",
+] }
 netmonitor-core = { path = "crates/core" }
 netmonitor-agent-protocol = { path = "crates/agent-protocol" }
 netmonitor-servers = { path = "crates/servers" }
+netmonitor-vpn = { path = "crates/vpn" }
 
 [dependencies]
 loco-rs = { workspace = true  }
@@ -101,6 +111,7 @@ migration = { path = "migration" }
 netmonitor-core = { workspace = true }
 netmonitor-agent-protocol = { workspace = true }
 netmonitor-servers = { workspace = true }
+netmonitor-vpn = { workspace = true }
 sea-orm = { workspace = true }
 chrono = { workspace = true }
 # Expressões cron das tarefas agendadas (próximas execuções na hora local do
@@ -137,11 +148,7 @@ rand = { workspace = true }
 
 # --- rede: DNS (wire format + DoH, §3.4 SPIKE-04) ---
 hickory-proto = { version = "0.24", default-features = false }
-reqwest = { version = "0.12", default-features = false, features = [
-  "rustls-tls",
-  "json",
-  "stream",
-] }
+reqwest = { workspace = true }
 
 # --- rede: SNMP (§3.4 SPIKE-01) ---
 async-snmp = { version = "0.16", default-features = false, features = ["crypto-rustcrypto"] }
@@ -152,7 +159,7 @@ async-snmp = { version = "0.16", default-features = false, features = ["crypto-r
 # o que se quer de um receptor que aceita o que o roteador mandar. Traz `nom 8`
 # como dependência transitiva; nenhum tipo dela cruza a fronteira do crate,
 # então não repete o problema de duas majors do `socket2` registrado acima.
-syslog_loose = { version = "0.23" }
+syslog_loose = { workspace = true }
 # Cliente SSH em Rust puro, para a ativação automática do log no roteador.
 # `default-features = false` de propósito: o padrão traz `aws-lc-rs`, que pede
 # cmake e clang no `builder` do Dockerfile (hoje só tem `pkg-config` e
@@ -168,7 +175,6 @@ russh = { workspace = true }
 md-5 = { version = "0.11" }
 
 # --- criptografia ---
-x25519-dalek = { version = "2", features = ["static_secrets"] }
 chacha20poly1305 = { workspace = true }
 p256 = { version = "0.13", default-features = false, features = ["ecdsa", "ecdh", "pem", "pkcs8", "std"] }
 aes-gcm = { version = "0.10", default-features = false, features = ["aes"] }
@@ -176,9 +182,6 @@ hkdf = { version = "0.12" }
 base64 = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }
-
-# --- artefatos VPN ---
-qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 
 # --- plugins de dispositivo ---
 # Motor de script dos plugins. Rust puro, sem runtime externo, e o script só

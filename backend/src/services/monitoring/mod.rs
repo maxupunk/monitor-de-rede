@@ -15,7 +15,6 @@ pub mod managed;
 pub mod metrics_repository;
 pub mod ping_diagnostics;
 pub mod presenter;
-pub mod reachability;
 pub mod result_processor;
 pub mod rollup;
 pub mod runner;
@@ -23,3 +22,6 @@ pub mod saas;
 pub mod scheduler;
 pub mod timeseries;
 pub mod uptime;
+
+/// Quem pode medir o quê mora no núcleo (a VPN também consulta).
+pub use netmonitor_core::monitoring::reachability;

@@ -532,8 +532,8 @@ mod tests {
     }
 
     #[test]
-    fn o_catalogo_cobre_as_receitas_de_syslog_e_os_perfis_da_vpn() {
-        use crate::services::{syslog::snippets, vpn::profiles::registry};
+    fn o_catalogo_cobre_as_receitas_de_syslog() {
+        use crate::services::syslog::snippets;
 
         for receita in snippets::systems() {
             let adapter = super::registry::find(receita)
@@ -549,23 +549,6 @@ mod tests {
                 "{} promete receita de syslog que não existe",
                 adapter.platform().id
             );
-        }
-
-        for card in registry::list() {
-            assert!(
-                super::registry::by_vpn_profile(&card.profile).is_some(),
-                "o perfil de VPN {} não tem sistema no catálogo",
-                card.profile
-            );
-        }
-        for adapter in super::registry::all() {
-            if let Some(perfil) = adapter.vpn_profile() {
-                assert!(
-                    registry::has(perfil),
-                    "{} aponta para o perfil {perfil}, que não existe",
-                    adapter.platform().id
-                );
-            }
         }
     }
 

@@ -90,7 +90,7 @@
      do agente, do registrador e do provisionador continua obrigatório: é ele
      que sustenta os dois arranjos.
    - **Token Fallback Padrão (`DEFAULT_VPN_PROBE_TOKEN`)**: o registrador
-     (`services/vpn/probe_registrar.rs`) e o agente (`services/probes/agent.rs`)
+     (`services/probes/vpn_registrar.rs`) e o agente (`services/probes/agent.rs`)
      **DEVEM** usar `DEFAULT_VPN_PROBE_TOKEN = "default_vpn_probe_token"` como
      fallback quando `VPN_PROBE_TOKEN`/`PROBE_TOKEN` não estiverem definidos.
      **NUNCA remova este fallback**: é ele que garante registro e autenticação
@@ -98,7 +98,7 @@
      `probes.token_hash` não ter índice único.
    - **Comando CLI de Registro**: `backend-cli task vpn_probe_register`
      (`src/tasks/vpn_probe_register.rs`) gera ou reutiliza o token do probe e o
-     exibe no terminal. **NÃO remover** este comando nem o `probe_registrar`.
+     exibe no terminal. **NÃO remover** este comando nem o `vpn_registrar`.
    - **Fallback de Execução Local no Agendador** (`src/tasks/scheduler_run.rs`):
      se o probe estiver offline por qualquer motivo, o agendador **DEVE** tentar
      a execução local via `run_monitor` antes de reportar `unknown`. **NÃO

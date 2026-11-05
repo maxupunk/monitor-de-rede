@@ -33,6 +33,8 @@ netmonitor-agent-protocol = { workspace = true }
 # Destinos de armazenamento (backups do sistema e dos bancos).
 opendal = { workspace = true }
 russh-sftp = { workspace = true }
+# Severidade canônica do syslog nos adapters de plataforma.
+syslog_loose = { workspace = true }
 
 [dev-dependencies]
 migration = { path = "../../migration" }

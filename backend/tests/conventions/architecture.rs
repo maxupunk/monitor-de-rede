@@ -47,7 +47,6 @@ const EXCECOES: &[(&str, &str)] = &[
     ("agent_runtime", "plugins"),
     ("agents", "discovery"),
     ("agents", "plugins"),
-    ("agents", "vpn"),
     ("ai", "discovery"),
     ("ai", "docker"),
     ("ai", "plugins"),
@@ -56,7 +55,6 @@ const EXCECOES: &[(&str, &str)] = &[
     ("ai", "vpn"),
     ("devices", "ai"),
     ("devices", "discovery"),
-    ("devices", "vpn"),
     ("devices", "wifi"),
     ("discovery", "ai"),
     ("maintenance", "link_tests"),
@@ -67,11 +65,8 @@ const EXCECOES: &[(&str, &str)] = &[
     ("network_tools", "plugins"),
     ("onboarding", "vpn"),
     ("plugins", "ai"),
-    ("plugins", "vpn"),
     ("probes", "discovery"),
     ("scheduled_tasks", "ai"),
-    ("server_addresses", "vpn"),
-    ("settings", "vpn"),
     ("snmp", "ai"),
     ("syslog", "ai"),
     ("syslog", "plugins"),
@@ -79,7 +74,10 @@ const EXCECOES: &[(&str, &str)] = &[
 ];
 
 /// Crates de área já extraídos e o nome com que contam na regra.
-const CRATES_DE_AREA: &[(&str, &str)] = &[("netmonitor_servers::", "servers")];
+const CRATES_DE_AREA: &[(&str, &str)] = &[
+    ("netmonitor_servers::", "servers"),
+    ("netmonitor_vpn::", "vpn"),
+];
 
 fn area_of(module: &str) -> &'static str {
     AREAS
@@ -292,6 +290,10 @@ fn o_detector_enxerga_use_agrupado_e_caminho_inline() {
     let deps = dependencias(source);
     assert!(deps.contains("vpn"));
     assert!(deps.contains("servers"), "crate de área conta pelo nome");
+    assert!(
+        dependencias("fn h() { netmonitor_vpn::probe_is_external(); }").contains("vpn"),
+        "o crate da VPN também"
+    );
     assert!(deps.contains("shared"));
     assert!(deps.contains("wifi"));
     assert!(!deps.contains("docker"), "comentário não conta");

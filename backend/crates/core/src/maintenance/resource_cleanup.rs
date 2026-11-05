@@ -1,0 +1,201 @@
+//! Remoção explícita de agregados e de seus históricos.
+//!
+//! As FKs protegem a integridade, mas não cobrem todos os dados históricos que
+//! pertencem a um recurso. Centralizar a sequência aqui impede que cada
+//! controller apague um subconjunto diferente do agregado.
+
+use sea_orm::{
+    sea_query::Expr, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, ExprTrait,
+    QueryFilter,
+};
+
+use crate::{
+    models::{
+        _entities::{
+            alert_events, alert_rules, device_interfaces, device_links, metrics, monitor_results,
+        },
+        devices, monitors, probes,
+    },
+    shared::errors::AppResult,
+};
+
+/// Serviço responsável pelas cinco cascatas manuais do contrato HTTP.
+pub struct ResourceCleanupService;
+
+impl ResourceCleanupService {
+    /// Remove um monitor e todo histórico que não é coberto pela FK.
+    ///
+    /// Genérico sobre a conexão para poder rodar dentro de uma transação: são
+    /// cinco `DELETE` que só fazem sentido juntos, e quem chama em lote (a
+    /// aplicação de monitores SNMP) precisa que a falha do terceiro desfaça os
+    /// dois primeiros.
+    pub async fn delete_monitor<C: ConnectionTrait>(db: &C, monitor_id: i64) -> AppResult<()> {
+        monitor_results::Entity::delete_many()
+            .filter(monitor_results::Column::MonitorId.eq(monitor_id))
+            .exec(db)
+            .await?;
+        metrics::Entity::delete_many()
+            .filter(metrics::Column::MonitorId.eq(monitor_id))
+            .exec(db)
+            .await?;
+        alert_events::Entity::delete_many()
+            .filter(alert_events::Column::MonitorId.eq(monitor_id))
+            .exec(db)
+            .await?;
+        alert_rules::Entity::delete_many()
+            .filter(alert_rules::Column::MonitorId.eq(monitor_id))
+            .exec(db)
+            .await?;
+        monitors::Entity::delete_by_id(monitor_id).exec(db).await?;
+        Ok(())
+    }
+
+    /// Remove um dispositivo, seus monitores, interfaces, links e histórico.
+    pub async fn delete_device(db: &DatabaseConnection, device_id: i64) -> AppResult<()> {
+        let monitor_rows = monitors::Entity::find()
+            .filter(monitors::Column::DeviceId.eq(device_id))
+            .all(db)
+            .await?;
+        for monitor in monitor_rows {
+            Self::delete_monitor(db, monitor.id).await?;
+        }
+
+        let interfaces = device_interfaces::Entity::find()
+            .filter(device_interfaces::Column::DeviceId.eq(device_id))
+            .all(db)
+            .await?;
+        let interface_ids: Vec<i64> = interfaces.into_iter().map(|item| item.id).collect();
+        if !interface_ids.is_empty() {
+            metrics::Entity::delete_many()
+                .filter(metrics::Column::InterfaceId.is_in(interface_ids))
+                .exec(db)
+                .await?;
+        }
+        device_interfaces::Entity::delete_many()
+            .filter(device_interfaces::Column::DeviceId.eq(device_id))
+            .exec(db)
+            .await?;
+        metrics::Entity::delete_many()
+            .filter(metrics::Column::DeviceId.eq(device_id))
+            .exec(db)
+            .await?;
+        alert_events::Entity::delete_many()
+            .filter(alert_events::Column::DeviceId.eq(device_id))
+            .exec(db)
+            .await?;
+        alert_rules::Entity::delete_many()
+            .filter(alert_rules::Column::DeviceId.eq(device_id))
+            .exec(db)
+            .await?;
+        device_links::Entity::delete_many()
+            .filter(
+                device_links::Column::SourceDeviceId
+                    .eq(device_id)
+                    .or(device_links::Column::TargetDeviceId.eq(device_id)),
+            )
+            .exec(db)
+            .await?;
+        devices::Entity::delete_by_id(device_id).exec(db).await?;
+        Ok(())
+    }
+
+    /// Apaga todo o histórico (métricas, resultados de monitor, eventos de alerta e logs)
+    /// pertencente a um dispositivo, preservando o cadastro do dispositivo e seus monitores/interfaces.
+    pub async fn clear_device_history(
+        db: &DatabaseConnection,
+        logs_db: Option<&DatabaseConnection>,
+        device_id: i64,
+    ) -> AppResult<()> {
+        let monitor_rows = monitors::Entity::find()
+            .filter(monitors::Column::DeviceId.eq(device_id))
+            .all(db)
+            .await?;
+        let monitor_ids: Vec<i64> = monitor_rows.into_iter().map(|m| m.id).collect();
+        if !monitor_ids.is_empty() {
+            monitor_results::Entity::delete_many()
+                .filter(monitor_results::Column::MonitorId.is_in(monitor_ids.clone()))
+                .exec(db)
+                .await?;
+            metrics::Entity::delete_many()
+                .filter(metrics::Column::MonitorId.is_in(monitor_ids.clone()))
+                .exec(db)
+                .await?;
+            alert_events::Entity::delete_many()
+                .filter(alert_events::Column::MonitorId.is_in(monitor_ids))
+                .exec(db)
+                .await?;
+        }
+
+        let interfaces = device_interfaces::Entity::find()
+            .filter(device_interfaces::Column::DeviceId.eq(device_id))
+            .all(db)
+            .await?;
+        let interface_ids: Vec<i64> = interfaces.into_iter().map(|item| item.id).collect();
+        if !interface_ids.is_empty() {
+            metrics::Entity::delete_many()
+                .filter(metrics::Column::InterfaceId.is_in(interface_ids))
+                .exec(db)
+                .await?;
+        }
+
+        metrics::Entity::delete_many()
+            .filter(metrics::Column::DeviceId.eq(device_id))
+            .exec(db)
+            .await?;
+
+        alert_events::Entity::delete_many()
+            .filter(alert_events::Column::DeviceId.eq(device_id))
+            .exec(db)
+            .await?;
+
+        if let Some(logs_conn) = logs_db {
+            let _ = crate::models::logs::device_logs::Entity::delete_many()
+                .filter(crate::models::logs::device_logs::Column::DeviceId.eq(device_id))
+                .exec(logs_conn)
+                .await;
+        }
+
+        Ok(())
+    }
+
+    /// Remove um site e os dispositivos que fazem parte dele.
+    pub async fn delete_site(db: &DatabaseConnection, site_id: i64) -> AppResult<()> {
+        let device_rows = devices::Entity::find()
+            .filter(devices::Column::SiteId.eq(site_id))
+            .all(db)
+            .await?;
+        for device in device_rows {
+            Self::delete_device(db, device.id).await?;
+        }
+        alert_rules::Entity::delete_many()
+            .filter(alert_rules::Column::SiteId.eq(site_id))
+            .exec(db)
+            .await?;
+        probes::Entity::update_many()
+            .col_expr(probes::Column::SiteId, Expr::value(None::<i64>))
+            .filter(probes::Column::SiteId.eq(site_id))
+            .exec(db)
+            .await?;
+        crate::models::sites::Entity::delete_by_id(site_id)
+            .exec(db)
+            .await?;
+        Ok(())
+    }
+
+    /// Remove um probe e os monitores atribuídos a ele, sem deixar resultados órfãos.
+    pub async fn delete_probe(db: &DatabaseConnection, probe_id: i64) -> AppResult<()> {
+        let monitor_rows = monitors::Entity::find()
+            .filter(monitors::Column::ProbeId.eq(probe_id))
+            .all(db)
+            .await?;
+        for monitor in monitor_rows {
+            Self::delete_monitor(db, monitor.id).await?;
+        }
+        monitor_results::Entity::delete_many()
+            .filter(monitor_results::Column::ProbeId.eq(probe_id))
+            .exec(db)
+            .await?;
+        probes::Entity::delete_by_id(probe_id).exec(db).await?;
+        Ok(())
+    }
+}

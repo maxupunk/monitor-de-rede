@@ -202,14 +202,16 @@ impl Hooks for App {
             .add_route(controllers::alerts::routes().layer(business_auth.clone()))
             .add_route(controllers::areas::routes().layer(business_auth.clone()))
             .add_route(controllers::push::routes().layer(business_auth.clone()))
-            .add_route(controllers::vpn_servers::routes().layer(business_auth.clone()))
+            .add_route(
+                netmonitor_vpn::controllers::vpn_servers::routes().layer(business_auth.clone()),
+            )
             .add_route(controllers::ai::routes().layer(business_auth.clone()))
             .add_route(controllers::ai_conversations::routes().layer(business_auth.clone()))
             .add_route(controllers::plugins::routes().layer(business_auth.clone()))
             .add_route(controllers::link_tests::routes().layer(business_auth.clone()))
             .add_route(controllers::scheduled_tasks::routes().layer(business_auth.clone()))
             .add_route(controllers::wifi::routes().layer(business_auth.clone()))
-            .add_route(controllers::vpn_peers::routes().layer(business_auth))
+            .add_route(netmonitor_vpn::controllers::vpn_peers::routes().layer(business_auth))
     }
 
     /// Monta a SPA depois das rotas — e só depois delas.

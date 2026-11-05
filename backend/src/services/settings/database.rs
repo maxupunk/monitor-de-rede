@@ -28,10 +28,11 @@ use crate::{
         devices::system_device::{self, SystemDeviceService},
         monitoring::managed::ensure_system_health_monitor,
         network_tools::dns::registry::DnsServerRegistry,
+        probes::vpn_registrar as vpn_probe_registrar,
         shared::errors::{AppError, AppResult},
-        vpn::{probe_is_external, probe_registrar as vpn_probe_registrar},
     },
 };
+use netmonitor_core::vpn_probe::probe_is_external;
 
 /// Tipo do banco de dados detectado.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
