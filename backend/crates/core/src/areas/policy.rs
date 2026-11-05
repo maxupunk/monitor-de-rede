@@ -81,3 +81,15 @@ pub trait AreaPolicy: Send + Sync {
         Ok(None)
     }
 }
+
+/// Monitores nunca param pela área — a confirmação diz quantos seguem rodando.
+#[must_use]
+pub fn monitors_keep_running(count: u64, singular: &str, plural_form: &str) -> Option<Consequence> {
+    (count > 0).then(|| {
+        Consequence::new(format!(
+            "{} continua{} rodando e alertando: monitor nunca para pela área.",
+            crate::shared::text::count_noun(count, singular, plural_form),
+            if count == 1 { "" } else { "m" }
+        ))
+    })
+}

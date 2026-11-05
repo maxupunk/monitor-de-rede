@@ -1,7 +1,11 @@
-//! Telemetria de host e containers: amostragem, agregação em minutos e
-//! histórico. Compartilhado pela central (host `local`) e pelo agente remoto.
+//! Telemetria de host e containers.
+//!
+//! A leitura do host (`host_metrics`) roda no agente; o balde de 1 minuto
+//! (`rollup`) é contrato do canal (`agent-protocol`); o histórico gravado
+//! (`store`) é do núcleo. O amostrador mora no lado do agente
+//! (`agent_runtime::sampler`).
 
 pub mod host_metrics;
-pub mod rollup;
-pub mod sampler;
-pub mod store;
+
+pub use agent_protocol::telemetry as rollup;
+pub use netmonitor_core::telemetry::store;

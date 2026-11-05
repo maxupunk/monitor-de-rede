@@ -18,7 +18,6 @@ use crate::{
     dtos::agents::{AgentCreateInput, AgentEnrollInput, AgentUpdateInput},
     models::{devices, probes},
     services::{
-        docker::hosts::HostKey,
         events::EventBus,
         maintenance::resource_cleanup::ResourceCleanupService,
         probes::{
@@ -36,22 +35,15 @@ use crate::{
     views::agents::{AgentCapabilityView, AgentHostInfo, AgentView},
 };
 
+use netmonitor_core::agents::{identity, HostKey};
+
 use super::{enrollment, local, protocol::Hello};
 
-pub const ROLE_AGENT: &str = "agent";
+pub use netmonitor_core::agents::identity::{is_agent, ROLE_AGENT};
 const STATUS_PENDING: &str = "pending";
 /// Validade do código de enrollment, igual à do cofre (15 minutos).
 pub const ENROLLMENT_TTL_SECONDS: u64 = 15 * 60;
 const MAX_NAME: usize = 120;
-
-pub(crate) fn is_agent(probe: &probes::Model) -> bool {
-    probe
-        .configuration
-        .as_ref()
-        .and_then(|value| value.get("role"))
-        .and_then(Value::as_str)
-        == Some(ROLE_AGENT)
-}
 
 fn enforce_tunnel_ip(probe: &probes::Model) -> bool {
     probe
@@ -155,13 +147,7 @@ pub fn to_view(
     device: Option<&devices::Model>,
     connected: bool,
 ) -> AgentView {
-    let host = probe
-        .configuration
-        .as_ref()
-        .and_then(|value| value.get("host"))
-        .cloned()
-        .and_then(|value| serde_json::from_value::<AgentHostInfo>(value).ok())
-        .unwrap_or_default();
+    let host = identity::host_info(probe);
     AgentView {
         id: probe.id,
         name: probe.name.clone(),
@@ -306,13 +292,7 @@ impl<'a> AgentService<'a> {
     ///
     /// Propaga erro do banco.
     pub async fn list(&self) -> AppResult<Vec<probes::Model>> {
-        Ok(probes::Entity::find()
-            .order_by_asc(probes::Column::Name)
-            .all(self.db)
-            .await?
-            .into_iter()
-            .filter(is_agent)
-            .collect())
+        identity::list(self.db).await
     }
 
     /// Dispositivos vinculados, para montar as views sem N consultas.

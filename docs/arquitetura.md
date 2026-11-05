@@ -96,12 +96,13 @@ containers marcados com `com.netmonitor.protected`. Mutações e exportação de
 volume continuam exclusivas de `admin` e auditadas
 ([ADR 014](adr/014-docker-local-pelo-agente.md)).
 
-A camada Docker separa a **fonte** dos dados crus (`services/docker/source.rs`,
-trait `DockerEngine`) do **mapeamento** para DTO, da redação de segredos e das
-regras (`services/docker/engine.rs`). No agente a fonte é `LocalEngine`, o
-`bollard` pelo socket; na central, `AgentEngine`, o mesmo contrato pelo canal.
-Todo host Docker — o desta central inclusive — é um agente, com a chave
-`agent-<id>` (`services/docker/hosts.rs`).
+A camada Docker (crate `servers`, `crates/servers/src/docker/`) separa a
+**fonte** dos dados crus (`source.rs`, trait `DockerEngine`) do
+**mapeamento** para DTO, da redação de segredos e das regras (`engine.rs`). No
+agente a fonte é `LocalEngine`, o `bollard` pelo socket; na central,
+`AgentEngine` (`remote_engine.rs`), o mesmo contrato pelo canal. Todo host
+Docker — o desta central inclusive — é um agente, com a chave `agent-<id>`
+(`HostKey`, `netmonitor_core::agents`; resolvida em `docker/hosts.rs`).
 
 ### Estáticos
 
@@ -136,27 +137,37 @@ confundido com arquivo — e é por isso que a identificação do serviço saiu 
 ## 4. Organização do código
 
 ```text
-backend/
+backend/                 workspace Cargo; o pacote raiz é o crate transitório e a montagem
 ├── src/
+│   ├── app.rs           Hooks do Loco: monta rotas, initializers e os registros
+│   ├── registries.rs    registros que o ponto de montagem preenche (políticas, checkers)
 │   ├── controllers/     extrai, valida, delega, serializa — sem regra de negócio
-│   ├── services/        todo o domínio, testável sem HTTP
-│   ├── models/          entidades SeaORM (_entities/, geradas) + regras de modelo
+│   ├── services/        o domínio ainda não extraído, testável sem HTTP
 │   ├── views/           serialização de saída
 │   ├── dtos/            entrada e tipos de contrato
 │   ├── tasks/           comandos de CLI (inclui o laço do scheduler e o probe)
 │   ├── initializers/    process_deps (todos os modos) + monitoring (só servidor)
 │   ├── mailers/         templates de e-mail
-│   └── bin/             entrypoint
+│   └── bin/             entrypoints (central e `netmonitor-agent`)
+├── crates/
+│   ├── core/            núcleo: models, shared, events, areas, agents (sessões, hub,
+│   │                    pontes), audit, storage, telemetry, monitoring (MonitorChecker)
+│   ├── agent-protocol/  contrato de fio central ↔ agente; não depende de crate do workspace
+│   └── servers/         área Servidores: docker, databases, monitor de container,
+│                        política da área, rotas /api/docker e /api/databases
 ├── migration/           uma migration por tabela + helpers em shared.rs
 ├── config/              development.yaml, test.yaml, production.yaml
 ├── examples/spikes/     protótipos que sustentam as ADRs
 └── tests/               requests/, models/, conventions/
 ```
 
-`src/services/` é onde o sistema realmente vive. Os módulos estão agrupados
-pela área a que pertencem no [ADR 017](adr/017-arquitetura-modular.md) — hoje
-é só organização: tudo está num crate só, e as dependências na direção errada
-(ARQ-02 em [`debitos_tecnicos.md`](debitos_tecnicos.md)) ainda existem.
+`src/services/` é onde o que ainda não foi extraído vive. Os módulos estão
+agrupados pela área a que pertencem no [ADR 017](adr/017-arquitetura-modular.md).
+A área Servidores já mora no seu crate (`crates/servers`, que só depende do
+`core` e do `agent-protocol`); `services/docker` e `services/databases` são
+reexportações do caminho antigo. As dependências na direção errada que restam
+(ARQ-02 em [`debitos_tecnicos.md`](debitos_tecnicos.md)) estão congeladas no
+teste de arquitetura.
 
 ```text
 services/
@@ -170,11 +181,12 @@ services/
 ├── syslog/           pipeline de logs (aplicação e equipamentos), listeners, retenção
 ├── dashboard/        catálogo de widgets e layout
 ├── scheduled_tasks/  tarefas agendadas (cron): ferramenta do catálogo da IA num horário
-├── agents/           central dos agentes remotos (ADR 011): sessões, política, túneis
+├── agents/           cadastro, handshake e eventos dos agentes (ADR 011); sessões, hub e
+│                     pontes no `core`, protocolo e política no `agent-protocol`
 ├── agent_runtime/    o lado do agente: executor, identidade, fila de saída
 ├── probes/           sondas: dispatcher, receiver, liveness, buffer
-├── telemetry/        métricas de host e de container (rollup de 1 min)
-├── backup/ storage/  export/restore das configurações e destinos de armazenamento
+├── telemetry/        leitura do host no agente; rollup no `agent-protocol`, histórico no `core`
+├── backup/ storage/  export/restore das configurações; destinos de armazenamento no `core`
 ├── auth/ settings/   autenticação, primeiro acesso e configurações
 ├── network_tools/    ICMP, TCP, UDP, DNS, port scanner, vazão (iperf3/btest)
 ├── maintenance/      data_pruner e limpeza de recursos
@@ -190,8 +202,8 @@ services/
 ├── plugins/          plugins de dispositivo (ADR 012), apps de frota, transporte
 ├── package_mirror/   espelho de pacotes para os plugins
 │  ── Servidores ──
-├── docker/           fonte (`DockerEngine`), operações, compose, logs, proteção
-├── databases/        backup de bancos de terceiros (ADR 013)
+├── docker/           → crate `servers`: fonte (`DockerEngine`), operações, compose, logs, proteção
+├── databases/        → crate `servers`: backup de bancos de terceiros (ADR 013)
 │  ── VPN ──
 └── vpn/              peers, chaves, config_builder/writer, preflight, telemetria
 ```
@@ -715,12 +727,13 @@ instalações PostgreSQL dimensionam `DB_MAX_CONNECTIONS` explicitamente.
 Um agente (`netmonitor-agent`, [ADR 011](adr/011-agente-remoto.md)) é uma
 linha de `probes` com `configuration.role = "agent"`, opcionalmente vinculada ao
 dispositivo que o hospeda (`probes.device_id`, normalmente o peer da VPN). É um
-segundo binário do mesmo crate: não sobe o Loco nem abre banco e reaproveita o
-protocolo, a `LocalEngine`, os checkers (`run_monitor_with`) e a telemetria.
+segundo binário do pacote raiz: não sobe o Loco nem abre banco e reaproveita o
+protocolo (`agent-protocol`), a `LocalEngine` (`servers`), os checkers
+(`run_monitor_with`, com o monitor de container registrado) e a telemetria.
 
 **Canal.** O agente abre `GET /api/agents/connect` (WebSocket, `X-Probe-Token`)
 e nunca escuta porta. Tudo que atravessa é um `Envelope` JSON
-(`services/agents/protocol.rs`): `Request` → `Chunk`* → `Response`, `Cancel`,
+(crate `agent-protocol`): `Request` → `Chunk`* → `Response`, `Cancel`,
 e `Event` espontâneo. Os comandos Docker formam um enum fechado, cada um com a
 sua permissão. `services/agents/connection.rs` e
 `services/agent_runtime/session.rs` falam texto por canais — o controller só
@@ -741,11 +754,10 @@ deixa o agente dirigir um teste de vazão — só como cliente, sem abrir porta 
 até um equipamento da rede dele; amostras chegam em `Chunk` e a central as
 consome pelo `AgentDriver` (`services/agents/throughput.rs`).
 
-**Docker por host.** `services/docker/source.rs` (`DockerEngine`) e
-`maintenance.rs` (`DockerMaintenance`) são as fontes; `hosts.rs` resolve
-`local` para `LocalEngine` e `agent-<id>` para `AgentEngine` (RPC pelo hub). As
-rotas existem em `/api/docker/...` (a central) e
-`/api/docker/hosts/{host}/...`. Pull, atualização (recreate com rollback) e
+**Docker por host.** `crates/servers/src/docker/source.rs` (`DockerEngine`)
+e `maintenance.rs` (`DockerMaintenance`) são as fontes; `hosts.rs` resolve
+`agent-<id>` para `AgentEngine` (RPC pelo hub do `core`). As rotas existem em
+`/api/docker/hosts` e `/api/docker/hosts/{host}/...`. Pull, atualização (recreate com rollback) e
 compose respondem `202` e relatam progresso em `docker:operation`; logs em
 follow chegam como `docker:log`. O CLI `docker compose` só roda no agente.
 
@@ -753,7 +765,8 @@ follow chegam como `docker:log`. O CLI `docker compose` só roda no agente.
 vivo (`SetLive`) e os republica como `docker:snapshot`/`docker:inventory` com
 `hostKey`; o último de cada host é reenviado a quem assina depois
 (`EventBus::publish_snapshot`). Sem assinante, o agente só manda o rollup de
-1 minuto (`services/telemetry`), que também é coletado para o host `local`.
+1 minuto (`agent-protocol::telemetry`), gravado pela central no histórico do
+núcleo (`netmonitor_core::telemetry::store`).
 As tabelas `host_metrics_1m` e `container_metrics_1m` seguem
 `RETENTION_METRICS_DAYS`.
 
@@ -933,16 +946,18 @@ Decididas no [ADR 017](adr/017-arquitetura-modular.md). Quatro áreas: Núcleo
 | Peça | Onde | Efeito da área desligada |
 | :--- | :--- | :--- |
 | Estado, validação, publicação | `crates/core/src/areas/` | `areas:updated` no SSE, também no snapshot de quem conecta |
-| O que cada área sabe de si (evidência, consequências, bloqueio) | `services/area_policies/` | VPN com servidor ativo não desliga (409) |
+| O que cada área sabe de si (evidência, consequências, bloqueio) | `AreaPolicy` no crate da área (`netmonitor_servers::ServersPolicy`) ou em `services/area_policies/` (Rede, VPN); registro em `src/registries.rs` | VPN com servidor ativo não desliga (409) |
 | API | `controllers/areas.rs`, `POST /api/settings/onboarding/intent` | só admin muda; auditado |
 | Ferramentas da IA | `AiToolHandler::area()` + `ToolPolicy::with_areas` | saem do chat, das rotinas e das tarefas; tarefa agendada vira `skipped` |
 | Rotinas | `discovery::queue`, `maintenance_runner`, `agents::background` | varredura, enlaces agendados e vigia de Wi-Fi pausados; snapshot Docker só com Servidores ligada **e** alguma aba com `?interest=docker` |
-| Monitores e alertas | — | **continuam** (monitor nunca para pela área); modelos de regra da área somem do catálogo |
+| Monitores e alertas | `MonitorChecker` (`netmonitor_core::monitoring`): o monitor `container` é da área Servidores e entra pelo registro | **continuam** (monitor nunca para pela área); modelos de regra da área somem do catálogo |
 | SPA | `frontend/src/areas/`, `router/areaGuard.ts`, `AreaOffPage.vue` | menu, rotas, cards e handlers SSE da área saem; link profundo mostra "Área desligada" |
 
-A fronteira de código entre as áreas é verificada por
-`tests/conventions/architecture.rs` (exceções congeladas, a lista só
-diminui) até cada área ter o seu crate.
+A fronteira de código entre as áreas é verificada pelo compilador onde a área
+já tem crate (`crates/servers` só depende de `core` e `agent-protocol`) e, no
+código ainda não extraído, por `tests/conventions/architecture.rs` (exceções
+congeladas, a lista só diminui; `netmonitor_servers::` conta como a área
+Servidores).
 
 ## 12. O que não existe
 

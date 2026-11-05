@@ -11,7 +11,6 @@ use crate::{
     controllers::{areas, auth_guard::require_admin},
     dtos::areas::OnboardingIntentInput,
     services::{
-        area_policies,
         audit::{AuditAction, AuditActor, AuditEntryInput, AuditService, ResourceType},
         onboarding,
         preferences::{self, Preferences},
@@ -65,7 +64,7 @@ async fn onboarding_intent(
         "Apenas administradores escolhem o que o NetMonitor vai acompanhar.",
     )
     .await?;
-    let policies = area_policies::registry();
+    let policies = crate::registries::area_policies();
     let outcome = onboarding::apply_intent(&ctx.db, &policies, input).await?;
     for change in &outcome.changes {
         areas::record_change(

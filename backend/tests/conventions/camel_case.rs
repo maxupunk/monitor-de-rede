@@ -7,8 +7,10 @@
 //! no momento em que o DTO nasce — que é quando custa barato — em vez de na
 //! tela, quando o Vue lê `undefined` de `perPage`.
 //!
-//! Escopo: `src/dtos/`, `src/views/` e os DTOs de paginação em
-//! `crates/core/src/shared/pagination.rs`. Structs de request/response do Loco que
+//! Escopo: `src/dtos/`, `src/views/`, os mesmos diretórios no crate de cada
+//! área (`crates/servers/src/{dtos,views}`), os contratos do núcleo
+//! (paginação, áreas, agentes, histórico de métricas) e os DTOs Docker do
+//! contrato de fio. Structs de request/response do Loco que
 //! o frontend não consome (fixtures, seeds) ficam de fora por não serem
 //! contrato.
 
@@ -20,14 +22,23 @@ const CAMEL_CASE_ATTR: &str = r#"rename_all = "camelCase""#;
 fn arquivos_de_contrato() -> Vec<PathBuf> {
     let raiz = Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut arquivos = Vec::new();
-    for dir in ["src/dtos", "src/views"] {
+    for dir in [
+        "src/dtos",
+        "src/views",
+        "crates/servers/src/dtos",
+        "crates/servers/src/views",
+    ] {
         colete_rs(&raiz.join(dir), &mut arquivos);
     }
-    // Os contratos do núcleo (paginação, áreas) moram em `crates/core`.
+    // Os contratos do núcleo (paginação, áreas, agentes, métricas) moram em
+    // `crates/core`; os DTOs Docker, no contrato de fio.
     arquivos.push(raiz.join("crates/core/src/shared/pagination.rs"));
     for contrato in ["policy.rs", "state.rs"] {
         arquivos.push(raiz.join("crates/core/src/areas").join(contrato));
     }
+    arquivos.push(raiz.join("crates/core/src/agents/views.rs"));
+    arquivos.push(raiz.join("crates/core/src/telemetry/views.rs"));
+    arquivos.push(raiz.join("crates/agent-protocol/src/docker/views.rs"));
     arquivos
 }
 

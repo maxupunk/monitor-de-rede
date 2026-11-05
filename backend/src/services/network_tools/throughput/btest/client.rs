@@ -25,7 +25,7 @@ use super::{
 use crate::services::{
     network_tools::throughput::{
         cancelled, Flow, SampleSink, ThroughputEngine, ThroughputReport, ThroughputSpec,
-        HANDSHAKE_TIMEOUT,
+        ThroughputSpecExt, HANDSHAKE_TIMEOUT,
     },
     shared::errors::{AppError, AppResult},
 };

@@ -14,18 +14,7 @@ use std::str::FromStr;
 
 use crate::services::users::{request_is_allowed, Role};
 
-/// Cabeçalho interno com a identidade de quem passou pelo guarda.
-///
-/// Existe porque a auditoria e o rate limit da VPN (§7.13) precisam saber
-/// *quem* pediu, e o guarda é o único ponto que já validou o token. Escrever no
-/// próprio `Request` (em vez de uma extensão tipada) mantém os handlers com
-/// extratores infalíveis: um `HeaderMap` nunca falha, uma `Extension` ausente
-/// vira 500.
-///
-/// É um cabeçalho de **requisição**, escrito por nós depois da validação —
-/// nada que o cliente mande com esse nome sobrevive, porque a linha abaixo o
-/// sobrescreve.
-pub const AUTHENTICATED_USER_HEADER: &str = "x-authenticated-user";
+pub use netmonitor_core::audit::AUTHENTICATED_USER_HEADER;
 
 pub async fn require_jwt(
     State(ctx): State<AppContext>,

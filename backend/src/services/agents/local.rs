@@ -17,15 +17,12 @@
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, Set,
-};
-use serde_json::{json, Value};
+use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, Set};
+use serde_json::json;
 
 use crate::{
     models::{monitors, probes},
     services::{
-        docker::hosts::HostKey,
         shared::{
             crypto::{random_token, sha256_hex},
             errors::{AppError, AppResult},
@@ -35,7 +32,9 @@ use crate::{
     },
 };
 
-use super::service::{is_agent, ROLE_AGENT};
+use netmonitor_core::agents::HostKey;
+
+use super::service::ROLE_AGENT;
 
 /// Nome com que o agente local nasce; o usuário pode renomear.
 pub const LOCAL_AGENT_NAME: &str = "Este servidor";
@@ -53,31 +52,8 @@ pub fn token_file() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-/// O agente é o local desta central?
-#[must_use]
-pub fn is_local(probe: &probes::Model) -> bool {
-    probe
-        .configuration
-        .as_ref()
-        .and_then(|value| value.get("local"))
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-}
-
-/// O agente local cadastrado, se houver.
-///
-/// # Errors
-///
-/// Propaga erro do banco.
-pub async fn find<C: ConnectionTrait>(db: &C) -> AppResult<Option<probes::Model>> {
-    Ok(probes::Entity::find()
-        .filter(probes::Column::Status.ne(probes::STATUS_REVOKED))
-        .order_by_asc(probes::Column::Id)
-        .all(db)
-        .await?
-        .into_iter()
-        .find(|probe| is_agent(probe) && is_local(probe)))
-}
+/// Quem é o agente local é leitura do núcleo (as áreas também perguntam).
+pub use netmonitor_core::agents::identity::{find_local as find, is_local};
 
 /// Recusa mexer no ciclo de vida do agente local: ele é da instalação, e o
 /// próximo boot o recriaria de qualquer forma.

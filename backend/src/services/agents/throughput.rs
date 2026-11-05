@@ -26,7 +26,7 @@ use crate::services::{
     network_tools::throughput::{
         cancelled,
         driver::{DriveRequest, ThroughputDriver},
-        SampleSink, ThroughputReport, ThroughputSample, DEADLINE_MARGIN,
+        SampleSink, ThroughputReport, ThroughputSample, ThroughputSpecExt, DEADLINE_MARGIN,
     },
     plugins::transport::is_reachable_target,
     shared::errors::{AppError, AppResult},
@@ -178,7 +178,7 @@ mod tests {
         agents::{
             policy::Policy,
             protocol::{Body, Envelope, Welcome, WireFrame},
-            session::tests::hello,
+            session::testing::hello,
         },
         monitoring::runner::CheckDeps,
         network_tools::throughput::{

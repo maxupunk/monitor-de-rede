@@ -1,12 +1,12 @@
 //! Agentes remotos: o canal de comando entre a central e os servidores
 //! (ADR 011).
 //!
-//! * [`protocol`] — o contrato de fio, compartilhado com o binário do agente;
+//! * [`protocol`] — o contrato de fio (crate `agent-protocol`), compartilhado
+//!   com o binário do agente;
 //! * [`policy`] — o que cada host aceita, decidido **no host**;
-//! * [`session`] / [`hub`] — conexões vivas e correlação de pedidos;
+//! * [`session`] / [`hub`] — conexões vivas e correlação de pedidos (núcleo);
 //! * [`connection`] — handshake e vida de uma conexão (sem WebSocket);
 //! * [`service`] / [`enrollment`] — cadastro, código de uso único, token;
-//! * [`remote_engine`] — o Docker do host do agente como fonte da central;
 //! * [`local`] — o agente ao lado da central, dono do Docker dela (ADR 014);
 //! * [`throughput`] — o agente como origem de teste de vazão (ADR 015 §6);
 //! * [`inbound`] / [`background`] — eventos recebidos, modo ao vivo e pump
@@ -15,19 +15,22 @@
 //! O lado do agente mora em [`crate::services::agent_runtime`].
 
 pub mod background;
-pub mod bridge;
 pub mod connection;
 pub mod enrollment;
-pub mod hub;
 pub mod inbound;
 pub mod install;
 pub mod install_address;
 pub mod local;
-pub mod policy;
-pub mod protocol;
-pub mod remote_engine;
-pub mod routes;
 pub mod service;
-pub mod session;
 pub mod throughput;
-pub mod tunnel;
+
+/// O contrato de fio é o crate `agent-protocol`; o transporte do lado da
+/// central (sessões, hub, pontes, rotas) é do núcleo. Os caminhos antigos
+/// continuam valendo.
+pub use agent_protocol::{policy, tunnel};
+pub use netmonitor_core::agents::{bridge, hub, routes, session};
+
+pub mod protocol {
+    //! O contrato de fio (`agent-protocol`), pelo caminho antigo.
+    pub use agent_protocol::*;
+}

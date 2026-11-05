@@ -7,25 +7,10 @@
 
 use super::{device_identifier::classify, fingerprints};
 use crate::services::vendors::{self, builtin::is_locally_administered};
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DiscoveredHost {
-    pub ip_address: String,
-    pub mac_address: Option<String>,
-    pub hostname: Option<String>,
-    pub mdns_name: Option<String>,
-    pub vendor: Option<String>,
-    pub device_type: Option<String>,
-    #[serde(default)]
-    pub open_ports: Vec<u16>,
-    pub confidence: i32,
-    #[serde(default)]
-    pub data: serde_json::Value,
-}
+pub use agent_protocol::probes::DiscoveredHost;
 
 /// Funde e classifica sem saber o gateway da rede.
 #[must_use]

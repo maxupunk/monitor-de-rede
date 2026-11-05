@@ -23,47 +23,7 @@ use super::{
 /// firmware) sem alterar nada.
 pub const DETECT_ACTION: &str = "detect";
 
-/// Por onde o plugin fala com o equipamento.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
-#[serde(rename_all = "snake_case")]
-#[ts(export, export_to = "../../frontend/src/bindings/")]
-pub enum TransportKind {
-    Ssh,
-    Http,
-    Telnet,
-}
-
-impl TransportKind {
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Ssh => "ssh",
-            Self::Http => "http",
-            Self::Telnet => "telnet",
-        }
-    }
-
-    #[must_use]
-    pub const fn default_port(self) -> u16 {
-        match self {
-            Self::Ssh => 22,
-            Self::Http => 80,
-            Self::Telnet => 23,
-        }
-    }
-
-    /// # Errors
-    ///
-    /// Tipo fora de `ssh`, `http` e `telnet`.
-    pub fn parse(value: &str) -> Result<Self, String> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "ssh" => Ok(Self::Ssh),
-            "http" => Ok(Self::Http),
-            "telnet" => Ok(Self::Telnet),
-            other => Err(format!("tipo de acesso desconhecido: {other}")),
-        }
-    }
-}
+pub use agent_protocol::device_io::TransportKind;
 
 /// Como a tela apresenta o resultado de uma ação.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]

@@ -171,7 +171,9 @@ impl Hooks for App {
             .add_route(controllers::dashboard::routes().layer(business_auth.clone()))
             .add_route(controllers::backup::routes().layer(business_auth.clone()))
             .add_route(controllers::storages::routes().layer(business_auth.clone()))
-            .add_route(controllers::databases::routes().layer(business_auth.clone()))
+            .add_route(
+                netmonitor_servers::controllers::databases::routes().layer(business_auth.clone()),
+            )
             .add_route(controllers::sites::routes().layer(business_auth.clone()))
             .add_route(controllers::networks::routes().layer(business_auth.clone()))
             .add_route(controllers::devices::routes().layer(business_auth.clone()))
@@ -185,7 +187,9 @@ impl Hooks for App {
             .add_route(controllers::diagnostics::routes().layer(business_auth.clone()))
             .add_route(controllers::dns::routes().layer(business_auth.clone()))
             .add_route(controllers::dns_servers::routes().layer(business_auth.clone()))
-            .add_route(controllers::docker::routes().layer(business_auth.clone()))
+            .add_route(
+                netmonitor_servers::controllers::docker::routes().layer(business_auth.clone()),
+            )
             .add_route(controllers::server_addresses::routes().layer(business_auth.clone()))
             .add_route(controllers::settings::routes().layer(business_auth.clone()))
             .add_route(controllers::users::routes().layer(business_auth.clone()))

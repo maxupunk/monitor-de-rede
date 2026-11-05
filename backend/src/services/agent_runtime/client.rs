@@ -19,7 +19,7 @@ use crate::{
         docker::source::LocalEngine,
         monitoring::{checkers::ping::PingClientCell, runner::CheckDeps},
         shared::secret_file,
-        telemetry::{host_metrics::HostMetricsReader, sampler},
+        telemetry::host_metrics::HostMetricsReader,
     },
     views::agents::AgentEnrollResponse,
 };
@@ -29,6 +29,7 @@ use super::{
     executor::LocalExecutor,
     identity,
     outbox::Outbox,
+    sampler,
     session::{self, DockerLiveSource, OutboxSink, SessionDeps},
     tunnel::LocalTunnelOpener,
 };
@@ -116,7 +117,7 @@ pub async fn run_forever(config: AgentConfig) {
             config.policy.clone(),
             CheckDeps {
                 ping: Some(PingClientCell::open()),
-                docker: Some(Arc::new(LocalEngine)),
+                checkers: crate::registries::monitor_checkers(Some(Arc::new(LocalEngine))),
             },
         )),
         outbox: outbox.clone(),

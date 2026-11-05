@@ -561,7 +561,7 @@ async fn serve_tunnel(request: TunnelRequest) {
 pub struct OutboxSink(pub Arc<Outbox>);
 
 #[async_trait]
-impl crate::services::telemetry::sampler::RollupSink for OutboxSink {
+impl super::sampler::RollupSink for OutboxSink {
     async fn accept(&self, rollup: crate::services::telemetry::rollup::MetricsRollup) {
         self.0.push(AgentEvent::MetricsRollup {
             rollup: Box::new(rollup),

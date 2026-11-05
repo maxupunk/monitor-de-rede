@@ -52,11 +52,11 @@ Este documento consolida a auditoria de arquitetura, código-fonte, padrões de 
 | **DOC-01** | Documentação | Inconsistência entre tabela resumo e corpo deste documento | Médio | Pequeno | 🟢 Corrigido |
 | **DB-02** | Banco | 64 migrations históricas num crate só | Baixo | Médio | 🟢 Concluído (ADR 017) |
 | **ARQ-01** | Arquitetura | Composição estática: rotas, rotinas, menu e rotas da SPA ligados para toda instalação | Alto | Grande | 🟢 Concluído (ADR 017) |
-| **ARQ-02** | Arquitetura | Dependências na direção errada entre domínios no backend (A1–A5) | Médio | Grande | 🗓️ Planejado (ADR 017) |
+| **ARQ-02** | Arquitetura | Dependências na direção errada entre domínios no backend (A1–A5) | Médio | Grande | 🟡 Em andamento (ADR 017; A1 resolvido) |
 | **ARQ-03** | Arquitetura | Barramento SSE central no frontend e Dashboard acoplado ao Docker (A6–A7) | Médio | Médio | 🟢 Concluído (ADR 017) |
 | **ARQ-04** | Arquitetura | Catálogo de widgets duplicado entre backend e frontend | Médio | Pequeno | 🟢 Concluído (ADR 017) |
 | **ARQ-05** | Performance | Snapshot Docker pedido com qualquer aba aberta | Médio | Pequeno | 🟢 Concluído (ADR 017) |
-| **ARQ-06** | Arquitetura | Crate único de ~185 mil linhas; fronteira só por convenção | Médio | Grande | 🗓️ Planejado (ADR 017) |
+| **ARQ-06** | Arquitetura | Crate único de ~185 mil linhas; fronteira só por convenção | Médio | Grande | 🟡 Em andamento (ADR 017; Servidores extraída) |
 
 ---
 
@@ -265,10 +265,11 @@ Levantados em 2026-11-05. A decisão está no [ADR 017](adr/017-arquitetura-modu
 - **Descrição:** toda instalação recebe os dois domínios: ~36 entradas de menu, onboarding só de rede, ~60 ferramentas de IA e rotinas próprias de áreas que não usa.
 - **Plano:** áreas `on`/`off` com registros declarativos (Fases 0, 2, 3, 4 e 5).
 
-### 🗓️ ARQ-02: Dependências na Direção Errada no Backend — Planejado
-- **Arquivos Afetados:** `services/monitoring/runner.rs` (A1), `services/{devices/identify.rs,discovery/decider_identity.rs,snmp/decider_interfaces.rs,syslog/categorizer.rs}` (A2), `services/ai/harness/tools/{mod,docker,platform}.rs` e `ai/mentions.rs` (A3), `services/dashboard/catalog.rs` (A4), `services/agents/background.rs` e `services/agent_runtime/` (A5)
-- **Descrição:** o núcleo conhece Docker, a Rede chama o Decisor diretamente e a IA conhece todos os domínios.
-- **Plano:** pontos de extensão no `core` (`MonitorChecker`, `Classifier`, `AiToolHandler::area`, `WidgetSpec`, `AgentCommandHandler`) — Fases 1 e 6 a 9. Até lá, o teste de arquitetura congela a lista e impede novas.
+### 🟡 ARQ-02: Dependências na Direção Errada no Backend — Em andamento
+- **Arquivos Afetados:** `services/{devices/identify.rs,discovery/decider_identity.rs,snmp/decider_interfaces.rs,syslog/categorizer.rs}` (A2), `services/ai/harness/tools/{mod,docker,platform}.rs` e `ai/mentions.rs` (A3), `services/dashboard/catalog.rs` (A4), `services/agents/background.rs` e `services/agent_runtime/` (A5)
+- **Descrição:** a Rede chama o Decisor diretamente e a IA conhece todos os domínios.
+- **Resolvido na Fase 6:** **A1** — `monitoring/runner.rs` não conhece mais Docker: o monitor `container` é um `MonitorChecker` (`netmonitor_core::monitoring`) do crate `servers`, registrado pelo ponto de montagem (`src/registries.rs`). Saíram também `agents → docker` (a `HostKey` e os tópicos `docker:snapshot`/`docker:inventory` são do núcleo; o `AgentEngine` foi para o crate `servers`) e `telemetry → docker` (o rollup é do `agent-protocol`, o histórico do `core` e o amostrador do lado do agente). O teste de arquitetura passou de **37 para 34 exceções** e conta `netmonitor_servers::…` como a área Servidores.
+- **Plano:** pontos de extensão no `core` (`Classifier`, `AiToolHandler::area`, `WidgetSpec`, `AgentCommandHandler`) — Fases 7 a 9. Até lá, o teste de arquitetura congela a lista e impede novas.
 
 ### 🟢 ARQ-03: Barramento SSE Central e Dashboard Acoplado ao Docker — Concluído
 - **Arquivos Afetados:** `frontend/src/stores/events.ts`, `frontend/src/pages/DashboardPage.vue`
@@ -285,10 +286,11 @@ Levantados em 2026-11-05. A decisão está no [ADR 017](adr/017-arquitetura-modu
 - **Descrição:** basta um assinante SSE, em qualquer página, para a central pedir `SetLive` a todos os agentes e distribuir snapshots Docker.
 - **Plano:** considerar a área Servidores e a presença de quem usa dados Docker (Fase 5).
 
-### 🗓️ ARQ-06: Crate Único e Fronteira por Convenção — Planejado
-- **Arquivos Afetados:** `backend/` (crate único, ~185 mil linhas)
+### 🟡 ARQ-06: Crate Único e Fronteira por Convenção — Em andamento
+- **Arquivos Afetados:** `backend/` (workspace; o pacote raiz ainda é o crate transitório)
 - **Descrição:** nada impede uma dependência nova entre domínios além da revisão humana; a compilação do crate inteiro estoura a paginação nesta máquina (erro 1455).
-- **Plano:** workspace com crates por área e reconstrução no lugar (Fases 1 e 6 a 10).
+- **Andamento:** Fase 1 criou o workspace e o `core`; a Fase 6 extraiu o `agent-protocol` e a área Servidores (`crates/servers`, que só depende de `core` e `agent-protocol` — garantido pelo `Cargo.toml`). O custo medido está no "Portão da Fase 6" do ADR 017.
+- **Plano:** VPN, assistente e Rede nos seus crates (Fases 7 a 9) e encerramento (Fase 10).
 
 ---
 

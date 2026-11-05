@@ -4,7 +4,9 @@
 //! não impede que o núcleo importe a área ou que uma área importe outra. Este
 //! teste faz esse papel: lê os `use crate::…` e os caminhos
 //! `crate::services::…` de cada módulo de `src/services/` e recusa qualquer
-//! dependência proibida que não esteja em [`EXCECOES`].
+//! dependência proibida que não esteja em [`EXCECOES`]. Uma área que já tem
+//! crate próprio conta pelo nome do crate (`netmonitor_servers::…` é a área
+//! Servidores); dentro dos crates, quem garante a regra é o `Cargo.toml`.
 //!
 //! A lista de exceções é o retrato do acoplamento que já existia (ARQ-02 em
 //! `docs/debitos_tecnicos.md`). Ela **só diminui**: uma dependência nova fora
@@ -29,6 +31,8 @@ const AREAS: &[(&str, &str)] = &[
     ("package_mirror", "network"),
     ("docker", "servers"),
     ("databases", "servers"),
+    // O crate da área (`netmonitor_servers::…`).
+    ("servers", "servers"),
     ("vpn", "vpn"),
     // Não é área de produto, mas é um crate com a mesma regra: ninguém
     // depende dele, e ele não depende de área (ADR 017, `Classifier`).
@@ -42,7 +46,6 @@ const EXCECOES: &[(&str, &str)] = &[
     ("agent_runtime", "docker"),
     ("agent_runtime", "plugins"),
     ("agents", "discovery"),
-    ("agents", "docker"),
     ("agents", "plugins"),
     ("agents", "vpn"),
     ("ai", "discovery"),
@@ -57,7 +60,6 @@ const EXCECOES: &[(&str, &str)] = &[
     ("devices", "wifi"),
     ("discovery", "ai"),
     ("maintenance", "link_tests"),
-    ("monitoring", "docker"),
     ("monitoring", "link_tests"),
     ("monitoring", "snmp"),
     ("monitoring", "vpn"),
@@ -74,8 +76,10 @@ const EXCECOES: &[(&str, &str)] = &[
     ("syslog", "ai"),
     ("syslog", "plugins"),
     ("syslog", "snmp"),
-    ("telemetry", "docker"),
 ];
+
+/// Crates de área já extraídos e o nome com que contam na regra.
+const CRATES_DE_AREA: &[(&str, &str)] = &[("netmonitor_servers::", "servers")];
 
 fn area_of(module: &str) -> &'static str {
     AREAS
@@ -210,6 +214,11 @@ fn dependencias(source: &str) -> BTreeSet<String> {
         }
         rest = after;
     }
+    for (prefixo, area) in CRATES_DE_AREA {
+        if code.contains(prefixo) {
+            deps.insert((*area).to_owned());
+        }
+    }
     deps
 }
 
@@ -277,10 +286,12 @@ fn o_detector_enxerga_use_agrupado_e_caminho_inline() {
             },
         };
         fn f() { crate::services::wifi::collector::run(); }
+        fn g() { netmonitor_servers::docker::enabled(); }
         const DOC: &str = /* crate::services::snmp */ 1;
     ";
     let deps = dependencias(source);
     assert!(deps.contains("vpn"));
+    assert!(deps.contains("servers"), "crate de área conta pelo nome");
     assert!(deps.contains("shared"));
     assert!(deps.contains("wifi"));
     assert!(!deps.contains("docker"), "comentário não conta");

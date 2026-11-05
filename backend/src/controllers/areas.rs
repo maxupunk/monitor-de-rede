@@ -2,14 +2,13 @@
 //!
 //! O controller extrai, delega e serializa: a regra mora em
 //! `netmonitor_core::areas` (estado e validação) e nas políticas de cada área
-//! (`services::area_policies`). Aqui só se junta a auditoria e a publicação no
+//! (`crate::registries`). Aqui só se junta a auditoria e a publicação no
 //! SSE — que é o que atualiza menu, rotas e dashboard em todas as abas.
 
 use crate::{
     controllers::auth_guard::require_admin,
     dtos::areas::AreaToggleInput,
     services::{
-        area_policies,
         audit::{
             AuditAction, AuditActor, AuditChanges, AuditEntryInput, AuditService, ResourceType,
         },
@@ -29,7 +28,7 @@ fn parse_area(id: &str) -> AppResult<Area> {
 /// `GET /api/areas` — o estado de todas as áreas (qualquer usuário: é o que
 /// monta o menu). O mesmo corpo chega pelo SSE em `areas:updated`.
 async fn index(State(ctx): State<AppContext>) -> AppResult<Response> {
-    let policies = area_policies::registry();
+    let policies = crate::registries::area_policies();
     Ok(format::json(
         AreaService::new(&ctx.db, &policies).snapshot().await?,
     )?)
@@ -55,7 +54,7 @@ async fn impact(
 /// O impacto da área somado ao das tarefas agendadas — que dependem do
 /// catálogo da IA, fora do alcance das políticas.
 async fn area_impact(ctx: &AppContext, area: Area) -> AppResult<AreaImpact> {
-    let policies = area_policies::registry();
+    let policies = crate::registries::area_policies();
     let mut impact = AreaService::new(&ctx.db, &policies).impact(area).await?;
     impact
         .consequences
@@ -77,7 +76,7 @@ async fn update(
     )
     .await?;
     let area = parse_area(&id)?;
-    let policies = area_policies::registry();
+    let policies = crate::registries::area_policies();
     let before = areas::is_enabled(&ctx.db, area).await?;
     let snapshot = AreaService::new(&ctx.db, &policies)
         .set(area, input.enabled)

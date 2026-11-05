@@ -44,6 +44,11 @@ pub fn install(ctx: &AppContext) {
     // vivo do Docker (ARQ-05).
     Interests::install(ctx);
     ApprovalDesk::install(ctx);
+    // Os tipos de monitor das áreas (ADR 017, `MonitorChecker`). Na central
+    // não há Docker Engine (ADR 014): o monitor de container responde que o
+    // Docker daqui é do agente local quando a execução local de reserva o roda.
+    ctx.shared_store
+        .insert(crate::registries::monitor_checkers(None));
 
     // O socket ICMP é a única peça que pode falhar, e falha por configuração do
     // ambiente, não por bug: sem `net.ipv4.ping_group_range` liberado, o

@@ -683,7 +683,6 @@ dependencies = [
  "async-trait",
  "axum",
  "base64 0.22.1",
- "bollard",
  "chacha20poly1305",
  "chrono",
  "croner",
@@ -699,9 +698,10 @@ dependencies = [
  "md-5",
  "mdns-sd",
  "migration",
+ "netmonitor-agent-protocol",
  "netmonitor-core",
+ "netmonitor-servers",
  "num_cpus",
- "opendal",
  "p256 0.13.2",
  "phf 0.11.3",
  "qrcode",
@@ -711,7 +711,6 @@ dependencies = [
  "rhai",
  "rstest",
  "russh",
- "russh-sftp",
  "sea-orm",
  "serde",
  "serde_json",
@@ -737,7 +736,6 @@ dependencies = [
  "uuid",
  "validator",
  "x25519-dalek",
- "zstd",
 ]
 
 [[package]]
@@ -4006,6 +4004,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "netmonitor-agent-protocol"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-util",
+ "ts-rs",
+ "uuid",
+ "zstd",
+]
+
+[[package]]
 name = "netmonitor-core"
 version = "0.1.0"
 dependencies = [
@@ -4019,21 +4032,57 @@ dependencies = [
  "hex",
  "loco-rs",
  "migration",
+ "netmonitor-agent-protocol",
+ "opendal",
  "rand 0.8.7",
  "regex",
  "russh",
+ "russh-sftp",
  "sea-orm",
  "serde",
  "serde_json",
  "serial_test",
  "sha2 0.10.9",
+ "tempfile",
  "thiserror 2.0.20",
  "tokio",
+ "tokio-util",
  "tower",
  "tracing",
  "ts-rs",
  "uuid",
  "validator",
+]
+
+[[package]]
+name = "netmonitor-servers"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-compression",
+ "async-trait",
+ "axum",
+ "bollard",
+ "chrono",
+ "futures",
+ "hex",
+ "insta",
+ "loco-rs",
+ "netmonitor-agent-protocol",
+ "netmonitor-core",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "sha2 0.10.9",
+ "sqlx",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "ts-rs",
+ "uuid",
 ]
 
 [[package]]

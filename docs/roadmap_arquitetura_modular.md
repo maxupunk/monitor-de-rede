@@ -205,7 +205,7 @@ comprometer as outras.
 
 ### Fase 6 — Piloto: crate `servers` (portão de decisão)
 
-- [ ] **Extrair a área Servidores**
+- [x] 🟢 Concluído — **Extrair a área Servidores**
   - **Débitos:** ARQ-02 (A1, parte de A3–A5), ARQ-06
   - **Esforço:** Médio
   - **Arquivos:** `services/docker/`, parte de contêiner de `services/telemetry/`, `services/databases/`, `monitoring/checkers/{container,host_resources}.rs`, `ai/harness/tools/docker.rs`, controllers e views correspondentes, `frontend/src/areas/servers/`
@@ -218,6 +218,7 @@ comprometer as outras.
     - `crates/core` compila sem `servers`; `servers` não depende de nenhuma outra área.
     - Suíte inteira verde nos dois bancos.
     - **Portão:** registrar no ADR 017 o custo medido (tempo, linhas movidas, testes ajustados, ganho de compilação incremental) e decidir seguir, ajustar ou parar nas Fases 7–10.
+  - **Entregue:** três crates novos. `crates/agent-protocol` (`agent_protocol`, sem dependência do workspace) leva o contrato (`protocol.rs`, `PROTOCOL_VERSION` inalterado, `policy.rs`, `tunnel.rs`) e os tipos que trafegam nele (DTOs Docker, `CheckResult`, `ThroughputSpec`, `DeviceIoCall`, tarefas de sonda, rollup de telemetria); as conversões com regra de negócio saíram do contrato (`AppError` ⇄ `RemoteError` no core, `ThroughputSpecExt` e `DriveRequest` ⇄ `Command` na vazão). O **transporte dos agentes** (`hub`, `session`, `bridge`, `HostKey`, identidade, rotas) foi para o `netmonitor-core` em vez de virar trait: só dependia do contrato e do `AppError`, e mover custou menos que abstrair chamadas, chunks e pontes. Também no core: `audit`, `storage`, `telemetry::{store, views}` e `monitoring` (`Checker`, `MonitorChecker`, `MonitorCheckers`). `crates/servers` (`netmonitor_servers`, depende só de `core` e `agent-protocol`): `docker/` (com o `AgentEngine`, o lado central dos comandos Docker/compose/volume), `databases/`, `ContainerMonitor` (registrado como `MonitorChecker`), `ServersPolicy`, controllers, DTOs e views. `src/registries.rs` monta políticas e checkers no ponto de montagem; `monitoring/runner.rs` perdeu o braço `container` e o import de Docker; `default-members` cobre o workspace inteiro (o CI roda `cargo test` sem `--workspace`). Exceções do teste de arquitetura: 37 → 34 (`monitoring → docker` — A1 —, `agents → docker`, `telemetry → docker`). **Ficou para depois, de propósito:** ferramentas `docker_*` da IA (o contrato `AiToolHandler` é do assistente — vão com a inversão da Fase 8); `WidgetSpec` (o `docker_summary` é uma entrada de catálogo sem lógica); `AgentCommandHandler` (nada no lado central precisou); migrations no crate `migration` (as tabelas de servidores só têm FK para o core). Portão registrado no ADR 017.
 
 ### Fase 7 — Crate `vpn`
 

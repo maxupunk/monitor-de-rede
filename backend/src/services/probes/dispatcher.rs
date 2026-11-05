@@ -8,7 +8,6 @@ use sea_orm::{
     sea_query::{Expr, OnConflict},
     ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set,
 };
-use serde::{Deserialize, Serialize};
 
 use crate::{
     models::{
@@ -30,40 +29,7 @@ pub const TASK_TTL_SECONDS: i64 = 120;
 /// atrás.
 const DELIVERY_BATCH_LIMIT: u64 = 100;
 
-/// Contrato de fio entre o servidor e o agente do probe.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProbeTask {
-    pub id: String,
-    pub monitor_id: i64,
-    #[serde(rename = "type")]
-    pub task_type: String,
-    pub timeout_ms: i32,
-    pub payload: serde_json::Value,
-}
-
-/// Contrato separado para discovery. Mantém compatibilidade com agentes que
-/// conhecem apenas tarefas de monitor e evita monitor fictício no banco.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProbeDiscoveryTask {
-    pub id: String,
-    pub run_id: i64,
-    pub cidr: String,
-    pub timeout_ms: u64,
-}
-
-impl From<probe_tasks::Model> for ProbeTask {
-    fn from(row: probe_tasks::Model) -> Self {
-        Self {
-            id: row.task_id,
-            monitor_id: row.monitor_id,
-            task_type: row.r#type,
-            timeout_ms: row.timeout_ms,
-            payload: row.payload,
-        }
-    }
-}
+pub use agent_protocol::probes::{ProbeDiscoveryTask, ProbeTask};
 
 /// Enfileira a tarefa, substituindo a pendente do mesmo monitor.
 ///

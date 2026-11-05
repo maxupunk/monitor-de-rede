@@ -6,7 +6,6 @@ use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, Quer
 
 use netmonitor_core::shared::text::count_noun;
 
-use super::monitors_keep_running;
 use crate::{
     models::_entities::{
         device_links, device_plugin_installs, devices, link_test_schedules, monitors, networks,
@@ -14,6 +13,7 @@ use crate::{
     },
     services::{agents::service::is_agent, shared::errors::AppResult},
 };
+use netmonitor_core::areas::monitors_keep_running;
 
 /// Tipos de monitor que só existem com equipamento de rede.
 const NETWORK_MONITOR_TYPES: [&str; 1] = ["snmp"];

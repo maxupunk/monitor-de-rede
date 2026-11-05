@@ -3,31 +3,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::services::agents::policy::Permission;
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../frontend/src/bindings/")]
-pub struct AgentCapabilityView {
-    pub available: bool,
-    pub version: Option<String>,
-    pub reason: Option<String>,
-}
-
-/// O que a última conexão do agente anunciou (guardado em
-/// `probes.configuration`).
-#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../frontend/src/bindings/")]
-pub struct AgentHostInfo {
-    pub hostname: Option<String>,
-    pub os: Option<String>,
-    pub arch: Option<String>,
-    pub in_container: bool,
-    pub policy: Vec<Permission>,
-    pub docker: AgentCapabilityView,
-    pub compose: AgentCapabilityView,
-}
+pub use netmonitor_core::agents::views::{AgentCapabilityView, AgentHostInfo};
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -99,67 +75,4 @@ pub struct AgentEnrollResponse {
     pub probe_id: i64,
     pub name: String,
     pub token: String,
-}
-
-/// Um host Docker disponível para a tela. Todo host é um agente (ADR 014):
-/// `kind` é `local` para o desta central e `agent` para os remotos.
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../frontend/src/bindings/")]
-pub struct DockerHostView {
-    pub key: String,
-    pub name: String,
-    pub kind: String,
-    pub online: bool,
-    #[ts(type = "number")]
-    pub agent_id: i64,
-    pub docker_available: bool,
-    pub compose_available: bool,
-    pub policy: Vec<Permission>,
-}
-
-/// Uma operação longa (pull, update, compose) aceita pela central.
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../frontend/src/bindings/")]
-pub struct DockerOperationAccepted {
-    pub operation_id: String,
-    pub host_key: String,
-    pub kind: String,
-    pub target: String,
-}
-
-/// Progresso publicado no SSE como `docker:operation`.
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../frontend/src/bindings/")]
-pub struct DockerOperationEvent {
-    pub operation_id: String,
-    pub host_key: String,
-    pub kind: String,
-    pub target: String,
-    /// `running`, `succeeded` ou `failed`.
-    pub state: String,
-    pub line: Option<String>,
-    pub message: Option<String>,
-}
-
-/// Linha de log em follow publicada no SSE como `docker:log`.
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../frontend/src/bindings/")]
-pub struct DockerLogStreamEvent {
-    pub stream_id: String,
-    pub host_key: String,
-    pub container_id: String,
-    pub entries: Vec<crate::views::docker::DockerLogEntry>,
-    /// Presente quando o stream terminou.
-    pub ended: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../frontend/src/bindings/")]
-pub struct DockerLogStreamStarted {
-    pub stream_id: String,
 }

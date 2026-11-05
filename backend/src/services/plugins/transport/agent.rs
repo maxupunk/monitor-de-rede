@@ -102,7 +102,7 @@ mod tests {
     use crate::services::{
         agents::{
             protocol::{Body, Envelope, Outcome},
-            session::tests::hello,
+            session::testing::hello,
         },
         plugins::transport::{Endpoint, Login},
     };

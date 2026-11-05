@@ -121,7 +121,7 @@
      abra porta nele nem faça a central chamá-lo. `docker compose` roda **só no
      agente**, no host dele; a central continua sem CLI `docker`. A política
      local (`AGENT_ALLOW`) é soberana — a central não a amplia — e comandos
-     Docker novos entram no enum fechado de `services/agents/protocol.rs`, cada
+     Docker novos entram no enum fechado de `crates/agent-protocol/src/protocol.rs`, cada
      um com a sua permissão. Proxy genérico para a Engine é proibido.
    - **O processo da API não monta o `docker.sock`** (ADR 014). O Docker da
      central é o do **agente local** — o serviço `netmonitor-agent` do compose,

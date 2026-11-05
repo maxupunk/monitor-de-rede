@@ -1,0 +1,51 @@
+[package]
+name = "netmonitor-servers"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Área Servidores do NetMonitor (ADR 017): Docker pelo agente, monitor de container e backup de bancos. Depende só do núcleo e do contrato de fio."
+
+[lib]
+name = "netmonitor_servers"
+
+[dependencies]
+netmonitor-core = { workspace = true }
+netmonitor-agent-protocol = { workspace = true }
+loco-rs = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+futures = { workspace = true }
+async-trait = { workspace = true }
+axum = { workspace = true }
+tracing = { workspace = true }
+sea-orm = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+ts-rs = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+hex = { workspace = true }
+sha2 = { workspace = true }
+# A Docker Engine do host — usada só no agente (ADR 014).
+bollard = { version = "0.18.1", default-features = false, features = ["http", "pipe"] }
+async-compression = { version = "0.4", default-features = false, features = ["tokio", "gzip"] }
+# Backup de bancos de terceiros (MySQL, MariaDB, PostgreSQL), nativo: o dump
+# sai pelo protocolo de cada SGBD — catálogo, `COPY` e `SHOW CREATE` —, sem
+# `pg_dump`/`mysqldump` na imagem. Não é crate nova: é o mesmo `sqlx` sobre o
+# qual o Sea-ORM roda; aqui ganha o driver MySQL. `mysql-rsa` é o que permite
+# autenticar no MySQL 8 (`caching_sha2_password`) sem TLS.
+sqlx = { version = "0.9", default-features = false, features = [
+  "runtime-tokio",
+  "tls-rustls",
+  "postgres",
+  "mysql",
+  "mysql-rsa",
+] }
+
+[dev-dependencies]
+loco-rs = { workspace = true, features = ["testing"] }
+serial_test = { version = "3.1.1" }
+tempfile = { version = "3" }
+insta = { version = "1.34", features = ["redactions", "yaml", "filters"] }

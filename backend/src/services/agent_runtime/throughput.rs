@@ -17,7 +17,7 @@ use crate::services::{
     agents::protocol::{ErrorCode, RemoteError, ThroughputAuth},
     network_tools::throughput::{
         driver::{DriveRequest, LocalDriver, ThroughputDriver},
-        sample_channel, ThroughputSample, ThroughputSpec,
+        sample_channel, ThroughputSample, ThroughputSpec, ThroughputSpecExt,
     },
 };
 

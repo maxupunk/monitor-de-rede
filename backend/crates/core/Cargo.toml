@@ -28,9 +28,15 @@ rand = { workspace = true }
 chacha20poly1305 = { workspace = true }
 russh = { workspace = true }
 validator = { workspace = true }
+tokio-util = { workspace = true }
+netmonitor-agent-protocol = { workspace = true }
+# Destinos de armazenamento (backups do sistema e dos bancos).
+opendal = { workspace = true }
+russh-sftp = { workspace = true }
 
 [dev-dependencies]
 migration = { path = "../../migration" }
 loco-rs = { workspace = true, features = ["testing"] }
 tower = { version = "0.5", features = ["util"] }
 serial_test = { version = "3.1.1" }
+tempfile = { version = "3" }

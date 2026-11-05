@@ -1,0 +1,20 @@
+[package]
+name = "netmonitor-agent-protocol"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Contrato de fio entre a central e o agente do NetMonitor (ADR 011). Não depende de nenhum outro crate do workspace."
+
+[lib]
+name = "agent_protocol"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+chrono = { workspace = true, features = ["serde"] }
+uuid = { workspace = true, features = ["serde"] }
+ts-rs = { workspace = true }
+thiserror = { workspace = true }
+zstd = { workspace = true }

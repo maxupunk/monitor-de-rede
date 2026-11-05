@@ -12,7 +12,7 @@ use loco_rs::{
 };
 use netmonitor_core::areas;
 
-use crate::services::{area_policies, events::EventBus};
+use crate::services::events::EventBus;
 
 pub struct AreasInitializer;
 
@@ -23,7 +23,7 @@ impl Initializer for AreasInitializer {
     }
 
     async fn before_run(&self, ctx: &AppContext) -> Result<()> {
-        let policies = area_policies::registry();
+        let policies = crate::registries::area_policies();
         match (
             areas::snapshot(&ctx.db, &policies).await,
             EventBus::from_context(ctx),

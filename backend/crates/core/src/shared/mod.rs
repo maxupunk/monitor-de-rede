@@ -1,6 +1,7 @@
 //! Blocos compartilhados por todos os módulos de domínio (§8.1).
 
 pub mod backup_schedule;
+pub mod body;
 pub mod cidr;
 pub mod crypto;
 pub mod errors;

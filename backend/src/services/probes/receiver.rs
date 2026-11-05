@@ -21,15 +21,7 @@ pub struct ProbeResultPayload {
     pub result: CheckResult,
 }
 
-#[derive(Debug, Clone, Deserialize, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProbeDiscoveryResultPayload {
-    pub run_id: i64,
-    pub task_id: Option<String>,
-    #[serde(default)]
-    pub hosts: Vec<crate::services::discovery::merger::DiscoveredHost>,
-    pub error: Option<String>,
-}
+pub use agent_protocol::probes::ProbeDiscoveryResultPayload;
 
 /// Verifica se o monitor informado pertence ao probe autenticado.
 ///

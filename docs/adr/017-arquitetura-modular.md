@@ -345,6 +345,37 @@ papéis separados de áreas. Divergiram em:
 11. Contar o que o sistema cria sozinho como evidência.
 12. Dependência entre áreas, ou do `core` para uma área.
 
+## Portão da Fase 6 (medido)
+
+A extração piloto (`crates/servers`, com `agent-protocol` e o transporte dos
+agentes no `core`) foi medida antes de seguir:
+
+| Medida | Valor |
+| :--- | :--- |
+| Tempo de trabalho | ~1 h de extração + ~1 h de validação (suíte completa ~7 min por rodada) |
+| Código movido | `servers` 10,8 mil linhas, `agent-protocol` 2,8 mil, `core` +~4 mil; pacote raiz ficou com ~160 mil |
+| Diff fora das renomeações | 108 arquivos, +770 / −1387 (o grosso é caminho de `use`) |
+| Testes ajustados | 4 (conversões que saíram do contrato) + 2 novos (credencial, registro) |
+| `cargo check` após tocar um arquivo | `servers`: 48 s · pacote raiz: 119 s |
+| `cargo build` incremental | `servers`: 36 s · raiz: 54 s · `core`: 71 s (recompila todos os dependentes) |
+| Exceções do teste de arquitetura | 37 → 34 |
+
+**Decisão: seguir, com ajustes.** O ganho existe e é o esperado — quem mexe
+numa área extraída tem retorno de `check` em menos da metade do tempo, e o
+compilador passa a impedir a dependência entre áreas. O custo foi menor que o
+previsto porque nenhum comportamento mudou e a suíte serviu de especificação.
+Ajustes para as Fases 7–10:
+
+1. **Núcleo primeiro.** Antes de extrair uma área, mover para o `core` o
+   serviço do núcleo de que ela depende (como foi o transporte dos agentes),
+   em vez de abstraí-lo em trait.
+2. **Registros no ponto de montagem** (`src/registries.rs`) desde o início da
+   fase; `default-members` já cobre o workspace.
+3. **Contratos do assistente na Fase 8.** As ferramentas `docker_*` e as das
+   outras áreas só saem quando o `AiToolHandler` estiver no `core`.
+4. **`core` é caro de tocar** (recompila tudo): mudanças no `core` em PR
+   próprio, antes da extração que as usa.
+
 ## Decisões em aberto
 
 1. **Nome na interface:** "Áreas" (proposto — "módulo" sugere instalar e

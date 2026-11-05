@@ -11,6 +11,7 @@ pub mod config;
 pub mod executor;
 pub mod identity;
 pub mod outbox;
+pub mod sampler;
 pub mod session;
 pub mod targets;
 pub mod throughput;

@@ -24,19 +24,15 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use ts_rs::TS;
 
+pub use agent_protocol::throughput::{
+    TestDirection, TestProtocol, ThroughputEngine, ThroughputSpec, MAX_DURATION_S, MAX_STREAMS,
+    MIN_DURATION_S, MIN_STREAMS,
+};
 pub use meter::SampleSink;
 
 use super::icmp_probe::round_two;
 use crate::services::shared::errors::{AppError, AppResult};
 
-/// Duração mínima de um sentido do teste, em segundos.
-pub const MIN_DURATION_S: u8 = 1;
-/// Duração máxima de um sentido do teste, em segundos.
-pub const MAX_DURATION_S: u8 = 60;
-/// Mínimo de fluxos TCP paralelos.
-pub const MIN_STREAMS: u8 = 1;
-/// Máximo de fluxos TCP paralelos.
-pub const MAX_STREAMS: u8 = 8;
 /// Prazo de cada passo de conexão e de handshake.
 pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 /// Folga somada à duração do teste para o prazo total de uma execução.
@@ -44,86 +40,26 @@ pub const DEADLINE_MARGIN: Duration = Duration::from_secs(15);
 /// Mensagem do erro devolvido quando o teste é cancelado.
 pub const CANCELLED_MESSAGE: &str = "teste de enlace cancelado";
 
-/// Motor que mede o enlace.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
-#[serde(rename_all = "lowercase")]
-#[ts(export, export_to = "../../frontend/src/bindings/")]
-pub enum ThroughputEngine {
-    Iperf3,
-    Btest,
-}
-
-impl ThroughputEngine {
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Iperf3 => "iperf3",
-            Self::Btest => "btest",
-        }
-    }
-}
-
-/// Sentido do teste, do ponto de vista de quem **dirige**.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
-#[serde(rename_all = "lowercase")]
-#[ts(export, export_to = "../../frontend/src/bindings/")]
-pub enum TestDirection {
-    /// Quem dirige envia.
-    Send,
-    /// Quem dirige recebe.
-    Receive,
-    /// Os dois sentidos.
-    Both,
-}
-
-impl TestDirection {
-    /// Quem dirige transmite neste sentido.
-    #[must_use]
-    pub const fn sends(self) -> bool {
-        matches!(self, Self::Send | Self::Both)
-    }
-
-    /// Quem dirige recebe neste sentido.
-    #[must_use]
-    pub const fn receives(self) -> bool {
-        matches!(self, Self::Receive | Self::Both)
-    }
-}
-
-/// Protocolo de transporte. UDP fica para a segunda etapa (ADR 015).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
-#[serde(rename_all = "lowercase")]
-#[ts(export, export_to = "../../frontend/src/bindings/")]
-pub enum TestProtocol {
-    #[default]
-    Tcp,
-}
-
-/// O que medir e como. Valide com [`ThroughputSpec::validate`] antes de usar.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../frontend/src/bindings/")]
-pub struct ThroughputSpec {
-    pub engine: ThroughputEngine,
-    pub direction: TestDirection,
-    #[serde(default)]
-    pub protocol: TestProtocol,
-    /// Duração de **cada** sentido, 1–60 s.
-    pub duration_s: u8,
-    /// Fluxos TCP paralelos, 1–8.
-    pub streams: u8,
-    /// Teto de banda total, em Mbit/s. `None` = sem limite.
-    #[serde(default)]
-    pub limit_mbps: Option<u32>,
-}
-
-impl ThroughputSpec {
+/// A validação da especificação, com a mensagem que o operador lê. Mora no
+/// motor, e não no contrato de fio, porque o erro é o da aplicação.
+pub trait ThroughputSpecExt {
     /// Confere os limites do contrato.
     ///
     /// # Errors
     ///
     /// [`AppError::Validation`] com o primeiro campo fora da faixa.
-    pub fn validate(&self) -> AppResult<()> {
+    fn validate(&self) -> AppResult<()>;
+
+    /// Confere o motor esperado pelo executor e os limites do contrato.
+    ///
+    /// # Errors
+    ///
+    /// [`AppError::Validation`] com o motor trocado ou um campo fora da faixa.
+    fn validate_for(&self, engine: ThroughputEngine) -> AppResult<()>;
+}
+
+impl ThroughputSpecExt for ThroughputSpec {
+    fn validate(&self) -> AppResult<()> {
         if !(MIN_DURATION_S..=MAX_DURATION_S).contains(&self.duration_s) {
             return Err(AppError::validation(format!(
                 "A duração do teste deve ficar entre {MIN_DURATION_S} e {MAX_DURATION_S} segundos"
@@ -142,20 +78,7 @@ impl ThroughputSpec {
         Ok(())
     }
 
-    /// Duração de um sentido do teste.
-    #[must_use]
-    pub fn duration(&self) -> Duration {
-        Duration::from_secs(u64::from(self.duration_s))
-    }
-
-    /// Teto de banda total em bit/s, quando houver.
-    #[must_use]
-    pub fn limit_bps(&self) -> Option<u64> {
-        self.limit_mbps.map(|mbps| u64::from(mbps) * 1_000_000)
-    }
-
-    /// Confere o motor esperado pelo executor e os limites do contrato.
-    pub(crate) fn validate_for(&self, engine: ThroughputEngine) -> AppResult<()> {
+    fn validate_for(&self, engine: ThroughputEngine) -> AppResult<()> {
         if self.engine != engine {
             return Err(AppError::validation(format!(
                 "Especificação do motor {} entregue ao motor {}",

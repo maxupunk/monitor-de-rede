@@ -9,10 +9,9 @@ use std::{sync::Arc, time::Duration};
 use loco_rs::app::AppContext;
 use tokio::sync::mpsc;
 
-use crate::{
-    models::probes,
-    services::{docker::hosts::HostKey, events::EventBus},
-};
+use netmonitor_core::agents::HostKey;
+
+use crate::{models::probes, services::events::EventBus};
 
 use super::{
     hub::AgentHub,

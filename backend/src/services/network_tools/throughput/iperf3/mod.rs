@@ -45,7 +45,7 @@ use super::{
     cancelled, elapsed_ms,
     meter::{ByteCounter, Pacer, Sampler},
     Flow, SampleSink, ThroughputEngine, ThroughputReport, ThroughputSample, ThroughputSpec,
-    DEADLINE_MARGIN, HANDSHAKE_TIMEOUT,
+    ThroughputSpecExt, DEADLINE_MARGIN, HANDSHAKE_TIMEOUT,
 };
 use crate::services::shared::errors::{AppError, AppResult};
 

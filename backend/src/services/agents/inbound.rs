@@ -8,11 +8,11 @@
 use chrono::{DateTime, Duration, Utc};
 use loco_rs::app::AppContext;
 
+use netmonitor_core::agents::{
+    HostKey, DOCKER_INVENTORY_EVENT as INVENTORY_EVENT, DOCKER_LIVE_EVENT as LIVE_EVENT,
+};
+
 use crate::services::{
-    docker::{
-        hosts::HostKey,
-        realtime::{INVENTORY_EVENT, LIVE_EVENT},
-    },
     events::EventBus,
     probes::receiver::{self, ProbeResultPayload},
     telemetry::{

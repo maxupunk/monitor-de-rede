@@ -1,23 +1,9 @@
 //! Entradas HTTP dos agentes remotos (ADR 011).
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use ts_rs::TS;
 
-use crate::services::docker::maintenance::ComposeAction;
-
-/// Agente remoto por onde um acesso pode sair (plugin de dispositivo, ponte
-/// de banco). A tela desabilita quem não serve e diz por quê.
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../frontend/src/bindings/")]
-pub struct AgentRouteOption {
-    #[ts(type = "number")]
-    pub id: i64,
-    pub name: String,
-    pub connected: bool,
-    /// O agente anunciou a permissão do recurso no `AGENT_ALLOW`.
-    pub allowed: bool,
-}
+pub use netmonitor_core::agents::views::AgentRouteOption;
 
 /// Cadastro de um agente pela central.
 #[derive(Debug, Clone, Deserialize, TS)]
@@ -62,33 +48,4 @@ pub struct AgentInstallCommandsInput {
 pub struct AgentEnrollInput {
     pub code: String,
     pub hostname: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../frontend/src/bindings/")]
-pub struct DockerPullInput {
-    pub image: String,
-}
-
-#[derive(Debug, Clone, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../frontend/src/bindings/")]
-pub struct DockerComposeInput {
-    pub action: ComposeAction,
-    pub service: Option<String>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../frontend/src/bindings/")]
-pub struct DockerHistoryQuery {
-    pub range: Option<crate::views::telemetry::MetricsRange>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../frontend/src/bindings/")]
-pub struct DockerFollowLogsInput {
-    pub tail: Option<String>,
 }

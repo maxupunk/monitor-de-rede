@@ -1,15 +1,16 @@
 //! Seleção de checker e aplicação do timeout definido no monitor.
+//!
+//! Os tipos do núcleo estão no `match`; os das áreas (container, por
+//! exemplo) vêm do registro de `MonitorChecker`s que o ponto de montagem
+//! preenche (ADR 017). O motor não conhece área nenhuma.
 
 use loco_rs::app::AppContext;
+use netmonitor_core::monitoring::{parse_config, MonitorCheckers};
 use serde_json::Value;
 
-use std::sync::Arc;
-
 use crate::services::{
-    docker::source::DockerEngine,
     monitoring::{
         checkers::{
-            container::{ContainerChecker, ContainerConfig},
             dns::{DnsChecker, DnsConfig},
             host_resources::{HostResourcesChecker, HostResourcesConfig},
             http::{HttpChecker, HttpConfig},
@@ -52,10 +53,10 @@ pub struct CheckDeps {
     /// tipos continuam rodando e só o ping falha — como antes do refactor.
     /// A célula tenta abrir de novo a cada uso (ver [`PingClientCell`]).
     pub ping: Option<PingClientCell>,
-    /// A Docker Engine deste host. Só o agente tem (ADR 014): na central o
-    /// monitor de container é despachado ao agente local, e a execução local
-    /// de reserva (§6) responde que o Docker daqui é do agente.
-    pub docker: Option<Arc<dyn DockerEngine>>,
+    /// Os checkers das áreas (`MonitorChecker`). Na central vêm do
+    /// `shared_store` (montados em `process_deps`); no agente, do cliente,
+    /// com a Docker Engine local.
+    pub checkers: MonitorCheckers,
 }
 
 impl CheckDeps {
@@ -63,7 +64,10 @@ impl CheckDeps {
     pub fn from_context(ctx: &AppContext) -> Self {
         Self {
             ping: ctx.shared_store.get::<PingClientCell>(),
-            docker: None,
+            checkers: ctx
+                .shared_store
+                .get::<MonitorCheckers>()
+                .unwrap_or_default(),
         }
     }
 
@@ -119,22 +123,8 @@ pub async fn run_monitor_with(
                 .execute(parse_config::<DnsConfig>(&configuration, "dns")?)
                 .await
         }
-        // Docker e recursos do host onde o monitor roda: a central, ou o
-        // agente do servidor remoto quando o monitor pertence a ele (ADR 011).
-        "container" => {
-            let engine = deps.docker.clone().ok_or_else(|| {
-                AppError::ServiceUnavailable(
-                    "O Docker deste servidor é atendido pelo agente local, que não está conectado"
-                        .to_string(),
-                )
-            })?;
-            ContainerChecker::new(engine)
-                .execute(parse_config::<ContainerConfig>(
-                    &configuration,
-                    "container",
-                )?)
-                .await
-        }
+        // Recursos do host onde o monitor roda: a central, ou o agente do
+        // servidor remoto quando o monitor pertence a ele (ADR 011).
         "host_resources" => {
             HostResourcesChecker
                 .execute(parse_config::<HostResourcesConfig>(
@@ -159,21 +149,17 @@ pub async fn run_monitor_with(
                 )?)
                 .await
         }
-        _ => {
-            return Err(AppError::business_rule(format!(
-                "Tipo de monitor desconhecido ou não suportado: {kind}"
-            )))
+        // Tipos das áreas (container, na área Servidores).
+        other => {
+            let Some(checker) = deps.checkers.find(other) else {
+                return Err(AppError::business_rule(format!(
+                    "Tipo de monitor desconhecido ou não suportado: {kind}"
+                )));
+            };
+            checker.check(&configuration).await?
         }
     };
     Ok(result)
-}
-
-fn parse_config<T: serde::de::DeserializeOwned>(configuration: &Value, name: &str) -> AppResult<T> {
-    serde_json::from_value(configuration.clone()).map_err(|error| {
-        AppError::validation(format!(
-            "Configuração inválida para monitor {name}: {error}"
-        ))
-    })
 }
 
 #[cfg(test)]
