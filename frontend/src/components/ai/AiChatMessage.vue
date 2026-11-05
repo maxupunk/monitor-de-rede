@@ -80,8 +80,8 @@
           <div
             v-if="message.content"
             class="markdown-body"
-            v-html="renderedContent"
             @click="handleMarkdownClick"
+            v-html="renderedContent"
           />
 
           <!-- Marcados com @ -->

@@ -84,9 +84,9 @@ describe('aiBenchmark utilities', () => {
     expect(
       chatTierFact({ ...SAMPLE_ROW, recommended: false, quantization: 'Q4_K_M' }).label
     ).toContain('Ultraleve')
-    expect(
-      chatTierFact({ ...SAMPLE_ROW, recommended: false, bundled: false }).label
-    ).toContain('Referência')
+    expect(chatTierFact({ ...SAMPLE_ROW, recommended: false, bundled: false }).label).toContain(
+      'Referência'
+    )
   })
 
   it('avalia velocidade e veredito do portão com motivos detalhados', () => {
@@ -108,4 +108,3 @@ describe('aiBenchmark utilities', () => {
     expect(failVerdict.reason).toContain('segurança')
   })
 })
-

@@ -275,4 +275,3 @@ function isCurrentModel(model: string): boolean {
   background: rgba(var(--v-theme-primary), 0.06);
 }
 </style>
-

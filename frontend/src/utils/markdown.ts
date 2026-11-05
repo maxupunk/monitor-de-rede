@@ -40,7 +40,14 @@ function splitTrailingUrlPunctuation(rawUrl: string): { url: string; trailing: s
   let trailing = ''
   while (url.length > 0) {
     const last = url[url.length - 1]
-    if (last === '.' || last === ',' || last === ';' || last === ':' || last === '!' || last === '?') {
+    if (
+      last === '.' ||
+      last === ',' ||
+      last === ';' ||
+      last === ':' ||
+      last === '!' ||
+      last === '?'
+    ) {
       trailing = last + trailing
       url = url.slice(0, -1)
       continue
