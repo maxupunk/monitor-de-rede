@@ -4,13 +4,13 @@
 //! técnicas. Aqui se prova o recorte de cada uma — o que é antigo sai, o que
 //! é recente fica, e execução em andamento nunca envelhece.
 
-use backend::{
-    app::App,
-    models::_entities::{audit_logs, devices, plugin_runs},
-    services::maintenance::data_pruner,
-};
+use backend::app::App;
+
+use netmonitor_core::models::_entities::{audit_logs, devices, plugin_runs};
+
 use chrono::{Duration, Utc};
 use loco_rs::testing::prelude::*;
+use netmonitor_nucleo::services::maintenance::data_pruner;
 use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 use serde_json::json;
 use serial_test::serial;

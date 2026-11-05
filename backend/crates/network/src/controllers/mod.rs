@@ -2,6 +2,7 @@
 
 pub mod discovery;
 pub mod link_tests;
+pub mod networks;
 pub mod package_mirror;
 pub mod plugins;
 pub mod port_scan;

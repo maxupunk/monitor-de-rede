@@ -5,8 +5,10 @@
 use std::time::Duration;
 
 use axum::{routing::get, Router};
-use backend::{app::App, models::devices, services::users::Role};
+use backend::app::App;
 use loco_rs::testing::prelude::*;
+use netmonitor_core::models::devices;
+use netmonitor_nucleo::services::users::Role;
 use sea_orm::{ActiveModelTrait, IntoActiveModel, Set};
 use serde_json::{json, Value};
 use serial_test::serial;

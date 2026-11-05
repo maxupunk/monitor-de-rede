@@ -2,9 +2,7 @@
 
 use chrono::{DateTime, Utc};
 use futures::future;
-use sea_orm::{
-    sea_query::Expr, ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
 use std::collections::{BTreeMap, HashMap};
 
 use crate::snmp::{
@@ -89,7 +87,6 @@ pub struct SnmpPollResult {
 /// desgarra os monitores já criados.
 pub const CPU_MONITOR_NAME: &str = "Monitor de Uso de CPU";
 pub const MEMORY_MONITOR_NAME: &str = "Monitor de Uso de Memoria";
-pub const DEFAULT_SNMP_POLL_INTERVAL_SECONDS: i32 = 15;
 
 #[must_use]
 pub fn interface_monitor_name(if_name: &str) -> String {
@@ -153,32 +150,11 @@ pub fn device_config_with(
     Ok(config)
 }
 
-/// Mantém a cadência e o timeout de todos os itens SNMP do equipamento alinhados
-/// ao intervalo que pertence ao próprio dispositivo.
-pub async fn sync_monitor_intervals(
-    db: &sea_orm::DatabaseConnection,
-    device_id: i64,
-    interval_seconds: i32,
-) -> AppResult<()> {
-    let interval_seconds = interval_seconds.max(1);
-    let timeout_seconds = calculate_smart_timeout_seconds("snmp", interval_seconds)
-        .min((interval_seconds - 1).max(1))
-        .max(1);
-    monitors::Entity::update_many()
-        .col_expr(
-            monitors_entity::Column::IntervalSeconds,
-            Expr::value(interval_seconds),
-        )
-        .col_expr(
-            monitors_entity::Column::TimeoutSeconds,
-            Expr::value(timeout_seconds),
-        )
-        .filter(monitors_entity::Column::DeviceId.eq(Some(device_id)))
-        .filter(monitors_entity::Column::Type.eq("snmp"))
-        .exec(db)
-        .await?;
-    Ok(())
-}
+/// A cadência SNMP é do dispositivo (inventário, núcleo): o caminho da área
+/// continua valendo.
+pub use netmonitor_core::devices::snmp_cadence::{
+    sync_monitor_intervals, DEFAULT_SNMP_POLL_INTERVAL_SECONDS,
+};
 
 pub async fn test_connection(config: SnmpConfig) -> AppResult<SnmpTestResult> {
     let client = super::client::SnmpClient::new(config);

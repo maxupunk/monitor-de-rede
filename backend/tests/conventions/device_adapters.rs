@@ -25,12 +25,12 @@ fn production_part(relative: &str) -> String {
 
 #[test]
 fn syslog_nao_mantem_catalogo_ou_match_paralelo() {
-    let snippets = production_part("backend/src/services/syslog/snippets.rs");
+    let snippets = production_part("backend/crates/nucleo/src/services/syslog/snippets.rs");
     assert!(!snippets.contains("RECEITAS"));
     assert!(!snippets.contains("match sistema"));
     assert!(snippets.contains("adapters::registry"));
 
-    let parser = production_part("backend/src/services/syslog/parser.rs");
+    let parser = production_part("backend/crates/nucleo/src/services/syslog/parser.rs");
     assert!(!parser.contains("topicos_do_routeros"));
     assert!(parser.contains("registry::syslog_topics"));
 }

@@ -1,15 +1,15 @@
 //! Áreas do produto (ADR 017) pela API: estado, impacto, mudança, papel,
 //! bloqueio da VPN, auditoria e evidência.
 
-use backend::{
-    app::App,
-    models::{
-        _entities::{audit_logs, networks, vpn_servers},
-        users,
-    },
-    services::users::Role,
+use backend::app::App;
+
+use netmonitor_core::models::{
+    _entities::{audit_logs, networks, vpn_servers},
+    users,
 };
+
 use loco_rs::testing::prelude::*;
+use netmonitor_nucleo::services::users::Role;
 use sea_orm::{ActiveModelTrait, EntityTrait, IntoActiveModel, Set};
 use serde_json::{json, Value};
 use serial_test::serial;
@@ -309,7 +309,7 @@ async fn onboarding_exige_rede_ou_servidores_e_admin() {
 async fn monitor_de_container_continua_rodando_com_servidores_desligado() {
     request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
         session_with_role(&mut request, &ctx, Role::Admin).await;
-        let monitor = backend::models::_entities::monitors::ActiveModel {
+        let monitor = netmonitor_core::models::_entities::monitors::ActiveModel {
             name: Set("web".to_owned()),
             r#type: Set("container".to_owned()),
             configuration: Set(json!({ "target": "web" })),
@@ -328,7 +328,7 @@ async fn monitor_de_container_continua_rodando_com_servidores_desligado() {
         backend::tasks::scheduler_run::run_cycle(&ctx)
             .await
             .expect("ciclo");
-        let depois = backend::models::_entities::monitors::Entity::find_by_id(monitor.id)
+        let depois = netmonitor_core::models::_entities::monitors::Entity::find_by_id(monitor.id)
             .one(&ctx.db)
             .await
             .unwrap()
@@ -360,7 +360,7 @@ async fn varredura_periodica_pausa_com_a_rede_desligada_e_volta_ao_religar() {
             .put("/api/areas/network")
             .json(&json!({ "enabled": false }))
             .await;
-        let pausada = backend::services::discovery::queue::schedule_due_networks(&ctx.db)
+        let pausada = netmonitor_network::discovery::queue::schedule_due_networks(&ctx.db)
             .await
             .expect("agendar");
         assert_eq!(pausada, 0, "área desligada não enfileira varredura");
@@ -369,7 +369,7 @@ async fn varredura_periodica_pausa_com_a_rede_desligada_e_volta_ao_religar() {
             .put("/api/areas/network")
             .json(&json!({ "enabled": true }))
             .await;
-        let retomada = backend::services::discovery::queue::schedule_due_networks(&ctx.db)
+        let retomada = netmonitor_network::discovery::queue::schedule_due_networks(&ctx.db)
             .await
             .expect("agendar");
         assert_eq!(retomada, 1, "religada, a rede volta a ser varrida");

@@ -1,8 +1,12 @@
 //! Conexões de banco pela API: cadastro, senha, validações, permissão e — com
 //! um PostgreSQL local — backup e restauração de ponta a ponta.
 
-use backend::{app::App, models::users, services::users::Role};
+use backend::app::App;
+
+use netmonitor_core::models::users;
+
 use loco_rs::{app::AppContext, testing::prelude::*, TestServer};
+use netmonitor_nucleo::services::users::Role;
 use sea_orm::{ActiveModelTrait, IntoActiveModel, Set};
 use serde_json::{json, Value};
 use serial_test::serial;
@@ -65,7 +69,7 @@ async fn a_senha_entra_e_nao_sai_e_editar_sem_ela_mantem() {
         assert_eq!(updated.status_code(), 200, "{}", updated.text());
         assert_eq!(body(&updated.text())["name"], json!("ERP produção"));
 
-        let row = backend::services::databases::service::load(&ctx.db, id)
+        let row = netmonitor_servers::databases::service::load(&ctx.db, id)
             .await
             .unwrap();
         assert_eq!(

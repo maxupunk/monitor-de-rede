@@ -6,19 +6,19 @@
 //! ponta a ponta: dispara → checagem ok → `recovering` → recaída → estável além
 //! da janela (com `lastProblemAt` no passado) → `resolved`.
 
-use backend::{
-    app::App,
-    models::{
-        _entities::{alert_events as alert_events_entity, event_outbox as event_outbox_entity},
-        alert_events, event_outbox,
-    },
-    services::monitoring::{
-        contracts::{CheckResult, MonitorStatus},
-        result_processor::process_result,
-    },
+use backend::app::App;
+
+use netmonitor_core::models::{
+    _entities::{alert_events as alert_events_entity, event_outbox as event_outbox_entity},
+    alert_events, event_outbox,
 };
+
 use chrono::{Duration, Utc};
 use loco_rs::testing::prelude::*;
+use netmonitor_nucleo::services::monitoring::{
+    contracts::{CheckResult, MonitorStatus},
+    result_processor::process_result,
+};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use serde_json::{json, Value};
 use serial_test::serial;

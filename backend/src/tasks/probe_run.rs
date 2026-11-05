@@ -3,7 +3,7 @@
 use loco_rs::prelude::*;
 use netmonitor_core::{agents::targets::DeviceNetworks, monitoring::CheckDeps};
 
-use crate::services::probes::agent::{ProbeAgent, ProbeAgentOptions};
+use netmonitor_nucleo::services::probes::agent::{ProbeAgent, ProbeAgentOptions};
 
 /// Processo de longa duração: o laço só termina por sinal do sistema.
 pub struct ProbeRun;

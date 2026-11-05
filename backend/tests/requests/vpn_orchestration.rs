@@ -4,12 +4,12 @@
 //! apontado para o `temp_dir` do processo antes de qualquer chamada, senão o
 //! serviço tentaria gravar em `/config`.
 
-use backend::{
-    app::App,
-    models::{vpn_peers, vpn_servers},
-    services::vpn::{key_generator, secret_store},
-};
+use backend::app::App;
+
+use netmonitor_core::models::{vpn_peers, vpn_servers};
+
 use loco_rs::testing::prelude::*;
+use netmonitor_vpn::{key_generator, secret_store};
 use sea_orm::EntityTrait;
 use serial_test::serial;
 

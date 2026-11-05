@@ -8,20 +8,21 @@
 //! - `monitors.retry_count` era gravado e nunca lido, e agora confirma a queda
 //!   antes de declarar `down`.
 
-use backend::{
-    app::App,
-    models::{_entities::alert_events as alert_events_entity, alert_events, monitor_results},
-    services::{
-        alerts::hysteresis,
-        monitoring::{
-            contracts::{CheckResult, MonitorStatus},
-            result_processor::process_result,
-        },
-    },
-    tasks::scheduler_run::run_cycle,
+use backend::{app::App, tasks::scheduler_run::run_cycle};
+
+use netmonitor_core::models::{
+    _entities::alert_events as alert_events_entity, alert_events, monitor_results,
 };
+
 use chrono::{Duration, Utc};
 use loco_rs::{testing::prelude::*, TestServer};
+use netmonitor_nucleo::{
+    services::alerts::hysteresis,
+    services::monitoring::{
+        contracts::{CheckResult, MonitorStatus},
+        result_processor::process_result,
+    },
+};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
 use serde_json::{json, Value};
 use serial_test::serial;

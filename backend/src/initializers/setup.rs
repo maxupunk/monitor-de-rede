@@ -22,7 +22,7 @@ use loco_rs::{
     Result,
 };
 
-use crate::services::auth::setup::{SetupService, SetupTokenOrigin, SETUP_TOKEN_ENV};
+use netmonitor_nucleo::services::auth::setup::{SetupService, SetupTokenOrigin, SETUP_TOKEN_ENV};
 
 /// Largura interna do quadro. 68 colunas cabem num terminal de 80 sem quebrar.
 const LARGURA: usize = 68;

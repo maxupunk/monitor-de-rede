@@ -6,45 +6,43 @@
 //! nunca roda sem passar pela confirmação, e quando roda usa os mesmos
 //! serviços da tela.
 
-use backend::{
-    app::App,
-    models::{
-        _entities::{alert_events, devices, maintenance_windows, monitor_results, monitors},
-        logs::device_logs,
-    },
-    services::{
-        ai::{
-            harness::{
-                confirmation,
-                tools::{ToolArgs, ToolPolicy, ToolRegistry},
-            },
-            settings::{self, AiSettings},
-        },
-        audit::AuditActor,
-        syslog::LogsDb,
-    },
+use backend::app::App;
+
+use netmonitor_core::models::{
+    _entities::{alert_events, devices, maintenance_windows, monitor_results, monitors},
+    logs::device_logs,
 };
+
+use netmonitor_assistant::{
+    harness::{
+        confirmation,
+        tools::{ToolArgs, ToolPolicy, ToolRegistry},
+    },
+    settings::{self, AiSettings},
+};
+
 use chrono::{Duration, Utc};
 use loco_rs::{prelude::AppContext, testing::prelude::*};
+use netmonitor_nucleo::{services::audit::AuditActor, services::syslog::LogsDb};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use serde_json::json;
 use serial_test::serial;
 
 const LEITURA: ToolPolicy = ToolPolicy {
     allow_active: false,
-    actions: backend::services::ai::settings::AiAutomationMode::Off,
+    actions: netmonitor_assistant::settings::AiAutomationMode::Off,
     confirm_active: false,
     interactive: false,
-    container_actions: backend::services::ai::settings::AiAutomationMode::Off,
+    container_actions: netmonitor_assistant::settings::AiAutomationMode::Off,
     areas: netmonitor_core::areas::AreaSet::ALL,
 };
 
 const COM_ACOES: ToolPolicy = ToolPolicy {
     allow_active: false,
-    actions: backend::services::ai::settings::AiAutomationMode::Confirm,
+    actions: netmonitor_assistant::settings::AiAutomationMode::Confirm,
     confirm_active: false,
     interactive: false,
-    container_actions: backend::services::ai::settings::AiAutomationMode::Off,
+    container_actions: netmonitor_assistant::settings::AiAutomationMode::Off,
     areas: netmonitor_core::areas::AreaSet::ALL,
 };
 
@@ -244,7 +242,7 @@ async fn analises_sem_historico_respondem_sem_inventar() {
 
         // A linha de base fica num cache do processo, por id de monitor: o
         // monitor 1 deste teste não pode herdar a de outro teste do mesmo id.
-        backend::services::alerts::baseline::clear_cache();
+        netmonitor_nucleo::services::alerts::baseline::clear_cache();
         let registro = ToolRegistry::new(LEITURA);
         let baseline = registro
             .execute(&ctx, "compare_with_baseline", r#"{"device": "borda"}"#)

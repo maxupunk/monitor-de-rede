@@ -24,7 +24,7 @@ use loco_rs::{
     Result,
 };
 
-use crate::services::syslog::{self, SyslogConfig};
+use netmonitor_nucleo::services::syslog::{self, SyslogConfig};
 
 pub struct SyslogInitializer;
 

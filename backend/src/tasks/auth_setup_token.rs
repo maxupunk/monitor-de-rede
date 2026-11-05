@@ -8,7 +8,7 @@
 
 use loco_rs::prelude::*;
 
-use crate::services::auth::setup::{SetupService, SetupTokenOrigin, SETUP_TOKEN_ENV};
+use netmonitor_nucleo::services::auth::setup::{SetupService, SetupTokenOrigin, SETUP_TOKEN_ENV};
 
 pub struct AuthSetupToken;
 

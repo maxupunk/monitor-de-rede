@@ -12,7 +12,7 @@ use loco_rs::{
 };
 use netmonitor_core::areas;
 
-use crate::services::events::EventBus;
+use netmonitor_nucleo::services::events::EventBus;
 
 pub struct AreasInitializer;
 

@@ -1,12 +1,14 @@
 //! Requisições da base CRUD e do motor de monitoramento (Fases 2 e 3).
 
-use backend::{
-    app::App,
-    models::_entities::{monitor_results, monitor_results_hourly, probes},
-    services::monitoring::{rollup::rollup_monitor_results, uptime::uptime_for_monitor},
-};
+use backend::app::App;
+
+use netmonitor_core::models::_entities::{monitor_results, monitor_results_hourly, probes};
+
 use chrono::{Duration, Utc};
 use loco_rs::testing::prelude::*;
+use netmonitor_nucleo::services::monitoring::{
+    rollup::rollup_monitor_results, uptime::uptime_for_monitor,
+};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use serial_test::serial;
 
@@ -594,7 +596,7 @@ async fn rollup_agrega_resultados_brutos_em_buckets_horarios() {
         .await
         .unwrap();
 
-        let base = backend::services::monitoring::rollup::truncate_to_hour(
+        let base = netmonitor_nucleo::services::monitoring::rollup::truncate_to_hour(
             Utc::now() - Duration::hours(3),
         ) + Duration::minutes(10);
         for sequence in 0..5 {
@@ -663,7 +665,7 @@ async fn rollup_limitado_nao_apaga_o_backlog_ainda_nao_agregado() {
             .await;
         let monitor: serde_json::Value = serde_json::from_str(&monitor.text()).unwrap();
         let monitor_id = monitor["id"].as_i64().unwrap();
-        let base = backend::services::monitoring::rollup::truncate_to_hour(
+        let base = netmonitor_nucleo::services::monitoring::rollup::truncate_to_hour(
             Utc::now() - Duration::hours(200),
         ) + Duration::minutes(5);
         let backlog = (0..170)

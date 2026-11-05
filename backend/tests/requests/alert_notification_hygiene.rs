@@ -8,23 +8,23 @@
 //! (`process_result`); o alvo real só aparece no disparo inicial (porta 9
 //! fechada em loopback = down determinístico).
 
-use backend::{
-    app::App,
-    models::{
-        _entities::alert_events as alert_events_entity, alert_events, devices, notification_outbox,
-        sites,
-    },
-    services::{
-        maintenance::data_pruner,
-        monitoring::{
-            contracts::{CheckResult, MonitorStatus},
-            result_processor::process_result,
-        },
-        notifications::outbox,
-    },
+use backend::app::App;
+
+use netmonitor_core::models::{
+    _entities::alert_events as alert_events_entity, alert_events, devices, notification_outbox,
+    sites,
 };
+
 use chrono::{Duration, Utc};
 use loco_rs::{testing::prelude::*, TestServer};
+use netmonitor_nucleo::{
+    services::maintenance::data_pruner,
+    services::monitoring::{
+        contracts::{CheckResult, MonitorStatus},
+        result_processor::process_result,
+    },
+    services::notifications::outbox,
+};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
 use serde_json::{json, Value};
 use serial_test::serial;

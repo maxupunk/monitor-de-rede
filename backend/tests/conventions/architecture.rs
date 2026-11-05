@@ -1,17 +1,22 @@
-//! Regra de dependência entre áreas (ADR 017), verificada pela suíte.
+//! Regra de dependência entre áreas (ADR 017): o que o compilador não vê.
 //!
-//! Enquanto o código de uma área não vive no seu próprio crate, o compilador
-//! não impede que o núcleo importe a área ou que uma área importe outra. Este
-//! teste faz esse papel: lê os `use crate::…` e os caminhos
-//! `crate::services::…` de cada módulo de `src/services/` e recusa qualquer
-//! dependência proibida que não esteja em [`EXCECOES`]. Uma área que já tem
-//! crate próprio conta pelo nome do crate (`netmonitor_servers::…` é a área
-//! Servidores); dentro dos crates, quem garante a regra é o `Cargo.toml`.
+//! Desde a Fase 10, cada área mora no seu crate e quem garante a regra é o
+//! `Cargo.toml`: um `use` de outra área nem compila. Ficam de fora do
+//! compilador três coisas, e é delas que este teste cuida:
 //!
-//! A lista de exceções é o retrato do acoplamento que já existia (ARQ-02 em
-//! `docs/debitos_tecnicos.md`). Ela **só diminui**: uma dependência nova fora
-//! da regra falha o teste, e uma exceção que deixou de existir também — para
-//! ser apagada da lista no mesmo PR que a eliminou.
+//! 1. **O próprio `Cargo.toml`.** Uma dependência proibida acrescentada nele
+//!    compilaria — o núcleo (`core`, `nucleo`) passaria a depender de uma área,
+//!    ou uma área de outra.
+//! 2. **O ponto de montagem.** O pacote raiz depende de tudo para montar; só
+//!    `app.rs`, os registros (`registries`) e os initializers do servidor
+//!    podem nomear um crate de área. Tarefa, binário ou SPA que importasse uma
+//!    área esconderia ali o acoplamento que os registros existem para evitar.
+//! 3. **Toda área tem consumidor.** Uma área sem nada registrado no ponto de
+//!    montagem, ou sem a sua parte no frontend, é código morto que compila.
+//!
+//! A lista de exceções que existiu até a Fase 10 (ARQ-02 em
+//! `docs/debitos_tecnicos.md`) chegou a zero e não volta: este teste não tem
+//! lista de exceções.
 
 use std::{
     collections::BTreeSet,
@@ -19,54 +24,52 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// Área de cada módulo de `services/`. O que não está aqui é do núcleo.
-const AREAS: &[(&str, &str)] = &[
-    ("discovery", "network"),
-    ("vendors", "network"),
-    ("snmp", "network"),
-    ("topology", "network"),
-    ("link_tests", "network"),
-    ("wifi", "network"),
-    ("plugins", "network"),
-    ("package_mirror", "network"),
-    // O crate da área (`netmonitor_network::…`) fora de um módulo conhecido.
-    ("network", "network"),
-    ("docker", "servers"),
-    ("databases", "servers"),
-    // O crate da área (`netmonitor_servers::…`).
-    ("servers", "servers"),
-    ("vpn", "vpn"),
-    // Não é área de produto, mas é um crate com a mesma regra: ninguém
-    // depende dele, e ele não depende de área (ADR 017, `Classifier`).
-    ("ai", "assistant"),
+/// Os crates de área e o assistente (que segue a mesma regra: ninguém depende
+/// dele, e ele não depende de área).
+const AREAS: &[&str] = &["network", "servers", "vpn", "assistant"];
+
+/// O que cada crate pode ter como dependência do workspace (sem o prefixo
+/// `netmonitor-`). `migration` é o esquema, comum a todos.
+const PERMITIDAS: &[(&str, &[&str])] = &[
+    ("agent-protocol", &[]),
+    ("core", &["agent-protocol"]),
+    ("nucleo", &["core", "agent-protocol"]),
+    ("network", &["core", "agent-protocol"]),
+    ("servers", &["core", "agent-protocol"]),
+    ("vpn", &["core", "agent-protocol"]),
+    ("assistant", &["core", "agent-protocol"]),
 ];
 
-/// Dependências proibidas que já existiam quando a regra nasceu.
-/// `(módulo de origem, módulo importado)`. Só pode diminuir.
-const EXCECOES: &[(&str, &str)] = &[];
+/// Arquivos do pacote raiz que montam as áreas.
+const PONTO_DE_MONTAGEM: &[&str] = &["app.rs", "registries.rs", "registries/", "initializers/"];
 
-/// Crates de área já extraídos e o nome com que contam na regra.
-const CRATES_DE_AREA: &[(&str, &str)] = &[
-    ("netmonitor_servers::", "servers"),
-    ("netmonitor_vpn::", "vpn"),
-    // O crate do assistente conta como o módulo `ai` (área `assistant`).
-    ("netmonitor_assistant::", "ai"),
-];
-
-/// O crate da área Rede, que conta pelo módulo seguinte.
-const CRATE_DA_REDE: &str = "netmonitor_network::";
-
-fn area_of(module: &str) -> &'static str {
-    AREAS
-        .iter()
-        .find(|(name, _)| *name == module)
-        .map_or("core", |(_, area)| area)
+fn backend() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-/// A dependência fere a regra? Núcleo não importa área; área não importa outra.
-fn proibida(origem: &str, destino: &str) -> bool {
-    let (de, para) = (area_of(origem), area_of(destino));
-    para != "core" && de != para
+/// As dependências `netmonitor-*` da seção `[dependencies]` de um manifesto.
+fn dependencias_do_workspace(manifesto: &str) -> BTreeSet<String> {
+    let mut dentro = false;
+    let mut deps = BTreeSet::new();
+    for linha in manifesto.lines() {
+        let linha = linha.trim();
+        if linha.starts_with('[') {
+            dentro = linha == "[dependencies]";
+            continue;
+        }
+        if !dentro {
+            continue;
+        }
+        if let Some(nome) = linha
+            .split('=')
+            .next()
+            .map(str::trim)
+            .and_then(|nome| nome.strip_prefix("netmonitor-"))
+        {
+            deps.insert(nome.to_owned());
+        }
+    }
+    deps
 }
 
 fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -127,191 +130,122 @@ fn sem_comentarios(source: &str) -> String {
     out
 }
 
-/// Os módulos de `services` alcançados por uma árvore de `use crate::…`.
-fn modulos_da_arvore(tree: &str, out: &mut BTreeSet<String>) {
-    let tree: String = tree.chars().filter(|c| !c.is_whitespace()).collect();
-    collect(&tree, &[], out);
-}
-
-fn collect(tree: &str, prefix: &[String], out: &mut BTreeSet<String>) {
-    if let Some(inner) = tree.strip_prefix('{').and_then(|t| t.strip_suffix('}')) {
-        let mut depth = 0;
-        let mut start = 0;
-        for (i, c) in inner.char_indices() {
-            match c {
-                '{' => depth += 1,
-                '}' => depth -= 1,
-                ',' if depth == 0 => {
-                    collect(&inner[start..i], prefix, out);
-                    start = i + 1;
-                }
-                _ => {}
-            }
-        }
-        if start < inner.len() {
-            collect(&inner[start..], prefix, out);
-        }
-        return;
-    }
-    if tree.is_empty() {
-        return;
-    }
-    let (head, rest) = tree.split_once("::").unwrap_or((tree, ""));
-    let mut path = prefix.to_vec();
-    path.push(head.to_owned());
-    if path.len() == 2 && path[0] == "services" {
-        out.insert(path[1].clone());
-        return;
-    }
-    if !rest.is_empty() {
-        collect(rest, &path, out);
-    }
-}
-
-fn dependencias(source: &str) -> BTreeSet<String> {
+/// As áreas que um código-fonte nomeia (`netmonitor_network::…`).
+fn areas_citadas(source: &str) -> BTreeSet<&'static str> {
     let code = sem_comentarios(source);
-    let mut deps = BTreeSet::new();
-    let mut rest = code.as_str();
-    while let Some(pos) = rest.find("crate::") {
-        let after = &rest[pos + "crate::".len()..];
-        let is_use = rest[..pos].trim_end().ends_with("use");
-        if is_use {
-            let end = after.find(';').unwrap_or(after.len());
-            modulos_da_arvore(&after[..end], &mut deps);
-        } else if let Some(path) = after.strip_prefix("services::") {
-            let name: String = path
-                .chars()
-                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
-                .collect();
-            if !name.is_empty() {
-                deps.insert(name);
-            }
-        }
-        rest = after;
-    }
-    for (prefixo, area) in CRATES_DE_AREA {
-        if code.contains(prefixo) {
-            deps.insert((*area).to_owned());
-        }
-    }
-    // O crate da Rede conta pelo módulo (`netmonitor_network::snmp::…` é o
-    // módulo `snmp`), para as exceções continuarem dizendo o que acoplam.
-    let mut resto = code.as_str();
-    while let Some(pos) = resto.find(CRATE_DA_REDE) {
-        let depois = &resto[pos + CRATE_DA_REDE.len()..];
-        let nome: String = depois
-            .chars()
-            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
-            .collect();
-        let modulo = AREAS
-            .iter()
-            .find(|(modulo, area)| *modulo == nome && *area == "network")
-            .map_or("network", |(modulo, _)| modulo);
-        deps.insert(modulo.to_owned());
-        resto = depois;
-    }
-    deps
+    AREAS
+        .iter()
+        .copied()
+        .filter(|area| code.contains(&format!("netmonitor_{area}::")))
+        .collect()
 }
 
-/// `(origem, destino)` de toda dependência proibida em `src/services/`.
-fn violacoes() -> BTreeSet<(String, String)> {
-    let services = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/services");
-    let mut files = Vec::new();
-    rust_files(&services, &mut files);
-    let mut found = BTreeSet::new();
-    for file in files {
-        let relative = file.strip_prefix(&services).expect("dentro de services");
-        let first = relative
-            .components()
-            .next()
-            .expect("caminho não vazio")
-            .as_os_str()
+#[test]
+fn os_manifestos_seguem_a_regra_de_dependencia() {
+    let mut violacoes = Vec::new();
+    for (krate, permitidas) in PERMITIDAS {
+        let manifesto = fs::read_to_string(backend().join("crates").join(krate).join("Cargo.toml"))
+            .expect("manifesto legível");
+        for dep in dependencias_do_workspace(&manifesto) {
+            if !permitidas.contains(&dep.as_str()) {
+                violacoes.push(format!("{krate} → {dep}"));
+            }
+        }
+    }
+    assert!(
+        violacoes.is_empty(),
+        "dependências que ferem a regra do ADR 017 (núcleo não depende de área; área não \
+         depende de outra nem do `nucleo`) — resolva por um trait do `core`: {violacoes:?}"
+    );
+}
+
+#[test]
+fn todo_crate_do_workspace_tem_regra() {
+    let mut sem_regra = Vec::new();
+    for entry in fs::read_dir(backend().join("crates")).expect("crates/ legível") {
+        let nome = entry
+            .expect("entrada")
+            .file_name()
             .to_string_lossy()
-            .trim_end_matches(".rs")
-            .to_owned();
-        if first == "mod" {
+            .into_owned();
+        if !PERMITIDAS.iter().any(|(krate, _)| *krate == nome) {
+            sem_regra.push(nome);
+        }
+    }
+    assert!(
+        sem_regra.is_empty(),
+        "crate novo sem regra de dependência em PERMITIDAS: {sem_regra:?}"
+    );
+}
+
+#[test]
+fn so_o_ponto_de_montagem_importa_area() {
+    let src = backend().join("src");
+    let mut files = Vec::new();
+    rust_files(&src, &mut files);
+    let mut violacoes = Vec::new();
+    for file in files {
+        let relativo = file
+            .strip_prefix(&src)
+            .expect("dentro de src")
+            .to_string_lossy()
+            .replace('\\', "/");
+        if PONTO_DE_MONTAGEM
+            .iter()
+            .any(|permitido| relativo == *permitido || relativo.starts_with(permitido))
+        {
             continue;
         }
         let source = fs::read_to_string(&file).expect("arquivo legível");
-        for dep in dependencias(&source) {
-            if dep != first && proibida(&first, &dep) {
-                found.insert((first.clone(), dep));
-            }
+        for area in areas_citadas(&source) {
+            violacoes.push(format!("src/{relativo} → {area}"));
         }
     }
-    found
-}
-
-#[test]
-fn nenhuma_dependencia_nova_entre_areas() {
-    let permitidas: BTreeSet<(String, String)> = EXCECOES
-        .iter()
-        .map(|(a, b)| ((*a).to_owned(), (*b).to_owned()))
-        .collect();
-    let atuais = violacoes();
-
-    let novas: Vec<_> = atuais.difference(&permitidas).collect();
     assert!(
-        novas.is_empty(),
-        "dependências novas que ferem a regra do ADR 017 (núcleo não importa área; \
-         área não importa outra) — resolva por um trait do núcleo: {novas:?}"
-    );
-
-    let resolvidas: Vec<_> = permitidas.difference(&atuais).collect();
-    assert!(
-        resolvidas.is_empty(),
-        "estas exceções não existem mais — apague-as de EXCECOES em \
-         tests/architecture.rs (a lista só diminui): {resolvidas:?}"
+        violacoes.is_empty(),
+        "fora do ponto de montagem (app.rs, registries, initializers), o pacote raiz não \
+         nomeia área — peça pelo registro: {violacoes:?}"
     );
 }
 
 #[test]
-fn o_detector_enxerga_use_agrupado_e_caminho_inline() {
+fn toda_area_tem_consumidor() {
+    let registries =
+        fs::read_to_string(backend().join("src/registries.rs")).expect("registries legível");
+    let montadas = areas_citadas(&registries);
+    let frontend = backend().join("../frontend/src/areas");
+    for area in AREAS {
+        assert!(
+            montadas.contains(area),
+            "a área `{area}` não contribui nada ao ponto de montagem (src/registries.rs)"
+        );
+        // O assistente não é área de produto: não tem menu próprio.
+        if *area != "assistant" {
+            assert!(
+                frontend.join(area).join("index.ts").is_file(),
+                "a área `{area}` não tem a sua parte no frontend (frontend/src/areas/{area})"
+            );
+        }
+    }
+}
+
+#[test]
+fn o_detector_ignora_comentarios_e_le_os_manifestos() {
     let source = r"
-        // use crate::services::docker::Fake;
-        use crate::{
-            models::devices,
-            services::{
-                shared::errors::AppResult,
-                vpn::{self, peers},
-            },
-        };
-        fn f() { crate::services::wifi::collector::run(); }
-        fn g() { netmonitor_servers::docker::enabled(); }
-        const DOC: &str = /* crate::services::snmp */ 1;
+        // use netmonitor_servers::docker::Fake;
+        fn f() { netmonitor_network::snmp::client::run(); }
+        const DOC: &str = /* netmonitor_vpn::x */ 1;
     ";
-    let deps = dependencias(source);
-    assert!(deps.contains("vpn"));
-    assert!(deps.contains("servers"), "crate de área conta pelo nome");
-    assert!(
-        dependencias("fn h() { netmonitor_vpn::probe_is_external(); }").contains("vpn"),
-        "o crate da VPN também"
-    );
-    assert!(
-        dependencias("use netmonitor_assistant::settings;").contains("ai"),
-        "e o do assistente, que conta como o módulo `ai`"
-    );
-    assert!(
-        dependencias("use netmonitor_network::snmp::client;").contains("snmp"),
-        "o da Rede conta pelo módulo"
-    );
-    assert!(
-        dependencias("use netmonitor_network::NetworkPolicy;").contains("network"),
-        "e, fora de um módulo conhecido, pela área"
-    );
-    assert!(deps.contains("shared"));
-    assert!(deps.contains("wifi"));
-    assert!(!deps.contains("docker"), "comentário não conta");
-    assert!(!deps.contains("snmp"), "comentário de bloco não conta");
-}
+    let citadas = areas_citadas(source);
+    assert!(citadas.contains("network"));
+    assert!(!citadas.contains("servers"), "comentário não conta");
+    assert!(!citadas.contains("vpn"), "comentário de bloco não conta");
 
-#[test]
-fn regra_da_area() {
-    assert!(proibida("monitoring", "docker"), "núcleo não importa área");
-    assert!(proibida("docker", "vpn"), "área não importa outra");
-    assert!(!proibida("docker", "shared"), "área importa o núcleo");
-    assert!(
-        !proibida("discovery", "snmp"),
-        "dentro da mesma área é livre"
+    let manifesto = "[package]\nname = \"x\"\n[dependencies]\nnetmonitor-core = { workspace = true }\nserde = \"1\"\n[dev-dependencies]\nnetmonitor-network = { workspace = true }\n";
+    let deps = dependencias_do_workspace(manifesto);
+    assert_eq!(
+        deps.into_iter().collect::<Vec<_>>(),
+        vec!["core".to_owned()],
+        "só [dependencies] conta"
     );
 }

@@ -1,10 +1,7 @@
 use axum::http::{HeaderName, HeaderValue};
-use backend::{
-    mailers::auth::AuthMailer,
-    models::{users, users::RegisterParams},
-    views::auth::LoginResponse,
-};
 use loco_rs::{app::AppContext, TestServer};
+use netmonitor_core::models::{users, users::RegisterParams};
+use netmonitor_nucleo::{mailers::auth::AuthMailer, views::auth::LoginResponse};
 use sea_orm::IntoActiveModel;
 
 pub const USER_EMAIL: &str = "test@loco.com";

@@ -9,7 +9,7 @@ use loco_rs::{
     Result,
 };
 
-use crate::services::ai::proactive;
+use netmonitor_assistant::proactive;
 
 pub struct AiInitializer;
 

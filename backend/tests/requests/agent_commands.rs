@@ -12,7 +12,6 @@ use agent_protocol::{
     Command, ErrorCode,
 };
 use async_trait::async_trait;
-use backend::services::agent_runtime::executor::{CommandExecutor, LocalExecutor};
 use netmonitor_core::{
     agents::{command::AgentCommandHandlers, targets::DeviceNetworks},
     monitoring::CheckDeps,
@@ -26,6 +25,7 @@ use netmonitor_network::{
         Flow, ThroughputReport, ThroughputSample, CANCELLED_MESSAGE,
     },
 };
+use netmonitor_nucleo::services::agent_runtime::executor::{CommandExecutor, LocalExecutor};
 use serde_json::Value;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;

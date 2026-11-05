@@ -140,7 +140,7 @@ async fn a_comunidade_padrao_e_gravada_no_dispositivo_com_snmp_ligado() {
 #[tokio::test]
 #[serial]
 async fn a_trava_de_descoberta_impede_o_enfileiramento_sem_apagar_a_rede() {
-    use backend::services::discovery::queue::schedule_due_networks;
+    use netmonitor_network::discovery::queue::schedule_due_networks;
 
     request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
         autenticado(&mut request, &ctx).await;
@@ -264,8 +264,8 @@ async fn database_size_retorna_tamanho_tipo_e_datas_do_banco() {
 #[tokio::test]
 #[serial]
 async fn clear_history_limpa_dados_historicos_e_retorna_estatisticas() {
-    use backend::models::_entities::{devices, metrics};
     use chrono::Utc;
+    use netmonitor_core::models::_entities::{devices, metrics};
     use sea_orm::{ActiveModelTrait, ActiveValue::Set};
 
     request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
@@ -326,7 +326,7 @@ async fn clear_history_exige_perfil_administrador() {
     request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
         let op_session = prepare_data::init_operator(&ctx).await;
         let mut active = op_session.user.into_active_model();
-        active.role = Set(backend::services::users::Role::Operator
+        active.role = Set(netmonitor_nucleo::services::users::Role::Operator
             .as_str()
             .to_string());
         active.update(&ctx.db).await.unwrap();
@@ -371,7 +371,7 @@ async fn onboarding_status_e_conclusao_funcionam_corretamente() {
 #[tokio::test]
 #[serial]
 async fn clear_all_items_limpa_cadastros_e_restaura_sistema_como_admin() {
-    use backend::models::_entities::{devices, monitors, networks, sites};
+    use netmonitor_core::models::_entities::{devices, monitors, networks, sites};
     use sea_orm::EntityTrait;
 
     request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
@@ -452,7 +452,7 @@ async fn clear_all_items_exige_perfil_administrador() {
     request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
         let op_session = prepare_data::init_operator(&ctx).await;
         let mut active = op_session.user.into_active_model();
-        active.role = Set(backend::services::users::Role::Operator
+        active.role = Set(netmonitor_nucleo::services::users::Role::Operator
             .as_str()
             .to_string());
         active.update(&ctx.db).await.unwrap();

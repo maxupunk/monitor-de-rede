@@ -32,30 +32,30 @@ use netmonitor_vpn::central::{Central, CentralServices};
 use sea_orm::DatabaseConnection;
 use serde_json::Value;
 
-use crate::{
+use netmonitor_nucleo::{
     controllers::devices::present_for_vpn,
-    services::{
-        agents::install_address,
-        ai_tools::{
-            actions, alert_rules, analysis, ask, audit, charts, dashboard, diagnostics, grep,
-            history, inventory, logs, platform, schedules,
-        },
-        alerts::{
-            catalog as alert_catalog, inhibition, manager as alert_manager,
-            recovery as alert_recovery, vpn_peer_watcher,
-        },
-        devices::identify,
-        docker::{
-            engine, hosts,
-            source::{DockerEngine, LocalEngine},
-        },
-        notifications::NotificationService,
-        plugins::{ai_tools as plugins, auto_accept, credentials},
-        server_addresses,
-        shared::errors::AppResult,
-        webpush::{deliver, Audience},
+    services::agents::install_address,
+    services::ai_tools::{
+        actions, alert_rules, analysis, ask, audit, charts, dashboard, diagnostics, grep, history,
+        inventory, logs, platform, schedules,
     },
+    services::alerts::{
+        catalog as alert_catalog, inhibition, manager as alert_manager, recovery as alert_recovery,
+        vpn_peer_watcher,
+    },
+    services::devices::identify,
+    services::notifications::NotificationService,
+    services::server_addresses,
+    services::shared::errors::AppResult,
+    services::webpush::{deliver, Audience},
 };
+
+use netmonitor_servers::docker::{
+    engine, hosts,
+    source::{DockerEngine, LocalEngine},
+};
+
+use netmonitor_network::plugins::{ai_tools as plugins, auto_accept, credentials};
 
 /// As políticas das áreas opcionais.
 #[must_use]

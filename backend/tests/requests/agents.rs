@@ -4,37 +4,35 @@
 use std::{sync::Arc, time::Duration};
 
 use async_trait::async_trait;
-use backend::{
-    app::App,
-    models::{devices, monitor_results, monitors, probes, users},
-    services::{
-        agent_runtime::{executor::CommandExecutor, tunnel::LocalTunnelOpener},
-        agents::{
-            background,
-            connection::{self, HandshakeError},
-            hub::AgentHub,
-            inbound,
-            policy::{Permission, Policy},
-            protocol::{
-                AgentEvent, Body, Capability, Command, DockerCall, Envelope, Hello, RemoteError,
-                WireFrame, PROTOCOL_VERSION,
-            },
-            service::AgentService,
-        },
-        docker::{
-            engine,
-            hosts::{self, HostKey},
-        },
-        events::EventBus,
-        probes::{dispatcher, DEFAULT_VPN_PROBE_TOKEN},
-        shared::crypto::sha256_hex,
-        telemetry::rollup::{ContainerRollup, HostRollup, MetricsRollup},
-        users::Role,
-    },
-    views::docker::{DockerLiveSnapshot, DockerStatusResponse},
-};
+use backend::app::App;
 use chrono::Utc;
 use loco_rs::{app::AppContext, testing::prelude::*};
+use netmonitor_core::models::{devices, monitor_results, monitors, probes, users};
+use netmonitor_nucleo::{
+    services::agent_runtime::{executor::CommandExecutor, tunnel::LocalTunnelOpener},
+    services::agents::{
+        background,
+        connection::{self, HandshakeError},
+        hub::AgentHub,
+        inbound,
+        policy::{Permission, Policy},
+        protocol::{
+            AgentEvent, Body, Capability, Command, DockerCall, Envelope, Hello, RemoteError,
+            WireFrame, PROTOCOL_VERSION,
+        },
+        service::AgentService,
+    },
+    services::events::EventBus,
+    services::probes::{dispatcher, DEFAULT_VPN_PROBE_TOKEN},
+    services::shared::crypto::sha256_hex,
+    services::telemetry::rollup::{ContainerRollup, HostRollup, MetricsRollup},
+    services::users::Role,
+    views::docker::{DockerLiveSnapshot, DockerStatusResponse},
+};
+use netmonitor_servers::docker::{
+    engine,
+    hosts::{self, HostKey},
+};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
 use serde_json::{json, Value};
 use serial_test::serial;
@@ -578,7 +576,7 @@ fn rollup(bucket_at: chrono::DateTime<Utc>, cpu: f64) -> MetricsRollup {
 async fn rollup_do_agente_vira_historico_e_reenvio_nao_duplica() {
     request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
         let (probe, _) = enrolled_agent(&ctx, "srv-historico").await;
-        let bucket = backend::services::telemetry::rollup::bucket_of(Utc::now());
+        let bucket = netmonitor_nucleo::services::telemetry::rollup::bucket_of(Utc::now());
         for cpu in [40.0, 60.0] {
             inbound::handle(
                 &ctx,

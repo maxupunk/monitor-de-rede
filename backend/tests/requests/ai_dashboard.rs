@@ -2,15 +2,15 @@
 //! e a IA lê o layout e só o muda depois da confirmação — a cada chamada,
 //! também no modo automático.
 
-use backend::{
-    app::App,
-    models::_entities::event_outbox,
-    services::ai::{
-        harness::tools::{ToolArgs, ToolPolicy, ToolRegistry, Verdict},
-        settings::AiAutomationMode,
-    },
-};
+use backend::app::App;
+
+use netmonitor_core::models::_entities::event_outbox;
+
 use loco_rs::{app::AppContext, testing::prelude::*};
+use netmonitor_assistant::{
+    harness::tools::{ToolArgs, ToolPolicy, ToolRegistry, Verdict},
+    settings::AiAutomationMode,
+};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use serde_json::{json, Value};
 use serial_test::serial;
@@ -146,7 +146,7 @@ async fn ia_so_muda_o_layout_confirmada_e_avisa_as_abas() {
         }
         assert!(
             !ToolRegistry::new(politica(AiAutomationMode::Off))
-                .tool_names(backend::services::ai::harness::tools::ToolGroup::Dashboard)
+                .tool_names(netmonitor_assistant::harness::tools::ToolGroup::Dashboard)
                 .contains(&"update_dashboard_layout"),
             "ações desligadas: só a leitura"
         );

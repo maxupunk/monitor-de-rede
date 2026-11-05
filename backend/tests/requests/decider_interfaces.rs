@@ -5,12 +5,12 @@
 //! monitorar vêm com confiança; e com a frente desligada a resposta é
 //! `available: false`, sem consulta.
 
-use backend::{
-    app::App,
-    dtos::snmp::InterfaceSuggestions,
-    services::ai::{decider::decisions::interfaces::InterfaceCandidate, settings},
-};
+use backend::app::App;
+
+use netmonitor_network::dtos::snmp::InterfaceSuggestions;
+
 use loco_rs::testing::prelude::*;
+use netmonitor_assistant::{decider::decisions::interfaces::InterfaceCandidate, settings};
 use serde_json::json;
 use serial_test::serial;
 

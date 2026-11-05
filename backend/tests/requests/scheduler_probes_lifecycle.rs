@@ -1,15 +1,15 @@
 //! Requisições do motor de alertas e do protocolo de probes (Fases 6 e 7).
 
-use backend::{
-    app::App,
-    models::{_entities::probe_tasks, monitor_results, monitors, probes},
-    services::{
-        probes::{dispatcher, DEFAULT_VPN_PROBE_TOKEN},
-        shared::crypto::sha256_hex,
-    },
-};
+use backend::app::App;
+
+use netmonitor_core::models::{_entities::probe_tasks, monitor_results, monitors, probes};
+
 use chrono::{Duration, Utc};
 use loco_rs::testing::prelude::*;
+use netmonitor_nucleo::{
+    services::probes::{dispatcher, DEFAULT_VPN_PROBE_TOKEN},
+    services::shared::crypto::sha256_hex,
+};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use serial_test::serial;
 

@@ -6,16 +6,16 @@
 //! chat executando a proposta do servidor; e a proposta decidida numa tela
 //! não roda de novo em outra.
 
-use backend::{
-    app::App,
-    models::_entities::{alert_rules, devices},
-    services::ai::{
-        approvals::{self, ApprovalRequest},
-        harness::tools::{AiToolRisk, RiskAssessment, ToolArgs, ToolPolicy, ToolRegistry, Verdict},
-        settings::{self, AiAutomationMode, AiSettings},
-    },
-};
+use backend::app::App;
+
+use netmonitor_core::models::_entities::{alert_rules, devices};
+
 use loco_rs::{prelude::AppContext, testing::prelude::*};
+use netmonitor_assistant::{
+    approvals::{self, ApprovalRequest},
+    harness::tools::{AiToolRisk, RiskAssessment, ToolArgs, ToolPolicy, ToolRegistry, Verdict},
+    settings::{self, AiAutomationMode, AiSettings},
+};
 use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 use serde_json::{json, Value};
 use serial_test::serial;

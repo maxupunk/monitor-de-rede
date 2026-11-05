@@ -4,16 +4,15 @@
 //! na primeira vez), amostra host e containers e mantém o canal de saída com
 //! a central. Ver `services::agent_runtime`.
 
-use backend::{
-    registries,
-    services::agent_runtime::{
-        client::{self, AgentHost},
-        config::AgentConfig,
-    },
-};
+use backend::registries;
+
 use netmonitor_core::{
     agents::targets::DeviceNetworks, monitoring::CheckDeps,
     network_tools::ping_client::PingClientCell,
+};
+use netmonitor_nucleo::services::agent_runtime::{
+    client::{self, AgentHost},
+    config::AgentConfig,
 };
 use tracing_subscriber::EnvFilter;
 

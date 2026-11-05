@@ -6,14 +6,14 @@
 //! segundo boot e — o caso que quebrava tudo em silêncio — sem passar a
 //! apontar para outro equipamento depois de uma restauração de backup.
 
-use backend::{
-    app::App,
-    models::devices,
-    services::devices::system_device::{
-        self, ProposedIdentity, SystemDeviceService, NETMONITOR_KEY,
-    },
-};
+use backend::app::App;
+
+use netmonitor_core::models::devices;
+
 use loco_rs::testing::prelude::*;
+use netmonitor_nucleo::services::devices::system_device::{
+    self, ProposedIdentity, SystemDeviceService, NETMONITOR_KEY,
+};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, Set};
 use serde_json::Value;
 use serial_test::serial;

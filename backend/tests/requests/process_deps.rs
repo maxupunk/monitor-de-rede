@@ -4,18 +4,17 @@
 //! do caminho do servidor** — e o caminho do servidor é o único onde os
 //! `Initializer` do Loco rodam. Estes testes fecham exatamente essa brecha.
 
-use backend::{
-    app::App,
-    services::{
-        discovery::service::ScanSessionService,
-        events::{relay::relay_pending, EventBus},
-        monitoring::checkers::ping::PingClientCell,
-    },
-    tasks::scheduler_run::run_cycle,
-};
+use backend::{app::App, tasks::scheduler_run::run_cycle};
+
+use netmonitor_network::discovery::service::ScanSessionService;
+
 use chrono::Utc;
 use loco_rs::{
     app::Hooks, boot::create_context, environment::Environment, testing::prelude::*, Result,
+};
+use netmonitor_nucleo::{
+    services::events::{relay::relay_pending, EventBus},
+    services::monitoring::checkers::ping::PingClientCell,
 };
 use sea_orm::{ActiveModelTrait, Set};
 use serial_test::serial;
@@ -73,7 +72,7 @@ async fn o_ciclo_do_scheduler_nao_consome_o_outbox() {
     request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
         let bus = EventBus::from_context(&ctx).expect("barramento inicializado");
 
-        backend::models::event_outbox::ActiveModel {
+        netmonitor_core::models::event_outbox::ActiveModel {
             r#type: Set("monitor:result".into()),
             origin: Set("outro-processo".into()),
             payload: Set(serde_json::json!({

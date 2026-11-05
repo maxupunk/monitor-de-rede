@@ -14,20 +14,19 @@
 
 use std::{net::IpAddr, sync::Arc, time::Duration};
 
-use backend::{
-    models::logs::device_logs,
-    services::syslog::{
-        config::SyslogConfig,
-        db,
-        ingest::Ingestor,
-        listener,
-        matcher::PatternMatcher,
-        queue::{IngestMetrics, LogQueue},
-        sources::SourceRegistry,
-        writer,
-    },
-};
+use netmonitor_core::models::logs::device_logs;
+
 use migration::{Migrator, MigratorTrait};
+use netmonitor_nucleo::services::syslog::{
+    config::SyslogConfig,
+    db,
+    ingest::Ingestor,
+    listener,
+    matcher::PatternMatcher,
+    queue::{IngestMetrics, LogQueue},
+    sources::SourceRegistry,
+    writer,
+};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ConnectOptions, Database, DatabaseConnection, EntityTrait,
     PaginatorTrait,
@@ -51,7 +50,7 @@ async fn inventario(com_rede: bool) -> DatabaseConnection {
     Migrator::up(&db, None).await.expect("migrations");
 
     if com_rede {
-        backend::models::_entities::networks::ActiveModel {
+        netmonitor_core::models::_entities::networks::ActiveModel {
             name: Set("loopback".into()),
             cidr: Set("127.0.0.0/8".into()),
             scan_enabled: Set(false),

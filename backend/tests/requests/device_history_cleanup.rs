@@ -1,14 +1,13 @@
 //! Testes de limpeza e manutenção de histórico em dispositivos e descoberta SNMP.
 
-use backend::{
-    app::App,
-    models::{
-        _entities::{alert_events, metrics, monitor_results},
-        devices, monitors,
-    },
-};
+use backend::app::App;
+
 use chrono::Utc;
 use loco_rs::testing::prelude::*;
+use netmonitor_core::models::{
+    _entities::{alert_events, metrics, monitor_results},
+    devices, monitors,
+};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use serde_json::json;
 use serial_test::serial;
@@ -252,7 +251,7 @@ async fn atualizar_dispositivo_com_clear_history_false_preserva_historico() {
 #[tokio::test]
 #[serial]
 async fn atualizar_dispositivo_com_interfaces_e_clear_history_true_apaga_metricas_de_interfaces() {
-    use backend::models::device_interfaces;
+    use netmonitor_core::models::device_interfaces;
 
     request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
         autenticado(&mut request, &ctx).await;

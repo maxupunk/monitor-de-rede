@@ -1,9 +1,8 @@
 use loco_rs::prelude::*;
 
-use crate::{
-    mailers::auth::AuthMailer,
-    models::{_entities::users, users::RegisterParams},
-};
+use netmonitor_nucleo::mailers::auth::AuthMailer;
+
+use netmonitor_core::models::{_entities::users, users::RegisterParams};
 
 pub struct UserCreate;
 #[async_trait]

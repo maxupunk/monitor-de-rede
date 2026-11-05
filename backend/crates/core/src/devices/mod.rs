@@ -5,6 +5,7 @@
 pub mod access;
 pub mod adapters;
 pub mod kinds;
+pub mod snmp_cadence;
 pub mod system_device;
 pub mod systems;
 pub mod vpn_peer;

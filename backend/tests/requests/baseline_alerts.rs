@@ -1,22 +1,22 @@
 //! Baseline móvel e alertas por desvio (Fase 3 do roadmap mestre).
 
-use backend::{
-    app::App,
-    models::{
-        _entities::alert_events as alert_events_entity, alert_events, device_interfaces, devices,
-        metrics, monitor_results_hourly,
-    },
-    services::{
-        alerts::{
-            baseline::{self, MIN_BUCKETS_FOR_BASELINE},
-            datasets::monitor_result,
-            fields,
-        },
-        monitoring::contracts::{CheckMetric, CheckResult, MonitorStatus},
-    },
+use backend::app::App;
+
+use netmonitor_core::models::{
+    _entities::alert_events as alert_events_entity, alert_events, device_interfaces, devices,
+    metrics, monitor_results_hourly,
 };
+
 use chrono::{Duration, Utc};
 use loco_rs::{app::Hooks, testing::prelude::*, TestServer};
+use netmonitor_nucleo::{
+    services::alerts::{
+        baseline::{self, MIN_BUCKETS_FOR_BASELINE},
+        datasets::monitor_result,
+        fields,
+    },
+    services::monitoring::contracts::{CheckMetric, CheckResult, MonitorStatus},
+};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use serde_json::json;
 use serial_test::serial;
@@ -85,7 +85,7 @@ async fn monitor_externo(request: &TestServer, policy: serde_json::Value) -> (i6
 }
 
 fn limpar_cache() {
-    backend::services::alerts::baseline::clear_cache();
+    netmonitor_nucleo::services::alerts::baseline::clear_cache();
 }
 
 async fn buckets_de_baseline(ctx: &loco_rs::app::AppContext, monitor_id: i64) {
@@ -248,7 +248,7 @@ async fn regra_de_desvio_de_latencia_dispara_quando_acima_da_baseline() {
         );
 
         // Processa o resultado: a regra deve disparar imediatamente (durationSeconds = 0).
-        backend::services::monitoring::result_processor::process_result(
+        netmonitor_nucleo::services::monitoring::result_processor::process_result(
             &ctx,
             monitor_id,
             &resultado(40.0, 0.0),
@@ -302,7 +302,7 @@ async fn regra_de_desvio_de_latencia_nao_dispara_abaixo_do_limiar() {
         let rule_id = rule["id"].as_i64().unwrap();
 
         // Latência de 25 ms: 25% acima da baseline, abaixo do limiar de 50%.
-        backend::services::monitoring::result_processor::process_result(
+        netmonitor_nucleo::services::monitoring::result_processor::process_result(
             &ctx,
             monitor_id,
             &resultado(25.0, 0.0),
@@ -357,7 +357,7 @@ async fn regra_de_anomalia_estatistica_por_z_score_dispara_acima_de_3_sigmas() {
         let rule_id = rule["id"].as_i64().unwrap();
 
         // Latência de 30 ms com baseline de 20 ms -> Z-Score = (30 - 20) / 0.5 = 20.0 >= 3.0
-        backend::services::monitoring::result_processor::process_result(
+        netmonitor_nucleo::services::monitoring::result_processor::process_result(
             &ctx,
             monitor_id,
             &resultado(30.0, 0.0),
@@ -425,7 +425,7 @@ async fn alvo_externo_com_latencia_regional_alta_nao_dispara_regra_absoluta() {
         buckets_de_baseline_com_latencia(&ctx, monitor_id, 220.0).await;
         limpar_cache();
 
-        backend::services::monitoring::result_processor::process_result(
+        netmonitor_nucleo::services::monitoring::result_processor::process_result(
             &ctx,
             monitor_id,
             &resultado(225.0, 0.0),
@@ -463,7 +463,7 @@ async fn alvo_externo_exige_tres_desvios_consecutivos_antes_do_alerta() {
         let start = Utc::now() - Duration::seconds(10);
 
         for occurrence in 0..3 {
-            backend::services::monitoring::result_processor::process_result(
+            netmonitor_nucleo::services::monitoring::result_processor::process_result(
                 &ctx,
                 monitor_id,
                 &resultado_em(340.0, 0.0, start + Duration::seconds(occurrence)),
@@ -559,7 +559,7 @@ async fn saturacao_da_wan_quebra_a_sequencia_de_alerta_de_latencia() {
                 .await
                 .unwrap();
             }
-            backend::services::monitoring::result_processor::process_result(
+            netmonitor_nucleo::services::monitoring::result_processor::process_result(
                 &ctx,
                 monitor_id,
                 &resultado_em(340.0, 0.0, observed_at),

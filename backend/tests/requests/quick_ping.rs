@@ -4,8 +4,12 @@
 //! ICMP sem privilégio (sysctl fechado, Windows), a resposta tem que ser o 503
 //! que diz o que fazer, nunca um 500.
 
-use backend::{app::App, models::devices, services::users::Role};
+use backend::app::App;
+
+use netmonitor_core::models::devices;
+
 use loco_rs::{app::AppContext, testing::prelude::*};
+use netmonitor_nucleo::services::users::Role;
 use sea_orm::{ActiveModelTrait, IntoActiveModel, Set};
 use serde_json::{json, Value};
 use serial_test::serial;

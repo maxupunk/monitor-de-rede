@@ -5,21 +5,21 @@
 //! dialeto do banco de teste, os gráficos chegam com pontos para a tela e só
 //! o resumo para a IA, e ferramenta ativa desabilitada não roda.
 
-use backend::{
-    app::App,
-    models::_entities::{
-        alert_events, device_interfaces, devices, metrics, monitor_results, monitors,
-    },
-    services::ai::{
-        drivers::traits::AiMessage,
-        harness::{
-            grounding::invented_target,
-            tools::{ToolPolicy, ToolRegistry},
-        },
-    },
+use backend::app::App;
+
+use netmonitor_core::models::_entities::{
+    alert_events, device_interfaces, devices, metrics, monitor_results, monitors,
 };
+
 use chrono::{Duration, Utc};
 use loco_rs::{prelude::AppContext, testing::prelude::*};
+use netmonitor_assistant::{
+    drivers::traits::AiMessage,
+    harness::{
+        grounding::invented_target,
+        tools::{ToolPolicy, ToolRegistry},
+    },
+};
 use sea_orm::{ActiveModelTrait, Set};
 use serde_json::json;
 use serial_test::serial;

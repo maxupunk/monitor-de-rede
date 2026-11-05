@@ -17,9 +17,7 @@ use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 use std::path::Path;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-#[allow(unused_imports)]
 use crate::{
-    controllers,
     initializers::ai::AiInitializer,
     initializers::areas::AreasInitializer,
     initializers::btest::BtestInitializer,
@@ -29,12 +27,12 @@ use crate::{
     initializers::setup::SetupInitializer,
     initializers::syslog::SyslogInitializer,
     initializers::system_device::SystemDeviceInitializer,
-    models::_entities::users,
-    models::tables,
-    services::{alerts, syslog},
     spa, tasks,
     tasks::scheduler_run::{SchedulerLoop, SchedulerRun},
 };
+use netmonitor_core::{models::_entities::users, models::tables};
+#[allow(unused_imports)]
+use netmonitor_nucleo::{controllers, services::alerts, services::syslog};
 
 /// Os crates do workspace cujo log o filtro padrão precisa liberar.
 const WORKSPACE_CRATES: &[&str] = &[
@@ -55,13 +53,7 @@ impl Hooks for App {
     }
 
     fn app_version() -> String {
-        format!(
-            "{} ({})",
-            env!("CARGO_PKG_VERSION"),
-            option_env!("BUILD_SHA")
-                .or(option_env!("GITHUB_SHA"))
-                .unwrap_or("dev")
-        )
+        netmonitor_nucleo::app_version()
     }
 
     async fn boot(
@@ -84,7 +76,7 @@ impl Hooks for App {
         require_jwt_secret_in_production();
         // Todo pânico do processo vai ao log com o local e, dentro de uma
         // requisição, com o código do incidente que a tela mostra.
-        crate::services::shared::incident::install_panic_hook();
+        netmonitor_nucleo::services::shared::incident::install_panic_hook();
         process_deps::install(&ctx);
         enable_sqlite_wal(&ctx).await;
         // O banco de logs é separado e tem migrator próprio. Fica aqui, e não
@@ -197,7 +189,9 @@ impl Hooks for App {
                 netmonitor_servers::controllers::databases::routes().layer(business_auth.clone()),
             )
             .add_route(controllers::sites::routes().layer(business_auth.clone()))
-            .add_route(controllers::networks::routes().layer(business_auth.clone()))
+            .add_route(
+                netmonitor_network::controllers::networks::routes().layer(business_auth.clone()),
+            )
             .add_route(controllers::devices::routes().layer(business_auth.clone()))
             .add_route(controllers::monitors::routes().layer(business_auth.clone()))
             .add_route(
@@ -235,8 +229,11 @@ impl Hooks for App {
             .add_route(
                 netmonitor_vpn::controllers::vpn_servers::routes().layer(business_auth.clone()),
             )
-            .add_route(controllers::ai::routes().layer(business_auth.clone()))
-            .add_route(controllers::ai_conversations::routes().layer(business_auth.clone()))
+            .add_route(netmonitor_assistant::controllers::ai::routes().layer(business_auth.clone()))
+            .add_route(
+                netmonitor_assistant::controllers::ai_conversations::routes()
+                    .layer(business_auth.clone()),
+            )
             .add_route(
                 netmonitor_network::controllers::plugins::routes().layer(business_auth.clone()),
             )
@@ -260,7 +257,7 @@ impl Hooks for App {
     async fn after_routes(router: AxumRouter, _ctx: &AppContext) -> Result<AxumRouter> {
         Ok(
             spa::mount(router, &spa::web_root()).layer(axum::middleware::from_fn(
-                crate::services::shared::incident::track,
+                netmonitor_nucleo::services::shared::incident::track,
             )),
         )
     }

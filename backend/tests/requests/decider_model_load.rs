@@ -8,15 +8,16 @@
 
 use std::time::Duration;
 
-use backend::{
-    app::App,
-    dtos::ai::TestDeciderResponse,
-    services::ai::{
+use backend::app::App;
+
+use loco_rs::testing::prelude::*;
+use netmonitor_assistant::{
+    dtos::TestDeciderResponse,
+    {
         decider::{config::AiDeciderSettings, runtime::DeciderRuntime, tool_routing},
         harness::tools::ToolGroup,
     },
 };
-use loco_rs::testing::prelude::*;
 use serde_json::json;
 use serial_test::serial;
 

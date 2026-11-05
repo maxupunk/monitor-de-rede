@@ -6,18 +6,14 @@
 use std::time::Duration;
 
 use axum::http::StatusCode;
-use backend::{
-    app::App,
-    models::{device_links, devices, plugins},
-    services::{
-        plugins::{
-            package::PluginPackage,
-            service::{self as plugin_service, source},
-        },
-        users::Role,
-    },
-};
+use backend::app::App;
 use loco_rs::{app::AppContext, testing::prelude::*};
+use netmonitor_core::models::{device_links, devices, plugins};
+use netmonitor_network::plugins::{
+    package::PluginPackage,
+    service::{self as plugin_service, source},
+};
+use netmonitor_nucleo::services::users::Role;
 use sea_orm::{ActiveModelTrait, EntityTrait, IntoActiveModel, Set};
 use serde_json::{json, Value};
 use serial_test::serial;

@@ -7,10 +7,9 @@ use chrono::Utc;
 use loco_rs::prelude::*;
 use sea_orm::{ActiveModelTrait, Set};
 
-use crate::{
-    models::probes,
-    services::shared::crypto::{random_token, sha256_hex},
-};
+use netmonitor_core::models::probes;
+
+use netmonitor_nucleo::services::shared::crypto::{random_token, sha256_hex};
 
 pub struct ProbeRegister;
 

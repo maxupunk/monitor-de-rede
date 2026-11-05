@@ -5,21 +5,22 @@
 //! só); `GET /api/logs?category=` filtra por ela e a página traz o padrão com
 //! o modelo de alerta que o cobre; e a correção do operador vence o palpite.
 
-use backend::{
-    app::App,
+use backend::app::App;
+
+use netmonitor_nucleo::{
     dtos::logs::{LogPageResponse, LogTemplateInfo},
-    models::logs::{device_logs, log_templates},
-    services::{
-        ai::settings,
-        syslog::{
-            categorizer::{backfill, template_of, DeciderTemplateClassifier},
-            template::hash_hex,
-            LogsDb,
-        },
+    services::syslog::{
+        categorizer::{backfill, template_of, DeciderTemplateClassifier},
+        template::hash_hex,
+        LogsDb,
     },
 };
+
+use netmonitor_core::models::logs::{device_logs, log_templates};
+
 use chrono::Utc;
 use loco_rs::{app::AppContext, testing::prelude::*};
+use netmonitor_assistant::settings;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, DatabaseConnection};
 use serde_json::json;
 use serial_test::serial;

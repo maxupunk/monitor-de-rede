@@ -18,10 +18,10 @@ use loco_rs::{
     Result,
 };
 
-use crate::services::{
-    alerts::catalog::health_defaults,
-    devices::system_device::SystemDeviceService,
-    monitoring::{managed::ensure_system_health_monitor, reachability},
+use netmonitor_nucleo::{
+    services::alerts::catalog::health_defaults,
+    services::devices::system_device::SystemDeviceService,
+    services::monitoring::{managed::ensure_system_health_monitor, reachability},
 };
 
 pub struct SystemDeviceInitializer;

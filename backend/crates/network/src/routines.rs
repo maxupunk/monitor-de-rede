@@ -23,7 +23,7 @@ use netmonitor_core::{
         cadence::{is_device_collection_due, is_due},
         retention_days, Cycle, RetentionJob, Routine,
     },
-    shared::errors::AppResult,
+    shared::errors::{AppError, AppResult},
 };
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect, Set,
@@ -181,6 +181,36 @@ impl MonitorGroup for SnmpDeviceGroup {
     ) -> AppResult<Vec<(i64, CheckResult)>> {
         execute_snmp_device_group(ctx, key, scheduled_at).await
     }
+
+    async fn run_now(
+        &self,
+        ctx: &AppContext,
+        monitor: &monitors::Model,
+    ) -> Option<AppResult<Vec<(i64, CheckResult)>>> {
+        if monitor.r#type != "snmp" {
+            return None;
+        }
+        let device_id = monitor.device_id?;
+        Some(poll_device_now(ctx, device_id).await)
+    }
+}
+
+/// A coleta consolidada de todos os monitores SNMP do dispositivo, pedida pela
+/// tela (fora da cadência).
+async fn poll_device_now(ctx: &AppContext, device_id: i64) -> AppResult<Vec<(i64, CheckResult)>> {
+    let _guard = try_acquire_snmp_device(device_id).ok_or_else(|| {
+        AppError::conflict("Já existe uma coleta SNMP em andamento para este dispositivo")
+    })?;
+    let device = devices::Entity::find_by_id(device_id)
+        .one(&ctx.db)
+        .await?
+        .ok_or_else(|| AppError::not_found("Dispositivo não encontrado"))?;
+    let related = monitors::Entity::find()
+        .filter(monitors::Column::DeviceId.eq(Some(device_id)))
+        .filter(monitors::Column::Type.eq("snmp"))
+        .all(&ctx.db)
+        .await?;
+    Ok(snmp_service::poll_device_monitors(ctx, &device, &related).await)
 }
 
 /// A coleta dos dispositivos com SNMP ligado que nenhum monitor agenda.

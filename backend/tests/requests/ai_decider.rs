@@ -10,33 +10,29 @@
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use backend::{
-    app::App,
-    dtos::ai::{
+use backend::app::App;
+use futures::StreamExt;
+use loco_rs::testing::prelude::*;
+use netmonitor_assistant::{
+    dtos::{
         AiMention, AiMentionKind, ChatMessageInput, DeciderModelsResponse, TestConnectionResponse,
         TestDeciderResponse,
     },
-    models::_entities::devices,
-    services::{
-        ai::{
-            decider::config::AiDeciderSettings,
-            drivers::traits::{
-                AiChatChunk, AiChatOptions, AiChunkStream, AiDriver, AiMessage, AiTool, AiToolCall,
-            },
-            harness::{
-                agent::{
-                    run_agent_loop, AgentRequest, ConversationMemory, HarnessEvent, ToolLoading,
-                },
-                prompt::ChatContext,
-                tools::{ToolGroup, ToolPolicy},
-            },
-            settings::{self, AiAutomationMode, AiSettings},
+    {
+        decider::config::AiDeciderSettings,
+        drivers::traits::{
+            AiChatChunk, AiChatOptions, AiChunkStream, AiDriver, AiMessage, AiTool, AiToolCall,
         },
-        shared::errors::AppResult,
+        harness::{
+            agent::{run_agent_loop, AgentRequest, ConversationMemory, HarnessEvent, ToolLoading},
+            prompt::ChatContext,
+            tools::{ToolGroup, ToolPolicy},
+        },
+        settings::{self, AiAutomationMode, AiSettings},
     },
 };
-use futures::StreamExt;
-use loco_rs::testing::prelude::*;
+use netmonitor_core::models::_entities::devices;
+use netmonitor_nucleo::services::shared::errors::AppResult;
 use sea_orm::{ActiveModelTrait, Set};
 use serde_json::json;
 use serial_test::serial;
@@ -225,7 +221,7 @@ async fn tools_sent_with(
             policy: ToolPolicy::from_settings(&settings),
             tool_loading: ToolLoading::OnDemand,
             memory: ConversationMemory::default(),
-            actor: backend::services::audit::AuditActor::default(),
+            actor: netmonitor_nucleo::services::audit::AuditActor::default(),
         },
     )
     .await
@@ -429,7 +425,7 @@ async fn modelo_treinado_continua_com_a_revisao_das_acoes() {
                 policy: ToolPolicy::from_settings(&settings),
                 tool_loading: ToolLoading::OnDemand,
                 memory: ConversationMemory::default(),
-                actor: backend::services::audit::AuditActor::default(),
+                actor: netmonitor_nucleo::services::audit::AuditActor::default(),
             },
         )
         .await

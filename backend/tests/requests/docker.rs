@@ -5,20 +5,18 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use backend::{
-    app::App,
-    models::{probes, users},
-    services::{
-        agent_runtime::{executor::CommandExecutor, tunnel::TunnelOpener},
-        agents::{
-            policy::Permission,
-            protocol::{Command, ErrorCode, RemoteError},
-            tunnel::TunnelStream,
-        },
-        users::Role,
-    },
-};
+use backend::app::App;
 use loco_rs::{app::AppContext, testing::prelude::*};
+use netmonitor_core::models::{probes, users};
+use netmonitor_nucleo::{
+    services::agent_runtime::{executor::CommandExecutor, tunnel::TunnelOpener},
+    services::agents::{
+        policy::Permission,
+        protocol::{Command, ErrorCode, RemoteError},
+        tunnel::TunnelStream,
+    },
+    services::users::Role,
+};
 use sea_orm::{ActiveModelTrait, IntoActiveModel, Set};
 use serde_json::Value;
 use serial_test::serial;

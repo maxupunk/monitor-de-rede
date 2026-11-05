@@ -1,5 +1,7 @@
-use backend::{app::App, models::users, services::users::Role};
+use backend::app::App;
 use loco_rs::testing::prelude::*;
+use netmonitor_core::models::users;
+use netmonitor_nucleo::services::users::Role;
 use sea_orm::{ActiveModelTrait, IntoActiveModel, Set};
 use serial_test::serial;
 

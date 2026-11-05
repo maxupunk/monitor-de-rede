@@ -97,6 +97,15 @@ pub trait MonitorGroup: Send + Sync {
         key: i64,
         scheduled_at: DateTime<Utc>,
     ) -> AppResult<Vec<(i64, CheckResult)>>;
+
+    /// "Testar agora" de um monitor da tela: se ele é deste grupo, executa o
+    /// grupo inteiro fora da cadência e devolve o resultado de cada monitor.
+    /// `None` quando o monitor não é deste grupo.
+    async fn run_now(
+        &self,
+        ctx: &AppContext,
+        monitor: &monitors::Model,
+    ) -> Option<AppResult<Vec<(i64, CheckResult)>>>;
 }
 
 /// Os grupos registrados, no `shared_store` do processo.
@@ -122,6 +131,20 @@ impl MonitorGroups {
             .iter()
             .enumerate()
             .find_map(|(index, group)| group.group_of(monitor).map(|key| (index, key)))
+    }
+
+    /// "Testar agora" pelo grupo que reivindica o monitor, se algum.
+    pub async fn run_now(
+        &self,
+        ctx: &AppContext,
+        monitor: &monitors::Model,
+    ) -> Option<AppResult<Vec<(i64, CheckResult)>>> {
+        for group in self.0.iter() {
+            if let Some(result) = group.run_now(ctx, monitor).await {
+                return Some(result);
+            }
+        }
+        None
     }
 
     /// O grupo de índice `index` (de [`Self::group_of`]).

@@ -1,6 +1,7 @@
 //! DTOs de entrada e saída da área Rede.
 
 pub mod discovery;
+pub mod networks;
 pub mod plugins;
 pub mod port_scan;
 pub mod snmp;

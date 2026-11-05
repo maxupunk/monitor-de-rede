@@ -4,14 +4,13 @@
 //! As fontes são um servidor HTTP em 127.0.0.1 servindo CSV no formato do
 //! IEEE — nenhum teste sai da máquina.
 
-use backend::{
-    app::App,
-    services::vendors::{
-        registry::{self, OuiRegistry},
-        service,
-    },
-};
+use backend::app::App;
+
 use loco_rs::testing::prelude::*;
+use netmonitor_network::vendors::{
+    registry::{self, OuiRegistry},
+    service,
+};
 use serial_test::serial;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},

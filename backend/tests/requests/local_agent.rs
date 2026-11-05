@@ -2,23 +2,23 @@
 //! ao lado dela. Cadastro zero-config pelo arquivo do token, adoção do que
 //! era da central e a guarda do ciclo de vida.
 
-use backend::{
-    app::App,
-    models::{monitors, users},
-    services::{
-        agents::{local, service::AgentService},
-        monitoring::creation,
-        shared::secret_file,
-        telemetry::{
-            rollup::{HostRollup, MetricsRollup},
-            store,
-        },
-        users::Role,
-    },
-    views::telemetry::MetricsRange,
-};
+use backend::app::App;
+
+use netmonitor_core::models::{monitors, users};
+
 use chrono::Utc;
 use loco_rs::{app::AppContext, testing::prelude::*};
+use netmonitor_nucleo::{
+    services::agents::{local, service::AgentService},
+    services::monitoring::creation,
+    services::shared::secret_file,
+    services::telemetry::{
+        rollup::{HostRollup, MetricsRollup},
+        store,
+    },
+    services::users::Role,
+    views::telemetry::MetricsRange,
+};
 use sea_orm::{ActiveModelTrait, EntityTrait, IntoActiveModel, Set};
 use serde_json::{json, Value};
 use serial_test::serial;
@@ -39,7 +39,7 @@ async fn session_with_role(
     user
 }
 
-fn container_monitor(name: &str) -> backend::dtos::resources::MonitorInput {
+fn container_monitor(name: &str) -> netmonitor_nucleo::dtos::resources::MonitorInput {
     serde_json::from_value(json!({ "type": "container", "name": name, "target": name }))
         .expect("entrada")
 }

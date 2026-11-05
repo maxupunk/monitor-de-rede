@@ -1,8 +1,8 @@
 [workspace]
-members = [".", "migration", "crates/core", "crates/agent-protocol", "crates/servers", "crates/vpn", "crates/assistant", "crates/network"]
+members = [".", "migration", "crates/core", "crates/nucleo", "crates/agent-protocol", "crates/servers", "crates/vpn", "crates/assistant", "crates/network"]
 # Sem isto, `cargo test`/`cargo clippy` na raiz só cobririam o pacote raiz:
 # os testes que se mudam para um crate sairiam da suíte sem ninguém notar.
-default-members = [".", "migration", "crates/core", "crates/agent-protocol", "crates/servers", "crates/vpn", "crates/assistant", "crates/network"]
+default-members = [".", "migration", "crates/core", "crates/nucleo", "crates/agent-protocol", "crates/servers", "crates/vpn", "crates/assistant", "crates/network"]
 
 [package]
 name = "backend"
@@ -84,6 +84,7 @@ reqwest = { version = "0.12", default-features = false, features = [
 surge-ping = { version = "0.8" }
 socket2 = { version = "0.6" }
 netmonitor-core = { path = "crates/core" }
+netmonitor-nucleo = { path = "crates/nucleo" }
 netmonitor-agent-protocol = { path = "crates/agent-protocol" }
 netmonitor-servers = { path = "crates/servers" }
 netmonitor-vpn = { path = "crates/vpn" }
@@ -115,6 +116,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 regex = { workspace = true }
 migration = { path = "migration" }
 netmonitor-core = { workspace = true }
+netmonitor-nucleo = { workspace = true }
 netmonitor-agent-protocol = { workspace = true }
 netmonitor-servers = { workspace = true }
 netmonitor-vpn = { workspace = true }

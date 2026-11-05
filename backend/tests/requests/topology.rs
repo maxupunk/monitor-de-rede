@@ -1,15 +1,16 @@
 //! Rotas de topologia: grafo com recorte por site, layout (inteiro e parcial),
 //! CRUD de enlaces, hierarquia virtual e menor caminho.
 
-use backend::{
-    app::App,
-    models::{_entities::event_outbox, device_interfaces, device_links, devices, sites},
-    services::{
-        devices::system_device::SystemDeviceService,
-        topology::link_resolver::{persist_resolved_links_detailed, NetworkLink},
-    },
+use backend::app::App;
+
+use netmonitor_core::models::{
+    _entities::event_outbox, device_interfaces, device_links, devices, sites,
 };
+
+use netmonitor_nucleo::services::devices::system_device::SystemDeviceService;
+
 use loco_rs::{app::AppContext, testing::prelude::*};
+use netmonitor_network::topology::link_resolver::{persist_resolved_links_detailed, NetworkLink};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter, Set,
 };

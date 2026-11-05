@@ -5,12 +5,11 @@
 //! isso as asserções são sobre o que muda de comportamento — o sistema
 //! declarado no cadastro decide os comandos que a ativação de log vai enviar.
 
-use backend::{
-    app::App,
-    models::{discovery_results, discovery_runs, networks},
-};
+use backend::app::App;
+
 use chrono::Utc;
 use loco_rs::testing::prelude::*;
+use netmonitor_core::models::{discovery_results, discovery_runs, networks};
 use sea_orm::{ActiveModelTrait, Set};
 use serde_json::Value;
 use serial_test::serial;

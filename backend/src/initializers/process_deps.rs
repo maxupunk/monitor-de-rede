@@ -14,14 +14,17 @@
 
 use loco_rs::app::AppContext;
 
-use crate::services::{
-    agents::hub::AgentHub,
-    ai::approvals::ApprovalDesk,
-    discovery::service::ScanSessionService,
-    docker::log_stream::LogStreams,
-    events::{EventBus, Interests, Presence},
-    monitoring::checkers::ping::PingClientCell,
+use netmonitor_nucleo::{
+    services::agents::hub::AgentHub,
+    services::events::{EventBus, Interests, Presence},
+    services::monitoring::checkers::ping::PingClientCell,
 };
+
+use netmonitor_assistant::approvals::ApprovalDesk;
+
+use netmonitor_network::discovery::service::ScanSessionService;
+
+use netmonitor_servers::docker::log_stream::LogStreams;
 
 /// Popula o `shared_store` do contexto.
 ///

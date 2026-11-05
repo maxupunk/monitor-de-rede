@@ -8,13 +8,13 @@
 //! O que se afirma aqui: com o vínculo por `id`, `list_interfaces` distingue as
 //! homônimas.
 
-use backend::{
-    app::App,
-    models::{_entities::device_interfaces, devices, monitors},
-    services::snmp::service::list_interfaces,
-};
+use backend::app::App;
+
+use netmonitor_core::models::{_entities::device_interfaces, devices, monitors};
+
 use chrono::{Duration, Utc};
 use loco_rs::testing::prelude::*;
+use netmonitor_network::snmp::service::list_interfaces;
 use sea_orm::{ActiveModelTrait, Set};
 use serde_json::json;
 use serial_test::serial;

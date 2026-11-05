@@ -6,16 +6,15 @@
 //! acontece; e o "identificar" do cadastro devolve o palpite quando a
 //! evidência dele é fraca.
 
-use backend::{
-    app::App,
-    models::{discovery_results, discovery_runs, networks},
-    services::{
-        ai::{decider::config::AiDeciderSettings, settings},
-        discovery::{decider_identity, merger::DiscoveredHost},
-    },
-};
+use backend::app::App;
+
+use netmonitor_core::models::{discovery_results, discovery_runs, networks};
+
+use netmonitor_assistant::{decider::config::AiDeciderSettings, settings};
+
 use chrono::Utc;
 use loco_rs::{app::AppContext, testing::prelude::*};
+use netmonitor_network::discovery::{decider_identity, merger::DiscoveredHost};
 use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 use serde_json::{json, Value};
 use serial_test::serial;

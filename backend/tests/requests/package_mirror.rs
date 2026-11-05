@@ -4,8 +4,10 @@
 //! Só o que recusa: nenhum teste sai da máquina, então a busca na origem fica
 //! de fora — a política de caminhos e os tokens têm teste de unidade.
 
-use backend::{app::App, services::package_mirror};
+use backend::app::App;
+
 use loco_rs::testing::prelude::*;
+use netmonitor_network::package_mirror;
 use serial_test::serial;
 
 const INDEX: &str = "releases/25.12.5/packages/aarch64_cortex-a53/base/packages.adb";

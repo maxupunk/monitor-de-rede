@@ -11,30 +11,26 @@ use std::sync::{
 };
 
 use async_trait::async_trait;
-use backend::{
-    app::App,
-    dtos::ai::{AiMention, AiMentionKind, ChatMessageInput, TestConnectionResponse},
-    models::_entities::devices,
-    services::{
-        ai::{
-            drivers::traits::{
-                AiChatChunk, AiChatOptions, AiChunkStream, AiDriver, AiMessage, AiTool, AiToolCall,
-            },
-            harness::{
-                agent::{
-                    run_agent_loop, AgentRequest, ConversationMemory, HarnessEvent, ToolLoading,
-                },
-                prompt::{build_system_prompt, build_turn_context, ChatContext},
-                tools::ToolPolicy,
-            },
-            mentions,
-            settings::AiSettings,
-        },
-        shared::errors::AppResult,
-    },
-};
+use backend::app::App;
 use futures::StreamExt;
 use loco_rs::{prelude::AppContext, testing::prelude::*};
+use netmonitor_assistant::{
+    dtos::{AiMention, AiMentionKind, ChatMessageInput, TestConnectionResponse},
+    {
+        drivers::traits::{
+            AiChatChunk, AiChatOptions, AiChunkStream, AiDriver, AiMessage, AiTool, AiToolCall,
+        },
+        harness::{
+            agent::{run_agent_loop, AgentRequest, ConversationMemory, HarnessEvent, ToolLoading},
+            prompt::{build_system_prompt, build_turn_context, ChatContext},
+            tools::ToolPolicy,
+        },
+        mentions,
+        settings::AiSettings,
+    },
+};
+use netmonitor_core::models::_entities::devices;
+use netmonitor_nucleo::services::shared::errors::AppResult;
 use sea_orm::{ActiveModelTrait, Set};
 use serde_json::{json, Value};
 use serial_test::serial;
@@ -211,7 +207,7 @@ async fn pergunta_ao_usuario_encerra_a_rodada_sem_nova_chamada() {
                 policy: ToolPolicy::from_settings(&AiSettings::default()),
                 tool_loading: ToolLoading::OnDemand,
                 memory: ConversationMemory::default(),
-                actor: backend::services::audit::AuditActor::default(),
+                actor: netmonitor_nucleo::services::audit::AuditActor::default(),
             },
         )
         .await;

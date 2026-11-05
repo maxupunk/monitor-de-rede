@@ -10,12 +10,6 @@ use agent_protocol::{
     policy::{Permission, Policy},
     Body, Envelope, ErrorCode, RemoteError, Welcome, WireFrame,
 };
-use backend::services::agent_runtime::{
-    executor::LocalExecutor,
-    outbox::Outbox,
-    session::{self as agent_session, NoLiveSource, SessionDeps},
-    tunnel::LocalTunnelOpener,
-};
 use netmonitor_core::{
     agents::{
         hub::AgentHub,
@@ -31,6 +25,12 @@ use netmonitor_network::throughput::{
     iperf3::fake_server::{Behavior, FakeServer},
     is_cancelled, sample_channel, Flow, TestDirection, TestProtocol, ThroughputEngine,
     ThroughputSpec,
+};
+use netmonitor_nucleo::services::agent_runtime::{
+    executor::LocalExecutor,
+    outbox::Outbox,
+    session::{self as agent_session, NoLiveSource, SessionDeps},
+    tunnel::LocalTunnelOpener,
 };
 use tokio_util::sync::CancellationToken;
 

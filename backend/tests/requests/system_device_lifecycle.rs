@@ -6,15 +6,15 @@
 //! à feature. Em todos, o que se afirma é o mesmo: o dispositivo volta correto,
 //! o log interno seguinte vai para ele, e não sobra linha órfã.
 
-use backend::{
-    app::App,
-    models::{alert_rules, devices, monitors},
-    services::{
-        devices::system_device::{self, SystemDeviceService, NETMONITOR_KEY},
-        monitoring::managed::SYSTEM_HEALTH,
-    },
-};
+use backend::app::App;
+
+use netmonitor_core::models::{alert_rules, devices, monitors};
+
 use loco_rs::testing::prelude::*;
+use netmonitor_nucleo::{
+    services::devices::system_device::{self, SystemDeviceService, NETMONITOR_KEY},
+    services::monitoring::managed::SYSTEM_HEALTH,
+};
 use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
 use serde_json::Value;
 use serial_test::serial;

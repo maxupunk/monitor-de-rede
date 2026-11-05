@@ -4,23 +4,19 @@
 
 use std::sync::{Arc, Mutex};
 
-use backend::{
-    app::App,
-    models::{device_credentials, devices},
-    services::{
-        plugins::{
-            credentials,
-            dedicated_access::keys,
-            manifest::TransportKind,
-            transport::{
-                local::LocalTransport, DeviceIoCall, DeviceIoReply, DeviceTransport, Endpoint,
-            },
-        },
-        shared::crypto,
-        users::Role,
-    },
+use backend::app::App;
+
+use netmonitor_core::models::{device_credentials, devices};
+
+use netmonitor_network::plugins::{
+    credentials,
+    dedicated_access::keys,
+    manifest::TransportKind,
+    transport::{local::LocalTransport, DeviceIoCall, DeviceIoReply, DeviceTransport, Endpoint},
 };
+
 use loco_rs::testing::prelude::*;
+use netmonitor_nucleo::{services::shared::crypto, services::users::Role};
 use russh::{
     keys::ssh_key::PublicKey,
     server::{self, Auth, Msg, Session},
@@ -339,7 +335,7 @@ async fn acesso_dedicado_do_primeiro_acesso_a_revogacao() {
 #[serial]
 #[ignore = "precisa de um RouterOS/OpenWrt real (ver o comentário)"]
 async fn acesso_dedicado_em_equipamento_real() {
-    use backend::services::plugins::dedicated_access::{
+    use netmonitor_network::plugins::dedicated_access::{
         self, DedicatedPlatform, ProvisionInput, RevokeInput, Target,
     };
     let env = |name: &str| std::env::var(name).ok().filter(|value| !value.is_empty());
