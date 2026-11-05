@@ -11,9 +11,9 @@
 
 use crate::services::{
     link_tests::model::{LinkTestEndpointKind, LinkTestFlow, LinkTestSide},
-    network_tools::throughput::{Flow, TestDirection, ThroughputEngine},
     plugins::manifest::ThroughputRoles,
 };
+use netmonitor_network::throughput::{Flow, TestDirection, ThroughputEngine};
 
 /// Ordem de preferência dos motores.
 pub const ENGINE_PREFERENCE: [ThroughputEngine; 2] =

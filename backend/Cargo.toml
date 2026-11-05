@@ -250,6 +250,7 @@ name = "spike_syslog_parse"
 path = "examples/spikes/syslog_parse.rs"
 
 [dev-dependencies]
+netmonitor-network = { workspace = true, features = ["testing"] }
 async-snmp = { version = "0.16", default-features = false, features = ["agent", "crypto-rustcrypto"] }
 loco-rs = { workspace = true, features = ["testing"] }
 serial_test = { version = "3.1.1" }

@@ -20,16 +20,16 @@ use super::health::{DefaultHealthReaders, HealthReaders};
 use crate::{
     models::devices,
     services::{
-        agents::throughput::agent_driver,
         events::EventBus,
-        network_tools::throughput::{
-            btest::{ArmedSession, BtestServer},
-            driver::{LocalDriver, ThroughputDriver},
-        },
         plugins::invoke::{self, RunOutcome, ServiceRunRequest},
         server_addresses,
         shared::errors::{AppError, AppResult},
     },
+};
+use netmonitor_network::throughput::{
+    agent::agent_driver,
+    btest::{ArmedSession, BtestServer},
+    driver::{LocalDriver, ThroughputDriver},
 };
 
 /// Chama uma ação de plugin num equipamento.
@@ -123,7 +123,7 @@ impl BtestArmer for ServerArmer {
 
     fn port(&self) -> u16 {
         self.0.as_ref().map_or(
-            crate::services::network_tools::throughput::btest::DEFAULT_PORT,
+            netmonitor_network::throughput::btest::DEFAULT_PORT,
             |server| server.local_addr().port(),
         )
     }
@@ -133,8 +133,7 @@ impl BtestArmer for ServerArmer {
             .as_ref()
             .ok_or_else(|| {
                 AppError::ServiceUnavailable(
-                    crate::services::network_tools::throughput::btest::UNAVAILABLE_MESSAGE
-                        .to_owned(),
+                    netmonitor_network::throughput::btest::UNAVAILABLE_MESSAGE.to_owned(),
                 )
             })?
             .arm(peer, ttl)

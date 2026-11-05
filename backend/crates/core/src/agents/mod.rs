@@ -11,6 +11,7 @@
 //! * [`HostKey`] — a chave de um host Docker (`agent-<id>`).
 
 pub mod bridge;
+pub mod command;
 pub mod enrollment;
 mod errors;
 mod host_key;
@@ -19,6 +20,7 @@ pub mod identity;
 pub mod registration;
 pub mod routes;
 pub mod session;
+pub mod targets;
 pub mod views;
 
 pub use host_key::HostKey;

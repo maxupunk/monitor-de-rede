@@ -8,7 +8,8 @@
 //! * [`connection`] — handshake e vida de uma conexão (sem WebSocket);
 //! * [`service`] / [`enrollment`] — cadastro, código de uso único, token;
 //! * [`local`] — o agente ao lado da central, dono do Docker dela (ADR 014);
-//! * [`throughput`] — o agente como origem de teste de vazão (ADR 015 §6);
+//! * o agente como origem de teste de vazão (ADR 015 §6) é da área Rede
+//!   (`netmonitor_network::throughput::agent`);
 //! * [`inbound`] / [`background`] — eventos recebidos, modo ao vivo e pump
 //!   de tarefas.
 //!
@@ -21,7 +22,6 @@ pub mod install;
 pub mod install_address;
 pub mod local;
 pub mod service;
-pub mod throughput;
 
 /// O contrato de fio é o crate `agent-protocol`; o transporte do lado da
 /// central (sessões, hub, pontes, rotas) é do núcleo. Os caminhos antigos

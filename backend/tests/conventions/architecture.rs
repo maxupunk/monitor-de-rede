@@ -44,20 +44,15 @@ const AREAS: &[(&str, &str)] = &[
 /// Dependências proibidas que já existiam quando a regra nasceu.
 /// `(módulo de origem, módulo importado)`. Só pode diminuir.
 const EXCECOES: &[(&str, &str)] = &[
-    ("agent_runtime", "discovery"),
     ("agent_runtime", "docker"),
-    ("agent_runtime", "plugins"),
     ("agents", "discovery"),
-    ("agents", "plugins"),
     ("devices", "wifi"),
     ("maintenance", "link_tests"),
     ("monitoring", "link_tests"),
     ("monitoring", "snmp"),
     ("monitoring", "vpn"),
     ("monitoring", "wifi"),
-    ("network_tools", "plugins"),
     ("onboarding", "vpn"),
-    ("plugins", "ai"),
     ("probes", "discovery"),
     ("syslog", "plugins"),
     ("syslog", "snmp"),

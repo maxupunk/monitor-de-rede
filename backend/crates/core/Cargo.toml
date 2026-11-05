@@ -36,6 +36,8 @@ russh-sftp = { workspace = true }
 # Socket ICMP DGRAM sem privilégio (ADR 003): o cliente do processo e a
 # sonda usada pelos checkers e pela área Rede.
 surge-ping = { workspace = true }
+# Faixas extras de alvo de equipamento (`AGENT_DEVICE_CIDRS`).
+ipnet = { version = "2.9" }
 socket2 = { workspace = true }
 # Severidade canônica do syslog nos adapters de plataforma.
 syslog_loose = { workspace = true }

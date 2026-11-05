@@ -10,6 +10,7 @@
 //! que toda ferramenta usa para achar dispositivo e resumir série; a
 //! documentação que a IA consulta fica em [`knowledge`].
 
+pub mod access;
 pub mod args;
 pub mod automation;
 pub mod chart;

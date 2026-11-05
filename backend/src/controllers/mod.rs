@@ -16,8 +16,6 @@ pub mod logs;
 pub mod maintenance_windows;
 pub mod monitors;
 pub mod networks;
-pub mod package_mirror;
-pub mod plugins;
 pub mod probes;
 pub mod push;
 pub mod root;

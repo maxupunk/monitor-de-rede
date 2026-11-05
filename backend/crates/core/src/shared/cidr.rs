@@ -313,3 +313,16 @@ pub fn expand_cidr_batch(
         .map(|address| IpAddr::V4(Ipv4Addr::from(address as u32)))
         .collect())
 }
+/// Endereço que um plugin (ou agente) pode alcançar: rede privada, CGNAT,
+/// link-local e loopback. Um IP público nunca é alvo de plugin — nem por
+/// engano de cadastro, nem por um script que tente sair da rede administrada.
+#[must_use]
+pub fn is_reachable_target(ip: IpAddr) -> bool {
+    is_internal_address(ip)
+}
+
+/// [`is_reachable_target`] e, quando há lista, dentro de uma das faixas.
+#[must_use]
+pub fn target_allowed(ip: IpAddr, cidrs: &[ipnet::IpNet]) -> bool {
+    is_reachable_target(ip) && (cidrs.is_empty() || cidrs.iter().any(|cidr| cidr.contains(&ip)))
+}

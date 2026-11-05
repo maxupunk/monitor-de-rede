@@ -57,12 +57,6 @@ use crate::{
     models::{devices, link_test_legs, link_tests},
     services::{
         events::EventBus,
-        network_tools::throughput::{
-            btest::{self, ArmedSession, BtestAuth},
-            driver::DriveRequest,
-            is_cancelled, sample_channel, Flow, TestDirection, TestProtocol, ThroughputEngine,
-            ThroughputSample, ThroughputSpec,
-        },
         plugins::{
             invoke::{RunOutcome, RunStatus, ServiceRunRequest},
             runs::Origin,
@@ -70,6 +64,12 @@ use crate::{
         },
         shared::errors::{AppError, AppResult},
     },
+};
+use netmonitor_network::throughput::{
+    btest::{self, ArmedSession, BtestAuth},
+    driver::DriveRequest,
+    is_cancelled, sample_channel, Flow, TestDirection, TestProtocol, ThroughputEngine,
+    ThroughputSample, ThroughputSpec,
 };
 
 /// Amostras guardadas por sentido de uma perna.

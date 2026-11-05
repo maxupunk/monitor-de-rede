@@ -32,7 +32,6 @@
 //! - [`risk`]: o risco de cada chamada, que decide se o modo automático roda
 //!   ou pergunta.
 
-pub mod access;
 pub mod actions;
 pub mod alert_rules;
 pub mod analysis;
@@ -52,6 +51,7 @@ pub mod timeline;
 
 /// O contrato e as utilidades das ferramentas moram no núcleo.
 pub use netmonitor_core::ai::{
+    access,
     args::ToolArgs,
     lookup,
     risk::{self, AiToolRisk, Approval, RiskAssessment},

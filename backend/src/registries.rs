@@ -2,7 +2,7 @@
 //! entrega as suas peças e o núcleo só consulta o registro. É o único lugar,
 //! fora de `app.rs`, que conhece todas as áreas.
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use loco_rs::app::AppContext;
@@ -11,9 +11,16 @@ use netmonitor_assistant::{
     mentions::{ContainerDirectory, MentionContainer},
 };
 use netmonitor_core::{
-    ai::tools::AiToolHandler, alerts::contracts::AlertEvaluationContext, areas::AreaPolicy,
-    classifier::Classifier, models::devices, monitoring::MonitorCheckers,
-    notifications::NotificationMessage, shared::errors::AppError,
+    agents::{command::AgentCommandHandlers, targets::DeviceNetworks},
+    ai::tools::AiToolHandler,
+    alerts::contracts::AlertEvaluationContext,
+    areas::AreaPolicy,
+    classifier::Classifier,
+    models::devices,
+    monitoring::CheckDeps,
+    monitoring::MonitorCheckers,
+    notifications::NotificationMessage,
+    shared::errors::AppError,
 };
 use netmonitor_network::central as network;
 use netmonitor_vpn::central::{Central, CentralServices};
@@ -23,11 +30,13 @@ use serde_json::Value;
 use crate::{
     controllers::devices::present_for_vpn,
     services::{
+        agents::install_address,
         ai_tools::{
             actions, alert_rules, analysis, ask, audit, charts, dashboard, diagnostics, grep,
             history, inventory, logs, platform, schedules,
         },
         alerts::{inhibition, manager as alert_manager, vpn_peer_watcher},
+        devices::identify,
         docker::{engine, hosts, source::DockerEngine},
         notifications::NotificationService,
         plugins::{ai_tools as plugins, auto_accept, credentials},
@@ -91,7 +100,8 @@ pub fn vpn_central() -> Central {
     Central::new(Arc::new(VpnCentral))
 }
 
-/// O que a área Rede pede ao resto da central: o motor de alertas.
+/// O que a área Rede pede ao resto da central: o motor de alertas, a
+/// identificação de dispositivo, a porta publicada da API e a IA.
 struct NetworkCentral;
 
 #[async_trait]
@@ -103,6 +113,99 @@ impl network::CentralServices for NetworkCentral {
     ) -> AppResult<()> {
         alert_manager::evaluate(ctx, context).await
     }
+
+    async fn observe_device(
+        &self,
+        ctx: &AppContext,
+        device: &devices::Model,
+        ssh_port: Option<u16>,
+    ) -> AppResult<devices::Model> {
+        identify::observe(ctx, device, ssh_port).await
+    }
+
+    fn published_api_port(&self, ctx: &AppContext) -> u16 {
+        install_address::ports(ctx).1
+    }
+
+    async fn ask_ai(
+        &self,
+        db: &DatabaseConnection,
+        system: &str,
+        user: &str,
+        max_tokens: u32,
+        timeout: Duration,
+    ) -> Result<Option<(String, Option<String>)>, String> {
+        use futures::StreamExt;
+        use netmonitor_assistant::{
+            drivers::{
+                self,
+                traits::{AiChatOptions, AiMessage},
+            },
+            settings,
+        };
+
+        let settings = settings::load(db)
+            .await
+            .map_err(|error| error.to_string())?;
+        if !settings.enabled {
+            return Ok(None);
+        }
+        let driver = drivers::connect(&settings)
+            .await
+            .map_err(|error| error.to_string())?;
+        let messages = vec![
+            AiMessage {
+                role: "system".into(),
+                content: Some(system.into()),
+                tool_calls: None,
+                tool_call_id: None,
+            },
+            AiMessage {
+                role: "user".into(),
+                content: Some(user.into()),
+                tool_calls: None,
+                tool_call_id: None,
+            },
+        ];
+        let work = async {
+            let mut stream = driver
+                .chat_stream(
+                    &messages,
+                    &[],
+                    AiChatOptions {
+                        max_tokens: Some(max_tokens),
+                    },
+                )
+                .await
+                .map_err(|error| error.to_string())?;
+            let (mut answer, mut model) = (String::new(), driver.model().map(str::to_owned));
+            while let Some(chunk) = stream.next().await {
+                let chunk = chunk.map_err(|error| error.to_string())?;
+                if let Some(delta) = chunk.text_delta {
+                    answer.push_str(&delta);
+                }
+                if chunk.model.is_some() {
+                    model = chunk.model;
+                }
+            }
+            Ok(Some((answer, model)))
+        };
+        tokio::time::timeout(timeout, work)
+            .await
+            .map_err(|_| "a IA não respondeu a tempo".to_owned())?
+    }
+}
+
+/// Os comandos das áreas no host do agente (ADR 017, `AgentCommandHandler`):
+/// descoberta, acesso a equipamento e vazão, da Rede. A política local
+/// (`AGENT_ALLOW`) continua no executor, antes deles.
+#[must_use]
+pub fn agent_command_handlers(deps: &CheckDeps, networks: DeviceNetworks) -> AgentCommandHandlers {
+    AgentCommandHandlers::new(netmonitor_network::agent_commands::handlers(
+        deps.clone(),
+        networks,
+        None,
+    ))
 }
 
 /// Os serviços da central para a Rede, para o `shared_store`.

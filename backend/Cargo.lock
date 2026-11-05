@@ -4058,6 +4058,7 @@ dependencies = [
  "chrono",
  "futures",
  "hex",
+ "ipnet",
  "loco-rs",
  "migration",
  "netmonitor-agent-protocol",
@@ -4096,7 +4097,9 @@ dependencies = [
  "chrono",
  "futures",
  "hickory-proto",
+ "insta",
  "loco-rs",
+ "md-5",
  "migration",
  "netmonitor-agent-protocol",
  "netmonitor-core",
@@ -4104,6 +4107,8 @@ dependencies = [
  "rand 0.8.7",
  "regex",
  "reqwest 0.12.28",
+ "rhai",
+ "russh",
  "sea-orm",
  "serde",
  "serde_json",
@@ -4116,6 +4121,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "ts-rs",
+ "uuid",
 ]
 
 [[package]]

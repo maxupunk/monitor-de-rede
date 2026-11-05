@@ -29,7 +29,7 @@ use crate::services::{
         tunnel::TunnelStream,
     },
     docker::{maintenance::DockerMaintenance, source::LocalEngine},
-    plugins::transport::is_reachable_target,
+    shared::cidr::is_reachable_target,
 };
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);

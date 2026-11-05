@@ -9,11 +9,11 @@ use ts_rs::TS;
 pub use super::health::LinkTestHealthSample;
 
 use crate::services::{
-    network_tools::throughput::{
-        ThroughputEngine, MAX_DURATION_S, MAX_STREAMS, MIN_DURATION_S, MIN_STREAMS,
-    },
     plugins::manifest::TransportKind,
     shared::errors::{AppError, AppResult},
+};
+use netmonitor_network::throughput::{
+    ThroughputEngine, MAX_DURATION_S, MAX_STREAMS, MIN_DURATION_S, MIN_STREAMS,
 };
 
 /// Duração padrão de cada sentido, em segundos.

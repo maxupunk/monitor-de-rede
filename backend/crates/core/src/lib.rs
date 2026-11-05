@@ -28,6 +28,7 @@ pub mod monitoring;
 pub mod network_tools;
 pub mod notifications;
 pub mod preferences;
+pub mod roles;
 pub mod shared;
 pub mod storage;
 pub mod telemetry;

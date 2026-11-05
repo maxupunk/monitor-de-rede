@@ -44,12 +44,6 @@ use crate::{
     models::{device_links, devices, link_test_legs, plugins},
     services::{
         events::EventBus,
-        network_tools::throughput::{
-            btest::{self, BtestServer},
-            driver::{LocalDriver, ThroughputDriver},
-            iperf3::fake_server::{Behavior, FakeServer},
-            sample_channel, TestDirection, TestProtocol, ThroughputEngine, ThroughputSpec,
-        },
         plugins::{
             credentials::{self, CredentialInput, SecretStorage},
             invoke::{RunOutcome, RunStatus, ServiceRunRequest},
@@ -61,6 +55,12 @@ use crate::{
         shared::errors::{AppError, AppResult},
         topology::service::parent_edge_id,
     },
+};
+use netmonitor_network::throughput::{
+    btest::{self, BtestServer},
+    driver::{LocalDriver, ThroughputDriver},
+    iperf3::fake_server::{Behavior, FakeServer},
+    sample_channel, TestDirection, TestProtocol, ThroughputEngine, ThroughputSpec,
 };
 
 // --- Fakes -------------------------------------------------------------------

@@ -8,6 +8,10 @@ description = "Área Rede do NetMonitor (ADR 017): descoberta, fabricantes, varr
 [lib]
 name = "netmonitor_network"
 
+[features]
+# Ajudantes de teste para quem liga a central a um agente (o pacote raiz).
+testing = []
+
 [dependencies]
 netmonitor-core = { workspace = true }
 netmonitor-agent-protocol = { workspace = true }
@@ -36,6 +40,15 @@ hickory-proto = { version = "0.24", default-features = false }
 # SNMP (§3.4 SPIKE-01).
 async-snmp = { version = "0.16", default-features = false, features = ["crypto-rustcrypto"] }
 phf = { version = "0.11", features = ["macros"] }
+uuid = { workspace = true }
+# SSH dos plugins e da ativação do log no roteador (Rust puro, ver o
+# comentário no `Cargo.toml` da raiz).
+russh = { workspace = true }
+# Motor de script dos plugins (ADR 012): só enxerga o que é registrado nele;
+# `no_module` desliga o `import` de arquivos.
+rhai = { version = "1", features = ["sync", "serde", "no_module"] }
+# Resposta ao desafio do btest da MikroTik (definido pelo protocolo).
+md-5 = { version = "0.11" }
 
 [dev-dependencies]
 # O agente SNMP de teste (os testes do cliente sobem um em 127.0.0.1).
@@ -43,3 +56,4 @@ async-snmp = { version = "0.16", default-features = false, features = ["agent", 
 migration = { path = "../../migration" }
 loco-rs = { workspace = true, features = ["testing"] }
 serial_test = { version = "3.1.1" }
+insta = { version = "1.34", features = ["redactions", "yaml", "filters"] }

@@ -289,7 +289,7 @@ pub async fn agent_of<C: ConnectionTrait>(db: &C, device_id: i64) -> AppResult<O
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::network_tools::throughput::ThroughputEngine;
+    use netmonitor_network::throughput::ThroughputEngine;
 
     #[test]
     fn central_sem_dispositivo_do_sistema_tem_nome_padrao() {

@@ -9,7 +9,6 @@ pub mod mactelnet;
 pub mod ping_capacity;
 pub mod playbook;
 pub mod speedtest;
-pub mod throughput;
 pub mod traceroute;
 
 /// Os primitivos que os checkers do núcleo e a área Rede usam moram no núcleo.

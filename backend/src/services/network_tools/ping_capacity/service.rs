@@ -15,7 +15,7 @@ use crate::{
     models::devices,
     services::{
         monitoring::{checkers::ping::PingClient, execution_guard::try_acquire_quick_ping},
-        plugins::transport::is_reachable_target,
+        shared::cidr::is_reachable_target,
         shared::errors::{AppError, AppResult},
     },
 };

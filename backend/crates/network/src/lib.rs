@@ -1,5 +1,6 @@
 //! Área Rede (ADR 017): descoberta, fabricantes (OUI), varredura de portas,
-//! SNMP e topologia, com as rotas e telas que os servem.
+//! SNMP, topologia, plugins de dispositivo, espelho de pacotes e testes de
+//! vazão, com as rotas e telas que os servem.
 //!
 //! Depende só do núcleo (`netmonitor-core`) e do contrato de fio
 //! (`agent-protocol`) — nunca de outra área nem do crate de montagem. O que
@@ -14,15 +15,28 @@
 //! * [`snmp`] — coleta, interfaces, a observação do estado delas e o monitor
 //!   `snmp` ([`SnmpMonitor`], registrado como `MonitorChecker`);
 //! * [`topology`] — o mapa, os enlaces e o layout;
+//! * [`plugins`] — plugins de dispositivo (ADR 012): o script Rhai roda só
+//!   no sandbox desta central e toda E/S passa por
+//!   [`plugins::transport::DeviceTransport`];
+//! * [`package_mirror`] — o espelho de pacotes que os plugins oferecem ao
+//!   equipamento;
+//! * [`throughput`] — os motores de vazão (iperf3, btest) e o agente como
+//!   origem do teste (ADR 015);
+//! * [`agent_commands`] — a descoberta, o acesso a equipamento e a vazão no
+//!   host do agente (`AgentCommandHandler`);
 //! * [`controllers`], [`dtos`] — as rotas da área.
 
+pub mod agent_commands;
 pub mod area_policy;
 pub mod central;
 pub mod controllers;
 pub mod discovery;
 pub mod dtos;
+pub mod package_mirror;
+pub mod plugins;
 pub mod port_scanner;
 pub mod snmp;
+pub mod throughput;
 pub mod topology;
 pub mod vendors;
 

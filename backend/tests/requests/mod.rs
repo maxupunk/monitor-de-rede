@@ -1,4 +1,6 @@
+mod agent_commands;
 mod agent_harness;
+mod agent_throughput;
 mod agent_tunnel;
 mod agents;
 mod ai_alert_rules;

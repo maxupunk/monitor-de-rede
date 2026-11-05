@@ -27,7 +27,6 @@ use crate::{
     models::{device_links, devices},
     services::{
         devices::system_device::{SystemDeviceService, NETMONITOR_KEY},
-        network_tools::throughput::ThroughputEngine,
         shared::errors::{AppError, AppResult},
         topology::{
             path::{shortest_path, TopologyPath},
@@ -35,6 +34,7 @@ use crate::{
         },
     },
 };
+use netmonitor_network::throughput::ThroughputEngine;
 
 /// Folga fixa de uma perna (conexões, relatórios), em segundos.
 const LEG_OVERHEAD_S: u32 = 4;

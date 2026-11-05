@@ -167,7 +167,7 @@ impl Hooks for App {
             .add_route(controllers::agents::agent_routes())
             // O gerenciador de pacotes do roteador não tem sessão: o espelho
             // (ADR 015 §10) confere o token da execução do plugin no handler.
-            .add_route(controllers::package_mirror::routes())
+            .add_route(netmonitor_network::controllers::package_mirror::routes())
             .add_route(controllers::dashboard::routes().layer(business_auth.clone()))
             .add_route(controllers::backup::routes().layer(business_auth.clone()))
             .add_route(controllers::storages::routes().layer(business_auth.clone()))
@@ -215,7 +215,9 @@ impl Hooks for App {
             )
             .add_route(controllers::ai::routes().layer(business_auth.clone()))
             .add_route(controllers::ai_conversations::routes().layer(business_auth.clone()))
-            .add_route(controllers::plugins::routes().layer(business_auth.clone()))
+            .add_route(
+                netmonitor_network::controllers::plugins::routes().layer(business_auth.clone()),
+            )
             .add_route(controllers::link_tests::routes().layer(business_auth.clone()))
             .add_route(controllers::scheduled_tasks::routes().layer(business_auth.clone()))
             .add_route(controllers::wifi::routes().layer(business_auth.clone()))

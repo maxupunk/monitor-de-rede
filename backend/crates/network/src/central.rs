@@ -1,18 +1,23 @@
 //! O que a área Rede pede ao resto da central (ADR 017).
 //!
 //! Peças que não são do núcleo nem da área: o motor de alertas (que avalia a
-//! transição de cada interface observada pelo SNMP). O ponto de montagem
+//! transição de cada interface observada pelo SNMP), a identificação de
+//! dispositivo (que os plugins pedem ao observar o equipamento), a porta
+//! publicada da API (o espelho de pacotes) e a IA configurada (a revisão de
+//! segurança de um plugin importado). O ponto de montagem
 //! implementa [`CentralServices`] e o põe no `shared_store` (`after_context`),
 //! em todo processo — o scheduler, que roda a coleta SNMP, inclusive.
 
-use std::{ops::Deref, sync::Arc};
+use std::{ops::Deref, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use loco_rs::app::AppContext;
 use netmonitor_core::{
     alerts::contracts::AlertEvaluationContext,
+    models::devices,
     shared::errors::{AppError, AppResult},
 };
+use sea_orm::DatabaseConnection;
 
 #[async_trait]
 pub trait CentralServices: Send + Sync {
@@ -23,6 +28,31 @@ pub trait CentralServices: Send + Sync {
         ctx: &AppContext,
         context: &AlertEvaluationContext,
     ) -> AppResult<()>;
+
+    /// Observa o equipamento (SSH, SNMP e o Decisor, como a identificação
+    /// de dispositivo) e devolve o cadastro com o sistema observado.
+    async fn observe_device(
+        &self,
+        ctx: &AppContext,
+        device: &devices::Model,
+        ssh_port: Option<u16>,
+    ) -> AppResult<devices::Model>;
+
+    /// A porta publicada da API, por onde o equipamento alcança a central
+    /// (o espelho de pacotes dos plugins).
+    fn published_api_port(&self, ctx: &AppContext) -> u16;
+
+    /// Uma leitura da IA configurada, sem ferramentas: o texto e o modelo
+    /// que respondeu. `Ok(None)` com o assistente desligado; `Err` com a
+    /// mensagem da falha (configuração, provedor ou o `timeout` da resposta).
+    async fn ask_ai(
+        &self,
+        db: &DatabaseConnection,
+        system: &str,
+        user: &str,
+        max_tokens: u32,
+        timeout: Duration,
+    ) -> Result<Option<(String, Option<String>)>, String>;
 }
 
 /// O [`CentralServices`] do processo, guardado no `shared_store`.
