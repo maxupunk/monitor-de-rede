@@ -1,4 +1,5 @@
 [workspace]
+members = [".", "migration", "crates/core"]
 
 [package]
 name = "backend"
@@ -11,13 +12,8 @@ default-run = "backend-cli"
 
 [workspace.dependencies]
 loco-rs = { version = "1.0" }
-
-[dependencies]
-loco-rs = { workspace = true  }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1" }
-# `process` e `fs` existem por causa do fallback de ping no Windows (§3.2.3) e da
-# escrita atômica do wg0.conf (§8.10); `signal` desliga o scheduler com graça.
 tokio = { version = "1.45", default-features = false, features = [
   "rt-multi-thread",
   "net",
@@ -29,24 +25,10 @@ tokio = { version = "1.45", default-features = false, features = [
   "signal",
   "io-util",
 ] }
-tokio-stream = { version = "0.1", features = ["sync"] }
-tokio-util = { version = "0.7", features = ["io"] }
-# Serve o `dist` da SPA no lugar do nginx (ver `src/spa.rs`). Já está na árvore
-# via Loco; entra como dependência direta porque o `ServeDir` é usado aqui.
-tower-http = { version = "0.6", features = ["fs", "set-header"] }
 futures = { version = "0.3" }
 async-trait = { version = "0.1" }
-# `ws` atende o canal do agente remoto (`/api/agents/connect`, ADR 011).
 axum = { version = "0.8", features = ["ws"] }
-# Cliente do canal no binário `netmonitor-agent`. Mesma versão que o `axum`
-# puxa para o lado servidor; o TLS usa o `ring` já presente na árvore.
-tokio-tungstenite = { version = "0.29", features = ["rustls-tls-webpki-roots"] }
-bollard = { version = "0.18.1", default-features = false, features = ["http", "pipe"] }
-async-compression = { version = "0.4", default-features = false, features = ["tokio", "gzip"] }
 tracing = { version = "0.1" }
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-regex = { version = "1.11" }
-migration = { path = "migration" }
 sea-orm = { version = "2.0", features = [
   "sqlx-sqlite",
   "sqlx-postgres",
@@ -54,12 +36,54 @@ sea-orm = { version = "2.0", features = [
   "macros",
 ] }
 chrono = { version = "0.4" }
+uuid = { version = "1.6", features = ["v4"] }
+ts-rs = { version = "12", features = ["chrono-impl", "serde-compat"] }
+regex = { version = "1.11" }
+anyhow = { version = "1" }
+thiserror = { version = "2" }
+hex = { version = "0.4" }
+sha2 = { version = "0.10" }
+base64 = { version = "0.22" }
+rand = { version = "0.8" }
+chacha20poly1305 = { version = "0.10" }
+russh = { version = "0.62", default-features = false, features = ["ring", "rsa"] }
+validator = { version = "0.20" }
+netmonitor-core = { path = "crates/core" }
+
+[dependencies]
+loco-rs = { workspace = true  }
+serde = { workspace = true }
+serde_json = { workspace = true }
+# `process` e `fs` existem por causa do fallback de ping no Windows (§3.2.3) e da
+# escrita atômica do wg0.conf (§8.10); `signal` desliga o scheduler com graça.
+tokio = { workspace = true }
+tokio-stream = { version = "0.1", features = ["sync"] }
+tokio-util = { version = "0.7", features = ["io"] }
+# Serve o `dist` da SPA no lugar do nginx (ver `src/spa.rs`). Já está na árvore
+# via Loco; entra como dependência direta porque o `ServeDir` é usado aqui.
+tower-http = { version = "0.6", features = ["fs", "set-header"] }
+futures = { workspace = true }
+async-trait = { workspace = true }
+# `ws` atende o canal do agente remoto (`/api/agents/connect`, ADR 011).
+axum = { workspace = true }
+# Cliente do canal no binário `netmonitor-agent`. Mesma versão que o `axum`
+# puxa para o lado servidor; o TLS usa o `ring` já presente na árvore.
+tokio-tungstenite = { version = "0.29", features = ["rustls-tls-webpki-roots"] }
+bollard = { version = "0.18.1", default-features = false, features = ["http", "pipe"] }
+async-compression = { version = "0.4", default-features = false, features = ["tokio", "gzip"] }
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+regex = { workspace = true }
+migration = { path = "migration" }
+netmonitor-core = { workspace = true }
+sea-orm = { workspace = true }
+chrono = { workspace = true }
 # Expressões cron das tarefas agendadas (próximas execuções na hora local do
 # servidor). Já estava na árvore como transitiva do `loco-rs` (pelo
 # `tokio-cron-scheduler`), então promovê-la a direta não acrescenta download.
 croner = { version = "3.0" }
-validator = { version = "0.20" }
-uuid = { version = "1.6", features = ["v4"] }
+validator = { workspace = true }
+uuid = { workspace = true }
 # Backup de bancos de terceiros (MySQL, MariaDB, PostgreSQL), nativo: o dump
 # sai pelo protocolo de cada SGBD — catálogo, `COPY` e `SHOW CREATE` —, sem
 # `pg_dump`/`mysqldump` na imagem. Não é crate nova: é o mesmo `sqlx` sobre o
@@ -75,7 +99,7 @@ sqlx = { version = "0.9", default-features = false, features = [
 # ts-rs derives the TypeScript bindings for the `dtos` (the typed JSON API
 # contract). Present for every db app; the SPA frontend consumes the exports,
 # and a headless app can still emit them for external consumers.
-ts-rs = { version = "12", features = ["chrono-impl", "serde-compat"] }
+ts-rs = { workspace = true }
 include_dir = { version = "0.7" }
 
 # --- rede: ICMP nativo (substitui execFile('ping'), §3.2) ---
@@ -84,7 +108,7 @@ surge-ping = { version = "0.8" }
 # `sock_type_hint` recebe o `socket2::Type` **daquela** versão. Com duas majors
 # na árvore o tipo não unifica e o ICMP DGRAM não compila (SPIKE-03).
 socket2 = { version = "0.6" }          # sock_type_hint / fallback DGRAM
-rand = { version = "0.8" }             # identifier/sequence do ICMP
+rand = { workspace = true }
 
 # --- rede: DNS (wire format + DoH, §3.4 SPIKE-04) ---
 hickory-proto = { version = "0.24", default-features = false }
@@ -111,7 +135,7 @@ syslog_loose = { version = "0.23" }
 # `rustls` do `reqwest`/`sea-orm`, então reaproveitá-lo não acrescenta nenhum
 # requisito de toolchain. `rsa` fica ligado porque roteador antigo ainda
 # apresenta host key `ssh-rsa` — sem ela o handshake nem começa.
-russh = { version = "0.62", default-features = false, features = ["ring", "rsa"] }
+russh = { workspace = true }
 # Armazenamentos (destinos dos backups). SFTP sobre o mesmo `russh`: Rust
 # puro, sem o binário `ssh` que o service SFTP do `opendal` exigiria.
 russh-sftp = { version = "2.1" }
@@ -137,13 +161,13 @@ md-5 = { version = "0.11" }
 
 # --- criptografia ---
 x25519-dalek = { version = "2", features = ["static_secrets"] }
-chacha20poly1305 = { version = "0.10" }
+chacha20poly1305 = { workspace = true }
 p256 = { version = "0.13", default-features = false, features = ["ecdsa", "ecdh", "pem", "pkcs8", "std"] }
 aes-gcm = { version = "0.10", default-features = false, features = ["aes"] }
 hkdf = { version = "0.12" }
-base64 = { version = "0.22" }
-sha2 = { version = "0.10" }
-hex = { version = "0.4" }
+base64 = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
 
 # --- artefatos VPN ---
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
@@ -157,10 +181,10 @@ qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 rhai = { version = "1", features = ["sync", "serde", "no_module"] }
 
 # --- utilitários ---
-anyhow = { version = "1" }             # AppError::Internal (§8.1) — erro opaco de infra
+anyhow = { workspace = true }
 ipnet = { version = "2.9" }            # CIDR IPv4 (discovery + VPN)
 serde_yaml = { version = "0.9" }       # fixtures / seeds
-thiserror = { version = "2" }
+thiserror = { workspace = true }
 num_cpus = { version = "1.16" }
 
 # --- discovery e topologia (Fase 5) ---

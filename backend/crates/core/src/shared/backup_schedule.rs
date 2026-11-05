@@ -6,7 +6,7 @@
 
 use chrono::{DateTime, Utc};
 
-use crate::services::shared::errors::{AppError, AppResult};
+use crate::shared::errors::{AppError, AppResult};
 
 /// Intervalo máximo entre backups automáticos: 30 dias.
 pub const MAX_INTERVAL_HOURS: i32 = 24 * 30;

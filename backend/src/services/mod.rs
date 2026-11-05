@@ -3,6 +3,10 @@
 //! A regra da casa: o controller extrai, valida, delega e serializa. Toda regra
 //! de negócio vive aqui e é testável sem HTTP.
 
+/// Barramento de eventos e utilidades transversais moram no núcleo
+/// (`crates/core`); os caminhos `services::events` e `services::shared` continuam.
+pub use netmonitor_core::{events, shared};
+
 pub mod agent_runtime;
 pub mod agents;
 pub mod ai;
@@ -15,7 +19,6 @@ pub mod databases;
 pub mod devices;
 pub mod discovery;
 pub mod docker;
-pub mod events;
 pub mod link_tests;
 pub mod maintenance;
 pub mod maintenance_windows;
@@ -30,7 +33,6 @@ pub mod probes;
 pub mod scheduled_tasks;
 pub mod server_addresses;
 pub mod settings;
-pub mod shared;
 pub mod snmp;
 pub mod storage;
 pub mod syslog;

@@ -2,7 +2,7 @@ use sea_orm::entity::prelude::*;
 
 pub use super::_entities::vpn_servers::{ActiveModel, Column, Entity, Model};
 
-use crate::services::shared::{crypto, errors::AppResult};
+use crate::shared::{crypto, errors::AppResult};
 
 pub type VpnServers = Entity;
 

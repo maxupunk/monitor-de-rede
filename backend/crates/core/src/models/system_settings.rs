@@ -2,7 +2,7 @@ use sea_orm::{entity::prelude::*, ActiveValue};
 
 pub use super::_entities::system_settings::{ActiveModel, Column, Entity, Model};
 
-use crate::services::shared::errors::AppResult;
+use crate::shared::errors::AppResult;
 
 pub type SystemSettings = Entity;
 

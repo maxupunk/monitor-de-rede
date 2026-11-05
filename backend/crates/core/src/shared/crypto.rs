@@ -17,7 +17,7 @@ use chacha20poly1305::{
 use sha2::{Digest, Sha256};
 use std::sync::OnceLock;
 
-use crate::services::shared::errors::{AppError, AppResult};
+use crate::shared::errors::{AppError, AppResult};
 
 /// Tamanho do nonce do XChaCha20 — 24 bytes, grande o bastante para ser
 /// sorteado aleatoriamente sem risco prático de colisão (o do ChaCha20

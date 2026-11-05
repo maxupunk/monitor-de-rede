@@ -10,7 +10,7 @@
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
-use crate::services::shared::errors::{AppError, AppResult};
+use crate::shared::errors::{AppError, AppResult};
 
 /// Tamanho máximo padrão de cada lote de varredura.
 pub const MAX_SCAN_HOSTS: u32 = 1024;

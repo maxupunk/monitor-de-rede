@@ -8,7 +8,7 @@
 use std::collections::HashSet;
 use std::sync::{LazyLock, Mutex};
 
-use crate::services::shared::errors::{AppError, AppResult};
+use crate::shared::errors::{AppError, AppResult};
 
 static RUNNING: LazyLock<Mutex<HashSet<(&'static str, i64)>>> =
     LazyLock::new(|| Mutex::new(HashSet::new()));

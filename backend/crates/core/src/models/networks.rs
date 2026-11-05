@@ -2,7 +2,7 @@ use sea_orm::entity::prelude::*;
 
 pub use super::_entities::networks::{ActiveModel, Column, Entity, Model};
 
-use crate::services::discovery::cidr_range::{is_scannable_cidr, parse_cidr_range};
+use crate::shared::cidr::{is_scannable_cidr, parse_discovery_cidr as parse_cidr_range};
 
 pub type Networks = Entity;
 

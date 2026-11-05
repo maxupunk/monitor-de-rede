@@ -2,7 +2,7 @@ use sea_orm::entity::prelude::*;
 
 pub use super::_entities::probes::{ActiveModel, Column, Entity, Model};
 
-use crate::services::shared::crypto;
+use crate::shared::crypto;
 
 pub type Probes = Entity;
 

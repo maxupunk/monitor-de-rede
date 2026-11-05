@@ -9,3 +9,9 @@ playground = "run --example playground"
 # (can be removed once link.exe is fixed)
 [target.x86_64-pc-windows-msvc]
 linker = "rust-lld"
+
+# Os bindings TypeScript (`ts-rs`) usam `export_to = "../../frontend/src/bindings/"`,
+# relativo a este diretório-base. Fixá-lo aqui (e não no diretório de cada crate)
+# faz todo crate do workspace escrever no mesmo `frontend/src/bindings/`.
+[env]
+TS_RS_EXPORT_DIR = { value = "bindings", relative = true }

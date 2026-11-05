@@ -232,8 +232,7 @@ mod tests {
             "/x",
             get(move || async move {
                 *no_handler.lock().unwrap() = current_incident();
-                crate::services::shared::errors::AppError::Internal(anyhow::anyhow!("falhou"))
-                    .into_response()
+                crate::shared::errors::AppError::Internal(anyhow::anyhow!("falhou")).into_response()
             }),
         );
         let (status, header, body) = call(router).await;

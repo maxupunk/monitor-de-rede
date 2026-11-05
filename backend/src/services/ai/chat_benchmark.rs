@@ -198,10 +198,12 @@ impl SplitResult {
             domains: DOMAIN_LABELS
                 .iter()
                 .filter_map(|(id, _)| {
-                    self.domains.get(*id).map(|&score| ChatBenchmarkDomainScore {
-                        domain: (*id).to_string(),
-                        score,
-                    })
+                    self.domains
+                        .get(*id)
+                        .map(|&score| ChatBenchmarkDomainScore {
+                            domain: (*id).to_string(),
+                            score,
+                        })
                 })
                 .collect(),
         }
@@ -230,8 +232,7 @@ impl ModelSnapshotRow {
             model: self.model.clone(),
             label: meta.map_or_else(|| self.model.clone(), |m| m.label.to_string()),
             family: meta.map_or_else(|| "Ollama".to_string(), |m| m.family.to_string()),
-            description: catalog_desc
-                .or_else(|| meta.map(|m| m.fallback_description.to_string())),
+            description: catalog_desc.or_else(|| meta.map(|m| m.fallback_description.to_string())),
             quantization: meta.and_then(|m| m.quantization.map(str::to_string)),
             parameter_size: meta.map(|m| m.parameter_size.to_string()),
             download_mb: meta.map(|m| m.download_mb),
@@ -266,8 +267,7 @@ pub fn result(model: &str) -> Option<&'static ModelSnapshotRow> {
 #[must_use]
 pub fn report() -> Option<ChatBenchmarkReport> {
     let snapshot = snapshot()?;
-    let models: Vec<ChatBenchmarkRow> =
-        snapshot.models.iter().map(ModelSnapshotRow::row).collect();
+    let models: Vec<ChatBenchmarkRow> = snapshot.models.iter().map(ModelSnapshotRow::row).collect();
     Some(ChatBenchmarkReport {
         measured_on: snapshot.measured_on.clone(),
         hardware: snapshot.hardware.clone(),
@@ -348,4 +348,3 @@ mod tests {
         assert!(result("modelo-inexistente").is_none());
     }
 }
-

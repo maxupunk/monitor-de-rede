@@ -2,11 +2,9 @@ use loco_rs::app::AppContext;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 
 use crate::{
+    events::{DomainEvent, EventBus},
     models::{_entities::event_outbox as event_outbox_entity, event_outbox},
-    services::{
-        events::{DomainEvent, EventBus},
-        shared::errors::AppResult,
-    },
+    shared::errors::AppResult,
 };
 
 /// Replica eventos de outros processos somente quando ha cliente SSE conectado.

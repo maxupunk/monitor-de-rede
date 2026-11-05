@@ -699,6 +699,7 @@ dependencies = [
  "md-5",
  "mdns-sd",
  "migration",
+ "netmonitor-core",
  "num_cpus",
  "opendal",
  "p256 0.13.2",
@@ -4002,6 +4003,36 @@ dependencies = [
  "mime",
  "spin 0.9.9",
  "version_check",
+]
+
+[[package]]
+name = "netmonitor-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "base64 0.22.1",
+ "chacha20poly1305",
+ "chrono",
+ "futures",
+ "hex",
+ "loco-rs",
+ "rand 0.8.7",
+ "regex",
+ "russh",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "sha2 0.10.9",
+ "thiserror 2.0.20",
+ "tokio",
+ "tower",
+ "tracing",
+ "ts-rs",
+ "uuid",
+ "validator",
 ]
 
 [[package]]

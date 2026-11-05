@@ -17,7 +17,7 @@ use sea_orm::{ConnectionTrait, EntityTrait, FromQueryResult, PaginatorTrait, Sel
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::services::shared::errors::AppResult;
+use crate::shared::errors::AppResult;
 
 /// Itens por página quando o cliente não manda `limit`.
 pub const DEFAULT_LIMIT: u64 = 20;

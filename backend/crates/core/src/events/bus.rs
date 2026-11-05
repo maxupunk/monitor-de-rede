@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::{
     models::event_outbox,
-    services::shared::errors::{AppError, AppResult},
+    shared::errors::{AppError, AppResult},
 };
 
 /// Evento de domínio no formato exato que o `EventSource` do frontend lê.

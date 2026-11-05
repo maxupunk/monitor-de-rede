@@ -12,7 +12,7 @@ use ts_rs::TS;
 
 pub use super::_entities::vpn_peers::{ActiveModel, Column, Entity, Model};
 
-use crate::services::shared::{crypto, errors::AppResult};
+use crate::shared::{crypto, errors::AppResult};
 
 pub type VpnPeers = Entity;
 

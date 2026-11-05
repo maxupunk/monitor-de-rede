@@ -477,7 +477,9 @@ async fn candidates_for_kind(
             {
                 for row in rows {
                     let label = match row.message.as_deref() {
-                        Some(msg) if !msg.trim().is_empty() => format!("#{} {}", row.id, msg.trim()),
+                        Some(msg) if !msg.trim().is_empty() => {
+                            format!("#{} {}", row.id, msg.trim())
+                        }
                         _ => format!("#{}", row.id),
                     };
                     push_unique(&mut out, label);
@@ -568,9 +570,10 @@ pub async fn sanitize_ask_user_arguments(
         } else {
             false
         };
-        if in_conv || in_candidates || in_db {
-            push_unique(&mut grounded_options, opt);
-        } else if kind.is_none() && !looks_like_resource_identifier(&opt) {
+        // Fica a opção ancorada (conversa, candidatos ou banco) e, sem tipo de
+        // recurso, a que nem parece identificador de recurso.
+        let free_text = kind.is_none() && !looks_like_resource_identifier(&opt);
+        if in_conv || in_candidates || in_db || free_text {
             push_unique(&mut grounded_options, opt);
         }
     }
