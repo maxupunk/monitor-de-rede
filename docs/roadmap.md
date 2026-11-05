@@ -13,7 +13,7 @@ O NetMonitor atende dois públicos: quem gerencia **rede** (descoberta de dispos
 
 Cada item carrega severidade, esforço, responsável sugerido e critério de aceite. Itens marcados com `[x]` já estão no código e validados; itens `[ ]` são próximas entregas.
 
-> **Frente atual — Arquitetura modular.** Áreas do produto (Núcleo, Rede, Servidores, VPN) ligadas por instalação e reconstrução do backend em crates, sem reescrita. Decisão no [ADR 017](adr/017-arquitetura-modular.md); fases, ordem e aceite em [`roadmap_arquitetura_modular.md`](roadmap_arquitetura_modular.md). Feature nova durante essa frente declara a sua área.
+> **Arquitetura modular — 🟢 Concluída (Fases 0–10).** Áreas do produto (Núcleo, Rede, Servidores, VPN) ligadas por instalação e reconstrução do backend em crates, sem reescrita; o pacote raiz só monta. Decisão no [ADR 017](adr/017-arquitetura-modular.md); fases, ordem e aceite em [`roadmap_arquitetura_modular.md`](roadmap_arquitetura_modular.md). Feature nova durante essa frente declara a sua área.
 
 ---
 
@@ -734,7 +734,7 @@ docker build -t netmonitor:check .
 
 ## 9. Referências
 
-- [`docs/roadmap_arquitetura_modular.md`](roadmap_arquitetura_modular.md) — frente atual: Áreas do produto e reconstrução em crates ([ADR 017](adr/017-arquitetura-modular.md)).
+- [`docs/roadmap_arquitetura_modular.md`](roadmap_arquitetura_modular.md) — concluída: Áreas do produto e reconstrução em crates ([ADR 017](adr/017-arquitetura-modular.md)).
 - [`docs/debitos_tecnicos.md`](debitos_tecnicos.md) — catálogo detalhado de débitos, com arquivo/linha e severidade.
 - [`docs/arquitetura.md`](arquitetura.md) — descrição do sistema como ele é hoje.
 - [`docs/adr/`](adr/README.md) — decisões de arquitetura vigentes.

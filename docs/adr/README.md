@@ -20,4 +20,5 @@ decisão cria.
 | [014](014-docker-local-pelo-agente.md) | Docker da central atendido por um agente local: socket fora da API, um caminho só para todo host | — | aceito |
 | [015](015-teste-de-enlace.md) | Teste de enlace: motores iperf3/btest nativos, papéis declarados por plugin, orquestração na central | — | aceito |
 | [016](016-acesso-dedicado-por-chave.md) | Acesso dedicado por chave SSH: senha do administrador só no primeiro acesso, chave por equipamento, host fixado | — | aceito |
-| [017](017-arquitetura-modular.md) | Arquitetura modular: Áreas do produto em runtime (Núcleo, Rede, Servidores, VPN) e reconstrução no lugar em crates | — | proposto |
+| [017](017-arquitetura-modular.md) | Arquitetura modular: Áreas do produto em runtime (Núcleo, Rede, Servidores, VPN) e reconstrução no lugar em crates | — | aceito e implementado |
+| [018](018-loco-ou-axum.md) | Manter o Loco.rs como ponto de montagem, sem trocar por `axum` + `sea-orm` direto | — | aceito |

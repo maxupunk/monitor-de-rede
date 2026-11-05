@@ -90,7 +90,8 @@
      do agente, do registrador e do provisionador continua obrigatório: é ele
      que sustenta os dois arranjos.
    - **Token Fallback Padrão (`DEFAULT_VPN_PROBE_TOKEN`)**: o registrador
-     (`services/probes/vpn_registrar.rs`) e o agente (`services/probes/agent.rs`)
+     (`crates/nucleo/src/services/probes/vpn_registrar.rs`) e o agente
+     (`crates/nucleo/src/services/probes/agent.rs`)
      **DEVEM** usar `DEFAULT_VPN_PROBE_TOKEN = "default_vpn_probe_token"` como
      fallback quando `VPN_PROBE_TOKEN`/`PROBE_TOKEN` não estiverem definidos.
      **NUNCA remova este fallback**: é ele que garante registro e autenticação
@@ -156,7 +157,8 @@
      execução, saída ou transcrição e sem publicar no SSE. `runs::prepare` a
      recusa — não abra outro caminho (lote, IA, validação) para ela.
    - Controller extrai, valida, delega e serializa. Regra de negócio vive em
-     `src/services/`, testável sem HTTP.
+     `services/` do crate dono (`crates/nucleo` para o Núcleo, o crate da
+     área para as demais), testável sem HTTP.
 
 8. **Edições Cirúrgicas e Preservação de Formatação / Indentação (Economia de Tokens)**:
    - **Edições cirúrgicas**: Faça apenas modificações pontuais no escopo estrito da tarefa. **NUNCA** reformate arquivos inteiros nem altere a indentação, espaçamento ou quebras de linha de blocos de código não relacionados à mudança funcional.
@@ -181,10 +183,10 @@
 
 10. **Princípios de Design de Software (SOLID) & Clean Architecture**:
     - **S — Responsabilidade Única (Single Responsibility)**:
-      - **Controllers** (`src/controllers/`): Extraem parâmetros de rota/query/corpo, validam DTOs de entrada, delegam imediatamente para serviços (`src/services/`) e retornam a resposta formatada delegando a serialização para `src/views/` ou DTOs. Jamais escreva SQL, lógica de negócio, transformações complexas de dados ou formatação de exportação dentro de controllers.
-      - **Services** (`src/services/`): Contêm regras de negócio puras, orquestração e fluxos de domínio. Devem ser testáveis sem camada HTTP (sem axum/loco requests).
-      - **Views** (`src/views/`): Responsáveis por formatação, hidratação de apresentação, serialização de envelopes e renderização de relatórios/exportações (ex: CSV, plain text).
-      - **Entidades e Repositórios** (`src/models/`, `services/**/repository.rs`): Responsáveis pelo acesso a dados, mapeamento relacional e consultas otimizadas.
+      - **Controllers** (`controllers/` de cada crate): Extraem parâmetros de rota/query/corpo, validam DTOs de entrada, delegam imediatamente para serviços (`services/`) e retornam a resposta formatada delegando a serialização para `views/` ou DTOs. Jamais escreva SQL, lógica de negócio, transformações complexas de dados ou formatação de exportação dentro de controllers.
+      - **Services** (`services/` de cada crate — `crates/nucleo/src/services/` no Núcleo): Contêm regras de negócio puras, orquestração e fluxos de domínio. Devem ser testáveis sem camada HTTP (sem axum/loco requests).
+      - **Views** (`views/` de cada crate): Responsáveis por formatação, hidratação de apresentação, serialização de envelopes e renderização de relatórios/exportações (ex: CSV, plain text).
+      - **Entidades e Repositórios** (`crates/core/src/models/`, `services/**/repository.rs`): Responsáveis pelo acesso a dados, mapeamento relacional e consultas otimizadas.
       - **Frontend (Vue 3 / Vuetify / Pinia)**: Componentes tratam da interação do usuário e da árvore visual; Pinia stores (`src/stores/`) tratam do estado reativo e chamadas a endpoints; utilitários centralizados (`src/utils/formatters.ts`) tratam de formatação de valores, datas, latências e bytes (DRY absoluto).
     - **O — Aberto/Fechado (Open/Closed)**:
       - Módulos e serviços devem ser abertos para extensão e fechados para modificação.
@@ -213,7 +215,7 @@
         - Sondas TCP pontuais devem usar exclusivamente `network_tools::tcp_probe::probe_tcp`.
         - Sondas UDP com payloads conhecidos devem usar `network_tools::udp_probes::probe_for`.
       - **Tratamento e Propagação de Erros**:
-        - Utilize os tipos centrais `AppError` e `AppResult<T>` (`src/services/shared/errors.rs`). Jamais crie tipos ad-hoc de erro redundantes onde os existentes cobrem a semântica.
+        - Utilize os tipos centrais `AppError` e `AppResult<T>` (`crates/core/src/shared/errors.rs`). Jamais crie tipos ad-hoc de erro redundantes onde os existentes cobrem a semântica.
     - **Frontend (Vue 3 / TypeScript)**:
       - **Formatadores Centralizados (`frontend/src/utils/formatters.ts`)**:
         - Toda exibição de dados — bytes (`formatBytes`, `formatBinaryBytes`, `formatDecimalBytes`), taxas de rede (`formatBps`, `formatLinkSpeed`), latências (`formatLatency`), datas e horários (`formatDate`, `formatDateTime`, `formatShortDateTime`, `formatClockTime`, `formatRelativeTime`, `formatTimeSpan`) — **DEVE** ser importada de `@/utils/formatters`.
@@ -241,12 +243,17 @@
       o papel (`admin`, `operator`, `viewer`).
     - **Desligar uma área nunca apaga dado e nunca para monitor.** Só esconde e
       pausa as rotinas próprias dela.
-    - **Fronteira de dependência:** o núcleo não importa área e uma área não
-      importa outra; a conversa é por trait do núcleo (`MonitorChecker`,
-      `Classifier`, `AiToolHandler`, `WidgetSpec`, `AgentCommandHandler` —
-      criados na Fase 1 do roadmap; antes dela, não aumente o acoplamento). As
-      exceções atuais (ARQ-02 em `docs/debitos_tecnicos.md`) estão congeladas:
-      não crie novas.
+    - **Fronteira de dependência:** o núcleo (`crates/core`, `crates/nucleo`)
+      não depende de área e uma área não depende de outra nem do `nucleo` — o
+      `Cargo.toml` de cada crate garante, e `tests/conventions/architecture.rs`
+      guarda o que o compilador não vê (os manifestos, o ponto de montagem e
+      um consumidor por área). A conversa é por trait do `core`
+      (`MonitorChecker`, `MonitorGroup`, `Routine`/`RetentionJob`,
+      `Classifier`, `AiToolHandler`, `AgentCommandHandler`/`Dispatcher`,
+      `HostDocker`, `DeviceAccess`, `AreaPolicy`) ou pelo `CentralServices`
+      da área. Só o ponto de montagem (`src/app.rs`, `src/registries.rs`,
+      `src/initializers/`) nomeia crate de área. Não há exceções, e não se
+      cria nenhuma.
     - **Reconstrução no lugar, sem reescrita:** um PR de extração só move código
       e inverte dependências; mudança de comportamento vai em PR separado. A
       ordem das fases está no roadmap da arquitetura modular.

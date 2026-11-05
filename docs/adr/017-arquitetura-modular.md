@@ -2,10 +2,11 @@
 
 ## Status
 
-**Proposto** (2026-11-05). Vira **aceito** quando a Fase 0 do
-[roadmap da arquitetura modular](../roadmap_arquitetura_modular.md) for
-entregue. O plano de execução, com critérios de aceite, mora no roadmap; este
-documento registra **o que** foi decidido e **por quê**.
+**Aceito e implementado** (2026-11-05). Proposto em 2026-11-05; as Fases 0–10
+do [roadmap da arquitetura modular](../roadmap_arquitetura_modular.md) foram
+entregues — o plano de execução e o que cada fase entregou moram lá; este
+documento registra **o que** foi decidido e **por quê**. O que ficou de
+fora, de propósito, está em [Implementação](#implementação-fase-10).
 
 Consolida duas análises independentes do código (registradas antes de serem
 comparadas — ver [Divergências resolvidas](#divergências-resolvidas)) e uma
@@ -284,7 +285,8 @@ reconstrução é de **estrutura**, não de tecnologia.
 
 #### Loco.rs
 
-Fica durante a reconstrução. Hoje 176 arquivos o referenciam e o `app.rs` já
+Fica durante a reconstrução (decidido depois dela, com dados, no
+[ADR 018](018-loco-ou-axum.md): fica). Hoje 176 arquivos o referenciam e o `app.rs` já
 contorna três comportamentos dele (`run_task` sem initializers, logger
 reimplementado, `file_appender` não reproduzido). Quando o `app` for o único
 ponto de montagem, trocá-lo por `axum` + `sea-orm` direto vira uma troca
@@ -376,14 +378,45 @@ Ajustes para as Fases 7–10:
 4. **`core` é caro de tocar** (recompila tudo): mudanças no `core` em PR
    próprio, antes da extração que as usa.
 
-## Decisões em aberto
+## Decisões tomadas (antes em aberto)
 
-1. **Nome na interface:** "Áreas" (proposto — "módulo" sugere instalar e
-   desinstalar), "Recursos" ou "Módulos".
-2. **Plugins de dispositivo** na Rede (proposto) ou no Núcleo, para um futuro
-   plugin de servidor.
-3. **Ping e traceroute para quem usa só Servidores:** as páginas ficam na Rede;
-   as ferramentas `ping_host` e `traceroute` da IA ficam no Núcleo (proposto).
+1. **Nome na interface: "Áreas".** "Módulo" sugere instalar e desinstalar;
+   "Recursos" é genérico demais. É o nome em Configurações › Geral, no
+   onboarding e na página de área desligada.
+2. **Plugins de dispositivo na Rede.** Moram em `crates/network` (ADR 012); o
+   núcleo os alcança só pelo `DeviceAccess` (credencial, shell, plugins no
+   cadastro). Um plugin de servidor, se vier, decide o seu lugar no ADR dele.
+3. **`ping_host` e `traceroute` da IA no Núcleo.** Quem usa só Servidores
+   continua diagnosticando alcance pela IA; as páginas de ping e traceroute
+   ficam na Rede.
+
+## Implementação (Fase 10)
+
+O workspace ao fim da reconstrução difere do desenho da seção 2 em três
+pontos, todos medidos:
+
+- **Sem `crates/legacy` nem `crates/app`/`crates/agent`.** O pacote raiz
+  (`backend`) foi o crate transitório e virou o ponto de montagem dos dois
+  binários (central e `netmonitor-agent`): mover o pacote quebraria os caminhos
+  relativos a ele (configuração do Loco, bindings, banco de teste) sem ganho.
+- **O Núcleo em dois crates.** `core` guarda os contratos e o que as áreas
+  também usam; os serviços, rotas e telas do Núcleo estão em `crates/nucleo`,
+  do qual nenhuma área depende. Medido (build incremental com uma função
+  pública nova, `-j 2`): mudar o `nucleo` custa **10 s** (ele e a montagem);
+  mudar o `core`, **17 s** (todas as áreas, o assistente e a montagem). Com o
+  Núcleo dentro do `core`, toda mudança de serviço pagaria o segundo preço.
+- **Pontos de extensão a mais, nascidos quando foram precisos:** além dos da
+  tabela, `MonitorGroup` (coleta consolidada), `Routine`/`RetentionJob`
+  (rotinas do scheduler e retenção por área), `HostDocker` (o Docker do host
+  do agente), `DeviceAccess` (o acesso ao equipamento que a Rede oferece) e o
+  `CentralServices` de cada área (o que ela pede à central). O `WidgetSpec`
+  **não** foi criado: o `docker_summary` é uma entrada de catálogo com
+  `area()`, sem código que dependa de Servidores. Migrations continuam num
+  crate comum (`migration`): as tabelas das áreas só têm FK para o `core`.
+
+A regra de dependência é do compilador; `tests/conventions/architecture.rs`
+guarda o que ele não vê. A troca do Loco.rs foi decidida no
+[ADR 018](018-loco-ou-axum.md): fica.
 
 ## Referências
 

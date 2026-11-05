@@ -52,11 +52,11 @@ Este documento consolida a auditoria de arquitetura, código-fonte, padrões de 
 | **DOC-01** | Documentação | Inconsistência entre tabela resumo e corpo deste documento | Médio | Pequeno | 🟢 Corrigido |
 | **DB-02** | Banco | 64 migrations históricas num crate só | Baixo | Médio | 🟢 Concluído (ADR 017) |
 | **ARQ-01** | Arquitetura | Composição estática: rotas, rotinas, menu e rotas da SPA ligados para toda instalação | Alto | Grande | 🟢 Concluído (ADR 017) |
-| **ARQ-02** | Arquitetura | Dependências na direção errada entre domínios no backend (A1–A5) | Médio | Grande | 🟡 Em andamento (ADR 017; A1, A2, A3 e A5 resolvidos; 11 exceções) |
+| **ARQ-02** | Arquitetura | Dependências na direção errada entre domínios no backend (A1–A5) | Médio | Grande | 🟢 Concluído (ADR 017; zero exceções) |
 | **ARQ-03** | Arquitetura | Barramento SSE central no frontend e Dashboard acoplado ao Docker (A6–A7) | Médio | Médio | 🟢 Concluído (ADR 017) |
 | **ARQ-04** | Arquitetura | Catálogo de widgets duplicado entre backend e frontend | Médio | Pequeno | 🟢 Concluído (ADR 017) |
 | **ARQ-05** | Performance | Snapshot Docker pedido com qualquer aba aberta | Médio | Pequeno | 🟢 Concluído (ADR 017) |
-| **ARQ-06** | Arquitetura | Crate único de ~185 mil linhas; fronteira só por convenção | Médio | Grande | 🟡 Em andamento (ADR 017; Servidores, VPN, assistente e Rede extraídos) |
+| **ARQ-06** | Arquitetura | Crate único de ~185 mil linhas; fronteira só por convenção | Médio | Grande | 🟢 Concluído (ADR 017; pacote raiz só monta) |
 
 ---
 
@@ -265,14 +265,14 @@ Levantados em 2026-11-05. A decisão está no [ADR 017](adr/017-arquitetura-modu
 - **Descrição:** toda instalação recebe os dois domínios: ~36 entradas de menu, onboarding só de rede, ~60 ferramentas de IA e rotinas próprias de áreas que não usa.
 - **Plano:** áreas `on`/`off` com registros declarativos (Fases 0, 2, 3, 4 e 5).
 
-### 🟡 ARQ-02: Dependências na Direção Errada no Backend — Em andamento
+### 🟢 ARQ-02: Dependências na Direção Errada no Backend — Concluído
 - **Arquivos Afetados:** `services/dashboard/catalog.rs` (A4); A2 e A3 resolvidos na Fase 8, A5 na Fase 9
 - **Descrição:** a Rede chama o Decisor diretamente e a IA conhece todos os domínios.
 - **Resolvido na Fase 6:** **A1** — `monitoring/runner.rs` não conhece mais Docker: o monitor `container` é um `MonitorChecker` (`netmonitor_core::monitoring`) do crate `servers`, registrado pelo ponto de montagem (`src/registries.rs`). Saíram também `agents → docker` (a `HostKey` e os tópicos `docker:snapshot`/`docker:inventory` são do núcleo; o `AgentEngine` foi para o crate `servers`) e `telemetry → docker` (o rollup é do `agent-protocol`, o histórico do `core` e o amostrador do lado do agente). O teste de arquitetura passou de **37 para 34 exceções** e conta `netmonitor_servers::…` como a área Servidores.
 - **Resolvido na Fase 7:** `agents → vpn`, `plugins → vpn` e `settings → vpn` (o cofre efêmero, o enrollment/cadastro dos agentes e o `vpn_probe` foram para o `core`; o registrador do `vpn-probe` foi para `services/probes`), `server_addresses → vpn` e `devices → vpn` (o cálculo CIDR já era do `core`; o teste que cruza perfis de VPN e sistemas foi para o crate `vpn`). **34 → 29 exceções**; restam da VPN `ai`, `monitoring` (`maintenance_runner` → telemetria dos túneis) e `onboarding`.
 - **Resolvido na Fase 8:** **A2** — `devices`, `discovery`, `snmp` e `syslog` dependem só do `Classifier` do núcleo (`netmonitor_core::classifier`), com a heurística como padrão; o assistente registra o Decisor no ponto de montagem. **A3** — o assistente virou crate (`crates/assistant`, depende só do `core`): o contrato das ferramentas (`AiToolHandler`, `ToolPolicy`, `ToolArgs`, risco, gráfico, fonte do `grep`, seção da plataforma) mora no `core`, as ferramentas `docker_*` e a fonte `docker` do `grep` no crate `servers`, a seção `vpn` no crate `vpn`, a topologia, a descoberta e os plugins nos módulos da Rede, e o catálogo é montado em `src/registries.rs`. Saíram também `scheduled_tasks → ai` (o catálogo agendável é do `core`). **29 → 18 exceções**; da IA resta `plugins → ai` (a revisão de segurança do plugin chama o provedor do chat).
 - **Resolvido na Fase 9:** **A5** — o agente não conhece mais a Rede: o executor (`agent_runtime/executor.rs`) aplica a política local e entrega `Discovery`, `DeviceIo` e `Throughput` aos `AgentCommandHandler`s (`netmonitor_core::agents::command`) que o crate `network` contribui (`agent_commands`), e o pump da central (`agents/background.rs`) entrega as varreduras pendentes pelo `AgentCommandDispatcher` da Rede (`discovery::remote::DiscoveryDispatch`); os dois são registrados em `src/registries.rs`. A Rede virou crate (`crates/network`, depende só de `core` e `agent-protocol`), com o que ela pede à central por `netmonitor_network::central::CentralServices` (motor de alertas, endereços, identificação de dispositivo, porta publicada, leitura da IA para a revisão de plugin — sai `plugins → ai`). Saíram `agent_runtime → discovery`, `agent_runtime → plugins`, `agents → discovery`, `agents → plugins`, `devices → discovery` (as chaves do palpite do Decisor são do `classifier`), `network_tools → plugins` (o alvo aceitável de equipamento é do `core`) e `plugins → ai`. **18 → 11 exceções**; o detector conta `netmonitor_network::<módulo>` pelo módulo.
-- **Plano:** `WidgetSpec`; um registro de rotinas por área para o scheduler e a limpeza (`monitoring → {link_tests, snmp, vpn, wifi}`, `maintenance → link_tests`); o Docker do executor do agente como `AgentCommandHandler` de Servidores (`agent_runtime → docker`); as capacidades do dispositivo sem o Wi-Fi (`devices → wifi`); o polling HTTP do probe pelo despachante (`probes → discovery`); e a ativação do log no equipamento e as dicas do formulário (`syslog → {plugins, snmp}`), que dependem do receptor do núcleo. Até lá, o teste de arquitetura congela a lista e impede novas.
+- **Resolvido na Fase 10:** as 11 restantes, por inversão. Registro de rotinas no `core` (`netmonitor_core::routines`: `Routine`, `RetentionJob`, `AreaRoutines`, cadência) e grupos de monitores (`MonitorGroup`): a coleta SNMP consolidada e a sem monitor, a varredura agendada, o vigia do Wi-Fi, os enlaces agendados e a retenção deles vêm da Rede; a telemetria dos túneis, da VPN (`monitoring → {link_tests, snmp, vpn, wifi}`, `maintenance → link_tests`). O Docker do agente virou `AgentCommandHandler` e `HostDocker` de Servidores (`agent_runtime → docker`). `DeviceAccess` no `core`, implementado pela Rede (identidade SNMP, leitor de Wi-Fi, credencial salva, shell SSH/Telnet, plugins no cadastro): saem `devices → wifi` e `syslog → {plugins, snmp}`. O probe por HTTP usa os `AgentCommandDispatcher`s (`probes → discovery`); o assistente inicial usa o IP público e a tabela do `core` (`onboarding → vpn`). **11 → 0 exceções.** Com o Núcleo no crate `nucleo` (Fase 10.2), a regra passou a ser do compilador; `tests/conventions/architecture.rs` guarda só o que ele não vê (manifestos, ponto de montagem, consumidor por área). O `WidgetSpec` não foi criado: o `docker_summary` é uma entrada de catálogo com `area()`, sem código que dependa de Servidores (A4 não é dependência).
 
 ### 🟢 ARQ-03: Barramento SSE Central e Dashboard Acoplado ao Docker — Concluído
 - **Arquivos Afetados:** `frontend/src/stores/events.ts`, `frontend/src/pages/DashboardPage.vue`
@@ -289,11 +289,11 @@ Levantados em 2026-11-05. A decisão está no [ADR 017](adr/017-arquitetura-modu
 - **Descrição:** basta um assinante SSE, em qualquer página, para a central pedir `SetLive` a todos os agentes e distribuir snapshots Docker.
 - **Plano:** considerar a área Servidores e a presença de quem usa dados Docker (Fase 5).
 
-### 🟡 ARQ-06: Crate Único e Fronteira por Convenção — Em andamento
-- **Arquivos Afetados:** `backend/` (workspace; o pacote raiz ainda é o crate transitório)
+### 🟢 ARQ-06: Crate Único e Fronteira por Convenção — Concluído
+- **Arquivos Afetados:** `backend/` (workspace; o pacote raiz só monta)
 - **Descrição:** nada impede uma dependência nova entre domínios além da revisão humana; a compilação do crate inteiro estoura a paginação nesta máquina (erro 1455).
 - **Andamento:** Fase 1 criou o workspace e o `core`; a Fase 6 extraiu o `agent-protocol` e a área Servidores (`crates/servers`, que só depende de `core` e `agent-protocol` — garantido pelo `Cargo.toml`); a Fase 7, a VPN (`crates/vpn`, que só depende de `core`); a Fase 8, o assistente (`crates/assistant`, que só depende de `core`); a Fase 9, a Rede (`crates/network`, que só depende de `core` e `agent-protocol`). O custo medido está no "Portão da Fase 6" do ADR 017.
-- **Plano:** encerramento (Fase 10).
+- **Concluído na Fase 10:** o que restava do Núcleo no pacote raiz (serviços, controllers, DTOs, views, mailers — ~65 mil linhas) foi para `crates/nucleo`, que depende só de `core` e `agent-protocol` e do qual nenhuma área depende; o cadastro de redes foi para a Rede. O pacote raiz ficou com `app.rs`, `registries`, initializers, tarefas, binários e SPA. Ver ADR 017 (Fase 10) e [ADR 018](adr/018-loco-ou-axum.md).
 
 ---
 

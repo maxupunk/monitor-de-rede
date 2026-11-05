@@ -259,7 +259,7 @@ comprometer as outras.
 
 ### Fase 10 — Encerramento
 
-- [ ] **`legacy` vazio e documentação final**
+- [x] 🟢 Concluído — **`legacy` vazio e documentação final**
   - **Esforço:** Pequeno
   - **Entregas:**
     - O que restar do `legacy` vai para o `core`; o crate é removido.
@@ -267,21 +267,22 @@ comprometer as outras.
     - ADR 017 passa a **aceito e implementado**; ADR 018 decide manter o Loco.rs ou trocar por `axum` + `sea-orm` direto, com dados.
     - `arquitetura.md` §4 descreve os crates como são; `AGENTS.md` e `backend/AGENTS.md` sem referência ao crate único.
   - **Aceite:** lista de exceções do teste de arquitetura vazia; nenhum `use` entre áreas no workspace.
+  - **Entregue:** em três commits verdes. **10.1 — zero exceções.** Registro de rotinas no `core` (`routines`: `Routine`, `RetentionJob`, `AreaRoutines`, `cadence`) e grupos de monitores (`monitoring::MonitorGroup`, com o "testar agora"): a Rede contribui a coleta SNMP consolidada (`SnmpDeviceGroup`) e a sem monitor, a varredura agendada, o vigia do Wi-Fi, os enlaces agendados e a retenção deles; a VPN, a telemetria dos túneis. Área desligada pausa só o que já pausava (a própria rotina consulta a área); monitor nunca. O agente: o Docker virou `DockerCommands` (`AgentCommandHandler`) e `LocalHostDocker` (`agents::host::HostDocker`, no `core`) de Servidores, e o runtime recebe as peças montadas pelo binário (`AgentHost`) — `AGENT_ALLOW` intacto, antes dos handlers. `devices::access::DeviceAccess` no `core` (identidade SNMP, leitor de Wi-Fi, credencial salva, shell SSH/Telnet, ligar plugins no cadastro), implementado pela Rede; os tipos que cruzam (`CredentialView`, `SecretStorage`, `DedicatedAccess`, `SnmpSystemInfo`, prazos da sessão) foram para o `core` byte a byte. O probe por HTTP usa os despachantes (`pending_for_probe`, `receive`). Núcleo primeiro: IP público, rate limit e IP de origem, `VpnPeerResponse`, a cadência SNMP do dispositivo e o campo da triagem no `core`; `AreaPolicies` no `shared_store`. **10.2 — o crate transitório esvaziado.** Medido antes de decidir (build incremental do pacote raiz com uma função pública nova, `-j 2`): no `nucleo`, **10 s** (recompila ele e o ponto de montagem); no `core`, **17 s** (recompila `core`, as quatro áreas, o assistente e a montagem). Pôr o Núcleo no `core` faria toda mudança de serviço pagar o segundo preço e recompilar as áreas — por isso **`crates/nucleo`** (`netmonitor-nucleo`): serviços, controllers, DTOs, views e mailers do Núcleo (~64 mil linhas), dependendo só de `core` e `agent-protocol`, e nenhuma área depende dele. O cadastro de redes (que enfileira a varredura) foi para a Rede. O pacote raiz ficou com ~2,9 mil linhas: `app.rs`, `registries`, initializers, tarefas, binários e SPA. As reexportações de caminho antigo saíram — do pacote raiz e as de área dentro do Núcleo (`services::{docker, vpn, ai, snmp…}`, `dtos::ai`, `controllers::{ai, ai_conversations}`); os testes e a montagem usam os crates direto. O teste de arquitetura virou o que o compilador não vê: os manifestos seguem a regra, só `app.rs`/`registries`/`initializers` nomeiam área, e toda área tem consumidor no ponto de montagem e no frontend. **Achado:** o filtro padrão de log do Loco só libera o crate `backend` — o log dos crates do workspace sumia desde a Fase 6; corrigido com `WORKSPACE_CRATES` em `app.rs`. **10.3 — documentação:** ADR 017 aceito e implementado, [ADR 018](adr/018-loco-ou-axum.md) (manter o Loco.rs), `arquitetura.md` §4, `AGENTS.md`, ARQ-02 e ARQ-06 fechados. Suíte com o mesmo número de testes (2864 → 2866, os dois novos do teste de arquitetura), `contracts/ai_chat.json` e `frontend/src/bindings/` sem diff. **Ficou de fora, de propósito:** `WidgetSpec` (o `docker_summary` é dado de catálogo com `area()`, sem dependência); migrations por crate (as tabelas das áreas continuam no `migration` comum — só têm FK para o `core`).
 
 ---
 
 ## 6. Como medir
 
-| Métrica | Hoje | Meta |
-| :--- | :--- | :--- |
-| Entradas de menu — perfil Completo | ~36 | ~26 (Fase 0) |
-| Entradas de menu — só Servidores | ~36 | ~15 (Fase 3) |
-| Etapas do onboarding — só Servidores | 8, nenhuma de servidor | ≤ 3 (Fase 4) |
-| Ferramentas da IA — só Rede | ~60 | sem nenhuma `docker_*` (Fase 5) |
-| Snapshots Docker sem ninguém olhando | contínuos com qualquer aba | zero (Fase 5) |
-| Exceções no teste de arquitetura | 5 (A1–A5) + A6–A7 no frontend | 0 (Fase 10) |
-| Linhas no crate `legacy` | ~185 mil | 0 (Fase 10) |
-| Migrations | 64 | uma base por crate (Fases 1 e 6–9) |
+| Métrica | Antes | Meta | Ao fim da Fase 10 |
+| :--- | :--- | :--- | :--- |
+| Entradas de menu — perfil Completo | ~36 | ~26 (Fase 0) | 26 para admin (Fase 0) |
+| Entradas de menu — só Servidores | ~36 | ~15 (Fase 3) | entregue (Fase 3) |
+| Etapas do onboarding — só Servidores | 8, nenhuma de servidor | ≤ 3 (Fase 4) | entregue (Fase 4) |
+| Ferramentas da IA — só Rede | ~60 | sem nenhuma `docker_*` (Fase 5) | nenhuma `docker_*` |
+| Snapshots Docker sem ninguém olhando | contínuos com qualquer aba | zero (Fase 5) | zero |
+| Exceções no teste de arquitetura | 5 (A1–A5) + A6–A7 no frontend | 0 (Fase 10) | **0** (lista removida) |
+| Linhas no crate `legacy` | ~185 mil | 0 (Fase 10) | 0 — pacote raiz só monta (~2,9 mil linhas) |
+| Migrations | 64 | uma base por crate (Fases 1 e 6–9) | 37 + 3 (uma por tabela, no `migration` comum) |
 
 ## 7. Fora do plano, de propósito
 
@@ -290,9 +291,10 @@ comprometer as outras.
 - Features do Cargo, imagens por edição, microsserviços — rejeitados no ADR 017.
 - Crates de submódulo (Wi-Fi, enlace) — só com demanda real.
 
-## 8. Decisões em aberto
+## 8. Decisões que estavam em aberto
 
-Ver [ADR 017 — Decisões em aberto](adr/017-arquitetura-modular.md#decisões-em-aberto):
-nome na interface, lugar dos plugins de dispositivo e ferramentas de ping e
-traceroute para quem usa só Servidores. Precisam de resposta antes da Fase 0
-(nome) e da Fase 2 (as outras duas).
+Nenhuma. As três do [ADR 017](adr/017-arquitetura-modular.md#decisões-tomadas-antes-em-aberto)
+foram decididas: o nome na interface é **"Áreas"**; os plugins de dispositivo
+ficam na **Rede**; as ferramentas `ping_host` e `traceroute` da IA ficam no
+**Núcleo** (as páginas, na Rede). A troca do Loco.rs foi decidida no
+[ADR 018](adr/018-loco-ou-axum.md): fica.
