@@ -26,6 +26,7 @@ fn politica(actions: AiAutomationMode) -> ToolPolicy {
         confirm_active: false,
         interactive: true,
         container_actions: AiAutomationMode::Off,
+        areas: netmonitor_core::areas::AreaSet::ALL,
     }
 }
 

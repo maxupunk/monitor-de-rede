@@ -22,6 +22,7 @@ const COM_ACOES: ToolPolicy = ToolPolicy {
     confirm_active: false,
     interactive: true,
     container_actions: backend::services::ai::settings::AiAutomationMode::Off,
+    areas: netmonitor_core::areas::AreaSet::ALL,
 };
 
 const SO_LEITURA: ToolPolicy = ToolPolicy {
@@ -30,6 +31,7 @@ const SO_LEITURA: ToolPolicy = ToolPolicy {
     confirm_active: false,
     interactive: true,
     container_actions: backend::services::ai::settings::AiAutomationMode::Off,
+    areas: netmonitor_core::areas::AreaSet::ALL,
 };
 
 async fn aparelho(ctx: &AppContext) -> devices::Model {

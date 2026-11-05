@@ -19,7 +19,7 @@ use crate::services::{
     ai::approvals::ApprovalDesk,
     discovery::service::ScanSessionService,
     docker::log_stream::LogStreams,
-    events::{EventBus, Presence},
+    events::{EventBus, Interests, Presence},
     monitoring::checkers::ping::PingClientCell,
 };
 
@@ -40,6 +40,9 @@ pub fn install(ctx: &AppContext) {
     // Quem está com o NetMonitor aberto (stream SSE): decide se um pedido de
     // aprovação da IA vira notificação no celular.
     Presence::install(ctx);
+    // O que as abas estão olhando: decide se os agentes mandam o estado ao
+    // vivo do Docker (ARQ-05).
+    Interests::install(ctx);
     ApprovalDesk::install(ctx);
 
     // O socket ICMP é a única peça que pode falhar, e falha por configuração do

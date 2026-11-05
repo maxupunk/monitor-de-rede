@@ -7,19 +7,17 @@
 //!
 //! Só o processo da API povoa o registro; nos outros ele existe vazio.
 
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex, PoisonError},
-};
-
 use loco_rs::app::AppContext;
 
-type Connections = Arc<Mutex<HashMap<i64, usize>>>;
+use super::counter::{ConnectionCounter, CounterGuard};
 
 #[derive(Clone, Default)]
 pub struct Presence {
-    connections: Connections,
+    connections: ConnectionCounter<i64>,
 }
+
+/// Uma conexão aberta. Ao cair, desconta a do usuário.
+pub type PresenceGuard = CounterGuard<i64>;
 
 impl Presence {
     /// Registra a instância do processo no `shared_store`.
@@ -36,41 +34,13 @@ impl Presence {
     /// Marca mais uma conexão do usuário, até o guarda sair de escopo.
     #[must_use]
     pub fn connect(&self, user_id: i64) -> PresenceGuard {
-        *lock(&self.connections).entry(user_id).or_default() += 1;
-        PresenceGuard {
-            connections: Arc::clone(&self.connections),
-            user_id,
-        }
+        self.connections.connect(user_id)
     }
 
     #[must_use]
     pub fn is_online(&self, user_id: i64) -> bool {
-        lock(&self.connections)
-            .get(&user_id)
-            .is_some_and(|count| *count > 0)
+        self.connections.is_active(&user_id)
     }
-}
-
-/// Uma conexão aberta. Ao cair, desconta a do usuário.
-pub struct PresenceGuard {
-    connections: Connections,
-    user_id: i64,
-}
-
-impl Drop for PresenceGuard {
-    fn drop(&mut self) {
-        let mut connections = lock(&self.connections);
-        if let Some(count) = connections.get_mut(&self.user_id) {
-            *count = count.saturating_sub(1);
-            if *count == 0 {
-                connections.remove(&self.user_id);
-            }
-        }
-    }
-}
-
-fn lock(connections: &Connections) -> std::sync::MutexGuard<'_, HashMap<i64, usize>> {
-    connections.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 #[cfg(test)]

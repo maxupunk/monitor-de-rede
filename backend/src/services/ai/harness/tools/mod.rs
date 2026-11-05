@@ -61,6 +61,7 @@ mod web;
 
 use async_trait::async_trait;
 use loco_rs::prelude::AppContext;
+use netmonitor_core::areas::{Area, AreaSet};
 use serde_json::{json, Value};
 
 pub use args::ToolArgs;
@@ -308,6 +309,9 @@ pub struct ToolPolicy {
     pub interactive: bool,
     /// Ações em container: desligadas, com confirmação ou automáticas.
     pub container_actions: AiAutomationMode,
+    /// Áreas do produto ligadas (ADR 017): ferramenta de área desligada não
+    /// entra no catálogo — nem no chat, nem nas rotinas, nem nas tarefas.
+    pub areas: AreaSet,
 }
 
 impl ToolPolicy {
@@ -320,6 +324,7 @@ impl ToolPolicy {
             confirm_active: false,
             interactive: false,
             container_actions: AiAutomationMode::Off,
+            areas: AreaSet::ALL,
         }
     }
 
@@ -333,6 +338,7 @@ impl ToolPolicy {
             confirm_active: false,
             interactive: false,
             container_actions: AiAutomationMode::Auto,
+            areas: AreaSet::ALL,
         }
     }
 
@@ -344,7 +350,19 @@ impl ToolPolicy {
             confirm_active: settings.require_tool_confirmation,
             interactive: true,
             container_actions: settings.container_actions,
+            areas: AreaSet::ALL,
         }
+    }
+
+    /// A mesma política restrita às áreas ligadas. Sem Servidores, as ações em
+    /// container também saem — e com elas a regra de containers do prompt.
+    #[must_use]
+    pub const fn with_areas(mut self, areas: AreaSet) -> Self {
+        self.areas = areas;
+        if !areas.contains(Area::Servers) {
+            self.container_actions = AiAutomationMode::Off;
+        }
+        self
     }
 
     /// O modo que vale para o tipo de ferramenta.
@@ -509,6 +527,11 @@ pub(super) fn preview_or_error(result: Result<String, ToolOutput>) -> String {
 pub trait AiToolHandler: Send + Sync {
     fn name(&self) -> &'static str;
 
+    /// A área do produto a que a ferramenta pertence (ADR 017). Sem padrão de
+    /// propósito: ferramenta nova que não declara a área não compila. Com a
+    /// área desligada, a ferramenta sai do chat, das rotinas e das tarefas.
+    fn area(&self) -> Area;
+
     fn description(&self) -> &'static str;
 
     /// JSON Schema dos argumentos.
@@ -651,6 +674,26 @@ fn all_handlers() -> Vec<Box<dyn AiToolHandler>> {
     ]
 }
 
+/// Os nomes das ferramentas de uma área — para as consequências de desligá-la
+/// (tarefas agendadas que passariam a ser puladas).
+#[must_use]
+pub fn tool_names_in_area(area: Area) -> Vec<&'static str> {
+    all_handlers()
+        .into_iter()
+        .filter(|handler| handler.area() == area)
+        .map(|handler| handler.name())
+        .collect()
+}
+
+/// A área de uma ferramenta pelo nome (`None` se ela não existe).
+#[must_use]
+pub fn area_of_tool(name: &str) -> Option<Area> {
+    all_handlers()
+        .into_iter()
+        .find(|handler| handler.name() == name)
+        .map(|handler| handler.area())
+}
+
 /// Contrato de uma ferramenta que pode virar tarefa agendada.
 #[derive(Debug, Clone)]
 pub struct ToolContract {
@@ -659,6 +702,8 @@ pub struct ToolContract {
     pub group: ToolGroup,
     pub kind: ToolKind,
     pub admin_only: bool,
+    /// A área do produto da ferramenta (ADR 017).
+    pub area: Area,
     /// JSON Schema dos argumentos — o mesmo que a IA recebe.
     pub parameters: Value,
 }
@@ -685,11 +730,20 @@ impl Default for UnattendedTools {
 impl UnattendedTools {
     #[must_use]
     pub fn new() -> Self {
-        let policy = ToolPolicy::unattended();
+        Self::for_areas(AreaSet::ALL)
+    }
+
+    /// O catálogo só com as ferramentas das áreas ligadas (ADR 017).
+    #[must_use]
+    pub fn for_areas(areas: AreaSet) -> Self {
+        let policy = ToolPolicy::unattended().with_areas(areas);
         let handlers = all_handlers()
             .into_iter()
             .filter(|handler| {
-                handler.enabled() && policy.allows(handler.kind()) && handler.schedulable()
+                handler.enabled()
+                    && policy.allows(handler.kind())
+                    && handler.schedulable()
+                    && policy.areas.contains(handler.area())
             })
             .collect();
         Self { handlers }
@@ -712,6 +766,7 @@ impl UnattendedTools {
             group: handler.group(),
             kind: handler.kind(),
             admin_only: handler.admin_only(),
+            area: handler.area(),
             parameters: handler.parameters(),
         }
     }
@@ -800,7 +855,11 @@ impl ToolRegistry {
     pub fn new(policy: ToolPolicy) -> Self {
         let handlers = all_handlers()
             .into_iter()
-            .filter(|handler| handler.enabled() && policy.allows(handler.kind()))
+            .filter(|handler| {
+                handler.enabled()
+                    && policy.allows(handler.kind())
+                    && policy.areas.contains(handler.area())
+            })
             .collect();
         Self { handlers, policy }
     }
@@ -1130,6 +1189,7 @@ mod tests {
             confirm_active: false,
             interactive: true,
             container_actions: AiAutomationMode::Confirm,
+            areas: AreaSet::ALL,
         });
         assert_eq!(todas.definitions().len(), all_handlers().len());
     }
@@ -1142,6 +1202,7 @@ mod tests {
             confirm_active: false,
             interactive: true,
             container_actions: AiAutomationMode::Confirm,
+            areas: AreaSet::ALL,
         });
         let nomes = |carregados: &ToolGroups| -> Vec<String> {
             registro
@@ -1282,6 +1343,7 @@ mod tests {
             confirm_active: false,
             interactive: true,
             container_actions: AiAutomationMode::Confirm,
+            areas: AreaSet::ALL,
         };
         assert!(!sem.needs_confirmation(ToolKind::Passive));
         assert!(!sem.needs_confirmation(ToolKind::Active));
@@ -1340,6 +1402,7 @@ mod tests {
             actions: AiAutomationMode::Auto,
             interactive: true,
             container_actions: AiAutomationMode::Auto,
+            areas: AreaSet::ALL,
         };
         assert!(politica.needs_confirmation(ToolKind::DeviceAccess));
         assert_eq!(
@@ -1347,5 +1410,28 @@ mod tests {
             Approval::Ask,
             "ADR 012: só o aceitar automaticamente da conversa dispensa"
         );
+    }
+
+    #[test]
+    fn sem_a_area_servidores_nenhuma_ferramenta_docker_nem_grupo_docker() {
+        let politica = ToolPolicy::from_settings(&AiSettings::default())
+            .with_areas(AreaSet::ALL.without(Area::Servers));
+        assert_eq!(politica.container_actions, AiAutomationMode::Off);
+        let registro = ToolRegistry::new(politica);
+        assert!(
+            !registro
+                .definitions()
+                .iter()
+                .any(|tool| tool.function.name.contains("docker")),
+            "ferramenta docker_* com a área desligada"
+        );
+        assert!(!registro.available_groups().contains(&ToolGroup::Docker));
+        let catalogo = UnattendedTools::for_areas(AreaSet::ALL.without(Area::Servers));
+        assert!(!catalogo.names().iter().any(|name| name.contains("docker")));
+        // E com tudo ligado elas voltam.
+        assert!(UnattendedTools::new()
+            .names()
+            .iter()
+            .any(|name| name.contains("docker")));
     }
 }

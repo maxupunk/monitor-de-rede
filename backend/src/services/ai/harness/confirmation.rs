@@ -42,7 +42,11 @@ pub async fn execute_confirmed(
             "O Assistente IA está desativado nas configurações do sistema.",
         ));
     }
-    ToolRegistry::new(ToolPolicy::from_settings(settings))
+    let areas = netmonitor_core::areas::load(&ctx.db)
+        .await
+        .map(|enabled| netmonitor_core::areas::AreaSet::from_enabled(&enabled))
+        .unwrap_or_default();
+    ToolRegistry::new(ToolPolicy::from_settings(settings).with_areas(areas))
         .execute_confirmed(
             ctx,
             name,

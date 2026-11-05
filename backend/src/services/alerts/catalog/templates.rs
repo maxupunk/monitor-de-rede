@@ -5,6 +5,7 @@
 //! template é apenas *dado*: quem aplica, avalia e dispara não precisa ser
 //! alterado para nascer uma política nova — basta acrescentar um item aqui.
 
+use netmonitor_core::areas::Area;
 use serde::Serialize;
 use serde_json::{json, Value};
 
@@ -53,7 +54,7 @@ fn log_pattern(spec: LogPatternSpec) -> AlertRuleTemplate {
         key,
         name,
         description,
-        category: "logs",
+        category: AlertCategory::Logs,
         rule_type: LOG_PATTERN_TYPE,
         condition: json!({
             "field": fields::LOG_MATCH_COUNT,
@@ -82,18 +83,84 @@ fn log_pattern(spec: LogPatternSpec) -> AlertRuleTemplate {
     }
 }
 
-/// As seis categorias exibidas na tela, com os rótulos em português.
-pub const CATEGORY_LABELS: [(&str, &str); 9] = [
-    ("disponibilidade", "Disponibilidade"),
-    ("desempenho", "Desempenho"),
-    ("servicos", "Serviços e aplicações"),
-    ("interfaces", "Interfaces de rede (SNMP)"),
-    ("equipamento", "Equipamento (SNMP)"),
-    ("saude", "Saúde do equipamento"),
-    ("vpn", "Túneis VPN (WireGuard)"),
-    ("logs", "Padrões no log (syslog)"),
-    ("wifi", "Aparelhos vigiados (Wi-Fi)"),
-];
+/// Categoria de um template, na ordem em que a tela as exibe.
+///
+/// Enum, e não texto, para que a área do produto (ADR 017) seja declarada num
+/// `match` exaustivo: categoria nova sem área não compila. O JSON continua o
+/// identificador em minúsculas que a tela já lê.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AlertCategory {
+    Disponibilidade,
+    Desempenho,
+    Servicos,
+    Interfaces,
+    Equipamento,
+    Saude,
+    Vpn,
+    Logs,
+    Wifi,
+}
+
+impl AlertCategory {
+    pub const ALL: [Self; 9] = [
+        Self::Disponibilidade,
+        Self::Desempenho,
+        Self::Servicos,
+        Self::Interfaces,
+        Self::Equipamento,
+        Self::Saude,
+        Self::Vpn,
+        Self::Logs,
+        Self::Wifi,
+    ];
+
+    #[must_use]
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::Disponibilidade => "disponibilidade",
+            Self::Desempenho => "desempenho",
+            Self::Servicos => "servicos",
+            Self::Interfaces => "interfaces",
+            Self::Equipamento => "equipamento",
+            Self::Saude => "saude",
+            Self::Vpn => "vpn",
+            Self::Logs => "logs",
+            Self::Wifi => "wifi",
+        }
+    }
+
+    /// Rótulo em português.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Disponibilidade => "Disponibilidade",
+            Self::Desempenho => "Desempenho",
+            Self::Servicos => "Serviços e aplicações",
+            Self::Interfaces => "Interfaces de rede (SNMP)",
+            Self::Equipamento => "Equipamento (SNMP)",
+            Self::Saude => "Saúde do equipamento",
+            Self::Vpn => "Túneis VPN (WireGuard)",
+            Self::Logs => "Padrões no log (syslog)",
+            Self::Wifi => "Aparelhos vigiados (Wi-Fi)",
+        }
+    }
+
+    /// A área do produto (ADR 017). Com a área desligada, os modelos dela
+    /// somem do catálogo "Criar regra"; regras já criadas continuam.
+    #[must_use]
+    pub const fn area(self) -> Area {
+        match self {
+            Self::Disponibilidade
+            | Self::Desempenho
+            | Self::Servicos
+            | Self::Saude
+            | Self::Logs => Area::Core,
+            Self::Interfaces | Self::Equipamento | Self::Wifi => Area::Network,
+            Self::Vpn => Area::Vpn,
+        }
+    }
+}
 
 /// Um item do catálogo. Os campos são exatamente os que o frontend lê em
 /// `AlertRuleTemplate` (`stores/alerts.ts`), mais `applied`/`ruleId`, que a
@@ -105,7 +172,7 @@ pub struct AlertRuleTemplate {
     pub key: &'static str,
     pub name: &'static str,
     pub description: &'static str,
-    pub category: &'static str,
+    pub category: AlertCategory,
     #[serde(rename = "type")]
     pub rule_type: &'static str,
     pub condition: Value,
@@ -170,7 +237,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             key: "device_offline",
             name: "Dispositivo sem resposta",
             description: "Dispara assim que uma verificação retorna \"sem resposta\". É a regra base de indisponibilidade.",
-            category: "disponibilidade",
+            category: AlertCategory::Disponibilidade,
             rule_type: "device_offline",
             condition: json!({ "field": fields::STATUS, "operator": "eq", "value": "down" }),
             severity: "critical",
@@ -191,7 +258,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             key: "icmp_filtered",
             name: "ICMP filtrado ou desativado",
             description: "O equipamento responde via TCP, mas não devolve ICMP. Indica filtragem por firewall ou ping desativado no alvo.",
-            category: "disponibilidade",
+            category: AlertCategory::Disponibilidade,
             rule_type: "icmp_filtered",
             condition: json!({ "field": fields::REACHABILITY_CAUSE, "operator": "eq", "value": "icmp_filtered" }),
             severity: "warning",
@@ -207,7 +274,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             key: "packet_loss_high",
             name: "Perda de pacotes acima de 10%",
             description: "Link instável: parte dos pacotes ICMP não volta. Só dispara se a perda persistir por 5 minutos.",
-            category: "disponibilidade",
+            category: AlertCategory::Disponibilidade,
             rule_type: "custom",
             condition: json!({ "field": fields::PACKET_LOSS, "operator": "gt", "value": 10 }),
             severity: "warning",
@@ -223,7 +290,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             key: "latency_high",
             name: "Latência acima de 200 ms",
             description: "Tempo de resposta degradado de forma sustentada (5 minutos), evitando alarme por oscilação momentânea.",
-            category: "desempenho",
+            category: AlertCategory::Desempenho,
             rule_type: "latency_high",
             condition: json!({ "field": fields::LATENCY_MS, "operator": "gt", "value": 200 }),
             severity: "warning",
@@ -239,7 +306,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             key: "latency_critical",
             name: "Latência acima de 500 ms",
             description: "Degradação severa de latência: acima deste patamar aplicações interativas travam.",
-            category: "desempenho",
+            category: AlertCategory::Desempenho,
             rule_type: "latency_high",
             condition: json!({ "field": fields::LATENCY_MS, "operator": "gt", "value": 500 }),
             severity: "critical",
@@ -255,7 +322,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             key: "latency_baseline_deviation",
             name: "Latência 50% acima da baseline",
             description: "A latência atual ultrapassou em 50% a média histórica de 7 dias — indicativo de degradação progressiva do link.",
-            category: "desempenho",
+            category: AlertCategory::Desempenho,
             rule_type: "custom",
             condition: json!({ "field": fields::LATENCY_DEVIATION_PERCENT, "operator": "gt", "value": 50 }),
             severity: "warning",
@@ -271,7 +338,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             key: "latency_statistical_anomaly",
             name: "Anomalia estatística de latência (Z-Score > 3.0)",
             description: "Dispara quando a latência ultrapassa 3 desvios padrão (3σ) acima da média histórica de 7 dias — detecta picos e degradações sem limiar fixo.",
-            category: "desempenho",
+            category: AlertCategory::Desempenho,
             rule_type: "custom",
             condition: json!({ "field": fields::LATENCY_Z_SCORE, "operator": "gte", "value": 3.0 }),
             severity: "warning",
@@ -287,7 +354,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             key: "packet_loss_baseline_deviation",
             name: "Perda de pacotes acima da baseline",
             description: "A perda de pacotes atual superou em 10 pontos percentuais a média histórica de 7 dias.",
-            category: "disponibilidade",
+            category: AlertCategory::Disponibilidade,
             rule_type: "custom",
             condition: json!({ "field": fields::PACKET_LOSS_DEVIATION_PERCENT, "operator": "gt", "value": 10 }),
             severity: "warning",
@@ -303,7 +370,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             key: "packet_loss_statistical_anomaly",
             name: "Anomalia estatística de perda de pacotes (Z-Score > 3.0)",
             description: "Dispara quando a perda de pacotes sobe mais de 3 desvios padrão (3σ) acima do comportamento padrão do link.",
-            category: "disponibilidade",
+            category: AlertCategory::Disponibilidade,
             rule_type: "custom",
             condition: json!({ "field": fields::PACKET_LOSS_Z_SCORE, "operator": "gte", "value": 3.0 }),
             severity: "warning",
@@ -319,7 +386,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             key: "uptime_baseline_deviation",
             name: "Uptime abaixo da baseline",
             description: "O uptime de 24 horas caiu 2 pontos percentuais abaixo da média histórica de 7 dias — link menos estável que o habitual.",
-            category: "disponibilidade",
+            category: AlertCategory::Disponibilidade,
             rule_type: "custom",
             condition: json!({ "field": fields::UPTIME_DEVIATION_PERCENT, "operator": "gt", "value": 2 }),
             severity: "critical",
@@ -335,7 +402,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             key: "check_duration_high",
             name: "Checagem demorando mais de 5 segundos",
             description: "Verificação lenta como um todo — útil para monitores HTTP de páginas pesadas.",
-            category: "desempenho",
+            category: AlertCategory::Desempenho,
             rule_type: "custom",
             condition: json!({ "field": fields::DURATION_MS, "operator": "gt", "value": 5000 }),
             severity: "info",
@@ -351,7 +418,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             key: "http_error_response",
             name: "Serviço HTTP respondendo com erro (4xx/5xx)",
             description: "O site/serviço responde, mas devolve código de erro em vez de conteúdo válido.",
-            category: "servicos",
+            category: AlertCategory::Servicos,
             rule_type: "http_failure",
             condition: json!({ "field": fields::STATUS_CODE, "operator": "gte", "value": 400 }),
             severity: "critical",
@@ -367,7 +434,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             key: "tcp_connect_slow",
             name: "Conexão TCP acima de 1 segundo",
             description: "A porta monitorada aceita conexão, mas o handshake está lento.",
-            category: "servicos",
+            category: AlertCategory::Servicos,
             rule_type: "tcp_failure",
             condition: json!({ "field": fields::CONNECT_TIME_MS, "operator": "gt", "value": 1000 }),
             severity: "warning",
@@ -383,7 +450,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             key: "dns_resolution_slow",
             name: "Resolução DNS acima de 800 ms",
             description: "O servidor DNS responde, porém devagar o bastante para atrasar toda a navegação.",
-            category: "servicos",
+            category: AlertCategory::Servicos,
             rule_type: "custom",
             condition: json!({ "field": fields::RESOLUTION_TIME_MS, "operator": "gt", "value": 800 }),
             severity: "warning",
@@ -399,7 +466,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             key: "interface_link_down",
             name: "Interface de rede caiu (UP ➔ DOWN)",
             description: "Queda de link detectada na coleta SNMP das interfaces administrativamente habilitadas.",
-            category: "interfaces",
+            category: AlertCategory::Interfaces,
             rule_type: "custom",
             condition: json!({
                 "field": fields::INTERFACE_STATUS_TRANSITION,
@@ -419,7 +486,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             key: "interface_speed_downgrade",
             name: "Downgrade na negociação da interface",
             description: "A interface renegociou para uma velocidade menor (ex.: 1 Gbps ➔ 100 Mbps) — sintoma clássico de cabo ou porta com defeito.",
-            category: "interfaces",
+            category: AlertCategory::Interfaces,
             rule_type: "custom",
             condition: json!({
                 "field": fields::INTERFACE_SPEED_TRANSITION,
@@ -439,7 +506,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             key: "interface_speed_upgrade",
             name: "Interface renegociou velocidade para cima",
             description: "Registro informativo de renegociação para uma velocidade maior (ex.: 100 Mbps ➔ 1 Gbps).",
-            category: "interfaces",
+            category: AlertCategory::Interfaces,
             rule_type: "custom",
             condition: json!({
                 "field": fields::INTERFACE_SPEED_TRANSITION,
@@ -459,7 +526,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             key: "interface_link_recovered",
             name: "Interface voltou a operar (DOWN ➔ UP)",
             description: "Registro informativo do retorno do link após uma queda.",
-            category: "interfaces",
+            category: AlertCategory::Interfaces,
             rule_type: "custom",
             condition: json!({
                 "field": fields::INTERFACE_STATUS_TRANSITION,
@@ -479,7 +546,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             key: "interface_below_gigabit",
             name: "Interface negociada abaixo de 1 Gbps",
             description: "Vigia links que deveriam operar em gigabit e estão negociando abaixo disso de forma contínua.",
-            category: "interfaces",
+            category: AlertCategory::Interfaces,
             rule_type: "custom",
             condition: json!({
                 "field": fields::INTERFACE_SPEED_BPS,
@@ -499,7 +566,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             key: "traffic_statistical_anomaly",
             name: "Pico anômalo de tráfego de rede (Z-Score > 3.0)",
             description: "Detecta anomalia estatística de throughput quando o tráfego de entrada na interface excede 3 desvios padrão (3σ) do padrão histórico.",
-            category: "interfaces",
+            category: AlertCategory::Interfaces,
             rule_type: "custom",
             condition: json!({ "field": fields::TRAFFIC_IN_Z_SCORE, "operator": "gte", "value": 3.0 }),
             severity: "warning",
@@ -515,7 +582,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             key: "snmp_interface_oper_down",
             name: "Interface monitorada via SNMP inativa",
             description: "Para monitores do tipo SNMP que leem ifOperStatus diretamente: 2 significa interface inativa.",
-            category: "equipamento",
+            category: AlertCategory::Equipamento,
             rule_type: "custom",
             // O `"2"` é string de propósito: `eq` compara sem coerção (§8.7).
             condition: json!({ "field": fields::IF_OPER_STATUS, "operator": "eq", "value": "2" }),
@@ -532,7 +599,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             key: "snmp_device_restarted",
             name: "Equipamento reiniciado recentemente",
             description: "Uptime SNMP abaixo de 10 minutos indica que o equipamento reiniciou (queda de energia, travamento ou reboot).",
-            category: "equipamento",
+            category: AlertCategory::Equipamento,
             rule_type: "custom",
             // sysUpTime é reportado em centésimos de segundo: 60.000 = 10 minutos.
             condition: json!({ "field": fields::SNMP_UPTIME, "operator": "lt", "value": 60_000 }),
@@ -549,7 +616,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             key: "vpn_peer_disconnected",
             name: "Túnel VPN caiu",
             description: "O equipamento remoto parou de responder pelo túnel WireGuard. Enquanto o túnel estiver fora, o monitoramento por trás dele fica cego.",
-            category: "vpn",
+            category: AlertCategory::Vpn,
             rule_type: "custom",
             condition: json!({
                 "field": fields::VPN_STATUS_TRANSITION,
@@ -569,7 +636,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             key: "vpn_peer_unstable",
             name: "Túnel VPN instável",
             description: "O túnel ainda responde, mas os keepalives estão falhando — sintoma de link ruim ou NAT reciclando a porta do peer.",
-            category: "vpn",
+            category: AlertCategory::Vpn,
             rule_type: "custom",
             condition: json!({
                 "field": fields::VPN_STATUS_TRANSITION,
@@ -589,7 +656,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             key: "vpn_peer_reconnected",
             name: "Túnel VPN restabelecido",
             description: "Registro informativo do retorno do túnel após uma queda.",
-            category: "vpn",
+            category: AlertCategory::Vpn,
             rule_type: "custom",
             condition: json!({
                 "field": fields::VPN_STATUS_TRANSITION,
@@ -613,7 +680,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             key: "wifi_watched_offline",
             name: "Aparelho vigiado fora do Wi-Fi",
             description: "Um aparelho que deveria estar sempre conectado (câmera, IoT) não aparece em nenhum roteador há 10 minutos.",
-            category: "wifi",
+            category: AlertCategory::Wifi,
             rule_type: "custom",
             condition: json!({
                 "field": fields::WIFI_CLIENT_OFFLINE_SECONDS,
@@ -635,7 +702,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             key: "wifi_watched_poor_signal",
             name: "Aparelho vigiado com sinal ruim",
             description: "O aparelho vigiado está conectado, mas com sinal ou ruído na faixa crítica há 15 minutos — a câmera trava, o IoT perde comando.",
-            category: "wifi",
+            category: AlertCategory::Wifi,
             rule_type: "custom",
             condition: json!({
                 "field": fields::WIFI_CLIENT_HEALTH,
@@ -734,7 +801,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             key: "cpu_usage_high",
             name: "CPU acima de 85%",
             description: "Uso de CPU sustentado por 5 minutos. Pico curto não alerta — só a carga que persiste.",
-            category: "saude",
+            category: AlertCategory::Saude,
             rule_type: "custom",
             condition: json!({ "field": fields::CPU_USAGE_PERCENT, "operator": "gt", "value": 85 }),
             severity: "warning",
@@ -752,7 +819,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             key: "memory_usage_high",
             name: "Memória usada acima de 90%",
             description: "Memória sustentada acima de 90% por 5 minutos — a faixa em que o sistema começa a recuperar página à força.",
-            category: "saude",
+            category: AlertCategory::Saude,
             rule_type: "custom",
             condition: json!({ "field": fields::MEMORY_USED_PERCENT, "operator": "gt", "value": 90 }),
             severity: "warning",
@@ -768,7 +835,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             key: "storage_usage_high",
             name: "Armazenamento usado acima de 85%",
             description: "Disco enchendo de forma sustentada por 10 minutos. A janela é maior porque armazenamento não oscila: quando sobe, é para ficar.",
-            category: "saude",
+            category: AlertCategory::Saude,
             rule_type: "custom",
             condition: json!({ "field": fields::STORAGE_USED_PERCENT, "operator": "gt", "value": 85 }),
             severity: "warning",
@@ -839,12 +906,12 @@ mod tests {
 
     #[test]
     fn toda_categoria_declarada_tem_rotulo() {
-        let labels: HashSet<&str> = CATEGORY_LABELS.iter().map(|(key, _)| *key).collect();
+        let labels: HashSet<&str> = AlertCategory::ALL.iter().map(|c| c.id()).collect();
         for template in all() {
             assert!(
-                labels.contains(template.category),
+                labels.contains(template.category.id()),
                 "categoria sem rótulo: {}",
-                template.category
+                template.category.id()
             );
         }
         assert_eq!(labels.len(), 9);
@@ -928,14 +995,18 @@ mod tests {
         // Um roteador caído derruba ping, HTTP, TCP e DNS de tudo que está
         // atrás dele. Já o estado das interfaces e dos túneis descreve o
         // próprio equipamento: ali o pai não explica o filho.
-        const ALCANCE: [&str; 3] = ["disponibilidade", "desempenho", "servicos"];
+        const ALCANCE: [AlertCategory; 3] = [
+            AlertCategory::Disponibilidade,
+            AlertCategory::Desempenho,
+            AlertCategory::Servicos,
+        ];
         for template in all() {
             assert_eq!(
                 template.inhibit_when_parent_down,
                 ALCANCE.contains(&template.category),
                 "{} está na categoria {} e tem inibição {}",
                 template.key,
-                template.category,
+                template.category.id(),
                 template.inhibit_when_parent_down
             );
         }

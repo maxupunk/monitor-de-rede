@@ -4,22 +4,21 @@
 //! e os padrões vivem em [`crate::services::preferences`], que é também quem os
 //! pontos de consumo consultam.
 
-use std::str::FromStr;
-
 use axum::http::HeaderMap;
 use loco_rs::prelude::*;
 
 use crate::{
-    controllers::auth_guard::AUTHENTICATED_USER_HEADER,
+    controllers::{areas, auth_guard::require_admin},
+    dtos::areas::OnboardingIntentInput,
     services::{
+        area_policies,
         audit::{AuditAction, AuditActor, AuditEntryInput, AuditService, ResourceType},
         onboarding,
         preferences::{self, Preferences},
         server_addresses,
         settings::database,
-        shared::errors::{AppError, AppResult},
+        shared::errors::AppResult,
         syslog::db::LogsDb,
-        users::Role,
     },
 };
 
@@ -52,6 +51,37 @@ async fn complete_onboarding(State(ctx): State<AppContext>) -> AppResult<Respons
     Ok(format::json(onboarding::mark_completed(&ctx.db).await?)?)
 }
 
+/// `POST /api/settings/onboarding/intent` — a primeira etapa do assistente:
+/// o que a instalação vai gerenciar vira o estado das áreas (ADR 017). Só
+/// admin, como qualquer mudança de área; auditado e publicado no SSE.
+async fn onboarding_intent(
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Json(input): Json<OnboardingIntentInput>,
+) -> AppResult<Response> {
+    let user = require_admin(
+        &ctx,
+        &headers,
+        "Apenas administradores escolhem o que o NetMonitor vai acompanhar.",
+    )
+    .await?;
+    let policies = area_policies::registry();
+    let outcome = onboarding::apply_intent(&ctx.db, &policies, input).await?;
+    for change in &outcome.changes {
+        areas::record_change(
+            &ctx,
+            &headers,
+            user.id,
+            change.area,
+            change.before,
+            change.enabled,
+        )
+        .await;
+    }
+    areas::publish(&ctx, &outcome.snapshot);
+    Ok(format::json(outcome.snapshot)?)
+}
+
 /// `GET /api/settings/database-size` — tipo, tamanho e amplitude temporal do histórico do banco de dados.
 async fn database_size(State(ctx): State<AppContext>) -> AppResult<Response> {
     let logs_db = LogsDb::from_context(&ctx).ok();
@@ -67,7 +97,12 @@ async fn database_size(State(ctx): State<AppContext>) -> AppResult<Response> {
 
 /// `POST /api/settings/clear-history` — limpa métricas, resultados e logs históricos, liberando disco.
 async fn clear_history(headers: HeaderMap, State(ctx): State<AppContext>) -> AppResult<Response> {
-    require_admin(&ctx, &headers).await?;
+    require_admin(
+        &ctx,
+        &headers,
+        "Apenas administradores podem apagar o histórico do sistema.",
+    )
+    .await?;
 
     let logs_db = LogsDb::from_context(&ctx).ok();
     let stats = database::clear_history(&ctx.db, logs_db.as_ref().map(LogsDb::connection)).await?;
@@ -96,7 +131,12 @@ async fn clear_history(headers: HeaderMap, State(ctx): State<AppContext>) -> App
 
 /// `POST /api/settings/clear-all-items` — limpa todos os cadastros e dados, mantendo apenas usuários e preferências.
 async fn clear_all_items(headers: HeaderMap, State(ctx): State<AppContext>) -> AppResult<Response> {
-    require_admin(&ctx, &headers).await?;
+    require_admin(
+        &ctx,
+        &headers,
+        "Apenas administradores podem apagar o histórico do sistema.",
+    )
+    .await?;
 
     let logs_db = LogsDb::from_context(&ctx).ok();
     let stats =
@@ -124,32 +164,13 @@ async fn clear_all_items(headers: HeaderMap, State(ctx): State<AppContext>) -> A
     Ok(format::json(stats)?)
 }
 
-async fn require_admin(ctx: &AppContext, headers: &HeaderMap) -> AppResult<()> {
-    let pid = headers
-        .get(AUTHENTICATED_USER_HEADER)
-        .and_then(|value| value.to_str().ok())
-        .ok_or_else(|| AppError::unauthorized("Não autenticado"))?;
-
-    let user = crate::models::users::Model::find_by_pid(&ctx.db, pid)
-        .await
-        .map_err(|_| AppError::unauthorized("Não autenticado"))?;
-
-    let role = Role::from_str(&user.role)?;
-    if !role.can_manage_users() {
-        return Err(AppError::forbidden(
-            "Apenas administradores podem apagar o histórico do sistema.",
-        ));
-    }
-
-    Ok(())
-}
-
 pub fn routes() -> Routes {
     Routes::new()
         .prefix("/settings")
         .add("/", get(show).put(update))
         .add("/onboarding", get(onboarding_status))
         .add("/onboarding/complete", post(complete_onboarding))
+        .add("/onboarding/intent", post(onboarding_intent))
         .add("/database-size", get(database_size))
         .add("/clear-history", post(clear_history))
         .add("/clear-all-items", post(clear_all_items))

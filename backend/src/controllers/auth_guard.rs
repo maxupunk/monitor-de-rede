@@ -129,3 +129,25 @@ pub async fn authenticated_user(
         .await
         .map_err(|_| AppError::unauthorized("Usuário não encontrado"))
 }
+
+/// Usuário autenticado **e** administrador.
+///
+/// `forbidden` é a frase da recusa — ela diz o que a pessoa tentou fazer
+/// ("Apenas administradores podem …").
+///
+/// # Errors
+///
+/// `401` sem sessão; `403` com `forbidden` quando o papel não é admin.
+pub async fn require_admin(
+    ctx: &AppContext,
+    headers: &axum::http::HeaderMap,
+    forbidden: &str,
+) -> crate::services::shared::errors::AppResult<crate::models::users::Model> {
+    use crate::services::shared::errors::AppError;
+
+    let user = authenticated_user(ctx, headers).await?;
+    if !Role::from_str(&user.role)?.can_manage_users() {
+        return Err(AppError::forbidden(forbidden));
+    }
+    Ok(user)
+}

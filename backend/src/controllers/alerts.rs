@@ -155,9 +155,9 @@ async fn catalog_index(
     State(ctx): State<AppContext>,
     Query(scope): Query<AlertRuleScopeQuery>,
 ) -> AppResult<Response> {
-    let categories: serde_json::Map<String, Value> = templates::CATEGORY_LABELS
+    let categories: serde_json::Map<String, Value> = templates::AlertCategory::ALL
         .iter()
-        .map(|(key, label)| ((*key).to_string(), json!(label)))
+        .map(|category| (category.id().to_string(), json!(category.label())))
         .collect();
 
     let escopo = TemplateScope {

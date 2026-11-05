@@ -8,6 +8,7 @@
 use async_trait::async_trait;
 use chrono::Utc;
 use loco_rs::prelude::AppContext;
+use netmonitor_core::areas::Area;
 use serde_json::{json, Value};
 
 use super::{
@@ -205,6 +206,10 @@ pub struct DockerContainers;
 
 #[async_trait]
 impl AiToolHandler for DockerContainers {
+    fn area(&self) -> Area {
+        Area::Servers
+    }
+
     fn name(&self) -> &'static str {
         "get_docker_containers"
     }
@@ -296,6 +301,10 @@ pub struct DockerHosts;
 
 #[async_trait]
 impl AiToolHandler for DockerHosts {
+    fn area(&self) -> Area {
+        Area::Servers
+    }
+
     fn name(&self) -> &'static str {
         "get_docker_hosts"
     }
@@ -358,6 +367,10 @@ pub struct DockerUsage;
 
 #[async_trait]
 impl AiToolHandler for DockerUsage {
+    fn area(&self) -> Area {
+        Area::Servers
+    }
+
     fn name(&self) -> &'static str {
         "get_docker_usage"
     }
@@ -583,6 +596,10 @@ pub struct DockerContainerAction;
 
 #[async_trait]
 impl AiToolHandler for DockerContainerAction {
+    fn area(&self) -> Area {
+        Area::Servers
+    }
+
     fn name(&self) -> &'static str {
         "docker_container_action"
     }

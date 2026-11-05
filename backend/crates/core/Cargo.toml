@@ -30,6 +30,7 @@ russh = { workspace = true }
 validator = { workspace = true }
 
 [dev-dependencies]
+migration = { path = "../../migration" }
 loco-rs = { workspace = true, features = ["testing"] }
 tower = { version = "0.5", features = ["util"] }
 serial_test = { version = "3.1.1" }

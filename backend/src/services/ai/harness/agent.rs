@@ -2,6 +2,7 @@
 //!
 //! Coordena a troca de mensagens com o provedor de IA e a execução iterativa de ferramentas.
 
+use netmonitor_core::areas::AreaSet;
 use std::{
     pin::Pin,
     time::{Duration, Instant},
@@ -724,7 +725,14 @@ pub async fn run_agent_loop(
 
     tokio::spawn(async move {
         let sink = EventSink(sender);
-        let registry = ToolRegistry::new(request.policy);
+        // As áreas desligadas (ADR 017) tiram ferramentas, grupos, regras do
+        // prompt e intenções do Decisor de uma vez: tudo sai do registro.
+        let areas = netmonitor_core::areas::load(&ctx.db)
+            .await
+            .map(|enabled| AreaSet::from_enabled(&enabled))
+            .unwrap_or_default();
+        let policy = request.policy.with_areas(areas);
+        let registry = ToolRegistry::new(policy);
         let options = AiChatOptions {
             max_tokens: settings.response_style.max_output_tokens(),
         };
@@ -818,7 +826,7 @@ pub async fn run_agent_loop(
             // O catálogo do `load_tools` só faz sentido se sobrou grupo de fora.
             build_system_prompt(
                 &settings,
-                request.policy,
+                policy,
                 available.iter().any(|group| !preselected.contains(group)),
             )
         };

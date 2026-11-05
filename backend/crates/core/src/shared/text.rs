@@ -75,9 +75,26 @@ pub fn html_to_text(html: &str) -> String {
     collapse_whitespace(&decode_html_entities(&without_tags))
 }
 
+/// Quantidade com o substantivo concordando: `1 rede`, `3 redes`.
+#[must_use]
+pub fn count_noun(count: u64, singular: &str, plural: &str) -> String {
+    if count == 1 {
+        format!("1 {singular}")
+    } else {
+        format!("{count} {plural}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn count_noun_concorda_com_a_quantidade() {
+        assert_eq!(count_noun(1, "rede", "redes"), "1 rede");
+        assert_eq!(count_noun(0, "rede", "redes"), "0 redes");
+        assert_eq!(count_noun(3, "rede", "redes"), "3 redes");
+    }
 
     #[test]
     fn corta_por_caractere_e_marca() {

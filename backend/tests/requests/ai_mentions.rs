@@ -193,6 +193,10 @@ impl AiDriver for Pergunta {
 #[serial]
 async fn pergunta_ao_usuario_encerra_a_rodada_sem_nova_chamada() {
     request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
+        // A pergunta é sobre equipamento: as opções só ficam se existirem de
+        // verdade (ancoragem do `ask_user`, `harness::grounding`).
+        aparelho(&ctx, "Borda", "10.0.0.1").await;
+        aparelho(&ctx, "MPPT Bateria", "10.0.0.2").await;
         let chamadas = Arc::new(AtomicUsize::new(0));
         let stream = run_agent_loop(
             ctx.clone(),
@@ -228,7 +232,22 @@ async fn pergunta_ao_usuario_encerra_a_rodada_sem_nova_chamada() {
             })
             .expect("a pergunta chega à tela");
         assert_eq!(pergunta["question"], "De qual equipamento?");
-        assert_eq!(pergunta["options"], json!(["Borda", "MPPT Bateria"]));
+        let opcoes: Vec<&str> = pergunta["options"]
+            .as_array()
+            .expect("opções")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect();
+        assert_eq!(
+            &opcoes[..2],
+            ["Borda", "MPPT Bateria"],
+            "as do modelo, sem repetição"
+        );
+        assert_eq!(
+            opcoes.iter().filter(|opcao| **opcao == "Borda").count(),
+            1,
+            "{opcoes:?}"
+        );
         assert!(matches!(eventos.last(), Some(HarnessEvent::Done)));
     })
     .await;

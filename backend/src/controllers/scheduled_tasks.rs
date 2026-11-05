@@ -44,8 +44,11 @@ async fn index(State(ctx): State<AppContext>) -> AppResult<Response> {
     Ok(format::json(service::list(&ctx.db).await?)?)
 }
 
-async fn catalog() -> AppResult<Response> {
-    Ok(format::json(service::catalog())?)
+async fn catalog(State(ctx): State<AppContext>) -> AppResult<Response> {
+    let enabled = netmonitor_core::areas::load(&ctx.db).await?;
+    Ok(format::json(service::catalog(
+        netmonitor_core::areas::AreaSet::from_enabled(&enabled),
+    ))?)
 }
 
 async fn preview(

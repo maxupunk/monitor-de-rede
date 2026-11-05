@@ -8,6 +8,7 @@
 
 use async_trait::async_trait;
 use loco_rs::prelude::AppContext;
+use netmonitor_core::areas::Area;
 use serde_json::{json, Value};
 
 use super::{log_digest::truncate_chars, AiToolHandler, ToolArgs, ToolKind, ToolOutput};
@@ -46,6 +47,10 @@ pub struct AskUser;
 
 #[async_trait]
 impl AiToolHandler for AskUser {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "ask_user"
     }

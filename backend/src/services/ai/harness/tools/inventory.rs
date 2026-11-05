@@ -1,6 +1,7 @@
 //! Estado atual do que o NetMonitor conhece: dispositivos, interfaces,
 //! monitores, alertas e a documentação interna.
 
+use netmonitor_core::areas::Area;
 use std::collections::HashMap;
 
 use async_trait::async_trait;
@@ -39,6 +40,10 @@ pub struct SystemSummary;
 
 #[async_trait]
 impl AiToolHandler for SystemSummary {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "get_system_summary"
     }
@@ -107,6 +112,10 @@ pub struct ListDevices;
 
 #[async_trait]
 impl AiToolHandler for ListDevices {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "list_devices"
     }
@@ -220,6 +229,10 @@ pub struct DeviceDetail;
 
 #[async_trait]
 impl AiToolHandler for DeviceDetail {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "get_device_detail"
     }
@@ -322,6 +335,10 @@ pub struct DeviceInterfaces;
 
 #[async_trait]
 impl AiToolHandler for DeviceInterfaces {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "get_device_interfaces"
     }
@@ -404,6 +421,10 @@ pub struct ListMonitors;
 
 #[async_trait]
 impl AiToolHandler for ListMonitors {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "list_monitors"
     }
@@ -489,6 +510,10 @@ pub struct Alerts;
 
 #[async_trait]
 impl AiToolHandler for Alerts {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "get_alerts"
     }
@@ -569,6 +594,10 @@ pub struct SearchDocs;
 
 #[async_trait]
 impl AiToolHandler for SearchDocs {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "search_system_docs"
     }

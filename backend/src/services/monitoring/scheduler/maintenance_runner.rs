@@ -2,6 +2,7 @@
 
 use chrono::Utc;
 use loco_rs::app::AppContext;
+use netmonitor_core::areas::{self, Area};
 
 use super::cadence::{
     is_due, DATA_PRUNE_INTERVAL_SECONDS, LINK_TEST_SCHEDULES_INTERVAL_SECONDS,
@@ -114,24 +115,32 @@ pub async fn rollup_monitor_results_if_due(ctx: &AppContext) -> AppResult<()> {
     Ok(())
 }
 
-/// Dispara os agendamentos de teste de enlace vencidos (ADR 015 §5).
-///
-/// Confere a cada minuto; o teste em si roda em segundo plano, com a mesma
-/// trava de concorrência dos testes pedidos pela tela.
 /// Dispara o vigia dos clientes Wi-Fi vigiados. Roda em segundo plano: a
 /// leitura dos APs por SSH leva segundos e não pode atrasar os monitores.
+/// Com a área Rede desligada (ADR 017) o vigia fica pausado.
 pub fn run_wifi_watch_if_due(ctx: &AppContext) {
     if !is_due("wifi_watch", WIFI_WATCH_INTERVAL_SECONDS, Utc::now()) {
         return;
     }
     let ctx = ctx.clone();
     tokio::spawn(async move {
+        if !areas::is_enabled(&ctx.db, Area::Network)
+            .await
+            .unwrap_or(true)
+        {
+            return;
+        }
         if let Err(error) = wifi::watch::run(&ctx).await {
             tracing::warn!(%error, "falha no vigia dos clientes Wi-Fi");
         }
     });
 }
 
+/// Dispara os agendamentos de teste de enlace vencidos (ADR 015 §5).
+///
+/// Confere a cada minuto; o teste em si roda em segundo plano, com a mesma
+/// trava de concorrência dos testes pedidos pela tela. Com a área Rede
+/// desligada (ADR 017) os agendamentos ficam pausados — não são apagados.
 pub async fn run_link_test_schedules_if_due(ctx: &AppContext) -> AppResult<()> {
     let now = Utc::now();
     if !is_due(
@@ -139,6 +148,9 @@ pub async fn run_link_test_schedules_if_due(ctx: &AppContext) -> AppResult<()> {
         LINK_TEST_SCHEDULES_INTERVAL_SECONDS,
         now,
     ) {
+        return Ok(());
+    }
+    if !areas::is_enabled(&ctx.db, Area::Network).await? {
         return Ok(());
     }
     let started = link_test_schedules::run_due(LinkTestEnv::from_context(ctx), now).await?;

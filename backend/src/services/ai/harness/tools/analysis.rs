@@ -5,6 +5,7 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 use loco_rs::prelude::AppContext;
+use netmonitor_core::areas::Area;
 use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter, QueryOrder};
 use serde_json::{json, Value};
 
@@ -69,6 +70,10 @@ pub struct RootCause;
 
 #[async_trait]
 impl AiToolHandler for RootCause {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "analyze_root_cause"
     }
@@ -150,6 +155,10 @@ pub struct BaselineComparison;
 
 #[async_trait]
 impl AiToolHandler for BaselineComparison {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "compare_with_baseline"
     }
@@ -219,6 +228,10 @@ pub struct HourlyPattern;
 
 #[async_trait]
 impl AiToolHandler for HourlyPattern {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "get_hourly_pattern"
     }
@@ -464,6 +477,10 @@ pub struct IncidentTimeline;
 
 #[async_trait]
 impl AiToolHandler for IncidentTimeline {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "get_incident_timeline"
     }

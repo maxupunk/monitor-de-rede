@@ -83,10 +83,10 @@ impl Author {
     }
 }
 
-/// O catálogo do que pode ser agendado.
+/// O catálogo do que pode ser agendado, só com as áreas ligadas (ADR 017).
 #[must_use]
-pub fn catalog() -> Vec<SchedulableTool> {
-    UnattendedTools::new()
+pub fn catalog(areas: netmonitor_core::areas::AreaSet) -> Vec<SchedulableTool> {
+    UnattendedTools::for_areas(areas)
         .contracts()
         .into_iter()
         .map(|contract| SchedulableTool {

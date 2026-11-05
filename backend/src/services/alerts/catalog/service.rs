@@ -36,6 +36,9 @@ pub struct AlertRuleTemplateView {
     ///
     /// Sempre `true` no catálogo global: lá ainda não há dispositivo escolhido.
     pub applicable: bool,
+    /// A área do produto do template (ADR 017): a tela esconde os de área
+    /// desligada.
+    pub area: netmonitor_core::areas::Area,
 }
 
 /// Por que um template pedido não virou regra.
@@ -233,6 +236,7 @@ pub async fn describe_for<C: ConnectionTrait>(
             let rule_id = existing.matching(&template, scope);
             let applicable = is_applicable(&template, capabilities);
             AlertRuleTemplateView {
+                area: template.category.area(),
                 applied: rule_id.is_some(),
                 rule_id,
                 applicable,
@@ -394,6 +398,7 @@ mod tests {
             applied: true,
             rule_id: Some(4),
             applicable: true,
+            area: netmonitor_core::areas::Area::Core,
         };
         let json = serde_json::to_value(&view).unwrap();
         // O frontend lê tudo no mesmo nível do objeto (`AlertRuleTemplate`).

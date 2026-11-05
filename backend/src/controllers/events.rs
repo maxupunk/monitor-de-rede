@@ -24,7 +24,7 @@ use crate::{
     models::alert_events,
     services::{
         audit::AuditActor,
-        events::{DomainEvent, EventBus, Presence},
+        events::{DomainEvent, EventBus, Interests, Presence},
         shared::{
             errors::AppResult,
             pagination::{paginate, PaginatedResponse},
@@ -54,8 +54,23 @@ async fn index(
     })?)
 }
 
-async fn stream(State(ctx): State<AppContext>, headers: HeaderMap) -> AppResult<Response> {
+/// `GET /api/events/stream?interest=docker` — o barramento SSE global.
+///
+/// `interest` lista (por vírgula) os dados caros que esta aba exibe agora; só
+/// enquanto alguma aba os declara a fonte os produz (ARQ-05).
+#[derive(Debug, serde::Deserialize)]
+struct StreamQuery {
+    interest: Option<String>,
+}
+
+async fn stream(
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Query(query): Query<StreamQuery>,
+) -> AppResult<Response> {
     let bus = EventBus::from_context(&ctx)?;
+    let interest =
+        Interests::from_context(&ctx).connect(query.interest.as_deref().unwrap_or_default());
     // Enquanto o stream estiver aberto, o usuário conta como online: um pedido
     // de aprovação da IA chega na tela, não como notificação no celular.
     let presence = AuditActor::from_headers(&headers, &ctx.db)
@@ -107,8 +122,9 @@ async fn stream(State(ctx): State<AppContext>, headers: HeaderMap) -> AppResult<
         }
     });
     let stream = ReceiverStream::new(receiver).map(move |(event, first)| {
-        // O guarda vive com o stream: o navegador fechou, ele cai junto.
+        // Os guardas vivem com o stream: o navegador fechou, eles caem junto.
         let _presence = &presence;
+        let _interest = &interest;
         let frame =
             Event::default().data(serde_json::to_string(&event).unwrap_or_else(|_| "{}".into()));
         Ok::<Event, Infallible>(if first {

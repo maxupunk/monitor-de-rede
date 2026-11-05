@@ -13,6 +13,7 @@
 
 use async_trait::async_trait;
 use loco_rs::prelude::AppContext;
+use netmonitor_core::areas::Area;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use serde_json::{json, Value};
 
@@ -199,6 +200,10 @@ pub struct AuthoringGuide;
 
 #[async_trait]
 impl AiToolHandler for AuthoringGuide {
+    fn area(&self) -> Area {
+        Area::Network
+    }
+
     fn name(&self) -> &'static str {
         "get_plugin_authoring_guide"
     }
@@ -229,6 +234,10 @@ pub struct ListDevicePlugins;
 
 #[async_trait]
 impl AiToolHandler for ListDevicePlugins {
+    fn area(&self) -> Area {
+        Area::Network
+    }
+
     fn name(&self) -> &'static str {
         "list_device_plugins"
     }
@@ -291,6 +300,10 @@ const LIST_DESCRIPTION_CHARS: usize = 160;
 
 #[async_trait]
 impl AiToolHandler for ListPluginApps {
+    fn area(&self) -> Area {
+        Area::Network
+    }
+
     fn name(&self) -> &'static str {
         "list_plugin_apps"
     }
@@ -356,6 +369,10 @@ pub struct GetPlugin;
 
 #[async_trait]
 impl AiToolHandler for GetPlugin {
+    fn area(&self) -> Area {
+        Area::Network
+    }
+
     fn name(&self) -> &'static str {
         "get_plugin"
     }
@@ -397,6 +414,10 @@ pub struct RunPluginTests;
 
 #[async_trait]
 impl AiToolHandler for RunPluginTests {
+    fn area(&self) -> Area {
+        Area::Network
+    }
+
     fn name(&self) -> &'static str {
         "run_plugin_tests"
     }
@@ -455,6 +476,10 @@ pub struct FingerprintDevice;
 
 #[async_trait]
 impl AiToolHandler for FingerprintDevice {
+    fn area(&self) -> Area {
+        Area::Network
+    }
+
     fn name(&self) -> &'static str {
         "fingerprint_device"
     }
@@ -501,6 +526,10 @@ pub struct DeviceSshExec;
 
 #[async_trait]
 impl AiToolHandler for DeviceSshExec {
+    fn area(&self) -> Area {
+        Area::Network
+    }
+
     fn name(&self) -> &'static str {
         "device_ssh_exec"
     }
@@ -572,6 +601,10 @@ pub struct DeviceHttpRequest;
 
 #[async_trait]
 impl AiToolHandler for DeviceHttpRequest {
+    fn area(&self) -> Area {
+        Area::Network
+    }
+
     fn name(&self) -> &'static str {
         "device_http_request"
     }
@@ -659,6 +692,10 @@ pub struct SavePluginDraft;
 
 #[async_trait]
 impl AiToolHandler for SavePluginDraft {
+    fn area(&self) -> Area {
+        Area::Network
+    }
+
     fn name(&self) -> &'static str {
         "save_plugin_draft"
     }
@@ -763,6 +800,10 @@ pub struct RunPluginAction;
 
 #[async_trait]
 impl AiToolHandler for RunPluginAction {
+    fn area(&self) -> Area {
+        Area::Network
+    }
+
     fn name(&self) -> &'static str {
         "run_plugin_action"
     }
@@ -879,6 +920,10 @@ pub struct ValidatePlugin;
 
 #[async_trait]
 impl AiToolHandler for ValidatePlugin {
+    fn area(&self) -> Area {
+        Area::Network
+    }
+
     fn name(&self) -> &'static str {
         "validate_plugin"
     }

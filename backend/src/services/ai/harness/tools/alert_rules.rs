@@ -4,6 +4,7 @@
 //! As escritas passam por [`crate::services::alerts::rules`], o mesmo serviço
 //! da tela: mesmas recusas, mesmo evento SSE, mesma auditoria.
 
+use netmonitor_core::areas::Area;
 use std::collections::HashMap;
 
 use async_trait::async_trait;
@@ -110,6 +111,10 @@ pub struct AlertRulesGuide;
 
 #[async_trait]
 impl AiToolHandler for AlertRulesGuide {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "get_alert_rules_guide"
     }
@@ -140,6 +145,10 @@ pub struct ListAlertRules;
 
 #[async_trait]
 impl AiToolHandler for ListAlertRules {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "list_alert_rules"
     }
@@ -307,6 +316,10 @@ pub struct ExplainAlert;
 
 #[async_trait]
 impl AiToolHandler for ExplainAlert {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "explain_alert"
     }
@@ -552,6 +565,10 @@ pub struct CreateAlertRule;
 
 #[async_trait]
 impl AiToolHandler for CreateAlertRule {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "create_alert_rule"
     }
@@ -667,6 +684,10 @@ impl DeleteAlertRule {
 
 #[async_trait]
 impl AiToolHandler for DeleteAlertRule {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "delete_alert_rule"
     }
@@ -783,6 +804,10 @@ impl ToggleAlertRule {
 
 #[async_trait]
 impl AiToolHandler for ToggleAlertRule {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "toggle_alert_rule"
     }

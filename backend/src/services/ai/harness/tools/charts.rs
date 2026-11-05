@@ -8,6 +8,7 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 use loco_rs::prelude::AppContext;
+use netmonitor_core::areas::Area;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use serde_json::{json, Value};
 
@@ -129,6 +130,10 @@ pub struct MonitorLatencyChart;
 
 #[async_trait]
 impl AiToolHandler for MonitorLatencyChart {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "chart_monitor_latency"
     }
@@ -204,6 +209,10 @@ pub struct InterfaceTrafficChart;
 
 #[async_trait]
 impl AiToolHandler for InterfaceTrafficChart {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "chart_interface_traffic"
     }
@@ -306,6 +315,10 @@ pub struct DeviceMetricChart;
 
 #[async_trait]
 impl AiToolHandler for DeviceMetricChart {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "chart_device_metric"
     }

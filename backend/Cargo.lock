@@ -4018,6 +4018,7 @@ dependencies = [
  "futures",
  "hex",
  "loco-rs",
+ "migration",
  "rand 0.8.7",
  "regex",
  "russh",

@@ -158,6 +158,9 @@ pub async fn enqueue_network_scan(
 /// individual intacto — religar a trava devolve o parque ao que era, sem que
 /// ninguém precise reconfigurar rede por rede.
 ///
+/// A área Rede desligada (ADR 017) tem o mesmo efeito da trava: nada é
+/// enfileirado sozinho, e nada se perde.
+///
 /// # Errors
 ///
 /// Propaga erro do banco.
@@ -165,6 +168,7 @@ pub async fn schedule_due_networks(db: &sea_orm::DatabaseConnection) -> AppResul
     if !crate::services::preferences::load(db)
         .await?
         .auto_discovery_enabled
+        || !netmonitor_core::areas::is_enabled(db, netmonitor_core::areas::Area::Network).await?
     {
         return Ok(0);
     }

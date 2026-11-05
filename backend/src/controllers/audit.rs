@@ -8,15 +8,14 @@ use chrono::{DateTime, Utc};
 use loco_rs::prelude::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde::Deserialize;
-use std::{collections::HashMap, str::FromStr};
+use std::collections::HashMap;
 
 use crate::{
-    controllers::auth_guard::AUTHENTICATED_USER_HEADER,
+    controllers::auth_guard::require_admin,
     models::{_entities::users::Column as UsersColumn, users},
     services::{
         audit::{AuditFilters, AuditService},
-        shared::errors::{AppError, AppResult},
-        users::Role,
+        shared::errors::AppResult,
     },
     views::audit::{AuditLogListResponse, AuditLogResponse},
 };
@@ -39,7 +38,12 @@ async fn index(
     headers: HeaderMap,
     Query(query): Query<AuditLogQuery>,
 ) -> AppResult<Response> {
-    require_admin(&ctx, &headers).await?;
+    require_admin(
+        &ctx,
+        &headers,
+        "Apenas administradores podem consultar a trilha de auditoria.",
+    )
+    .await?;
 
     let filters = AuditFilters {
         user_id: query.user_id,
@@ -79,26 +83,6 @@ async fn index(
             .collect(),
         meta: page.meta,
     })?)
-}
-
-async fn require_admin(ctx: &AppContext, headers: &HeaderMap) -> AppResult<()> {
-    let pid = headers
-        .get(AUTHENTICATED_USER_HEADER)
-        .and_then(|value| value.to_str().ok())
-        .ok_or_else(|| AppError::unauthorized("Não autenticado"))?;
-
-    let user = users::Model::find_by_pid(&ctx.db, pid)
-        .await
-        .map_err(|_| AppError::unauthorized("Não autenticado"))?;
-
-    let role = Role::from_str(&user.role)?;
-    if !role.can_manage_users() {
-        return Err(AppError::forbidden(
-            "Apenas administradores podem consultar a trilha de auditoria.",
-        ));
-    }
-
-    Ok(())
 }
 
 pub fn routes() -> Routes {

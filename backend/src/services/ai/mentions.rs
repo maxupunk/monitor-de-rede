@@ -9,6 +9,8 @@
 
 use std::collections::HashSet;
 
+use netmonitor_core::areas::{Area, AreaSet};
+
 use sea_orm::{ConnectionTrait, EntityTrait, QueryOrder};
 
 use super::harness::tools::device_matches;
@@ -38,6 +40,8 @@ pub struct MentionSource {
     pub hint: &'static str,
     /// Palavras que também encontram a fonte na busca.
     keywords: &'static str,
+    /// Área do produto (ADR 017): com ela desligada, a fonte some do `@`.
+    pub area: Area,
 }
 
 pub const SOURCES: [MentionSource; 4] = [
@@ -46,24 +50,28 @@ pub const SOURCES: [MentionSource; 4] = [
         label: "Logs",
         hint: "syslog dos equipamentos e da aplicação — get_logs_overview para o panorama, grep source='logs' para procurar",
         keywords: "logs syslog eventos",
+        area: Area::Core,
     },
     MentionSource {
         id: "alerts",
         label: "Alertas",
         hint: "alertas abertos e resolvidos — get_alerts, ou grep source='alerts' para procurar nas mensagens",
         keywords: "alertas alerts incidentes",
+        area: Area::Core,
     },
     MentionSource {
         id: "checks",
         label: "Checagens",
         hint: "falhas das checagens dos monitores — grep source='checks'",
         keywords: "checagens checks falhas monitores",
+        area: Area::Core,
     },
     MentionSource {
         id: "docker",
         label: "Docker",
         hint: "containers da Docker Engine — get_docker_containers; logs de um container com grep source='docker' container=<nome>",
         keywords: "docker containers",
+        area: Area::Servers,
     },
 ];
 
@@ -103,9 +111,10 @@ fn monitor_mention(monitor: &monitors::Model) -> AiMention {
     }
 }
 
-fn source_mentions(term: &str) -> Vec<AiMention> {
+fn source_mentions(term: &str, areas: AreaSet) -> Vec<AiMention> {
     SOURCES
         .iter()
+        .filter(|source| areas.contains(source.area))
         .filter(|source| contains(source.label, term) || contains(source.keywords, term))
         .map(|source| AiMention {
             kind: AiMentionKind::Source,
@@ -169,8 +178,13 @@ pub async fn search<C: ConnectionTrait>(
             .take(PER_KIND)
             .map(monitor_mention),
     );
-    mentions.extend(source_mentions(&term));
-    mentions.extend(container_mentions(docker, &term).await);
+    // Lido aqui, e não passado por quem chama: quem pede sugestões é sempre a
+    // tela, e a área desligada (ADR 017) tira containers e a fonte Docker.
+    let areas = AreaSet::from_enabled(&netmonitor_core::areas::load(db).await?);
+    mentions.extend(source_mentions(&term, areas));
+    if areas.contains(Area::Servers) {
+        mentions.extend(container_mentions(docker, &term).await);
+    }
     Ok(mentions)
 }
 
@@ -210,11 +224,25 @@ mod tests {
     #[test]
     fn fonte_e_encontrada_pelo_nome_ou_por_palavra_chave() {
         let ids = |term: &str| -> Vec<String> {
-            source_mentions(term).into_iter().map(|m| m.id).collect()
+            source_mentions(term, AreaSet::ALL)
+                .into_iter()
+                .map(|m| m.id)
+                .collect()
         };
         assert_eq!(ids("syslog"), vec!["logs"]);
         assert_eq!(ids("doc"), vec!["docker"]);
         assert_eq!(ids("").len(), SOURCES.len());
+    }
+
+    #[test]
+    fn sem_a_area_servidores_a_fonte_docker_some() {
+        let sem_servidores = AreaSet::ALL.without(Area::Servers);
+        let ids: Vec<String> = source_mentions("", sem_servidores)
+            .into_iter()
+            .map(|m| m.id)
+            .collect();
+        assert!(!ids.contains(&"docker".to_string()));
+        assert!(ids.contains(&"logs".to_string()));
     }
 
     #[test]

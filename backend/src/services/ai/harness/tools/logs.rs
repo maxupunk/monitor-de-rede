@@ -4,6 +4,7 @@
 //! específico a IA usa o `grep` (ver [`super::grep`]), que também lê esta
 //! tabela.
 
+use netmonitor_core::areas::Area;
 use std::collections::HashMap;
 
 use async_trait::async_trait;
@@ -113,6 +114,10 @@ pub struct LogsOverview;
 
 #[async_trait]
 impl AiToolHandler for LogsOverview {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "get_logs_overview"
     }

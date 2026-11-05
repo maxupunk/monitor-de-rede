@@ -2,6 +2,7 @@ pub mod agents;
 pub mod ai;
 pub mod ai_conversations;
 pub mod alerts;
+pub mod areas;
 pub mod audit;
 pub mod auth;
 pub mod auth_guard;

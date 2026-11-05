@@ -9,6 +9,7 @@
 
 use async_trait::async_trait;
 use loco_rs::prelude::AppContext;
+use netmonitor_core::areas::Area;
 use serde_json::{json, Value};
 
 use super::{
@@ -99,6 +100,10 @@ pub struct GetDashboardLayout;
 
 #[async_trait]
 impl AiToolHandler for GetDashboardLayout {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "get_dashboard_layout"
     }
@@ -135,6 +140,10 @@ pub struct UpdateDashboardLayout;
 
 #[async_trait]
 impl AiToolHandler for UpdateDashboardLayout {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "update_dashboard_layout"
     }

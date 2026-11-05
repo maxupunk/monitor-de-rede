@@ -9,6 +9,7 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Local};
 use loco_rs::prelude::AppContext;
+use netmonitor_core::areas::Area;
 use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect};
 use serde_json::{json, Value};
 
@@ -113,6 +114,10 @@ pub struct ListScheduledTasks;
 
 #[async_trait]
 impl AiToolHandler for ListScheduledTasks {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "list_scheduled_tasks"
     }
@@ -252,6 +257,10 @@ pub struct CreateScheduledTask;
 
 #[async_trait]
 impl AiToolHandler for CreateScheduledTask {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "create_scheduled_task"
     }
@@ -349,6 +358,10 @@ impl UpdateScheduledTask {
 
 #[async_trait]
 impl AiToolHandler for UpdateScheduledTask {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "update_scheduled_task"
     }
@@ -444,6 +457,10 @@ pub struct RunScheduledTask;
 
 #[async_trait]
 impl AiToolHandler for RunScheduledTask {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "run_scheduled_task"
     }
@@ -529,6 +546,10 @@ pub struct DeleteScheduledTask;
 
 #[async_trait]
 impl AiToolHandler for DeleteScheduledTask {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "delete_scheduled_task"
     }

@@ -7,6 +7,7 @@
 //! sete vezes mais para a IA escolher entre eles. Tudo é leitura, e nada que
 //! seja segredo sai daqui (token, chave privada, senha de canal).
 
+use netmonitor_core::areas::Area;
 use std::collections::HashMap;
 
 use async_trait::async_trait;
@@ -64,6 +65,10 @@ pub struct PlatformStatus;
 
 #[async_trait]
 impl AiToolHandler for PlatformStatus {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "get_platform_status"
     }
@@ -367,6 +372,10 @@ fn neighbor_row(edge: &TopologyEdge, device_id: i64) -> Value {
 
 #[async_trait]
 impl AiToolHandler for Topology {
+    fn area(&self) -> Area {
+        Area::Network
+    }
+
     fn name(&self) -> &'static str {
         "get_topology"
     }

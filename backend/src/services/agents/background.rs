@@ -12,10 +12,11 @@
 use std::{sync::Arc, time::Duration};
 
 use loco_rs::app::AppContext;
+use netmonitor_core::areas::{self, Area};
 
 use crate::services::{
     discovery::service::ScanSessionService,
-    events::EventBus,
+    events::{interest, Interests},
     monitoring::contracts::CheckResult,
     probes::{
         dispatcher::{self, ProbeDiscoveryTask, ProbeTask},
@@ -42,10 +43,12 @@ pub fn spawn(ctx: AppContext) {
     tokio::spawn(pump_loop(ctx));
 }
 
-/// Intervalo desejado para os snapshots ao vivo.
+/// Intervalo desejado para os snapshots ao vivo: só enquanto alguma aba exibe
+/// o Docker (interesse declarado no stream SSE, ARQ-05) **e** a área
+/// Servidores está ligada (ADR 017). Fora disso, `0` desliga o envio.
 #[must_use]
-pub const fn desired_live_interval(has_subscribers: bool) -> u64 {
-    if has_subscribers {
+pub const fn desired_live_interval(watching: bool) -> u64 {
+    if watching {
         LIVE_INTERVAL_MS
     } else {
         0
@@ -57,11 +60,14 @@ async fn live_loop(ctx: AppContext) {
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         ticker.tick().await;
-        let (Ok(hub), Ok(bus)) = (AgentHub::from_context(&ctx), EventBus::from_context(&ctx))
-        else {
+        let Ok(hub) = AgentHub::from_context(&ctx) else {
             continue;
         };
-        let interval = desired_live_interval(bus.has_subscribers());
+        let watching = Interests::from_context(&ctx).is_watched(interest::DOCKER)
+            && areas::is_enabled(&ctx.db, Area::Servers)
+                .await
+                .unwrap_or(true);
+        let interval = desired_live_interval(watching);
         if hub.set_live_interval_ms(interval) {
             for session in hub.sessions() {
                 tokio::spawn(async move {

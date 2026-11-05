@@ -21,6 +21,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use crate::{
     controllers,
     initializers::ai::AiInitializer,
+    initializers::areas::AreasInitializer,
     initializers::btest::BtestInitializer,
     initializers::link_tests::LinkTestsInitializer,
     initializers::monitoring::MonitoringInitializer,
@@ -68,13 +69,6 @@ impl Hooks for App {
     /// servem para isto — o `run_task` não os executa, e foi exatamente essa
     /// suposição que deixou o `scheduler` e o `probe` sem cliente ICMP e sem
     /// barramento de eventos, com todo monitor de ping caindo em `unknown`.
-    ///
-    /// É também o único ponto que roda **antes** do migrator: o `create_app`
-    /// chama `create_context` e só depois `db::converge`. É daí que
-    /// [`migration::purge_removed_migrations`] tira a chance de apagar o
-    /// registro das migrations que saíram do repositório — sem isso, o
-    /// `sea-orm-migration` aborta o boot de qualquer banco que já as tenha
-    /// aplicado.
     async fn after_context(ctx: AppContext) -> Result<AppContext> {
         require_jwt_secret_in_production();
         // Todo pânico do processo vai ao log com o local e, dentro de uma
@@ -82,9 +76,6 @@ impl Hooks for App {
         crate::services::shared::incident::install_panic_hook();
         process_deps::install(&ctx);
         enable_sqlite_wal(&ctx).await;
-        migration::purge_removed_migrations(&ctx.db)
-            .await
-            .map_err(loco_rs::Error::DB)?;
         // O banco de logs é separado e tem migrator próprio. Fica aqui, e não
         // num `Initializer`, porque a purga de retenção roda no ciclo do
         // `scheduler` — que pode ser invocado como `task`, e o `run_task` não
@@ -145,6 +136,7 @@ impl Hooks for App {
     async fn initializers(_ctx: &AppContext) -> Result<Vec<Box<dyn Initializer>>> {
         Ok(vec![
             Box::new(SetupInitializer),
+            Box::new(AreasInitializer),
             Box::new(MonitoringInitializer),
             Box::new(SystemDeviceInitializer),
             Box::new(SyslogInitializer),
@@ -204,6 +196,7 @@ impl Hooks for App {
             .add_route(controllers::audit::routes().layer(business_auth.clone()))
             .add_route(controllers::alerts::rules_routes().layer(business_auth.clone()))
             .add_route(controllers::alerts::routes().layer(business_auth.clone()))
+            .add_route(controllers::areas::routes().layer(business_auth.clone()))
             .add_route(controllers::push::routes().layer(business_auth.clone()))
             .add_route(controllers::vpn_servers::routes().layer(business_auth.clone()))
             .add_route(controllers::ai::routes().layer(business_auth.clone()))

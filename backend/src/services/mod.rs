@@ -11,6 +11,7 @@ pub mod agent_runtime;
 pub mod agents;
 pub mod ai;
 pub mod alerts;
+pub mod area_policies;
 pub mod audit;
 pub mod auth;
 pub mod backup;

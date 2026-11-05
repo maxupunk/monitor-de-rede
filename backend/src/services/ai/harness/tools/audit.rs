@@ -6,6 +6,7 @@
 //! administrador (como a tela `/audit`); IP e navegador de quem alterou não
 //! saem daqui.
 
+use netmonitor_core::areas::Area;
 use std::collections::HashMap;
 
 use async_trait::async_trait;
@@ -35,6 +36,10 @@ pub struct AuditLog;
 
 #[async_trait]
 impl AiToolHandler for AuditLog {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "get_audit_log"
     }

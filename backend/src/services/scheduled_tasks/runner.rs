@@ -12,6 +12,8 @@
 //!   `skipped`, com o motivo.
 //! - Uma execução por tarefa de cada vez ([`RunGuard`]); a seguinte que
 //!   vencer no meio é registrada como `skipped`.
+//! - Ferramenta de uma área desligada (ADR 017): o horário vira `skipped`,
+//!   com o motivo, e a tarefa volta a rodar quando a área volta.
 //! - A tarefa roda em nome de quem a salvou por último, com o papel que essa
 //!   pessoa tem **agora**: perdeu a escrita, a tarefa falha com o motivo.
 
@@ -319,6 +321,8 @@ pub async fn run_due(
         .filter(scheduled_tasks::Column::NextRunAt.lte(now))
         .all(&ctx.db)
         .await?;
+    // Lido a cada ciclo, sem cache: o laço pode rodar em outro processo.
+    let enabled = netmonitor_core::areas::load(&ctx.db).await?;
     let mut started = Vec::new();
     for task in due {
         let Some(scheduled_for) = task.next_run_at.map(|at| at.with_timezone(&Utc)) else {
@@ -339,6 +343,21 @@ pub async fn run_due(
                 format!(
                     "Não rodou às {}: o servidor estava fora do ar nesse horário",
                     local(scheduled_for)
+                ),
+                true,
+            )
+            .await?;
+            events::publish(ctx, task.id, &task.name, Some(ScheduledTaskStatus::Skipped)).await;
+            continue;
+        }
+        if let Some(area) = super::areas::disabled_area(&enabled, &task.tool) {
+            skip(
+                ctx,
+                &task,
+                format!(
+                    "Não rodou às {}: a área {} está desligada (Configurações › Áreas)",
+                    local(scheduled_for),
+                    area.title()
                 ),
                 true,
             )

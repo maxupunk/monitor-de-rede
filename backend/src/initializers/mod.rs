@@ -3,11 +3,12 @@
 //! * [`process_deps`] — roda em **todo** modo, via `Hooks::after_context`.
 //!   Dependências que qualquer processo precisa (socket ICMP, barramento de
 //!   eventos, sessão de scan).
-//! * [`ai`], [`monitoring`], [`syslog`] e [`btest`] — rodam **só no servidor**, via
+//! * [`ai`], [`areas`], [`monitoring`], [`syslog`] e [`btest`] — rodam **só no servidor**, via
 //!   `Initializer`. Conveniências de boot e laços que dependem do processo que
 //!   atende HTTP — ou, no caso do syslog e do btest, que abre porta.
 
 pub mod ai;
+pub mod areas;
 pub mod btest;
 pub mod link_tests;
 pub mod monitoring;

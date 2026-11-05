@@ -5,6 +5,7 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Local, Utc};
 use loco_rs::prelude::AppContext;
+use netmonitor_core::areas::Area;
 use sea_orm::EntityTrait;
 use serde_json::{json, Value};
 
@@ -98,6 +99,10 @@ pub struct AcknowledgeAlert;
 
 #[async_trait]
 impl AiToolHandler for AcknowledgeAlert {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "acknowledge_alert"
     }
@@ -143,6 +148,10 @@ pub struct SilenceAlert;
 
 #[async_trait]
 impl AiToolHandler for SilenceAlert {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "silence_alert"
     }
@@ -236,6 +245,10 @@ pub struct CreateMaintenanceWindow;
 
 #[async_trait]
 impl AiToolHandler for CreateMaintenanceWindow {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "create_maintenance_window"
     }
@@ -381,6 +394,10 @@ pub struct CreateMonitor;
 
 #[async_trait]
 impl AiToolHandler for CreateMonitor {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "create_monitor"
     }

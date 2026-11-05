@@ -5,6 +5,7 @@
 
 use async_trait::async_trait;
 use loco_rs::prelude::AppContext;
+use netmonitor_core::areas::Area;
 use serde_json::{json, Value};
 
 use super::{AiToolHandler, ToolArgs, ToolOutput};
@@ -17,6 +18,10 @@ pub struct WebSearch;
 
 #[async_trait]
 impl AiToolHandler for WebSearch {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "web_search"
     }

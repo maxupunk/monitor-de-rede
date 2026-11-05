@@ -1,6 +1,7 @@
 //! Testes ativos de rede: geram tráfego a partir do servidor e por isso só
 //! entram no registro com `allow_active_tools`.
 
+use netmonitor_core::areas::Area;
 use std::{net::IpAddr, time::Duration};
 
 use async_trait::async_trait;
@@ -83,6 +84,10 @@ pub struct Ping;
 
 #[async_trait]
 impl AiToolHandler for Ping {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "ping_host"
     }
@@ -140,6 +145,10 @@ pub struct Traceroute;
 
 #[async_trait]
 impl AiToolHandler for Traceroute {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "traceroute"
     }
@@ -210,6 +219,10 @@ pub struct ScanPorts;
 
 #[async_trait]
 impl AiToolHandler for ScanPorts {
+    fn area(&self) -> Area {
+        Area::Network
+    }
+
     fn name(&self) -> &'static str {
         "scan_ports"
     }
@@ -298,6 +311,10 @@ pub struct DnsLookup;
 
 #[async_trait]
 impl AiToolHandler for DnsLookup {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "dns_lookup"
     }
@@ -371,6 +388,10 @@ pub struct Playbook;
 
 #[async_trait]
 impl AiToolHandler for Playbook {
+    fn area(&self) -> Area {
+        Area::Network
+    }
+
     fn name(&self) -> &'static str {
         "run_playbook"
     }

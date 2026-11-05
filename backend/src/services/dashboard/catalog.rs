@@ -5,6 +5,7 @@
 //! categoria e ícone seguem os da tela (`stores/dashboard.ts`), para que um
 //! card criado aqui apareça igual a um criado pelo catálogo da tela.
 
+use netmonitor_core::areas::Area;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -405,6 +406,159 @@ impl DashboardWidgetType {
     }
 }
 
+impl DashboardWidgetType {
+    /// A área do produto do card (ADR 017). `match` exaustivo, sem `_ =>`:
+    /// card novo que não declara a área não compila. Com a área desligada o
+    /// card sai do catálogo e não é desenhado — mas continua no layout salvo.
+    #[must_use]
+    pub const fn area(self) -> Area {
+        match self {
+            Self::StatCards
+            | Self::HealthGauge
+            | Self::ActiveAlerts
+            | Self::LatencyTimeSeries
+            | Self::EventDistribution
+            | Self::UnstableTargets
+            | Self::EventsFeed
+            | Self::NetworkMonitors
+            | Self::CpuUsage
+            | Self::RamUsage
+            | Self::BinaryStatus => Area::Core,
+            Self::DnsLatency
+            | Self::SaasServices
+            | Self::SaasHeatmap
+            | Self::EtherBandwidth
+            | Self::BandwidthVsLatency => Area::Network,
+            Self::DockerSummary => Area::Servers,
+        }
+    }
+
+    /// Que tipo de recurso o card sabe desenhar — o diálogo "Adicionar card"
+    /// usa para oferecer só o que serve. Vazio nos cards sem configuração.
+    #[must_use]
+    pub const fn compatible_resources(self) -> &'static [&'static str] {
+        match self {
+            Self::EtherBandwidth => &["bandwidth"],
+            Self::BandwidthVsLatency => &["dual-axis", "bandwidth", "numeric"],
+            Self::CpuUsage | Self::RamUsage | Self::SaasHeatmap | Self::SaasServices => {
+                &["numeric"]
+            }
+            Self::DnsLatency => &["dns-resolvers", "numeric"],
+            Self::BinaryStatus => &["binary"],
+            Self::StatCards
+            | Self::HealthGauge
+            | Self::ActiveAlerts
+            | Self::LatencyTimeSeries
+            | Self::EventDistribution
+            | Self::UnstableTargets
+            | Self::EventsFeed
+            | Self::NetworkMonitors
+            | Self::DockerSummary => &[],
+        }
+    }
+}
+
+/// Um tipo de card como a tela o vê — o catálogo único (ARQ-04): o frontend
+/// não mantém lista própria de tipos, títulos, ícones nem tamanhos.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct WidgetCatalogEntry {
+    #[serde(rename = "type")]
+    #[ts(rename = "type")]
+    pub widget_type: DashboardWidgetType,
+    pub title: String,
+    pub description: String,
+    pub category: String,
+    pub icon: String,
+    pub allow_multiple: bool,
+    pub default_size: DashboardWidgetSize,
+    pub config_keys: Vec<String>,
+    pub compatible_resources: Vec<String>,
+    pub area: Area,
+}
+
+/// Um card do layout padrão.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DefaultWidget {
+    #[serde(rename = "type")]
+    #[ts(rename = "type")]
+    pub widget_type: DashboardWidgetType,
+    pub size: DashboardWidgetSize,
+    /// Os ocultos nascem no layout desligados: estão a um clique na edição.
+    pub visible: bool,
+}
+
+/// Corpo do `GET /api/dashboard/catalog`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DashboardCatalog {
+    pub widgets: Vec<WidgetCatalogEntry>,
+    pub default_layout: Vec<DefaultWidget>,
+}
+
+impl WidgetCatalogEntry {
+    #[must_use]
+    pub fn of(widget_type: DashboardWidgetType) -> Self {
+        let spec = widget_type.spec();
+        Self {
+            widget_type,
+            title: spec.title.to_owned(),
+            description: spec.description.to_owned(),
+            category: spec.category.id().to_owned(),
+            icon: spec.icon.to_owned(),
+            allow_multiple: spec.multiple,
+            default_size: spec.default_size,
+            config_keys: spec
+                .config_keys
+                .iter()
+                .map(|key| (*key).to_owned())
+                .collect(),
+            compatible_resources: widget_type
+                .compatible_resources()
+                .iter()
+                .map(|kind| (*kind).to_owned())
+                .collect(),
+            area: widget_type.area(),
+        }
+    }
+}
+
+/// Cards do layout padrão que nascem ocultos (a um clique na edição).
+pub const DEFAULT_HIDDEN: [(DashboardWidgetType, DashboardWidgetSize); 3] = [
+    (DashboardWidgetType::DnsLatency, DashboardWidgetSize::Half),
+    (DashboardWidgetType::SaasServices, DashboardWidgetSize::Full),
+    (DashboardWidgetType::SaasHeatmap, DashboardWidgetSize::Full),
+];
+
+/// O catálogo inteiro, para a tela.
+#[must_use]
+pub fn dashboard_catalog() -> DashboardCatalog {
+    DashboardCatalog {
+        widgets: DashboardWidgetType::ALL
+            .into_iter()
+            .map(WidgetCatalogEntry::of)
+            .collect(),
+        default_layout: DEFAULT_LAYOUT
+            .iter()
+            .map(|(widget_type, size)| (widget_type, size, true))
+            .chain(
+                DEFAULT_HIDDEN
+                    .iter()
+                    .map(|(widget_type, size)| (widget_type, size, false)),
+            )
+            .map(|(widget_type, size, visible)| DefaultWidget {
+                widget_type: *widget_type,
+                size: *size,
+                visible,
+            })
+            .collect(),
+    }
+}
+
 /// O layout que vale quando nada foi salvo, na ordem da tela.
 pub const DEFAULT_LAYOUT: [(DashboardWidgetType, DashboardWidgetSize); 9] = [
     (DashboardWidgetType::StatCards, DashboardWidgetSize::Full),
@@ -436,6 +590,46 @@ pub const DEFAULT_LAYOUT: [(DashboardWidgetType, DashboardWidgetSize); 9] = [
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn catalogo_cobre_todos_os_tipos_com_area() {
+        let catalog = dashboard_catalog();
+        assert_eq!(catalog.widgets.len(), DashboardWidgetType::ALL.len());
+        let docker = catalog
+            .widgets
+            .iter()
+            .find(|entry| entry.widget_type == DashboardWidgetType::DockerSummary)
+            .expect("docker");
+        assert_eq!(docker.area, Area::Servers);
+        assert_eq!(DashboardWidgetType::EtherBandwidth.area(), Area::Network);
+        assert_eq!(DashboardWidgetType::CpuUsage.area(), Area::Core);
+    }
+
+    #[test]
+    fn layout_padrao_tem_visiveis_e_ocultos_sem_repetir_tipo() {
+        let layout = dashboard_catalog().default_layout;
+        assert_eq!(
+            layout.iter().filter(|w| w.visible).count(),
+            DEFAULT_LAYOUT.len()
+        );
+        assert_eq!(
+            layout.iter().filter(|w| !w.visible).count(),
+            DEFAULT_HIDDEN.len()
+        );
+        let mut tipos: Vec<_> = layout.iter().map(|w| w.widget_type.id()).collect();
+        tipos.sort_unstable();
+        tipos.dedup();
+        assert_eq!(tipos.len(), layout.len());
+    }
+
+    #[test]
+    fn json_usa_type_como_o_layout_salvo() {
+        let entry = WidgetCatalogEntry::of(DashboardWidgetType::BinaryStatus);
+        let json = serde_json::to_value(&entry).expect("json");
+        assert_eq!(json["type"], "binary_status");
+        assert_eq!(json["area"], "core");
+        assert_eq!(json["compatibleResources"], serde_json::json!(["binary"]));
+    }
 
     #[test]
     fn tamanho_vira_colunas_do_vuetify() {

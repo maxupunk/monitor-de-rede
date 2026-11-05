@@ -10,6 +10,12 @@ async fn get_layout(State(ctx): State<AppContext>) -> AppResult<Response> {
         serde_json::json!({"layout":stored.layout,"updatedAt":stored.updated_at}),
     )?)
 }
+/// `GET /api/dashboard/catalog` — tipos de card e layout padrão: a fonte única
+/// que a tela usa no lugar de uma lista própria (ARQ-04).
+async fn get_catalog() -> AppResult<Response> {
+    Ok(format::json(dashboard::catalog::dashboard_catalog())?)
+}
+
 async fn save_layout(
     State(ctx): State<AppContext>,
     Json(input): Json<DashboardLayoutInput>,
@@ -23,4 +29,5 @@ pub fn routes() -> Routes {
     Routes::new()
         .prefix("/dashboard")
         .add("/layout", get(get_layout).post(save_layout))
+        .add("/catalog", get(get_catalog))
 }

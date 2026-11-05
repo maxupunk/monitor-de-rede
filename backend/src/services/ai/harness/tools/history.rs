@@ -1,6 +1,7 @@
 //! Histórico gravado no banco: disponibilidade e falhas de monitores e as
 //! métricas de sistema (CPU, memória, sensores) de um dispositivo.
 
+use netmonitor_core::areas::Area;
 use std::collections::BTreeMap;
 
 use async_trait::async_trait;
@@ -71,6 +72,10 @@ pub struct MonitorHistory;
 
 #[async_trait]
 impl AiToolHandler for MonitorHistory {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "get_monitor_history"
     }
@@ -156,6 +161,10 @@ pub struct DeviceMetrics;
 
 #[async_trait]
 impl AiToolHandler for DeviceMetrics {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
     fn name(&self) -> &'static str {
         "get_device_metrics"
     }

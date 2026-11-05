@@ -13,6 +13,7 @@
 //!
 //! [`UnattendedTools`]: crate::services::ai::harness::tools::UnattendedTools
 
+pub mod areas;
 pub mod arguments;
 pub mod events;
 pub mod model;

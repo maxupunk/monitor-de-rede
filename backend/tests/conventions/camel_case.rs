@@ -8,7 +8,7 @@
 //! tela, quando o Vue lê `undefined` de `perPage`.
 //!
 //! Escopo: `src/dtos/`, `src/views/` e os DTOs de paginação em
-//! `src/services/shared/pagination.rs`. Structs de request/response do Loco que
+//! `crates/core/src/shared/pagination.rs`. Structs de request/response do Loco que
 //! o frontend não consome (fixtures, seeds) ficam de fora por não serem
 //! contrato.
 
@@ -23,7 +23,11 @@ fn arquivos_de_contrato() -> Vec<PathBuf> {
     for dir in ["src/dtos", "src/views"] {
         colete_rs(&raiz.join(dir), &mut arquivos);
     }
-    arquivos.push(raiz.join("src/services/shared/pagination.rs"));
+    // Os contratos do núcleo (paginação, áreas) moram em `crates/core`.
+    arquivos.push(raiz.join("crates/core/src/shared/pagination.rs"));
+    for contrato in ["policy.rs", "state.rs"] {
+        arquivos.push(raiz.join("crates/core/src/areas").join(contrato));
+    }
     arquivos
 }
 
