@@ -225,7 +225,7 @@ async fn historico_do_monitor_traz_uptime_e_falhas_recentes() {
             )
             .await
             .unwrap();
-        assert_eq!(saida.data["monitor"]["id"], mon.id);
+        assert_eq!(saida.data["monitor"]["id"], mon.id, "{}", saida.data);
         assert_eq!(saida.data["checks"]["down"], 1);
         assert_eq!(saida.data["recent_failures"][0]["message"], "Timeout");
 

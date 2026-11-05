@@ -254,6 +254,22 @@ Este documento consolida a auditoria de arquitetura, código-fonte, padrões de 
   - Leitura tolerante a arquivo ausente, vazio ou corrompido.
   - Testes cobrem acúmulo/limpeza, arquivo corrompido, buffer separado de discovery, limite de itens, limite de bytes, deduplicação, truncamento por idade e escrita atômica com recuperação de tmp órfão.
 
+### 🟡 QUA-07: Testes Intermitentes sob Carga — Em observação
+- **Arquivos Afetados:** `tests/requests/{wifi_telemetry,ai_analysis,ai_tools}.rs`, `services/network_tools/throughput/btest`
+- **Descrição:** durante a arquitetura modular (2026-11), quatro testes falharam
+  uma vez cada em `cargo test --workspace` com a máquina sob carga máxima
+  (compilação paralela de vários crates) e passaram em toda reexecução —
+  isolados e em quatro rodadas seguidas do binário `tests/mod` inteiro:
+  `wifi_telemetry::aparelho_vigiado_que_some_vira_alerta_e_volta_resolvendo`,
+  `throughput::btest::tests::cliente_envia_ao_servidor_armado`,
+  `ai_analysis::analises_sem_historico_respondem_sem_inventar` e
+  `ai_tools::historico_do_monitor_traz_uptime_e_falhas_recentes` (este duas
+  vezes, ambas na rodada completa do workspace).
+- **Próximo passo:** a asserção do último já imprime a saída da ferramenta;
+  na próxima falha, a causa (busca ambígua × dispositivo ausente × janela de
+  tempo) fica no log. Se repetir, investigar dependência de relógio nos
+  quatro (todos usam `Utc::now()` relativo ou laço de vazão com prazo).
+
 ---
 
 ## 7. Débitos de Arquitetura Modular (ADR 017)
