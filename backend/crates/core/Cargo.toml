@@ -42,6 +42,11 @@ socket2 = { workspace = true }
 # Severidade canônica do syslog nos adapters de plataforma.
 syslog_loose = { workspace = true }
 
+# `statvfs` do armazenamento no coletor de saúde (só Unix; no Windows a
+# métrica é declarada indisponível).
+[target.'cfg(unix)'.dependencies]
+libc = { version = "0.2" }
+
 [dev-dependencies]
 migration = { path = "../../migration" }
 loco-rs = { workspace = true, features = ["testing"] }

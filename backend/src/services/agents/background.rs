@@ -12,15 +12,17 @@
 use std::{sync::Arc, time::Duration};
 
 use loco_rs::app::AppContext;
-use netmonitor_core::areas::{self, Area};
+use netmonitor_core::{
+    agents::command::AgentCommandDispatchers,
+    areas::{self, Area},
+};
 
 use crate::services::{
-    discovery::service::ScanSessionService,
     events::{interest, Interests},
     monitoring::contracts::CheckResult,
     probes::{
-        dispatcher::{self, ProbeDiscoveryTask, ProbeTask},
-        receiver::{self, ProbeDiscoveryResultPayload, ProbeResultPayload},
+        dispatcher::{self, ProbeTask},
+        receiver::{self, ProbeResultPayload},
     },
 };
 
@@ -115,13 +117,14 @@ pub async fn pump_session(
             tokio::spawn(run_monitor(ctx.clone(), session.clone(), task));
         }
     }
-    if session.allows(Permission::Discovery) {
-        for task in dispatcher::get_pending_discovery_tasks(&ctx.db, session.probe_id).await? {
-            if let Ok(scan) = ScanSessionService::from_context(ctx) {
-                scan.remote_started(task.run_id).await;
-            }
-            tokio::spawn(run_discovery(ctx.clone(), session.clone(), task));
-        }
+    // O trabalho das áreas (a varredura, da Rede): ADR 017,
+    // `AgentCommandDispatcher`.
+    let dispatchers = ctx
+        .shared_store
+        .get::<AgentCommandDispatchers>()
+        .unwrap_or_default();
+    for dispatcher in dispatchers.iter() {
+        dispatcher.dispatch(ctx, session).await?;
     }
     Ok(())
 }
@@ -155,36 +158,6 @@ async fn run_monitor(ctx: AppContext, session: Arc<AgentSession>, task: ProbeTas
         // Sem resposta, o agendador enfileira de novo no próximo ciclo — e
         // roda local se o agente estiver fora (fallback do AGENTS §6).
         Err(error) => tracing::debug!(%error, monitor_id, "monitor não voltou do agente"),
-    }
-}
-
-async fn run_discovery(ctx: AppContext, session: Arc<AgentSession>, task: ProbeDiscoveryTask) {
-    let timeout = Duration::from_millis(task.timeout_ms) + MONITOR_GRACE;
-    let run_id = task.run_id;
-    let task_id = task.id.clone();
-    let result = session.request(Command::Discovery { task }, timeout).await;
-    let payload = match result.and_then(|value| {
-        serde_json::from_value::<Vec<agent_protocol::probes::DiscoveredHost>>(value).map_err(
-            |error| RemoteError::new(super::protocol::ErrorCode::Internal, error.to_string()),
-        )
-    }) {
-        Ok(hosts) => ProbeDiscoveryResultPayload {
-            run_id,
-            task_id: Some(task_id),
-            hosts,
-            error: None,
-        },
-        Err(error) => ProbeDiscoveryResultPayload {
-            run_id,
-            task_id: Some(task_id),
-            hosts: Vec::new(),
-            error: Some(error.message),
-        },
-    };
-    if let Err(error) =
-        receiver::receive_discovery_results(&ctx, session.probe_id, &[payload]).await
-    {
-        tracing::warn!(%error, run_id, "falha ao processar discovery do agente");
     }
 }
 

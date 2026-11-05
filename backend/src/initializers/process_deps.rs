@@ -56,6 +56,9 @@ pub fn install(ctx: &AppContext) {
     // scheduler coleta o SNMP e avalia as interfaces.
     ctx.shared_store
         .insert(crate::registries::network_central());
+    // O lado central dos comandos das áreas aos agentes (a varredura).
+    ctx.shared_store
+        .insert(crate::registries::agent_command_dispatchers());
     // A IA (ADR 017, Fase 8): o classificador do núcleo pelo Decisor, o que o
     // assistente pede ao resto da central e o catálogo de ferramentas que as
     // áreas contribuem. Aqui, e não num initializer: o scheduler classifica

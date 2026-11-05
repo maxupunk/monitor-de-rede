@@ -11,7 +11,10 @@ use netmonitor_assistant::{
     mentions::{ContainerDirectory, MentionContainer},
 };
 use netmonitor_core::{
-    agents::{command::AgentCommandHandlers, targets::DeviceNetworks},
+    agents::{
+        command::{AgentCommandDispatchers, AgentCommandHandlers},
+        targets::DeviceNetworks,
+    },
     ai::tools::AiToolHandler,
     alerts::contracts::AlertEvaluationContext,
     areas::AreaPolicy,
@@ -35,7 +38,10 @@ use crate::{
             actions, alert_rules, analysis, ask, audit, charts, dashboard, diagnostics, grep,
             history, inventory, logs, platform, schedules,
         },
-        alerts::{inhibition, manager as alert_manager, vpn_peer_watcher},
+        alerts::{
+            catalog as alert_catalog, inhibition, manager as alert_manager,
+            recovery as alert_recovery, vpn_peer_watcher,
+        },
         devices::identify,
         docker::{engine, hosts, source::DockerEngine},
         notifications::NotificationService,
@@ -100,8 +106,9 @@ pub fn vpn_central() -> Central {
     Central::new(Arc::new(VpnCentral))
 }
 
-/// O que a área Rede pede ao resto da central: o motor de alertas, a
-/// identificação de dispositivo, a porta publicada da API e a IA.
+/// O que a área Rede pede ao resto da central: o motor de alertas, os
+/// endereços da central, a identificação de dispositivo, a porta publicada
+/// da API e a IA.
 struct NetworkCentral;
 
 #[async_trait]
@@ -121,6 +128,35 @@ impl network::CentralServices for NetworkCentral {
         ssh_port: Option<u16>,
     ) -> AppResult<devices::Model> {
         identify::observe(ctx, device, ssh_port).await
+    }
+
+    async fn close_alert_scope(
+        &self,
+        ctx: &AppContext,
+        scope_key: &str,
+        reason: &str,
+    ) -> AppResult<usize> {
+        alert_recovery::close_scope(ctx, scope_key, reason).await
+    }
+
+    async fn ensure_wifi_watch_rules(&self, db: &DatabaseConnection) -> AppResult<()> {
+        alert_catalog::once::ensure_wifi_watch(db).await.map(|_| ())
+    }
+
+    async fn address_toward(
+        &self,
+        ctx: &AppContext,
+        device: &devices::Model,
+    ) -> AppResult<Option<String>> {
+        let nat = server_addresses::nat_detector(ctx);
+        let list = server_addresses::list(&ctx.db, &nat).await?;
+        let Some((id, _)) = server_addresses::suggest_for(&ctx.db, device, &list).await? else {
+            return Ok(None);
+        };
+        Ok(list
+            .into_iter()
+            .find(|address| address.id == id)
+            .and_then(|address| address.value))
     }
 
     fn published_api_port(&self, ctx: &AppContext) -> u16 {
@@ -206,6 +242,15 @@ pub fn agent_command_handlers(deps: &CheckDeps, networks: DeviceNetworks) -> Age
         networks,
         None,
     ))
+}
+
+/// O lado central dos comandos das áreas (ADR 017): o despacho das
+/// varreduras pendentes aos agentes conectados.
+#[must_use]
+pub fn agent_command_dispatchers() -> AgentCommandDispatchers {
+    AgentCommandDispatchers::new(vec![Arc::new(
+        netmonitor_network::discovery::remote::DiscoveryDispatch,
+    )])
 }
 
 /// Os serviços da central para a Rede, para o `shared_store`.

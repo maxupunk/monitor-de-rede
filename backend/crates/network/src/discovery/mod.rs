@@ -14,5 +14,6 @@ pub mod merger;
 pub mod pipeline;
 pub mod progress;
 pub mod queue;
+pub mod remote;
 pub mod scanners;
 pub mod service;

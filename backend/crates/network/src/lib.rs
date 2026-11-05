@@ -1,6 +1,6 @@
 //! Área Rede (ADR 017): descoberta, fabricantes (OUI), varredura de portas,
-//! SNMP, topologia, plugins de dispositivo, espelho de pacotes e testes de
-//! vazão, com as rotas e telas que os servem.
+//! SNMP, topologia, plugins de dispositivo, espelho de pacotes, testes de
+//! vazão e de enlace e Wi-Fi, com as rotas e telas que os servem.
 //!
 //! Depende só do núcleo (`netmonitor-core`) e do contrato de fio
 //! (`agent-protocol`) — nunca de outra área nem do crate de montagem. O que
@@ -24,6 +24,10 @@
 //!   origem do teste (ADR 015);
 //! * [`agent_commands`] — a descoberta, o acesso a equipamento e a vazão no
 //!   host do agente (`AgentCommandHandler`);
+//! * [`link_tests`] — os testes de enlace (ADR 015), orquestrados pelos
+//!   plugins e pelos motores de vazão;
+//! * [`wifi`] — as estações dos pontos de acesso e os clientes vigiados (o
+//!   dataset de alerta `wifi_client` incluso);
 //! * [`controllers`], [`dtos`] — as rotas da área.
 
 pub mod agent_commands;
@@ -32,6 +36,7 @@ pub mod central;
 pub mod controllers;
 pub mod discovery;
 pub mod dtos;
+pub mod link_tests;
 pub mod package_mirror;
 pub mod plugins;
 pub mod port_scanner;
@@ -39,6 +44,7 @@ pub mod snmp;
 pub mod throughput;
 pub mod topology;
 pub mod vendors;
+pub mod wifi;
 
 use std::sync::Arc;
 

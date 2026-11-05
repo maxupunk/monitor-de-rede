@@ -4,7 +4,6 @@ pub mod bandwidth_latency;
 pub mod checkers;
 pub mod contracts;
 pub mod creation;
-pub mod health;
 pub mod heatmap;
 pub mod ip_reconciliation;
 pub mod managed;
@@ -20,5 +19,5 @@ pub mod uptime;
 
 /// Quem pode medir o quê mora no núcleo (a VPN também consulta).
 pub use netmonitor_core::monitoring::{
-    device_status, execution_guard, link_speed, metrics_repository, reachability,
+    device_status, execution_guard, health, link_speed, metrics_repository, reachability,
 };

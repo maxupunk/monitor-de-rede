@@ -1,7 +1,9 @@
 //! O que a área Rede pede ao resto da central (ADR 017).
 //!
 //! Peças que não são do núcleo nem da área: o motor de alertas (que avalia a
-//! transição de cada interface observada pelo SNMP), a identificação de
+//! transição de cada interface observada pelo SNMP e de cada cliente Wi-Fi
+//! vigiado, e as regras desses clientes), os endereços da central (o que o
+//! equipamento alcança num teste de enlace), a identificação de
 //! dispositivo (que os plugins pedem ao observar o equipamento), a porta
 //! publicada da API (o espelho de pacotes) e a IA configurada (a revisão de
 //! segurança de um plugin importado). O ponto de montagem
@@ -37,6 +39,27 @@ pub trait CentralServices: Send + Sync {
         device: &devices::Model,
         ssh_port: Option<u16>,
     ) -> AppResult<devices::Model>;
+
+    /// Fecha os alertas abertos de um alvo (`scope_key`) com o motivo.
+    /// Devolve quantos fechou.
+    async fn close_alert_scope(
+        &self,
+        ctx: &AppContext,
+        scope_key: &str,
+        reason: &str,
+    ) -> AppResult<usize>;
+
+    /// Aplica, uma vez na vida da instalação, as regras dos clientes Wi-Fi
+    /// vigiados (quando o primeiro aparelho é vigiado).
+    async fn ensure_wifi_watch_rules(&self, db: &DatabaseConnection) -> AppResult<()>;
+
+    /// O endereço da central que um equipamento alcança (a sugestão dos
+    /// endereços do servidor). `None` quando não há como saber.
+    async fn address_toward(
+        &self,
+        ctx: &AppContext,
+        device: &devices::Model,
+    ) -> AppResult<Option<String>>;
 
     /// A porta publicada da API, por onde o equipamento alcança a central
     /// (o espelho de pacotes dos plugins).

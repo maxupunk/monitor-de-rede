@@ -11,7 +11,6 @@ pub mod diagnostics;
 pub mod dns;
 pub mod dns_servers;
 pub mod events;
-pub mod link_tests;
 pub mod logs;
 pub mod maintenance_windows;
 pub mod monitors;
@@ -25,7 +24,6 @@ pub mod settings;
 pub mod sites;
 pub mod storages;
 pub mod users;
-pub mod wifi;
 
 /// As rotas do assistente moram no crate dele (`netmonitor-assistant`).
 pub use netmonitor_assistant::controllers::{ai, ai_conversations};

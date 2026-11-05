@@ -1,5 +1,9 @@
-//! Ponto de extensão dos comandos de área no host do agente (ADR 017,
-//! `AgentCommandHandler`).
+//! Pontos de extensão dos comandos de área (ADR 017, `AgentCommandHandler`).
+//!
+//! Os dois lados de um comando de área são registrados pelo ponto de
+//! montagem: na central, o [`AgentCommandDispatcher`] entrega ao agente
+//! conectado o trabalho que a área enfileirou; no host do agente, o
+//! [`AgentCommandHandler`] o executa.
 //!
 //! O **enum** dos comandos continua fechado em `agent-protocol` (AGENTS §7) e a
 //! política local (`AGENT_ALLOW`) continua aplicada pelo executor do agente,
@@ -12,9 +16,13 @@ use std::sync::Arc;
 
 use agent_protocol::{Command, RemoteError};
 use async_trait::async_trait;
+use loco_rs::app::AppContext;
 use serde_json::Value;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
+
+use super::session::AgentSession;
+use crate::shared::errors::AppResult;
 
 /// Um comando de área executado no host do agente.
 #[async_trait]
@@ -50,5 +58,34 @@ impl AgentCommandHandlers {
             .iter()
             .find(|handler| handler.handles(command))
             .map(AsRef::as_ref)
+    }
+}
+
+/// O lado central de um comando de área: entrega ao agente conectado o
+/// trabalho que a área enfileirou (a varredura, da Rede). Chamado a cada
+/// rodada do pump dos agentes.
+#[async_trait]
+pub trait AgentCommandDispatcher: Send + Sync {
+    /// Despacha o trabalho pendente para `session`. A permissão anunciada
+    /// pelo agente (`AGENT_ALLOW`) é conferida aqui.
+    ///
+    /// # Errors
+    ///
+    /// Erro do banco ao reivindicar o trabalho.
+    async fn dispatch(&self, ctx: &AppContext, session: &Arc<AgentSession>) -> AppResult<()>;
+}
+
+/// Os despachantes registrados na central, no `shared_store`.
+#[derive(Clone, Default)]
+pub struct AgentCommandDispatchers(Arc<Vec<Arc<dyn AgentCommandDispatcher>>>);
+
+impl AgentCommandDispatchers {
+    #[must_use]
+    pub fn new(dispatchers: Vec<Arc<dyn AgentCommandDispatcher>>) -> Self {
+        Self(Arc::new(dispatchers))
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Arc<dyn AgentCommandDispatcher>> {
+        self.0.iter()
     }
 }

@@ -218,9 +218,11 @@ impl Hooks for App {
             .add_route(
                 netmonitor_network::controllers::plugins::routes().layer(business_auth.clone()),
             )
-            .add_route(controllers::link_tests::routes().layer(business_auth.clone()))
+            .add_route(
+                netmonitor_network::controllers::link_tests::routes().layer(business_auth.clone()),
+            )
             .add_route(controllers::scheduled_tasks::routes().layer(business_auth.clone()))
-            .add_route(controllers::wifi::routes().layer(business_auth.clone()))
+            .add_route(netmonitor_network::controllers::wifi::routes().layer(business_auth.clone()))
             .add_route(netmonitor_vpn::controllers::vpn_peers::routes().layer(business_auth))
     }
 

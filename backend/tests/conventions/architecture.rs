@@ -45,7 +45,6 @@ const AREAS: &[(&str, &str)] = &[
 /// `(módulo de origem, módulo importado)`. Só pode diminuir.
 const EXCECOES: &[(&str, &str)] = &[
     ("agent_runtime", "docker"),
-    ("agents", "discovery"),
     ("devices", "wifi"),
     ("maintenance", "link_tests"),
     ("monitoring", "link_tests"),

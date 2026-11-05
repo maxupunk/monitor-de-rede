@@ -206,7 +206,7 @@
       - Nunca reimplemente funções utilitárias de formatação, cálculo numérico, conversão de unidades ou parsing se já existirem no repositório.
       - Antes de criar qualquer nova função utilitária ou rotina de suporte, o agente **DEVE** inspecionar os módulos canônicos existentes (`grep_search` ou leitura dos módulos centrais).
     - **Backend (Rust)**:
-      - **Métricas e Sondas de Rede (`backend/src/services/network_tools/`)**:
+      - **Métricas e Sondas de Rede (`backend/crates/core/src/network_tools/`)**:
         - Sockets ICMP DGRAM, envio de pacotes, cálculo de RTT, estatísticas de perdas e jitter pertencem exclusivamente a `network_tools::icmp_probe` (`probe_icmp`, `create_icmp_client`, `calculate_jitter`, `duration_to_ms`, `round_two`).
         - Nunca instancie sockets de rede brutos/DGRAM ou HTTP clients repetidamente dentro de loops iterativos (ex: loops de sequência em traceroute, scans de porta). Reutilize o cliente/socket ao longo de toda a varredura ou hop.
         - Conversões de `Duration` para milissegundos com precisão decimal devem obrigatoriamente usar `duration_to_ms(duration)`.

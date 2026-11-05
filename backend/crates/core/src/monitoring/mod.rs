@@ -9,6 +9,7 @@
 pub mod check_deps;
 pub mod device_status;
 pub mod execution_guard;
+pub mod health;
 pub mod link_speed;
 pub mod metrics_repository;
 pub mod reachability;

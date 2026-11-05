@@ -5,7 +5,7 @@ use sea_orm::EntityTrait;
 use serde::Deserialize;
 
 use crate::{
-    models::{discovery_runs, monitors},
+    models::monitors,
     services::{
         monitoring::{contracts::CheckResult, result_processor::process_result},
         shared::errors::{AppError, AppResult},
@@ -42,26 +42,6 @@ async fn assert_monitor_belongs_to_probe(
     };
     if monitor.probe_id != Some(probe_id) {
         return Err(AppError::unauthorized("monitor não pertence a este probe"));
-    }
-    Ok(())
-}
-
-/// Verifica se a run de discovery informada pertence ao probe autenticado.
-async fn assert_discovery_run_belongs_to_probe(
-    ctx: &AppContext,
-    run_id: i64,
-    probe_id: i64,
-) -> AppResult<()> {
-    let Some(run) = discovery_runs::Entity::find_by_id(run_id)
-        .one(&ctx.db)
-        .await?
-    else {
-        return Err(AppError::not_found("run de discovery não encontrada"));
-    };
-    if run.probe_id != Some(probe_id) {
-        return Err(AppError::unauthorized(
-            "run de discovery não pertence a este probe",
-        ));
     }
     Ok(())
 }
@@ -114,43 +94,9 @@ pub async fn receive_batch_results(
     Ok(processed)
 }
 
-pub async fn receive_discovery_results(
-    ctx: &AppContext,
-    probe_id: i64,
-    payloads: &[ProbeDiscoveryResultPayload],
-) -> AppResult<usize> {
-    let mut processed = 0;
-    for item in payloads {
-        if let Err(error) = assert_discovery_run_belongs_to_probe(ctx, item.run_id, probe_id).await
-        {
-            tracing::warn!(
-                %error,
-                run_id = item.run_id,
-                probe_id,
-                "resultado de discovery rejeitado: run não pertence ao probe"
-            );
-            continue;
-        }
-        match crate::services::discovery::service::complete_remote_discovery(
-            ctx,
-            probe_id,
-            item.run_id,
-            &item.hosts,
-            item.error.as_deref(),
-        )
-        .await
-        {
-            Ok(()) => processed += 1,
-            Err(error) => tracing::warn!(
-                %error,
-                run_id = item.run_id,
-                probe_id,
-                "erro ao processar discovery do probe"
-            ),
-        }
-    }
-    Ok(processed)
-}
+/// O retorno de uma varredura remota é da área Rede; o caminho antigo
+/// continua valendo (o polling HTTP do probe e a caixa de saída do agente).
+pub use netmonitor_network::discovery::remote::receive_discovery_results;
 
 #[cfg(test)]
 mod tests {
