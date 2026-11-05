@@ -10,11 +10,19 @@ decisões técnicas vigentes estão em [`adr/`](adr/).
 
 ## 1. O que o sistema faz
 
-Monitora redes residenciais e de pequenas empresas: descobre dispositivos,
-executa checagens de disponibilidade (ICMP, HTTP, TCP, DNS, SNMP), coleta
-métricas, monta topologia, avalia regras de alerta, notifica, e publica tudo em
-tempo real para uma SPA. Opcionalmente sobe um servidor WireGuard para alcançar
-redes remotas.
+Atende dois públicos na mesma instalação:
+
+- **Rede** — descobre dispositivos, executa checagens de disponibilidade (ICMP,
+  HTTP, TCP, DNS, SNMP), coleta métricas, monta topologia, mede enlaces e Wi-Fi
+  e, opcionalmente, sobe um servidor WireGuard para alcançar redes remotas.
+- **Servidores** — gerencia hosts e containers Docker por agentes
+  ([ADR 011](adr/011-agente-remoto.md), [ADR 014](adr/014-docker-local-pelo-agente.md))
+  e faz backup de bancos ([ADR 013](adr/013-ponte-de-banco-pelo-agente.md)).
+
+Os dois compartilham alertas, notificações, eventos, Assistente IA e a SPA, que
+recebe tudo em tempo real por SSE. Hoje toda instalação recebe os dois lados;
+as **Áreas do produto** que vão separá-los estão decididas no
+[ADR 017](adr/017-arquitetura-modular.md) e ainda não implementadas.
 
 ## 2. Stack
 
@@ -145,28 +153,51 @@ backend/
 └── tests/               requests/, models/, conventions/
 ```
 
-`src/services/` é onde o sistema realmente vive:
+`src/services/` é onde o sistema realmente vive. Os módulos estão agrupados
+pela área a que pertencem no [ADR 017](adr/017-arquitetura-modular.md) — hoje
+é só organização: tudo está num crate só, e as dependências na direção errada
+(ARQ-02 em [`debitos_tecnicos.md`](debitos_tecnicos.md)) ainda existem.
 
 ```text
 services/
-├── devices/        adapters de plataforma, acesso, capacidades e dispositivo do sistema
-├── monitoring/     checkers/, runner, result_processor, device_status, presenter
-├── discovery/      service, pipeline, scanners/, fingerprints, device_identifier, merger, queue
-├── vendors/        fabricante por MAC: registro do IEEE (`oui_vendors`) + base embutida
-├── snmp/           sessões, coletores, perfis
-├── topology/       ligações e confiança
-├── link_tests/     teste de enlace (ADR 015): plano, negociação de motor, pernas e etapas, agendamentos
-├── scheduled_tasks/ tarefas agendadas (cron): ferramenta do catálogo da IA + argumentos num horário
-├── alerts/         datasets → evaluator → manager (+ catalog, recovery, repository)
-├── notifications/  channels/ (telegram, discord, webhook, email) + formatter
-├── probes/         agent, dispatcher, receiver, liveness, buffer
-├── vpn/            peers, chaves, config_builder/writer, preflight, telemetria
-├── events/         bus (SSE) e relay (outbox → bus)
-├── network_tools/  port scanner e utilidades de rede
-├── maintenance/    data_pruner e limpeza de recursos
-├── backup/         export/restore das configurações
-└── shared/         crypto, pagination, errors
+│  ── Núcleo ──
+├── devices/          adapters de plataforma, acesso, capacidades e dispositivo do sistema
+├── monitoring/       checkers/, runner, scheduler/, result_processor, rollup, uptime
+├── alerts/           datasets → evaluator → manager (+ catalog, correlação, silêncio)
+├── notifications/    channels/ (telegram, discord, webhook, email) + formatter
+├── webpush/          notificações Web Push (PWA)
+├── events/           bus (SSE), presença e relay (outbox → bus)
+├── syslog/           pipeline de logs (aplicação e equipamentos), listeners, retenção
+├── dashboard/        catálogo de widgets e layout
+├── scheduled_tasks/  tarefas agendadas (cron): ferramenta do catálogo da IA num horário
+├── agents/           central dos agentes remotos (ADR 011): sessões, política, túneis
+├── agent_runtime/    o lado do agente: executor, identidade, fila de saída
+├── probes/           sondas: dispatcher, receiver, liveness, buffer
+├── telemetry/        métricas de host e de container (rollup de 1 min)
+├── backup/ storage/  export/restore das configurações e destinos de armazenamento
+├── auth/ settings/   autenticação, primeiro acesso e configurações
+├── network_tools/    ICMP, TCP, UDP, DNS, port scanner, vazão (iperf3/btest)
+├── maintenance/      data_pruner e limpeza de recursos
+├── ai/               Assistente IA: chat, harness de ferramentas, Decisor, proativo
+├── shared/           crypto, pagination, errors, transaction
+│  ── Rede ──
+├── discovery/        service, pipeline, scanners/, fingerprints, merger, queue
+├── vendors/          fabricante por MAC: registro do IEEE (`oui_vendors`) + base embutida
+├── snmp/             sessões, coletores, perfis
+├── topology/         ligações e confiança
+├── link_tests/       teste de enlace (ADR 015): plano, motores, pernas, agendamentos
+├── wifi/             clientes Wi-Fi observados e coletor
+├── plugins/          plugins de dispositivo (ADR 012), apps de frota, transporte
+├── package_mirror/   espelho de pacotes para os plugins
+│  ── Servidores ──
+├── docker/           fonte (`DockerEngine`), operações, compose, logs, proteção
+├── databases/        backup de bancos de terceiros (ADR 013)
+│  ── VPN ──
+└── vpn/              peers, chaves, config_builder/writer, preflight, telemetria
 ```
+
+O alvo — um workspace com um crate por área e pontos de extensão no `core` —
+está no [roadmap da arquitetura modular](roadmap_arquitetura_modular.md).
 
 ### Adapters de dispositivo
 
@@ -341,19 +372,16 @@ definidos; qualquer coisa fora do catálogo é rejeitada.
 
 ## 7. Esquema de dados
 
-21 tabelas. A ordem de criação está em `src/models/tables.rs` (`CREATION_ORDER`)
-e é a mesma das migrations — pai antes de filho, por causa das FKs. Um teste
-garante que a lista e as migrations não divirjam.
+47 tabelas no banco principal, mais o banco de logs com migrator próprio. A
+lista e a ordem de criação moram em `src/models/tables.rs` (`CREATION_ORDER`) —
+pai antes de filho, por causa das FKs — e são a mesma ordem das migrations. Um
+teste garante que as duas não divirjam; este documento não repete a lista.
 
-```text
-users  sites  probes  networks
-devices  device_interfaces  device_links
-monitors  monitor_results  metrics
-discovery_runs  discovery_results
-alert_rules  alert_events
-vpn_servers  vpn_peers
-dns_servers  event_outbox  probe_tasks  system_settings
-```
+**O sistema ainda não foi para produção.** Mudança de esquema edita a migration
+existente e recria o banco de desenvolvimento — sem migration de
+compatibilidade nem rotina de upgrade. A consolidação das migrations numa base
+está planejada (DB-02, Fase 1 do
+[roadmap da arquitetura modular](roadmap_arquitetura_modular.md)).
 
 Notas que valem mais que a lista:
 
@@ -896,7 +924,7 @@ mesma rodada do agente, sem devolver a vez a ninguém. Detalhes em
   de todo catálogo; `AI_WEB_SEARCH_URL` troca o DuckDuckGo por um SearXNG — e
   aí as pesquisas gerais não saem para buscador público. CVEs vêm do NVD.
 
-
+## 12. O que não existe
 
 Registrar o que **não** foi construído evita que alguém procure por uma peça
 ausente achando que ela está escondida:
@@ -921,23 +949,14 @@ ausente achando que ela está escondida:
 - **Não há observador externo do processo.** Um processo parado não consegue
   alertar sobre si: monitorar a queda total do NetMonitor exigiria um segundo
   agente, e isso está fora de escopo.
-- **Não há trilha de auditoria.** Há autorização por papel (`admin`, `operator`
-  e `viewer`), mas ainda não existe registro histórico de quem alterou cada
-  recurso.
+- **Não há área nem módulo desligável.** Toda instalação recebe Rede e
+  Servidores; as Áreas do produto estão decididas no
+  [ADR 017](adr/017-arquitetura-modular.md), não implementadas.
 
 ## 13. Decisões registradas
 
-| ADR | Decisão |
-| :--- | :--- |
-| [001](adr/001-snmp-client.md) | Cliente SNMP |
-| [002](adr/002-rustscan-embedding.md) | Estratégia de port scan sobre `tokio` |
-| [003](adr/003-icmp-dgram.md) | Ping por socket ICMP `SOCK_DGRAM` |
-| [004](adr/004-dns-wire.md) | Consultas DNS no formato wire |
-| [007](adr/007-scheduler-processo-unico.md) | Scheduler em laço no processo principal |
-| [008](adr/008-syslog-parser.md) | Parser e ingestão de Syslog |
-| [009](adr/009-device-adapters.md) | Adapters extensíveis por plataforma de dispositivo |
-| [010](adr/010-docker-engine-api.md) | Gerenciamento pela Docker Engine API |
-| [011](adr/011-agente-remoto.md) | Agente remoto por canal de saída sobre a VPN |
+O índice das decisões, com o status de cada uma, é o
+[`adr/README.md`](adr/README.md).
 
 ## 14. Configuração
 

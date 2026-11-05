@@ -1,10 +1,10 @@
 # Diagnóstico e Catálogo de Débitos Técnicos
 
-Este documento consolida a auditoria de arquitetura, código-fonte, padrões de design, duplicações, segurança e gaps de teste do **NetMonitor**. A última revisão completa foi em **2026-08-21**; o estado real do código prevalece sobre qualquer descrição deste arquivo.
+Este documento consolida a auditoria de arquitetura, código-fonte, padrões de design, duplicações, segurança e gaps de teste do **NetMonitor**. A última revisão completa foi em **2026-08-21**; a seção 7 (arquitetura modular) foi acrescentada em **2026-11-05**. O estado real do código prevalece sobre qualquer descrição deste arquivo.
 
 ---
 
-## 📊 Sumário Executivo & Métricas da Auditoria (2026-08-20)
+## 📊 Sumário Executivo & Métricas da Auditoria (2026-08-20 — retrato histórico)
 
 | Área Auditada | Escopo | Estado Geral | Débitos Críticos / Altos |
 | :--- | :--- | :--- | :--- |
@@ -50,6 +50,13 @@ Este documento consolida a auditoria de arquitetura, código-fonte, padrões de 
 | **QUA-05** | Qualidade | Coluna `monitors.timeout_seconds` escrita e nunca lida | Médio | Pequeno | 🟢 Concluído |
 | **QUA-06** | Qualidade | Buffer offline do probe sem teto e com reescrita O(n²) | Médio | Médio | 🟢 Concluído |
 | **DOC-01** | Documentação | Inconsistência entre tabela resumo e corpo deste documento | Médio | Pequeno | 🟢 Corrigido |
+| **DB-02** | Banco | 64 migrations históricas num crate só | Baixo | Médio | 🗓️ Planejado (ADR 017) |
+| **ARQ-01** | Arquitetura | Composição estática: rotas, rotinas, menu e rotas da SPA ligados para toda instalação | Alto | Grande | 🗓️ Planejado (ADR 017) |
+| **ARQ-02** | Arquitetura | Dependências na direção errada entre domínios no backend (A1–A5) | Médio | Grande | 🗓️ Planejado (ADR 017) |
+| **ARQ-03** | Arquitetura | Barramento SSE central no frontend e Dashboard acoplado ao Docker (A6–A7) | Médio | Médio | 🗓️ Planejado (ADR 017) |
+| **ARQ-04** | Arquitetura | Catálogo de widgets duplicado entre backend e frontend | Médio | Pequeno | 🗓️ Planejado (ADR 017) |
+| **ARQ-05** | Performance | Snapshot Docker pedido com qualquer aba aberta | Médio | Pequeno | 🗓️ Planejado (ADR 017) |
+| **ARQ-06** | Arquitetura | Crate único de ~185 mil linhas; fronteira só por convenção | Médio | Grande | 🗓️ Planejado (ADR 017) |
 
 ---
 
@@ -123,8 +130,10 @@ Este documento consolida a auditoria de arquitetura, código-fonte, padrões de 
 ### 🟢 DB-01: Abstração de Busca Textual — Concluído
 - FTS5 no SQLite, `tsvector` + GIN no PostgreSQL, `LIKE` como fallback, escolha em runtime por densidade.
 
-### 🟢 DB-02: Versionamento de Migrations
-- Débito cosmético sem impacto operacional; manter como está para não invalidar `seaql_migrations`.
+### 🗓️ DB-02: Versionamento de Migrations — Planejado (ADR 017)
+- **Descrição:** 64 migrations históricas, mais o `migration::purge_removed_migrations` para bancos que aplicaram migrations já removidas.
+- **Mudança de premissa (2026-11-05):** o sistema nunca foi para produção, então não há `seaql_migrations` real a preservar. A orientação anterior ("manter como está") caiu.
+- **Plano:** consolidar numa base por crate e editar no lugar até a primeira instalação real — Fase 1 do [roadmap da arquitetura modular](roadmap_arquitetura_modular.md).
 
 ---
 
@@ -149,30 +158,25 @@ Este documento consolida a auditoria de arquitetura, código-fonte, padrões de 
 
 ## 5. Débitos de Segurança Identificados na Auditoria de 2026-08-20
 
-### 🔴 SEC-01: Segredos de Fallback Públicos
-- **Arquivos Afetados:** `.env.example:55,63`, `docker-compose.yml:82,87`, `backend/config/{production.yaml:70,development.yaml:117,test.yaml:104}`
-- **Descrição:** `JWT_SECRET` e `ENCRYPTION_KEY` têm defaults públicos. Quem não customiza o `.env` roda com autenticação e cifra decorativas.
-- **Recomendação:** remover defaults dos três arquivos; em produção, fazer o boot falhar se os segredos não estiverem definidos (já existe o padrão para `ENCRYPTION_KEY` em `crypto.rs`).
+### 🟢 SEC-01: Segredos de Fallback Públicos — Concluído
+- **Descrição:** `JWT_SECRET` e `ENCRYPTION_KEY` tinham defaults públicos.
+- **Implementado:** `.env.example` sem valor padrão para `JWT_SECRET`; `require_jwt_secret_in_production` (`backend/src/app.rs`) falha o boot em produção sem o segredo.
 
-### 🔴 SEC-02: Chave Privada WireGuard em Claro no Repositório
-- **Arquivos Afetados:** `backend/tmp/wireguard/wg0.conf`, `.dockerignore`
-- **Descrição:** o arquivo contém `PrivateKey` de servidor WireGuard em claro, está rastreado pelo Git e não é excluído por `.dockerignore` (que só lista `.env` da raiz, não `**/.env`, e não lista `backend/tmp/`).
-- **Recomendação:** remover o arquivo do repositório, rotacionar a chave (considerá-la comprometida), adicionar `backend/tmp/` e `**/.env` ao `.dockerignore`.
+### 🟢 SEC-02: Chave Privada WireGuard em Claro no Repositório — Concluído
+- **Descrição:** `backend/tmp/wireguard/wg0.conf` com `PrivateKey` estava rastreado e entrava na imagem.
+- **Implementado:** arquivo fora do Git; `.dockerignore` lista `**/.env` e `backend/tmp/`.
 
-### 🔴 SEC-04: Receptor de Resultados de Probe Não Vincula Monitor ao Probe
-- **Arquivos Afetados:** `backend/src/services/probes/receiver.rs:40-67`, `backend/src/controllers/probes.rs:275-289`
-- **Descrição:** o receptor aceita `monitor_id` e grava sem conferir `monitor.probe_id == probe.id`. Combinado ao token padrão público (`DEFAULT_VPN_PROBE_TOKEN`), permite injetar resultados falsos em qualquer monitor. O endpoint de tarefas também não filtra por `role`.
-- **Recomendação:** descartar resultados cujo monitor não pertença ao probe; filtrar tarefas por role; logar `warn!` quando o token efetivo for o padrão.
+### 🟢 SEC-04: Receptor de Resultados de Probe Não Vincula Monitor ao Probe — Concluído
+- **Descrição:** o receptor gravava resultado de qualquer `monitor_id`.
+- **Implementado:** `services/probes/receiver.rs` descarta resultado e execução cujo `probe_id` não seja o do probe autenticado.
 
-### 🟡 SEC-05: Injeção de Configuração `wg0.conf` via Nome de Peer
-- **Arquivos Afetados:** `backend/src/services/vpn/config_builder.rs:69`, `backend/src/controllers/vpn_peers.rs:183-197,247-254`
-- **Descrição:** `controllers/devices.rs` valida nome/tipo de dispositivo contra `\n`/`\r`, mas `vpn_peers.rs` não valida nomes de peer. `config_builder.rs` interpola `peer.name` em comentário sem defesa em profundidade.
-- **Recomendação:** rejeitar controles em nomes de peer e sanitizar no gerador final.
+### 🟢 SEC-05: Injeção de Configuração `wg0.conf` via Nome de Peer — Concluído
+- **Descrição:** nomes de peer sem validação eram interpolados no `wg0.conf`.
+- **Implementado:** validação centralizada em `services/vpn/peer_name`, usada por `controllers/vpn_peers.rs`.
 
-### 🔴 SEC-06: `POST /api/probes` Aceita `token_hash` do Cliente
-- **Arquivos Afetados:** `backend/src/controllers/probes.rs:163-165`
-- **Descrição:** o endpoint permite que o cliente envie o hash que quiser, em vez de receber o token cru e hashear no servidor.
-- **Recomendação:** receber token cru, gerar `sha256` no servidor e nunca aceitar `token_hash` na criação.
+### 🟢 SEC-06: `POST /api/probes` Aceita `token_hash` do Cliente — Concluído
+- **Descrição:** o cliente podia enviar o hash que quisesse.
+- **Implementado:** `controllers/probes.rs` recebe o token cru e grava `sha256_hex(&token)`.
 
 ### 🟢 SEC-07: JWT Armazenado em `localStorage` — Concluído (mitigado)
 - **Arquivos Afetados:** `frontend/src/services/apiService.ts:28-30`, `backend/src/spa.rs`
@@ -252,26 +256,42 @@ Este documento consolida a auditoria de arquitetura, código-fonte, padrões de 
 
 ---
 
-## 7. Roteiro Resumido de Ação
+## 7. Débitos de Arquitetura Modular (ADR 017)
 
-1. **Fase 0 — Segurança & CI (não negociável):**
-   - Remover segredos públicos e chave privada do repo; rotacionar chave.
-   - Mover CI para `.github/workflows/` e adicionar frontend/auditoria/build Docker.
-   - Vincular resultados de probe ao probe; sanitizar nomes de peer; corrigir `POST /probes`.
+Levantados em 2026-11-05. A decisão está no [ADR 017](adr/017-arquitetura-modular.md); o plano, no [roadmap da arquitetura modular](roadmap_arquitetura_modular.md), que cita estes IDs em cada fase.
 
-2. **Fase 1 — Higiene de frontend e infra:**
-   - Headers de segurança no servidor estático.
-   - Limpar `lastArtifact` ao fechar visualizador VPN; DOMPurify no QR code.
-   - Supervisão do watcher e hardening do container.
+### 🗓️ ARQ-01: Composição Estática — Planejado
+- **Arquivos Afetados:** `backend/src/app.rs` (38 `add_route`), `backend/src/initializers/monitoring.rs`, `frontend/src/layouts/DefaultLayout.vue` (`navSections`), `frontend/src/router/index.ts`, `frontend/src/components/setup/InitialSetupDialog.vue`
+- **Descrição:** toda instalação recebe os dois domínios: ~36 entradas de menu, onboarding só de rede, ~60 ferramentas de IA e rotinas próprias de áreas que não usa.
+- **Plano:** áreas `on`/`off` com registros declarativos (Fases 0, 2, 3, 4 e 5).
 
-3. **Fase 2 — Qualidade e performance:**
-   - Infraestrutura de testes no frontend.
-   - Cachear `reqwest::Client`; timeouts em `lookup_host`.
-   - Reduzir N+1 SNMP; resolver `timeout_seconds`.
-   - Melhorar buffer offline do probe.
+### 🗓️ ARQ-02: Dependências na Direção Errada no Backend — Planejado
+- **Arquivos Afetados:** `services/monitoring/runner.rs` (A1), `services/{devices/identify.rs,discovery/decider_identity.rs,snmp/decider_interfaces.rs,syslog/categorizer.rs}` (A2), `services/ai/harness/tools/{mod,docker,platform}.rs` e `ai/mentions.rs` (A3), `services/dashboard/catalog.rs` (A4), `services/agents/background.rs` e `services/agent_runtime/` (A5)
+- **Descrição:** o núcleo conhece Docker, a Rede chama o Decisor diretamente e a IA conhece todos os domínios.
+- **Plano:** pontos de extensão no `core` (`MonitorChecker`, `Classifier`, `AiToolHandler::area`, `WidgetSpec`, `AgentCommandHandler`) — Fases 1 e 6 a 9. Até lá, o teste de arquitetura congela a lista e impede novas.
 
-4. **Fase 3 — Evolução de produto (iniciada):**
-   - Janelas de manutenção: silenciar notificações por site/dispositivo em intervalo agendado.
-   - Rollup/agregação de métricas: tabela `monitor_results_hourly`, job no scheduler, endpoint `GET /api/monitors/:id/uptime` e card de estabilidade no detalhe do dispositivo.
+### 🗓️ ARQ-03: Barramento SSE Central e Dashboard Acoplado ao Docker — Planejado
+- **Arquivos Afetados:** `frontend/src/stores/events.ts`, `frontend/src/pages/DashboardPage.vue`
+- **Descrição:** `events.ts` importa 26 stores e roteia ~58 tópicos num `switch`: área nova exige editar o centro (fere o Aberto/Fechado). O `case 'device:updated'` aparece duas vezes (o segundo nunca executa). `DashboardPage` sempre importa a store Docker.
+- **Plano:** registro de handlers por prefixo; o widget Docker carrega a própria store (Fase 3).
 
-O detalhamento completo das entregas, cronograma e critérios de aceite está em [`docs/roadmap.md`](roadmap.md).
+### 🗓️ ARQ-04: Catálogo de Widgets Duplicado — Planejado
+- **Arquivos Afetados:** `backend/src/services/dashboard/catalog.rs`, `frontend/src/stores/dashboard.ts` (`CARD_TEMPLATES`, `DEFAULT_WIDGETS`, `parseSavedList`)
+- **Descrição:** os tipos de widget existem nos dois lados (fere o DRY), e `parseSavedList` devolve ao layout todo widget padrão ausente — com as áreas, traria o `docker_summary` de volta sozinho.
+- **Plano:** catálogo único no backend, lido pelo frontend via `ts-rs`, com `area()` por widget (Fase 2).
+
+### 🗓️ ARQ-05: Snapshot Docker com Qualquer Aba Aberta — Planejado
+- **Arquivos Afetados:** `backend/src/services/agents/background.rs` (`desired_live_interval(has_subscribers)`)
+- **Descrição:** basta um assinante SSE, em qualquer página, para a central pedir `SetLive` a todos os agentes e distribuir snapshots Docker.
+- **Plano:** considerar a área Servidores e a presença de quem usa dados Docker (Fase 5).
+
+### 🗓️ ARQ-06: Crate Único e Fronteira por Convenção — Planejado
+- **Arquivos Afetados:** `backend/` (crate único, ~185 mil linhas)
+- **Descrição:** nada impede uma dependência nova entre domínios além da revisão humana; a compilação do crate inteiro estoura a paginação nesta máquina (erro 1455).
+- **Plano:** workspace com crates por área e reconstrução no lugar (Fases 1 e 6 a 10).
+
+---
+
+## 8. Onde está o plano
+
+Entregas, ordem e critérios de aceite: [`roadmap.md`](roadmap.md) (roadmap mestre) e [`roadmap_arquitetura_modular.md`](roadmap_arquitetura_modular.md) (ADR 017).

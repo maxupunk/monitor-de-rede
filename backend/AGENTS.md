@@ -77,6 +77,11 @@ Ver `docs/adr/` para as decisões arquiteturais vigentes.
   `loco_rs::boot::create_context::<App>` — ver `tests/requests/process_deps.rs`.
 - **Tabelas novas** entram em `src/models/tables.rs` (`CREATION_ORDER`). O
   `Hooks::truncate` já as cobre; não mexa no `app.rs`.
+- **Sem produção, sem migration nova para alterar esquema.** O sistema nunca foi
+  instalado de verdade: mudar uma tabela é editar a migration que a cria e
+  recriar o banco de desenvolvimento. Não gere migration de `alter`, de
+  compatibilidade nem rotina de upgrade (ver `AGENTS.md` §3 e o DB-02 em
+  `docs/debitos_tecnicos.md`).
 - **Migrations:** use os helpers de `migration/src/shared.rs`. As FKs são
   declaradas à mão (`fk(...)` com a ação de `ON DELETE`) porque o parâmetro
   `refs` do `create_table` do Loco deriva a ação da nulabilidade, e o esquema

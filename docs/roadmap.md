@@ -1,17 +1,19 @@
 # Roadmap NetMonitor
 
 > Roadmap mestre do NetMonitor. Ele consolida os roadmaps temáticos já entregues, os débitos técnicos pendentes e as próximas frentes de evolução do produto.  
-> **Última revisão:** 2026-08-25.
+> **Última revisão:** 2026-11-05.
 
 ## 1. Visão e critérios de priorização
 
-O NetMonitor monitora redes residenciais e de pequenas empresas: descoberta de dispositivos, checagens de disponibilidade, métricas, alertas inteligentes, syslog e VPN — tudo num único container Docker. O roadmap segue a ordem:
+O NetMonitor atende dois públicos: quem gerencia **rede** (descoberta de dispositivos, checagens de disponibilidade, métricas, alertas inteligentes, syslog, enlaces e VPN) e quem gerencia **servidores com Docker** (hosts, containers, compose e backup de bancos) — tudo numa única imagem. O roadmap segue a ordem:
 
 1. **Segurança e confiança operacional** primeiro: segredos, CI, autenticação e permissões.
 2. **Qualidade e manutenibilidade** em seguida: testes, performance, decomposição e dever de casa técnico.
 3. **Evolução de produto** por fim: novas features e melhorias de UX.
 
 Cada item carrega severidade, esforço, responsável sugerido e critério de aceite. Itens marcados com `[x]` já estão no código e validados; itens `[ ]` são próximas entregas.
+
+> **Frente atual — Arquitetura modular.** Áreas do produto (Núcleo, Rede, Servidores, VPN) ligadas por instalação e reconstrução do backend em crates, sem reescrita. Decisão no [ADR 017](adr/017-arquitetura-modular.md); fases, ordem e aceite em [`roadmap_arquitetura_modular.md`](roadmap_arquitetura_modular.md). Feature nova durante essa frente declara a sua área.
 
 ---
 
@@ -726,12 +728,14 @@ docker build -t netmonitor:check .
 3. Itens da **Fase 2** podem ser paralelizados, mas não devem ser iniciados antes da Fase 0 estar completa.
 4. Itens da **Fase 3** são planejados; a prioridade entre eles é decidida conforme feedback de uso e capacidade do time.
 5. Ao concluir um item, marque `[x]`, atualize este arquivo e, se necessário, o `docs/debitos_tecnicos.md`.
+6. **O sistema ainda não foi para produção:** item que muda o esquema edita a migration existente — sem migration de compatibilidade nem rotina de upgrade.
 
 ---
 
 ## 9. Referências
 
+- [`docs/roadmap_arquitetura_modular.md`](roadmap_arquitetura_modular.md) — frente atual: Áreas do produto e reconstrução em crates ([ADR 017](adr/017-arquitetura-modular.md)).
 - [`docs/debitos_tecnicos.md`](debitos_tecnicos.md) — catálogo detalhado de débitos, com arquivo/linha e severidade.
 - [`docs/arquitetura.md`](arquitetura.md) — descrição do sistema como ele é hoje.
-- [`docs/diretrizes_testes.md`](diretrizes_testes.md) — padrões de teste do projeto.
-- [`AGENTS.md`](../AGENTS.md) — diretrizes obrigatórias para agentes IA trabalhando no repositório.
+- [`docs/adr/`](adr/README.md) — decisões de arquitetura vigentes.
+- [`AGENTS.md`](../AGENTS.md) — diretrizes obrigatórias para agentes IA trabalhando no repositório, incluindo os padrões de teste (§4).

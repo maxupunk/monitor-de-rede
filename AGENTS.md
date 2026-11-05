@@ -40,8 +40,13 @@
 3. **Independência de Ambiente (Docker / Local)**:
    - O backend Rust roda em **SQLite** (teste, dev e produção) e **PostgreSQL**
      (instalações grandes, via `DATABASE_URL`). Toda consulta precisa valer nos
-     dois dialetos — a produção padrão passou a ser o SQLite, então quebrar o
-     dialeto dele agora quebra a instalação real, não só a suíte.
+     dois dialetos — o SQLite é o banco padrão de instalação, então quebrar o
+     dialeto dele quebra a instalação padrão, não só a suíte.
+   - **O sistema ainda não foi para produção.** Mudança de esquema **edita a
+     migration existente** e recria o banco de desenvolvimento: não crie
+     migration nova para alterar tabela, nem migration de compatibilidade,
+     initializer de upgrade ou *shim* de campo/rota/tópico antigo. Essa regra se
+     inverte na primeira instalação real, e isso será anunciado.
    - **Transação que escreve abre com `shared::transaction::begin_write`**,
      nunca com `begin()`: o `BEGIN` deferido do SQLite falha na hora com
      `database is locked` quando outra conexão escreve entre a leitura e a
@@ -71,7 +76,10 @@
 5. **Documentação & Roadmap**:
    - Atualize `docs/roadmap.md` marcando itens concluídos com `[x]` e badge
      `🟢 Concluído`.
-   - Consulte [arquitetura.md](docs/arquitetura.md) e [diretrizes_testes.md](docs/diretrizes_testes.md).
+   - Consulte [arquitetura.md](docs/arquitetura.md) (o sistema como ele é),
+     [adr/](docs/adr/README.md) (decisões vigentes) e, para a frente atual,
+     [roadmap_arquitetura_modular.md](docs/roadmap_arquitetura_modular.md).
+     Os padrões de teste são os do §4 acima.
 
 6. **Preservação e Regras de Negócio do Módulo `vpn-probe`**:
    - **Agente Dedicado (`vpn-probe`)**: mede ICMP/SNMP na faixa `10.8.0.x` de
@@ -219,6 +227,29 @@
     - **Superfície Limpa dos Cards**: Os containers e cards devem adotar o fundo padrão da superfície do tema (`surface`), bordas nítidas e contraste consistente tanto no tema claro quanto no tema escuro.
 
 
+
+13. **Arquitetura Modular — Áreas do Produto ([ADR 017](docs/adr/017-arquitetura-modular.md))**:
+    - **Quatro áreas, nenhuma a mais:** Núcleo (sempre ligado), Rede, Servidores
+      e VPN. O catálogo de o que pertence a cada uma está no ADR; feature nova
+      **declara a sua área** no registro correspondente (menu, rota, widget,
+      ferramenta da IA, modelo de regra ou de tarefa, aba de configuração, etapa
+      do onboarding).
+    - **Nenhum `if área` fora dos registros.** A área é consultada por quem monta
+      o menu, as rotas, o catálogo e as rotinas — nunca espalhada em componentes
+      e serviços.
+    - **Área não é controle de acesso.** A API continua montada e quem autoriza é
+      o papel (`admin`, `operator`, `viewer`).
+    - **Desligar uma área nunca apaga dado e nunca para monitor.** Só esconde e
+      pausa as rotinas próprias dela.
+    - **Fronteira de dependência:** o núcleo não importa área e uma área não
+      importa outra; a conversa é por trait do núcleo (`MonitorChecker`,
+      `Classifier`, `AiToolHandler`, `WidgetSpec`, `AgentCommandHandler` —
+      criados na Fase 1 do roadmap; antes dela, não aumente o acoplamento). As
+      exceções atuais (ARQ-02 em `docs/debitos_tecnicos.md`) estão congeladas:
+      não crie novas.
+    - **Reconstrução no lugar, sem reescrita:** um PR de extração só move código
+      e inverte dependências; mudança de comportamento vai em PR separado. A
+      ordem das fases está no roadmap da arquitetura modular.
 
 ## Limpeza (CLEAN UP) — não deixe lixo para trás
 
