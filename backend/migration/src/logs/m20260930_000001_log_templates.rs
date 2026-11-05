@@ -2,16 +2,8 @@
 //!
 //! O Decisor classifica **padrões**, não linhas: "login failure for user admin
 //! from #" é uma pergunta só, venha ela mil vezes. A linha guarda só a chave
-//! do padrão (`template_hash`); a categoria, a confiança e a correção do
-//! operador moram uma vez em `log_templates`.
-//!
-//! # `device_logs.template_hash`: nulo, sem default e sem índice
-//!
-//! É a tabela mais quente do sistema. Coluna nula sem default é mudança só de
-//! metadado no PostgreSQL — não reescreve milhões de linhas — e não custa nada
-//! no SQLite. Sem índice de propósito: o filtro por categoria já roda dentro da
-//! janela de tempo da consulta, e cada índice é mais uma escrita por linha.
-//! Linhas antigas ficam nulas; a categoria vale do deploy em diante.
+//! do padrão (`device_logs.template_hash`, criada com a tabela); a categoria,
+//! a confiança e a correção do operador moram uma vez em `log_templates`.
 //!
 //! `confidence` é percentual inteiro (`SMALLINT`), não real: igualdade exata
 //! na entidade e o mesmo tipo nos dois bancos.
@@ -27,16 +19,6 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
-        if !m.has_column("device_logs", "template_hash").await? {
-            m.alter_table(
-                Table::alter()
-                    .table(Alias::new("device_logs"))
-                    .add_column(big_integer_null("template_hash"))
-                    .to_owned(),
-            )
-            .await?;
-        }
-
         let mut stmt = table("log_templates");
         stmt.col(big_integer("template_hash").primary_key())
             .col(text("template"))
@@ -67,18 +49,6 @@ impl MigrationTrait for Migration {
 
     async fn down(&self, m: &SchemaManager) -> Result<(), DbErr> {
         m.drop_table(drop("log_templates")).await?;
-        let db = m.get_connection();
-        if db.get_database_backend() != sea_orm::DatabaseBackend::Sqlite
-            && m.has_column("device_logs", "template_hash").await?
-        {
-            m.alter_table(
-                Table::alter()
-                    .table(Alias::new("device_logs"))
-                    .drop_column(Alias::new("template_hash"))
-                    .to_owned(),
-            )
-            .await?;
-        }
         Ok(())
     }
 }

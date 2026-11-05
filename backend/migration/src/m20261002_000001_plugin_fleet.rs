@@ -6,10 +6,8 @@
 //!   Wi-Fi) ficam cifrados dentro do JSON. Uma linha por (plugin, escopo) —
 //!   regra de serviço: `NULL` em índice único não vale igual nos dois bancos.
 //! * `plugin_batches` — uma ação de frota: a mesma ação em vários
-//!   equipamentos, o andamento de cada um e o consolidado (`result`).
-//! * `plugin_runs.batch_id` — a execução de cada equipamento dentro do lote.
-//!   Sem FK: o SQLite não acrescenta constraint a tabela existente, e o lote
-//!   é só agrupamento — apagar um não deve apagar a auditoria das execuções.
+//!   equipamentos, o andamento de cada um e o consolidado (`result`). A
+//!   execução de cada equipamento aponta o lote por `plugin_runs.batch_id`.
 
 use sea_orm_migration::prelude::*;
 
@@ -88,31 +86,10 @@ impl MigrationTrait for Migration {
             ))
             .await?;
         }
-
-        if !m.has_column("plugin_runs", "batch_id").await? {
-            m.alter_table(
-                Table::alter()
-                    .table(Alias::new("plugin_runs"))
-                    .add_column(big_integer_null("batch_id"))
-                    .to_owned(),
-            )
-            .await?;
-        }
         Ok(())
     }
 
     async fn down(&self, m: &SchemaManager) -> Result<(), DbErr> {
-        if m.get_connection().get_database_backend() != sea_orm::DatabaseBackend::Sqlite
-            && m.has_column("plugin_runs", "batch_id").await?
-        {
-            m.alter_table(
-                Table::alter()
-                    .table(Alias::new("plugin_runs"))
-                    .drop_column(Alias::new("batch_id"))
-                    .to_owned(),
-            )
-            .await?;
-        }
         m.drop_table(drop("plugin_batches")).await?;
         m.drop_table(drop("plugin_settings")).await?;
         Ok(())

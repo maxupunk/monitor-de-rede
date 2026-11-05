@@ -5,6 +5,12 @@
 //! a `ENCRYPTION_KEY` — e a política de backup: quais bancos, para qual
 //! armazenamento, de quanto em quanto tempo e quantas cópias manter.
 //!
+//! `via_probe_id` é o "Acessar a partir de" (ADR 013): nulo, a central conecta
+//! direto; preenchido, o backup passa pela ponte do agente remoto, para bancos
+//! que só a rede dele alcança — o mesmo padrão de
+//! `device_credentials.via_probe_id`. Apagar o agente não apaga a conexão, só
+//! desfaz a rota (`SET NULL`).
+//!
 //! `database_backups` é uma linha por banco por execução. É ela que a tela de
 //! histórico lista e que a retenção percorre: o arquivo no armazenamento sozinho
 //! não diz quantas linhas tinha, quanto demorou nem que avisos o dump deu.
@@ -46,8 +52,16 @@ impl MigrationTrait for Migration {
                     "storage_destination_id",
                     "storage_destinations",
                     ForeignKeyAction::SetNull,
+                ))
+                .foreign_key(&mut fk(
+                    "database_connections",
+                    "via_probe_id",
+                    "probes",
+                    ForeignKeyAction::SetNull,
                 ));
-            m.create_table(with_timestamps(stmt.take())).await?;
+            let mut stmt = with_timestamps(stmt.take());
+            stmt.col(big_integer_null("via_probe_id"));
+            m.create_table(stmt).await?;
 
             m.create_index(unique(
                 "database_connections_name_unique",

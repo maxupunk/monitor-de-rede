@@ -2,15 +2,20 @@
 //!
 //! * `plugins` — o pacote (manifesto, script, uso, compatibilidade, testes e
 //!   o relatório da revisão de segurança). `scope = 'model'` serve a todo
-//!   equipamento compatível; `scope = 'device'` só ao `device_id`.
+//!   equipamento compatível; `scope = 'device'` só ao `device_id`. Plugins
+//!   nascem desativados; `auto_enable` marca o que ainda pode ser ligado
+//!   sozinho quando um equipamento compatível é cadastrado — desativar à mão
+//!   desmarca, e o que o operador desligou não volta sem ele.
 //! * `device_credentials` — acesso SSH/HTTP/Telnet. O segredo é cifrado
 //!   (`storage = 'vault'`) ou nem é gravado (`storage = 'ask'`, pedido a cada
 //!   sessão e mantido só em memória).
 //! * `plugin_runs` — cada execução, com o transcript já sem segredos. É a
 //!   auditoria da aba e a origem das entradas de compatibilidade.
+//!   `batch_id` liga a execução ao lote de frota (`plugin_batches`, criada
+//!   depois). Sem FK: o lote é só agrupamento, e apagá-lo não deve apagar a
+//!   auditoria das execuções.
 //! * `plugin_auto_accept` — o aceite do termo do modo automático da IA, por
 //!   conversa × dispositivo, com validade.
-//! * `devices.firmware_version` — versão lida pelo `detect` de um plugin.
 //!
 //! A unicidade de `(slug, version)` entre plugins de modelo é regra de serviço,
 //! não índice: os de dispositivo podem repetir o slug, e `NULL` em índice único
@@ -52,7 +57,9 @@ impl MigrationTrait for Migration {
                     "devices",
                     ForeignKeyAction::Cascade,
                 ));
-            m.create_table(with_timestamps(stmt.take())).await?;
+            let mut stmt = with_timestamps(stmt.take());
+            stmt.col(boolean("auto_enable").default(false));
+            m.create_table(stmt).await?;
             m.create_index(index("plugins_slug_index", "plugins", &["slug"]))
                 .await?;
             m.create_index(index("plugins_device_index", "plugins", &["device_id"]))
@@ -124,7 +131,9 @@ impl MigrationTrait for Migration {
                     "users",
                     ForeignKeyAction::SetNull,
                 ));
-            m.create_table(with_timestamps(stmt.take())).await?;
+            let mut stmt = with_timestamps(stmt.take());
+            stmt.col(big_integer_null("batch_id"));
+            m.create_table(stmt).await?;
             // O histórico da aba é "as execuções deste equipamento, mais
             // recentes primeiro".
             m.create_index(index(
@@ -164,16 +173,6 @@ impl MigrationTrait for Migration {
             ))
             .await?;
         }
-
-        if !m.has_column("devices", "firmware_version").await? {
-            m.alter_table(
-                Table::alter()
-                    .table(Alias::new("devices"))
-                    .add_column(string_len_null("firmware_version", 64))
-                    .to_owned(),
-            )
-            .await?;
-        }
         Ok(())
     }
 
@@ -182,17 +181,6 @@ impl MigrationTrait for Migration {
         m.drop_table(drop("plugin_runs")).await?;
         m.drop_table(drop("device_credentials")).await?;
         m.drop_table(drop("plugins")).await?;
-        if m.get_connection().get_database_backend() != sea_orm::DatabaseBackend::Sqlite
-            && m.has_column("devices", "firmware_version").await?
-        {
-            m.alter_table(
-                Table::alter()
-                    .table(Alias::new("devices"))
-                    .drop_column(Alias::new("firmware_version"))
-                    .to_owned(),
-            )
-            .await?;
-        }
         Ok(())
     }
 }

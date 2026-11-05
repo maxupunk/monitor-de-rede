@@ -1,23 +1,13 @@
-//! Fase 4 do roadmap de alertas inteligentes — higiene de notificações.
+//! `notification_outbox` — o diário de notificações (fase 4 do roadmap de
+//! alertas inteligentes, higiene de notificações).
 //!
-//! Três coisas nascem aqui, e as três são a mesma ideia: **a decisão de
-//! notificar deixa de ser um efeito colateral do motor de alertas e passa a ser
-//! um registro**.
-//!
-//! - `alert_rules.notification_cooldown_seconds`: intervalo mínimo entre
-//!   notificações de problema do mesmo par (regra, alvo), **mesmo quando o
-//!   evento fecha e reabre**. `0` desliga — é o default, para que instalações
-//!   existentes não emudeçam sozinhas. O catálogo é o veículo dos valores
-//!   sensatos (§3.4 do roadmap).
-//! - `alert_rules.inhibit_when_parent_down`: quando o dispositivo tem pai
-//!   declarado (`devices.parent_id`) e o pai está em alerta, o alerta do filho
-//!   não notifica. Default `false` pelo mesmo motivo: parar de avisar alguém é
-//!   o lado perigoso do erro, então quem liga é o catálogo ou o operador.
-//! - `notification_outbox`: o diário de notificações. Toda decisão — entregue,
-//!   represada no digest ou suprimida, e por quê — vira linha. É o que sustenta
-//!   o cooldown (que precisa saber quando foi a última entrega), o digest (que
-//!   precisa de uma fila) e a entrega ao menos uma vez (que precisa sobreviver
-//!   a um crash entre o INSERT do alerta e o envio).
+//! **A decisão de notificar não é um efeito colateral do motor de alertas, é
+//! um registro.** Toda decisão — entregue, represada no digest ou suprimida, e
+//! por quê — vira linha. É o que sustenta o cooldown
+//! (`alert_rules.notification_cooldown_seconds`, que precisa saber quando foi a
+//! última entrega), a inibição pelo pai (`alert_rules.inhibit_when_parent_down`),
+//! o digest (que precisa de uma fila) e a entrega ao menos uma vez (que precisa
+//! sobreviver a um crash entre o INSERT do alerta e o envio).
 
 use sea_orm_migration::prelude::*;
 
@@ -29,39 +19,6 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
-        if !m
-            .has_column("alert_rules", "notification_cooldown_seconds")
-            .await?
-        {
-            m.alter_table(
-                Table::alter()
-                    .table(Alias::new("alert_rules"))
-                    .add_column(
-                        integer("notification_cooldown_seconds")
-                            .not_null()
-                            .default(0),
-                    )
-                    .to_owned(),
-            )
-            .await?;
-        }
-        if !m
-            .has_column("alert_rules", "inhibit_when_parent_down")
-            .await?
-        {
-            m.alter_table(
-                Table::alter()
-                    .table(Alias::new("alert_rules"))
-                    .add_column(
-                        boolean("inhibit_when_parent_down")
-                            .not_null()
-                            .default(false),
-                    )
-                    .to_owned(),
-            )
-            .await?;
-        }
-
         if !m.has_table("notification_outbox").await? {
             let mut stmt = table("notification_outbox");
             stmt.col(big_pk_auto("id"))
@@ -135,23 +92,6 @@ impl MigrationTrait for Migration {
 
     async fn down(&self, m: &SchemaManager) -> Result<(), DbErr> {
         m.drop_table(drop("notification_outbox")).await?;
-        // Mesmo motivo do m20260815_000001: o SQLite de produção suporta ADD
-        // COLUMN, mas não um DROP COLUMN compatível com todas as versões que
-        // ainda atendemos.
-        if m.get_connection().get_database_backend() == sea_orm::DatabaseBackend::Sqlite {
-            return Ok(());
-        }
-        for column in ["inhibit_when_parent_down", "notification_cooldown_seconds"] {
-            if m.has_column("alert_rules", column).await? {
-                m.alter_table(
-                    Table::alter()
-                        .table(Alias::new("alert_rules"))
-                        .drop_column(Alias::new(column))
-                        .to_owned(),
-                )
-                .await?;
-            }
-        }
         Ok(())
     }
 }

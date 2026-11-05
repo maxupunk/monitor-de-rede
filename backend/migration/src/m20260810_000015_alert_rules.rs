@@ -1,4 +1,20 @@
 //! §6 #15 — `alert_rules`. Regras do motor de alertas.
+//!
+//! Os parâmetros dos alertas inteligentes ficam depois dos timestamps, na
+//! ordem em que chegaram. São parâmetros de **regra** (cada escopo tolera o que
+//! fizer sentido para ele), e os defaults deixam tudo desligado — os valores
+//! sensatos vêm do catálogo:
+//!
+//! * `recovery_window_seconds` — quanto tempo o alvo precisa ficar estável,
+//!   contado do último problema, antes de o alerta fechar. `0` resolve na
+//!   primeira checagem ok.
+//! * `flap_threshold`/`flap_window_seconds` — quantas recaídas dentro da
+//!   janela declaram o alvo oscilando. `0` desliga a detecção.
+//! * `notification_cooldown_seconds` — intervalo mínimo entre notificações de
+//!   problema do mesmo par (regra, alvo), mesmo quando o evento fecha e reabre.
+//! * `inhibit_when_parent_down` — com o pai (`devices.parent_id`) em alerta, o
+//!   alerta do filho não notifica. Parar de avisar é o lado perigoso do erro,
+//!   então quem liga é o catálogo ou o operador.
 
 use sea_orm_migration::prelude::*;
 
@@ -46,7 +62,22 @@ impl MigrationTrait for Migration {
                 ForeignKeyAction::Cascade,
             ));
 
-        m.create_table(with_timestamps(stmt.take())).await?;
+        let mut stmt = with_timestamps(stmt.take());
+        stmt.col(integer("recovery_window_seconds").not_null().default(0))
+            .col(integer("flap_threshold").not_null().default(0))
+            .col(integer("flap_window_seconds").not_null().default(900))
+            .col(
+                integer("notification_cooldown_seconds")
+                    .not_null()
+                    .default(0),
+            )
+            .col(
+                boolean("inhibit_when_parent_down")
+                    .not_null()
+                    .default(false),
+            );
+
+        m.create_table(stmt).await?;
 
         m.create_index(index(
             "alert_rules_template_key_index",

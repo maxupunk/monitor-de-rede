@@ -9,6 +9,15 @@
 //!   JSON), a vazão de cada sentido, as amostras e a **limpeza pendente**
 //!   (`cleanup`): o `handle` do servidor que o equipamento subiu, gravado
 //!   antes de usá-lo para que o boot o desfaça se o processo cair no meio.
+//!   Depois dos timestamps, porque chegaram depois:
+//!   * `edge_ids` — todas as arestas da perna, em ordem, como `,10,20,`: o
+//!     filtro "testes deste enlace" vira um `LIKE` que vale igual nos dois
+//!     bancos (ADR 015 §5.2). Nulo, a leitura deriva a lista da `edge_id`.
+//!   * `via` — os equipamentos sem IP atravessados (`[{ deviceId, name }]`),
+//!     com o nome, para o histórico sobreviver à exclusão.
+//!   * `health` — CPU e memória das pontas durante a medição
+//!     (`[{ deviceId, atMs, cpu, memory }]`, ADR 015 §12), no mesmo relógio
+//!     das amostras de vazão: a tela desenha os dois juntos.
 //!
 //! Sem FK para `devices`: o histórico guarda o nome e o IP de cada ponta no
 //! próprio JSON da perna e sobrevive à exclusão do equipamento.
@@ -129,7 +138,11 @@ impl MigrationTrait for Migration {
                     "link_tests",
                     ForeignKeyAction::Cascade,
                 ));
-            m.create_table(with_timestamps(stmt.take())).await?;
+            let mut stmt = with_timestamps(stmt.take());
+            stmt.col(text_null("edge_ids"))
+                .col(json_binary_null("via"))
+                .col(json_binary_null("health"));
+            m.create_table(stmt).await?;
             m.create_index(unique(
                 "link_test_legs_test_seq_unique",
                 "link_test_legs",

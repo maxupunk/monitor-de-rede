@@ -1,3 +1,10 @@
+//! `users` — a tabela do scaffold do Loco, mais `active` e `role`.
+//!
+//! * `active` desliga um login sem apagar o histórico que aponta para o
+//!   usuário.
+//! * `role` é o perfil de acesso. Contas novas recebem um papel explícito pelo
+//!   serviço de usuários; o default `admin` vale para o primeiro cadastro.
+
 use loco_rs::schema::*;
 use sea_orm_migration::prelude::*;
 
@@ -27,6 +34,8 @@ impl MigrationTrait for Migration {
                 ("email_verified_at", ColType::TimestampWithTimeZoneNull),
                 ("magic_link_token", ColType::StringNull),
                 ("magic_link_expiration", ColType::TimestampWithTimeZoneNull),
+                ("active", ColType::BooleanWithDefault(true)),
+                ("role", ColType::StringWithDefault("admin".to_string())),
             ],
             &[],
         )

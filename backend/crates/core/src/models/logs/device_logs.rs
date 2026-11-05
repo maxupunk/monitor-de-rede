@@ -38,8 +38,7 @@ pub struct Model {
     pub topics: Option<String>,
     #[sea_orm(column_type = "Text")]
     pub message: String,
-    /// `syslog` (rede) ou `application` (este processo). Ver
-    /// `migration::logs::m20260819_000001_device_logs_source`.
+    /// `syslog` (rede) ou `application` (este processo).
     pub source: String,
     /// Chave do padrão da mensagem (`syslog::template::template_hash`), só nas
     /// linhas de syslog gravadas depois da classificação existir.

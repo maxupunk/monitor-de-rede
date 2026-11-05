@@ -1,4 +1,11 @@
 //! §6 #08 — `device_interfaces`. Portas/interfaces descobertas por SNMP.
+//!
+//! Os contadores SNMP (`in_octets`, `out_octets`, `in_errors`, `out_errors` e
+//! o instante da leitura, `counters_at`) moram na linha da interface, não no
+//! histórico: são acumulados desde o boot do equipamento, e o que importa é a
+//! **última** leitura, base da taxa seguinte. Gravá-los em `metrics` a cada
+//! coleta fazia dois terços daquela tabela sem tela nenhuma que os lesse. Ficam
+//! depois de `created_at`/`updated_at` porque chegaram depois.
 
 use sea_orm_migration::prelude::*;
 
@@ -31,7 +38,14 @@ impl MigrationTrait for Migration {
                 ForeignKeyAction::Cascade,
             ));
 
-        m.create_table(with_timestamps(stmt.take())).await?;
+        let mut stmt = with_timestamps(stmt.take());
+        stmt.col(big_integer_null("in_octets"))
+            .col(big_integer_null("out_octets"))
+            .col(big_integer_null("in_errors"))
+            .col(big_integer_null("out_errors"))
+            .col(timestamp_with_time_zone_null("counters_at"));
+
+        m.create_table(stmt).await?;
 
         // Uma consulta por interface a cada coleta SNMP — o laço mais quente do
         // módulo. Não é UNIQUE porque `snmp_index` é opcional em interfaces
