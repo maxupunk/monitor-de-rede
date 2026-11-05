@@ -21,11 +21,11 @@ use super::{
         prune_tool_results, small_window_notice, summarize, supersede_repeated_results,
         worth_folding, ContextBudget,
     },
-    grounding::invented_target,
+    grounding::{invented_target, sanitize_ask_user_arguments},
     prompt::{build_small_talk_prompt, build_system_prompt, build_turn_context, ChatContext},
     tools::{
-        target_device_id, AiToolRisk, RiskAssessment, ToolArgs, ToolGroup, ToolGroups, ToolKind,
-        ToolPolicy, ToolRegistry, LOAD_TOOLS,
+        invalid_action_reason, target_device_id, AiToolRisk, RiskAssessment, ToolArgs, ToolGroup,
+        ToolGroups, ToolKind, ToolPolicy, ToolRegistry, LOAD_TOOLS,
     },
     turn::{compact_for_model, context_groups, is_small_talk, question_groups, requested_groups},
 };
@@ -455,10 +455,43 @@ impl ToolSession {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ToolFlow {
     Continue,
+    /// A chamada falhou na validação ou pediu confirmação: um `ask_user` na
+    /// mesma rodada é suprimido para a IA corrigir o erro ou não empilhar dois
+    /// cartões interativos.
+    SuppressInteractive,
     /// A ferramenta perguntou ao usuário: a rodada termina sem nova chamada.
     EndTurn,
     /// A tela fechou a conexão.
     Disconnected,
+}
+
+/// Quando o modelo inventa o nome de uma ferramenta ainda não carregada
+/// (ex.: `scheduler_add`), deduz o grupo do catálogo pelo nome para carregá-lo
+/// já na próxima rodada.
+fn infer_group_from_unknown_tool(name: &str) -> Option<ToolGroup> {
+    let lower = name.trim().to_lowercase();
+    if lower.contains("schedul") || lower.contains("cron") || lower.contains("task") {
+        Some(ToolGroup::Schedules)
+    } else if lower.contains("docker") || lower.contains("container") {
+        Some(ToolGroup::Docker)
+    } else if lower.contains("chart") || lower.contains("graph") {
+        Some(ToolGroup::Charts)
+    } else if lower.contains("audit") {
+        Some(ToolGroup::Audit)
+    } else if lower.contains("dashboard") || lower.contains("widget") {
+        Some(ToolGroup::Dashboard)
+    } else if lower.contains("rule") {
+        Some(ToolGroup::AlertRules)
+    } else if lower.contains("plugin") || lower.contains("ssh") {
+        Some(ToolGroup::Devices)
+    } else if ["ping", "trace", "scan", "dns"]
+        .iter()
+        .any(|k| lower.contains(k))
+    {
+        Some(ToolGroup::Diagnostics)
+    } else {
+        None
+    }
 }
 
 /// Resolve uma chamada de ferramenta: executa, ou devolve o pedido de
@@ -470,9 +503,9 @@ async fn handle_tool_call(
     conversation: &mut Vec<AiMessage>,
     loaded: &mut ToolGroups,
     session: &mut ToolSession,
-    tool: AiToolCall,
+    mut tool: AiToolCall,
 ) -> ToolFlow {
-    let arguments: serde_json::Value =
+    let mut arguments: serde_json::Value =
         serde_json::from_str(&tool.arguments).unwrap_or_else(|_| json!({}));
 
     // Carregar grupos é coisa do agente, não consulta: a tela não vê.
@@ -500,12 +533,42 @@ async fn handle_tool_call(
         return ToolFlow::Continue;
     }
 
+    // Ferramenta inexistente ou desligada volta para a IA como erro sem poluir
+    // a tela com card quebrado; se o nome indicar um grupo sob demanda, ele já
+    // entra para a próxima rodada.
+    let Some(kind) = registry.kind_of(&tool.name) else {
+        let mut message = format!("Ferramenta indisponível: {}", tool.name);
+        if let Some(group) = infer_group_from_unknown_tool(&tool.name) {
+            if registry.available_groups().contains(&group) {
+                loaded.insert(group);
+                let names = registry.tool_names(group).join(", ");
+                message = format!(
+                    "{message}. O grupo '{}' foi carregado; use uma destas ferramentas: {names}. (Nota: tarefas agendadas só executam ferramentas do catálogo, não lembretes de texto livre.)",
+                    group.id()
+                );
+            }
+        }
+        tracing::info!(tool = %tool.name, "ferramenta inexistente recusada sem card na tela");
+        conversation.push(AiMessage {
+            role: "tool".to_string(),
+            content: Some(json!({ "error": message }).to_string()),
+            tool_calls: None,
+            tool_call_id: Some(tool.id),
+        });
+        return ToolFlow::SuppressInteractive;
+    };
+
     // Chamada direta pelo nome do catálogo, sem `load_tools`: roda do mesmo
     // jeito, e o grupo entra para as próximas rodadas terem o contrato.
     if let Some(group) = registry.group_of(&tool.name) {
         if group != ToolGroup::Core {
             loaded.insert(group);
         }
+    }
+
+    if kind == ToolKind::Interactive {
+        arguments = sanitize_ask_user_arguments(ctx, conversation, &arguments).await;
+        tool.arguments = arguments.to_string();
     }
 
     // Alvo interno inventado volta para a IA como erro, sem card nem pedido
@@ -519,12 +582,12 @@ async fn handle_tool_call(
                 tool_calls: None,
                 tool_call_id: Some(tool.id),
             });
-            return ToolFlow::Continue;
+            return ToolFlow::SuppressInteractive;
         }
     }
 
     let mut flow = ToolFlow::Continue;
-    let device_access = registry.kind_of(&tool.name) == Some(ToolKind::DeviceAccess);
+    let device_access = kind == ToolKind::DeviceAccess;
     if device_access && !session.warned {
         session.warned = true;
         if !sink
@@ -555,10 +618,30 @@ async fn handle_tool_call(
     };
     let result = match decision {
         GateDecision::Ask(risk) => {
-            let summary = registry
-                .preview(ctx, &tool.name, &tool.arguments)
-                .await
-                .unwrap_or_else(|error| error.to_string());
+            let summary = match registry.preview(ctx, &tool.name, &tool.arguments).await {
+                Ok(text) => text,
+                Err(error) => {
+                    conversation.push(AiMessage {
+                        role: "tool".to_string(),
+                        content: Some(compact_for_model(&tool_error(&error))),
+                        tool_calls: None,
+                        tool_call_id: Some(tool.id),
+                    });
+                    return ToolFlow::SuppressInteractive;
+                }
+            };
+            // Ação com argumento inválido ou alvo inexistente volta para a IA
+            // corrigir na próxima rodada — sem botão "Confirmar" quebrado.
+            if let Some(problem) = invalid_action_reason(&summary) {
+                tracing::info!(tool = %tool.name, %problem, "ação inválida devolvida à IA sem pedir confirmação");
+                conversation.push(AiMessage {
+                    role: "tool".to_string(),
+                    content: Some(json!({ "error": problem }).to_string()),
+                    tool_calls: None,
+                    tool_call_id: Some(tool.id),
+                });
+                return ToolFlow::SuppressInteractive;
+            }
             if !sink
                 .send(HarnessEvent::ConfirmationRequired {
                     id: tool.id.clone(),
@@ -573,6 +656,7 @@ async fn handle_tool_call(
                 return ToolFlow::Disconnected;
             }
             session.await_user(ctx, &tool, arguments, &summary, &risk);
+            flow = ToolFlow::SuppressInteractive;
             json!({
                 "status": "awaiting_user_confirmation",
                 "summary": summary,
@@ -942,7 +1026,24 @@ pub async fn run_agent_loop(
                 tool_call_id: None,
             });
             let mut ends_turn = false;
+            let mut suppress_interactive = false;
             for tool in pending_tools {
+                if suppress_interactive
+                    && registry.kind_of(&tool.name) == Some(ToolKind::Interactive)
+                {
+                    conversation.push(AiMessage {
+                        role: "tool".to_string(),
+                        content: Some(
+                            json!({
+                                "error": "Outra chamada nesta mesma rodada já pediu confirmação ou falhou; trate o resultado dela antes de usar ask_user."
+                            })
+                            .to_string(),
+                        ),
+                        tool_calls: None,
+                        tool_call_id: Some(tool.id),
+                    });
+                    continue;
+                }
                 match handle_tool_call(
                     &ctx,
                     &registry,
@@ -955,7 +1056,13 @@ pub async fn run_agent_loop(
                 .await
                 {
                     ToolFlow::Disconnected => return,
-                    ToolFlow::EndTurn => ends_turn = true,
+                    ToolFlow::EndTurn => {
+                        ends_turn = true;
+                        suppress_interactive = true;
+                    }
+                    ToolFlow::SuppressInteractive => {
+                        suppress_interactive = true;
+                    }
                     ToolFlow::Continue => {}
                 }
             }

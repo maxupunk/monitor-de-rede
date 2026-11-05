@@ -13,25 +13,33 @@ use serde_json::{json, Value};
 use super::{log_digest::truncate_chars, AiToolHandler, ToolArgs, ToolKind, ToolOutput};
 use crate::services::shared::errors::AppResult;
 
+#[cfg(test)]
 const MAX_OPTIONS: usize = 6;
+const MAX_RESOURCE_OPTIONS: usize = 12;
 const MAX_QUESTION_CHARS: usize = 300;
 const MAX_OPTION_CHARS: usize = 80;
 
-/// Pergunta e opções já limpas: sem repetição, curtas e no máximo [`MAX_OPTIONS`].
-fn question_payload(question: &str, options: Vec<String>) -> Value {
+/// Pergunta e opções já limpas: sem repetição, curtas e no máximo `limit`.
+fn question_payload_with_limit(question: &str, options: Vec<String>, limit: usize) -> Value {
     let mut unique: Vec<String> = Vec::new();
     for option in options {
-        let option = truncate_chars(&option, MAX_OPTION_CHARS);
-        if !unique.iter().any(|seen| seen.eq_ignore_ascii_case(&option)) {
+        let option = truncate_chars(option.trim(), MAX_OPTION_CHARS);
+        if !option.is_empty() && !unique.iter().any(|seen| seen.eq_ignore_ascii_case(&option)) {
             unique.push(option);
         }
     }
-    unique.truncate(MAX_OPTIONS);
+    unique.truncate(limit);
     json!({
         "status": "awaiting_user_answer",
         "question": truncate_chars(question, MAX_QUESTION_CHARS),
         "options": unique,
     })
+}
+
+/// Pergunta e opções já limpas: sem repetição, curtas e no máximo [`MAX_OPTIONS`].
+#[cfg(test)]
+fn question_payload(question: &str, options: Vec<String>) -> Value {
+    question_payload_with_limit(question, options, MAX_OPTIONS)
 }
 
 pub struct AskUser;
@@ -69,9 +77,10 @@ impl AiToolHandler for AskUser {
         let Some(question) = args.text("question") else {
             return Ok(ToolOutput::not_found("Informe a pergunta em 'question'"));
         };
-        Ok(ToolOutput::awaiting_user(question_payload(
+        Ok(ToolOutput::awaiting_user(question_payload_with_limit(
             &question,
             args.texts("options"),
+            MAX_RESOURCE_OPTIONS,
         )))
     }
 }

@@ -26,7 +26,7 @@ use super::{
 use crate::{
     models::{_entities::users, scheduled_task_runs, scheduled_tasks},
     services::{
-        ai::harness::tools::{ToolArgs, ToolContract, UnattendedTools},
+        ai::harness::tools::{invalid_action_reason, ToolArgs, ToolContract, UnattendedTools},
         audit::{
             AuditAction, AuditActor, AuditChanges, AuditEntryInput, AuditService, ResourceType,
         },
@@ -40,9 +40,6 @@ use crate::{
 
 /// Quantas próximas execuções a conferência mostra.
 const UPCOMING: usize = 3;
-/// Começo da frase que a ferramenta devolve quando o argumento não serve
-/// (`preview_or_error` das ações).
-const INVALID_ACTION: &str = "Ação inválida: ";
 
 /// Quem está salvando a tarefa, e por onde.
 #[derive(Debug, Clone)]
@@ -174,7 +171,7 @@ async fn check(
             let args = ToolArgs::from_value(arguments.clone())
                 .with_actor(author.map_or_else(AuditActor::default, |author| author.actor.clone()));
             match tools.preview(ctx, tool, &args).await {
-                Ok(Some(text)) => match text.strip_prefix(INVALID_ACTION) {
+                Ok(Some(text)) => match invalid_action_reason(&text) {
                     Some(problem) => errors.push(problem.to_string()),
                     None => preview.summary = Some(text),
                 },

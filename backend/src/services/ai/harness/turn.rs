@@ -157,7 +157,14 @@ pub fn question_groups(question: &str) -> ToolGroups {
         ),
         (
             ToolGroup::Docker,
-            &["docker", "container", "containers", "compose"],
+            &[
+                "docker",
+                "container",
+                "containers",
+                "conteiner",
+                "conteineres",
+                "compose",
+            ],
             &[],
         ),
         (
@@ -262,8 +269,25 @@ pub fn question_groups(question: &str) -> ToolGroups {
                 "tarefas",
                 "cron",
                 "periodicamente",
+                "diariamente",
+                "semanalmente",
+                "marque",
+                "marcar",
+                "programe",
+                "programar",
+                "amanha",
+                "lembrar",
+                "lembrete",
             ],
-            &["todo dia", "toda hora"],
+            &[
+                "todo dia",
+                "toda hora",
+                "toda manha",
+                "toda noite",
+                "toda segunda",
+                "todo domingo",
+                "a cada",
+            ],
         ),
         (
             ToolGroup::Dashboard,
@@ -500,6 +524,12 @@ mod tests {
         assert_eq!(
             question_groups("Qual container está consumindo mais memória?"),
             ToolGroups::from([ToolGroup::Docker, ToolGroup::History])
+        );
+        assert_eq!(
+            question_groups(
+                "Marque para amanhã às 9 horas verificar se os contêiner está tudo ok e me notificar."
+            ),
+            ToolGroups::from([ToolGroup::Docker, ToolGroup::Schedules])
         );
         assert!(question_groups("vamos verificar quais equipamentos estão caídos").is_empty());
         assert_eq!(

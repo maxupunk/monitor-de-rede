@@ -207,7 +207,17 @@ async fn plan_task(
     };
     let preview = service::preview(ctx, &probe, author.as_ref()).await?;
     if !preview.valid {
-        return Ok(Err(ToolOutput::not_found(preview.errors.join("; "))));
+        let mut errors = preview.errors;
+        if input.tool == "docker_container_action"
+            && errors
+                .iter()
+                .any(|err| err.contains("action") || err.contains("container"))
+        {
+            errors.push(
+                "Para verificar ou listar o estado de todos os containers num horário, agende tool='get_docker_containers' com arguments={} (docker_container_action é só para start/stop/restart de um container específico)".to_string(),
+            );
+        }
+        return Ok(Err(ToolOutput::not_found(errors.join("; "))));
     }
     let what = preview
         .summary

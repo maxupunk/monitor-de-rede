@@ -64,6 +64,7 @@ use loco_rs::prelude::AppContext;
 use serde_json::{json, Value};
 
 pub use args::ToolArgs;
+pub use docker::list_all_container_names;
 pub use lookup::{device_ip, device_matches, device_not_found, fill_device_ip, monitor_target};
 pub use plugins::target_device_id;
 pub use risk::{AiToolRisk, Approval, RiskAssessment};
@@ -482,12 +483,21 @@ fn as_output<T>(result: AppResult<T>) -> AppResult<Result<T, ToolOutput>> {
     }
 }
 
+/// Começo da frase que a ferramenta devolve quando o argumento não serve.
+pub const INVALID_ACTION_PREFIX: &str = "Ação inválida: ";
+
+/// Extrai o motivo quando o preview de uma ação indica argumentos inválidos.
+#[must_use]
+pub fn invalid_action_reason(preview: &str) -> Option<&str> {
+    preview.strip_prefix(INVALID_ACTION_PREFIX)
+}
+
 /// Texto do preview de uma ação ou o motivo da recusa de validação.
 pub(super) fn preview_or_error(result: Result<String, ToolOutput>) -> String {
     match result {
         Ok(text) => text,
         Err(output) => format!(
-            "Ação inválida: {}",
+            "{INVALID_ACTION_PREFIX}{}",
             output.data["error"]
                 .as_str()
                 .unwrap_or("argumentos incompletos")

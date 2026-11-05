@@ -47,7 +47,7 @@ export interface ModelFact {
 }
 
 /** O recomendado (`recommended` no catálogo do backend) e o padrão. */
-export const RECOMMENDED_MODEL = 'netmonitor/decima-network:v13'
+export const RECOMMENDED_MODEL = 'netmonitor/decima-network:v14'
 
 /** Abaixo disso o modelo fica perto do chute nas decisões do NetMonitor. */
 const USEFUL_ACCURACY = 0.6

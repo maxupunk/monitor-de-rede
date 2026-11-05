@@ -31,9 +31,8 @@ const CHAT_MODELS_RELEASE_URL: &str =
 
 fn lfm3_default_parameters() -> serde_json::Value {
     serde_json::json!({
-        "temperature": 0.1,
-        "top_p": 0.1,
-        "top_k": 50,
+        "temperature": 0,
+        "top_k": 1,
         "repeat_penalty": 1.05,
         "num_ctx": 262144,
     })
@@ -56,7 +55,7 @@ pub static BUNDLED_MODELS: &[BundledOllamaModel] = &[
         release_url_env: "CHAT_MODELS_URL",
         default_release_url: CHAT_MODELS_RELEASE_URL,
         gguf_filename: "lfm3-netmonitor-q8_0.gguf",
-        gguf_digest: "sha256:3d4541f19c0f66c22ff3cb71de4bc2e8e66d8080f38b34845493baba7b29e1df",
+        gguf_digest: "sha256:20e645e2f86ecc5700a2607ab76d29baa6ecab05663e88250e21da65c4890f19",
         gguf_size: 1_846_237_728,
         template: "{{ .Prompt }}",
         renderer: "lfm3",
@@ -69,7 +68,7 @@ pub static BUNDLED_MODELS: &[BundledOllamaModel] = &[
         release_url_env: "CHAT_MODELS_URL",
         default_release_url: CHAT_MODELS_RELEASE_URL,
         gguf_filename: "lfm3-netmonitor-q5_k_m.gguf",
-        gguf_digest: "sha256:e1498c11993cbf3951a9057bbab07953c0d4f836ecaff4d00dcc023b6fdce201",
+        gguf_digest: "sha256:4bec8818dd9df245bb1d895687b53ebf3073d949d5e7f4fc4c5057dd869057ce",
         gguf_size: 1_258_662_432,
         template: "{{ .Prompt }}",
         renderer: "lfm3",
@@ -82,7 +81,7 @@ pub static BUNDLED_MODELS: &[BundledOllamaModel] = &[
         release_url_env: "CHAT_MODELS_URL",
         default_release_url: CHAT_MODELS_RELEASE_URL,
         gguf_filename: "lfm3-netmonitor-q4_k_m.gguf",
-        gguf_digest: "sha256:480ef9bf9fcc8975a0576677ec9a1b6304eb2468e878e44e07539b5133eb05db",
+        gguf_digest: "sha256:740f3b27087f76b84aebba9bb6c40ff2e9cdfcd90458355cdf079065d00b606b",
         gguf_size: 1_099_627_040,
         template: "{{ .Prompt }}",
         renderer: "lfm3",
@@ -116,7 +115,7 @@ pub struct RecommendedModel {
 pub static RECOMMENDED_MODELS: &[RecommendedModel] = &[
     RecommendedModel {
         name: "lfm3-netmonitor:latest",
-        description: "LFM3 NetMonitor 1.7B (Q8_0 / Q8_K — Máxima precisão, padrão) — Especialista nas 61 ferramentas do NetMonitor (redes, Wi-Fi IEEE 802.11, fibra óptica GPON/SFP+, roteadores, Docker, backups, dashboard e web_search): 1,85 GB, 98,9% em ferramentas e 100% em segurança (nota 97,4 blind / 93,8 bench)",
+        description: "LFM3 NetMonitor 1.7B v5 (Q8_0 / Q8_K — Máxima precisão, padrão) — Especialista nas 61 ferramentas do NetMonitor com jargão técnico NOC/ISP brasileiro (redes, Wi-Fi IEEE 802.11, fibra óptica GPON/SFP+, roteadores, Docker, backups, dashboard e web_search): 1,85 GB, 98,9% em ferramentas e 100% em segurança (nota 98,5 blind / 96,1 bench)",
         parameter_size: "1.7B · Q8_0",
         context_length: 262_144,
         tool_calling_optimized: true,
@@ -124,7 +123,7 @@ pub static RECOMMENDED_MODELS: &[RecommendedModel] = &[
     },
     RecommendedModel {
         name: "lfm3-netmonitor:q5_k_m",
-        description: "LFM3 NetMonitor 1.7B (Q5_K_M — Equilibrado) — Mesma especialização em redes e nas 61 ferramentas do NetMonitor com 32% menos memória: 1,26 GB, 100% segurança no bench (nota 94,2 blind / 94,5 bench)",
+        description: "LFM3 NetMonitor 1.7B v5 (Q5_K_M — Equilibrado) — Mesma especialização NOC/ISP e nas 61 ferramentas do NetMonitor com 32% menos memória: 1,26 GB, 98,9% em ferramentas no blind e 100% em segurança (nota 97,7 blind / 96,1 bench)",
         parameter_size: "1.7B · Q5_K_M",
         context_length: 262_144,
         tool_calling_optimized: true,
@@ -132,7 +131,7 @@ pub static RECOMMENDED_MODELS: &[RecommendedModel] = &[
     },
     RecommendedModel {
         name: "lfm3-netmonitor:q4_k_m",
-        description: "LFM3 NetMonitor 1.7B (Q4_K_M — Ultraleve / Rápido) — Versão compacta de 4 bits para servidores com pouca RAM/CPU: 1,10 GB, 99,4% em ferramentas e 100% segurança no blind (nota 97,7 blind / 93,5 bench)",
+        description: "LFM3 NetMonitor 1.7B v5 (Q4_K_M — Ultraleve / Rápido) — Versão compacta de 4 bits para servidores com pouca RAM/CPU: 1,10 GB, 96,2% em ferramentas no bench e 100% em segurança no blind (nota 96,0 blind / 96,2 bench)",
         parameter_size: "1.7B · Q4_K_M",
         context_length: 262_144,
         tool_calling_optimized: true,

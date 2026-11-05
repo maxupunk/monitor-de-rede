@@ -77,7 +77,12 @@
           </v-alert>
 
           <!-- Conteúdo Renderizado -->
-          <div v-if="message.content" class="markdown-body" v-html="renderedContent" />
+          <div
+            v-if="message.content"
+            class="markdown-body"
+            v-html="renderedContent"
+            @click="handleMarkdownClick"
+          />
 
           <!-- Marcados com @ -->
           <div v-if="message.mentions?.length" class="d-flex flex-wrap ga-1 mt-2">
@@ -195,6 +200,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { useAiStore, type AiDisplayMessage } from '@/stores/ai'
 import AiToolActivity from './AiToolActivity.vue'
 import AiQuestionCard from './AiQuestionCard.vue'
@@ -214,6 +220,7 @@ const emit = defineEmits<{
 }>()
 
 const aiStore = useAiStore()
+const router = useRouter()
 
 /** Perguntas da IA (`ask_user`) viram cartão com opções; o resto, cartão de ferramenta. */
 const questions = computed(() =>
@@ -244,6 +251,19 @@ const hasChart = computed(() => props.message.toolCalls?.some((tool) => tool.cha
 
 /** Markdown leve e seguro (ver `utils/markdown`). */
 const renderedContent = computed(() => renderMarkdown(props.message.content))
+
+/** Rotas internas (`/alerts`, `/devices/12`) navegam pela SPA sem recarregar a página. */
+function handleMarkdownClick(event: MouseEvent) {
+  if (event.defaultPrevented || event.button !== 0) return
+  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+  const target = event.target instanceof Element ? event.target.closest('a') : null
+  if (!target) return
+  const href = target.getAttribute('href')
+  if (href && href.startsWith('/') && !href.startsWith('//') && router) {
+    event.preventDefault()
+    void router.push(href)
+  }
+}
 
 async function copyContent() {
   if (!props.message.content) return
@@ -284,6 +304,15 @@ async function copyContent() {
   display: block;
   max-width: 100%;
   overflow-x: auto;
+}
+.message-bubble :deep(a) {
+  color: rgb(var(--v-theme-primary));
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  font-weight: 500;
+}
+.message-bubble :deep(a:hover) {
+  opacity: 0.85;
 }
 /* No balão do usuário (fundo primary) link e borda seguem o texto branco. */
 .message-bubble.text-white :deep(a),

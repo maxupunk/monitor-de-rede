@@ -34,22 +34,54 @@ const QUOTE = /^>\s?(.*)$/
 const RULE = /^\s*([-*_])(\s*\1){2,}\s*$/
 const TABLE_SEPARATOR = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/
 
-/** Negrito, itálico, código e link num trecho de texto já sem blocos. */
+/** Negrito, itálico, código e link (markdown, rota interna ou URL solta) num trecho de texto. */
+function splitTrailingUrlPunctuation(rawUrl: string): { url: string; trailing: string } {
+  let url = rawUrl
+  let trailing = ''
+  while (url.length > 0) {
+    const last = url[url.length - 1]
+    if (last === '.' || last === ',' || last === ';' || last === ':' || last === '!' || last === '?') {
+      trailing = last + trailing
+      url = url.slice(0, -1)
+      continue
+    }
+    if (last === ')' && !url.includes('(')) {
+      trailing = last + trailing
+      url = url.slice(0, -1)
+      continue
+    }
+    break
+  }
+  return { url, trailing }
+}
+
 function inline(text: string): string {
-  const codes: string[] = []
-  let html = escapeHtml(text).replace(/`([^`]+)`/g, (_match, code: string) => {
-    codes.push(`<code class="inline-code px-1 rounded font-mono text-body-small">${code}</code>`)
-    return `\u0000${codes.length - 1}\u0000`
-  })
+  const tokens: string[] = []
+  const stash = (fragment: string): string => {
+    tokens.push(fragment)
+    return `\u0000${tokens.length - 1}\u0000`
+  }
+
+  let html = escapeHtml(text).replace(/`([^`]+)`/g, (_match, code: string) =>
+    stash(`<code class="inline-code px-1 rounded font-mono text-body-small">${code}</code>`)
+  )
   html = html
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     .replace(/__([^_]+)__/g, '<strong>$1</strong>')
     .replace(/(^|[^*\w])\*([^*\s][^*]*)\*(?!\w)/g, '$1<em>$2</em>')
-    .replace(
-      /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
-      '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>'
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_match, label: string, href: string) =>
+      stash(`<a href="${href}" target="_blank" rel="noopener noreferrer">${label}</a>`)
     )
-  return html.replace(/\u0000(\d+)\u0000/g, (_match, index: string) => codes[Number(index)])
+    .replace(/\[([^\]]+)\]\((\/(?!\/)[^\s)]*)\)/g, (_match, label: string, href: string) =>
+      stash(`<a href="${href}">${label}</a>`)
+    )
+    .replace(/(^|[\s(])(https?:\/\/[^\s<\u0000]+)/g, (_match, prefix: string, rawUrl: string) => {
+      const { url, trailing } = splitTrailingUrlPunctuation(rawUrl)
+      if (!url) return `${prefix}${rawUrl}`
+      const link = stash(`<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`)
+      return `${prefix}${link}${trailing}`
+    })
+  return html.replace(/\u0000(\d+)\u0000/g, (_match, index: string) => tokens[Number(index)])
 }
 
 function cells(row: string): string[] {

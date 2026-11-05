@@ -335,8 +335,8 @@ mod tests {
             aprovados,
             [
                 "lfm3-netmonitor:latest",
-                "lfm3-netmonitor:q4_k_m",
-                "lfm3-netmonitor:q5_k_m"
+                "lfm3-netmonitor:q5_k_m",
+                "lfm3-netmonitor:q4_k_m"
             ]
         );
     }

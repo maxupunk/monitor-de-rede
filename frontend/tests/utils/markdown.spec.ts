@@ -24,14 +24,28 @@ describe('renderMarkdown', () => {
     expect(html).toContain('<td>1.1.1.1</td><td>12 ms</td>')
   })
 
-  it('escapa HTML do texto e só aceita link http(s)', () => {
+  it('escapa HTML do texto e só aceita link http(s) ou rota interna', () => {
     const html = renderMarkdown(
-      '<script>alert(1)</script> [doc](https://exemplo.local/a) [x](javascript:alert(1))'
+      '<script>alert(1)</script> [doc](https://exemplo.local/a) [Alertas](/alerts) [x](javascript:alert(1)) [mal](//evil.com)'
     )
     expect(html).not.toContain('<script>')
     expect(html).toContain('&lt;script&gt;')
     expect(html).toContain('<a href="https://exemplo.local/a"')
+    expect(html).toContain('<a href="/alerts">Alertas</a>')
     expect(html).not.toContain('href="javascript')
+    expect(html).not.toContain('href="//evil.com"')
+  })
+
+  it('transforma URLs http(s) soltas em links clicáveis preservando pontuação final', () => {
+    const html = renderMarkdown(
+      'Acesse https://exemplo.local/status:8080/health, ou veja (http://192.168.1.1/admin).'
+    )
+    expect(html).toContain(
+      '<a href="https://exemplo.local/status:8080/health" target="_blank" rel="noopener noreferrer">https://exemplo.local/status:8080/health</a>,'
+    )
+    expect(html).toContain(
+      '(<a href="http://192.168.1.1/admin" target="_blank" rel="noopener noreferrer">http://192.168.1.1/admin</a>).'
+    )
   })
 
   it('código inline protege o que está dentro', () => {

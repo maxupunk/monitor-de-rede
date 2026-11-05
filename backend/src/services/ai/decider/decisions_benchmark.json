@@ -16,7 +16,7 @@
   ],
   "models": [
     {
-      "model": "netmonitor/decima-network:v13",
+      "model": "netmonitor/decima-network:v14",
       "overall": 0.9326,
       "overallLow": 0.9197,
       "overallHigh": 0.9495,

@@ -130,8 +130,56 @@ pub(super) async fn resolve_container(
     pick_container(&containers, identifier)
         .cloned()
         .ok_or_else(|| {
-            format!("Container '{identifier}' não encontrado ou ambíguo; use get_docker_containers")
+            let available: Vec<String> = containers
+                .iter()
+                .take(10)
+                .map(DockerContainerSummary::display_name)
+                .collect();
+            if available.is_empty() {
+                format!(
+                    "Container '{identifier}' não encontrado ou ambíguo; use get_docker_containers"
+                )
+            } else {
+                format!(
+                    "Container '{identifier}' não encontrado ou ambíguo; disponíveis: {}; use get_docker_containers",
+                    available.join(", ")
+                )
+            }
         })
+}
+
+/// Nomes de containers reais nos hosts conectados (central primeiro, depois
+/// agentes remotos online), sem repetição.
+pub async fn list_all_container_names(ctx: &AppContext) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    let mut push_from = |list: Vec<DockerContainerSummary>| {
+        for container in list {
+            let name = container.display_name();
+            if !name.is_empty() && !names.iter().any(|seen| seen.eq_ignore_ascii_case(&name)) {
+                names.push(name);
+            }
+        }
+    };
+    if let Ok(Some(default)) = hosts::default_host(ctx).await {
+        if let Ok(list) = engine::list_containers(default.engine.as_ref()).await {
+            push_from(list);
+        }
+    }
+    if let Ok(listed) = hosts::list(ctx).await {
+        for view in listed
+            .into_iter()
+            .filter(|view| view.online && view.docker_available)
+        {
+            if let Ok(key) = view.key.parse::<HostKey>() {
+                if let Ok(host) = hosts::resolve(ctx, key) {
+                    if let Ok(list) = engine::list_containers(host.engine.as_ref()).await {
+                        push_from(list);
+                    }
+                }
+            }
+        }
+    }
+    names
 }
 
 fn summary_row(container: &DockerContainerSummary) -> Value {
@@ -500,7 +548,7 @@ async fn resolve_target(ctx: &AppContext, args: &ToolArgs) -> AppResult<Result<T
         .and_then(LifecycleAction::parse)
     else {
         return Ok(Err(format!(
-            "Informe 'action': {}",
+            "Informe 'action': {} (para apenas consultar ou verificar o estado dos containers, use get_docker_containers)",
             LifecycleAction::NAMES.join(", ")
         )));
     };
@@ -591,7 +639,7 @@ Conforme a configuração, roda direto ou pede confirmação ao usuário."
                 target.container.display_name(),
                 target.host_name
             ),
-            Err(message) => message,
+            Err(message) => super::preview_or_error(Err(ToolOutput::not_found(message))),
         })
     }
 
