@@ -209,6 +209,7 @@
         >
           Modo somente visualização: você pode consultar os dados, mas alterações estão desativadas.
         </v-alert>
+        <AreaSuggestions class="mb-4" />
         <router-view />
       </v-container>
     </v-main>
@@ -274,9 +275,14 @@ import DiagnosticPlaybookDialog from '@/components/DiagnosticPlaybookDialog.vue'
 import AiChatDrawer from '@/components/ai/AiChatDrawer.vue'
 import PluginApprovalDialog from '@/components/plugins/PluginApprovalDialog.vue'
 import AiApprovalNotice from '@/components/ai/AiApprovalNotice.vue'
+import AreaSuggestions from '@/components/areas/AreaSuggestions.vue'
 import { useAiStore } from '@/stores/ai'
 import { usePluginAppsStore } from '@/stores/pluginApps'
 import { buildNavSections, groupOfPath, type NavAction } from '@/navigation'
+import { NAV_ENTRIES } from '@/areas'
+import { installAreaRealtime } from '@/areas/realtime'
+import { useAreasStore } from '@/stores/areas'
+import { areaOffRedirect } from '@/router/areaGuard'
 
 const display = useDisplay()
 const drawer = ref(!display.mdAndDown.value)
@@ -287,6 +293,7 @@ const aiStore = useAiStore()
 const pluginAppsStore = usePluginAppsStore()
 const eventsStore = useEventsStore()
 const authStore = useAuthStore()
+const areasStore = useAreasStore()
 const onboardingStore = useOnboardingStore()
 const router = useRouter()
 const route = useRoute()
@@ -322,13 +329,29 @@ async function handleNotificationClick() {
   }
 }
 
-/** O menu vem do registro (`navigation.ts`); o layout só executa as ações. */
+/** O menu vem das áreas (`src/areas`); o layout só executa as ações. */
 const navSections = computed(() =>
-  buildNavSections({
-    isAdmin: authStore.isAdmin,
-    apps: pluginAppsStore.apps,
-    canInstallPwa: canInstall.value && !isInstalled.value,
-  })
+  buildNavSections(
+    {
+      isAdmin: authStore.isAdmin,
+      apps: pluginAppsStore.apps,
+      canInstallPwa: canInstall.value && !isInstalled.value,
+      enabledAreas: areasStore.enabledAreas,
+    },
+    NAV_ENTRIES
+  )
+)
+
+/*
+ * A área da página aberta desligou (aqui ou em outra aba, pelo SSE): a página
+ * dá lugar à que explica e oferece ligar — o mesmo destino do guard.
+ */
+watch(
+  () => areasStore.enabledAreas,
+  () => {
+    const target = areaOffRedirect(route, areasStore.isEnabled)
+    if (target) void router.replace(target)
+  }
 )
 
 const ACTIONS: Record<NavAction, () => void> = {
@@ -364,8 +387,12 @@ watch(
   { immediate: true }
 )
 
+// As rotas SSE de cada área ligada; antes do `connect`, para o snapshot inicial.
+let uninstallAreaRealtime: (() => void) | null = null
+
 onMounted(() => {
   void authStore.fetchMe()
+  uninstallAreaRealtime = installAreaRealtime()
   eventsStore.connect()
   void onboardingStore.checkAndOpenIfNeeded()
   void pluginAppsStore.fetchApps()
@@ -373,6 +400,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   eventsStore.disconnect()
+  uninstallAreaRealtime?.()
 })
 
 async function handleLogout() {

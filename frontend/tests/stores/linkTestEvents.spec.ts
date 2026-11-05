@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import { installAreaRealtime } from '@/areas/realtime'
 import { apiService } from '@/services/apiService'
 import { useEventsStore } from '@/stores/events'
 import { useLinkTestsStore } from '@/stores/linkTests'
@@ -27,6 +28,8 @@ function emit(type: string, data: unknown) {
 describe('SSE do teste de enlace', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    // As rotas SSE das áreas ligadas, como o layout instala.
+    installAreaRealtime()
     vi.stubGlobal('EventSource', FakeEventSource)
     vi.stubGlobal('localStorage', {
       getItem: vi.fn(() => null),

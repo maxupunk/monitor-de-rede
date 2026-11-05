@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest'
-import { buildNavSections, groupOfPath, type NavContext, type NavSection } from '@/navigation'
+import {
+  buildNavSections as build,
+  groupOfPath,
+  type NavContext,
+  type NavSection,
+} from '@/navigation'
+import { NAV_ENTRIES } from '@/areas'
+
+const buildNavSections = (ctx: NavContext) => build(ctx, NAV_ENTRIES)
 
 const BASE: NavContext = { isAdmin: false, apps: [], canInstallPwa: false }
 

@@ -78,7 +78,7 @@
                   </v-card-title>
                   <v-card-subtitle class="mt-1 d-flex align-center ga-1 flex-wrap">
                     <v-chip
-                      v-for="resType in tmpl.compatibleResourceTypes"
+                      v-for="resType in tmpl.compatibleResources"
                       :key="resType"
                       size="x-small"
                       color="deep-purple"
@@ -338,7 +338,6 @@
 import { ref, computed, watch } from 'vue'
 import {
   useDashboardStore,
-  CARD_TEMPLATES,
   type CardTemplate,
   type WidgetCategory,
   type ResourceCompatibilityType,
@@ -398,14 +397,14 @@ watch(isOpen, async (newVal) => {
 
 const filteredTemplates = computed(() => {
   const q = searchQuery.value.trim().toLowerCase()
-  return CARD_TEMPLATES.filter(
+  return dashboardStore.cardTemplates.filter(
     (t) => !q || t.title.toLowerCase().includes(q) || t.description.toLowerCase().includes(q)
   )
 })
 
 const filteredStandardWidgets = computed(() => {
   const q = searchQuery.value.trim().toLowerCase()
-  return dashboardStore.sortedWidgets.filter(
+  return dashboardStore.availableWidgets.filter(
     (w) => !q || w.title.toLowerCase().includes(q) || w.description.toLowerCase().includes(q)
   )
 })
@@ -503,7 +502,7 @@ const pingTargetOptions = computed<PingTargetOption[]>(() => {
 
 function isResourceRequired(type: ResourceCompatibilityType): boolean {
   if (!selectedTemplate.value) return false
-  return selectedTemplate.value.compatibleResourceTypes.includes(type)
+  return selectedTemplate.value.compatibleResources.includes(type)
 }
 
 async function startCardCreation(tmpl: CardTemplate) {
@@ -581,7 +580,7 @@ function closeDialog() {
   isOpen.value = false
 }
 
-function resourceTypeLabel(rt: ResourceCompatibilityType): string {
+function resourceTypeLabel(rt: string): string {
   switch (rt) {
     case 'bandwidth':
       return 'Banda (Rx/Tx)'

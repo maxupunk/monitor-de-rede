@@ -890,6 +890,7 @@ import { getStatusColor } from '@/utils/monitorPresentation'
 import { formatBinaryBytes, formatLinkSpeed, formatPercent } from '@/utils/formatters'
 import DeciderSuggestionChip from '@/components/ai/DeciderSuggestionChip.vue'
 import { useVpnStore } from '@/stores/vpn'
+import { useAreasStore } from '@/stores/areas'
 import { useLogsStore } from '@/stores/logs'
 import { confirm } from '@/composables/useConfirm'
 
@@ -900,6 +901,7 @@ const devicesStore = useDevicesStore()
 const vpnStore = useVpnStore()
 const logsStore = useLogsStore()
 const pluginsStore = usePluginsStore()
+const areasStore = useAreasStore()
 const activeTab = ref('overview')
 const abaPedida = ref<string | null>(null)
 const profilesDialogOpen = ref(false)
@@ -920,8 +922,9 @@ const can = computed(() => {
     interfaces: caps?.interfaces ?? false,
     events: caps?.events ?? false,
     logs: caps?.logs ?? false,
-    vpn: caps?.vpn ?? Boolean(detailStore.device?.vpnPeer),
-    wifi: caps?.wifi ?? false,
+    // Aba de área exige a capacidade **e** a área ligada (ADR 017).
+    vpn: areasStore.isEnabled('vpn') && (caps?.vpn ?? Boolean(detailStore.device?.vpnPeer)),
+    wifi: areasStore.isEnabled('network') && (caps?.wifi ?? false),
     health: caps?.health ?? false,
     plugins: caps?.plugins ?? false,
     snmpScan,
@@ -1034,7 +1037,7 @@ const aiDeviceContext = computed(() => ({ deviceId: deviceId.value }))
 onMounted(() => {
   if (deviceId.value) {
     detailStore.loadDeviceDetails(deviceId.value)
-    vpnStore.fetchServer()
+    if (areasStore.isEnabled('vpn')) vpnStore.fetchServer()
   }
 })
 

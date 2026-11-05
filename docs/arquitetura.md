@@ -20,9 +20,9 @@ Atende dois públicos na mesma instalação:
   e faz backup de bancos ([ADR 013](adr/013-ponte-de-banco-pelo-agente.md)).
 
 Os dois compartilham alertas, notificações, eventos, Assistente IA e a SPA, que
-recebe tudo em tempo real por SSE. Hoje toda instalação recebe os dois lados;
-as **Áreas do produto** que vão separá-los estão decididas no
-[ADR 017](adr/017-arquitetura-modular.md) e ainda não implementadas.
+recebe tudo em tempo real por SSE. Cada instalação liga só as **áreas do
+produto** que usa (Rede, Servidores, VPN; o Núcleo sempre) — ver
+[§11-F](#11-f-áreas-do-produto) e o [ADR 017](adr/017-arquitetura-modular.md).
 
 ## 2. Stack
 
@@ -924,6 +924,26 @@ mesma rodada do agente, sem devolver a vez a ninguém. Detalhes em
   de todo catálogo; `AI_WEB_SEARCH_URL` troca o DuckDuckGo por um SearXNG — e
   aí as pesquisas gerais não saem para buscador público. CVEs vêm do NVD.
 
+## 11-F. Áreas do produto
+
+Decididas no [ADR 017](adr/017-arquitetura-modular.md). Quatro áreas: Núcleo
+(sempre ligado), Rede, Servidores e VPN. O estado mora em `system_settings`
+(chave `areas`, ausente = tudo ligado) e é lido por `netmonitor_core::areas`.
+
+| Peça | Onde | Efeito da área desligada |
+| :--- | :--- | :--- |
+| Estado, validação, publicação | `crates/core/src/areas/` | `areas:updated` no SSE, também no snapshot de quem conecta |
+| O que cada área sabe de si (evidência, consequências, bloqueio) | `services/area_policies/` | VPN com servidor ativo não desliga (409) |
+| API | `controllers/areas.rs`, `POST /api/settings/onboarding/intent` | só admin muda; auditado |
+| Ferramentas da IA | `AiToolHandler::area()` + `ToolPolicy::with_areas` | saem do chat, das rotinas e das tarefas; tarefa agendada vira `skipped` |
+| Rotinas | `discovery::queue`, `maintenance_runner`, `agents::background` | varredura, enlaces agendados e vigia de Wi-Fi pausados; snapshot Docker só com Servidores ligada **e** alguma aba com `?interest=docker` |
+| Monitores e alertas | — | **continuam** (monitor nunca para pela área); modelos de regra da área somem do catálogo |
+| SPA | `frontend/src/areas/`, `router/areaGuard.ts`, `AreaOffPage.vue` | menu, rotas, cards e handlers SSE da área saem; link profundo mostra "Área desligada" |
+
+A fronteira de código entre as áreas é verificada por
+`tests/conventions/architecture.rs` (exceções congeladas, a lista só
+diminui) até cada área ter o seu crate.
+
 ## 12. O que não existe
 
 Registrar o que **não** foi construído evita que alguém procure por uma peça
@@ -949,9 +969,9 @@ ausente achando que ela está escondida:
 - **Não há observador externo do processo.** Um processo parado não consegue
   alertar sobre si: monitorar a queda total do NetMonitor exigiria um segundo
   agente, e isso está fora de escopo.
-- **Não há área nem módulo desligável.** Toda instalação recebe Rede e
-  Servidores; as Áreas do produto estão decididas no
-  [ADR 017](adr/017-arquitetura-modular.md), não implementadas.
+- **Área não é controle de acesso nem desinstalação.** A API continua montada
+  com a área desligada, quem autoriza é o papel, e nenhum dado é apagado
+  ([§11-F](#11-f-áreas-do-produto)).
 
 ## 13. Decisões registradas
 

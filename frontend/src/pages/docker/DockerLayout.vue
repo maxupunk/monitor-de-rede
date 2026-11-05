@@ -75,10 +75,15 @@ import { useRoute, useRouter } from 'vue-router'
 import DockerOperationsPanel from '@/components/docker/DockerOperationsPanel.vue'
 import DockerUnavailableAlert from '@/components/docker/DockerUnavailableAlert.vue'
 import { useDockerStore } from '@/stores/docker'
+import { useLiveInterest } from '@/composables/useLiveInterest'
 
 const docker = useDockerStore()
 const route = useRoute()
 const router = useRouter()
+
+// Enquanto as telas Docker estiverem abertas, o backend mantém o snapshot ao
+// vivo dos agentes (ARQ-05); ao sair, deixa de pedir.
+useLiveInterest('docker')
 
 const tabs = [
   { title: 'Visão geral', icon: 'mdi-view-dashboard-outline', to: '/docker' },

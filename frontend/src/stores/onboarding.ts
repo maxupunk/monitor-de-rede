@@ -1,19 +1,10 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { apiService } from '@/services/apiService'
+import type { OnboardingStatus } from '@/bindings/OnboardingStatus'
 import { useAuthStore } from './auth'
 
-export interface OnboardingStatus {
-  completed: boolean
-  completedAt: string | null
-  needsOnboarding: boolean
-  sitesCount: number
-  networksCount: number
-  dnsServersCount: number
-  vpnConfigured: boolean
-  detectedLanIp: string | null
-  detectedPublicIp: string | null
-}
+export type { OnboardingStatus }
 
 export const useOnboardingStore = defineStore('onboarding', () => {
   const status = ref<OnboardingStatus | null>(null)
@@ -38,7 +29,9 @@ export const useOnboardingStore = defineStore('onboarding', () => {
 
   /**
    * Avalia se deve abrir o assistente automaticamente no primeiro acesso.
-   * Só abre se o operador tiver permissão de escrita e a instalação estiver pendente.
+   * Só abre se o operador tiver permissão de escrita e a instalação estiver
+   * pendente: áreas ainda não escolhidas ou, com a área Rede ligada, sem site e
+   * rede (o servidor decide em `needsOnboarding`).
    */
   async function checkAndOpenIfNeeded(): Promise<boolean> {
     if (checked.value || dismissedInSession.value) return false
@@ -65,6 +58,11 @@ export const useOnboardingStore = defineStore('onboarding', () => {
     if (persistOnServer) {
       void completeOnboarding()
     }
+  }
+
+  /** A escolha das áreas foi gravada (`POST /settings/onboarding/intent`). */
+  function markIntentChosen() {
+    if (status.value) status.value.intentChosen = true
   }
 
   async function completeOnboarding(): Promise<boolean> {
@@ -94,6 +92,7 @@ export const useOnboardingStore = defineStore('onboarding', () => {
     checkAndOpenIfNeeded,
     openWizard,
     dismissWizard,
+    markIntentChosen,
     completeOnboarding,
   }
 })

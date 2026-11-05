@@ -87,7 +87,7 @@ comprometer as outras.
 
 ### Fase 1 — Esqueleto do workspace e base de dados
 
-- [ ] **Workspace Cargo com o código atual num crate transitório**
+- [x] 🟢 Concluído — **Workspace Cargo com o código atual num crate transitório**
   - **Débitos:** ARQ-06, ARQ-02 (congelamento)
   - **Esforço:** Médio
   - **Arquivos:** `backend/Cargo.toml`, novo `backend/crates/{app,legacy,core,agent-protocol,agent}/`, `Dockerfile`, `.github/workflows/ci.yaml`
@@ -101,8 +101,9 @@ comprometer as outras.
     - Os quatro comandos do backend passam de `backend/`, sem nenhum teste alterado além de caminhos.
     - Imagem Docker e binário do agente gerados como antes.
     - Teste de arquitetura falha ao introduzir de propósito uma dependência nova proibida.
+  - **Entregue:** `backend/` é a raiz do workspace e o **pacote raiz é o crate transitório** (e o ponto de montagem) — em vez de `crates/legacy` + `crates/app`: mover o pacote quebraria os caminhos relativos a ele (config do Loco, bindings, fixtures, banco de teste) sem ganho, e o papel é o mesmo. `crates/core` (`netmonitor-core`) recebeu `models`, `shared` e `events` — o conjunto fechado medido pelo grafo de imports —, com reexportação dos caminhos antigos. Versões comuns em `[workspace.dependencies]`; `TS_RS_EXPORT_DIR` fixo em `.cargo/config.toml`. `tests/conventions/architecture.rs` congela 37 exceções (o detector lê `use` agrupado e caminho inline; a lista só diminui). **Ajustes medidos:** o `agent-protocol` sai na Fase 6 — o contrato carrega tipos de Docker, monitoramento, vazão, plugins e telemetria, que só ganham casa quando o crate da área existe; e cada ponto de extensão nasce na fase que o usa (`AreaPolicy` na 2, `MonitorChecker`/`AgentCommandHandler` na 6, `Classifier` na 8), sem abstração especulativa.
 
-- [ ] **Base de dados consolidada**
+- [x] 🟢 Concluído — **Base de dados consolidada**
   - **Débitos:** DB-02
   - **Esforço:** Pequeno
   - **Arquivos:** `backend/migration/`, `src/models/tables.rs`, `src/app.rs`
@@ -112,10 +113,11 @@ comprometer as outras.
   - **Aceite:**
     - Banco recriado do zero em SQLite e PostgreSQL com o mesmo esquema de antes (comparação do esquema exportado).
     - Entidades regeneradas **contra o PostgreSQL** sem diff.
+  - **Entregue:** 64 → 37 migrations no banco principal e 4 → 3 no de logs: uma migration de criação por tabela, com todo `ALTER` posterior dobrado nela (ordem de colunas preservada); as só de dados e as de criar-e-apagar foram removidas. Esquema comparado antes/depois em SQLite e PostgreSQL 17 (colunas, tipos, nulidade, padrões, índices, FKs): idêntico, salvo o nome da FK `database_connections.via_probe_id` (agora pelo helper `fk(...)`) e a posição ordinal no Postgres de `storage_destinations` (lacunas de coluna apagada). `purge_removed_migrations` removido.
 
 ### Fase 2 — Áreas no backend
 
-- [ ] **Serviço de áreas no `core`**
+- [x] 🟢 Concluído — **Serviço de áreas no `core`**
   - **Débitos:** ARQ-01
   - **Esforço:** Médio
   - **Arquivos:** `crates/core/src/areas/`, controller fino em `crates/app`
@@ -129,8 +131,9 @@ comprometer as outras.
     - Testes de evidência em SQLite em memória, incluindo "o agente local não é evidência de Servidores" e "o dispositivo do sistema não é evidência de Rede".
     - Requisição: viewer recebe 403 no `PUT`; `off` da VPN recusado com servidor ativo; mudança registrada na auditoria.
     - SQLite e PostgreSQL.
+  - **Entregue:** `netmonitor_core::areas` (`Area`, `AreaSet`, `EnabledAreas`, `AreaPolicy`, `AreaService`, `AreasSnapshot`, `AreaImpact`); políticas em `services/area_policies/` (vão para o crate de cada área nas Fases 6–9); `controllers/areas.rs` com `GET /api/areas`, `GET /api/areas/{area}/impact` e `PUT /api/areas/{area}` (admin, auditado, publicado); `AreasInitializer` publica o snapshot no boot. `require_admin` virou um só (`auth_guard`), no lugar de duas cópias. Testes: `crates/core/src/areas/state.rs`, `tests/requests/areas.rs`.
 
-- [ ] **Declaração exaustiva de área e catálogo único de widgets**
+- [x] 🟢 Concluído — **Declaração exaustiva de área e catálogo único de widgets**
   - **Débitos:** ARQ-04
   - **Esforço:** Médio
   - **Arquivos:** `services/ai/harness/tools/`, `services/dashboard/catalog.rs`, `services/alerts/catalog/`, catálogo de tarefas agendadas, `frontend/src/stores/dashboard.ts`
@@ -140,10 +143,11 @@ comprometer as outras.
   - **Aceite:**
     - Peça nova sem área não compila (provado por teste de compilação ou `match` exaustivo).
     - Nenhuma lista de tipos de widget no frontend.
+  - **Entregue:** `AiToolHandler::area()` obrigatório (60 ferramentas), `DashboardWidgetType::area()` e `AlertCategory` (enum no lugar de texto) com `area()` — todos `match` sem `_ =>`; `GET /api/dashboard/catalog` (`DashboardCatalog`), lido pelo frontend no lugar de `CARD_TEMPLATES`/`DEFAULT_WIDGETS`.
 
 ### Fase 3 — Frontend por áreas
 
-- [ ] **Registro de áreas na SPA**
+- [x] 🟢 Concluído — **Registro de áreas na SPA**
   - **Débitos:** ARQ-01, ARQ-03, ARQ-04
   - **Esforço:** Médio
   - **Arquivos:** novo `frontend/src/areas/{core,network,servers,vpn}/index.ts`, `navigation.ts`, `router/index.ts`, `stores/events.ts`, `stores/dashboard.ts`, `pages/DashboardPage.vue`, `pages/SettingsPage.vue`
@@ -161,10 +165,11 @@ comprometer as outras.
     - Link profundo para `/docker` com Servidores `off` mostra a `AreaOffPage`.
     - Layout salvo não perde widget ao desligar e religar.
     - Teste: área desligada não registra handlers SSE.
+  - **Entregue:** `frontend/src/areas/{core,network,servers,vpn}` com `defineArea({ id, routes, nav, widgets, sse })` e registro em `areas/index.ts`; `areas/realtime.ts` registra e desregistra os handlers SSE por área; `events.ts` virou barramento genérico (o `switch` e os imports de stores saíram); `router/areaGuard.ts` + `AreaOffPage.vue`; `AreasCard.vue` em Configurações › Geral; catálogo do dashboard vindo da API. `settingsTabs` e `onboardingSteps` não entraram no contrato: as abas de configuração ainda não têm conteúdo por área, e as etapas do assistente têm registro próprio por área (`components/setup/steps.ts`). Testes: `tests/areas/*.spec.ts`, `tests/stores/dashboard.spec.ts`.
 
 ### Fase 4 — Onboarding por intenção
 
-- [ ] **"O que você vai gerenciar?"**
+- [x] 🟢 Concluído — **"O que você vai gerenciar?"**
   - **Débitos:** ARQ-01
   - **Esforço:** Médio
   - **Arquivos:** `frontend/src/components/setup/`, `InitialSetupDialog.vue`, `backend/src/services/onboarding.rs`
@@ -178,10 +183,11 @@ comprometer as outras.
     - Caminho só Servidores com no máximo 3 etapas.
     - O status não cobra rede de quem escolheu só Servidores.
     - Teste de componente para os dois caminhos.
+  - **Entregue:** `POST /api/settings/onboarding/intent` (admin; exige Rede ou Servidores) e `OnboardingStatus.intentChosen`; `components/setup/steps.ts` (registro de etapas por área), `SetupIntentStep.vue`, `SetupAgentsStep.vue`, `SetupNotificationsStep.vue` e as etapas de rede extraídas do `InitialSetupDialog.vue` (de ~1600 para ~600 linhas); `components/areas/AreaSuggestions.vue` (sugestões por evidência, uma vez por direção). Testes: `tests/components/InitialSetupDialog.spec.ts`, `tests/components/AreaSuggestions.spec.ts`, `tests/requests/areas.rs`.
 
 ### Fase 5 — Backend respeita as áreas
 
-- [ ] **IA, rotinas, catálogos e tempo real filtrados pela área**
+- [x] 🟢 Concluído — **IA, rotinas, catálogos e tempo real filtrados pela área**
   - **Débitos:** ARQ-01, ARQ-05
   - **Esforço:** Médio
   - **Arquivos:** `services/ai/{harness,decider,mentions.rs}`, `services/scheduled_tasks/runner.rs`, `services/agents/background.rs`, ciclo do scheduler, `services/wifi/`, `services/link_tests/`, catálogo de alertas
@@ -195,6 +201,7 @@ comprometer as outras.
     - Com Servidores `off`: nenhuma ferramenta `docker_*` no registro e nenhum `docker` no enum do `load_tools`; `SetLive{0}` enviado.
     - **Monitores de container continuam rodando** com Servidores `off` (teste).
     - Rotinas de Rede pausadas com `off` e retomadas com `on` (teste).
+  - **Entregue:** `ToolPolicy.areas` (+ `with_areas`, que também desliga as ações em container) aplicado uma vez em `run_agent_loop` e na confirmação; `UnattendedTools::for_areas`; tarefas de área desligada viram `skipped` com o motivo (`scheduled_tasks/areas.rs`); menções `@` sem Docker; varredura periódica, enlaces agendados e vigia de Wi-Fi pausados com Rede `off`; **interesse por conexão SSE** (`?interest=docker`, `events::Interests`, base comum `ConnectionCounter` com a presença): o laço de `SetLive` só pede snapshot com alguém olhando o Docker **e** Servidores ligada (ARQ-05). Testes: `tools/mod.rs` (sem ferramenta docker), `tests/requests/areas.rs` (monitor de container continua; varredura pausa e volta).
 
 ### Fase 6 — Piloto: crate `servers` (portão de decisão)
 

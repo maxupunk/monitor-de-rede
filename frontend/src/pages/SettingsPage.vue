@@ -29,6 +29,9 @@
             <DashboardSyncCard />
           </v-col>
           <v-col cols="12">
+            <AreasCard />
+          </v-col>
+          <v-col cols="12">
             <OnboardingCard />
           </v-col>
         </v-row>
@@ -115,6 +118,7 @@ import VendorRegistryCard from '@/components/settings/VendorRegistryCard.vue'
 import DashboardSyncCard from '@/components/settings/DashboardSyncCard.vue'
 import NotificationsCard from '@/components/settings/NotificationsCard.vue'
 import OnboardingCard from '@/components/settings/OnboardingCard.vue'
+import AreasCard from '@/components/settings/AreasCard.vue'
 import DatabaseInfoCard from '@/components/settings/DatabaseInfoCard.vue'
 import AiSettingsCard from '@/components/settings/AiSettingsCard.vue'
 import DeciderSettingsCard from '@/components/settings/DeciderSettingsCard.vue'

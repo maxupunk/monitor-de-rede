@@ -50,12 +50,12 @@ Este documento consolida a auditoria de arquitetura, código-fonte, padrões de 
 | **QUA-05** | Qualidade | Coluna `monitors.timeout_seconds` escrita e nunca lida | Médio | Pequeno | 🟢 Concluído |
 | **QUA-06** | Qualidade | Buffer offline do probe sem teto e com reescrita O(n²) | Médio | Médio | 🟢 Concluído |
 | **DOC-01** | Documentação | Inconsistência entre tabela resumo e corpo deste documento | Médio | Pequeno | 🟢 Corrigido |
-| **DB-02** | Banco | 64 migrations históricas num crate só | Baixo | Médio | 🗓️ Planejado (ADR 017) |
-| **ARQ-01** | Arquitetura | Composição estática: rotas, rotinas, menu e rotas da SPA ligados para toda instalação | Alto | Grande | 🗓️ Planejado (ADR 017) |
+| **DB-02** | Banco | 64 migrations históricas num crate só | Baixo | Médio | 🟢 Concluído (ADR 017) |
+| **ARQ-01** | Arquitetura | Composição estática: rotas, rotinas, menu e rotas da SPA ligados para toda instalação | Alto | Grande | 🟢 Concluído (ADR 017) |
 | **ARQ-02** | Arquitetura | Dependências na direção errada entre domínios no backend (A1–A5) | Médio | Grande | 🗓️ Planejado (ADR 017) |
-| **ARQ-03** | Arquitetura | Barramento SSE central no frontend e Dashboard acoplado ao Docker (A6–A7) | Médio | Médio | 🗓️ Planejado (ADR 017) |
-| **ARQ-04** | Arquitetura | Catálogo de widgets duplicado entre backend e frontend | Médio | Pequeno | 🗓️ Planejado (ADR 017) |
-| **ARQ-05** | Performance | Snapshot Docker pedido com qualquer aba aberta | Médio | Pequeno | 🗓️ Planejado (ADR 017) |
+| **ARQ-03** | Arquitetura | Barramento SSE central no frontend e Dashboard acoplado ao Docker (A6–A7) | Médio | Médio | 🟢 Concluído (ADR 017) |
+| **ARQ-04** | Arquitetura | Catálogo de widgets duplicado entre backend e frontend | Médio | Pequeno | 🟢 Concluído (ADR 017) |
+| **ARQ-05** | Performance | Snapshot Docker pedido com qualquer aba aberta | Médio | Pequeno | 🟢 Concluído (ADR 017) |
 | **ARQ-06** | Arquitetura | Crate único de ~185 mil linhas; fronteira só por convenção | Médio | Grande | 🗓️ Planejado (ADR 017) |
 
 ---
@@ -130,10 +130,10 @@ Este documento consolida a auditoria de arquitetura, código-fonte, padrões de 
 ### 🟢 DB-01: Abstração de Busca Textual — Concluído
 - FTS5 no SQLite, `tsvector` + GIN no PostgreSQL, `LIKE` como fallback, escolha em runtime por densidade.
 
-### 🗓️ DB-02: Versionamento de Migrations — Planejado (ADR 017)
+### 🟢 DB-02: Versionamento de Migrations — Concluído (ADR 017)
 - **Descrição:** 64 migrations históricas, mais o `migration::purge_removed_migrations` para bancos que aplicaram migrations já removidas.
 - **Mudança de premissa (2026-11-05):** o sistema nunca foi para produção, então não há `seaql_migrations` real a preservar. A orientação anterior ("manter como está") caiu.
-- **Plano:** consolidar numa base por crate e editar no lugar até a primeira instalação real — Fase 1 do [roadmap da arquitetura modular](roadmap_arquitetura_modular.md).
+- **Implementado:** 64 → 37 migrations (uma por tabela, com os `ALTER` dobrados) e 4 → 3 no banco de logs; esquema idêntico em SQLite e PostgreSQL; `purge_removed_migrations` removido. Mudança de esquema edita a migration da tabela.
 
 ---
 
@@ -260,7 +260,7 @@ Este documento consolida a auditoria de arquitetura, código-fonte, padrões de 
 
 Levantados em 2026-11-05. A decisão está no [ADR 017](adr/017-arquitetura-modular.md); o plano, no [roadmap da arquitetura modular](roadmap_arquitetura_modular.md), que cita estes IDs em cada fase.
 
-### 🗓️ ARQ-01: Composição Estática — Planejado
+### 🟢 ARQ-01: Composição Estática — Concluído
 - **Arquivos Afetados:** `backend/src/app.rs` (38 `add_route`), `backend/src/initializers/monitoring.rs`, `frontend/src/layouts/DefaultLayout.vue` (`navSections`), `frontend/src/router/index.ts`, `frontend/src/components/setup/InitialSetupDialog.vue`
 - **Descrição:** toda instalação recebe os dois domínios: ~36 entradas de menu, onboarding só de rede, ~60 ferramentas de IA e rotinas próprias de áreas que não usa.
 - **Plano:** áreas `on`/`off` com registros declarativos (Fases 0, 2, 3, 4 e 5).
@@ -270,17 +270,17 @@ Levantados em 2026-11-05. A decisão está no [ADR 017](adr/017-arquitetura-modu
 - **Descrição:** o núcleo conhece Docker, a Rede chama o Decisor diretamente e a IA conhece todos os domínios.
 - **Plano:** pontos de extensão no `core` (`MonitorChecker`, `Classifier`, `AiToolHandler::area`, `WidgetSpec`, `AgentCommandHandler`) — Fases 1 e 6 a 9. Até lá, o teste de arquitetura congela a lista e impede novas.
 
-### 🗓️ ARQ-03: Barramento SSE Central e Dashboard Acoplado ao Docker — Planejado
+### 🟢 ARQ-03: Barramento SSE Central e Dashboard Acoplado ao Docker — Concluído
 - **Arquivos Afetados:** `frontend/src/stores/events.ts`, `frontend/src/pages/DashboardPage.vue`
 - **Descrição:** `events.ts` importa 26 stores e roteia ~58 tópicos num `switch`: área nova exige editar o centro (fere o Aberto/Fechado). O `case 'device:updated'` aparece duas vezes (o segundo nunca executa). `DashboardPage` sempre importa a store Docker.
 - **Plano:** registro de handlers por prefixo; o widget Docker carrega a própria store (Fase 3).
 
-### 🗓️ ARQ-04: Catálogo de Widgets Duplicado — Planejado
+### 🟢 ARQ-04: Catálogo de Widgets Duplicado — Concluído
 - **Arquivos Afetados:** `backend/src/services/dashboard/catalog.rs`, `frontend/src/stores/dashboard.ts` (`CARD_TEMPLATES`, `DEFAULT_WIDGETS`, `parseSavedList`)
 - **Descrição:** os tipos de widget existem nos dois lados (fere o DRY), e `parseSavedList` devolve ao layout todo widget padrão ausente — com as áreas, traria o `docker_summary` de volta sozinho.
 - **Plano:** catálogo único no backend, lido pelo frontend via `ts-rs`, com `area()` por widget (Fase 2).
 
-### 🗓️ ARQ-05: Snapshot Docker com Qualquer Aba Aberta — Planejado
+### 🟢 ARQ-05: Snapshot Docker com Qualquer Aba Aberta — Concluído
 - **Arquivos Afetados:** `backend/src/services/agents/background.rs` (`desired_live_interval(has_subscribers)`)
 - **Descrição:** basta um assinante SSE, em qualquer página, para a central pedir `SetLive` a todos os agentes e distribuir snapshots Docker.
 - **Plano:** considerar a área Servidores e a presença de quem usa dados Docker (Fase 5).

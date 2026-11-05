@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import { installAreaRealtime } from '@/areas/realtime'
 import { apiService } from '@/services/apiService'
 import { useDiscoveryStore } from '@/stores/discovery'
 import { useEventsStore } from '@/stores/events'
@@ -46,6 +47,8 @@ const scanFrame = (overrides: Record<string, unknown> = {}) => ({
 describe('discovery store', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    // As rotas SSE das áreas ligadas, como o layout instala.
+    installAreaRealtime()
     FakeEventSource.latest = null
     FakeEventSource.opened = 0
     vi.stubGlobal('EventSource', FakeEventSource)

@@ -12,6 +12,10 @@ export interface ConfirmOptions {
   iconColor?: string
   width?: number | string
   persistent?: boolean
+  /** Itens listados abaixo da mensagem (ex.: as consequências de desligar). */
+  details?: string[]
+  /** O que impede a ação: aparece como erro e o botão de confirmar fica desabilitado. */
+  blocker?: string | null
 }
 
 export interface PromptOptions {
