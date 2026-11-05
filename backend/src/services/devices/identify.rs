@@ -13,15 +13,16 @@ use loco_rs::app::AppContext;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use serde::Deserialize;
 
+use netmonitor_core::classifier::{
+    self,
+    device_identity::{DeviceFacts, DeviceIdentity, IdentitySuggestion},
+    ClassifierFeature, Lane,
+};
+
 use super::{access::AccessContext, systems};
 use crate::{
     models::_entities::discovery_results,
     services::{
-        ai::decider::{
-            config::DeciderFeature,
-            decisions::device_identity::{DeviceFacts, DeviceIdentity, IdentitySuggestion},
-            runtime::{DeciderRuntime, Lane},
-        },
         discovery::decider_identity::{DECIDER_KEY, LEGACY_DECIDER_KEY},
         shared::errors::AppResult,
         syslog::hints,
@@ -228,19 +229,19 @@ async fn decider_suggestion(
     if !facts.has_evidence() {
         return None;
     }
-    let runtime = DeciderRuntime::from_context(ctx);
-    let settings = runtime
-        .settings_for(&ctx.db, DeciderFeature::DeviceIdentity)
+    let classifier = classifier::from_context(ctx);
+    let min_confidence = classifier
+        .min_confidence(ctx, ClassifierFeature::DeviceIdentity)
         .await?;
     let decision = DeviceIdentity {
         ask_type: true,
         ask_system: true,
-        min_confidence: settings.min_confidence,
+        min_confidence,
     };
-    let outcome = runtime
-        .decide_with(&settings, Lane::Interactive, &facts.state(), &decision)
-        .await?;
-    Some(outcome.value.answered_by(&outcome.model)).filter(|suggestion| !suggestion.is_empty())
+    classifier
+        .identify_device(ctx, Lane::Interactive, &facts, &decision)
+        .await
+        .filter(|suggestion| !suggestion.is_empty())
 }
 
 fn portas_da_descoberta(item: &discovery_results::Model) -> Vec<u16> {
@@ -366,9 +367,7 @@ pub async fn observe(
 #[cfg(test)]
 mod observation_tests {
     use super::*;
-    use crate::services::ai::decider::{
-        decisions::device_identity::IdentitySuggestion, suggestion::DeciderSuggestion,
-    };
+    use netmonitor_core::classifier::suggestion::DeciderSuggestion;
 
     fn result(source: &str, system: &str) -> systems::IdentifyResult {
         systems::IdentifyResult {

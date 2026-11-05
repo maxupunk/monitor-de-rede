@@ -13,6 +13,8 @@ use sea_orm::{
     QueryOrder, QuerySelect,
 };
 
+use netmonitor_core::classifier::log_category::is_category;
+
 use super::{
     categorizer::CLASSIFIED_EVENT,
     template::{hash_hex, parse_hash_hex, template_to_regex},
@@ -21,7 +23,6 @@ use crate::{
     dtos::logs::LogTemplateInfo,
     models::logs::log_templates,
     services::{
-        ai::decider::decisions::log_category::is_category,
         events::EventBus,
         shared::errors::{AppError, AppResult},
     },
@@ -146,7 +147,7 @@ pub async fn confirm(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::ai::decider::decisions::log_category::LOG_CATEGORIES;
+    use netmonitor_core::classifier::log_category::LOG_CATEGORIES;
 
     #[test]
     fn todo_modelo_de_alerta_aponta_para_categoria_conhecida() {

@@ -3,8 +3,8 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::services::ai::decider::{
-    decisions::interfaces::{InterfaceCandidate, MonitorSuggestion},
+use netmonitor_core::classifier::{
+    interfaces::{InterfaceCandidate, MonitorSuggestion},
     suggestion::DeciderSuggestion,
 };
 

@@ -9,13 +9,8 @@ use netmonitor_core::{
 };
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter};
 
-use crate::{
-    models::_entities::scheduled_tasks,
-    services::{
-        ai::harness::tools::{area_of_tool, tool_names_in_area},
-        shared::errors::AppResult,
-    },
-};
+use crate::{models::_entities::scheduled_tasks, services::shared::errors::AppResult};
+use netmonitor_core::ai::tools::{area_of_tool, tool_names_in_area};
 
 /// A consequência de desligar a área para as tarefas agendadas, se houver
 /// alguma ligada que use ferramenta dela.
@@ -54,6 +49,8 @@ mod tests {
 
     #[test]
     fn ferramenta_de_area_desligada_e_pulada() {
+        // O catálogo é montado no ponto de montagem (ADR 017).
+        crate::registries::install_ai_tools();
         let mut enabled = EnabledAreas::all_on();
         assert_eq!(disabled_area(&enabled, "get_docker_containers"), None);
         enabled.set(Area::Servers, false);

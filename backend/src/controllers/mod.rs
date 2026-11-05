@@ -1,6 +1,4 @@
 pub mod agents;
-pub mod ai;
-pub mod ai_conversations;
 pub mod alerts;
 pub mod areas;
 pub mod audit;
@@ -35,3 +33,6 @@ pub mod topology;
 pub mod users;
 pub mod vendors;
 pub mod wifi;
+
+/// As rotas do assistente moram no crate dele (`netmonitor-assistant`).
+pub use netmonitor_assistant::controllers::{ai, ai_conversations};

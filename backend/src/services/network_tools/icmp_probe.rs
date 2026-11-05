@@ -54,15 +54,9 @@ pub struct IcmpProbeResult {
     pub packet_loss_pct: f64,
 }
 
-/// Arredonda um valor de ponto flutuante para duas casas decimais.
-pub fn round_two(val: f64) -> f64 {
-    (val * 100.0).round() / 100.0
-}
-
-/// Converte um `Duration` em milissegundos com arredondamento para duas casas decimais.
-pub fn duration_to_ms(duration: Duration) -> f64 {
-    round_two(duration.as_secs_f64() * 1_000.0)
-}
+/// `round_two` e `duration_to_ms` moram no núcleo (o Decisor também mede
+/// latência); o caminho canônico continua sendo este.
+pub use netmonitor_core::shared::units::{duration_to_ms, round_two};
 
 /// Cria um cliente ICMP DGRAM não-privilegiado (ADR 003) para IPv4 ou IPv6,
 /// opcionalmente definindo o TTL do socket.

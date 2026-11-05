@@ -34,7 +34,6 @@ use super::{
 use crate::{
     models::{_entities::users, scheduled_task_runs, scheduled_tasks},
     services::{
-        ai::harness::tools::{ToolArgs, ToolOutput, UnattendedTools},
         audit::AuditActor,
         shared::{
             errors::{AppError, AppResult},
@@ -42,6 +41,10 @@ use crate::{
         },
         users::Role,
     },
+};
+use netmonitor_core::ai::{
+    args::ToolArgs,
+    tools::{ToolOutput, UnattendedTools},
 };
 
 /// Escopo do [`RunGuard`] das tarefas.

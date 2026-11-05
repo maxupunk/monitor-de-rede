@@ -163,3 +163,45 @@ async fn frente_desligada_nao_classifica() {
     })
     .await;
 }
+
+/// ADR 017: sem o assistente registrado, a classificação de log segue pela
+/// heurística — o padrão é gravado e agrupa as linhas, a busca funciona e
+/// nenhum palpite é pedido ao Decisor, mesmo configurado e no ar.
+#[tokio::test]
+#[serial]
+async fn sem_o_assistente_o_log_segue_pela_heuristica() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |request, ctx| async move {
+        with_key();
+        let fake = fake_ollaya::start(by_keyword(&[("login failure", "auth_failure")])).await;
+        let mut decider = fake.settings();
+        decider.features.log_events = true;
+        settings::save_decider(&ctx.db, decider).await.unwrap();
+        netmonitor_core::classifier::uninstall(&ctx);
+
+        let logs = logs_db(&ctx);
+        line(&logs, "login failure for user admin from 10.0.0.5").await;
+        line(&logs, "login failure for user admin from 10.0.0.9").await;
+
+        let classifier = DeciderTemplateClassifier::new(ctx.clone());
+        assert_eq!(backfill(&logs, &classifier, None, 10).await, 0);
+        assert_eq!(
+            fake.calls(),
+            0,
+            "sem o assistente, o Decisor não é consultado"
+        );
+
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (h, v) = prepare_data::auth_header(&session.token);
+        let page: LogPageResponse = request.get("/api/logs").add_header(h, v).await.json();
+        assert_eq!(page.data.len(), 2, "as linhas continuam na busca");
+        assert_eq!(
+            page.data[0].template_hash, page.data[1].template_hash,
+            "a heurística agrupa as duas linhas num padrão só"
+        );
+        assert!(page
+            .templates
+            .iter()
+            .all(|template| template.category.is_none()));
+    })
+    .await;
+}

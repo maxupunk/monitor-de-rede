@@ -11,7 +11,7 @@
 //! - [`service`]: catálogo, conferência, cadastro e histórico.
 //! - [`runner`]: o laço que roda o que venceu e o "rodar agora".
 //!
-//! [`UnattendedTools`]: crate::services::ai::harness::tools::UnattendedTools
+//! [`UnattendedTools`]: netmonitor_core::ai::tools::UnattendedTools
 
 pub mod areas;
 pub mod arguments;

@@ -4,6 +4,7 @@
 //! `Network.scannable`/`usableHosts` (§6.1) dependem dele. Os scanners, a fila
 //! e a sessão ao vivo entram na Fase 5.
 
+pub mod ai_tools;
 pub mod cidr_range;
 pub mod conflicts;
 pub mod decider_identity;

@@ -1,18 +1,7 @@
-pub mod approvals;
-pub mod chat_benchmark;
-pub mod context_window;
-pub mod conversations;
-pub mod decider;
-pub mod drivers;
-pub mod harness;
-pub mod knowledge;
-pub mod local_models;
-pub mod local_server;
-pub mod mentions;
-pub mod ollama;
-pub mod opencode;
-pub mod openrouter;
-pub mod proactive;
-pub mod response_style;
-pub mod settings;
-pub mod web_search;
+//! O assistente é um crate (`netmonitor-assistant`, ADR 017, Fase 8); o
+//! caminho antigo continua valendo para os controllers, as views e os testes.
+//! As ferramentas que a IA chama não moram aqui: o contrato é do núcleo e
+//! cada área contribui as suas (`services::ai_tools`, `netmonitor_servers::
+//! ai_tools`, `netmonitor_vpn::ai_tools`…), montadas em `crate::registries`.
+
+pub use netmonitor_assistant::*;

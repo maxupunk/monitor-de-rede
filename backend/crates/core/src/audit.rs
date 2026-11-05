@@ -433,6 +433,27 @@ fn extract_user_agent(headers: &HeaderMap) -> Option<String> {
         .filter(|s| !s.is_empty() && s.len() <= 512)
 }
 
+/// Usuário que passou pelo guarda, lido do cabeçalho interno.
+///
+/// # Errors
+///
+/// `401` sem o cabeçalho (rota fora do guarda) ou quando o usuário não existe
+/// mais.
+pub async fn authenticated_user(
+    ctx: &loco_rs::app::AppContext,
+    headers: &axum::http::HeaderMap,
+) -> crate::shared::errors::AppResult<crate::models::users::Model> {
+    use crate::shared::errors::AppError;
+
+    let pid = headers
+        .get(AUTHENTICATED_USER_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| AppError::unauthorized("Não autenticado"))?;
+    crate::models::users::Model::find_by_pid(&ctx.db, pid)
+        .await
+        .map_err(|_| AppError::unauthorized("Usuário não encontrado"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

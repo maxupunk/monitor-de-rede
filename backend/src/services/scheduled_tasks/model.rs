@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use ts_rs::TS;
 
-use crate::services::ai::harness::tools::{AiToolRisk, ToolKind};
+use netmonitor_core::ai::{risk::AiToolRisk, tools::ToolKind};
 
 /// Desfecho de uma execução (e o "último" da tarefa).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]

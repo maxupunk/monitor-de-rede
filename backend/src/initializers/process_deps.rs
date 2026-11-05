@@ -52,6 +52,14 @@ pub fn install(ctx: &AppContext) {
     // O que a área VPN pede ao resto da central (motor de alertas,
     // apresentação de dispositivo, endereços): o scheduler avalia os túneis.
     ctx.shared_store.insert(crate::registries::vpn_central());
+    // A IA (ADR 017, Fase 8): o classificador do núcleo pelo Decisor, o que o
+    // assistente pede ao resto da central e o catálogo de ferramentas que as
+    // áreas contribuem. Aqui, e não num initializer: o scheduler classifica
+    // logs e roda tarefas agendadas com essas ferramentas.
+    netmonitor_core::classifier::install(ctx, crate::registries::classifier());
+    ctx.shared_store
+        .insert(crate::registries::assistant_central());
+    crate::registries::install_ai_tools();
 
     // O socket ICMP é a única peça que pode falhar, e falha por configuração do
     // ambiente, não por bug: sem `net.ipv4.ping_group_range` liberado, o

@@ -26,7 +26,6 @@ use super::{
 use crate::{
     models::{_entities::users, scheduled_task_runs, scheduled_tasks},
     services::{
-        ai::harness::tools::{invalid_action_reason, ToolArgs, ToolContract, UnattendedTools},
         audit::{
             AuditAction, AuditActor, AuditChanges, AuditEntryInput, AuditService, ResourceType,
         },
@@ -36,6 +35,10 @@ use crate::{
         },
         users::Role,
     },
+};
+use netmonitor_core::ai::{
+    args::ToolArgs,
+    tools::{invalid_action_reason, ToolContract, UnattendedTools},
 };
 
 /// Quantas próximas execuções a conferência mostra.

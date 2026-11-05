@@ -8,7 +8,6 @@
 //! mudou é quem o chama e quando.
 
 pub mod channels;
-pub mod contracts;
 pub mod formatter;
 pub mod http_channel;
 pub mod outbox;
@@ -16,5 +15,7 @@ pub mod policy;
 pub mod service;
 
 pub use contracts::{NotificationChannel, NotificationMessage, Severity};
+/// O contrato dos canais mora no núcleo (o resumo da IA também o usa).
+pub use netmonitor_core::notifications::contracts;
 pub use policy::{NotificationKind, NotificationPolicy};
 pub use service::NotificationService;

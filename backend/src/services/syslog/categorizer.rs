@@ -31,19 +31,14 @@ use sea_orm::{
 };
 use tokio::sync::mpsc;
 
+use netmonitor_core::classifier::{
+    self, log_category::LogPattern, suggestion::DeciderSuggestion, ClassifierFeature, Lane,
+};
+
 use super::{queue::PendingLog, template::normalize_message};
 use crate::{
     models::logs::log_templates,
-    services::{
-        ai::decider::{
-            config::DeciderFeature,
-            decisions::log_category::{LogCategory, LogPattern},
-            runtime::{DeciderRuntime, Lane},
-            suggestion::DeciderSuggestion,
-        },
-        events::EventBus,
-        shared::text::truncate_chars,
-    },
+    services::{events::EventBus, shared::text::truncate_chars},
 };
 
 /// Padrões lembrados em memória antes de recomeçar do zero — um padrão
@@ -80,7 +75,8 @@ impl TemplateJob {
     }
 }
 
-/// Quem dá a categoria. O Decisor em produção; um stub nos testes.
+/// Quem dá a categoria. O classificador do processo em produção (o Decisor,
+/// com o assistente); um stub nos testes.
 #[async_trait]
 pub trait TemplateClassifier: Send + Sync {
     /// Vale a pena tentar agora? Falso com a frente desligada.
@@ -102,32 +98,20 @@ impl DeciderTemplateClassifier {
 #[async_trait]
 impl TemplateClassifier for DeciderTemplateClassifier {
     async fn ready(&self) -> bool {
-        DeciderRuntime::from_context(&self.ctx)
-            .settings_for(&self.ctx.db, DeciderFeature::LogEvents)
+        classifier::from_context(&self.ctx)
+            .min_confidence(&self.ctx, ClassifierFeature::LogEvents)
             .await
             .is_some()
     }
 
     async fn classify(&self, job: &TemplateJob) -> Option<DeciderSuggestion> {
-        let runtime = DeciderRuntime::from_context(&self.ctx);
-        let settings = runtime
-            .settings_for(&self.ctx.db, DeciderFeature::LogEvents)
+        let classifier = classifier::from_context(&self.ctx);
+        let min_confidence = classifier
+            .min_confidence(&self.ctx, ClassifierFeature::LogEvents)
             .await?;
-        let decision = LogCategory {
-            min_confidence: settings.min_confidence,
-        };
-        let outcome = runtime
-            .decide_with(
-                &settings,
-                Lane::Background,
-                &job.pattern().state(),
-                &decision,
-            )
-            .await?;
-        outcome.value.map(|mut suggestion| {
-            suggestion.model = outcome.model;
-            suggestion
-        })
+        classifier
+            .categorize_log(&self.ctx, Lane::Background, &job.pattern(), min_confidence)
+            .await
     }
 }
 

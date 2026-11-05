@@ -342,20 +342,8 @@ pub async fn build_dependency_graph<C: ConnectionTrait>(
     Ok(graph)
 }
 
-/// Peso de prioridade topológica por tipo de equipamento.
-#[must_use]
-pub fn role_weight(device_type: &str) -> i32 {
-    match device_type.to_lowercase().as_str() {
-        "gateway" => 100,
-        "router" => 90,
-        "firewall" => 85,
-        "switch" => 80,
-        "access_point" | "ap" => 60,
-        "vpn_peer" | "vpn" => 50,
-        "server" => 40,
-        _ => 20,
-    }
-}
+/// Peso de prioridade topológica — no núcleo, que o triagem da IA também lê.
+pub use netmonitor_core::alerts::role_weight;
 
 /// Infere a categoria causal provável com base no tipo, nome e escopo do equipamento.
 #[must_use]

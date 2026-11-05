@@ -98,26 +98,8 @@ pub async fn require_jwt(
     next.run(request).await
 }
 
-/// Usuário que passou pelo guarda, lido do cabeçalho interno.
-///
-/// # Errors
-///
-/// `401` sem o cabeçalho (rota fora do guarda) ou quando o usuário não existe
-/// mais.
-pub async fn authenticated_user(
-    ctx: &AppContext,
-    headers: &axum::http::HeaderMap,
-) -> crate::services::shared::errors::AppResult<crate::models::users::Model> {
-    use crate::services::shared::errors::AppError;
-
-    let pid = headers
-        .get(AUTHENTICATED_USER_HEADER)
-        .and_then(|value| value.to_str().ok())
-        .ok_or_else(|| AppError::unauthorized("Não autenticado"))?;
-    crate::models::users::Model::find_by_pid(&ctx.db, pid)
-        .await
-        .map_err(|_| AppError::unauthorized("Usuário não encontrado"))
-}
+/// Usuário que passou pelo guarda — mora no núcleo, ao lado do cabeçalho.
+pub use netmonitor_core::audit::authenticated_user;
 
 /// Usuário autenticado **e** administrador.
 ///

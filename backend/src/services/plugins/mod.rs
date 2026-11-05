@@ -18,6 +18,7 @@
 //! fechado, sem interpretador genérico do outro lado.
 
 pub mod actions;
+pub mod ai_tools;
 pub mod auto_accept;
 pub mod builtin;
 pub mod compat;

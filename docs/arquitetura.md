@@ -153,13 +153,18 @@ backend/                 workspace Cargo; o pacote raiz é o crate transitório 
 │   ├── core/            núcleo: models, shared (+ cofre efêmero), events, areas, agents
 │   │                    (sessões, hub, pontes, cadastro, enrollment), audit, storage,
 │   │                    telemetry, monitoring (MonitorChecker, reachability), devices
-│   │                    (adapters, dispositivo do sistema), maintenance, vpn_probe
+│   │                    (adapters, tipos, dispositivo do sistema), maintenance, vpn_probe,
+│   │                    classifier (Classifier + heurística), ai (contrato das ferramentas
+│   │                    da IA, ToolPolicy, grep, seções da plataforma, documentação),
+│   │                    alerts (contratos e feed SSE), notifications (contrato dos canais)
 │   ├── agent-protocol/  contrato de fio central ↔ agente; não depende de crate do workspace
 │   ├── servers/         área Servidores: docker, databases, monitor de container,
 │   │                    política da área, rotas /api/docker e /api/databases
-│   └── vpn/             área VPN: servidor, peers, IPAM, chaves, config/status do watcher,
-│                        perfis de cliente, telemetria dos túneis, política da área,
-│                        rotas /api/vpn
+│   ├── vpn/             área VPN: servidor, peers, IPAM, chaves, config/status do watcher,
+│   │                    perfis de cliente, telemetria dos túneis, política da área,
+│   │                    rotas /api/vpn, a seção `vpn` do estado da plataforma (IA)
+│   └── assistant/       o assistente: chat e harness, provedores de LLM, Decisor, rotinas
+│                        automáticas, marcações, conversas, rotas /api/ai; depende só do `core`
 ├── migration/           uma migration por tabela + helpers em shared.rs
 ├── config/              development.yaml, test.yaml, production.yaml
 ├── examples/spikes/     protótipos que sustentam as ADRs
@@ -169,8 +174,9 @@ backend/                 workspace Cargo; o pacote raiz é o crate transitório 
 `src/services/` é onde o que ainda não foi extraído vive. Os módulos estão
 agrupados pela área a que pertencem no [ADR 017](adr/017-arquitetura-modular.md).
 A área Servidores já mora no seu crate (`crates/servers`, que só depende do
-`core` e do `agent-protocol`) e a VPN no dela (`crates/vpn`, que só depende do
-`core`); `services/docker`, `services/databases` e `services/vpn` são
+`core` e do `agent-protocol`), a VPN no dela (`crates/vpn`, que só depende do
+`core`) e o assistente no dele (`crates/assistant`, que só depende do `core`);
+`services/docker`, `services/databases`, `services/vpn` e `services/ai` são
 reexportações do caminho antigo. As dependências na direção errada que restam
 (ARQ-02 em [`debitos_tecnicos.md`](debitos_tecnicos.md)) estão congeladas no
 teste de arquitetura.
@@ -196,7 +202,10 @@ services/
 ├── auth/ settings/   autenticação, primeiro acesso e configurações
 ├── network_tools/    ICMP, TCP, UDP, DNS, port scanner, vazão (iperf3/btest)
 ├── maintenance/      data_pruner e limpeza de recursos
-├── ai/               Assistente IA: chat, harness de ferramentas, Decisor, proativo
+├── ai/               reexportação do crate `assistant` (chat, harness, Decisor, proativo)
+├── ai_tools/         ferramentas da IA do núcleo (inventário, histórico, logs, grep,
+│                     análise, gráficos, diagnóstico, ações, regras, auditoria, tarefas,
+│                     dashboard, estado da plataforma); as das áreas vêm de cada área
 ├── shared/           crypto, pagination, errors, transaction
 │  ── Rede ──
 ├── discovery/        service, pipeline, scanners/, fingerprints, merger, queue
@@ -820,7 +829,7 @@ confiança, e quem aplica é o operador. Desligado ou fora do ar, tudo segue com
 antes.
 
 ```text
-services/ai/decider/
+crates/assistant/src/decider/
   config.rs         chave mestra, provedor, chave de acesso, uma chave por frente (features)
   providers.rs      presets: Ollaya, TypeSafe, OpenRouter, Cloudflare, OpenAI, Outro
   protocols.rs      os formatos de API (Ollaya, System One, Cloudflare, OpenAI, OpenRouter)
@@ -892,7 +901,7 @@ saem de `ollama.rs`). A API fala com ele em `http://ollama:11434/v1` (protocolo
 OpenAI, o mesmo driver dos provedores na nuvem).
 
 - **Achar o servidor.** O Ollama e o Ollaya usam a mesma procura
-  (`services/ai/local_server.rs`): enquanto a URL da tela apontar para esta
+  (`crates/assistant/src/local_server.rs`): enquanto a URL da tela apontar para esta
   máquina — o nome do serviço, o loopback ou o host do Docker —, a API tenta a
   URL da tela, a variável da instalação (`OLLAMA_URL`/`OLLAYA_URL`, que o
   `docker-compose.host.yml` define), o nome do serviço, `127.0.0.1` e
@@ -932,8 +941,8 @@ periódico, tarefas agendadas). É uma consulta (`ToolKind::Passive`): resolve n
 mesma rodada do agente, sem devolver a vez a ninguém. Detalhes em
 [pesquisa_web_ia_frontend.md](pesquisa_web_ia_frontend.md).
 
-- **Peças.** `harness/tools/web.rs` só traz o contrato; a regra fica em
-  `services/ai/web_search/`: `query.rs` (limpeza do termo e do site),
+- **Peças.** `crates/assistant/src/tools.rs` só traz o contrato; a regra fica em
+  `crates/assistant/src/web_search/`: `query.rs` (limpeza do termo e do site),
   `providers/` (um `SearchProvider` por fonte: DuckDuckGo HTML, SearXNG e NVD),
   `untrusted.rs` (o que volta vira texto puro), `cache.rs` (1 h em memória) e
   `mod.rs` (o `WebSearchService` que junta tudo).
@@ -961,7 +970,7 @@ Decididas no [ADR 017](adr/017-arquitetura-modular.md). Quatro áreas: Núcleo
 | Estado, validação, publicação | `crates/core/src/areas/` | `areas:updated` no SSE, também no snapshot de quem conecta |
 | O que cada área sabe de si (evidência, consequências, bloqueio) | `AreaPolicy` no crate da área (`netmonitor_servers::ServersPolicy`, `netmonitor_vpn::VpnPolicy`) ou em `services/area_policies/` (Rede); registro em `src/registries.rs` | VPN com servidor ativo não desliga (409) |
 | API | `controllers/areas.rs`, `POST /api/settings/onboarding/intent` | só admin muda; auditado |
-| Ferramentas da IA | `AiToolHandler::area()` + `ToolPolicy::with_areas` | saem do chat, das rotinas e das tarefas; tarefa agendada vira `skipped` |
+| Ferramentas da IA | `AiToolHandler` (`netmonitor_core::ai::tools`) com `area()`; cada área contribui as suas (`netmonitor_servers::ai_tools`, `netmonitor_vpn::ai_tools`, `services/{plugins,topology,discovery}/ai_tools.rs`) e o catálogo, na ordem da IA, é montado em `src/registries.rs`; `ToolPolicy::with_areas` filtra | saem do chat, das rotinas e das tarefas; tarefa agendada vira `skipped` |
 | Rotinas | `discovery::queue`, `maintenance_runner`, `agents::background` | varredura, enlaces agendados e vigia de Wi-Fi pausados; snapshot Docker só com Servidores ligada **e** alguma aba com `?interest=docker` |
 | Monitores e alertas | `MonitorChecker` (`netmonitor_core::monitoring`): o monitor `container` é da área Servidores e entra pelo registro | **continuam** (monitor nunca para pela área); modelos de regra da área somem do catálogo |
 | SPA | `frontend/src/areas/`, `router/areaGuard.ts`, `AreaOffPage.vue` | menu, rotas, cards e handlers SSE da área saem; link profundo mostra "Área desligada" |
@@ -970,10 +979,24 @@ A fronteira de código entre as áreas é verificada pelo compilador onde a áre
 já tem crate (`crates/servers` só depende de `core` e `agent-protocol`;
 `crates/vpn`, só de `core`) e, no código ainda não extraído, por
 `tests/conventions/architecture.rs` (exceções congeladas, a lista só diminui;
-`netmonitor_servers::` conta como a área Servidores e `netmonitor_vpn::` como a
-VPN). O que a VPN pede ao resto da central — motor de alertas, apresentação de
-dispositivo, endereços da central — chega por `netmonitor_vpn::central::CentralServices`,
-implementado em `src/registries.rs` e guardado no `shared_store`.
+`netmonitor_servers::` conta como a área Servidores, `netmonitor_vpn::` como a
+VPN e `netmonitor_assistant::` como o assistente). O que a VPN pede ao resto da
+central — motor de alertas, apresentação de dispositivo, endereços da central —
+chega por `netmonitor_vpn::central::CentralServices`, implementado em
+`src/registries.rs` e guardado no `shared_store`.
+
+**Pontos de extensão da IA (Fase 8).** O assistente não importa área:
+
+| Ponto | Onde mora | Quem implementa | Registro |
+| :--- | :--- | :--- | :--- |
+| `Classifier` (palpite onde a heurística ficou em dúvida: identificação de dispositivo, interfaces do SNMP, categoria de log) | `netmonitor_core::classifier` | `netmonitor_assistant::DeciderClassifier`; o padrão é a `HeuristicClassifier` (nenhum palpite, fica a heurística de quem chama) | `src/registries.rs::classifier`, instalado no `shared_store` pelo `after_context` |
+| `AiToolHandler` (+ `ToolPolicy`, `ToolArgs`, risco, gráfico) | `netmonitor_core::ai` | o núcleo (`services/ai_tools`), cada área e o assistente (`web_search`) | `src/registries.rs::ai_tool_catalog`, instalado por `install_catalog` no `after_context` |
+| `GrepSource` (fonte do `grep`) e `PlatformSection` (seção do `get_platform_status`) | `netmonitor_core::ai::{grep, platform}` | a fonte `docker` (Servidores); as seções `vpn` (VPN) e `discovery` (Rede) | montadas com a ferramenta no catálogo |
+| `CentralServices` do assistente (Web Push, canais de notificação, inibição dos alertas, plugins de dispositivo, Docker das marcações) | `netmonitor_assistant::central` | `src/registries.rs` | `shared_store`, pelo `after_context` |
+
+O `backend/contracts/ai_chat.json` (prompt e ferramentas como o modelo os vê) é
+gerado pelo teste do catálogo em `src/registries/ai_catalog_tests.rs`, onde
+todas as áreas estão montadas.
 
 ## 12. O que não existe
 

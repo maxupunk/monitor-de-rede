@@ -14,6 +14,7 @@
 //! [`VpnPolicy`] (`AreaPolicy`). Os dois são montados pelo ponto de montagem.
 
 pub mod access_control;
+pub mod ai_tools;
 pub mod area_policy;
 pub mod central;
 pub mod cidr;

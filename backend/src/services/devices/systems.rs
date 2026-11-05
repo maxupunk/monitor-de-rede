@@ -439,8 +439,7 @@ pub struct IdentifyResult {
     pub from_discovery: bool,
     /// Palpite do Decisor (tipo e sistema) quando a evidência acima é fraca.
     /// Só sugestão: a tela mostra e o operador decide.
-    pub decider:
-        Option<crate::services::ai::decider::decisions::device_identity::IdentitySuggestion>,
+    pub decider: Option<netmonitor_core::classifier::device_identity::IdentitySuggestion>,
 }
 
 /// Escolhe e normaliza um nome anunciado pelo equipamento.

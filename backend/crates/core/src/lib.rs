@@ -8,18 +8,24 @@
 //! (`telemetry`), as plataformas e o dispositivo do sistema (`devices`), a
 //! remoção de agregados (`maintenance`), o `vpn-probe` (`vpn_probe`) e os
 //! pontos de extensão que as áreas implementam
-//! (`monitoring::MonitorChecker`, `areas::AreaPolicy`). A regra de dependência
-//! é garantida pelo `Cargo.toml`: este crate só conhece o contrato de fio
-//! (`agent-protocol`) — não Rede, Servidores, VPN nem a IA.
+//! (`monitoring::MonitorChecker`, `areas::AreaPolicy`, `classifier::Classifier`
+//! e o contrato das ferramentas da IA em `ai`, com os contratos e o feed dos
+//! alertas em `alerts`). A regra de dependência é garantida pelo `Cargo.toml`:
+//! este crate só conhece o contrato de fio (`agent-protocol`) — não Rede,
+//! Servidores, VPN nem o assistente.
 
 pub mod agents;
+pub mod ai;
+pub mod alerts;
 pub mod areas;
 pub mod audit;
+pub mod classifier;
 pub mod devices;
 pub mod events;
 pub mod maintenance;
 pub mod models;
 pub mod monitoring;
+pub mod notifications;
 pub mod shared;
 pub mod storage;
 pub mod telemetry;

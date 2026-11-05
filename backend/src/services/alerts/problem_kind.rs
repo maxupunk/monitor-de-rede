@@ -13,9 +13,8 @@ use serde_json::Value;
 
 use super::{contracts::AlertDataset, fields};
 
-/// Chave de `alert_events.data` com a classificação do episódio (camelCase,
-/// como `lastProblemAt`).
-pub const PROBLEM_KIND: &str = "problemKind";
+/// Chave de `alert_events.data` com a classificação do episódio — no núcleo.
+pub use netmonitor_core::alerts::PROBLEM_KIND;
 
 /// O que o alerta está observando. A forma string é contrato extensível:
 /// valores novos entram aqui e no rótulo, sem migração de schema.

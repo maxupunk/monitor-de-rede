@@ -7,19 +7,14 @@
 use loco_rs::app::AppContext;
 use serde_json::json;
 
-use crate::{
-    dtos::snmp::{InterfaceSuggestions, InterfaceSuggestionsInput},
-    services::ai::decider::{
-        config::DeciderFeature,
-        decisions::interfaces::{rank_candidates, InterfaceAdvice},
-        runtime::{DeciderRuntime, Lane},
-    },
-};
+use netmonitor_core::classifier::{self, interfaces::rank_candidates, ClassifierFeature, Lane};
+
+use crate::dtos::snmp::{InterfaceSuggestions, InterfaceSuggestionsInput};
 
 pub async fn suggest(ctx: &AppContext, input: &InterfaceSuggestionsInput) -> InterfaceSuggestions {
-    let runtime = DeciderRuntime::from_context(ctx);
-    let Some(settings) = runtime
-        .settings_for(&ctx.db, DeciderFeature::Interfaces)
+    let classifier = classifier::from_context(ctx);
+    let Some(min_confidence) = classifier
+        .min_confidence(ctx, ClassifierFeature::Interfaces)
         .await
     else {
         return InterfaceSuggestions::default();
@@ -36,23 +31,19 @@ pub async fn suggest(ctx: &AppContext, input: &InterfaceSuggestionsInput) -> Int
         "interfaceCount": input.interfaces.len(),
     })
     .to_string();
-    let advice = InterfaceAdvice {
-        ranked,
-        min_confidence: settings.min_confidence,
-    };
-    let Some(outcome) = runtime
-        .decide_with(&settings, Lane::OnDemand, &state, &advice)
+    let Some((advice, model)) = classifier
+        .advise_interfaces(ctx, Lane::OnDemand, &state, &ranked, min_confidence)
         .await
     else {
         return InterfaceSuggestions::default();
     };
     InterfaceSuggestions {
         available: true,
-        uplink: outcome.value.uplink.map(|mut uplink| {
-            uplink.model.clone_from(&outcome.model);
+        uplink: advice.uplink.map(|mut uplink| {
+            uplink.model.clone_from(&model);
             uplink
         }),
-        monitor: outcome.value.monitor,
-        model: Some(outcome.model),
+        monitor: advice.monitor,
+        model: Some(model),
     }
 }

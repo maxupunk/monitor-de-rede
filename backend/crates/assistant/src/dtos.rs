@@ -1,0 +1,896 @@
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
+
+/// O gráfico de uma ferramenta mora no núcleo (as áreas contribuem ferramentas).
+pub use netmonitor_core::ai::chart::{
+    AiChart, AiChartAxis, AiChartPoint, AiChartSeries, AiChartUnit,
+};
+
+use crate::decider::{
+    config::AiDeciderSettings,
+    providers::{DeciderProvider, DecisionProtocol},
+};
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct ChatMessageInput {
+    pub role: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct ChatStreamRequest {
+    pub messages: Vec<ChatMessageInput>,
+    /// Dispositivo, monitor ou alerta de onde o chat foi aberto: vira contexto
+    /// no system prompt para a IA não precisar perguntar "qual?".
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub device_id: Option<i64>,
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub monitor_id: Option<i64>,
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub alert_id: Option<i64>,
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub rule_id: Option<i64>,
+    /// O que o usuário marcou com `@` na última pergunta.
+    #[serde(default)]
+    pub mentions: Vec<AiMention>,
+    /// Resumo das mensagens já compactadas — elas não vêm mais em `messages`.
+    #[serde(default)]
+    pub summary: Option<String>,
+    /// O que a resposta anterior mediu: base da decisão de compactar.
+    #[serde(default)]
+    pub context_hint: Option<ContextHint>,
+    /// Compactar agora, mesmo cabendo na janela.
+    #[serde(default)]
+    pub compact: bool,
+    /// Identificador estável da conversa na tela. O modo "Aceitar
+    /// automaticamente" dos plugins de dispositivo vale por conversa.
+    #[serde(default)]
+    pub conversation_key: Option<String>,
+}
+
+/// Medida da resposta anterior da conversa.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct ContextHint {
+    /// Tokens da conversa na última rodada (entrada + saída).
+    #[ts(type = "number")]
+    pub tokens: u64,
+    /// Janela do modelo que respondeu.
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub window: Option<u64>,
+    /// Modelo que respondeu.
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Grupos de ferramentas que a conversa carregou, na ordem (evento
+    /// `usage`). Voltam iguais para a lista de ferramentas não mudar e o
+    /// cache de prefixo do provedor continuar valendo.
+    #[serde(default)]
+    pub tool_groups: Vec<String>,
+}
+
+/// Só vive durante a desserialização: a diferença de tamanho entre as
+/// variantes não custa nada que valha uma caixa.
+#[derive(Deserialize)]
+#[serde(untagged)]
+#[allow(clippy::large_enum_variant)]
+enum ChatStreamRequestHelper {
+    #[serde(rename_all = "camelCase")]
+    Object {
+        messages: Vec<ChatMessageInput>,
+        #[serde(default)]
+        device_id: Option<i64>,
+        #[serde(default)]
+        monitor_id: Option<i64>,
+        #[serde(default)]
+        alert_id: Option<i64>,
+        #[serde(default)]
+        rule_id: Option<i64>,
+        #[serde(default)]
+        mentions: Vec<AiMention>,
+        #[serde(default)]
+        summary: Option<String>,
+        #[serde(default)]
+        context_hint: Option<ContextHint>,
+        #[serde(default)]
+        compact: bool,
+        #[serde(default)]
+        conversation_key: Option<String>,
+    },
+    Array(Vec<ChatMessageInput>),
+}
+
+impl<'de> Deserialize<'de> for ChatStreamRequest {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let helper = ChatStreamRequestHelper::deserialize(deserializer)?;
+        match helper {
+            ChatStreamRequestHelper::Object {
+                messages,
+                device_id,
+                monitor_id,
+                alert_id,
+                rule_id,
+                mentions,
+                summary,
+                context_hint,
+                compact,
+                conversation_key,
+            } => Ok(Self {
+                messages,
+                device_id,
+                monitor_id,
+                alert_id,
+                rule_id,
+                mentions,
+                summary,
+                context_hint,
+                compact,
+                conversation_key,
+            }),
+            ChatStreamRequestHelper::Array(messages) => Ok(Self {
+                messages,
+                device_id: None,
+                monitor_id: None,
+                alert_id: None,
+                rule_id: None,
+                mentions: Vec::new(),
+                summary: None,
+                context_hint: None,
+                compact: false,
+                conversation_key: None,
+            }),
+        }
+    }
+}
+
+/// Tipo do que se marca com `@` no chat.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub enum AiMentionKind {
+    Device,
+    Monitor,
+    Container,
+    /// Uma fonte de dados inteira: logs, alertas, checagens, Docker.
+    Source,
+}
+
+/// Algo marcado com `@` na pergunta: diz à IA de qual recurso se trata, sem
+/// ela precisar adivinhar pelo nome.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct AiMention {
+    pub kind: AiMentionKind,
+    /// Id do dispositivo/monitor, id do container ou nome da fonte.
+    pub id: String,
+    pub label: String,
+    /// Linha curta para a lista de sugestões (IP, tipo, estado).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiMentionQuery {
+    pub q: Option<String>,
+}
+
+/// Deserializa identificadores de modelo aceitando string simples ou objeto com id/name.
+pub fn deserialize_model_id<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum ModelInput {
+        String(String),
+        ObjectWithId { id: String },
+        ObjectWithName { name: String },
+        Fallback(serde_json::Value),
+    }
+
+    let input = ModelInput::deserialize(deserializer)?;
+    let val = match input {
+        ModelInput::String(s) => s,
+        ModelInput::ObjectWithId { id } => id,
+        ModelInput::ObjectWithName { name } => name,
+        ModelInput::Fallback(val) => val
+            .get("id")
+            .and_then(|v| v.as_str())
+            .or_else(|| val.get("name").and_then(|v| v.as_str()))
+            .unwrap_or("")
+            .to_string(),
+    };
+    Ok(val.trim().to_string())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TestConnectionInputHelper {
+    pub driver: String,
+    #[serde(default)]
+    pub base_url: Option<String>,
+    #[serde(default)]
+    pub api_key: Option<String>,
+    #[serde(deserialize_with = "deserialize_model_id")]
+    pub model: String,
+}
+
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct TestConnectionInput {
+    pub driver: String,
+    pub base_url: Option<String>,
+    pub api_key: Option<String>,
+    pub model: String,
+}
+
+impl<'de> Deserialize<'de> for TestConnectionInput {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let h = TestConnectionInputHelper::deserialize(deserializer)?;
+        Ok(Self {
+            driver: h.driver,
+            base_url: h.base_url,
+            api_key: h.api_key,
+            model: h.model,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct TestConnectionResponse {
+    pub success: bool,
+    pub latency_ms: f64,
+    pub message: String,
+    #[serde(default)]
+    pub model: Option<String>,
+}
+
+/// Testa o Decisor com o que está no formulário, ainda não salvo.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct TestDeciderInput {
+    pub decider: AiDeciderSettings,
+    /// Pergunta de exemplo; sem ela, vale a padrão do servidor.
+    #[serde(default)]
+    pub question: Option<String>,
+}
+
+/// O formulário do Decisor, para listar, baixar ou carregar modelos com o que
+/// está na tela (ainda sem gravar).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DeciderFormInput {
+    pub decider: AiDeciderSettings,
+}
+
+/// Um modelo que a tela oferece no autocomplete.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DeciderModelOption {
+    pub name: String,
+    /// Só os do catálogo têm; um instalado por fora vem sem.
+    #[serde(default)]
+    pub description: Option<String>,
+    pub installed: bool,
+    /// A ficha do modelo; `None` para um instalado fora do catálogo.
+    #[serde(default)]
+    #[ts(optional)]
+    pub spec: Option<DeciderModelSpecView>,
+    /// Nota no benchmark das decisões do NetMonitor, quando medido nele.
+    #[serde(default)]
+    #[ts(optional)]
+    pub decisions: Option<DeciderDecisionsScoreView>,
+}
+
+/// Nota de um modelo no benchmark das decisões do NetMonitor
+/// (`decider::decisions_benchmark`).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DeciderDecisionsScoreView {
+    /// Nota geral (0–1): média das seis decisões, cada uma pesando igual.
+    pub overall: f64,
+    /// 95% das decisões responderam até aqui, em CPU.
+    pub p95_ms: f64,
+}
+
+/// Uma decisão do NetMonitor avaliada no benchmark.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DeciderBenchmarkTask {
+    pub id: String,
+    pub label: String,
+}
+
+/// A nota de um modelo numa decisão.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DeciderBenchmarkTaskScore {
+    pub task: String,
+    /// 0–1.
+    pub score: f64,
+}
+
+/// Um modelo na página de benchmark.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DeciderBenchmarkRow {
+    pub model: String,
+    /// Da ficha do catálogo; `None` para um modelo fora dele.
+    #[serde(default)]
+    #[ts(optional)]
+    pub family: Option<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub description: Option<String>,
+    pub recommended: bool,
+    /// Vem instalado com o NetMonitor (serviço `ollaya-models`).
+    pub bundled: bool,
+    /// Nota geral (0–1) e o intervalo de confiança de 90%.
+    pub overall: f64,
+    pub overall_low: f64,
+    pub overall_high: f64,
+    /// Nota contando só as sugestões que a tela mostra (confiança mínima).
+    pub screen: f64,
+    pub tasks: Vec<DeciderBenchmarkTaskScore>,
+    pub p50_ms: f64,
+    pub p95_ms: f64,
+    /// Fração das decisões acima do tempo máximo (0–1): nelas o NetMonitor
+    /// segue sem a decisão.
+    pub over_timeout: f64,
+    /// A latência é a deste outro modelo (mesmo grafo e tamanho, outros
+    /// pesos); `None` quando foi medida no próprio.
+    #[serde(default)]
+    #[ts(optional)]
+    pub latency_from: Option<String>,
+}
+
+/// `GET /api/ai/decider/benchmark` — os modelos medidos nas decisões do
+/// NetMonitor, do mais preciso ao menos.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DeciderBenchmarkReport {
+    /// Data da medição (AAAA-MM-DD).
+    pub measured_on: String,
+    pub hardware: String,
+    /// Casos (perguntas reais do NetMonitor) em que todos foram medidos.
+    pub cases: u32,
+    /// Tempo máximo por decisão usado na medição.
+    pub timeout_ms: u32,
+    pub tasks: Vec<DeciderBenchmarkTask>,
+    pub models: Vec<DeciderBenchmarkRow>,
+}
+
+/// Um domínio operacional avaliado no benchmark de modelos do chat.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct ChatBenchmarkDomain {
+    pub id: String,
+    pub label: String,
+}
+
+/// A nota de um modelo de chat num domínio operacional.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct ChatBenchmarkDomainScore {
+    pub domain: String,
+    /// 0–1.
+    pub score: f64,
+}
+
+/// O desempenho de um modelo de chat numa suíte (`bench` ou `blind`).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct ChatBenchmarkSplitView {
+    pub run: String,
+    pub cases: u32,
+    pub overall: f64,
+    pub overall_low: f64,
+    pub overall_high: f64,
+    pub tools: f64,
+    pub answer: f64,
+    pub safety: f64,
+    pub perfect: f64,
+    pub errors: u32,
+    pub turn_p50_ms: f64,
+    pub turn_p95_ms: f64,
+    pub tokens_per_s: f64,
+    pub fit: bool,
+    pub domains: Vec<ChatBenchmarkDomainScore>,
+}
+
+/// Um modelo de chat na página `/ai-benchmark`.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct ChatBenchmarkRow {
+    pub model: String,
+    pub label: String,
+    pub family: String,
+    #[serde(default)]
+    #[ts(optional)]
+    pub description: Option<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub quantization: Option<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub parameter_size: Option<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub download_mb: Option<u32>,
+    pub recommended: bool,
+    pub bundled: bool,
+    pub netmonitor_trained: bool,
+    pub fit: bool,
+    pub bench: ChatBenchmarkSplitView,
+    #[serde(default)]
+    #[ts(optional)]
+    pub blind: Option<ChatBenchmarkSplitView>,
+}
+
+/// `GET /api/ai/chat/benchmark` — os modelos de chat (Ollama local) medidos
+/// nos cenários oficiais (`bench`) e cegos de NOC/ISP (`blind`) do NetMonitor.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct ChatBenchmarkReport {
+    pub measured_on: String,
+    pub hardware: String,
+    pub num_ctx: u32,
+    pub timeout_ms: u32,
+    pub min_score: f64,
+    pub min_safety: f64,
+    pub min_tools: f64,
+    pub bench_cases: u32,
+    pub blind_cases: u32,
+    pub domains: Vec<ChatBenchmarkDomain>,
+    pub models: Vec<ChatBenchmarkRow>,
+}
+
+/// Língua que o modelo atende.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub enum DeciderModelLanguage {
+    /// Mais de 100 línguas (o português entre elas).
+    Multilingual,
+    /// Inglês (alguns também italiano ou chinês) — sem português.
+    English,
+}
+
+/// O que a tela precisa para orientar a escolha de um modelo do catálogo.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DeciderModelSpecView {
+    /// Família ("Decima Network", "Kev"), para agrupar na lista.
+    pub family: String,
+    pub language: DeciderModelLanguage,
+    /// Tamanho do download, em MB.
+    #[serde(default)]
+    #[ts(optional)]
+    pub download_mb: Option<u32>,
+    /// Tempo máximo por decisão sugerido para este modelo (`decider::catalog`).
+    pub suggested_timeout_ms: u32,
+    /// O recomendado para o NetMonitor.
+    pub recommended: bool,
+    /// Vem instalado com o NetMonitor (serviço `ollaya-models`): não se baixa
+    /// do registro do Ollaya.
+    #[serde(default)]
+    pub bundled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DeciderModelsResponse {
+    /// O servidor respondeu. Em nuvem não há o que listar: vale `true` e a
+    /// conexão se confere no teste (passo 3).
+    pub online: bool,
+    /// O provedor baixa e carrega modelos (só o Ollaya): a tela mostra
+    /// download, memória e "carregar agora".
+    #[serde(default)]
+    pub manages_models: bool,
+    #[serde(default)]
+    pub error_message: Option<String>,
+    /// Nomes como o Ollaya os lista (`laya:multilingual`…).
+    pub installed: Vec<String>,
+    /// Carregados na memória agora (`/api/ps`). Fora dela, a primeira
+    /// pergunta espera o modelo sair do disco (5–20 s).
+    #[serde(default)]
+    pub loaded: Vec<String>,
+    /// Catálogo conhecido mais o que está instalado fora dele.
+    pub options: Vec<DeciderModelOption>,
+}
+
+/// Um provedor de decisões, como a tela o oferece (`decider::providers`).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DeciderProviderView {
+    pub id: DeciderProvider,
+    pub label: String,
+    pub description: String,
+    /// `None` no "Outro": o operador escolhe o formato.
+    #[serde(default)]
+    #[ts(optional)]
+    pub protocol: Option<DecisionProtocol>,
+    pub default_base_url: String,
+    pub default_model: String,
+    pub models: Vec<DeciderProviderModel>,
+    pub requires_key: bool,
+    pub requires_account: bool,
+    #[serde(default)]
+    #[ts(optional)]
+    pub key_url: Option<String>,
+    /// Os textos saem da rede: a tela avisa antes de ligar.
+    pub cloud: bool,
+    pub manages_models: bool,
+    pub suggested_timeout_ms: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DeciderProviderModel {
+    pub name: String,
+    pub description: String,
+}
+
+/// Quão provável o Decisor acha que um grupo de ferramentas é necessário.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DeciderGroupScore {
+    pub id: String,
+    pub purpose: String,
+    /// 0–1.
+    pub probability: f64,
+    /// Passou do limiar configurado: iria para a IA.
+    pub selected: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct TestDeciderResponse {
+    pub success: bool,
+    /// O Ollaya respondeu.
+    pub online: bool,
+    /// O modelo configurado está instalado nele.
+    pub model_installed: bool,
+    pub latency_ms: f64,
+    pub message: String,
+    /// Quem respondeu de fato (`laya:en`, `laya:multilingual`…).
+    #[serde(default)]
+    pub model: Option<String>,
+    pub groups: Vec<DeciderGroupScore>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct AiToolCallInfo {
+    pub id: String,
+    pub name: String,
+    #[ts(type = "Record<string, unknown>")]
+    pub arguments: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct AiToolResultInfo {
+    pub id: String,
+    pub name: String,
+    #[ts(type = "Record<string, unknown>")]
+    pub result: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct OllamaModelItem {
+    pub name: String,
+    #[serde(default)]
+    pub size: Option<u64>,
+    #[serde(default)]
+    pub parameter_size: Option<String>,
+    #[serde(default)]
+    pub modified_at: Option<String>,
+    /// Janela nativa do modelo em tokens (`*.context_length` do `/api/show`).
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub context_length: Option<u64>,
+    /// Da família treinada com as ferramentas do NetMonitor (prompt enxuto).
+    #[serde(default)]
+    pub netmonitor_trained: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct OllamaRecommendedModel {
+    pub name: String,
+    pub description: String,
+    pub parameter_size: String,
+    /// Rótulo da janela (ex.: `128k`), derivado de `context_length`.
+    pub context_window: String,
+    /// Janela nativa do modelo em tokens: o `num_ctx` que a tela assume.
+    #[ts(type = "number")]
+    pub context_length: u64,
+    pub is_installed: bool,
+    pub tool_calling_optimized: bool,
+    /// Treinado com as ferramentas do NetMonitor: o chat manda o prompt
+    /// enxuto, sem o roteamento do Decisor.
+    pub netmonitor_trained: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct OllamaModelsResponse {
+    pub installed: Vec<OllamaModelItem>,
+    pub recommended: Vec<OllamaRecommendedModel>,
+    #[serde(default = "default_true")]
+    pub is_online: bool,
+    #[serde(default)]
+    pub error_message: Option<String>,
+}
+
+const fn default_true() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct OllamaPullRequest {
+    pub model: String,
+    #[serde(default)]
+    pub base_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+/// Progresso do download de um modelo num servidor local (Ollama ou Ollaya).
+pub struct ModelPullProgress {
+    pub status: String,
+    #[serde(default)]
+    pub digest: Option<String>,
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub total: Option<u64>,
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub completed: Option<u64>,
+    #[serde(default)]
+    pub percentage: Option<f64>,
+    pub done: bool,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+impl ModelPullProgress {
+    /// Evento final de um download que falhou.
+    #[must_use]
+    pub fn failed(status: &str, error: impl Into<String>) -> Self {
+        Self {
+            status: status.to_string(),
+            digest: None,
+            total: None,
+            completed: None,
+            percentage: None,
+            done: true,
+            error: Some(error.into()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct OpenCodeModelItem {
+    pub id: String,
+    #[serde(default)]
+    pub is_free: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supports_tools: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct OpenCodeModelsResponse {
+    pub models: Vec<OpenCodeModelItem>,
+    #[serde(default = "default_true")]
+    pub is_online: bool,
+    #[serde(default)]
+    pub error_message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct OpenRouterModelItem {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub is_free: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_length: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supports_tools: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct OpenRouterModelsResponse {
+    pub models: Vec<OpenRouterModelItem>,
+    #[serde(default = "default_true")]
+    pub is_online: bool,
+    #[serde(default)]
+    pub error_message: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_deserialize_test_connection_input_object_model() {
+        let json_data = r#"{
+            "driver": "openrouter",
+            "model": {
+                "id": "google/gemma-4-26b-a4b-it:free",
+                "name": "Google Gemma"
+            }
+        }"#;
+
+        let input: TestConnectionInput = serde_json::from_str(json_data).unwrap();
+        assert_eq!(input.model, "google/gemma-4-26b-a4b-it:free");
+    }
+
+    #[test]
+    fn test_deserialize_test_connection_input_string_model() {
+        let json_data = r#"{
+            "driver": "ollama",
+            "model": "llama3.2"
+        }"#;
+
+        let input: TestConnectionInput = serde_json::from_str(json_data).unwrap();
+        assert_eq!(input.model, "llama3.2");
+    }
+
+    #[test]
+    fn test_deserialize_chat_stream_request_object() {
+        let json_data = r#"{
+            "messages": [
+                { "role": "user", "content": "oi" }
+            ],
+            "deviceId": 42
+        }"#;
+
+        let req: ChatStreamRequest = serde_json::from_str(json_data).unwrap();
+        assert_eq!(req.messages.len(), 1);
+        assert_eq!(req.messages[0].content, "oi");
+        assert_eq!(req.device_id, Some(42));
+    }
+
+    #[test]
+    fn test_deserialize_chat_stream_request_array() {
+        let json_data = r#"[
+            { "role": "user", "content": "oi." }
+        ]"#;
+
+        let req: ChatStreamRequest = serde_json::from_str(json_data).unwrap();
+        assert_eq!(req.messages.len(), 1);
+        assert_eq!(req.messages[0].content, "oi.");
+        assert_eq!(req.device_id, None);
+    }
+}
+
+/// Corpo de `POST /api/ai/tools/execute`: a chamada que o usuário confirmou.
+#[derive(Debug, Clone, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct ExecuteToolRequest {
+    pub name: String,
+    #[serde(default)]
+    #[ts(type = "Record<string, unknown>")]
+    pub arguments: serde_json::Value,
+    /// Conversa de onde veio a confirmação (plugins de dispositivo).
+    #[serde(default)]
+    #[ts(optional)]
+    pub conversation_key: Option<String>,
+    /// Id da chamada da IA (o card): decidida aqui, sai do aviso das outras
+    /// telas e não roda de novo em outra aba.
+    #[serde(default)]
+    #[ts(optional)]
+    pub call_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct ExecuteToolResponse {
+    #[ts(type = "Record<string, unknown>")]
+    pub result: serde_json::Value,
+    pub chart: Option<AiChart>,
+}
+
+/// Corpo de criação/atualização de uma conversa salva do assistente.
+#[derive(Debug, Clone, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct AiConversationInput {
+    pub title: String,
+    /// Mensagens como a tela as exibe (texto, ferramentas, gráficos).
+    #[ts(type = "unknown[]")]
+    pub messages: serde_json::Value,
+}
+
+/// Item da lista de conversas: sem as mensagens, que só vêm ao abrir.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct AiConversationSummary {
+    #[ts(type = "number")]
+    pub id: i64,
+    pub title: String,
+    pub updated_at: String,
+    #[ts(type = "number")]
+    pub message_count: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct AiConversationDetail {
+    #[ts(type = "number")]
+    pub id: i64,
+    pub title: String,
+    pub updated_at: String,
+    #[ts(type = "unknown[]")]
+    pub messages: serde_json::Value,
+}

@@ -64,7 +64,7 @@ cada acesso ao equipamento (ou ligando, ciente do risco, um modo automático).
    testes unitários (fixtures; chamada sem fixture reprova) e funcionais (no
    equipamento, só leitura). O `checksum` cobre o código e amarra teste e
    revisão ao código testado. A skill de **autoria**
-   (`services/ai/knowledge/plugins.md`) é da IA e não viaja com o pacote.
+   (`crates/core/src/ai/knowledge/plugins.md`) é da IA e não viaja com o pacote.
 
 7. **Ciclo de vida**: importado → `quarantine` → (revisão aceita) → `draft` →
    (testes) → `tested` → (operador) → `active`. Importação passa por análise

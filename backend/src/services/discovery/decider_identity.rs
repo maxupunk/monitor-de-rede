@@ -11,18 +11,14 @@ use loco_rs::app::AppContext;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use serde_json::Value;
 
-use super::{device_identifier::scores, merger::DiscoveredHost, service::ScanSessionService};
-use crate::{
-    models::discovery_results,
-    services::{
-        ai::decider::{
-            config::DeciderFeature,
-            decisions::device_identity::{DeviceFacts, DeviceIdentity, IdentitySuggestion},
-            runtime::{DeciderRuntime, Lane},
-        },
-        shared::errors::AppResult,
-    },
+use netmonitor_core::classifier::{
+    self,
+    device_identity::{DeviceFacts, DeviceIdentity, IdentitySuggestion},
+    ClassifierFeature, Lane,
 };
+
+use super::{device_identifier::scores, merger::DiscoveredHost, service::ScanSessionService};
+use crate::{models::discovery_results, services::shared::errors::AppResult};
 
 /// Chave do palpite em `details` do resultado e em `data` do host ao vivo.
 pub const DECIDER_KEY: &str = "decider";
@@ -111,9 +107,9 @@ pub fn spawn(ctx: &AppContext, run_id: i64, hosts: Vec<DiscoveredHost>) {
 /// Pergunta ao Decisor sobre os hosts em dúvida e grava os palpites. Devolve
 /// quantos hosts ganharam sugestão.
 pub async fn enrich(ctx: &AppContext, run_id: i64, hosts: &[DiscoveredHost]) -> AppResult<usize> {
-    let runtime = DeciderRuntime::from_context(ctx);
-    let Some(settings) = runtime
-        .settings_for(&ctx.db, DeciderFeature::DeviceIdentity)
+    let classifier = classifier::from_context(ctx);
+    let Some(min_confidence) = classifier
+        .min_confidence(ctx, ClassifierFeature::DeviceIdentity)
         .await
     else {
         return Ok(0);
@@ -124,20 +120,16 @@ pub async fn enrich(ctx: &AppContext, run_id: i64, hosts: &[DiscoveredHost]) -> 
         if enriched >= MAX_HOSTS_PER_RUN {
             break;
         }
-        let Some((facts, decision)) = plan_for(host, settings.min_confidence) else {
+        let Some((facts, decision)) = plan_for(host, min_confidence) else {
             continue;
         };
-        let Some(outcome) = runtime
-            .decide_with(&settings, Lane::Background, &facts.state(), &decision)
+        let Some(answer) = classifier
+            .identify_device(ctx, Lane::Background, &facts, &decision)
             .await
         else {
             continue;
         };
-        let suggestion = calibrate(
-            outcome.value.answered_by(&outcome.model),
-            host,
-            settings.min_confidence,
-        );
+        let suggestion = calibrate(answer, host, min_confidence);
         if suggestion.is_empty() {
             continue;
         }
@@ -218,13 +210,11 @@ mod tests {
 
     fn suggestion(kind: &str, confidence: f64) -> IdentitySuggestion {
         IdentitySuggestion {
-            device_type: Some(
-                crate::services::ai::decider::suggestion::DeciderSuggestion {
-                    value: kind.into(),
-                    confidence,
-                    model: "laya:multilingual".into(),
-                },
-            ),
+            device_type: Some(netmonitor_core::classifier::suggestion::DeciderSuggestion {
+                value: kind.into(),
+                confidence,
+                model: "laya:multilingual".into(),
+            }),
             operating_system: None,
         }
     }

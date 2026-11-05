@@ -6,7 +6,14 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use loco_rs::app::AppContext;
-use netmonitor_core::{areas::AreaPolicy, models::devices, monitoring::MonitorCheckers};
+use netmonitor_assistant::{
+    central as assistant,
+    mentions::{ContainerDirectory, MentionContainer},
+};
+use netmonitor_core::{
+    ai::tools::AiToolHandler, areas::AreaPolicy, classifier::Classifier, models::devices,
+    monitoring::MonitorCheckers, notifications::NotificationMessage, shared::errors::AppError,
+};
 use netmonitor_vpn::central::{Central, CentralServices};
 use sea_orm::DatabaseConnection;
 use serde_json::Value;
@@ -14,8 +21,20 @@ use serde_json::Value;
 use crate::{
     controllers::devices::present_for_vpn,
     services::{
-        alerts::vpn_peer_watcher, area_policies::NetworkPolicy, docker::source::DockerEngine,
-        server_addresses, shared::errors::AppResult,
+        ai_tools::{
+            actions, alert_rules, analysis, ask, audit, charts, dashboard, diagnostics, grep,
+            history, inventory, logs, platform, schedules,
+        },
+        alerts::{inhibition, vpn_peer_watcher},
+        area_policies::NetworkPolicy,
+        discovery::ai_tools::DiscoveryStatus,
+        docker::{engine, hosts, source::DockerEngine},
+        notifications::NotificationService,
+        plugins::{ai_tools as plugins, auto_accept, credentials},
+        server_addresses,
+        shared::errors::AppResult,
+        topology::ai_tools::Topology,
+        webpush::{deliver, Audience},
     },
 };
 
@@ -69,6 +88,181 @@ impl CentralServices for VpnCentral {
 pub fn vpn_central() -> Central {
     Central::new(Arc::new(VpnCentral))
 }
+
+/// O classificador do processo (ADR 017, `Classifier`): o Decisor do
+/// assistente. Sem ele, o núcleo usa a heurística.
+#[must_use]
+pub fn classifier() -> Arc<dyn Classifier> {
+    Arc::new(netmonitor_assistant::DeciderClassifier)
+}
+
+/// O catálogo de ferramentas da IA, na ordem em que a IA as vê (a ordem é
+/// contrato: o prefixo em cache no provedor e o `contracts/ai_chat.json`
+/// dependem dela). Cada área contribui as suas; o assistente, a pesquisa na
+/// web.
+#[must_use]
+pub fn ai_tool_catalog() -> Vec<Box<dyn AiToolHandler>> {
+    use netmonitor_servers::ai_tools as docker;
+
+    vec![
+        Box::new(inventory::SystemSummary),
+        Box::new(inventory::ListDevices),
+        Box::new(inventory::DeviceDetail),
+        Box::new(inventory::DeviceInterfaces),
+        Box::new(inventory::ListMonitors),
+        Box::new(inventory::Alerts),
+        Box::new(history::MonitorHistory),
+        Box::new(history::DeviceMetrics),
+        Box::new(analysis::RootCause),
+        Box::new(analysis::BaselineComparison),
+        Box::new(analysis::HourlyPattern),
+        Box::new(analysis::IncidentTimeline),
+        Box::new(charts::MonitorLatencyChart),
+        Box::new(charts::InterfaceTrafficChart),
+        Box::new(charts::DeviceMetricChart),
+        Box::new(logs::LogsOverview),
+        Box::new(grep::Grep::new(Arc::new(docker::DockerLogs))),
+        Box::new(docker::DockerHosts),
+        Box::new(docker::DockerContainers),
+        Box::new(docker::DockerUsage),
+        Box::new(docker::DockerContainerAction),
+        Box::new(platform::PlatformStatus::new(vec![
+            Box::new(netmonitor_vpn::ai_tools::VpnStatus),
+            Box::new(DiscoveryStatus),
+        ])),
+        Box::new(Topology),
+        Box::new(audit::AuditLog),
+        Box::new(inventory::SearchDocs),
+        Box::new(netmonitor_assistant::tools::WebSearch),
+        Box::new(diagnostics::Ping),
+        Box::new(diagnostics::Traceroute),
+        Box::new(diagnostics::ScanPorts),
+        Box::new(diagnostics::DnsLookup),
+        Box::new(diagnostics::Playbook),
+        Box::new(actions::AcknowledgeAlert),
+        Box::new(actions::SilenceAlert),
+        Box::new(actions::CreateMaintenanceWindow),
+        Box::new(actions::CreateMonitor),
+        Box::new(alert_rules::AlertRulesGuide),
+        Box::new(alert_rules::ListAlertRules),
+        Box::new(alert_rules::ExplainAlert),
+        Box::new(alert_rules::CreateAlertRule),
+        Box::new(alert_rules::DeleteAlertRule),
+        Box::new(alert_rules::ToggleAlertRule),
+        Box::new(plugins::AuthoringGuide),
+        Box::new(plugins::ListDevicePlugins),
+        Box::new(plugins::ListPluginApps),
+        Box::new(plugins::GetPlugin),
+        Box::new(plugins::RunPluginTests),
+        Box::new(plugins::FingerprintDevice),
+        Box::new(plugins::DeviceSshExec),
+        Box::new(plugins::DeviceHttpRequest),
+        Box::new(plugins::SavePluginDraft),
+        Box::new(plugins::RunPluginAction),
+        Box::new(plugins::ValidatePlugin),
+        Box::new(schedules::ListScheduledTasks),
+        Box::new(schedules::CreateScheduledTask),
+        Box::new(schedules::UpdateScheduledTask),
+        Box::new(schedules::RunScheduledTask),
+        Box::new(schedules::DeleteScheduledTask),
+        Box::new(dashboard::GetDashboardLayout),
+        Box::new(dashboard::UpdateDashboardLayout),
+        Box::new(ask::AskUser),
+    ]
+}
+
+/// Instala o catálogo de ferramentas no núcleo. Idempotente: o primeiro
+/// vale (o `after_context` chama; os testes de unidade também podem).
+pub fn install_ai_tools() {
+    netmonitor_core::ai::tools::install_catalog(ai_tool_catalog);
+}
+
+/// Os containers do host desta central, para as marcações do `@`.
+struct HostContainers(Arc<dyn DockerEngine>);
+
+#[async_trait]
+impl ContainerDirectory for HostContainers {
+    async fn containers(&self) -> Option<Vec<MentionContainer>> {
+        let listed = engine::list_containers(self.0.as_ref()).await.ok()?;
+        Some(
+            listed
+                .iter()
+                .map(|container| MentionContainer {
+                    id: container.id.clone(),
+                    name: container.display_name(),
+                    image: container.image.clone(),
+                    state: container.state.clone(),
+                })
+                .collect(),
+        )
+    }
+}
+
+/// O que o assistente pede ao resto da central: Web Push, canais de
+/// notificação, inibição dos alertas, plugins de dispositivo e Docker.
+struct AssistantCentral;
+
+#[async_trait]
+impl assistant::CentralServices for AssistantCentral {
+    async fn push_to_user(
+        &self,
+        db: &DatabaseConnection,
+        user_id: i64,
+        payload: &Value,
+    ) -> AppResult<u64> {
+        Ok(deliver(db, Audience::User(user_id), payload).await?.sent)
+    }
+
+    async fn notify(&self, ctx: &AppContext, message: &NotificationMessage) {
+        NotificationService::with_default_channels()
+            .notify(ctx, message)
+            .await;
+    }
+
+    async fn explaining_ancestor(
+        &self,
+        db: &DatabaseConnection,
+        device_id: i64,
+    ) -> AppResult<Option<i64>> {
+        inhibition::explaining_ancestor(db, device_id).await
+    }
+
+    fn missing_device_access(&self, error: &AppError) -> Option<(i64, Value)> {
+        credentials::missing_access_of(error)
+            .map(|(device_id, kind)| (device_id, serde_json::to_value(kind).unwrap_or_default()))
+    }
+
+    async fn device_auto_accepted(
+        &self,
+        db: &DatabaseConnection,
+        conversation_key: &str,
+        device_id: i64,
+    ) -> bool {
+        auto_accept::active(db, conversation_key, device_id)
+            .await
+            .ok()
+            .flatten()
+            .is_some()
+    }
+
+    async fn container_names(&self, ctx: &AppContext) -> Vec<String> {
+        netmonitor_servers::ai_tools::list_all_container_names(ctx).await
+    }
+
+    async fn local_containers(&self, ctx: &AppContext) -> Option<Box<dyn ContainerDirectory>> {
+        let host = hosts::default_host(ctx).await.ok().flatten()?;
+        Some(Box::new(HostContainers(host.engine)))
+    }
+}
+
+/// Os serviços da central para o assistente, para o `shared_store`.
+#[must_use]
+pub fn assistant_central() -> assistant::Central {
+    assistant::Central::new(Arc::new(AssistantCentral))
+}
+
+#[cfg(test)]
+mod ai_catalog_tests;
 
 #[cfg(test)]
 mod tests {

@@ -24,7 +24,7 @@ use crate::services::{
 };
 
 /// O prompt do revisor, versionado junto com o código.
-pub const REVIEWER_PROMPT: &str = include_str!("../../ai/knowledge/plugin_security_review.md");
+pub const REVIEWER_PROMPT: &str = netmonitor_core::ai::knowledge::PLUGIN_SECURITY_REVIEW;
 
 const MAX_SCRIPT_CHARS: usize = 60_000;
 const REVIEW_TIMEOUT: Duration = Duration::from_secs(120);

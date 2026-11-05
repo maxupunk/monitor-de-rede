@@ -47,16 +47,8 @@ const EXCECOES: &[(&str, &str)] = &[
     ("agent_runtime", "plugins"),
     ("agents", "discovery"),
     ("agents", "plugins"),
-    ("ai", "discovery"),
-    ("ai", "docker"),
-    ("ai", "plugins"),
-    ("ai", "snmp"),
-    ("ai", "topology"),
-    ("ai", "vpn"),
-    ("devices", "ai"),
     ("devices", "discovery"),
     ("devices", "wifi"),
-    ("discovery", "ai"),
     ("maintenance", "link_tests"),
     ("monitoring", "link_tests"),
     ("monitoring", "snmp"),
@@ -66,9 +58,6 @@ const EXCECOES: &[(&str, &str)] = &[
     ("onboarding", "vpn"),
     ("plugins", "ai"),
     ("probes", "discovery"),
-    ("scheduled_tasks", "ai"),
-    ("snmp", "ai"),
-    ("syslog", "ai"),
     ("syslog", "plugins"),
     ("syslog", "snmp"),
 ];
@@ -77,6 +66,8 @@ const EXCECOES: &[(&str, &str)] = &[
 const CRATES_DE_AREA: &[(&str, &str)] = &[
     ("netmonitor_servers::", "servers"),
     ("netmonitor_vpn::", "vpn"),
+    // O crate do assistente conta como o módulo `ai` (área `assistant`).
+    ("netmonitor_assistant::", "ai"),
 ];
 
 fn area_of(module: &str) -> &'static str {
@@ -293,6 +284,10 @@ fn o_detector_enxerga_use_agrupado_e_caminho_inline() {
     assert!(
         dependencias("fn h() { netmonitor_vpn::probe_is_external(); }").contains("vpn"),
         "o crate da VPN também"
+    );
+    assert!(
+        dependencias("use netmonitor_assistant::settings;").contains("ai"),
+        "e o do assistente, que conta como o módulo `ai`"
     );
     assert!(deps.contains("shared"));
     assert!(deps.contains("wifi"));
