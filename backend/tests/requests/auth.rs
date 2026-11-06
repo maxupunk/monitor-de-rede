@@ -19,6 +19,15 @@ macro_rules! configure_insta {
     };
 }
 
+/// Os filtros do Loco para o usuário, mais o fuso negativo: o filtro de data
+/// do Loco só reconhece `+HH:MM`, e um horário local como `-03:00` vazava para
+/// o snapshot — que então dependia do fuso da máquina e do banco.
+fn filtros_de_usuario() -> Vec<(&'static str, &'static str)> {
+    let mut filtros = cleanup_user_model();
+    filtros.push((r"DATE[+-]\d{2}:\d{2}", "DATE"));
+    filtros
+}
+
 /// Payload do cadastro inicial com o token vigente da instalação.
 fn setup_payload(token: &str) -> serde_json::Value {
     serde_json::json!({
@@ -250,7 +259,7 @@ async fn can_register() {
         let saved_user = users::Model::find_by_email(&ctx.db, email).await;
 
         with_settings!({
-            filters => cleanup_user_model()
+            filters => filtros_de_usuario()
         }, {
             assert_debug_snapshot!(saved_user);
         });
@@ -307,7 +316,7 @@ async fn can_login_with_verify(#[case] test_name: &str, #[case] password: &str) 
         );
 
         with_settings!({
-            filters => cleanup_user_model()
+            filters => filtros_de_usuario()
         }, {
             assert_debug_snapshot!(test_name, (response.status_code(), response.text()));
         });
@@ -369,7 +378,7 @@ async fn can_login_without_verify() {
         );
 
         with_settings!({
-            filters => cleanup_user_model()
+            filters => filtros_de_usuario()
         }, {
             assert_debug_snapshot!(login_response.text());
         });
@@ -510,7 +519,7 @@ async fn can_get_current_user() {
         );
 
         with_settings!({
-            filters => cleanup_user_model()
+            filters => filtros_de_usuario()
         }, {
             assert_debug_snapshot!((response.status_code(), response.text()));
         });
@@ -566,7 +575,7 @@ async fn can_auth_with_magic_link() {
         );
 
         with_settings!({
-            filters => cleanup_user_model()
+            filters => filtros_de_usuario()
         }, {
             assert_debug_snapshot!(magic_link_response.text());
         });
@@ -663,7 +672,7 @@ async fn can_resend_verification_email() {
             .expect("User should exist");
 
         with_settings!({
-            filters => cleanup_user_model()
+            filters => filtros_de_usuario()
         }, {
             assert_debug_snapshot!("resend_verification_user", user);
         });

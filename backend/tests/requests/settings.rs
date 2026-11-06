@@ -254,7 +254,12 @@ async fn database_size_retorna_tamanho_tipo_e_datas_do_banco() {
         let corpo: serde_json::Value = serde_json::from_str(&resposta.text()).unwrap();
 
         assert!(corpo["sizeBytes"].as_i64().is_some_and(|v| v > 0));
-        assert_eq!(corpo["dbType"], "sqlite");
+        // A suíte roda nos dois bancos (`DATABASE_URL` aponta o PostgreSQL).
+        let esperado = match sea_orm::ConnectionTrait::get_database_backend(&ctx.db) {
+            sea_orm::DatabaseBackend::Postgres => "postgres",
+            _ => "sqlite",
+        };
+        assert_eq!(corpo["dbType"], esperado);
         assert!(corpo["earliestRecord"].is_null());
         assert!(corpo["latestRecord"].is_null());
     })

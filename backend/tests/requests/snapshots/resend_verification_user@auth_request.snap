@@ -17,7 +17,7 @@ Model {
         "PID",
     ),
     email_verification_sent_at: Some(
-        DATE-03:00,
+        DATE,
     ),
     email_verified_at: None,
     magic_link_token: None,

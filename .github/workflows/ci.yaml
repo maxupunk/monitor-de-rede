@@ -87,7 +87,7 @@ jobs:
       contents: read
     services:
       postgres:
-        image: postgres:17-alpine@sha256:7062a2109c4fe6d8bd1b5e0e9e4fe40a001eba4283d85ce661c79c96c8dc68e4
+        image: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
         env:
           POSTGRES_DB: postgres_test
           POSTGRES_USER: postgres

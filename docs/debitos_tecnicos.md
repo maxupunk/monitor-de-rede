@@ -264,7 +264,18 @@ Este documento consolida a auditoria de arquitetura, código-fonte, padrões de 
   `throughput::btest::tests::cliente_envia_ao_servidor_armado`,
   `ai_analysis::analises_sem_historico_respondem_sem_inventar` e
   `ai_tools::historico_do_monitor_traz_uptime_e_falhas_recentes` (este duas
-  vezes, ambas na rodada completa do workspace).
+  vezes, ambas na rodada completa do workspace) e
+  `probes::buffer::tests::escrita_e_atomica_e_recupera_de_crash_no_tmp` (uma
+  vez, na rodada contra o PostgreSQL; três vezes verde isolado).
+- **Não eram intermitentes, e foram corrigidos (2026-11-05):** a rodada
+  completa contra o PostgreSQL — que o CI não executava desde que o digest
+  fixado da imagem `postgres:17-alpine` deixou de existir — achou
+  `auth::can_register` e `auth::can_resend_verification_email` (o filtro de
+  data do Loco só reconhece fuso `+HH:MM`; o `-03:00` local vazava para o
+  snapshot, que falhava também no CI em UTC) e
+  `settings::database_size_retorna_tamanho_tipo_e_datas_do_banco` (esperava
+  `sqlite` fixo). Os três agora valem nos dois bancos, e o digest do CI foi
+  atualizado.
 - **Próximo passo:** a asserção do último já imprime a saída da ferramenta;
   na próxima falha, a causa (busca ambígua × dispositivo ausente × janela de
   tempo) fica no log. Se repetir, investigar dependência de relógio nos
