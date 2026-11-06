@@ -54,6 +54,33 @@ pub fn truncate_to_hour(dt: DateTime<Utc>) -> DateTime<Utc> {
     DateTime::from_timestamp(hour_start, 0).expect("timestamp de hora válido")
 }
 
+/// Primeiro instante da janela que o rollup ainda não agregou.
+///
+/// O rollup roda de hora em hora e grava todas as horas de todos os monitores
+/// na mesma transação, então o bucket mais recente marca até onde
+/// `monitor_results_hourly` vale. Daí em diante, quem soma uma janela lê o
+/// bruto — inclusive a hora que acabou de fechar e ainda espera o próximo
+/// ciclo. Os dois trechos não se sobrepõem: buckets antes do instante devolvido,
+/// bruto a partir dele.
+///
+/// # Errors
+///
+/// Propaga erro do banco.
+pub async fn unrolled_since<C: ConnectionTrait>(
+    db: &C,
+    window_start: DateTime<Utc>,
+    now: DateTime<Utc>,
+) -> AppResult<DateTime<Utc>> {
+    let latest = monitor_results_hourly::Entity::find()
+        .filter(monitor_results_hourly::Column::Bucket.lt(truncate_to_hour(now)))
+        .order_by_desc(monitor_results_hourly::Column::Bucket)
+        .one(db)
+        .await?;
+    Ok(latest.map_or(window_start, |bucket| {
+        window_start.max(truncate_to_hour(bucket.bucket.with_timezone(&Utc)) + Duration::hours(1))
+    }))
+}
+
 /// Agrega buckets completos anteriores a `until`.
 ///
 /// O intervalo é limitado, a agregação é feita por SQL e a substituição dos

@@ -649,6 +649,66 @@ async fn rollup_agrega_resultados_brutos_em_buckets_horarios() {
 
 #[tokio::test]
 #[serial]
+async fn uptime_conta_a_hora_fechada_antes_do_proximo_rollup() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+
+        let monitor = request
+            .post("/api/monitors")
+            .json(&serde_json::json!({
+                "name": "Hora recém-fechada",
+                "type": "ping",
+                "target": "127.0.0.1",
+            }))
+            .await;
+        assert_eq!(monitor.status_code(), 201);
+        let monitor: serde_json::Value = serde_json::from_str(&monitor.text()).unwrap();
+        let monitor_id = monitor["id"].as_i64().unwrap();
+
+        // Um rollup anterior já cobriu horas antigas; a hora que acabou de
+        // fechar ainda espera o próximo ciclo.
+        let hora_atual =
+            netmonitor_nucleo::services::monitoring::rollup::truncate_to_hour(Utc::now());
+        for (quando, status) in [
+            (hora_atual - Duration::hours(3) + Duration::minutes(5), "up"),
+            (hora_atual - Duration::minutes(30), "down"),
+        ] {
+            monitor_results::ActiveModel {
+                monitor_id: Set(monitor_id),
+                status: Set(status.into()),
+                started_at: Set(quando.into()),
+                finished_at: Set(quando.into()),
+                duration_ms: Set(1),
+                ..Default::default()
+            }
+            .insert(&ctx.db)
+            .await
+            .unwrap();
+            if quando < hora_atual - Duration::hours(2) {
+                rollup_monitor_results(&ctx.db, hora_atual - Duration::hours(2))
+                    .await
+                    .unwrap();
+            }
+        }
+
+        let antes = uptime_for_monitor(&ctx.db, monitor_id, 24).await.unwrap();
+        assert_eq!((antes.total_checks, antes.down_checks), (2, 1), "{antes:?}");
+
+        rollup_monitor_results(&ctx.db, Utc::now()).await.unwrap();
+        let depois = uptime_for_monitor(&ctx.db, monitor_id, 24).await.unwrap();
+        assert_eq!(
+            (depois.total_checks, depois.down_checks),
+            (2, 1),
+            "bucket e bruto não se somam: {depois:?}"
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
 async fn rollup_limitado_nao_apaga_o_backlog_ainda_nao_agregado() {
     request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
         let session = prepare_data::init_user_login(&request, &ctx).await;

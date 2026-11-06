@@ -283,10 +283,23 @@ Este documento consolida a auditoria de arquitetura, código-fonte, padrões de 
   binário `tests/mod` inteiro e três no binário inteiro com todos os núcleos
   ocupados por um queimador de CPU. As duas falhas foram em rodadas
   `cargo test --workspace` logo após uma compilação completa.
-- **Próximo passo:** a asserção do último já imprime a saída da ferramenta;
-  na próxima falha, a causa (busca ambígua × dispositivo ausente × janela de
-  tempo) fica no log. Se repetir, investigar dependência de relógio nos
-  quatro (todos usam `Utc::now()` relativo ou laço de vazão com prazo).
+- **Causa achada e corrigida (2026-11-06) — `ai_tools::historico_do_monitor…`:**
+  não era carga, era relógio, e o defeito era do produto. Reproduzido na 5ª de
+  cinco rodadas seguidas do workspace: `checks.down` veio `0`. O teste grava
+  checagens de 1 a 3 minutos atrás; `uptime_for_monitor` (e o mapa de calor)
+  liam horas fechadas **só** de `monitor_results_hourly` e o bruto **só** da
+  hora aberta. Rodando nos primeiros minutos de uma hora, a checagem `down`
+  caía na hora recém-fechada, que o rollup (a cada 3 600 s) ainda não tinha
+  agregado — e sumia. Em produção, o mesmo buraco tirava do uptime e do mapa
+  de calor até uma hora de dados entre o fechamento da hora e o próximo
+  rollup. Agora `rollup::unrolled_since` devolve até onde o rollup já
+  agregou e os dois leem o bruto a partir dali, sem sobrepor buckets
+  (`devices_monitors_crud::uptime_conta_a_hora_fechada_antes_do_proximo_rollup`,
+  que falha sem a correção com o mesmo sintoma).
+- **Ainda em observação:** os outros quatro, sem nova falha. Se repetirem,
+  procurar a mesma classe de causa — fronteira de hora/minuto em
+  `Utc::now()` relativo, ou o prazo do laço de vazão do `btest` (que falhou
+  de novo, uma vez, na 1ª das cinco rodadas acima).
 
 ---
 

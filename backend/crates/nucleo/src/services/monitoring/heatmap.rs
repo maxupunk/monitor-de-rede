@@ -16,7 +16,10 @@ use crate::{
         HourlyHeatmapResponse,
     },
     models::{monitor_results, monitor_results_hourly, monitors},
-    services::{monitoring::rollup::truncate_to_hour, shared::errors::AppResult},
+    services::{
+        monitoring::rollup::{truncate_to_hour, unrolled_since},
+        shared::errors::AppResult,
+    },
 };
 
 #[derive(Debug, Default)]
@@ -109,7 +112,6 @@ where
     let days_count = query.days.unwrap_or(7).clamp(1, 30);
     let now = Utc::now();
     let window_start = truncate_to_hour(now - Duration::days(days_count - 1));
-    let current_hour_start = truncate_to_hour(now);
 
     // Seleciona os monitores elegíveis
     let mut monitors_query = monitors::Entity::find();
@@ -185,11 +187,12 @@ where
         });
     }
 
-    // Consulta buckets horários fechados
+    // Buckets do rollup até onde ele já agregou; o resto sai do bruto.
+    let raw_start = unrolled_since(db, window_start, now).await?;
     let mut hourly_records = monitor_results_hourly::Entity::find()
         .filter(monitor_results_hourly::Column::MonitorId.is_in(monitor_ids.clone()))
         .filter(monitor_results_hourly::Column::Bucket.gte(window_start))
-        .filter(monitor_results_hourly::Column::Bucket.lt(current_hour_start))
+        .filter(monitor_results_hourly::Column::Bucket.lt(raw_start))
         .order_by_asc(monitor_results_hourly::Column::Bucket)
         .stream(db)
         .await?;
@@ -206,10 +209,10 @@ where
     }
     drop(hourly_records);
 
-    // Adiciona hora em andamento a partir de `monitor_results`
+    // Adiciona o trecho ainda não agregado a partir de `monitor_results`
     let mut raw_recent = monitor_results::Entity::find()
         .filter(monitor_results::Column::MonitorId.is_in(monitor_ids))
-        .filter(monitor_results::Column::StartedAt.gte(current_hour_start))
+        .filter(monitor_results::Column::StartedAt.gte(raw_start))
         .filter(monitor_results::Column::StartedAt.lte(now))
         .stream(db)
         .await?;

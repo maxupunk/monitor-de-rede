@@ -15,7 +15,7 @@ use crate::{
     services::shared::errors::AppResult,
 };
 
-use super::rollup::truncate_to_hour;
+use super::rollup::{truncate_to_hour, unrolled_since};
 
 /// Estatísticas consolidadas de uptime para um monitor em uma janela de tempo.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -105,12 +105,12 @@ where
 
     let now = Utc::now();
     let window_start = truncate_to_hour(now - Duration::hours(hours - 1));
-    let current_hour_start = truncate_to_hour(now);
+    let raw_start = unrolled_since(db, window_start, now).await?;
 
     let mut hourly = monitor_results_hourly::Entity::find()
         .filter(monitor_results_hourly::Column::MonitorId.eq(monitor_id))
         .filter(monitor_results_hourly::Column::Bucket.gte(window_start))
-        .filter(monitor_results_hourly::Column::Bucket.lt(current_hour_start))
+        .filter(monitor_results_hourly::Column::Bucket.lt(raw_start))
         .order_by_asc(monitor_results_hourly::Column::Bucket)
         .stream(db)
         .await?;
@@ -128,10 +128,11 @@ where
     }
     drop(hourly);
 
-    // Agrega a hora atual (bucket ainda aberto) a partir dos resultados brutos.
+    // O que o rollup ainda não agregou (a hora aberta e a que acabou de fechar)
+    // sai dos resultados brutos.
     let mut partial = monitor_results::Entity::find()
         .filter(monitor_results::Column::MonitorId.eq(monitor_id))
-        .filter(monitor_results::Column::StartedAt.gte(current_hour_start))
+        .filter(monitor_results::Column::StartedAt.gte(raw_start))
         .filter(monitor_results::Column::StartedAt.lte(now))
         .stream(db)
         .await?;
