@@ -282,6 +282,80 @@ comprometer as outras.
     - [x] Nenhum `use` entre áreas no workspace.
   - **Entregue:** em três commits verdes. **10.1 — zero exceções.** Registro de rotinas no `core` (`routines`: `Routine`, `RetentionJob`, `AreaRoutines`, `cadence`) e grupos de monitores (`monitoring::MonitorGroup`, com o "testar agora"): a Rede contribui a coleta SNMP consolidada (`SnmpDeviceGroup`) e a sem monitor, a varredura agendada, o vigia do Wi-Fi, os enlaces agendados e a retenção deles; a VPN, a telemetria dos túneis. Área desligada pausa só o que já pausava (a própria rotina consulta a área); monitor nunca. O agente: o Docker virou `DockerCommands` (`AgentCommandHandler`) e `LocalHostDocker` (`agents::host::HostDocker`, no `core`) de Servidores, e o runtime recebe as peças montadas pelo binário (`AgentHost`) — `AGENT_ALLOW` intacto, antes dos handlers. `devices::access::DeviceAccess` no `core` (identidade SNMP, leitor de Wi-Fi, credencial salva, shell SSH/Telnet, ligar plugins no cadastro), implementado pela Rede; os tipos que cruzam (`CredentialView`, `SecretStorage`, `DedicatedAccess`, `SnmpSystemInfo`, prazos da sessão) foram para o `core` byte a byte. O probe por HTTP usa os despachantes (`pending_for_probe`, `receive`). Núcleo primeiro: IP público, rate limit e IP de origem, `VpnPeerResponse`, a cadência SNMP do dispositivo e o campo da triagem no `core`; `AreaPolicies` no `shared_store`. **10.2 — o crate transitório esvaziado.** Medido antes de decidir (build incremental do pacote raiz com uma função pública nova, `-j 2`): no `nucleo`, **10 s** (recompila ele e o ponto de montagem); no `core`, **17 s** (recompila `core`, as quatro áreas, o assistente e a montagem). Pôr o Núcleo no `core` faria toda mudança de serviço pagar o segundo preço e recompilar as áreas — por isso **`crates/nucleo`** (`netmonitor-nucleo`): serviços, controllers, DTOs, views e mailers do Núcleo (~64 mil linhas), dependendo só de `core` e `agent-protocol`, e nenhuma área depende dele. O cadastro de redes (que enfileira a varredura) foi para a Rede. O pacote raiz ficou com ~2,9 mil linhas: `app.rs`, `registries`, initializers, tarefas, binários e SPA. As reexportações de caminho antigo saíram — do pacote raiz e as de área dentro do Núcleo (`services::{docker, vpn, ai, snmp…}`, `dtos::ai`, `controllers::{ai, ai_conversations}`); os testes e a montagem usam os crates direto. O teste de arquitetura virou o que o compilador não vê: os manifestos seguem a regra, só `app.rs`/`registries`/`initializers` nomeiam área, e toda área tem consumidor no ponto de montagem e no frontend. **Achado:** o filtro padrão de log do Loco só libera o crate `backend` — o log dos crates do workspace sumia desde a Fase 6; corrigido com `WORKSPACE_CRATES` em `app.rs`. **10.3 — documentação:** ADR 017 aceito e implementado, [ADR 018](adr/018-loco-ou-axum.md) (manter o Loco.rs), `arquitetura.md` §4, `AGENTS.md`, ARQ-02 e ARQ-06 fechados. Suíte com o mesmo número de testes (2864 → 2866, os dois novos do teste de arquitetura), `contracts/ai_chat.json` e `frontend/src/bindings/` sem diff. **Ficou de fora, de propósito:** `WidgetSpec` (o `docker_summary` é dado de catálogo com `area()`, sem dependência); migrations por crate (as tabelas das áreas continuam no `migration` comum — só têm FK para o `core`).
 
+### Fases 11–16 — Pendências decididas em entrevista (2026-11-06)
+
+Decididas com o responsável pelo produto depois do encerramento. **Critério de
+aceite comum a todas:** usabilidade e experiência do usuário conferidas na tela
+(AGENTS §12: contraste, cores semânticas, nada de botão ativo cinza), SOLID
+(cada peça com uma responsabilidade; extensão por registro, nunca por `if`
+espalhado) e DRY (reaproveitar o filtro de áreas, os formatadores e os
+componentes que já existem antes de criar outro). Ordem pela dependência:
+as migrations por crate vêm antes das tabelas novas das Fases 15 e 16.
+
+### Fase 11 — Pendências pequenas
+
+- [ ] 🔴 Pendente — **Fechar o que ficou solto**
+  - **Entregas:**
+    - [ ] Gráfico de latência de 7 dias da IA (`chart_monitor_latency`) e linha de base dos alertas (`alerts/baseline.rs`) contam o trecho que o rollup ainda não agregou, pelo mesmo `rollup::unrolled_since` do uptime.
+    - [ ] Dockerfile: o estágio `spike` deixa de copiar o exemplo inexistente `spike_snmp_v2c` (estágio removido ou exemplo corrigido).
+    - [ ] Laya-tuning (repositório vizinho): `sync.py` aponta para `crates/assistant` e `crates/core/src/{ai,classifier,devices}`; `sync-check` verde.
+    - [ ] Teste intermitente `throughput::btest::tests::cliente_envia_ao_servidor_armado`: causa achada e corrigida (QUA-07).
+    - [ ] `DeciderTemplateClassifier` do syslog renomeado para o que ele é (delega ao `Classifier` do processo).
+  - **Aceite:**
+    - [ ] Teste que falha sem a correção do gráfico/linha de base.
+    - [ ] `docker build --target spike` (ou a ausência do alvo) sem erro.
+
+### Fase 12 — Plugues por área: `settingsTabs` e `WidgetSpec`
+
+- [ ] 🔴 Pendente — **Configurações e widgets contribuídos pela área**
+  - **Entregas:**
+    - [ ] `defineArea` ganha `settingsTabs` (abas e cartões de Configurações); `SettingsPage.vue` só renderiza o registro. O cadastro de fabricantes vai para a Rede; Endereços da central e DNS ficam no Núcleo — a aba de uma área desligada some.
+    - [ ] `WidgetSpec` no `core`: o widget declara área, dados e coleta; o `docker_summary` passa a ser contribuído pelo crate `servers`, e o catálogo é montado no ponto de montagem.
+  - **Aceite:**
+    - [ ] Com Rede desligada, Configurações não mostra nada só da Rede (teste Vitest).
+    - [ ] Nenhuma lista fixa de abas nem de widgets fora dos registros.
+
+### Fase 13 — Migrations por crate
+
+- [ ] 🔴 Pendente — **Cada crate leva o próprio esquema**
+  - **Entregas:**
+    - [ ] Cada crate (`core`, `nucleo`, `servers`, `vpn`, `network`, `assistant`) expõe `migrations()` com as tabelas dele; o Migrator do ponto de montagem junta na ordem core → núcleo → áreas, num só histórico `seaql_migrations`.
+    - [ ] O crate comum `migration` fica só com os helpers de esquema (ou some).
+    - [ ] Teste de arquitetura: tabela de área só tem FK para o `core`/núcleo.
+  - **Aceite:**
+    - [ ] Banco recriado do zero com o mesmo esquema exportado (SQLite e PostgreSQL).
+    - [ ] Entidades regeneradas contra o PostgreSQL sem diff.
+
+### Fase 14 — Crates de submódulo da Rede
+
+- [ ] 🔴 Pendente — **`network-wifi` e `network-link-tests`**
+  - **Entregas:**
+    - [ ] Wi-Fi e testes de enlace viram crates que dependem do `network` (a base da área), continuando a área Rede.
+    - [ ] O teste de arquitetura conhece submódulo: depende só da base da própria área e do `core`.
+  - **Aceite:**
+    - [ ] Só movimento (sem mudança de comportamento); suíte verde nos dois bancos.
+
+### Fase 15 — Papel por área ([ADR 019](adr/019-papel-por-area.md))
+
+- [ ] 🔴 Pendente — **Operator, viewer ou sem acesso, por área**
+  - **Entregas:**
+    - [ ] `user_area_roles` e `AreaAccess` no núcleo; admin global vale em tudo e é o único que atribui.
+    - [ ] Sem acesso: some do menu e das rotas, a IA perde as ferramentas da área, widgets e eventos SSE dela não chegam, notificações da área não são entregues ao usuário.
+    - [ ] Tela de usuário com a matriz área × nível e o atalho "mesmo papel em todas".
+  - **Aceite:**
+    - [ ] Testes de requisição: viewer e sem-acesso por área em rota, IA, SSE e notificação.
+    - [ ] Vitest: perda de acesso no meio da sessão muda menu e rotas pelo SSE, sem chamada HTTP.
+
+### Fase 16 — Menu por usuário
+
+- [ ] 🔴 Pendente — **Fixar e ocultar, salvo no servidor**
+  - **Entregas:**
+    - [ ] Preferência de menu por usuário (itens fixados no topo, itens ocultos), salva no servidor e entregue pelo SSE.
+    - [ ] O montador `buildNavSections` aplica as preferências depois do filtro de áreas e papéis (uma regra só).
+    - [ ] Ações de fixar/ocultar no próprio menu, com "restaurar padrão".
+  - **Aceite:**
+    - [ ] Vitest do montador com fixados e ocultos; preferência vale em outro navegador.
+
 ### Nota de validação (2026-11-05)
 
 Conferências feitas depois da Fase 10, sobre o código final:
@@ -334,10 +408,12 @@ Conferências feitas depois da Fase 10, sobre o código final:
 
 ## 7. Fora do plano, de propósito
 
-- Papel por escopo ("operador só de Docker") — outro ADR, se pedido.
-- Menu por usuário ("fixar/ocultar no meu menu") — depois das Fases 0–3.
 - Features do Cargo, imagens por edição, microsserviços — rejeitados no ADR 017.
-- Crates de submódulo (Wi-Fi, enlace) — só com demanda real.
+- Subáreas ligáveis (Wi-Fi, enlace como chave própria) — os crates de submódulo
+  da Fase 14 continuam sendo a área Rede.
+
+Papel por escopo, menu por usuário e crates de submódulo saíram daqui em
+2026-11-06: viraram as Fases 14–16.
 
 ## 8. Decisões que estavam em aberto
 
@@ -345,4 +421,19 @@ Nenhuma. As três do [ADR 017](adr/017-arquitetura-modular.md#decisões-tomadas-
 foram decididas: o nome na interface é **"Áreas"**; os plugins de dispositivo
 ficam na **Rede**; as ferramentas `ping_host` e `traceroute` da IA ficam no
 **Núcleo** (as páginas, na Rede). A troca do Loco.rs foi decidida no
-[ADR 018](adr/018-loco-ou-axum.md): fica.
+[ADR 018](adr/018-loco-ou-axum.md): fica — confirmado pelo responsável pelo
+produto em 2026-11-06.
+
+Entrevista de 2026-11-06 (tudo o que restava em aberto):
+
+| Pergunta | Decisão |
+| :--- | :--- |
+| Manter o Loco.rs? | Manter (ADR 018 confirmado). |
+| Migrations no crate comum ou por crate? | Por crate, um Migrator só (Fase 13). |
+| `settingsTabs` e `WidgetSpec`? | Os dois agora (Fase 12). |
+| Gráfico de 7 dias e linha de base com o buraco da hora fechada? | Corrigir (Fase 11). |
+| Pendências pequenas (Dockerfile `spike`, `sync.py`, `btest`, nome do classificador)? | Todas (Fase 11). |
+| Papel por escopo? | Papel por área; sem papel = sem acesso; admin global vale em tudo; sem acesso esconde menu, rotas, IA, widgets, eventos e notificações ([ADR 019](adr/019-papel-por-area.md), Fase 15). |
+| Menu por usuário? | Fixar e ocultar, salvo no servidor (Fase 16). |
+| Crates de submódulo? | `network-wifi` e `network-link-tests` sobre o `network` (Fase 14). |
+| A branch? | Fica sem PR até concluir as Fases 11–16. |

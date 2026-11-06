@@ -1,6 +1,6 @@
 # ADR 018 — Manter o Loco.rs como ponto de montagem (não trocar por `axum` + `sea-orm` direto)
 
-- **Status:** aceito — 2026-11-05.
+- **Status:** aceito — 2026-11-05; confirmado pelo responsável pelo produto em 2026-11-06.
 - **Data:** 2026-11-05
 - **Relacionado:** [ADR 007](007-scheduler-processo-unico.md),
   [ADR 017](017-arquitetura-modular.md) (seção "Loco.rs").
