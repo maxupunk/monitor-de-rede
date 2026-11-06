@@ -409,7 +409,9 @@ pontos, todos medidos:
   tabela, `MonitorGroup` (coleta consolidada), `Routine`/`RetentionJob`
   (rotinas do scheduler e retenção por área), `HostDocker` (o Docker do host
   do agente), `DeviceAccess` (o acesso ao equipamento que a Rede oferece) e o
-  `CentralServices` de cada área (o que ela pede à central). O `WidgetSpec`
+  `CentralServices` de cada área (o que ela pede à central). O `AlertDataset`
+  nasceu depois da Fase 10 (`netmonitor_core::alerts::contracts`), com o
+  `vpn_peer` em `vpn` e o `wifi_client` em `network`. O `WidgetSpec`
   **não** foi criado: o `docker_summary` é uma entrada de catálogo com
   `area()`, sem código que dependa de Servidores. Migrations continuam num
   crate comum (`migration`): as tabelas das áreas só têm FK para o `core`.

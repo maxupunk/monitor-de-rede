@@ -1,7 +1,7 @@
 //! O que a área VPN pede ao resto da central (ADR 017).
 //!
 //! Três peças que não são do núcleo nem da área: o motor de alertas (que
-//! avalia a transição de cada túnel), a apresentação de um dispositivo (a
+//! avalia o dataset de cada túnel que mudou de estado), a apresentação de um dispositivo (a
 //! mesma das telas de dispositivos) e a lista de endereços da central (que
 //! esquece uma correção manual quando ela vira cópia do `public_endpoint`).
 //! O ponto de montagem implementa [`CentralServices`] e o põe no
@@ -13,6 +13,7 @@ use std::{ops::Deref, sync::Arc};
 use async_trait::async_trait;
 use loco_rs::app::AppContext;
 use netmonitor_core::{
+    alerts::contracts::AlertEvaluationContext,
     models::devices,
     shared::errors::{AppError, AppResult},
 };
@@ -21,9 +22,13 @@ use serde_json::Value;
 
 #[async_trait]
 pub trait CentralServices: Send + Sync {
-    /// Avalia o estado de todos os peers habilitados de um servidor no motor
-    /// de alertas. Devolve quantos mudaram de estado.
-    async fn evaluate_peer_states(&self, ctx: &AppContext, vpn_server_id: i64) -> AppResult<usize>;
+    /// Entrega um conjunto de fatos ao motor de alertas, que decide pelas
+    /// regras configuradas se abre, mantém ou fecha um alerta.
+    async fn evaluate_alert(
+        &self,
+        ctx: &AppContext,
+        context: &AlertEvaluationContext,
+    ) -> AppResult<()>;
 
     /// O dispositivo do peer como as telas da VPN o mostram — sem o próprio
     /// vínculo de VPN. `None` quando não serializa.

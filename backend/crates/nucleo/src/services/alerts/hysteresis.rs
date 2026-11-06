@@ -41,7 +41,7 @@ use crate::{
     models::{_entities::monitor_results as monitor_results_entity, monitor_results, monitors},
     services::{
         alerts::{
-            contracts::AlertDataset,
+            contracts::AlertFacts,
             evaluator::{self, AlertRuleCondition},
             fields,
         },
@@ -248,8 +248,8 @@ async fn rebuilt_since<C: ConnectionTrait>(
 /// Publicar `latencyMs` como `null` explícito quando a coluna está vazia segue
 /// a mesma convenção do dataset vivo — o avaliador distingue "não medido" de
 /// "medido zero".
-fn historic_dataset(monitor_type: &str, row: &monitor_results::Model) -> AlertDataset {
-    let mut dataset = AlertDataset::new();
+fn historic_dataset(monitor_type: &str, row: &monitor_results::Model) -> AlertFacts {
+    let mut dataset = AlertFacts::new();
     dataset.insert(fields::STATUS.into(), json!(row.status));
     dataset.insert("success".into(), json!(row.status == "up"));
     dataset.insert(fields::DURATION_MS.into(), json!(row.duration_ms));

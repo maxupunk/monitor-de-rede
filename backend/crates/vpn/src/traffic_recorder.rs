@@ -21,7 +21,7 @@ use netmonitor_core::{
 };
 
 use crate::{
-    central::Central, config_writer::FileConfigSink, peer_hints::compute_peer_hints, peer_status,
+    alerts::watcher, config_writer::FileConfigSink, peer_hints::compute_peer_hints, peer_status,
 };
 
 pub const VPN_METRIC_BYTES_RX: &str = "vpn_bytes_rx";
@@ -100,11 +100,7 @@ async fn sync_and_watch(ctx: &AppContext, server: &vpn_servers::Model) {
     {
         tracing::warn!(%error, server_id = server.id, "falha ao sincronizar telemetria da VPN");
     }
-    let evaluated = match Central::from_context(ctx) {
-        Ok(central) => central.evaluate_peer_states(ctx, server.id).await,
-        Err(error) => Err(error),
-    };
-    if let Err(error) = evaluated {
+    if let Err(error) = watcher::evaluate_server_peers(ctx, server.id).await {
         tracing::warn!(%error, server_id = server.id, "falha ao avaliar o estado dos túneis");
     }
 }

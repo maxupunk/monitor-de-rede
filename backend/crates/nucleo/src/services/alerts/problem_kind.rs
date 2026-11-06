@@ -11,7 +11,7 @@
 
 use serde_json::Value;
 
-use super::{contracts::AlertDataset, fields};
+use super::{contracts::AlertFacts, fields};
 
 /// Chave de `alert_events.data` com a classificação do episódio — no núcleo.
 pub use netmonitor_core::alerts::PROBLEM_KIND;
@@ -106,7 +106,7 @@ impl ProblemKind {
 /// interface e de túnel se identificam pelos próprios campos, DNS pelo tipo
 /// do monitor, e perda de pacotes pelo valor observado. O resto é `down`.
 #[must_use]
-pub fn classify(condition_field: Option<&str>, dataset: &AlertDataset) -> ProblemKind {
+pub fn classify(condition_field: Option<&str>, dataset: &AlertFacts) -> ProblemKind {
     if let Some(kind) = condition_field.and_then(kind_of_field) {
         return kind;
     }
@@ -118,7 +118,7 @@ pub fn classify(condition_field: Option<&str>, dataset: &AlertDataset) -> Proble
 /// têm valor a mostrar — os demais já se descrevem na mensagem do alerta.
 /// Agregações (p95, médias do episódio) ficam para o futuro de propósito.
 #[must_use]
-pub fn observed_value(kind: ProblemKind, dataset: &AlertDataset) -> Option<String> {
+pub fn observed_value(kind: ProblemKind, dataset: &AlertFacts) -> Option<String> {
     let number = |key: &str| dataset.get(key).and_then(Value::as_f64);
     match kind {
         ProblemKind::PacketLoss => {
@@ -162,7 +162,7 @@ pub struct ProblemDetail {
 
 /// Monta o detalhe do problema a partir do dataset do disparo.
 #[must_use]
-pub fn detail(kind: ProblemKind, dataset: &AlertDataset) -> ProblemDetail {
+pub fn detail(kind: ProblemKind, dataset: &AlertFacts) -> ProblemDetail {
     ProblemDetail {
         kind,
         observed: observed_value(kind, dataset),
@@ -216,7 +216,7 @@ fn kind_of_field(field: &str) -> Option<ProblemKind> {
     }
 }
 
-fn classify_by_dataset(dataset: &AlertDataset) -> ProblemKind {
+fn classify_by_dataset(dataset: &AlertFacts) -> ProblemKind {
     if dataset
         .get(fields::REACHABILITY_CAUSE)
         .and_then(Value::as_str)
@@ -269,7 +269,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn dataset(pairs: &[(&str, Value)]) -> AlertDataset {
+    fn dataset(pairs: &[(&str, Value)]) -> AlertFacts {
         pairs
             .iter()
             .map(|(key, value)| ((*key).to_string(), value.clone()))

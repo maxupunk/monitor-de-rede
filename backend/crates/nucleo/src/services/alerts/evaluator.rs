@@ -7,7 +7,7 @@
 
 use serde_json::Value;
 
-use super::contracts::AlertDataset;
+use super::contracts::AlertFacts;
 
 /// Comparadores oferecidos na tela de regras.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,7 +82,7 @@ impl AlertRuleCondition {
 
 /// `true` quando o fato observado satisfaz a condição.
 #[must_use]
-pub fn evaluate(condition: &AlertRuleCondition, dataset: &AlertDataset) -> bool {
+pub fn evaluate(condition: &AlertRuleCondition, dataset: &AlertFacts) -> bool {
     // Campo ausente ou nulo nunca dispara: a regra fala de uma medida que este
     // ciclo não produziu, e não de uma medida que veio zerada.
     let field_value = match dataset.get(&condition.field) {
@@ -156,7 +156,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn dataset(pairs: &[(&str, Value)]) -> AlertDataset {
+    fn dataset(pairs: &[(&str, Value)]) -> AlertFacts {
         pairs
             .iter()
             .map(|(key, value)| ((*key).to_string(), value.clone()))

@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 
 use crate::{
     alerts::{
-        contracts::AlertDataset,
+        contracts::AlertFacts,
         fields::{self, interface_speed_transition, interface_status_transition},
     },
     monitoring::link_speed::{format_speed, normalize_speed},
@@ -25,8 +25,8 @@ pub struct InterfaceFacts<'a> {
 
 /// Monta os fatos da interface, incluindo as transições do ciclo.
 #[must_use]
-pub fn build(facts: &InterfaceFacts<'_>) -> AlertDataset {
-    let mut dataset = AlertDataset::new();
+pub fn build(facts: &InterfaceFacts<'_>) -> AlertFacts {
+    let mut dataset = AlertFacts::new();
     dataset.insert(fields::INTERFACE_NAME.into(), json!(facts.name));
     dataset.insert(
         fields::INTERFACE_OPER_STATUS.into(),
@@ -83,7 +83,7 @@ pub fn build(facts: &InterfaceFacts<'_>) -> AlertDataset {
 /// `true` quando o dataset descreve alguma transição (queda, retorno ou
 /// renegociação). Só nesses casos vale publicar no feed em tempo real.
 #[must_use]
-pub fn has_transition(dataset: &AlertDataset) -> bool {
+pub fn has_transition(dataset: &AlertFacts) -> bool {
     dataset.contains_key(fields::INTERFACE_STATUS_TRANSITION)
         || dataset.contains_key(fields::INTERFACE_SPEED_TRANSITION)
 }
@@ -91,7 +91,7 @@ pub fn has_transition(dataset: &AlertDataset) -> bool {
 /// `true` quando a interface melhorou no ciclo (voltou a operar ou renegociou
 /// para cima). Sinaliza ao motor que os alertas abertos podem ser normalizados.
 #[must_use]
-pub fn is_recovery(dataset: &AlertDataset) -> bool {
+pub fn is_recovery(dataset: &AlertFacts) -> bool {
     dataset.get(fields::INTERFACE_STATUS_TRANSITION)
         == Some(&json!(interface_status_transition::CAME_BACK))
         || dataset.get(fields::INTERFACE_SPEED_TRANSITION)
@@ -100,7 +100,7 @@ pub fn is_recovery(dataset: &AlertDataset) -> bool {
 
 /// Frase legível do que foi observado, usada como mensagem do alerta.
 #[must_use]
-pub fn describe(dataset: &AlertDataset) -> String {
+pub fn describe(dataset: &AlertFacts) -> String {
     let name = dataset
         .get(fields::INTERFACE_NAME)
         .and_then(Value::as_str)
@@ -141,11 +141,11 @@ pub fn describe(dataset: &AlertDataset) -> String {
     parts.join(" | ")
 }
 
-fn text_of<'a>(dataset: &'a AlertDataset, key: &str) -> &'a str {
+fn text_of<'a>(dataset: &'a AlertFacts, key: &str) -> &'a str {
     dataset.get(key).and_then(Value::as_str).unwrap_or("")
 }
 
-fn speed_of(dataset: &AlertDataset, key: &str) -> Option<i64> {
+fn speed_of(dataset: &AlertFacts, key: &str) -> Option<i64> {
     dataset.get(key).and_then(Value::as_i64)
 }
 

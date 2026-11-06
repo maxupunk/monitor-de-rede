@@ -41,7 +41,6 @@ use netmonitor_nucleo::{
     },
     services::alerts::{
         catalog as alert_catalog, inhibition, manager as alert_manager, recovery as alert_recovery,
-        vpn_peer_watcher,
     },
     services::devices::identify,
     services::notifications::NotificationService,
@@ -83,8 +82,12 @@ struct VpnCentral;
 
 #[async_trait]
 impl CentralServices for VpnCentral {
-    async fn evaluate_peer_states(&self, ctx: &AppContext, vpn_server_id: i64) -> AppResult<usize> {
-        vpn_peer_watcher::evaluate_server_peers(ctx, vpn_server_id).await
+    async fn evaluate_alert(
+        &self,
+        ctx: &AppContext,
+        context: &AlertEvaluationContext,
+    ) -> AppResult<()> {
+        alert_manager::evaluate(ctx, context).await
     }
 
     async fn present_device(

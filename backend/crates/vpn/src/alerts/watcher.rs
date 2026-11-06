@@ -3,7 +3,8 @@
 //! Roda logo depois da sincronização da telemetria, quando `last_seen_at` e
 //! `last_handshake_at` já refletem o que o container publicou. Compara o estado
 //! persistido no ciclo anterior com o atual, publica a transição no feed em
-//! tempo real e entrega os fatos ao motor de alertas.
+//! tempo real e entrega os fatos ao motor de alertas, que a central oferece
+//! pelo [`CentralServices`](crate::central::CentralServices).
 //!
 //! Não decide o que é alerta: a política ("túnel caído é crítico", "instável só
 //! avisa depois de 5 minutos") vive nas regras do catálogo `vpn_*`.
@@ -13,18 +14,20 @@ use loco_rs::app::AppContext;
 use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 use serde_json::json;
 
-use crate::{
-    models::{devices, vpn_peers},
-    services::{
-        alerts::{
-            contracts::{AlertEvaluationContext, AlertEvaluationScope, AlertScopeKey},
-            datasets::vpn_peer::{self, VpnPeerFacts},
-            fields, manager,
+use netmonitor_core::{
+    alerts::{
+        contracts::{
+            AlertDataset, AlertEvaluationContext, AlertEvaluationScope, AlertScopeKey, AlertTarget,
         },
-        events::EventBus,
-        shared::errors::AppResult,
+        fields,
     },
+    events::EventBus,
+    models::{devices, vpn_peers},
+    shared::errors::AppResult,
 };
+
+use super::vpn_peer::{self, VpnPeerDataset, VpnPeerFacts};
+use crate::central::Central;
 
 /// Avalia todos os peers habilitados de um servidor.
 ///
@@ -34,12 +37,13 @@ use crate::{
 ///
 /// Propaga erro do banco.
 pub async fn evaluate_server_peers(ctx: &AppContext, vpn_server_id: i64) -> AppResult<usize> {
+    let central = Central::from_context(ctx)?;
     let peers = vpn_peers::Entity::find_enabled_for_server(vpn_server_id)
         .all(&ctx.db)
         .await?;
     let mut transitions = 0;
     for peer in peers {
-        if evaluate_peer(ctx, peer).await? {
+        if evaluate_peer(ctx, &central, peer).await? {
             transitions += 1;
         }
     }
@@ -51,7 +55,11 @@ pub async fn evaluate_server_peers(ctx: &AppContext, vpn_server_id: i64) -> AppR
 /// # Errors
 ///
 /// Propaga erro do banco.
-pub async fn evaluate_peer(ctx: &AppContext, peer: vpn_peers::Model) -> AppResult<bool> {
+pub async fn evaluate_peer(
+    ctx: &AppContext,
+    central: &Central,
+    peer: vpn_peers::Model,
+) -> AppResult<bool> {
     let device = devices::Entity::find_by_id(peer.device_id)
         .one(&ctx.db)
         .await?;
@@ -65,14 +73,14 @@ pub async fn evaluate_peer(ctx: &AppContext, peer: vpn_peers::Model) -> AppResul
         .as_deref()
         .and_then(parse_status);
 
-    let dataset = vpn_peer::build(&VpnPeerFacts {
+    let dataset = VpnPeerDataset::new(&VpnPeerFacts {
         peer_name: &peer_name,
         status,
         previous_status,
         seconds_since_activity: seconds_since_activity(&peer),
     });
-    let changed = vpn_peer::has_transition(&dataset);
-    let message = vpn_peer::describe(&dataset);
+    let changed = vpn_peer::has_transition(&dataset.0);
+    let message = dataset.describe();
     let peer_id = peer.id;
     let vpn_server_id = peer.vpn_server_id;
     let device_id = peer.device_id;
@@ -95,46 +103,37 @@ pub async fn evaluate_peer(ctx: &AppContext, peer: vpn_peers::Model) -> AppResul
         vpn_server_id,
         device_id,
         device.as_ref(),
-        &dataset,
+        &dataset.0,
         &message,
     )
     .await;
 
     let mut data = serde_json::Map::new();
-    data.insert("eventType".into(), json!("vpn_peer_state"));
     data.insert("vpnPeerId".into(), json!(peer_id));
     data.insert("vpnServerId".into(), json!(vpn_server_id));
-    for (key, value) in &dataset {
-        data.insert(key.clone(), value.clone());
-    }
-
-    manager::evaluate(
-        ctx,
-        &AlertEvaluationContext {
-            scope: AlertEvaluationScope {
-                site_id: device.as_ref().and_then(|device| device.site_id),
-                device_id: Some(device_id),
-                monitor_id: None,
-            },
-            scope_key: AlertScopeKey::vpn_peer(peer_id),
-            target_label: peer_name,
-            dataset: dataset.clone(),
-            message: Some(message),
-            data,
-            recovered: vpn_peer::is_recovery(&dataset),
-            // Túnel não tem "warning": a transição `destabilized` já é fato.
-            degraded: false,
+    // Túnel não tem "warning" (`degraded` sai `false`): a transição
+    // `destabilized` já é fato.
+    let target = AlertTarget {
+        scope: AlertEvaluationScope {
+            site_id: device.as_ref().and_then(|device| device.site_id),
+            device_id: Some(device_id),
+            monitor_id: None,
         },
-    )
-    .await?;
+        scope_key: AlertScopeKey::vpn_peer(peer_id),
+        label: peer_name,
+        data,
+    };
+    central
+        .evaluate_alert(ctx, &AlertEvaluationContext::of(&dataset, target))
+        .await?;
 
     Ok(true)
 }
 
 /// Lê o status persistido no ciclo anterior. Valor desconhecido vira `None` —
 /// e sem estado anterior não há transição, que é o comportamento seguro.
-fn parse_status(raw: &str) -> Option<crate::models::vpn_peers::VpnPeerConnectionStatus> {
-    use crate::models::vpn_peers::VpnPeerConnectionStatus as Status;
+fn parse_status(raw: &str) -> Option<vpn_peers::VpnPeerConnectionStatus> {
+    use vpn_peers::VpnPeerConnectionStatus as Status;
     match raw {
         "connected" => Some(Status::Connected),
         "unstable" => Some(Status::Unstable),
@@ -184,7 +183,7 @@ async fn publish_transition(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::vpn_peers::VpnPeerConnectionStatus as Status;
+    use netmonitor_core::models::vpn_peers::VpnPeerConnectionStatus as Status;
 
     #[test]
     fn o_status_persistido_e_lido_de_volta() {

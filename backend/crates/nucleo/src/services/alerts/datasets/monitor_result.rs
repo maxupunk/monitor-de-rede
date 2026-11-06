@@ -3,7 +3,7 @@
 use serde_json::{json, Value};
 
 use crate::services::{
-    alerts::{baseline, contracts::AlertDataset, fields},
+    alerts::{baseline, contracts::AlertFacts, fields},
     monitoring::contracts::CheckResult,
 };
 
@@ -51,8 +51,8 @@ pub fn build(
     monitor_type: &str,
     result: &CheckResult,
     baseline: &baseline::MonitorBaseline,
-) -> AlertDataset {
-    let mut dataset = AlertDataset::new();
+) -> AlertFacts {
+    let mut dataset = AlertFacts::new();
     dataset.insert(fields::STATUS.into(), json!(result.status.as_str()));
     dataset.insert("success".into(), json!(result.success));
     dataset.insert(fields::DURATION_MS.into(), json!(result.duration_ms));

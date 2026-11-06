@@ -605,8 +605,10 @@ exatamente esse o bug corrigido pela [ADR 007](adr/007-scheduler-processo-unico.
   (`netmonitor_core::shared::secret_store`, também usado pelo enrollment dos
   agentes e pelas senhas de sessão dos plugins), a topologia e o nome do
   `vpn-probe` (`netmonitor_core::vpn_probe`) e o registrador dele
-  (`services/probes/vpn_registrar.rs`). A avaliação da transição de cada túnel
-  pelo motor de alertas é `services/alerts/vpn_peer_watcher.rs`.
+  (`services/probes/vpn_registrar.rs`). A transição de cada túnel é da área:
+  o dataset `vpn_peer` (`netmonitor_vpn::alerts::vpn_peer`, um `AlertDataset`)
+  e o observador (`alerts::watcher`), que o entrega ao motor de alertas pelo
+  `CentralServices` da VPN.
 - O `server` gera as chaves em Rust puro (`x25519-dalek`), sem depender do
   binário `wg` e sem `NET_ADMIN`.
 - A **chave privada de um peer nunca vai ao banco**: vive num cofre em memória
@@ -960,6 +962,7 @@ Decididas no [ADR 017](adr/017-arquitetura-modular.md). Quatro áreas: Núcleo
 | API | `controllers/areas.rs`, `POST /api/settings/onboarding/intent` | só admin muda; auditado |
 | Ferramentas da IA | `AiToolHandler` (`netmonitor_core::ai::tools`) com `area()`; cada área contribui as suas (`netmonitor_servers::ai_tools`, `netmonitor_vpn::ai_tools`, `netmonitor_network::{plugins,topology,discovery}::ai_tools`) e o catálogo, na ordem da IA, é montado em `src/registries.rs`; `ToolPolicy::with_areas` filtra | saem do chat, das rotinas e das tarefas; tarefa agendada vira `skipped` |
 | Rotinas | `discovery::queue`, `maintenance_runner`, `agents::background` | varredura, enlaces agendados e vigia de Wi-Fi pausados; snapshot Docker só com Servidores ligada **e** alguma aba com `?interest=docker` |
+| Datasets de alerta | `AlertDataset` (`netmonitor_core::alerts::contracts`: `eventType`, fatos, mensagem, recuperação), implementado pelo cliente Wi-Fi vigiado (`netmonitor_network::wifi::wifi_client`) e pelo túnel (`netmonitor_vpn::alerts::vpn_peer`); `AlertEvaluationContext::of` monta o contexto e o `CentralServices` da área (`evaluate_alert`) o entrega ao motor do Núcleo | seguem a rotina que os observa: o vigia do Wi-Fi pausa com a Rede desligada; a VPN com servidor ativo não desliga |
 | Monitores e alertas | `MonitorChecker` (`netmonitor_core::monitoring`): o monitor `snmp` é da Rede (`SnmpMonitor`) e o `container`, de Servidores; entram pelo registro, na central e no agente | **continuam** (monitor nunca para pela área); modelos de regra da área somem do catálogo |
 | SPA | `frontend/src/areas/`, `router/areaGuard.ts`, `AreaOffPage.vue` | menu, rotas, cards e handlers SSE da área saem; link profundo mostra "Área desligada" |
 

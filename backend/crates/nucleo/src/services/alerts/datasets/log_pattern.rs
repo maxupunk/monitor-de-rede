@@ -6,7 +6,7 @@
 
 use serde_json::json;
 
-use crate::services::alerts::{contracts::AlertDataset, fields};
+use crate::services::alerts::{contracts::AlertFacts, fields};
 
 /// O que a janela deslizante do matcher observou para um par (regra, alvo).
 #[derive(Debug, Clone)]
@@ -25,8 +25,8 @@ pub struct LogPatternFacts<'a> {
 
 /// Monta os fatos do padrão.
 #[must_use]
-pub fn build(facts: &LogPatternFacts<'_>) -> AlertDataset {
-    let mut dataset = AlertDataset::new();
+pub fn build(facts: &LogPatternFacts<'_>) -> AlertFacts {
+    let mut dataset = AlertFacts::new();
     dataset.insert(fields::LOG_PATTERN_KEY.into(), json!(facts.pattern_key));
     dataset.insert(fields::LOG_MATCH_COUNT.into(), json!(facts.match_count));
     dataset.insert(

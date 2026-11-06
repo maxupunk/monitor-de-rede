@@ -5,13 +5,13 @@
 
 use serde_json::{json, Value};
 
-use super::format_seconds;
-use crate::{
-    models::vpn_peers::VpnPeerConnectionStatus,
-    services::alerts::{
-        contracts::AlertDataset,
+use netmonitor_core::{
+    alerts::{
+        contracts::{AlertDataset, AlertFacts},
+        datasets::format_seconds,
         fields::{self, vpn_status_transition},
     },
+    models::vpn_peers::VpnPeerConnectionStatus,
 };
 
 /// O que se sabe do túnel neste ciclo.
@@ -39,8 +39,8 @@ pub fn status_label(status: VpnPeerConnectionStatus) -> &'static str {
 }
 
 #[must_use]
-pub fn build(facts: &VpnPeerFacts<'_>) -> AlertDataset {
-    let mut dataset = AlertDataset::new();
+pub fn build(facts: &VpnPeerFacts<'_>) -> AlertFacts {
+    let mut dataset = AlertFacts::new();
     dataset.insert(fields::VPN_PEER_NAME.into(), json!(facts.peer_name));
     dataset.insert(
         fields::VPN_PEER_STATUS.into(),
@@ -103,19 +103,19 @@ pub fn resolve_transition(
 
 /// `true` quando o dataset descreve alguma mudança de estado do túnel.
 #[must_use]
-pub fn has_transition(dataset: &AlertDataset) -> bool {
+pub fn has_transition(dataset: &AlertFacts) -> bool {
     dataset.contains_key(fields::VPN_STATUS_TRANSITION)
 }
 
 /// `true` quando o túnel voltou — sinaliza ao motor que os alertas podem fechar.
 #[must_use]
-pub fn is_recovery(dataset: &AlertDataset) -> bool {
+pub fn is_recovery(dataset: &AlertFacts) -> bool {
     dataset.get(fields::VPN_STATUS_TRANSITION) == Some(&json!(vpn_status_transition::RECONNECTED))
 }
 
 /// Frase legível do que foi observado, usada como mensagem do alerta.
 #[must_use]
-pub fn describe(dataset: &AlertDataset) -> String {
+pub fn describe(dataset: &AlertFacts) -> String {
     let name = dataset
         .get(fields::VPN_PEER_NAME)
         .and_then(Value::as_str)
@@ -150,6 +150,35 @@ pub fn describe(dataset: &AlertDataset) -> String {
                 status_in_portuguese(status)
             )
         }
+    }
+}
+
+/// Os fatos de um túnel como dataset de alerta (`vpn_peer_state`).
+#[derive(Debug, Clone)]
+pub struct VpnPeerDataset(pub AlertFacts);
+
+impl VpnPeerDataset {
+    #[must_use]
+    pub fn new(facts: &VpnPeerFacts<'_>) -> Self {
+        Self(build(facts))
+    }
+}
+
+impl AlertDataset for VpnPeerDataset {
+    fn event_type(&self) -> &'static str {
+        "vpn_peer_state"
+    }
+
+    fn facts(&self) -> AlertFacts {
+        self.0.clone()
+    }
+
+    fn describe(&self) -> String {
+        describe(&self.0)
+    }
+
+    fn is_recovery(&self) -> bool {
+        is_recovery(&self.0)
     }
 }
 

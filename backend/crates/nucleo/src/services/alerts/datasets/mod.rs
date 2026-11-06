@@ -3,7 +3,7 @@
 pub use netmonitor_core::alerts::datasets::interface_state;
 pub mod log_pattern;
 pub mod monitor_result;
-pub mod vpn_peer;
 
-// O dataset do cliente Wi-Fi vigiado é da área Rede (`netmonitor_network::wifi`).
-use netmonitor_core::alerts::datasets::format_seconds;
+// Os datasets das áreas implementam `AlertDataset` no crate de cada uma: o
+// cliente Wi-Fi vigiado na Rede (`netmonitor_network::wifi`) e o túnel
+// WireGuard na VPN (`netmonitor_vpn::alerts`).

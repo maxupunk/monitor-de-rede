@@ -15,6 +15,7 @@
 
 pub mod access_control;
 pub mod ai_tools;
+pub mod alerts;
 pub mod area_policy;
 pub mod central;
 pub mod cidr;

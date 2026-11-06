@@ -25,10 +25,10 @@ use super::{
 use crate::central::Central;
 use crate::{
     dtos::wifi::{WifiDeviceSnapshot, WifiReadStatus, WifiStation},
-    wifi::wifi_client::{self, WifiClientFacts, WifiClientPresence},
+    wifi::wifi_client::{WifiClientFacts, WifiClientPresence},
 };
 use netmonitor_core::{
-    alerts::contracts::{AlertEvaluationContext, AlertEvaluationScope, AlertScopeKey},
+    alerts::contracts::{AlertEvaluationContext, AlertEvaluationScope, AlertScopeKey, AlertTarget},
     models::{devices, wifi_watched_clients},
     shared::errors::AppResult,
 };
@@ -141,31 +141,22 @@ async fn evaluate(
         name: &client.name,
         presence: &observation.presence,
     };
-    let dataset = wifi_client::build(&facts);
     let mut data = Map::new();
-    data.insert("eventType".into(), json!("wifi_client_state"));
     data.insert("wifiWatchedId".into(), json!(client.id));
     data.insert("mac".into(), json!(client.mac));
-    data.extend(dataset.clone());
+    let target = AlertTarget {
+        scope: AlertEvaluationScope {
+            site_id: device.as_ref().and_then(|device| device.site_id),
+            device_id: observation.device_id,
+            monitor_id: None,
+        },
+        scope_key: AlertScopeKey::wifi_client(client.id),
+        label: client.name.clone(),
+        data,
+    };
 
     Central::from_context(ctx)?
-        .evaluate_alert(
-            ctx,
-            &AlertEvaluationContext {
-                scope: AlertEvaluationScope {
-                    site_id: device.as_ref().and_then(|device| device.site_id),
-                    device_id: observation.device_id,
-                    monitor_id: None,
-                },
-                scope_key: AlertScopeKey::wifi_client(client.id),
-                target_label: client.name.clone(),
-                dataset,
-                message: Some(wifi_client::describe(&facts)),
-                data,
-                recovered: wifi_client::is_recovery(&observation.presence),
-                degraded: false,
-            },
-        )
+        .evaluate_alert(ctx, &AlertEvaluationContext::of(&facts, target))
         .await
 }
 

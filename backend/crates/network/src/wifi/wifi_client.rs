@@ -9,7 +9,7 @@ use serde_json::json;
 use crate::dtos::wifi::WifiHealth;
 use netmonitor_core::alerts::datasets::format_seconds;
 use netmonitor_core::alerts::{
-    contracts::AlertDataset,
+    contracts::{AlertDataset, AlertFacts},
     fields::{self, wifi_client_status},
 };
 
@@ -34,8 +34,8 @@ pub struct WifiClientFacts<'a> {
 }
 
 #[must_use]
-pub fn build(facts: &WifiClientFacts<'_>) -> AlertDataset {
-    let mut dataset = AlertDataset::new();
+pub fn build(facts: &WifiClientFacts<'_>) -> AlertFacts {
+    let mut dataset = AlertFacts::new();
     dataset.insert(fields::WIFI_CLIENT_NAME.into(), json!(facts.name));
     match facts.presence {
         WifiClientPresence::Connected {
@@ -90,6 +90,25 @@ pub fn describe(facts: &WifiClientFacts<'_>) -> String {
             signal_dbm,
             ..
         } => format!("{name} conectado em {device_name}, sinal de {signal_dbm} dBm."),
+    }
+}
+
+/// O cliente vigiado como dataset de alerta (`wifi_client_state`).
+impl AlertDataset for WifiClientFacts<'_> {
+    fn event_type(&self) -> &'static str {
+        "wifi_client_state"
+    }
+
+    fn facts(&self) -> AlertFacts {
+        build(self)
+    }
+
+    fn describe(&self) -> String {
+        describe(self)
+    }
+
+    fn is_recovery(&self) -> bool {
+        is_recovery(self.presence)
     }
 }
 

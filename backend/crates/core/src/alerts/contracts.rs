@@ -14,7 +14,7 @@ use serde_json::{Map, Value};
 ///
 /// É um `Map<String, Value>` e não um struct porque o conjunto de campos é
 /// aberto: um checker novo publica chaves novas sem que o avaliador mude.
-pub type AlertDataset = Map<String, Value>;
+pub type AlertFacts = Map<String, Value>;
 
 /// Delimita quais regras se aplicam ao fato observado (`None` = regra global).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -36,7 +36,7 @@ pub struct AlertEvaluationContext {
     /// Rótulo do alvo exibido no título do alerta.
     pub target_label: String,
 
-    pub dataset: AlertDataset,
+    pub dataset: AlertFacts,
 
     /// Descrição legível do fato; cai para o nome da regra quando ausente.
     pub message: Option<String>,
@@ -53,6 +53,65 @@ pub struct AlertEvaluationContext {
     /// pacotes, DNS parcial). Não dispara regra, mas conta como problema para
     /// a janela de recuperação dos eventos abertos do escopo (Fase 2).
     pub degraded: bool,
+}
+
+/// Um dataset de alerta de área (ADR 017): o que um produtor de fatos
+/// contribui ao motor — o `eventType`, os fatos, a mensagem e se o alvo
+/// voltou. Quem é o alvo vem à parte ([`AlertTarget`]); o motor só recebe o
+/// [`AlertEvaluationContext`] montado por [`AlertEvaluationContext::of`].
+///
+/// Implementado pelo cliente Wi-Fi vigiado (Rede) e pelo túnel WireGuard
+/// (VPN). Decidir *quando* entregar o dataset (uma transição, um ciclo de
+/// leitura) continua com quem observa.
+pub trait AlertDataset {
+    /// `eventType` gravado em `alert_events.data` (`vpn_peer_state`).
+    fn event_type(&self) -> &'static str;
+
+    /// Os fatos no vocabulário das regras.
+    fn facts(&self) -> AlertFacts;
+
+    /// Frase legível do que foi observado, usada como mensagem do alerta.
+    fn describe(&self) -> String;
+
+    /// `true` quando o alvo voltou ao normal (ver
+    /// [`AlertEvaluationContext::recovered`]).
+    fn is_recovery(&self) -> bool;
+}
+
+/// O alvo de um [`AlertDataset`].
+#[derive(Debug, Clone)]
+pub struct AlertTarget {
+    pub scope: AlertEvaluationScope,
+    /// Ver [`AlertEvaluationContext::scope_key`].
+    pub scope_key: String,
+    /// Ver [`AlertEvaluationContext::target_label`].
+    pub label: String,
+    /// Identificação do alvo em `alert_events.data`, entre o `eventType` e
+    /// os fatos (`vpnPeerId`, `mac`).
+    pub data: Map<String, Value>,
+}
+
+impl AlertEvaluationContext {
+    /// O contexto que o motor avalia para um dataset de área. Nenhum dos
+    /// datasets de área tem estado degradado: `degraded` é sempre `false`.
+    #[must_use]
+    pub fn of(dataset: &dyn AlertDataset, target: AlertTarget) -> Self {
+        let facts = dataset.facts();
+        let mut data = Map::new();
+        data.insert("eventType".into(), Value::from(dataset.event_type()));
+        data.extend(target.data);
+        data.extend(facts.clone());
+        Self {
+            scope: target.scope,
+            scope_key: target.scope_key,
+            target_label: target.label,
+            dataset: facts,
+            message: Some(dataset.describe()),
+            data,
+            recovered: dataset.is_recovery(),
+            degraded: false,
+        }
+    }
 }
 
 /// Ciclo de vida de `alert_events` (§2.2 da análise de monitoramento
@@ -192,6 +251,62 @@ mod tests {
         assert_eq!(AlertScopeKey::interface(34), "interface:34");
         assert_eq!(AlertScopeKey::vpn_peer(7), "vpn_peer:7");
         assert_eq!(AlertScopeKey::wifi_client(3), "wifi_client:3");
+    }
+
+    /// Um dataset qualquer: o motor não sabe de qual área ele vem.
+    struct Fake {
+        voltou: bool,
+    }
+
+    impl AlertDataset for Fake {
+        fn event_type(&self) -> &'static str {
+            "fake_state"
+        }
+
+        fn facts(&self) -> AlertFacts {
+            let mut facts = AlertFacts::new();
+            facts.insert("fakeStatus".into(), Value::from("down"));
+            facts.insert("alvoId".into(), Value::from(99));
+            facts
+        }
+
+        fn describe(&self) -> String {
+            "Fake caiu.".into()
+        }
+
+        fn is_recovery(&self) -> bool {
+            self.voltou
+        }
+    }
+
+    #[test]
+    fn o_contexto_de_um_dataset_sai_do_trait() {
+        let mut data = Map::new();
+        data.insert("alvoId".into(), Value::from(7));
+        let target = AlertTarget {
+            scope: AlertEvaluationScope {
+                site_id: Some(1),
+                device_id: Some(2),
+                monitor_id: None,
+            },
+            scope_key: "fake:7".into(),
+            label: "Alvo".into(),
+            data,
+        };
+        let context = AlertEvaluationContext::of(&Fake { voltou: false }, target.clone());
+        assert_eq!(context.scope_key, "fake:7");
+        assert_eq!(context.target_label, "Alvo");
+        assert_eq!(context.scope.device_id, Some(2));
+        assert_eq!(context.message.as_deref(), Some("Fake caiu."));
+        assert_eq!(context.dataset["fakeStatus"], "down");
+        assert_eq!(context.data["eventType"], "fake_state");
+        assert_eq!(context.data["fakeStatus"], "down");
+        // Os fatos vêm por último: mesma chave, vale o fato observado.
+        assert_eq!(context.data["alvoId"], 99);
+        assert!(!context.recovered);
+        assert!(!context.degraded);
+
+        assert!(AlertEvaluationContext::of(&Fake { voltou: true }, target).recovered);
     }
 
     #[test]
