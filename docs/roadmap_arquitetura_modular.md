@@ -294,26 +294,26 @@ as migrations por crate vêm antes das tabelas novas das Fases 15 e 16.
 
 ### Fase 11 — Pendências pequenas
 
-- [ ] 🔴 Pendente — **Fechar o que ficou solto**
+- [x] 🟢 Concluído — **Fechar o que ficou solto**
   - **Entregas:**
-    - [ ] Gráfico de latência de 7 dias da IA (`chart_monitor_latency`) e linha de base dos alertas (`alerts/baseline.rs`) contam o trecho que o rollup ainda não agregou, pelo mesmo `rollup::unrolled_since` do uptime.
-    - [ ] Dockerfile: o estágio `spike` deixa de copiar o exemplo inexistente `spike_snmp_v2c` (estágio removido ou exemplo corrigido).
-    - [ ] Laya-tuning (repositório vizinho): `sync.py` aponta para `crates/assistant` e `crates/core/src/{ai,classifier,devices}`; `sync-check` verde.
-    - [ ] Teste intermitente `throughput::btest::tests::cliente_envia_ao_servidor_armado`: causa achada e corrigida (QUA-07).
-    - [ ] `DeciderTemplateClassifier` do syslog renomeado para o que ele é (delega ao `Classifier` do processo).
+    - [x] Gráfico de latência de 7 dias da IA (`chart_monitor_latency`) e linha de base dos alertas (`alerts/baseline.rs`) contam o trecho que o rollup ainda não agregou, pelo mesmo `rollup::unrolled_since` do uptime. — *ajustado:* o gráfico conta (`rollup::hourly_buckets`, buckets até onde o rollup chegou + o bruto agregado pela mesma SQL); a linha de base **não**, de propósito — o resultado avaliado já está gravado, e incluí-lo puxava a média para a própria anomalia (três testes de `baseline_alerts` provaram); o motivo ficou no módulo
+    - [x] Dockerfile: o estágio `spike` deixa de copiar o exemplo inexistente `spike_snmp_v2c` (estágio removido ou exemplo corrigido). — exemplo corrigido para `spike_async_snmp` (o `docker-compose.icmp-spike.yml` usa o estágio)
+    - [x] Laya-tuning (repositório vizinho): `sync.py` aponta para `crates/assistant` e `crates/core/src/{ai,classifier,devices}`; `sync-check` verde. — commit `c55859e` lá; "contrato idêntico ao código", pytest/mypy/ruff verdes
+    - [x] Teste intermitente `throughput::btest::tests::cliente_envia_ao_servidor_armado`: causa achada e corrigida (QUA-07). — 2 falhas em 160 execuções; a asserção comparava totais sem ordem garantida pelo protocolo; 320 execuções sem falha depois
+    - [x] `DeciderTemplateClassifier` do syslog renomeado para o que ele é (delega ao `Classifier` do processo). — `ProcessTemplateClassifier`
   - **Aceite:**
-    - [ ] Teste que falha sem a correção do gráfico/linha de base.
-    - [ ] `docker build --target spike` (ou a ausência do alvo) sem erro.
+    - [x] Teste que falha sem a correção do gráfico/linha de base. — `buckets_horarios_incluem_o_que_o_rollup_ainda_nao_agregou`
+    - [x] `docker build --target spike` (ou a ausência do alvo) sem erro.
 
 ### Fase 12 — Plugues por área: `settingsTabs` e `WidgetSpec`
 
-- [ ] 🔴 Pendente — **Configurações e widgets contribuídos pela área**
+- [x] 🟢 Concluído — **Configurações e widgets contribuídos pela área**
   - **Entregas:**
-    - [ ] `defineArea` ganha `settingsTabs` (abas e cartões de Configurações); `SettingsPage.vue` só renderiza o registro. O cadastro de fabricantes vai para a Rede; Endereços da central e DNS ficam no Núcleo — a aba de uma área desligada some.
-    - [ ] `WidgetSpec` no `core`: o widget declara área, dados e coleta; o `docker_summary` passa a ser contribuído pelo crate `servers`, e o catálogo é montado no ponto de montagem.
+    - [x] `defineArea` ganha `settingsTabs` (abas e cartões de Configurações); `SettingsPage.vue` só renderiza o registro. O cadastro de fabricantes vai para a Rede; Endereços da central e DNS ficam no Núcleo — a aba de uma área desligada some. — `settingsTabs` + `settingsCards`, montados por `areas/settings.ts`; a aba do Núcleo virou **Conectividade** e a **Rede** é da área; os cartões ficaram autossuficientes (o de endereços abre o próprio diálogo, o de notificações faz o teste local, o de preferências carrega sozinho) e todos avisam pelo mesmo `saved`
+    - [x] `WidgetSpec` no `core`: o widget declara área, dados e coleta; o `docker_summary` passa a ser contribuído pelo crate `servers`, e o catálogo é montado no ponto de montagem. — `netmonitor_core::dashboard` (`WidgetSpec`, `install_widgets`, `default_layout`); o tipo deixou de ser `enum` fechado e virou o id declarado pela área; Núcleo, Rede (`dns_latency`, SaaS, banda) e Servidores (`docker_summary`) declaram os seus; `registries::dashboard_widgets`; `contracts/ai_chat.json` sem diff (o `order` de cada card mantém a ordem)
   - **Aceite:**
-    - [ ] Com Rede desligada, Configurações não mostra nada só da Rede (teste Vitest).
-    - [ ] Nenhuma lista fixa de abas nem de widgets fora dos registros.
+    - [x] Com Rede desligada, Configurações não mostra nada só da Rede (teste Vitest). — `tests/areas/settings.spec.ts`
+    - [x] Nenhuma lista fixa de abas nem de widgets fora dos registros.
 
 ### Fase 13 — Migrations por crate
 
