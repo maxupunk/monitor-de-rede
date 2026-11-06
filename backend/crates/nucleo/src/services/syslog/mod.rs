@@ -120,7 +120,7 @@ pub fn build(ctx: &AppContext, config: &SyslogConfig) -> AppResult<SyslogService
         logs.connection().clone(),
         Arc::clone(&catalog),
         jobs,
-        Arc::new(categorizer::DeciderTemplateClassifier::new(ctx.clone())),
+        Arc::new(categorizer::ProcessTemplateClassifier::new(ctx.clone())),
         crate::services::events::EventBus::from_context(ctx).ok(),
     ));
 

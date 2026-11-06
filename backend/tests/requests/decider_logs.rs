@@ -10,7 +10,7 @@ use backend::app::App;
 use netmonitor_nucleo::{
     dtos::logs::{LogPageResponse, LogTemplateInfo},
     services::syslog::{
-        categorizer::{backfill, template_of, DeciderTemplateClassifier},
+        categorizer::{backfill, template_of, ProcessTemplateClassifier},
         template::hash_hex,
         LogsDb,
     },
@@ -79,7 +79,7 @@ async fn classifica_por_padrao_filtra_e_respeita_a_correcao() {
         line(&logs, "login failure for user admin from 10.0.0.9").await;
         let link = line(&logs, "ether3 link down").await;
 
-        let classifier = DeciderTemplateClassifier::new(ctx.clone());
+        let classifier = ProcessTemplateClassifier::new(ctx.clone());
         assert_eq!(backfill(&logs, &classifier, None, 10).await, 2);
         assert_eq!(fake.calls(), 2, "uma consulta por padrão, não por linha");
 
@@ -158,7 +158,7 @@ async fn frente_desligada_nao_classifica() {
         let logs = logs_db(&ctx);
         line(&logs, "login failure for user admin from 10.0.0.5").await;
 
-        let classifier = DeciderTemplateClassifier::new(ctx.clone());
+        let classifier = ProcessTemplateClassifier::new(ctx.clone());
         assert_eq!(backfill(&logs, &classifier, None, 10).await, 0);
         assert_eq!(fake.calls(), 0);
     })
@@ -183,7 +183,7 @@ async fn sem_o_assistente_o_log_segue_pela_heuristica() {
         line(&logs, "login failure for user admin from 10.0.0.5").await;
         line(&logs, "login failure for user admin from 10.0.0.9").await;
 
-        let classifier = DeciderTemplateClassifier::new(ctx.clone());
+        let classifier = ProcessTemplateClassifier::new(ctx.clone());
         assert_eq!(backfill(&logs, &classifier, None, 10).await, 0);
         assert_eq!(
             fake.calls(),

@@ -84,11 +84,14 @@ pub trait TemplateClassifier: Send + Sync {
     async fn classify(&self, job: &TemplateJob) -> Option<DeciderSuggestion>;
 }
 
-pub struct DeciderTemplateClassifier {
+/// Pede a categoria ao `Classifier` instalado no processo: o Decisor quando o
+/// assistente está montado; sem ele, a heurística (que não dá palpite, e o
+/// padrão fica sem categoria).
+pub struct ProcessTemplateClassifier {
     ctx: AppContext,
 }
 
-impl DeciderTemplateClassifier {
+impl ProcessTemplateClassifier {
     #[must_use]
     pub const fn new(ctx: AppContext) -> Self {
         Self { ctx }
@@ -96,7 +99,7 @@ impl DeciderTemplateClassifier {
 }
 
 #[async_trait]
-impl TemplateClassifier for DeciderTemplateClassifier {
+impl TemplateClassifier for ProcessTemplateClassifier {
     async fn ready(&self) -> bool {
         classifier::from_context(&self.ctx)
             .min_confidence(&self.ctx, ClassifierFeature::LogEvents)
