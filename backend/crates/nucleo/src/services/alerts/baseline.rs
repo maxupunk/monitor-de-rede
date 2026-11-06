@@ -6,6 +6,12 @@
 //! horários de `monitor_results_hourly`, evitando varrer a tabela bruta a cada
 //! ciclo.
 //!
+//! **Só horas já agregadas, de propósito.** Ao contrário do uptime e dos
+//! gráficos (`rollup::hourly_buckets`), a baseline não lê o bruto ainda não
+//! agregado: o resultado avaliado agora já está gravado, e incluí-lo puxaria a
+//! média para a própria anomalia que ela deve detectar. Uma hora a menos numa
+//! referência de dias não pesa.
+//!
 //! O resultado é publicado no dataset de alertas como campos auxiliares; o
 //! avaliador continua usando operadores simples (`gt`, `gte`), o que mantém a
 //! compatibilidade com regras manuais e com o catálogo.

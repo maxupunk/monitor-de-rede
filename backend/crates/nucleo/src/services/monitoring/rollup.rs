@@ -81,6 +81,71 @@ pub async fn unrolled_since<C: ConnectionTrait>(
     }))
 }
 
+/// Um bucket horário de um monitor, venha do rollup ou do bruto ainda não
+/// agregado.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HourlyBucket {
+    pub bucket: DateTime<Utc>,
+    pub total_checks: i64,
+    pub up_checks: i64,
+    pub down_checks: i64,
+    pub unknown_checks: i64,
+    pub avg_latency_ms: Option<f64>,
+}
+
+impl From<monitor_results_hourly::Model> for HourlyBucket {
+    fn from(row: monitor_results_hourly::Model) -> Self {
+        Self {
+            bucket: row.bucket.with_timezone(&Utc),
+            total_checks: i64::from(row.total_checks),
+            up_checks: i64::from(row.up_checks),
+            down_checks: i64::from(row.down_checks),
+            unknown_checks: i64::from(row.unknown_checks),
+            avg_latency_ms: row.avg_latency_ms,
+        }
+    }
+}
+
+/// Buckets horários de um monitor de `since` até `now`, em ordem.
+///
+/// Até onde o rollup já agregou ([`unrolled_since`]), lê
+/// `monitor_results_hourly`; dali em diante, agrega o bruto com a mesma SQL do
+/// rollup. Assim a hora recém-fechada e a aberta entram sem esperar o próximo
+/// ciclo, e nenhum trecho é contado duas vezes.
+///
+/// # Errors
+///
+/// Propaga erro do banco.
+pub async fn hourly_buckets<C: ConnectionTrait>(
+    db: &C,
+    monitor_id: i64,
+    since: DateTime<Utc>,
+    now: DateTime<Utc>,
+) -> AppResult<Vec<HourlyBucket>> {
+    let raw_start = unrolled_since(db, since, now).await?;
+    let mut buckets: Vec<HourlyBucket> = monitor_results_hourly::Entity::find()
+        .filter(monitor_results_hourly::Column::MonitorId.eq(monitor_id))
+        .filter(monitor_results_hourly::Column::Bucket.gte(since))
+        .filter(monitor_results_hourly::Column::Bucket.lt(raw_start))
+        .order_by_asc(monitor_results_hourly::Column::Bucket)
+        .all(db)
+        .await?
+        .into_iter()
+        .map(HourlyBucket::from)
+        .collect();
+    let pending =
+        aggregate_range(db, raw_start, now + Duration::seconds(1), Some(monitor_id)).await?;
+    buckets.extend(pending.into_iter().map(|row| HourlyBucket {
+        bucket: row.bucket.with_timezone(&Utc),
+        total_checks: row.total_checks,
+        up_checks: row.up_checks,
+        down_checks: row.down_checks,
+        unknown_checks: row.unknown_checks,
+        avg_latency_ms: row.avg_latency_ms,
+    }));
+    Ok(buckets)
+}
+
 /// Agrega buckets completos anteriores a `until`.
 ///
 /// O intervalo é limitado, a agregação é feita por SQL e a substituição dos
@@ -116,7 +181,7 @@ pub async fn rollup_monitor_results(
     }
 
     let txn = begin_write(db).await?;
-    let aggregates = aggregate_range(&txn, start, end).await?;
+    let aggregates = aggregate_range(&txn, start, end, None).await?;
     let rows_aggregated = aggregates.iter().try_fold(0_u64, |total, row| {
         u64::try_from(row.total_checks)
             .ok()
@@ -215,14 +280,25 @@ async fn aggregate_range<C>(
     db: &C,
     start: DateTime<Utc>,
     end: DateTime<Utc>,
+    monitor_id: Option<i64>,
 ) -> AppResult<Vec<HourlyAggregate>>
 where
     C: ConnectionTrait,
 {
     let backend = db.get_database_backend();
-    let (start_marker, end_marker, bucket_expression) = match backend {
-        DatabaseBackend::Postgres => ("$1", "$2", "date_trunc('hour', started_at)"),
-        _ => ("?", "?", "strftime('%Y-%m-%dT%H:00:00+00:00', started_at)"),
+    let (start_marker, end_marker, monitor_marker, bucket_expression) = match backend {
+        DatabaseBackend::Postgres => ("$1", "$2", "$3", "date_trunc('hour', started_at)"),
+        _ => (
+            "?",
+            "?",
+            "?",
+            "strftime('%Y-%m-%dT%H:00:00+00:00', started_at)",
+        ),
+    };
+    let monitor_filter = if monitor_id.is_some() {
+        format!(" AND monitor_id = {monitor_marker}")
+    } else {
+        String::new()
     };
     let sql = format!(
         "SELECT monitor_id, \
@@ -239,7 +315,7 @@ where
                 MIN(started_at) AS first_started_at, \
                 MAX(finished_at) AS last_finished_at \
            FROM monitor_results \
-          WHERE started_at >= {start_marker} AND started_at < {end_marker} \
+          WHERE started_at >= {start_marker} AND started_at < {end_marker}{monitor_filter} \
           GROUP BY monitor_id, {bucket_expression} \
           ORDER BY bucket ASC, monitor_id ASC"
     );
@@ -248,7 +324,10 @@ where
         HourlyAggregate::find_by_statement(Statement::from_sql_and_values(
             backend,
             sql,
-            Vec::<Value>::from([start.into(), end.into()]),
+            [start.into(), end.into()]
+                .into_iter()
+                .chain(monitor_id.map(Value::from))
+                .collect::<Vec<Value>>(),
         ))
         .all(db)
         .await?,

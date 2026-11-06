@@ -9,7 +9,6 @@ use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 use loco_rs::prelude::AppContext;
 use netmonitor_core::areas::Area;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use serde_json::{json, Value};
 
 use super::{
@@ -22,8 +21,11 @@ use netmonitor_core::ai::chart::{AiChart, AiChartAxis, AiChartSeries, AiChartUni
 
 use crate::{
     dtos::monitors::MonitorTimeSeriesQuery,
-    models::_entities::{monitor_results_hourly, monitors},
-    services::{monitoring::timeseries::calculate_monitor_timeseries, shared::errors::AppResult},
+    models::_entities::monitors,
+    services::{
+        monitoring::{rollup::hourly_buckets, timeseries::calculate_monitor_timeseries},
+        shared::errors::AppResult,
+    },
 };
 
 /// Janela do gráfico de latência. As três curtas vêm da mesma agregação do
@@ -76,25 +78,17 @@ async fn latency_samples(
     window: LatencyWindow,
 ) -> AppResult<(Vec<Sample>, Option<f64>)> {
     if window == LatencyWindow::Days7 {
-        let since = Utc::now() - Duration::days(7);
-        let buckets = monitor_results_hourly::Entity::find()
-            .filter(monitor_results_hourly::Column::MonitorId.eq(monitor.id))
-            .filter(monitor_results_hourly::Column::Bucket.gte(since))
-            .order_by_asc(monitor_results_hourly::Column::Bucket)
-            .all(&ctx.db)
-            .await?;
+        let now = Utc::now();
+        let buckets = hourly_buckets(&ctx.db, monitor.id, now - Duration::days(7), now).await?;
         let (down, total) = buckets.iter().fold((0_i64, 0_i64), |(down, total), b| {
-            (
-                down + i64::from(b.down_checks),
-                total + i64::from(b.total_checks),
-            )
+            (down + b.down_checks, total + b.total_checks)
         });
         let loss = (total > 0).then(|| round2(down as f64 * 100.0 / total as f64));
         let samples = buckets
             .into_iter()
             .filter_map(|bucket| {
                 bucket.avg_latency_ms.map(|value| Sample {
-                    at: bucket.bucket.with_timezone(&Utc),
+                    at: bucket.bucket,
                     value,
                 })
             })
