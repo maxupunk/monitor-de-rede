@@ -399,6 +399,23 @@ pub fn install_ai_tools() {
     netmonitor_core::ai::tools::install_catalog(ai_tool_catalog);
 }
 
+/// Os cards do dashboard de todas as áreas (`WidgetSpec`). A ordem final é a
+/// do `order` de cada card, não a desta lista.
+#[must_use]
+pub fn dashboard_widgets() -> Vec<netmonitor_core::dashboard::WidgetSpec> {
+    [
+        netmonitor_nucleo::services::dashboard::catalog::core_widgets(),
+        netmonitor_network::widgets::widgets(),
+        netmonitor_servers::widgets::widgets(),
+    ]
+    .concat()
+}
+
+/// Instala o catálogo de cards no núcleo. Idempotente, como o da IA.
+pub fn install_dashboard_widgets() {
+    netmonitor_core::dashboard::install_widgets(dashboard_widgets());
+}
+
 /// Os containers do host desta central, para as marcações do `@`.
 struct HostContainers(Arc<dyn DockerEngine>);
 
@@ -504,5 +521,36 @@ mod tests {
     fn o_monitor_de_container_esta_registrado() {
         assert!(monitor_checkers(None).find("container").is_some());
         assert!(monitor_checkers(None).find("snmp").is_some());
+    }
+
+    #[test]
+    fn cards_das_areas_entram_na_ordem_do_catalogo() {
+        install_dashboard_widgets();
+        let cards: Vec<(&str, Area)> = netmonitor_core::dashboard::widgets()
+            .iter()
+            .map(|spec| (spec.widget_type.id(), spec.area))
+            .collect();
+        assert_eq!(
+            cards,
+            vec![
+                ("stat_cards", Area::Core),
+                ("health_gauge", Area::Core),
+                ("active_alerts", Area::Core),
+                ("latency_time_series", Area::Core),
+                ("event_distribution", Area::Core),
+                ("unstable_targets", Area::Core),
+                ("events_feed", Area::Core),
+                ("network_monitors", Area::Core),
+                ("docker_summary", Area::Servers),
+                ("dns_latency", Area::Network),
+                ("saas_services", Area::Network),
+                ("saas_heatmap", Area::Network),
+                ("ether_bandwidth", Area::Network),
+                ("bandwidth_vs_latency", Area::Network),
+                ("cpu_usage", Area::Core),
+                ("ram_usage", Area::Core),
+                ("binary_status", Area::Core),
+            ]
+        );
     }
 }

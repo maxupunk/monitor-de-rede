@@ -26,6 +26,7 @@ pub mod databases;
 pub mod docker;
 pub mod dtos;
 pub mod views;
+pub mod widgets;
 
 use std::sync::Arc;
 

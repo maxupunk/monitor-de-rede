@@ -49,6 +49,7 @@ pub mod snmp;
 pub mod throughput;
 pub mod topology;
 pub mod vendors;
+pub mod widgets;
 pub mod wifi;
 
 use std::sync::Arc;

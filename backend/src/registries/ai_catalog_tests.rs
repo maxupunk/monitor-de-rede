@@ -21,10 +21,11 @@ use netmonitor_core::{
     areas::{Area, AreaSet},
 };
 
-use super::{ai_tool_catalog, install_ai_tools};
+use super::{ai_tool_catalog, install_ai_tools, install_dashboard_widgets};
 
 #[test]
 fn nomes_sao_unicos() {
+    install_dashboard_widgets();
     install_ai_tools();
     let handlers = ai_tool_catalog();
     let names: HashSet<&str> = handlers.iter().map(|handler| handler.name()).collect();
@@ -33,6 +34,7 @@ fn nomes_sao_unicos() {
 
 #[test]
 fn todo_contrato_e_um_objeto_json_schema() {
+    install_dashboard_widgets();
     install_ai_tools();
     for handler in ai_tool_catalog() {
         let schema = handler.parameters();
@@ -44,6 +46,7 @@ fn todo_contrato_e_um_objeto_json_schema() {
 
 #[test]
 fn ferramentas_ativas_so_entram_quando_liberadas() {
+    install_dashboard_widgets();
     install_ai_tools();
     let passivas = ToolRegistry::new(ToolPolicy::passive());
     let nomes: Vec<String> = passivas
@@ -78,6 +81,7 @@ fn ferramentas_ativas_so_entram_quando_liberadas() {
 
 #[test]
 fn catalogo_sob_demanda_manda_o_nucleo_e_so_o_que_foi_carregado() {
+    install_dashboard_widgets();
     install_ai_tools();
     let registro = ToolRegistry::new(ToolPolicy {
         allow_active: true,
@@ -125,6 +129,7 @@ fn catalogo_sob_demanda_manda_o_nucleo_e_so_o_que_foi_carregado() {
 
 #[test]
 fn tarefa_agendada_so_roda_o_que_dispensa_alguem_do_outro_lado() {
+    install_dashboard_widgets();
     install_ai_tools();
     let catalogo = UnattendedTools::new();
     let nomes = catalogo.names();
@@ -165,6 +170,7 @@ fn tarefa_agendada_so_roda_o_que_dispensa_alguem_do_outro_lado() {
 
 #[test]
 fn grupos_guardam_a_ordem_de_carga_sem_repetir() {
+    install_dashboard_widgets();
     install_ai_tools();
     let mut grupos = ToolGroups::from_ids(&["docker", "history", "inventado", "DOCKER"]);
     assert!(!grupos.insert(ToolGroup::History));
@@ -174,6 +180,7 @@ fn grupos_guardam_a_ordem_de_carga_sem_repetir() {
 
 #[test]
 fn nucleo_cabe_num_orcamento_pequeno() {
+    install_dashboard_widgets();
     install_ai_tools();
     let registro = ToolRegistry::new(ToolPolicy::from_settings(&AiSettings::default()));
     let tamanho: usize = registro
@@ -189,6 +196,7 @@ fn nucleo_cabe_num_orcamento_pequeno() {
 
 #[test]
 fn acao_em_container_segue_o_modo_configurado() {
+    install_dashboard_widgets();
     install_ai_tools();
     let modo = |container_actions| {
         ToolRegistry::new(ToolPolicy {
@@ -224,6 +232,7 @@ fn acao_em_container_segue_o_modo_configurado() {
 
 #[test]
 fn acoes_sempre_pedem_confirmacao_e_testes_ativos_so_quando_configurado() {
+    install_dashboard_widgets();
     install_ai_tools();
     let sem = ToolPolicy {
         allow_active: true,
@@ -253,6 +262,7 @@ fn acoes_sempre_pedem_confirmacao_e_testes_ativos_so_quando_configurado() {
 
 #[test]
 fn automatico_roda_risco_baixo_e_medio_e_pergunta_o_alto() {
+    install_dashboard_widgets();
     install_ai_tools();
     let politica = ToolPolicy {
         actions: AiAutomationMode::Auto,
@@ -285,6 +295,7 @@ fn automatico_roda_risco_baixo_e_medio_e_pergunta_o_alto() {
 
 #[test]
 fn acesso_a_equipamento_nunca_e_liberado_pelo_risco() {
+    install_dashboard_widgets();
     install_ai_tools();
     let politica = ToolPolicy {
         allow_active: true,
@@ -304,6 +315,7 @@ fn acesso_a_equipamento_nunca_e_liberado_pelo_risco() {
 
 #[test]
 fn sem_a_area_servidores_nenhuma_ferramenta_docker_nem_grupo_docker() {
+    install_dashboard_widgets();
     install_ai_tools();
     let politica = ToolPolicy::from_settings(&AiSettings::default())
         .with_areas(AreaSet::ALL.without(Area::Servers));
@@ -330,6 +342,7 @@ fn sem_a_area_servidores_nenhuma_ferramenta_docker_nem_grupo_docker() {
 #[tokio::test]
 async fn exporta_o_contrato_do_chat() {
     let db = sea_orm::Database::connect("sqlite::memory:").await.unwrap();
+    install_dashboard_widgets();
     install_ai_tools();
     let contract = chat_contract(&db).await;
     assert!(!contract.core.is_empty());
@@ -360,6 +373,7 @@ async fn exporta_o_contrato_do_chat() {
 #[test]
 fn custo_fixo_por_rodada_cabe_no_orcamento() {
     const BUDGET: u64 = 2_975;
+    install_dashboard_widgets();
     install_ai_tools();
     let settings = AiSettings {
         action_mode: AiAutomationMode::Auto,

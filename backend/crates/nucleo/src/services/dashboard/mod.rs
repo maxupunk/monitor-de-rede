@@ -153,12 +153,12 @@ mod tests {
 
     #[test]
     fn id_de_instancia_segue_o_formato_da_tela() {
-        let id = new_instance_id(DashboardWidgetType::CpuUsage);
+        let id = new_instance_id(DashboardWidgetType::new("cpu_usage"));
         let partes: Vec<&str> = id.rsplitn(3, '_').collect();
         assert_eq!(partes.len(), 3, "{id}");
         assert_eq!(partes[0].len(), 5);
         assert!(partes[1].parse::<i64>().is_ok(), "{id}");
         assert_eq!(partes[2], "cpu_usage");
-        assert_ne!(id, new_instance_id(DashboardWidgetType::CpuUsage));
+        assert_ne!(id, new_instance_id(DashboardWidgetType::new("cpu_usage")));
     }
 }

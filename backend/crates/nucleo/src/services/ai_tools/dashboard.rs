@@ -16,10 +16,12 @@ use super::{
     as_output, preview_or_error, AiToolHandler, RiskAssessment, ToolArgs, ToolGroup, ToolKind,
     ToolOutput,
 };
+use netmonitor_core::dashboard::widgets;
+
 use crate::services::{
     dashboard::{
         self,
-        catalog::{DashboardWidgetSize, DashboardWidgetType},
+        catalog::DashboardWidgetSize,
         layout::{CONFIG_KEYS, TIMEFRAMES},
         DashboardLayout, LayoutOperation,
     },
@@ -53,12 +55,11 @@ fn widgets_view(layout: &DashboardLayout) -> Vec<Value> {
 }
 
 fn catalog_view() -> Vec<Value> {
-    DashboardWidgetType::ALL
-        .into_iter()
-        .map(|kind| {
-            let spec = kind.spec();
+    widgets()
+        .iter()
+        .map(|spec| {
             json!({
-                "type": kind.id(),
+                "type": spec.widget_type.id(),
                 "title": spec.title,
                 "description": spec.description,
                 "multiple": spec.multiple,
@@ -153,10 +154,7 @@ impl AiToolHandler for UpdateDashboardLayout {
     }
 
     fn parameters(&self) -> Value {
-        let types: Vec<&str> = DashboardWidgetType::ALL
-            .into_iter()
-            .map(DashboardWidgetType::id)
-            .collect();
+        let types: Vec<&str> = widgets().iter().map(|spec| spec.widget_type.id()).collect();
         json!({
             "type": "object",
             "properties": {
@@ -242,6 +240,7 @@ impl AiToolHandler for UpdateDashboardLayout {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::dashboard::catalog::tests::install_test_catalog;
 
     #[test]
     fn operacoes_aceitam_objeto_solto_e_recusam_lista_vazia() {
@@ -259,6 +258,7 @@ mod tests {
 
     #[test]
     fn visao_da_ia_traz_posicao_so_dos_visiveis() {
+        install_test_catalog();
         let mut layout = DashboardLayout::default_layout();
         layout.remove("health_gauge").unwrap();
         let cards = widgets_view(&layout);
@@ -267,6 +267,6 @@ mod tests {
         assert!(cards[1]["position"].is_null());
         assert_eq!(cards[2]["position"], 1);
         assert_eq!(cards[0]["size"], "full");
-        assert_eq!(catalog_view().len(), DashboardWidgetType::ALL.len());
+        assert_eq!(catalog_view().len(), widgets().len());
     }
 }

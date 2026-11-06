@@ -11,7 +11,9 @@
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 
-use super::catalog::{DashboardWidgetSize, DashboardWidgetType, DEFAULT_LAYOUT};
+use netmonitor_core::dashboard::{default_layout, widgets};
+
+use super::catalog::{DashboardWidgetSize, DashboardWidgetType, WidgetSpec};
 use crate::services::shared::errors::{AppError, AppResult};
 
 /// Períodos que os gráficos do dashboard entendem.
@@ -112,11 +114,10 @@ fn lenient_object<'de, D: Deserializer<'de>>(
 impl DashboardWidget {
     /// Card novo de um tipo do catálogo, com o tamanho e o título padrão.
     #[must_use]
-    pub fn new(id: String, kind: DashboardWidgetType, size: DashboardWidgetSize) -> Self {
-        let spec = kind.spec();
+    pub fn new(id: String, spec: &WidgetSpec, size: DashboardWidgetSize) -> Self {
         let mut widget = Self {
             id,
-            widget_type: Some(kind.id().to_string()),
+            widget_type: Some(spec.widget_type.id().to_string()),
             title: Some(spec.title.to_string()),
             category: Some(spec.category.id().to_string()),
             cols: None,
@@ -141,7 +142,7 @@ impl DashboardWidget {
     }
 
     #[must_use]
-    pub fn kind(&self) -> Option<DashboardWidgetType> {
+    pub fn kind(&self) -> Option<&'static WidgetSpec> {
         DashboardWidgetType::from_id(self.type_id())
     }
 
@@ -164,7 +165,7 @@ impl DashboardWidget {
         self.title
             .clone()
             .filter(|title| !title.trim().is_empty())
-            .or_else(|| self.kind().map(|kind| kind.spec().title.to_string()))
+            .or_else(|| self.kind().map(|spec| spec.title.to_string()))
             .unwrap_or_else(|| self.id.clone())
     }
 
@@ -178,7 +179,7 @@ impl DashboardWidget {
 /// O que um `add` pede.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AddWidget {
-    pub kind: DashboardWidgetType,
+    pub kind: &'static WidgetSpec,
     pub size: Option<DashboardWidgetSize>,
     pub title: Option<String>,
     pub config: Option<Map<String, Value>>,
@@ -329,10 +330,7 @@ impl LayoutOperation {
 }
 
 fn unknown_type(type_id: &str) -> AppError {
-    let known: Vec<&str> = DashboardWidgetType::ALL
-        .into_iter()
-        .map(DashboardWidgetType::id)
-        .collect();
+    let known: Vec<&str> = widgets().iter().map(|spec| spec.widget_type.id()).collect();
     AppError::validation(format!(
         "Tipo de card \"{type_id}\" desconhecido; use um de: {}",
         known.join(", ")
@@ -470,13 +468,16 @@ impl Default for DashboardLayout {
 }
 
 impl DashboardLayout {
-    /// O layout de fábrica ([`DEFAULT_LAYOUT`]).
+    /// O layout de fábrica: os cards visíveis que as áreas declararam.
     #[must_use]
     pub fn default_layout() -> Self {
         let mut layout = Self {
-            widgets: DEFAULT_LAYOUT
+            widgets: default_layout()
                 .into_iter()
-                .map(|(kind, size)| DashboardWidget::new(kind.id().to_string(), kind, size))
+                .filter(|(_, visible)| *visible)
+                .map(|(spec, _)| {
+                    DashboardWidget::new(spec.widget_type.id().to_string(), spec, spec.default_size)
+                })
                 .collect(),
         };
         layout.renumber();
@@ -597,11 +598,12 @@ impl DashboardLayout {
     /// Card único já visível ou configuração inválida.
     pub fn add(&mut self, add: &AddWidget, new_id: NewId<'_>) -> AppResult<String> {
         let kind = add.kind;
-        let existing = (!kind.allows_multiple())
+        let type_id = kind.widget_type.id();
+        let existing = (!kind.multiple)
             .then(|| {
                 self.widgets
                     .iter()
-                    .position(|widget| widget.id == kind.id() || widget.type_id() == kind.id())
+                    .position(|widget| widget.id == type_id || widget.type_id() == type_id)
             })
             .flatten();
         let (index, restored) = match existing {
@@ -618,12 +620,12 @@ impl DashboardLayout {
                 (index, true)
             }
             None => {
-                let id = if kind.allows_multiple() {
-                    new_id(kind)
+                let id = if kind.multiple {
+                    new_id(kind.widget_type)
                 } else {
-                    kind.id().to_string()
+                    type_id.to_string()
                 };
-                let size = add.size.unwrap_or(kind.spec().default_size);
+                let size = add.size.unwrap_or(kind.default_size);
                 self.widgets.push(DashboardWidget::new(id, kind, size));
                 (self.widgets.len() - 1, false)
             }
@@ -756,7 +758,7 @@ impl DashboardLayout {
         if let Some(title) = title {
             let widget = &mut self.widgets[index];
             if title.is_empty() {
-                widget.title = widget.kind().map(|kind| kind.spec().title.to_string());
+                widget.title = widget.kind().map(|spec| spec.title.to_string());
                 details.insert(0, "título padrão".to_string());
             } else {
                 widget.title = Some(title.to_string());
@@ -809,6 +811,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::services::dashboard::catalog::tests::install_test_catalog;
 
     fn contador() -> impl FnMut(DashboardWidgetType) -> String {
         let mut n = 0;
@@ -833,6 +836,7 @@ mod tests {
 
     #[test]
     fn layout_padrao_na_ordem_e_tamanhos_combinados() {
+        install_test_catalog();
         let layout = DashboardLayout::default_layout();
         assert_eq!(
             visiveis(&layout),
@@ -858,6 +862,7 @@ mod tests {
 
     #[test]
     fn campos_desconhecidos_sobrevivem_ida_e_volta() {
+        install_test_catalog();
         let gravado = vec![
             json!({"id": "b", "type": "cpu_usage", "order": 1, "lg": 6, "md": 6, "visible": true,
                    "config": {"deviceId": 3, "chartType": "area"}, "pinned": true}),
@@ -876,6 +881,7 @@ mod tests {
 
     #[test]
     fn adicionar_instancia_gera_id_e_aceita_posicao_e_config() {
+        install_test_catalog();
         let mut layout = DashboardLayout::default_layout();
         let mut ids = contador();
         let frase = layout
@@ -908,6 +914,7 @@ mod tests {
 
     #[test]
     fn card_unico_repetido_e_recusado_e_oculto_volta() {
+        install_test_catalog();
         let mut layout = DashboardLayout::default_layout();
         let mut ids = contador();
         let erro = layout
@@ -935,6 +942,7 @@ mod tests {
 
     #[test]
     fn remover_oculta_o_lugar_fixo_e_apaga_a_instancia() {
+        install_test_catalog();
         let mut layout = DashboardLayout::default_layout();
         let mut ids = contador();
         layout
@@ -953,6 +961,7 @@ mod tests {
 
     #[test]
     fn mover_conta_so_os_visiveis_e_mantem_os_ocultos_no_lugar() {
+        install_test_catalog();
         let mut layout = DashboardLayout::default_layout();
         layout.remove("health_gauge").unwrap();
         let frase = layout.move_to("docker_summary", 0).unwrap();
@@ -981,6 +990,7 @@ mod tests {
 
     #[test]
     fn redimensionar_grava_as_colunas() {
+        install_test_catalog();
         let mut layout = DashboardLayout::default_layout();
         let frase = layout
             .resize("active_alerts", DashboardWidgetSize::Third)
@@ -1001,6 +1011,7 @@ mod tests {
 
     #[test]
     fn configurar_valida_periodo_ids_e_limites() {
+        install_test_catalog();
         let mut layout = DashboardLayout::default_layout();
         let patch = |value: Value| value.as_object().unwrap().clone();
         let frase = layout
@@ -1048,6 +1059,7 @@ mod tests {
 
     #[test]
     fn restaurar_volta_ao_padrao() {
+        install_test_catalog();
         let mut layout = DashboardLayout::default_layout();
         let mut ids = contador();
         layout
@@ -1060,6 +1072,7 @@ mod tests {
 
     #[test]
     fn lote_para_na_primeira_falha_com_o_numero_dela() {
+        install_test_catalog();
         let mut layout = DashboardLayout::default_layout();
         let mut ids = contador();
         let erro = layout
@@ -1076,6 +1089,7 @@ mod tests {
 
     #[test]
     fn leitura_das_operacoes_explica_o_erro() {
+        install_test_catalog();
         let erro = |value: Value| LayoutOperation::parse(&value).unwrap_err().to_string();
         assert!(erro(json!({"op": "add", "type": "grafico"})).contains("cpu_usage"));
         assert!(erro(json!({"op": "voar"})).contains("desconhecida"));
