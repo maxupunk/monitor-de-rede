@@ -276,6 +276,13 @@ Este documento consolida a auditoria de arquitetura, código-fonte, padrões de 
   `settings::database_size_retorna_tamanho_tipo_e_datas_do_banco` (esperava
   `sqlite` fixo). Os três agora valem nos dois bancos, e o digest do CI foi
   atualizado.
+- **Investigado (2026-11-05):** o caminho da ferramenta só lê o banco (sem
+  cache em memória); todo teste que sobe a aplicação é `#[serial]`, então não
+  há `truncate` concorrente; o ciclo do scheduler fica desligado nos testes.
+  Depois das duas falhas, o teste passou dez vezes: três isolado, quatro no
+  binário `tests/mod` inteiro e três no binário inteiro com todos os núcleos
+  ocupados por um queimador de CPU. As duas falhas foram em rodadas
+  `cargo test --workspace` logo após uma compilação completa.
 - **Próximo passo:** a asserção do último já imprime a saída da ferramenta;
   na próxima falha, a causa (busca ambígua × dispositivo ausente × janela de
   tempo) fica no log. Se repetir, investigar dependência de relógio nos
