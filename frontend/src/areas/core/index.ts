@@ -1,4 +1,4 @@
-import { defineArea, lazyWidget, withWidgetConfig } from '../defineArea'
+import { defineArea, lazyComponent, withWidgetConfig } from '../defineArea'
 import { coreSse } from './sse'
 
 /**
@@ -170,42 +170,111 @@ export const coreArea = defineArea({
   ],
   widgets: {
     stat_cards: {
-      component: lazyWidget(() => import('@/components/dashboard/StatCardsWidget.vue')),
+      component: lazyComponent(() => import('@/components/dashboard/StatCardsWidget.vue')),
     },
     health_gauge: {
-      component: lazyWidget(() => import('@/components/widgets/GaugeHealthWidget.vue')),
+      component: lazyComponent(() => import('@/components/widgets/GaugeHealthWidget.vue')),
     },
     active_alerts: {
-      component: lazyWidget(() => import('@/components/dashboard/ActiveAlertsWidget.vue')),
+      component: lazyComponent(() => import('@/components/dashboard/ActiveAlertsWidget.vue')),
     },
     latency_time_series: {
-      component: lazyWidget(() => import('@/components/widgets/LatencyTimeSeriesWidget.vue')),
+      component: lazyComponent(() => import('@/components/widgets/LatencyTimeSeriesWidget.vue')),
       props: withWidgetConfig,
     },
     event_distribution: {
-      component: lazyWidget(() => import('@/components/widgets/EventDistributionWidget.vue')),
+      component: lazyComponent(() => import('@/components/widgets/EventDistributionWidget.vue')),
     },
     unstable_targets: {
-      component: lazyWidget(() => import('@/components/widgets/UnstableTargetsWidget.vue')),
+      component: lazyComponent(() => import('@/components/widgets/UnstableTargetsWidget.vue')),
     },
     events_feed: {
-      component: lazyWidget(() => import('@/components/dashboard/EventsFeedWidget.vue')),
+      component: lazyComponent(() => import('@/components/dashboard/EventsFeedWidget.vue')),
     },
     network_monitors: {
-      component: lazyWidget(() => import('@/components/dashboard/NetworkMonitorsWidget.vue')),
+      component: lazyComponent(() => import('@/components/dashboard/NetworkMonitorsWidget.vue')),
     },
     cpu_usage: {
-      component: lazyWidget(() => import('@/components/widgets/CpuUsageWidget.vue')),
+      component: lazyComponent(() => import('@/components/widgets/CpuUsageWidget.vue')),
       props: withWidgetConfig,
     },
     ram_usage: {
-      component: lazyWidget(() => import('@/components/widgets/RamUsageWidget.vue')),
+      component: lazyComponent(() => import('@/components/widgets/RamUsageWidget.vue')),
       props: withWidgetConfig,
     },
     binary_status: {
-      component: lazyWidget(() => import('@/components/widgets/BinaryStatusWidget.vue')),
+      component: lazyComponent(() => import('@/components/widgets/BinaryStatusWidget.vue')),
       props: withWidgetConfig,
     },
   },
   sse: coreSse,
+  settingsTabs: [
+    { value: 'geral', title: 'Geral', icon: 'mdi-tune-variant', order: 10 },
+    { value: 'conectividade', title: 'Conectividade', icon: 'mdi-server-network', order: 20 },
+    { value: 'notificacoes', title: 'Notificações', icon: 'mdi-bell-outline', order: 40 },
+    { value: 'ia', title: 'Inteligência artificial', icon: 'mdi-robot-outline', order: 50 },
+    { value: 'sistema', title: 'Sistema', icon: 'mdi-database-cog-outline', order: 60 },
+  ],
+  settingsCards: [
+    {
+      tab: 'geral',
+      order: 10,
+      cols: { md: 6 },
+      component: lazyComponent(() => import('@/components/settings/PreferencesCard.vue')),
+    },
+    {
+      tab: 'geral',
+      order: 20,
+      cols: { md: 6 },
+      component: lazyComponent(() => import('@/components/settings/DashboardSyncCard.vue')),
+    },
+    {
+      tab: 'geral',
+      order: 30,
+      component: lazyComponent(() => import('@/components/settings/AreasCard.vue')),
+    },
+    {
+      tab: 'geral',
+      order: 40,
+      component: lazyComponent(() => import('@/components/settings/OnboardingCard.vue')),
+    },
+    {
+      tab: 'conectividade',
+      order: 10,
+      cols: { md: 6 },
+      component: lazyComponent(() => import('@/components/settings/ServerAddressesCard.vue')),
+    },
+    {
+      tab: 'conectividade',
+      order: 20,
+      cols: { md: 6 },
+      component: lazyComponent(() => import('@/components/settings/DnsServersCard.vue')),
+    },
+    {
+      tab: 'notificacoes',
+      order: 10,
+      cols: { md: 8, lg: 6 },
+      component: lazyComponent(() => import('@/components/settings/NotificationsCard.vue')),
+    },
+    {
+      tab: 'ia',
+      order: 10,
+      component: lazyComponent(() => import('@/components/settings/AiSettingsCard.vue')),
+    },
+    {
+      tab: 'ia',
+      order: 20,
+      component: lazyComponent(() => import('@/components/settings/DeciderSettingsCard.vue')),
+    },
+    {
+      tab: 'sistema',
+      order: 10,
+      component: lazyComponent(() => import('@/components/settings/BackupShortcutCard.vue')),
+    },
+    {
+      tab: 'sistema',
+      order: 20,
+      component: lazyComponent(() => import('@/components/settings/DatabaseInfoCard.vue')),
+    },
+  ],
 })

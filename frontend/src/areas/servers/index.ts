@@ -1,4 +1,4 @@
-import { defineArea, lazyWidget } from '../defineArea'
+import { defineArea, lazyComponent } from '../defineArea'
 import { serversSse } from './sse'
 
 /** Servidores: o Docker dos hosts (cada host é um agente, ADR 014). */
@@ -56,7 +56,7 @@ export const serversArea = defineArea({
   ],
   widgets: {
     docker_summary: {
-      component: lazyWidget(() => import('@/components/dashboard/DockerSummaryCard.vue')),
+      component: lazyComponent(() => import('@/components/dashboard/DockerSummaryCard.vue')),
     },
   },
   sse: serversSse,

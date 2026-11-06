@@ -12,12 +12,31 @@ export interface WidgetEntry {
   props?: (widget: WidgetConfig) => Record<string, unknown>
 }
 
-/** Card carregado sob demanda: widget desligado não pesa no painel. */
-export const lazyWidget = (loader: () => Promise<{ default: Component }>) =>
+/** Componente carregado sob demanda: card ou cartão de área desligada não pesa. */
+export const lazyComponent = (loader: () => Promise<{ default: Component }>) =>
   defineAsyncComponent(loader)
 
 /** Props dos cards configuráveis: a própria configuração. */
 export const withWidgetConfig = (widget: WidgetConfig) => ({ widget })
+
+/** Uma aba da página de Configurações. Aba sem nenhum cartão visível some. */
+export interface SettingsTabSpec {
+  /** Vai na URL (`?tab=`): é o link direto da aba. */
+  value: string
+  title: string
+  icon: string
+  order: number
+}
+
+/** Um cartão de Configurações, numa aba de qualquer área (inclusive de outra). */
+export interface SettingsCardSpec {
+  tab: string
+  order: number
+  /** Cartão autossuficiente: carrega e salva sozinho; avisa com `saved`. */
+  component: Component
+  /** Largura no grid a partir de `md`/`lg`; sem valor, a linha inteira. */
+  cols?: { md?: number; lg?: number }
+}
 
 /**
  * O que uma área do produto (ADR 017) traz para a SPA. Ligar, desligar,
@@ -34,6 +53,9 @@ export interface AreaDefinition {
   widgets?: Partial<Record<DashboardWidgetType, WidgetEntry>>
   /** Rotas do barramento SSE; só ficam registradas com a área ligada. */
   sse?: SseRoutes
+  /** Abas e cartões de Configurações; somem com a área desligada. */
+  settingsTabs?: SettingsTabSpec[]
+  settingsCards?: SettingsCardSpec[]
 }
 
 export interface AreaModule {
@@ -42,6 +64,8 @@ export interface AreaModule {
   nav: NavEntry[]
   widgets: Partial<Record<DashboardWidgetType, WidgetEntry>>
   sse: SseRoutes
+  settingsTabs: SettingsTabSpec[]
+  settingsCards: SettingsCardSpec[]
 }
 
 function withArea(route: RouteRecordRaw, area: Area): RouteRecordRaw {
@@ -62,5 +86,7 @@ export function defineArea(definition: AreaDefinition): AreaModule {
     nav: (definition.nav ?? []).map((entry) => ({ ...entry, area: id })),
     widgets: definition.widgets ?? {},
     sse: definition.sse ?? {},
+    settingsTabs: definition.settingsTabs ?? [],
+    settingsCards: definition.settingsCards ?? [],
   }
 }

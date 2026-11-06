@@ -1,4 +1,4 @@
-import { defineArea, lazyWidget, withWidgetConfig } from '../defineArea'
+import { defineArea, lazyComponent, withWidgetConfig } from '../defineArea'
 import type { NavApp, NavItemSpec } from '@/navigation'
 import { networkSse } from './sse'
 
@@ -115,25 +115,33 @@ export const networkArea = defineArea({
     },
   ],
   widgets: {
-    dns_latency: { component: lazyWidget(() => import('@/components/DnsLatencyCard.vue')) },
+    dns_latency: { component: lazyComponent(() => import('@/components/DnsLatencyCard.vue')) },
     saas_services: {
-      component: lazyWidget(() => import('@/components/widgets/SaasServicesWidget.vue')),
+      component: lazyComponent(() => import('@/components/widgets/SaasServicesWidget.vue')),
     },
     saas_heatmap: {
-      component: lazyWidget(() => import('@/components/widgets/SaasLatencyHeatmapWidget.vue')),
+      component: lazyComponent(() => import('@/components/widgets/SaasLatencyHeatmapWidget.vue')),
       props: (widget) => ({
         monitorId:
           typeof widget.config?.monitorId === 'number' ? widget.config.monitorId : undefined,
       }),
     },
     ether_bandwidth: {
-      component: lazyWidget(() => import('@/components/widgets/EtherBandwidthWidget.vue')),
+      component: lazyComponent(() => import('@/components/widgets/EtherBandwidthWidget.vue')),
       props: withWidgetConfig,
     },
     bandwidth_vs_latency: {
-      component: lazyWidget(() => import('@/components/widgets/BandwidthVsLatencyWidget.vue')),
+      component: lazyComponent(() => import('@/components/widgets/BandwidthVsLatencyWidget.vue')),
       props: withWidgetConfig,
     },
   },
   sse: networkSse,
+  settingsTabs: [{ value: 'rede', title: 'Rede', icon: 'mdi-lan', order: 30 }],
+  settingsCards: [
+    {
+      tab: 'rede',
+      order: 10,
+      component: lazyComponent(() => import('@/components/settings/VendorRegistryCard.vue')),
+    },
+  ],
 })

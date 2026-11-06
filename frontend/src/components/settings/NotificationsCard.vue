@@ -131,7 +131,7 @@
           variant="tonal"
           size="small"
           prepend-icon="mdi-bell-ring"
-          @click="emit('test-notification')"
+          @click="handleLocalTest"
         >
           Teste Local (Aba Aberta)
         </v-btn>
@@ -144,10 +144,6 @@
 import { reactive, ref } from 'vue'
 import { useNotifications } from '@/composables/useNotifications'
 
-const emit = defineEmits<{
-  'test-notification': []
-}>()
-
 const {
   permissionState,
   notificationsEnabled,
@@ -158,7 +154,14 @@ const {
   toggleWebPush,
   sendTestPush,
   setNotificationsEnabled,
+  sendLocalNotification,
 } = useNotifications()
+
+function handleLocalTest(): void {
+  void sendLocalNotification('Notificação de Teste PWA', {
+    body: 'Este é um teste de funcionamento das notificações em tempo real do NetMonitor.',
+  })
+}
 
 const testingPush = ref(false)
 const feedback = reactive<{ text: string; type: 'success' | 'info' | 'warning' | 'error' }>({
