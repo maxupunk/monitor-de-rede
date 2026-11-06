@@ -217,7 +217,12 @@ mod tests {
         assert_eq!((cliente.rx_bps, cliente.rx_bytes), (None, 0));
         // Visto do cliente nos dois relatórios: o servidor recebeu = tx.
         assert!(servidor.tx_bytes > 0 && servidor.tx_bps.is_some());
-        assert!(servidor.tx_bytes <= cliente.tx_bytes);
+        // Sem ordem entre os dois totais: o par só informa o que recebeu a
+        // cada segundo. Se o informe chega antes do fim, o cliente reporta a
+        // soma dos informes (menor que o total final do servidor); se não
+        // chega, reporta o que escreveu no socket (maior). Num teste de 1 s,
+        // qual dos dois acontece é corrida — comparar os totais era o motivo
+        // da intermitência (QUA-07).
         assert_eq!(servidor.rx_bps, None);
         assert!(servidor.samples.iter().all(|s| s.flow == Flow::Tx));
         assert_eq!(ao_vivo, servidor.samples.len());

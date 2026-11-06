@@ -296,10 +296,18 @@ Este documento consolida a auditoria de arquitetura, código-fonte, padrões de 
   agregou e os dois leem o bruto a partir dali, sem sobrepor buckets
   (`devices_monitors_crud::uptime_conta_a_hora_fechada_antes_do_proximo_rollup`,
   que falha sem a correção com o mesmo sintoma).
-- **Ainda em observação:** os outros quatro, sem nova falha. Se repetirem,
-  procurar a mesma classe de causa — fronteira de hora/minuto em
-  `Utc::now()` relativo, ou o prazo do laço de vazão do `btest` (que falhou
-  de novo, uma vez, na 1ª das cinco rodadas acima).
+- **Causa achada e corrigida (2026-11-06) — `throughput::btest::tests::cliente_envia_ao_servidor_armado`:**
+  reproduzido com 2 falhas em 160 execuções (8 em paralelo), sempre em
+  `servidor.tx_bytes <= cliente.tx_bytes`. A asserção não é invariante do
+  protocolo: o par só informa o que recebeu a cada segundo; se o informe chega
+  antes do fim de um teste de 1 s, o cliente reporta a soma dos informes
+  (menor que o total final do servidor), senão o que escreveu no socket
+  (maior). A comparação saiu, com o motivo no teste; 320 execuções dos 20
+  testes do `btest`, 8 em paralelo, sem falha.
+- **Ainda em observação:** `wifi_telemetry::aparelho_vigiado_que_some…`,
+  `ai_analysis::analises_sem_historico…` e `probes::buffer::…`, sem nova
+  falha. Se repetirem, procurar a mesma classe de causa — fronteira de
+  hora/minuto em `Utc::now()` relativo ou corrida de prazo.
 
 ---
 
