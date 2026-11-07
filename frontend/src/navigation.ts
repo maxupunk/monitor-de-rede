@@ -13,6 +13,7 @@
  * hospedam ficam juntos em "Servidores"; as sondas, com a rede que medem.
  */
 import type { Area } from '@/bindings/Area'
+import type { MenuPrefs } from '@/bindings/MenuPrefs'
 
 /** Áreas do produto (ADR 017). `core` nunca desliga. */
 export type NavArea = Area
@@ -50,6 +51,8 @@ export interface NavContext {
   canInstallPwa: boolean
   /** Áreas ligadas; ausente, todas. O núcleo é sempre considerado ligado. */
   enabledAreas?: ReadonlySet<NavArea>
+  /** O menu do usuário (Fase 16): fixados no topo, ocultos fora. */
+  menu?: MenuPrefs
 }
 
 /** Item como a área o declara: a área vem da entrada. */
@@ -104,8 +107,53 @@ function toNavItem(
   return { ...item, area, children: children.map((child) => ({ ...child, area })) }
 }
 
+/** Título da seção dos itens que o usuário fixou. */
+export const PINNED_SECTION = 'Fixados'
+
+/** Os itens do menu que levam a uma página, na ordem do menu. */
+export function navLeaves(sections: readonly NavSection[]): (NavLeaf & { section: string })[] {
+  return sections.flatMap((section) =>
+    section.items.flatMap((item) =>
+      (item.children ?? [item])
+        .filter((leaf) => Boolean(leaf.to))
+        .map((leaf) => ({ ...leaf, section: section.title }))
+    )
+  )
+}
+
+/**
+ * Aplica o menu do usuário **depois** de áreas e papéis — uma regra só: o que
+ * ele não pode ver não volta por estar fixado. Oculto sai (grupo vazio some);
+ * fixado aparece também numa seção no topo, na ordem em que foi fixado.
+ */
+function applyMenu(sections: NavSection[], menu: MenuPrefs | undefined): NavSection[] {
+  if (!menu || (menu.pinned.length === 0 && menu.hidden.length === 0)) return sections
+  const hidden = new Set(menu.hidden)
+  const shown = (leaf: NavLeaf) => !leaf.to || !hidden.has(leaf.to)
+  const byPath = new Map(navLeaves(sections).map((leaf) => [leaf.to, leaf]))
+  const pinned: NavItem[] = menu.pinned.flatMap((path) => {
+    const leaf = byPath.get(path)
+    return leaf ? [{ title: leaf.title, icon: leaf.icon, area: leaf.area, to: leaf.to }] : []
+  })
+  const rest = sections
+    .map((section) => ({
+      title: section.title,
+      items: section.items
+        .filter(shown)
+        .map((item) => (item.children ? { ...item, children: item.children.filter(shown) } : item))
+        .filter((item) => !item.children || item.children.length > 0),
+    }))
+    .filter((section) => section.items.length > 0)
+  return pinned.length > 0 ? [{ title: PINNED_SECTION, items: pinned }, ...rest] : rest
+}
+
 /** O menu para este contexto. Seções e grupos vazios somem. */
 export function buildNavSections(ctx: NavContext, entries: readonly NavEntry[]): NavSection[] {
+  return applyMenu(buildBaseSections(ctx, entries), ctx.menu)
+}
+
+/** O menu de áreas e papéis, antes do menu pessoal — a lista que o usuário personaliza. */
+export function buildBaseSections(ctx: NavContext, entries: readonly NavEntry[]): NavSection[] {
   return SECTIONS.map((section) => ({
     title: section.title,
     items: entries

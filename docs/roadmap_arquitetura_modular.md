@@ -348,13 +348,13 @@ as migrations por crate vêm antes das tabelas novas das Fases 15 e 16.
 
 ### Fase 16 — Menu por usuário
 
-- [ ] 🔴 Pendente — **Fixar e ocultar, salvo no servidor**
+- [x] 🟢 Concluído — **Fixar e ocultar, salvo no servidor**
   - **Entregas:**
-    - [ ] Preferência de menu por usuário (itens fixados no topo, itens ocultos), salva no servidor e entregue pelo SSE.
-    - [ ] O montador `buildNavSections` aplica as preferências depois do filtro de áreas e papéis (uma regra só).
-    - [ ] Ações de fixar/ocultar no próprio menu, com "restaurar padrão".
+    - [x] Preferência de menu por usuário (itens fixados no topo, itens ocultos), salva no servidor e entregue pelo SSE. — `users.menu_prefs`, `PUT /api/me/menu` (todo papel: é do usuário), estado inicial no `/auth/me` e `user:menu_updated` só ao próprio usuário
+    - [x] O montador `buildNavSections` aplica as preferências depois do filtro de áreas e papéis (uma regra só). — fixar não traz de volta o que a área ou o papel escondem; o fixado continua também no lugar dele
+    - [x] Ações de fixar/ocultar no próprio menu, com "restaurar padrão". — botão "Personalizar menu" no rodapé do menu abre o `MenuCustomizeDialog` (fixar, mostrar/esconder, restaurar padrão)
   - **Aceite:**
-    - [ ] Vitest do montador com fixados e ocultos; preferência vale em outro navegador.
+    - [x] Vitest do montador com fixados e ocultos; preferência vale em outro navegador. — `tests/utils/navigationMenu.spec.ts` (outro aparelho pelo SSE, sem HTTP); `tests/requests/menu_prefs.rs` (gravado no servidor e lido pela sessão)
 
 ### Nota de validação (2026-11-05)
 

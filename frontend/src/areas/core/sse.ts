@@ -1,3 +1,4 @@
+import { useMenuPrefsStore } from '@/stores/menuPrefs'
 import { useAuthStore } from '@/stores/auth'
 import type { SseRoutes } from '@/stores/events'
 import type { AiIncidentSummary } from '@/bindings/AiIncidentSummary'
@@ -35,6 +36,8 @@ export const coreSse: SseRoutes = {
   // O acesso deste usuário mudou (ADR 019): o backend só entrega `user:*` à
   // conexão do próprio usuário.
   'user:access_updated': (data) => useAuthStore().applyAccess(data),
+  // O menu deste usuário mudou em outra aba ou aparelho (Fase 16).
+  'user:menu_updated': (data) => useMenuPrefsStore().apply(data),
 
   'monitor:result': (data) => {
     const monitorsStore = useMonitorsStore()

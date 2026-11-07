@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { apiService } from '@/services/apiService'
 import type { Area } from '@/bindings/Area'
+import type { MenuPrefs } from '@/bindings/MenuPrefs'
 import {
   isUserRole,
   parseAreaRoles,
@@ -19,6 +20,8 @@ export interface User {
   role?: UserRole
   /** Papel por área (ADR 019); sem a área, sem acesso. */
   areaRoles?: AreaRoles
+  /** O menu do usuário (Fase 16). */
+  menuPrefs?: MenuPrefs
 }
 
 export interface LoginResponse {
@@ -193,6 +196,12 @@ export const useAuthStore = defineStore('auth', () => {
     if (token.value) persistAuthSession(token.value, user.value, rememberMe.value)
   }
 
+  /** Troca o usuário da sessão (e o guardado), mantendo o token. */
+  function updateUser(value: User) {
+    user.value = value
+    if (token.value) persistAuthSession(token.value, value, rememberMe.value)
+  }
+
   async function logout() {
     try {
       if (token.value) await apiService.post('/auth/logout')
@@ -218,6 +227,7 @@ export const useAuthStore = defineStore('auth', () => {
     roleIn,
     hasAccess,
     applyAccess,
+    updateUser,
     canManagePlugins,
     currentRoleLabel,
     clearError,

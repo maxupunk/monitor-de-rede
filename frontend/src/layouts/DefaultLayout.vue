@@ -69,11 +69,23 @@
         </template>
       </v-list>
       <template #append>
+        <div class="px-3 pb-2">
+          <v-btn
+            block
+            color="primary"
+            variant="tonal"
+            prepend-icon="mdi-menu-open"
+            @click="menuDialog = true"
+          >
+            Personalizar menu
+          </v-btn>
+        </div>
         <div class="app-footer-bar justify-center px-4 text-caption text-grey border-t">
           &copy; 2026 Master Sistemas
         </div>
       </template>
     </v-navigation-drawer>
+    <MenuCustomizeDialog v-model="menuDialog" :base-sections="baseNavSections" />
 
     <!-- App Bar Superior -->
     <v-app-bar flat border="b" density="comfortable" class="px-2 pwa-app-bar">
@@ -278,7 +290,9 @@ import AiApprovalNotice from '@/components/ai/AiApprovalNotice.vue'
 import AreaSuggestions from '@/components/areas/AreaSuggestions.vue'
 import { useAiStore } from '@/stores/ai'
 import { usePluginAppsStore } from '@/stores/pluginApps'
-import { buildNavSections, groupOfPath, type NavAction } from '@/navigation'
+import { buildBaseSections, buildNavSections, groupOfPath, type NavAction } from '@/navigation'
+import MenuCustomizeDialog from '@/components/menu/MenuCustomizeDialog.vue'
+import { useMenuPrefsStore } from '@/stores/menuPrefs'
 import { NAV_ENTRIES } from '@/areas'
 import { installAreaRealtime } from '@/areas/realtime'
 import { useAreasStore } from '@/stores/areas'
@@ -294,6 +308,7 @@ const pluginAppsStore = usePluginAppsStore()
 const eventsStore = useEventsStore()
 const authStore = useAuthStore()
 const areasStore = useAreasStore()
+const menuPrefsStore = useMenuPrefsStore()
 const onboardingStore = useOnboardingStore()
 const router = useRouter()
 const route = useRoute()
@@ -330,17 +345,19 @@ async function handleNotificationClick() {
 }
 
 /** O menu vem das áreas (`src/areas`); o layout só executa as ações. */
+const navContext = computed(() => ({
+  isAdmin: authStore.isAdmin,
+  apps: pluginAppsStore.apps,
+  canInstallPwa: canInstall.value && !isInstalled.value,
+  enabledAreas: areasStore.visibleAreas,
+}))
+/** O menu de áreas e papéis — o que o usuário pode personalizar. */
+const baseNavSections = computed(() => buildBaseSections(navContext.value, NAV_ENTRIES))
+/** O menu desenhado: o de áreas e papéis com o menu pessoal aplicado (Fase 16). */
 const navSections = computed(() =>
-  buildNavSections(
-    {
-      isAdmin: authStore.isAdmin,
-      apps: pluginAppsStore.apps,
-      canInstallPwa: canInstall.value && !isInstalled.value,
-      enabledAreas: areasStore.visibleAreas,
-    },
-    NAV_ENTRIES
-  )
+  buildNavSections({ ...navContext.value, menu: menuPrefsStore.prefs }, NAV_ENTRIES)
 )
+const menuDialog = ref(false)
 
 /*
  * A área da página aberta desligou (aqui ou em outra aba, pelo SSE): a página
