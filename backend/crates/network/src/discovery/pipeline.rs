@@ -32,7 +32,7 @@ use super::{
 use netmonitor_core::{
     network_tools::ping_client::PingClient,
     shared::{
-        cidr::is_ip_in_cidr,
+        cidr::is_scan_host,
         errors::{AppError, AppResult},
     },
 };
@@ -146,6 +146,7 @@ pub async fn scan(
             ),
         )
         .await;
+        let identified = in_scope(identified, &target.cidr);
         merged = merge_with_gateway([merged, identified], gateway.as_deref());
         reporter.hosts(&merged);
 
@@ -177,6 +178,7 @@ pub async fn scan(
                 ),
             )
             .await;
+            let identified = in_scope(identified, &target.cidr);
             merged = merge_with_gateway([merged, identified], gateway.as_deref());
         }
         reporter.hosts(&merged);
@@ -398,15 +400,19 @@ async fn identify(
 /// toda, e um aparelho de outra sub-rede não pertence a esta varredura.
 async fn multicast(client: Client, cidr: String) -> Vec<DiscoveredHost> {
     let (mdns_hosts, ssdp_hosts) = tokio::join!(mdns::scan(), ssdp::scan(&client));
-    mdns_hosts
+    in_scope([mdns_hosts, ssdp_hosts].concat(), &cidr)
+}
+
+/// Só os hosts da faixa varrida ([`is_scan_host`]). A identificação traz,
+/// além do host perguntado, a tabela ARP do roteador lida por SNMP — que
+/// lista outras sub-redes e, às vezes, o próprio endereço de rede.
+fn in_scope(hosts: Vec<DiscoveredHost>, cidr: &str) -> Vec<DiscoveredHost> {
+    hosts
         .into_iter()
-        .chain(ssdp_hosts)
         .filter(|host| {
             host.ip_address
                 .parse()
-                .ok()
-                .and_then(|ip| is_ip_in_cidr(ip, &cidr).ok())
-                .unwrap_or(false)
+                .is_ok_and(|ip| is_scan_host(ip, cidr))
         })
         .collect()
 }
@@ -414,6 +420,25 @@ async fn multicast(client: Client, cidr: String) -> Vec<DiscoveredHost> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn arp_do_roteador_fora_da_faixa_ou_no_endereco_de_rede_fica_de_fora() {
+        let host = |ip: &str| DiscoveredHost {
+            ip_address: ip.into(),
+            ..Default::default()
+        };
+        let kept = in_scope(
+            vec![
+                host("10.0.0.0"),
+                host("10.0.0.2"),
+                host("10.0.0.255"),
+                host("192.168.88.4"),
+            ],
+            "10.0.0.0/24",
+        );
+        let ips: Vec<&str> = kept.iter().map(|host| host.ip_address.as_str()).collect();
+        assert_eq!(ips, ["10.0.0.2"]);
+    }
 
     #[test]
     fn lote_divide_a_barra_sem_sobrepor() {

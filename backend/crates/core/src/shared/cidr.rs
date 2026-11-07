@@ -298,13 +298,7 @@ pub fn expand_cidr_batch(
         .network_address
         .parse()
         .map_err(|_| invalid_discovery(cidr, "endereço IP malformado"))?;
-    let base_num = u32::from(base);
-    let size = 1u64 << (32 - u32::from(range.prefix));
-    let (first, last) = if range.prefix >= 31 {
-        (u64::from(base_num), u64::from(base_num) + size - 1)
-    } else {
-        (u64::from(base_num) + 1, u64::from(base_num) + size - 2)
-    };
+    let (first, last) = ipv4_host_bounds(base, range.prefix);
 
     let limit = max_hosts.min(MAX_SCAN_HOSTS as usize);
     Ok((first..=last)
@@ -313,6 +307,44 @@ pub fn expand_cidr_batch(
         .map(|address| IpAddr::V4(Ipv4Addr::from(address as u32)))
         .collect())
 }
+/// Primeiro e último host IPv4 da faixa: sem o endereço de rede e o de
+/// broadcast, exceto nas /31 e /32 (RFC 3021), onde todo endereço é host.
+fn ipv4_host_bounds(network: Ipv4Addr, prefix: u8) -> (u64, u64) {
+    let base = u64::from(u32::from(network));
+    let size = 1u64 << (32 - u32::from(prefix));
+    if prefix >= 31 {
+        (base, base + size - 1)
+    } else {
+        (base + 1, base + size - 2)
+    }
+}
+
+/// O IP é um host da faixa varrida — o mesmo critério de [`expand_cidr`].
+/// Fontes que listam vizinhos por conta própria (tabela ARP de um roteador
+/// via SNMP, mDNS, SSDP) passam por aqui: um endereço de outra sub-rede, o
+/// endereço de rede ou o de broadcast não é um aparelho desta varredura.
+#[must_use]
+pub fn is_scan_host(ip: IpAddr, cidr: &str) -> bool {
+    let Ok(range) = parse_discovery_cidr(cidr) else {
+        return false;
+    };
+    match ip {
+        IpAddr::V4(v4) => range
+            .network_address
+            .parse::<Ipv4Addr>()
+            .is_ok_and(|network| {
+                let (first, last) = ipv4_host_bounds(network, range.prefix);
+                (first..=last).contains(&u64::from(u32::from(v4)))
+            }),
+        IpAddr::V6(v6) => range
+            .network_address
+            .parse::<Ipv6Addr>()
+            .ok()
+            .and_then(|network| ipnet::Ipv6Net::new(network, range.prefix).ok())
+            .is_some_and(|net| net.contains(&v6)),
+    }
+}
+
 /// Endereço que um plugin (ou agente) pode alcançar: rede privada, CGNAT,
 /// link-local e loopback. Um IP público nunca é alvo de plugin — nem por
 /// engano de cadastro, nem por um script que tente sair da rede administrada.
@@ -325,4 +357,42 @@ pub fn is_reachable_target(ip: IpAddr) -> bool {
 #[must_use]
 pub fn target_allowed(ip: IpAddr, cidrs: &[ipnet::IpNet]) -> bool {
     is_reachable_target(ip) && (cidrs.is_empty() || cidrs.iter().any(|cidr| cidr.contains(&ip)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ip(text: &str) -> IpAddr {
+        text.parse().unwrap()
+    }
+
+    #[test]
+    fn host_da_varredura_exclui_rede_broadcast_e_outra_subrede() {
+        assert!(is_scan_host(ip("10.0.0.1"), "10.0.0.0/24"));
+        assert!(is_scan_host(ip("10.0.0.254"), "10.0.0.0/24"));
+        assert!(!is_scan_host(ip("10.0.0.0"), "10.0.0.0/24"));
+        assert!(!is_scan_host(ip("10.0.0.255"), "10.0.0.0/24"));
+        assert!(!is_scan_host(ip("10.0.1.7"), "10.0.0.0/24"));
+        assert!(!is_scan_host(ip("10.0.0.7"), "não é faixa"));
+    }
+
+    #[test]
+    fn host_da_varredura_segue_a_rfc_3021_e_aceita_ipv6() {
+        assert!(is_scan_host(ip("10.0.0.0"), "10.0.0.0/31"));
+        assert!(is_scan_host(ip("10.0.0.9"), "10.0.0.9"));
+        assert!(is_scan_host(ip("fd00::5"), "fd00::/120"));
+        assert!(!is_scan_host(ip("fd00::1:5"), "fd00::/120"));
+    }
+
+    #[test]
+    fn criterio_e_o_mesmo_da_expansao() {
+        let hosts = expand_cidr("192.168.7.0/29", 64).unwrap();
+        let all: Vec<IpAddr> = (0..8).map(|n| ip(&format!("192.168.7.{n}"))).collect();
+        let accepted: Vec<IpAddr> = all
+            .into_iter()
+            .filter(|candidate| is_scan_host(*candidate, "192.168.7.0/29"))
+            .collect();
+        assert_eq!(accepted, hosts);
+    }
 }
