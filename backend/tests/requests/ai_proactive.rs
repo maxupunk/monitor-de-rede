@@ -5,27 +5,25 @@
 //! rede nem depende de chave de API.
 
 use async_trait::async_trait;
-use backend::{
-    app::App,
-    dtos::ai::TestConnectionResponse,
-    models::_entities::{alert_events, devices},
-    services::{
-        ai::{
-            drivers::traits::{
-                AiChatChunk, AiChatOptions, AiChunkStream, AiDriver, AiMessage, AiTool, AiUsage,
-            },
-            proactive::{
-                config::{AiDigestSchedule, AiProactiveSettings},
-                digest, incident,
-                runner::DriverFactory,
-            },
-            settings::{self, AiSettings},
-        },
-        shared::errors::AppResult,
-    },
-};
+use backend::app::App;
 use chrono::{Local, TimeZone, Utc};
 use loco_rs::{prelude::AppContext, testing::prelude::*};
+use netmonitor_assistant::{
+    dtos::TestConnectionResponse,
+    {
+        drivers::traits::{
+            AiChatChunk, AiChatOptions, AiChunkStream, AiDriver, AiMessage, AiTool, AiUsage,
+        },
+        proactive::{
+            config::{AiDigestSchedule, AiProactiveSettings},
+            digest, incident,
+            runner::DriverFactory,
+        },
+        settings::{self, AiSettings},
+    },
+};
+use netmonitor_core::models::_entities::{alert_events, devices};
+use netmonitor_nucleo::services::shared::errors::AppResult;
 use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 use serde_json::json;
 use serial_test::serial;

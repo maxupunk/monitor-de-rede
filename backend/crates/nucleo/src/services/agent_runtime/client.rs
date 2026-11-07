@@ -1,0 +1,244 @@
+//! Laço principal do agente: enrollment, conexão, reconexão.
+//!
+//! Só disca para fora — nenhuma porta é aberta no host (ADR 011). A
+//! reconexão usa backoff exponencial com jitter para que dezenas de agentes
+//! não voltem todos no mesmo segundo depois de uma queda da central.
+
+use std::{sync::Arc, time::Duration};
+
+use crate::services::agents::protocol::WireFrame;
+use futures::{SinkExt, StreamExt};
+use rand::Rng;
+use tokio::sync::mpsc;
+use tokio_tungstenite::tungstenite::{
+    client::IntoClientRequest, http::HeaderValue, protocol::Message,
+};
+
+use netmonitor_core::agents::{command::AgentCommandHandlers, host::HostDocker};
+
+use crate::{
+    services::{
+        monitoring::runner::CheckDeps, shared::secret_file,
+        telemetry::host_metrics::HostMetricsReader,
+    },
+    views::agents::AgentEnrollResponse,
+};
+
+use super::{
+    config::AgentConfig,
+    executor::LocalExecutor,
+    identity,
+    outbox::Outbox,
+    sampler,
+    session::{self, HostLive, OutboxSink, SessionDeps},
+    tunnel::LocalTunnelOpener,
+};
+
+/// O que as áreas contribuem ao agente, montado pelo binário
+/// (`netmonitor-agent`, ponto de montagem do agente): as dependências dos
+/// checkers (com os tipos de monitor das áreas), os comandos das áreas e o
+/// Docker deste host.
+pub struct AgentHost {
+    pub deps: CheckDeps,
+    pub handlers: AgentCommandHandlers,
+    pub docker: Arc<dyn HostDocker>,
+}
+
+const TOKEN_HEADER: &str = "x-probe-token";
+const BACKOFF_MIN: Duration = Duration::from_secs(1);
+const BACKOFF_MAX: Duration = Duration::from_secs(60);
+/// Conexão que durou isto é considerada estável e zera o backoff.
+const STABLE_AFTER: Duration = Duration::from_secs(60);
+const PING_INTERVAL: Duration = Duration::from_secs(20);
+/// Sem token (código ausente, central fora do ar, arquivo ainda não gravado).
+const TOKEN_RETRY: Duration = Duration::from_secs(30);
+
+/// Próxima espera: dobra até o teto e sorteia entre metade e o total.
+#[must_use]
+pub fn next_backoff(current: Duration) -> Duration {
+    (current * 2).min(BACKOFF_MAX)
+}
+
+fn jitter(base: Duration) -> Duration {
+    let millis = u64::try_from(base.as_millis()).unwrap_or(u64::MAX);
+    Duration::from_millis(rand::thread_rng().gen_range(millis / 2..=millis.max(1)))
+}
+
+/// Obtém o token: ambiente, arquivo ou troca do código de enrollment.
+///
+/// Chamada a cada tentativa de conexão: o agente local lê um arquivo que a
+/// central regrava quando gera um token novo (ADR 014), e um token recusado
+/// não pode prender o agente até reiniciar.
+///
+/// # Errors
+///
+/// Sem token nem código, ou recusa da central.
+pub async fn obtain_token(config: &AgentConfig) -> Result<String, String> {
+    if let Some(token) = &config.token {
+        return Ok(token.clone());
+    }
+    if let Some(token) = secret_file::read(&config.token_path()) {
+        return Ok(token);
+    }
+    let code = config.enroll_code.as_deref().ok_or(
+        "Sem token: defina AGENT_ENROLL_CODE com o código gerado na central (ou, no \
+             agente local, monte o arquivo de AGENT_TOKEN_FILE que a central grava)",
+    )?;
+    let response = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|error| error.to_string())?
+        .post(format!("{}/api/agents/enroll", config.server_url))
+        .json(&serde_json::json!({ "code": code, "hostname": std::env::var("HOSTNAME").ok() }))
+        .send()
+        .await
+        .map_err(|error| format!("central inacessível: {error}"))?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "a central recusou o código de enrollment ({}): gere um novo na tela de agentes",
+            response.status()
+        ));
+    }
+    let enrolled: AgentEnrollResponse = response.json().await.map_err(|error| error.to_string())?;
+    secret_file::write(&config.token_path(), &enrolled.token)
+        .map_err(|error| format!("não foi possível salvar o token: {error}"))?;
+    tracing::info!(probe_id = enrolled.probe_id, name = %enrolled.name, "agente registrado na central");
+    Ok(enrolled.token)
+}
+
+/// Espera até ter um token.
+async fn wait_for_token(config: &AgentConfig) -> String {
+    loop {
+        match obtain_token(config).await {
+            Ok(token) => return token,
+            Err(error) => {
+                tracing::error!(%error, "não foi possível obter o token do agente");
+                tokio::time::sleep(TOKEN_RETRY).await;
+            }
+        }
+    }
+}
+
+/// Roda o agente para sempre.
+pub async fn run_forever(config: AgentConfig, host: AgentHost) {
+    let outbox = Arc::new(Outbox::open(config.outbox_path(), config.outbox_max));
+    let deps = SessionDeps {
+        executor: Arc::new(LocalExecutor::new(
+            config.policy.clone(),
+            host.deps,
+            host.handlers,
+        )),
+        outbox: outbox.clone(),
+        live: Arc::new(HostLive(host.docker.clone())),
+        tunnels: Arc::new(
+            LocalTunnelOpener::new(config.policy.clone(), config.database_targets.clone())
+                .with_docker(host.docker.clone()),
+        ),
+    };
+    if sampler::enabled() {
+        sampler::spawn(
+            sampler::Sampler::new(HostMetricsReader::from_env(), host.docker.clone()),
+            Arc::new(OutboxSink(outbox)),
+        );
+    } else {
+        tracing::info!("histórico de métricas do host desligado (TELEMETRY_ENABLED=false)");
+    }
+
+    let mut backoff = BACKOFF_MIN;
+    loop {
+        let token = wait_for_token(&config).await;
+        let started = tokio::time::Instant::now();
+        match connect_once(&config, &token, deps.clone(), host.docker.as_ref()).await {
+            Ok(()) => tracing::warn!("conexão com a central encerrada"),
+            Err(error) => tracing::warn!(%error, "falha ao conectar na central"),
+        }
+        if started.elapsed() >= STABLE_AFTER {
+            backoff = BACKOFF_MIN;
+        }
+        let wait = jitter(backoff);
+        tracing::info!(segundos = wait.as_secs_f32(), "reconectando");
+        tokio::time::sleep(wait).await;
+        backoff = next_backoff(backoff);
+    }
+}
+
+async fn connect_once(
+    config: &AgentConfig,
+    token: &str,
+    deps: SessionDeps,
+    docker: &dyn HostDocker,
+) -> Result<(), String> {
+    let mut request = config
+        .websocket_url()
+        .into_client_request()
+        .map_err(|error| error.to_string())?;
+    request.headers_mut().insert(
+        TOKEN_HEADER,
+        HeaderValue::from_str(token).map_err(|error| error.to_string())?,
+    );
+    let (socket, _) = tokio_tungstenite::connect_async(request)
+        .await
+        .map_err(|error| error.to_string())?;
+    let (mut sink, mut stream) = socket.split();
+
+    let (incoming_tx, incoming_rx) = mpsc::channel::<WireFrame>(64);
+    let (outgoing_tx, mut outgoing_rx) = mpsc::channel::<WireFrame>(64);
+    let reader = tokio::spawn(async move {
+        while let Some(Ok(message)) = stream.next().await {
+            let frame = match message {
+                Message::Text(text) => WireFrame::Text(text.to_string()),
+                Message::Binary(bytes) => WireFrame::Binary(bytes.to_vec()),
+                Message::Close(_) => break,
+                _ => continue,
+            };
+            if incoming_tx.send(frame).await.is_err() {
+                break;
+            }
+        }
+    });
+    let writer = tokio::spawn(async move {
+        let mut ping = tokio::time::interval(PING_INTERVAL);
+        loop {
+            tokio::select! {
+                frame = outgoing_rx.recv() => {
+                    let message = match frame {
+                        Some(WireFrame::Text(text)) => Message::Text(text.into()),
+                        Some(WireFrame::Binary(bytes)) => Message::Binary(bytes.into()),
+                        None => break,
+                    };
+                    if sink.send(message).await.is_err() {
+                        break;
+                    }
+                }
+                _ = ping.tick() => {
+                    if sink.send(Message::Ping(Vec::new().into())).await.is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+        let _ = sink.close().await;
+    });
+
+    let hello = identity::hello(&config.policy, docker).await;
+    let result = session::run(deps, hello, incoming_rx, outgoing_tx)
+        .await
+        .map(|_| ())
+        .map_err(|error| error.to_string());
+    reader.abort();
+    writer.abort();
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn backoff_dobra_ate_o_teto() {
+        assert_eq!(next_backoff(Duration::from_secs(1)), Duration::from_secs(2));
+        assert_eq!(next_backoff(Duration::from_secs(40)), BACKOFF_MAX);
+        let waited = jitter(Duration::from_secs(10));
+        assert!(waited >= Duration::from_secs(5) && waited <= Duration::from_secs(10));
+    }
+}

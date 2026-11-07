@@ -1,6 +1,10 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { apiService } from '@/services/apiService'
+import type { Area } from '@/bindings/Area'
+import type { DashboardCatalog } from '@/bindings/DashboardCatalog'
+import type { WidgetCatalogEntry } from '@/bindings/WidgetCatalogEntry'
+import { useAreasStore } from './areas'
 
 export type WidgetCategory = 'summary' | 'lists' | 'charts'
 export type SyncMode = 'server' | 'local'
@@ -38,106 +42,18 @@ export interface WidgetConfig {
   config?: WidgetCustomConfig
 }
 
-export interface CardTemplate {
-  type: string
-  title: string
-  category: WidgetCategory
-  icon: string
-  description: string
-  compatibleResourceTypes: ResourceCompatibilityType[]
-  allowMultiple: boolean
-  defaultCols: { cols?: number; sm?: number; md?: number; lg?: number }
-}
+/**
+ * Um tipo de card que se adiciona várias vezes, cada um com a sua
+ * configuração. Vem do catálogo único do backend (`GET /dashboard/catalog`,
+ * ARQ-04): a tela não mantém lista própria de tipos, títulos nem ícones.
+ */
+export type CardTemplate = WidgetCatalogEntry
 
-export const CARD_TEMPLATES: CardTemplate[] = [
-  {
-    type: 'ether_bandwidth',
-    title: 'Consumo de Banda de Ether',
-    category: 'charts',
-    icon: 'mdi-swap-horizontal-bold',
-    description:
-      'Gráfico de tráfego de entrada e saída (Rx/Tx) para uma interface de rede específica.',
-    compatibleResourceTypes: ['bandwidth'],
-    allowMultiple: true,
-    defaultCols: { cols: 12, sm: 12, md: 6, lg: 6 },
-  },
-  {
-    type: 'bandwidth_vs_latency',
-    title: 'Consumo de Banda vs Latência',
-    category: 'charts',
-    icon: 'mdi-chart-multiaxis',
-    description:
-      'Gráfico correlacionado com eixo duplo comparando tráfego de rede (Mbps) e latência de ping (ms).',
-    compatibleResourceTypes: ['dual-axis', 'bandwidth', 'numeric'],
-    allowMultiple: true,
-    defaultCols: { cols: 12, sm: 12, md: 12, lg: 12 },
-  },
-  {
-    type: 'cpu_usage',
-    title: 'Uso de CPU',
-    category: 'charts',
-    icon: 'mdi-cpu-64-bit',
-    description:
-      'Monitoramento de utilização de CPU (%) com linha de tendência e alertas de limite.',
-    compatibleResourceTypes: ['numeric'],
-    allowMultiple: true,
-    defaultCols: { cols: 12, sm: 12, md: 6, lg: 6 },
-  },
-  {
-    type: 'ram_usage',
-    title: 'Uso de RAM',
-    category: 'charts',
-    icon: 'mdi-memory',
-    description: 'Monitoramento da quantidade de memória RAM usada e da capacidade disponível.',
-    compatibleResourceTypes: ['numeric'],
-    allowMultiple: true,
-    defaultCols: { cols: 12, sm: 12, md: 6, lg: 6 },
-  },
-  {
-    type: 'dns_latency',
-    title: 'Tempo de Resolução DNS (Alinhado)',
-    category: 'charts',
-    icon: 'mdi-dns-outline',
-    description:
-      'Gráfico e ranking comparativo com escala de tempo de consulta unificada para resolvedores DNS.',
-    compatibleResourceTypes: ['dns-resolvers', 'numeric'],
-    allowMultiple: true,
-    defaultCols: { cols: 12, sm: 12, md: 6, lg: 6 },
-  },
-  {
-    type: 'binary_status',
-    title: 'Status Binário (Up/Down)',
-    category: 'lists',
-    icon: 'mdi-checkbox-blank-circle-outline',
-    description:
-      'Card binário exclusivo para estados booleanos (Online/Offline, Link Up/Down, Check Pass/Fail).',
-    compatibleResourceTypes: ['binary'],
-    allowMultiple: true,
-    defaultCols: { cols: 12, sm: 12, md: 6, lg: 6 },
-  },
-  {
-    type: 'saas_heatmap',
-    title: 'Mapa de Calor de Latência SaaS',
-    category: 'charts',
-    icon: 'mdi-chart-scatter-plot-hexbin',
-    description:
-      'Matriz horária (00h-23h) de latência por hora do dia e identificação de picos de lentidão.',
-    compatibleResourceTypes: ['numeric'],
-    allowMultiple: true,
-    defaultCols: { cols: 12, sm: 12, md: 12, lg: 12 },
-  },
-  {
-    type: 'saas_services',
-    title: 'Serviços SaaS, Bancos & Nuvem',
-    category: 'lists',
-    icon: 'mdi-bank-check',
-    description:
-      'Painel de monitoramento de latência e qualidade de experiência (QoE) para bancos, fintechs e provedores SaaS.',
-    compatibleResourceTypes: ['numeric'],
-    allowMultiple: false,
-    defaultCols: { cols: 12, sm: 12, md: 12, lg: 12 },
-  },
-]
+const CATEGORIES: readonly WidgetCategory[] = ['summary', 'lists', 'charts']
+
+function asCategory(value: string | undefined): WidgetCategory {
+  return CATEGORIES.find((category) => category === value) ?? 'charts'
+}
 
 /*
  * v2: o padrão de fábrica mudou (enxuto, com o Docker como widget). Quem tinha
@@ -175,149 +91,35 @@ function sized(size: WidgetSize) {
   return { cols, sm, md, lg }
 }
 
+/** Um card a partir da entrada do catálogo. */
+function fromCatalog(entry: WidgetCatalogEntry): Omit<WidgetConfig, 'id' | 'visible' | 'order'> {
+  return {
+    type: entry.type,
+    title: entry.title,
+    category: asCategory(entry.category),
+    ...sized(entry.defaultSize),
+    description: entry.description,
+    icon: entry.icon,
+  }
+}
+
 /**
- * Widgets de instância única, na ordem do padrão de fábrica. O padrão
- * responde, de cima para baixo: "está tudo bem?" (números), "o que está
- * quebrado?" (saúde e alertas), "como a rede se comporta?" (latência e
- * eventos), "quem oscila?" e o detalhe por monitor. Os de `visible: false`
- * ficam no catálogo, prontos para ligar.
+ * O layout de fábrica, na ordem do catálogo. O padrão responde, de cima para
+ * baixo: "está tudo bem?" (números), "o que está quebrado?" (saúde e
+ * alertas), "como a rede se comporta?" (latência e eventos), "quem oscila?" e
+ * o detalhe por monitor. Os de `visible: false` ficam no layout, prontos para
+ * ligar.
  */
-export const DEFAULT_WIDGETS: WidgetConfig[] = [
-  {
-    id: 'stat_cards',
-    type: 'stat_cards',
-    title: 'Resumo',
-    category: 'summary',
-    ...sized('full'),
-    visible: true,
-    order: 0,
-    icon: 'mdi-view-dashboard-outline',
-    description: 'Dispositivos, monitores, disponibilidade e alertas em quatro números.',
-  },
-  {
-    id: 'health_gauge',
-    type: 'health_gauge',
-    title: 'Saúde global',
-    category: 'charts',
-    ...sized('half'),
-    visible: true,
-    order: 1,
-    icon: 'mdi-gauge',
-    description: 'Disponibilidade global e distribuição dos status dos monitores.',
-  },
-  {
-    id: 'active_alerts',
-    type: 'active_alerts',
-    title: 'Alertas ativos',
-    category: 'lists',
-    ...sized('half'),
-    visible: true,
-    order: 2,
-    icon: 'mdi-bell-outline',
-    description: 'Alertas em aberto, com verificar, reconhecer e silenciar.',
-  },
-  {
-    id: 'latency_time_series',
-    type: 'latency_time_series',
-    title: 'Latência & perda de pacotes',
-    category: 'charts',
-    ...sized('half'),
-    visible: true,
-    order: 3,
-    icon: 'mdi-chart-timeline-variant',
-    description: 'Série temporal de latência ICMP com marcação de perda (5m, 15m, 1h, 24h).',
-  },
-  {
-    id: 'event_distribution',
-    type: 'event_distribution',
-    title: 'Eventos por hora',
-    category: 'charts',
-    ...sized('half'),
-    visible: true,
-    order: 4,
-    icon: 'mdi-chart-bar',
-    description: 'Histograma por hora dos eventos, por severidade.',
-  },
-  {
-    id: 'unstable_targets',
-    type: 'unstable_targets',
-    title: 'Alvos instáveis',
-    category: 'lists',
-    ...sized('half'),
-    visible: true,
-    order: 5,
-    icon: 'mdi-sine-wave',
-    description:
-      'Ranking dos alvos que mais caíram e voltaram na janela — quem oscila não aparece nos alertas ativos.',
-  },
-  {
-    id: 'events_feed',
-    type: 'events_feed',
-    title: 'Eventos em tempo real',
-    category: 'lists',
-    ...sized('half'),
-    visible: true,
-    order: 6,
-    icon: 'mdi-pulse',
-    description: 'Fluxo em tempo real das mudanças de status.',
-  },
-  {
-    id: 'network_monitors',
-    type: 'network_monitors',
-    title: 'Monitores de rede',
-    category: 'lists',
-    ...sized('full'),
-    visible: true,
-    order: 7,
-    icon: 'mdi-heart-pulse',
-    description: 'Lista dos monitores com histórico recente e teste sob demanda.',
-  },
-  {
-    id: 'docker_summary',
-    type: 'docker_summary',
-    title: 'Docker',
-    category: 'summary',
-    ...sized('full'),
-    visible: true,
-    order: 8,
-    icon: 'mdi-docker',
-    description: 'CPU, RAM e tráfego dos containers desta central (só aparece com o Docker ativo).',
-  },
-  {
-    id: 'dns_latency',
-    type: 'dns_latency',
-    title: 'Tempo de consulta DNS',
-    category: 'charts',
-    ...sized('full'),
-    visible: false,
-    order: 9,
-    icon: 'mdi-dns-outline',
-    description: 'Ranking comparativo e histórico do tempo de consulta dos resolvedores DNS.',
-  },
-  {
-    id: 'saas_services',
-    type: 'saas_services',
-    title: 'Serviços SaaS, bancos & nuvem',
-    category: 'lists',
-    ...sized('full'),
-    visible: false,
-    order: 10,
-    icon: 'mdi-bank-check',
-    description:
-      'Latência e qualidade de experiência (QoE) para bancos, fintechs e provedores SaaS.',
-  },
-  {
-    id: 'saas_heatmap',
-    type: 'saas_heatmap',
-    title: 'Mapa de calor de latência',
-    category: 'charts',
-    ...sized('full'),
-    visible: false,
-    order: 11,
-    icon: 'mdi-chart-scatter-plot-hexbin',
-    description: 'Matriz horária (00h–23h) de latência e identificação de picos de lentidão.',
-  },
-]
+export function defaultWidgetsOf(catalog: DashboardCatalog | null): WidgetConfig[] {
+  if (!catalog) return []
+  return catalog.defaultLayout.flatMap((item, order) => {
+    const entry = catalog.widgets.find((widget) => widget.type === item.type)
+    if (!entry) return []
+    return [
+      { ...fromCatalog(entry), ...sized(item.size), id: item.type, visible: item.visible, order },
+    ]
+  })
+}
 
 export const useDashboardStore = defineStore('dashboard', () => {
   const isEditMode = ref(false)
@@ -330,17 +132,72 @@ export const useDashboardStore = defineStore('dashboard', () => {
   const savingGlobal = ref(false)
   const loadingServer = ref(false)
 
-  const widgets = ref<WidgetConfig[]>(loadInitialLayout())
+  const areasStore = useAreasStore()
+  const catalog = ref<DashboardCatalog | null>(null)
+  /** O catálogo já foi pedido (com ou sem sucesso): a grade pode desenhar. */
+  const ready = ref(false)
+  let catalogRequest: Promise<void> | null = null
+
+  // O layout só se monta com o catálogo: é dele que vêm os padrões.
+  const widgets = ref<WidgetConfig[]>([])
+
+  function catalogEntry(type: string | undefined): WidgetCatalogEntry | undefined {
+    return catalog.value?.widgets.find((entry) => entry.type === type)
+  }
+
+  /** A área do card; tipo desconhecido conta como núcleo (sempre ligado). */
+  function areaOfWidget(widget: Pick<WidgetConfig, 'id' | 'type'>): Area {
+    return catalogEntry(widget.type || widget.id)?.area ?? 'core'
+  }
+
+  function isWidgetAreaOn(widget: Pick<WidgetConfig, 'id' | 'type'>): boolean {
+    return areasStore.isVisible(areaOfWidget(widget))
+  }
+
+  function defaultWidgets(): WidgetConfig[] {
+    return defaultWidgetsOf(catalog.value)
+  }
+
+  /** Card do layout de fábrica (oculta-se em vez de sair do layout). */
+  function isDefaultWidget(id: string): boolean {
+    return catalog.value?.defaultLayout.some((item) => item.type === id) ?? false
+  }
+
+  /** Modelos de card múltiplo para o diálogo "Adicionar" — só de área ligada. */
+  const cardTemplates = computed<CardTemplate[]>(() =>
+    (catalog.value?.widgets ?? []).filter(
+      (entry) => entry.allowMultiple && areasStore.isEnabled(entry.area)
+    )
+  )
+
+  /**
+   * Pede o catálogo uma vez (ação pontual, não polling) e monta o layout
+   * salvo em cima dele.
+   */
+  function loadCatalog(): Promise<void> {
+    catalogRequest ??= (async () => {
+      try {
+        catalog.value = await apiService.get<DashboardCatalog>('/dashboard/catalog')
+      } catch {
+        // Sem catálogo, o layout salvo ainda se desenha; só faltam os padrões.
+      } finally {
+        widgets.value = loadInitialLayout()
+        ready.value = true
+      }
+    })()
+    return catalogRequest
+  }
 
   function parseSavedList(savedList: Partial<WidgetConfig>[]): WidgetConfig[] {
     const merged: WidgetConfig[] = []
     const processedIds = new Set<string>()
+    const defaults = defaultWidgets()
 
     savedList.forEach((savedItem, index) => {
       if (!savedItem.id) return
 
-      // Procura primeiro em DEFAULT_WIDGETS
-      const def = DEFAULT_WIDGETS.find((w) => w.id === savedItem.id)
+      // Procura primeiro no layout de fábrica
+      const def = defaults.find((w) => w.id === savedItem.id)
       if (def) {
         merged.push({
           ...def,
@@ -352,10 +209,11 @@ export const useDashboardStore = defineStore('dashboard', () => {
         processedIds.add(def.id)
       } else {
         // É um card dinâmico customizado criado pelo usuário
-        const tmpl = CARD_TEMPLATES.find((t) => t.type === savedItem.type)
+        const entry = catalogEntry(savedItem.type)
+        const tmpl = entry ? fromCatalog(entry) : null
         const baseCategory = tmpl ? tmpl.category : savedItem.category || 'charts'
         const baseIcon = tmpl ? tmpl.icon : savedItem.icon || 'mdi-view-dashboard-customize'
-        const baseCols = tmpl ? tmpl.defaultCols : { cols: 12, sm: 12, md: 6, lg: 6 }
+        const baseCols = tmpl ?? sized('half')
 
         merged.push({
           id: savedItem.id,
@@ -376,9 +234,10 @@ export const useDashboardStore = defineStore('dashboard', () => {
       }
     })
 
-    // Adiciona widgets padrão que não estavam salvos no layout
-    DEFAULT_WIDGETS.forEach((def) => {
-      if (!processedIds.has(def.id)) {
+    // Completa com os padrões que faltam — menos os de área desligada: o
+    // layout salvo volta exatamente como estava quando a área religar.
+    defaults.forEach((def) => {
+      if (!processedIds.has(def.id) && isWidgetAreaOn(def)) {
         merged.push({ ...def, order: merged.length })
       }
     })
@@ -390,12 +249,12 @@ export const useDashboardStore = defineStore('dashboard', () => {
   function loadInitialLayout(): WidgetConfig[] {
     try {
       const raw = localStorage.getItem(STORAGE_KEY)
-      if (!raw) return DEFAULT_WIDGETS.map((w) => ({ ...w }))
+      if (!raw) return defaultWidgets()
       const savedList = JSON.parse(raw) as Partial<WidgetConfig>[]
-      if (!Array.isArray(savedList)) return DEFAULT_WIDGETS.map((w) => ({ ...w }))
+      if (!Array.isArray(savedList)) return defaultWidgets()
       return parseSavedList(savedList)
     } catch {
-      return DEFAULT_WIDGETS.map((w) => ({ ...w }))
+      return defaultWidgets()
     }
   }
 
@@ -429,12 +288,18 @@ export const useDashboardStore = defineStore('dashboard', () => {
     return [...widgets.value].sort((a, b) => a.order - b.order)
   })
 
+  /**
+   * Cards de área ligada. Os de área desligada continuam no layout (e no que
+   * se salva), só não aparecem.
+   */
+  const availableWidgets = computed(() => sortedWidgets.value.filter(isWidgetAreaOn))
+
   const visibleWidgets = computed(() => {
-    return sortedWidgets.value.filter((w) => w.visible)
+    return availableWidgets.value.filter((w) => w.visible)
   })
 
   const hiddenWidgets = computed(() => {
-    return sortedWidgets.value.filter((w) => !w.visible)
+    return availableWidgets.value.filter((w) => !w.visible)
   })
 
   /**
@@ -572,8 +437,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
   function removeWidget(id: string) {
     const index = widgets.value.findIndex((w) => w.id === id)
     if (index !== -1) {
-      const isDefault = DEFAULT_WIDGETS.some((def) => def.id === id)
-      if (isDefault) {
+      if (isDefaultWidget(id)) {
         widgets.value[index].visible = false
       } else {
         widgets.value.splice(index, 1)
@@ -590,7 +454,9 @@ export const useDashboardStore = defineStore('dashboard', () => {
     customConfig: WidgetCustomConfig,
     customTitle?: string
   ): WidgetConfig {
-    const tmpl = CARD_TEMPLATES.find((t) => t.type === templateType)
+    const entry = catalogEntry(templateType)
+    const tmpl = entry ? fromCatalog(entry) : null
+    const cols = tmpl ?? sized('half')
     const id = `${templateType}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
 
     const newWidget: WidgetConfig = {
@@ -598,10 +464,10 @@ export const useDashboardStore = defineStore('dashboard', () => {
       type: templateType,
       title: customTitle || (tmpl ? tmpl.title : 'Card Personalizado'),
       category: tmpl ? tmpl.category : 'charts',
-      cols: tmpl?.defaultCols.cols ?? 12,
-      sm: tmpl?.defaultCols.sm ?? 12,
-      md: tmpl?.defaultCols.md ?? 6,
-      lg: tmpl?.defaultCols.lg ?? 6,
+      cols: cols.cols,
+      sm: cols.sm,
+      md: cols.md,
+      lg: cols.lg,
       visible: true,
       order: widgets.value.length,
       description: tmpl ? tmpl.description : '',
@@ -684,7 +550,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
   }
 
   function resetToDefaultLayout() {
-    widgets.value = DEFAULT_WIDGETS.map((w) => ({ ...w }))
+    widgets.value = defaultWidgets()
     saveLocalLayoutCache()
     if (syncMode.value === 'server') {
       void saveLayoutGlobally()
@@ -692,6 +558,13 @@ export const useDashboardStore = defineStore('dashboard', () => {
   }
 
   return {
+    catalog,
+    ready,
+    loadCatalog,
+    cardTemplates,
+    isDefaultWidget,
+    areaOfWidget,
+    availableWidgets,
     isEditMode,
     syncMode,
     promptDismissed,

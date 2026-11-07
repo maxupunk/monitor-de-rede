@@ -14,17 +14,17 @@ use loco_rs::{
     Result,
 };
 
-use crate::{
-    services::{
-        agents::{background as agents_background, local as local_agent},
-        alerts::catalog::service as alert_catalog,
-        events::relay::relay_pending,
-        network_tools::dns::registry::DnsServerRegistry,
-        vpn::probe_is_external,
-        vpn::probe_registrar as vpn_probe_registrar,
-    },
-    tasks::scheduler_run,
+use netmonitor_core::vpn_probe::probe_is_external;
+
+use netmonitor_nucleo::{
+    services::agents::{background as agents_background, local as local_agent},
+    services::alerts::catalog::service as alert_catalog,
+    services::events::relay::relay_pending,
+    services::network_tools::dns::registry::DnsServerRegistry,
+    services::probes::vpn_registrar as vpn_probe_registrar,
 };
+
+use crate::tasks::scheduler_run;
 
 /// Com que frequência o servidor drena o `event_outbox` para o barramento SSE.
 ///
@@ -49,14 +49,14 @@ impl Initializer for MonitoringInitializer {
         agents_background::spawn(ctx.clone());
         spawn_scheduler(ctx.clone());
         // Registro de fabricantes do IEEE: carrega e mantém em dia.
-        crate::services::vendors::service::spawn_auto_update(ctx);
+        netmonitor_network::vendors::service::spawn_auto_update(ctx);
         // Backup automático do próprio NetMonitor.
-        crate::services::backup::schedule::spawn(ctx);
+        netmonitor_nucleo::services::backup::schedule::spawn(ctx);
         // Backup automático dos bancos de dados cadastrados.
-        crate::services::databases::schedule::spawn(ctx);
+        netmonitor_servers::databases::schedule::spawn(ctx);
         // Tarefas agendadas (cron): ferramentas do catálogo da IA nos horários
         // marcados, em nome de quem as salvou.
-        crate::services::scheduled_tasks::runner::spawn(ctx);
+        netmonitor_nucleo::services::scheduled_tasks::runner::spawn(ctx);
 
         // Cadastro é uma conveniência de boot: banco indisponível não impede o
         // processo HTTP de subir, e a operação é idempotente em banco vazio.
@@ -99,7 +99,7 @@ impl Initializer for MonitoringInitializer {
         ensure_local_agent(ctx).await;
         // A lista dos aparelhos vigiados fica no barramento desde o boot: a
         // tela a recebe ao conectar no SSE, sem consulta.
-        crate::services::wifi::watchlist::publish(ctx).await;
+        netmonitor_network_wifi::watchlist::publish(ctx).await;
         Ok(())
     }
 }

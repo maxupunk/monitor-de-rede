@@ -4,27 +4,25 @@
 use std::{sync::Arc, time::Duration};
 
 use async_trait::async_trait;
-use backend::{
-    models::probes,
-    services::{
-        agent_runtime::{
-            executor::CommandExecutor,
-            outbox::Outbox,
-            session::{self as agent_session, NoLiveSource, SessionDeps},
-            tunnel::{parse_targets, LocalTunnelOpener, TunnelOpener},
+use loco_rs::app::AppContext;
+use netmonitor_core::models::probes;
+use netmonitor_nucleo::{
+    services::agent_runtime::{
+        executor::CommandExecutor,
+        outbox::Outbox,
+        session::{self as agent_session, NoLiveSource, SessionDeps},
+        tunnel::{parse_targets, LocalTunnelOpener, TunnelOpener},
+    },
+    services::agents::{
+        connection,
+        hub::AgentHub,
+        policy::{Permission, Policy},
+        protocol::{
+            Capability, Command, ErrorCode, Hello, RemoteError, WireFrame, PROTOCOL_VERSION,
         },
-        agents::{
-            connection,
-            hub::AgentHub,
-            policy::{Permission, Policy},
-            protocol::{
-                Capability, Command, ErrorCode, Hello, RemoteError, WireFrame, PROTOCOL_VERSION,
-            },
-            service::AgentService,
-        },
+        service::AgentService,
     },
 };
-use loco_rs::app::AppContext;
 use sea_orm::EntityTrait;
 use serde_json::{json, Value};
 use tokio::sync::mpsc;

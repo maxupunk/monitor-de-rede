@@ -6,32 +6,28 @@ use std::sync::Mutex;
 
 use async_trait::async_trait;
 use axum::{routing::get, Router};
-use backend::{
-    app::App,
-    dtos::ai::{ChatMessageInput, TestConnectionResponse},
-    models::{devices, plugin_runs},
-    services::{
-        ai::{
-            drivers::traits::{
-                AiChatChunk, AiChatOptions, AiChunkStream, AiDriver, AiMessage, AiTool, AiToolCall,
-            },
-            harness::{
-                agent::{
-                    run_agent_loop, AgentRequest, ConversationMemory, HarnessEvent, ToolLoading,
-                },
-                prompt::ChatContext,
-                tools::ToolPolicy,
-            },
-            settings::AiSettings,
-        },
-        audit::AuditActor,
-        plugins::{auto_accept, credentials},
-        shared::errors::AppResult,
-        users::Role,
-    },
-};
+use backend::app::App;
 use futures::StreamExt;
 use loco_rs::{prelude::AppContext, testing::prelude::*};
+use netmonitor_assistant::{
+    dtos::{ChatMessageInput, TestConnectionResponse},
+    {
+        drivers::traits::{
+            AiChatChunk, AiChatOptions, AiChunkStream, AiDriver, AiMessage, AiTool, AiToolCall,
+        },
+        harness::{
+            agent::{run_agent_loop, AgentRequest, ConversationMemory, HarnessEvent, ToolLoading},
+            prompt::ChatContext,
+            tools::ToolPolicy,
+        },
+        settings::AiSettings,
+    },
+};
+use netmonitor_core::models::{devices, plugin_runs};
+use netmonitor_network::plugins::{auto_accept, credentials};
+use netmonitor_nucleo::{
+    services::audit::AuditActor, services::shared::errors::AppResult, services::users::Role,
+};
 use sea_orm::{ActiveModelTrait, EntityTrait, IntoActiveModel, PaginatorTrait, Set};
 use serde_json::json;
 use serial_test::serial;

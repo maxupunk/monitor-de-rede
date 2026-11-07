@@ -7,8 +7,12 @@
 //! no momento em que o DTO nasce — que é quando custa barato — em vez de na
 //! tela, quando o Vue lê `undefined` de `perPage`.
 //!
-//! Escopo: `src/dtos/`, `src/views/` e os DTOs de paginação em
-//! `src/services/shared/pagination.rs`. Structs de request/response do Loco que
+//! Escopo: `crates/nucleo/src/{dtos,views}` (o núcleo), os mesmos diretórios no crate de cada
+//! área (`crates/servers/src/{dtos,views}`, `crates/network/src/dtos`,
+//! `crates/vpn/src/views.rs`,
+//! `crates/assistant/src/dtos.rs`), os contratos do núcleo
+//! (paginação, áreas, agentes, histórico de métricas) e os DTOs Docker do
+//! contrato de fio. Structs de request/response do Loco que
 //! o frontend não consome (fixtures, seeds) ficam de fora por não serem
 //! contrato.
 
@@ -20,17 +24,42 @@ const CAMEL_CASE_ATTR: &str = r#"rename_all = "camelCase""#;
 fn arquivos_de_contrato() -> Vec<PathBuf> {
     let raiz = Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut arquivos = Vec::new();
-    for dir in ["src/dtos", "src/views"] {
+    for dir in [
+        "crates/nucleo/src/dtos",
+        "crates/nucleo/src/views",
+        "crates/servers/src/dtos",
+        "crates/servers/src/views",
+        "crates/network/src/dtos",
+    ] {
         colete_rs(&raiz.join(dir), &mut arquivos);
     }
-    arquivos.push(raiz.join("src/services/shared/pagination.rs"));
+    // Os contratos do núcleo (paginação, áreas, agentes, métricas) moram em
+    // `crates/core`; os DTOs Docker, no contrato de fio.
+    arquivos.push(raiz.join("crates/core/src/shared/pagination.rs"));
+    for contrato in ["policy.rs", "state.rs"] {
+        arquivos.push(raiz.join("crates/core/src/areas").join(contrato));
+    }
+    arquivos.push(raiz.join("crates/core/src/agents/views.rs"));
+    // O que cruza a fronteira do acesso ao equipamento e o peer de VPN que a
+    // lista de dispositivos embute (Fase 10).
+    arquivos.push(raiz.join("crates/core/src/devices/access.rs"));
+    arquivos.push(raiz.join("crates/core/src/devices/vpn_peer.rs"));
+    arquivos.push(raiz.join("crates/core/src/telemetry/views.rs"));
+    arquivos.push(raiz.join("crates/agent-protocol/src/docker/views.rs"));
+    // A área VPN serializa num arquivo só.
+    arquivos.push(raiz.join("crates/vpn/src/views.rs"));
+    // O assistente (Fase 8): os DTOs dele e o gráfico das ferramentas, que
+    // mora no núcleo.
+    arquivos.push(raiz.join("crates/assistant/src/dtos.rs"));
+    arquivos.push(raiz.join("crates/core/src/ai/chart.rs"));
     arquivos
 }
 
 fn colete_rs(dir: &Path, saida: &mut Vec<PathBuf>) {
-    let Ok(entradas) = std::fs::read_dir(dir) else {
-        return;
-    };
+    // Diretório que sumiu (movido de crate) falha aqui, em vez de tirar os
+    // contratos dele do escopo sem ninguém notar.
+    let entradas = std::fs::read_dir(dir)
+        .unwrap_or_else(|error| panic!("{} ilegível: {error}", dir.display()));
     for entrada in entradas.flatten() {
         let caminho = entrada.path();
         if caminho.is_dir() {

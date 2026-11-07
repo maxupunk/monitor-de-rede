@@ -5,11 +5,10 @@
 //! a conversa de um usuário é invisível para outro (responde 404, não 403, para
 //! não revelar que o id existe); e o teto por usuário descarta as mais antigas.
 
-use backend::{
-    app::App,
-    services::ai::conversations::{self, MAX_CONVERSATIONS_PER_USER},
-};
+use backend::app::App;
+
 use loco_rs::testing::prelude::*;
+use netmonitor_assistant::conversations::{self, MAX_CONVERSATIONS_PER_USER};
 use serde_json::{json, Value};
 use serial_test::serial;
 

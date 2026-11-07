@@ -23,6 +23,20 @@
           {{ state.options.message }}
         </div>
 
+        <ul v-if="state.options.details?.length" class="confirm-details text-body-2 mb-3">
+          <li v-for="detail in state.options.details" :key="detail">{{ detail }}</li>
+        </ul>
+
+        <v-alert
+          v-if="state.options.blocker"
+          type="error"
+          variant="tonal"
+          density="compact"
+          class="mb-2"
+        >
+          {{ state.options.blocker }}
+        </v-alert>
+
         <v-form v-if="state.isPrompt" ref="formRef" @submit.prevent="submitPrompt">
           <v-text-field
             v-model="state.promptValue"
@@ -46,6 +60,7 @@
         <v-btn
           :color="state.options.confirmColor || 'primary'"
           variant="flat"
+          :disabled="Boolean(state.options.blocker)"
           @click="state.isPrompt ? submitPrompt() : handleConfirm()"
         >
           {{ state.options.confirmText || 'Confirmar' }}
@@ -76,3 +91,12 @@ async function submitPrompt() {
   handleConfirm(state.promptValue)
 }
 </script>
+
+<style scoped>
+.confirm-details {
+  padding-left: 20px;
+}
+.confirm-details li + li {
+  margin-top: 4px;
+}
+</style>

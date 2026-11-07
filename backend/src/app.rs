@@ -1,3 +1,4 @@
+use crate::migrator::Migrator;
 use async_trait::async_trait;
 use axum::Router as AxumRouter;
 use loco_rs::{
@@ -12,15 +13,13 @@ use loco_rs::{
     task::Tasks,
     Result,
 };
-use migration::Migrator;
 use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 use std::path::Path;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-#[allow(unused_imports)]
 use crate::{
-    controllers,
     initializers::ai::AiInitializer,
+    initializers::areas::AreasInitializer,
     initializers::btest::BtestInitializer,
     initializers::link_tests::LinkTestsInitializer,
     initializers::monitoring::MonitoringInitializer,
@@ -28,12 +27,25 @@ use crate::{
     initializers::setup::SetupInitializer,
     initializers::syslog::SyslogInitializer,
     initializers::system_device::SystemDeviceInitializer,
-    models::_entities::users,
-    models::tables,
-    services::{alerts, syslog},
     spa, tasks,
     tasks::scheduler_run::{SchedulerLoop, SchedulerRun},
 };
+use netmonitor_core::{models::_entities::users, models::tables};
+#[allow(unused_imports)]
+use netmonitor_nucleo::{controllers, services::alerts, services::syslog};
+
+/// Os crates do workspace cujo log o filtro padrão precisa liberar.
+const WORKSPACE_CRATES: &[&str] = &[
+    "netmonitor_core",
+    "netmonitor_nucleo",
+    "netmonitor_network",
+    "netmonitor_network_wifi",
+    "netmonitor_network_link_tests",
+    "netmonitor_servers",
+    "netmonitor_vpn",
+    "netmonitor_assistant",
+    "agent_protocol",
+];
 
 pub struct App;
 #[async_trait]
@@ -43,13 +55,7 @@ impl Hooks for App {
     }
 
     fn app_version() -> String {
-        format!(
-            "{} ({})",
-            env!("CARGO_PKG_VERSION"),
-            option_env!("BUILD_SHA")
-                .or(option_env!("GITHUB_SHA"))
-                .unwrap_or("dev")
-        )
+        netmonitor_nucleo::app_version()
     }
 
     async fn boot(
@@ -68,23 +74,13 @@ impl Hooks for App {
     /// servem para isto — o `run_task` não os executa, e foi exatamente essa
     /// suposição que deixou o `scheduler` e o `probe` sem cliente ICMP e sem
     /// barramento de eventos, com todo monitor de ping caindo em `unknown`.
-    ///
-    /// É também o único ponto que roda **antes** do migrator: o `create_app`
-    /// chama `create_context` e só depois `db::converge`. É daí que
-    /// [`migration::purge_removed_migrations`] tira a chance de apagar o
-    /// registro das migrations que saíram do repositório — sem isso, o
-    /// `sea-orm-migration` aborta o boot de qualquer banco que já as tenha
-    /// aplicado.
     async fn after_context(ctx: AppContext) -> Result<AppContext> {
         require_jwt_secret_in_production();
         // Todo pânico do processo vai ao log com o local e, dentro de uma
         // requisição, com o código do incidente que a tela mostra.
-        crate::services::shared::incident::install_panic_hook();
+        netmonitor_nucleo::services::shared::incident::install_panic_hook();
         process_deps::install(&ctx);
         enable_sqlite_wal(&ctx).await;
-        migration::purge_removed_migrations(&ctx.db)
-            .await
-            .map_err(loco_rs::Error::DB)?;
         // O banco de logs é separado e tem migrator próprio. Fica aqui, e não
         // num `Initializer`, porque a purga de retenção roda no ciclo do
         // `scheduler` — que pode ser invocado como `task`, e o `run_task` não
@@ -132,8 +128,19 @@ impl Hooks for App {
             return Ok(false);
         }
 
-        let filtro =
+        let mut filtro =
             logger::init_env_filter::<Self>(config.override_filter.as_ref(), &config.level);
+        // O filtro padrão do Loco só libera os módulos dele e o crate da
+        // aplicação (`backend`). O código mora nos crates do workspace (ADR
+        // 017): sem estas diretivas, o log de todos eles some. Quem define
+        // `RUST_LOG` ou `override_filter` continua decidindo sozinho.
+        if std::env::var_os("RUST_LOG").is_none() && config.override_filter.is_none() {
+            for crate_name in WORKSPACE_CRATES {
+                if let Ok(diretiva) = format!("{crate_name}={}", config.level).parse() {
+                    filtro = filtro.add_directive(diretiva);
+                }
+            }
+        }
         tracing_subscriber::registry()
             .with(logger::init_layer(std::io::stdout, &config.format, true))
             .with(syslog::app_layer::AppLogLayer)
@@ -145,6 +152,7 @@ impl Hooks for App {
     async fn initializers(_ctx: &AppContext) -> Result<Vec<Box<dyn Initializer>>> {
         Ok(vec![
             Box::new(SetupInitializer),
+            Box::new(AreasInitializer),
             Box::new(MonitoringInitializer),
             Box::new(SystemDeviceInitializer),
             Box::new(SyslogInitializer),
@@ -175,44 +183,69 @@ impl Hooks for App {
             .add_route(controllers::agents::agent_routes())
             // O gerenciador de pacotes do roteador não tem sessão: o espelho
             // (ADR 015 §10) confere o token da execução do plugin no handler.
-            .add_route(controllers::package_mirror::routes())
+            .add_route(netmonitor_network::controllers::package_mirror::routes())
             .add_route(controllers::dashboard::routes().layer(business_auth.clone()))
             .add_route(controllers::backup::routes().layer(business_auth.clone()))
             .add_route(controllers::storages::routes().layer(business_auth.clone()))
-            .add_route(controllers::databases::routes().layer(business_auth.clone()))
+            .add_route(
+                netmonitor_servers::controllers::databases::routes().layer(business_auth.clone()),
+            )
             .add_route(controllers::sites::routes().layer(business_auth.clone()))
-            .add_route(controllers::networks::routes().layer(business_auth.clone()))
+            .add_route(
+                netmonitor_network::controllers::networks::routes().layer(business_auth.clone()),
+            )
             .add_route(controllers::devices::routes().layer(business_auth.clone()))
             .add_route(controllers::monitors::routes().layer(business_auth.clone()))
-            .add_route(controllers::discovery::routes().layer(business_auth.clone()))
-            .add_route(controllers::topology::routes().layer(business_auth.clone()))
-            .add_route(controllers::snmp::routes().layer(business_auth.clone()))
+            .add_route(
+                netmonitor_network::controllers::discovery::routes().layer(business_auth.clone()),
+            )
+            .add_route(
+                netmonitor_network::controllers::topology::routes().layer(business_auth.clone()),
+            )
+            .add_route(netmonitor_network::controllers::snmp::routes().layer(business_auth.clone()))
             .add_route(controllers::probes::routes().layer(business_auth.clone()))
             .add_route(controllers::agents::routes().layer(business_auth.clone()))
-            .add_route(controllers::port_scan::routes().layer(business_auth.clone()))
+            .add_route(
+                netmonitor_network::controllers::port_scan::routes().layer(business_auth.clone()),
+            )
             .add_route(controllers::diagnostics::routes().layer(business_auth.clone()))
             .add_route(controllers::dns::routes().layer(business_auth.clone()))
             .add_route(controllers::dns_servers::routes().layer(business_auth.clone()))
-            .add_route(controllers::docker::routes().layer(business_auth.clone()))
+            .add_route(
+                netmonitor_servers::controllers::docker::routes().layer(business_auth.clone()),
+            )
             .add_route(controllers::server_addresses::routes().layer(business_auth.clone()))
             .add_route(controllers::settings::routes().layer(business_auth.clone()))
             .add_route(controllers::users::routes().layer(business_auth.clone()))
-            .add_route(controllers::vendors::routes().layer(business_auth.clone()))
+            .add_route(controllers::me::routes().layer(business_auth.clone()))
+            .add_route(
+                netmonitor_network::controllers::vendors::routes().layer(business_auth.clone()),
+            )
             .add_route(controllers::events::routes().layer(business_auth.clone()))
             .add_route(controllers::logs::routes().layer(business_auth.clone()))
             .add_route(controllers::maintenance_windows::routes().layer(business_auth.clone()))
             .add_route(controllers::audit::routes().layer(business_auth.clone()))
             .add_route(controllers::alerts::rules_routes().layer(business_auth.clone()))
             .add_route(controllers::alerts::routes().layer(business_auth.clone()))
+            .add_route(controllers::areas::routes().layer(business_auth.clone()))
             .add_route(controllers::push::routes().layer(business_auth.clone()))
-            .add_route(controllers::vpn_servers::routes().layer(business_auth.clone()))
-            .add_route(controllers::ai::routes().layer(business_auth.clone()))
-            .add_route(controllers::ai_conversations::routes().layer(business_auth.clone()))
-            .add_route(controllers::plugins::routes().layer(business_auth.clone()))
-            .add_route(controllers::link_tests::routes().layer(business_auth.clone()))
+            .add_route(
+                netmonitor_vpn::controllers::vpn_servers::routes().layer(business_auth.clone()),
+            )
+            .add_route(netmonitor_assistant::controllers::ai::routes().layer(business_auth.clone()))
+            .add_route(
+                netmonitor_assistant::controllers::ai_conversations::routes()
+                    .layer(business_auth.clone()),
+            )
+            .add_route(
+                netmonitor_network::controllers::plugins::routes().layer(business_auth.clone()),
+            )
+            .add_route(
+                netmonitor_network_link_tests::controllers::routes().layer(business_auth.clone()),
+            )
             .add_route(controllers::scheduled_tasks::routes().layer(business_auth.clone()))
-            .add_route(controllers::wifi::routes().layer(business_auth.clone()))
-            .add_route(controllers::vpn_peers::routes().layer(business_auth))
+            .add_route(netmonitor_network_wifi::controllers::routes().layer(business_auth.clone()))
+            .add_route(netmonitor_vpn::controllers::vpn_peers::routes().layer(business_auth))
     }
 
     /// Monta a SPA depois das rotas — e só depois delas.
@@ -227,7 +260,7 @@ impl Hooks for App {
     async fn after_routes(router: AxumRouter, _ctx: &AppContext) -> Result<AxumRouter> {
         Ok(
             spa::mount(router, &spa::web_root()).layer(axum::middleware::from_fn(
-                crate::services::shared::incident::track,
+                netmonitor_nucleo::services::shared::incident::track,
             )),
         )
     }

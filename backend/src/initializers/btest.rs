@@ -20,7 +20,7 @@ use loco_rs::{
     Result,
 };
 
-use crate::services::network_tools::throughput::btest::{self, BtestServer};
+use netmonitor_network::throughput::btest::{self, BtestServer};
 
 pub struct BtestInitializer;
 

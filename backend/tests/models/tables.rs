@@ -4,11 +4,10 @@
 //! alguém lembrasse — e o sintoma seria um teste passando por causa de sujeira
 //! deixada pelo anterior, que é o tipo de falha que custa uma tarde.
 
-use backend::{
-    app::App,
-    models::tables::{existing_tables, truncate_all, CREATION_ORDER},
-};
+use backend::app::App;
+
 use loco_rs::testing::prelude::*;
+use netmonitor_core::models::tables::{existing_tables, truncate_all, CREATION_ORDER};
 use serial_test::serial;
 
 /// Tabelas de infraestrutura do próprio Loco/SeaORM — não são do domínio.

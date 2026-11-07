@@ -10,11 +10,19 @@ decisões técnicas vigentes estão em [`adr/`](adr/).
 
 ## 1. O que o sistema faz
 
-Monitora redes residenciais e de pequenas empresas: descobre dispositivos,
-executa checagens de disponibilidade (ICMP, HTTP, TCP, DNS, SNMP), coleta
-métricas, monta topologia, avalia regras de alerta, notifica, e publica tudo em
-tempo real para uma SPA. Opcionalmente sobe um servidor WireGuard para alcançar
-redes remotas.
+Atende dois públicos na mesma instalação:
+
+- **Rede** — descobre dispositivos, executa checagens de disponibilidade (ICMP,
+  HTTP, TCP, DNS, SNMP), coleta métricas, monta topologia, mede enlaces e Wi-Fi
+  e, opcionalmente, sobe um servidor WireGuard para alcançar redes remotas.
+- **Servidores** — gerencia hosts e containers Docker por agentes
+  ([ADR 011](adr/011-agente-remoto.md), [ADR 014](adr/014-docker-local-pelo-agente.md))
+  e faz backup de bancos ([ADR 013](adr/013-ponte-de-banco-pelo-agente.md)).
+
+Os dois compartilham alertas, notificações, eventos, Assistente IA e a SPA, que
+recebe tudo em tempo real por SSE. Cada instalação liga só as **áreas do
+produto** que usa (Rede, Servidores, VPN; o Núcleo sempre) — ver
+[§11-F](#11-f-áreas-do-produto) e o [ADR 017](adr/017-arquitetura-modular.md).
 
 ## 2. Stack
 
@@ -88,12 +96,13 @@ containers marcados com `com.netmonitor.protected`. Mutações e exportação de
 volume continuam exclusivas de `admin` e auditadas
 ([ADR 014](adr/014-docker-local-pelo-agente.md)).
 
-A camada Docker separa a **fonte** dos dados crus (`services/docker/source.rs`,
-trait `DockerEngine`) do **mapeamento** para DTO, da redação de segredos e das
-regras (`services/docker/engine.rs`). No agente a fonte é `LocalEngine`, o
-`bollard` pelo socket; na central, `AgentEngine`, o mesmo contrato pelo canal.
-Todo host Docker — o desta central inclusive — é um agente, com a chave
-`agent-<id>` (`services/docker/hosts.rs`).
+A camada Docker (crate `servers`, `crates/servers/src/docker/`) separa a
+**fonte** dos dados crus (`source.rs`, trait `DockerEngine`) do
+**mapeamento** para DTO, da redação de segredos e das regras (`engine.rs`). No
+agente a fonte é `LocalEngine`, o `bollard` pelo socket; na central,
+`AgentEngine` (`remote_engine.rs`), o mesmo contrato pelo canal. Todo host
+Docker — o desta central inclusive — é um agente, com a chave `agent-<id>`
+(`HostKey`, `netmonitor_core::agents`; resolvida em `docker/hosts.rs`).
 
 ### Estáticos
 
@@ -127,51 +136,89 @@ confundido com arquivo — e é por isso que a identificação do serviço saiu 
 
 ## 4. Organização do código
 
+O backend é um workspace Cargo ([ADR 017](adr/017-arquitetura-modular.md)). O
+pacote raiz é **só o ponto de montagem**; o domínio mora em `crates/`, um crate
+por área, e a regra de dependência é garantida pelo `Cargo.toml` de cada um.
+
 ```text
-backend/
+backend/                 workspace Cargo; o pacote raiz (`backend`) é o ponto de montagem
 ├── src/
-│   ├── controllers/     extrai, valida, delega, serializa — sem regra de negócio
-│   ├── services/        todo o domínio, testável sem HTTP
-│   ├── models/          entidades SeaORM (_entities/, geradas) + regras de modelo
-│   ├── views/           serialização de saída
-│   ├── dtos/            entrada e tipos de contrato
-│   ├── tasks/           comandos de CLI (inclui o laço do scheduler e o probe)
-│   ├── initializers/    process_deps (todos os modos) + monitoring (só servidor)
-│   ├── mailers/         templates de e-mail
-│   └── bin/             entrypoint
-├── migration/           uma migration por tabela + helpers em shared.rs
+│   ├── app.rs           Hooks do Loco: rotas de todos os crates, initializers, tarefas
+│   ├── registries.rs    o que cada área contribui: políticas, checkers, grupos de monitores,
+│   │                    rotinas e retenção do scheduler, comandos e Docker do agente, acesso
+│   │                    ao equipamento, catálogo da IA, CentralServices de Rede, VPN e
+│   │                    assistente — único lugar (com app.rs e initializers) que nomeia área
+│   ├── initializers/    process_deps (todos os modos, instala os registros) + os do servidor
+│   ├── tasks/           comandos de CLI (o ciclo do scheduler, o probe, os registros)
+│   ├── bin/             backend-cli e netmonitor-agent (que monta o agente com os registros)
+│   └── spa.rs           o dist do frontend
+├── crates/
+│   ├── core/            contratos e kernel compartilhado com as áreas: models (+ entidades
+│   │                    geradas), shared (erros, transação, paginação, cofre, rate limit),
+│   │                    events, areas (AreaPolicy, AreaPolicies), agents (canal, hub, pontes,
+│   │                    cadastro, AgentCommandHandler/Dispatcher, HostDocker), routines
+│   │                    (Routine, RetentionJob, cadência), monitoring (MonitorChecker,
+│   │                    MonitorGroup, CheckDeps, guardas), network_tools (ICMP DGRAM, TCP,
+│   │                    UDP, vizinhos, NAT, IP público), devices (adapters, sistemas,
+│   │                    DeviceAccess, cadência SNMP, peer de VPN), classifier, ai (contrato
+│   │                    das ferramentas), alerts (contratos, feed), notifications, audit,
+│   │                    storage, telemetry, preferences, roles, vpn_probe
+│   ├── nucleo/          o Núcleo: services/ (monitoramento e ciclo do scheduler, alertas,
+│   │                    notificações e Web Push, dispositivos, syslog, sondas e agentes —
+│   │                    incluindo o runtime do host do agente —, usuários e autenticação,
+│   │                    configurações, dashboard, tarefas agendadas, backup, ferramentas da
+│   │                    IA do núcleo, assistente inicial), controllers/, dtos/, views/,
+│   │                    mailers/; depende só de `core` e `agent-protocol`
+│   ├── agent-protocol/  contrato de fio central ↔ agente; não depende de crate do workspace
+│   ├── network/         área Rede: descoberta (+ despacho ao agente e ao probe), fabricantes,
+│   │                    varredura de portas, SNMP (+ monitor e grupo `snmp`), topologia,
+│   │                    redes, plugins de dispositivo (ADR 012) e o acesso ao equipamento,
+│   │                    espelho de pacotes, motores de vazão (ADR 015), as rotinas da
+│   │                    base, os comandos da Rede no agente e as rotas — a base da área
+│   ├── network-wifi/    submódulo da Rede: clientes Wi-Fi, vigia e dataset `wifi_client`
+│   ├── network-link-tests/ submódulo da Rede: testes de enlace (ADR 015), agendamentos
+│   │                    e retenção — os dois dependem só do core e da base da área
+│   ├── servers/         área Servidores: docker (+ comandos e Docker do host no agente),
+│   │                    databases, monitor de container, rotas /api/docker e /api/databases
+│   ├── vpn/             área VPN: servidor, peers, IPAM, chaves, config/status do watcher,
+│   │                    perfis de cliente, telemetria dos túneis (rotina), rotas /api/vpn
+│   └── assistant/       o assistente: chat e harness, provedores de LLM, Decisor, rotinas
+│                        automáticas, marcações, conversas, rotas /api/ai
+├── src/migrator.rs      o Migrator: esquema do core + o de cada área (crates/*/src/migrations),
+│                        uma migration por tabela; helpers em netmonitor_core::schema
 ├── config/              development.yaml, test.yaml, production.yaml
 ├── examples/spikes/     protótipos que sustentam as ADRs
-└── tests/               requests/, models/, conventions/
+└── tests/               requests/, models/, conventions/ (inclui a regra de arquitetura)
 ```
 
-`src/services/` é onde o sistema realmente vive:
+Regra de dependência:
 
 ```text
-services/
-├── devices/        adapters de plataforma, acesso, capacidades e dispositivo do sistema
-├── monitoring/     checkers/, runner, result_processor, device_status, presenter
-├── discovery/      service, pipeline, scanners/, fingerprints, device_identifier, merger, queue
-├── vendors/        fabricante por MAC: registro do IEEE (`oui_vendors`) + base embutida
-├── snmp/           sessões, coletores, perfis
-├── topology/       ligações e confiança
-├── link_tests/     teste de enlace (ADR 015): plano, negociação de motor, pernas e etapas, agendamentos
-├── scheduled_tasks/ tarefas agendadas (cron): ferramenta do catálogo da IA + argumentos num horário
-├── alerts/         datasets → evaluator → manager (+ catalog, recovery, repository)
-├── notifications/  channels/ (telegram, discord, webhook, email) + formatter
-├── probes/         agent, dispatcher, receiver, liveness, buffer
-├── vpn/            peers, chaves, config_builder/writer, preflight, telemetria
-├── events/         bus (SSE) e relay (outbox → bus)
-├── network_tools/  port scanner e utilidades de rede
-├── maintenance/    data_pruner e limpeza de recursos
-├── backup/         export/restore das configurações
-└── shared/         crypto, pagination, errors
+backend (montagem)  ──▶  todos os crates
+nucleo, network, servers, vpn, assistant  ──▶  core, agent-protocol
+core  ──▶  agent-protocol
+área  ─╳─▶  outra área, nucleo          (proibido; conversa por trait do core)
 ```
+
+O que o núcleo pede a uma área chega por um registro instalado no
+`shared_store` pelo `after_context` (vale para o servidor e para as tarefas):
+`MonitorCheckers`, `MonitorGroups`, `AreaRoutines`, `AreaPolicies`,
+`AgentCommandDispatchers`, o `DeviceAccess`, o `Classifier` e o catálogo da IA.
+O que uma área pede à central chega pelo `CentralServices` dela,
+implementado em `src/registries.rs` com os serviços do `nucleo`. O agente
+remoto recebe as peças das áreas do binário (`AgentHost`). Nenhuma área
+depende do `nucleo`, então mexer nele recompila só ele e o ponto de montagem.
+`tests/conventions/architecture.rs` guarda o que o compilador não vê: os
+manifestos, que só o ponto de montagem nomeia área e que toda área tem
+consumidor.
+
+Neste documento, um caminho `services/…` sem crate é do `nucleo`
+(`crates/nucleo/src/services/…`).
 
 ### Adapters de dispositivo
 
 Toda variação por sistema operacional ou família de equipamento parte de
-`services/devices/adapters/`. O contrato `DeviceAdapter` concentra identidade,
+`netmonitor_core::devices::adapters`. O contrato `DeviceAdapter` concentra identidade,
 evidências de detecção, meios de acesso, classificação e vínculos com adapters
 especializados. O registro define a ordem pública e é consumido por cadastro,
 discovery, Syslog e VPN.
@@ -341,19 +388,16 @@ definidos; qualquer coisa fora do catálogo é rejeitada.
 
 ## 7. Esquema de dados
 
-21 tabelas. A ordem de criação está em `src/models/tables.rs` (`CREATION_ORDER`)
-e é a mesma das migrations — pai antes de filho, por causa das FKs. Um teste
-garante que a lista e as migrations não divirjam.
+47 tabelas no banco principal, mais o banco de logs com migrator próprio. A
+lista e a ordem de criação moram em `src/models/tables.rs` (`CREATION_ORDER`) —
+pai antes de filho, por causa das FKs — e são a mesma ordem das migrations. Um
+teste garante que as duas não divirjam; este documento não repete a lista.
 
-```text
-users  sites  probes  networks
-devices  device_interfaces  device_links
-monitors  monitor_results  metrics
-discovery_runs  discovery_results
-alert_rules  alert_events
-vpn_servers  vpn_peers
-dns_servers  event_outbox  probe_tasks  system_settings
-```
+**O sistema ainda não foi para produção.** Mudança de esquema edita a migration
+existente e recria o banco de desenvolvimento — sem migration de
+compatibilidade nem rotina de upgrade. A consolidação das migrations numa base
+está planejada (DB-02, Fase 1 do
+[roadmap da arquitetura modular](roadmap_arquitetura_modular.md)).
 
 Notas que valem mais que a lista:
 
@@ -370,7 +414,7 @@ Notas que valem mais que a lista:
 - **FKs anuláveis com `CASCADE`** existem de propósito (`probes.site_id`,
   `networks.site_id`, `devices.site_id`, `monitors.device_id`, as três de
   `alert_rules`). Por isso as FKs são declaradas à mão em
-  `migration/src/shared.rs`, e não pelo `refs` do Loco, que derivaria a ação da
+  `netmonitor_core::schema`, e não pelo `refs` do Loco, que derivaria a ação da
   nulabilidade.
 - **`auth_tokens` não existe.** A autenticação é JWT stateless.
 - **Não existe usuário semeado em produção.** Banco vazio significa instalação
@@ -560,6 +604,15 @@ exatamente esse o bug corrigido pela [ADR 007](adr/007-scheduler-processo-unico.
 
 ## 10. Módulo VPN
 
+- O código da área mora em `crates/vpn` (`netmonitor_vpn`, depende só do
+  `core`). O que é do núcleo por natureza ficou nele: o cofre efêmero
+  (`netmonitor_core::shared::secret_store`, também usado pelo enrollment dos
+  agentes e pelas senhas de sessão dos plugins), a topologia e o nome do
+  `vpn-probe` (`netmonitor_core::vpn_probe`) e o registrador dele
+  (`services/probes/vpn_registrar.rs`). A transição de cada túnel é da área:
+  o dataset `vpn_peer` (`netmonitor_vpn::alerts::vpn_peer`, um `AlertDataset`)
+  e o observador (`alerts::watcher`), que o entrega ao motor de alertas pelo
+  `CentralServices` da VPN.
 - O `server` gera as chaves em Rust puro (`x25519-dalek`), sem depender do
   binário `wg` e sem `NET_ADMIN`.
 - A **chave privada de um peer nunca vai ao banco**: vive num cofre em memória
@@ -687,12 +740,16 @@ instalações PostgreSQL dimensionam `DB_MAX_CONNECTIONS` explicitamente.
 Um agente (`netmonitor-agent`, [ADR 011](adr/011-agente-remoto.md)) é uma
 linha de `probes` com `configuration.role = "agent"`, opcionalmente vinculada ao
 dispositivo que o hospeda (`probes.device_id`, normalmente o peer da VPN). É um
-segundo binário do mesmo crate: não sobe o Loco nem abre banco e reaproveita o
-protocolo, a `LocalEngine`, os checkers (`run_monitor_with`) e a telemetria.
+segundo binário do pacote raiz: não sobe o Loco nem abre banco e reaproveita o
+protocolo (`agent-protocol`), o runtime do agente (`nucleo`:
+`services/agent_runtime`), os checkers (`run_monitor_with`, com o monitor de
+container registrado) e a telemetria. O que é de área chega montado pelo
+binário (`AgentHost`): os comandos Docker e o Docker do host (`servers`), a
+descoberta, o equipamento e a vazão (`network`).
 
 **Canal.** O agente abre `GET /api/agents/connect` (WebSocket, `X-Probe-Token`)
 e nunca escuta porta. Tudo que atravessa é um `Envelope` JSON
-(`services/agents/protocol.rs`): `Request` → `Chunk`* → `Response`, `Cancel`,
+(crate `agent-protocol`): `Request` → `Chunk`* → `Response`, `Cancel`,
 e `Event` espontâneo. Os comandos Docker formam um enum fechado, cada um com a
 sua permissão. `services/agents/connection.rs` e
 `services/agent_runtime/session.rs` falam texto por canais — o controller só
@@ -713,11 +770,10 @@ deixa o agente dirigir um teste de vazão — só como cliente, sem abrir porta 
 até um equipamento da rede dele; amostras chegam em `Chunk` e a central as
 consome pelo `AgentDriver` (`services/agents/throughput.rs`).
 
-**Docker por host.** `services/docker/source.rs` (`DockerEngine`) e
-`maintenance.rs` (`DockerMaintenance`) são as fontes; `hosts.rs` resolve
-`local` para `LocalEngine` e `agent-<id>` para `AgentEngine` (RPC pelo hub). As
-rotas existem em `/api/docker/...` (a central) e
-`/api/docker/hosts/{host}/...`. Pull, atualização (recreate com rollback) e
+**Docker por host.** `crates/servers/src/docker/source.rs` (`DockerEngine`)
+e `maintenance.rs` (`DockerMaintenance`) são as fontes; `hosts.rs` resolve
+`agent-<id>` para `AgentEngine` (RPC pelo hub do `core`). As rotas existem em
+`/api/docker/hosts` e `/api/docker/hosts/{host}/...`. Pull, atualização (recreate com rollback) e
 compose respondem `202` e relatam progresso em `docker:operation`; logs em
 follow chegam como `docker:log`. O CLI `docker compose` só roda no agente.
 
@@ -725,7 +781,8 @@ follow chegam como `docker:log`. O CLI `docker compose` só roda no agente.
 vivo (`SetLive`) e os republica como `docker:snapshot`/`docker:inventory` com
 `hostKey`; o último de cada host é reenviado a quem assina depois
 (`EventBus::publish_snapshot`). Sem assinante, o agente só manda o rollup de
-1 minuto (`services/telemetry`), que também é coletado para o host `local`.
+1 minuto (`agent-protocol::telemetry`), gravado pela central no histórico do
+núcleo (`netmonitor_core::telemetry::store`).
 As tabelas `host_metrics_1m` e `container_metrics_1m` seguem
 `RETENTION_METRICS_DAYS`.
 
@@ -766,7 +823,7 @@ confiança, e quem aplica é o operador. Desligado ou fora do ar, tudo segue com
 antes.
 
 ```text
-services/ai/decider/
+crates/assistant/src/decider/
   config.rs         chave mestra, provedor, chave de acesso, uma chave por frente (features)
   providers.rs      presets: Ollaya, TypeSafe, OpenRouter, Cloudflare, OpenAI, Outro
   protocols.rs      os formatos de API (Ollaya, System One, Cloudflare, OpenAI, OpenRouter)
@@ -838,7 +895,7 @@ saem de `ollama.rs`). A API fala com ele em `http://ollama:11434/v1` (protocolo
 OpenAI, o mesmo driver dos provedores na nuvem).
 
 - **Achar o servidor.** O Ollama e o Ollaya usam a mesma procura
-  (`services/ai/local_server.rs`): enquanto a URL da tela apontar para esta
+  (`crates/assistant/src/local_server.rs`): enquanto a URL da tela apontar para esta
   máquina — o nome do serviço, o loopback ou o host do Docker —, a API tenta a
   URL da tela, a variável da instalação (`OLLAMA_URL`/`OLLAYA_URL`, que o
   `docker-compose.host.yml` define), o nome do serviço, `127.0.0.1` e
@@ -878,8 +935,8 @@ periódico, tarefas agendadas). É uma consulta (`ToolKind::Passive`): resolve n
 mesma rodada do agente, sem devolver a vez a ninguém. Detalhes em
 [pesquisa_web_ia_frontend.md](pesquisa_web_ia_frontend.md).
 
-- **Peças.** `harness/tools/web.rs` só traz o contrato; a regra fica em
-  `services/ai/web_search/`: `query.rs` (limpeza do termo e do site),
+- **Peças.** `crates/assistant/src/tools.rs` só traz o contrato; a regra fica em
+  `crates/assistant/src/web_search/`: `query.rs` (limpeza do termo e do site),
   `providers/` (um `SearchProvider` por fonte: DuckDuckGo HTML, SearXNG e NVD),
   `untrusted.rs` (o que volta vira texto puro), `cache.rs` (1 h em memória) e
   `mod.rs` (o `WebSearchService` que junta tudo).
@@ -896,7 +953,60 @@ mesma rodada do agente, sem devolver a vez a ninguém. Detalhes em
   de todo catálogo; `AI_WEB_SEARCH_URL` troca o DuckDuckGo por um SearXNG — e
   aí as pesquisas gerais não saem para buscador público. CVEs vêm do NVD.
 
+## 11-F. Áreas do produto
 
+Decididas no [ADR 017](adr/017-arquitetura-modular.md). Quatro áreas: Núcleo
+(sempre ligado), Rede, Servidores e VPN. O estado mora em `system_settings`
+(chave `areas`, ausente = tudo ligado) e é lido por `netmonitor_core::areas`.
+
+| Peça | Onde | Efeito da área desligada |
+| :--- | :--- | :--- |
+| Estado, validação, publicação | `crates/core/src/areas/` | `areas:updated` no SSE, também no snapshot de quem conecta |
+| O que cada área sabe de si (evidência, consequências, bloqueio) | `AreaPolicy` no crate da área (`netmonitor_network::NetworkPolicy`, `netmonitor_servers::ServersPolicy`, `netmonitor_vpn::VpnPolicy`); registro em `src/registries.rs` | VPN com servidor ativo não desliga (409) |
+| API | `controllers/areas.rs`, `POST /api/settings/onboarding/intent` | só admin muda; auditado |
+| Ferramentas da IA | `AiToolHandler` (`netmonitor_core::ai::tools`) com `area()`; cada área contribui as suas (`netmonitor_servers::ai_tools`, `netmonitor_vpn::ai_tools`, `netmonitor_network::{plugins,topology,discovery}::ai_tools`) e o catálogo, na ordem da IA, é montado em `src/registries.rs`; `ToolPolicy::with_areas` filtra | saem do chat, das rotinas e das tarefas; tarefa agendada vira `skipped` |
+| Rotinas | `discovery::queue`, `maintenance_runner`, `agents::background` | varredura, enlaces agendados e vigia de Wi-Fi pausados; snapshot Docker só com Servidores ligada **e** alguma aba com `?interest=docker` |
+| Datasets de alerta | `AlertDataset` (`netmonitor_core::alerts::contracts`: `eventType`, fatos, mensagem, recuperação), implementado pelo cliente Wi-Fi vigiado (`netmonitor_network::wifi::wifi_client`) e pelo túnel (`netmonitor_vpn::alerts::vpn_peer`); `AlertEvaluationContext::of` monta o contexto e o `CentralServices` da área (`evaluate_alert`) o entrega ao motor do Núcleo | seguem a rotina que os observa: o vigia do Wi-Fi pausa com a Rede desligada; a VPN com servidor ativo não desliga |
+| Monitores e alertas | `MonitorChecker` (`netmonitor_core::monitoring`): o monitor `snmp` é da Rede (`SnmpMonitor`) e o `container`, de Servidores; entram pelo registro, na central e no agente | **continuam** (monitor nunca para pela área); modelos de regra da área somem do catálogo |
+| SPA | `frontend/src/areas/`, `router/areaGuard.ts`, `AreaOffPage.vue` | menu, rotas, cards e handlers SSE da área saem; link profundo mostra "Área desligada" |
+
+A fronteira de código entre as áreas é verificada pelo compilador: cada área
+e o Núcleo (`crates/nucleo`) só dependem de `core` e `agent-protocol`, e só o
+ponto de montagem conhece todas (ver §4). `tests/conventions/architecture.rs`
+guarda o que o compilador não vê — os manifestos, o ponto de montagem e um
+consumidor por área —, sem lista de exceções. O que uma área pede ao
+resto da central chega por um único trait da área, implementado em
+`src/registries.rs` e guardado no `shared_store`: a VPN pede o motor de alertas,
+a apresentação de dispositivo e os endereços da central
+(`netmonitor_vpn::central::CentralServices`); a Rede, o motor de alertas (estado
+de interface, cliente Wi-Fi vigiado), os endereços da central, a identificação
+de dispositivo, a porta publicada da API e a leitura da IA para a revisão de
+plugin (`netmonitor_network::central::CentralServices`).
+
+**Comandos das áreas aos agentes (Fase 9).** O enum dos comandos continua
+fechado no `agent-protocol` e a política local (`AGENT_ALLOW`) continua
+aplicada pelo executor do agente antes de qualquer efeito; quem atende o
+comando de uma área é o crate dela:
+
+| Ponto | Onde mora | Quem implementa | Registro |
+| :--- | :--- | :--- | :--- |
+| `AgentCommandHandler` (executa no host do agente: `Discovery`, `DeviceIo`, `Throughput`) | `netmonitor_core::agents::command` | `netmonitor_network::agent_commands` | `src/registries.rs::agent_command_handlers`, usado pelo `LocalExecutor` |
+| `AgentCommandDispatcher` (entrega na central o trabalho pendente ao agente conectado: a varredura) | `netmonitor_core::agents::command` | `netmonitor_network::discovery::remote::DiscoveryDispatch` | `src/registries.rs::agent_command_dispatchers`, no `shared_store` pelo `after_context`; chamado pelo pump de `agents::background` |
+
+**Pontos de extensão da IA (Fase 8).** O assistente não importa área:
+
+| Ponto | Onde mora | Quem implementa | Registro |
+| :--- | :--- | :--- | :--- |
+| `Classifier` (palpite onde a heurística ficou em dúvida: identificação de dispositivo, interfaces do SNMP, categoria de log) | `netmonitor_core::classifier` | `netmonitor_assistant::DeciderClassifier`; o padrão é a `HeuristicClassifier` (nenhum palpite, fica a heurística de quem chama) | `src/registries.rs::classifier`, instalado no `shared_store` pelo `after_context` |
+| `AiToolHandler` (+ `ToolPolicy`, `ToolArgs`, risco, gráfico) | `netmonitor_core::ai` | o núcleo (`services/ai_tools`), cada área e o assistente (`web_search`) | `src/registries.rs::ai_tool_catalog`, instalado por `install_catalog` no `after_context` |
+| `GrepSource` (fonte do `grep`) e `PlatformSection` (seção do `get_platform_status`) | `netmonitor_core::ai::{grep, platform}` | a fonte `docker` (Servidores); as seções `vpn` (VPN) e `discovery` (Rede) | montadas com a ferramenta no catálogo |
+| `CentralServices` do assistente (Web Push, canais de notificação, inibição dos alertas, plugins de dispositivo, Docker das marcações) | `netmonitor_assistant::central` | `src/registries.rs` | `shared_store`, pelo `after_context` |
+
+O `backend/contracts/ai_chat.json` (prompt e ferramentas como o modelo os vê) é
+gerado pelo teste do catálogo em `src/registries/ai_catalog_tests.rs`, onde
+todas as áreas estão montadas.
+
+## 12. O que não existe
 
 Registrar o que **não** foi construído evita que alguém procure por uma peça
 ausente achando que ela está escondida:
@@ -921,23 +1031,14 @@ ausente achando que ela está escondida:
 - **Não há observador externo do processo.** Um processo parado não consegue
   alertar sobre si: monitorar a queda total do NetMonitor exigiria um segundo
   agente, e isso está fora de escopo.
-- **Não há trilha de auditoria.** Há autorização por papel (`admin`, `operator`
-  e `viewer`), mas ainda não existe registro histórico de quem alterou cada
-  recurso.
+- **Área não é controle de acesso nem desinstalação.** A API continua montada
+  com a área desligada, quem autoriza é o papel, e nenhum dado é apagado
+  ([§11-F](#11-f-áreas-do-produto)).
 
 ## 13. Decisões registradas
 
-| ADR | Decisão |
-| :--- | :--- |
-| [001](adr/001-snmp-client.md) | Cliente SNMP |
-| [002](adr/002-rustscan-embedding.md) | Estratégia de port scan sobre `tokio` |
-| [003](adr/003-icmp-dgram.md) | Ping por socket ICMP `SOCK_DGRAM` |
-| [004](adr/004-dns-wire.md) | Consultas DNS no formato wire |
-| [007](adr/007-scheduler-processo-unico.md) | Scheduler em laço no processo principal |
-| [008](adr/008-syslog-parser.md) | Parser e ingestão de Syslog |
-| [009](adr/009-device-adapters.md) | Adapters extensíveis por plataforma de dispositivo |
-| [010](adr/010-docker-engine-api.md) | Gerenciamento pela Docker Engine API |
-| [011](adr/011-agente-remoto.md) | Agente remoto por canal de saída sobre a VPN |
+O índice das decisões, com o status de cada uma, é o
+[`adr/README.md`](adr/README.md).
 
 ## 14. Configuração
 

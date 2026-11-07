@@ -5,17 +5,18 @@
 //! (porta 9 fechada em loopback = down determinístico). É o que torna possível
 //! encenar "caiu e voltou N vezes" sem depender de tempo real.
 
-use backend::{
-    app::App,
-    models::_entities::alert_events as alert_events_entity,
-    models::alert_events,
-    services::monitoring::{
-        contracts::{CheckResult, MonitorStatus},
-        result_processor::process_result,
-    },
+use backend::app::App;
+
+use netmonitor_core::{
+    models::_entities::alert_events as alert_events_entity, models::alert_events,
 };
+
 use chrono::{Duration, Utc};
 use loco_rs::{testing::prelude::*, TestServer};
+use netmonitor_nucleo::services::monitoring::{
+    contracts::{CheckResult, MonitorStatus},
+    result_processor::process_result,
+};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use serde_json::{json, Value};
 use serial_test::serial;

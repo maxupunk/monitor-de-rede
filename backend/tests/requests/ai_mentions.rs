@@ -11,30 +11,26 @@ use std::sync::{
 };
 
 use async_trait::async_trait;
-use backend::{
-    app::App,
-    dtos::ai::{AiMention, AiMentionKind, ChatMessageInput, TestConnectionResponse},
-    models::_entities::devices,
-    services::{
-        ai::{
-            drivers::traits::{
-                AiChatChunk, AiChatOptions, AiChunkStream, AiDriver, AiMessage, AiTool, AiToolCall,
-            },
-            harness::{
-                agent::{
-                    run_agent_loop, AgentRequest, ConversationMemory, HarnessEvent, ToolLoading,
-                },
-                prompt::{build_system_prompt, build_turn_context, ChatContext},
-                tools::ToolPolicy,
-            },
-            mentions,
-            settings::AiSettings,
-        },
-        shared::errors::AppResult,
-    },
-};
+use backend::app::App;
 use futures::StreamExt;
 use loco_rs::{prelude::AppContext, testing::prelude::*};
+use netmonitor_assistant::{
+    dtos::{AiMention, AiMentionKind, ChatMessageInput, TestConnectionResponse},
+    {
+        drivers::traits::{
+            AiChatChunk, AiChatOptions, AiChunkStream, AiDriver, AiMessage, AiTool, AiToolCall,
+        },
+        harness::{
+            agent::{run_agent_loop, AgentRequest, ConversationMemory, HarnessEvent, ToolLoading},
+            prompt::{build_system_prompt, build_turn_context, ChatContext},
+            tools::ToolPolicy,
+        },
+        mentions,
+        settings::AiSettings,
+    },
+};
+use netmonitor_core::models::_entities::devices;
+use netmonitor_nucleo::services::shared::errors::AppResult;
 use sea_orm::{ActiveModelTrait, Set};
 use serde_json::{json, Value};
 use serial_test::serial;
@@ -193,6 +189,10 @@ impl AiDriver for Pergunta {
 #[serial]
 async fn pergunta_ao_usuario_encerra_a_rodada_sem_nova_chamada() {
     request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
+        // A pergunta é sobre equipamento: as opções só ficam se existirem de
+        // verdade (ancoragem do `ask_user`, `harness::grounding`).
+        aparelho(&ctx, "Borda", "10.0.0.1").await;
+        aparelho(&ctx, "MPPT Bateria", "10.0.0.2").await;
         let chamadas = Arc::new(AtomicUsize::new(0));
         let stream = run_agent_loop(
             ctx.clone(),
@@ -207,7 +207,7 @@ async fn pergunta_ao_usuario_encerra_a_rodada_sem_nova_chamada() {
                 policy: ToolPolicy::from_settings(&AiSettings::default()),
                 tool_loading: ToolLoading::OnDemand,
                 memory: ConversationMemory::default(),
-                actor: backend::services::audit::AuditActor::default(),
+                actor: netmonitor_nucleo::services::audit::AuditActor::default(),
             },
         )
         .await;
@@ -228,7 +228,22 @@ async fn pergunta_ao_usuario_encerra_a_rodada_sem_nova_chamada() {
             })
             .expect("a pergunta chega à tela");
         assert_eq!(pergunta["question"], "De qual equipamento?");
-        assert_eq!(pergunta["options"], json!(["Borda", "MPPT Bateria"]));
+        let opcoes: Vec<&str> = pergunta["options"]
+            .as_array()
+            .expect("opções")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect();
+        assert_eq!(
+            &opcoes[..2],
+            ["Borda", "MPPT Bateria"],
+            "as do modelo, sem repetição"
+        );
+        assert_eq!(
+            opcoes.iter().filter(|opcao| **opcao == "Borda").count(),
+            1,
+            "{opcoes:?}"
+        );
         assert!(matches!(eventos.last(), Some(HarnessEvent::Done)));
     })
     .await;

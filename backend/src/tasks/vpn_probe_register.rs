@@ -6,7 +6,7 @@
 
 use loco_rs::prelude::*;
 
-use crate::services::vpn::probe_registrar;
+use netmonitor_nucleo::services::probes::vpn_registrar as probe_registrar;
 
 pub struct VpnProbeRegister;
 

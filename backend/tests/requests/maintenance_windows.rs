@@ -4,16 +4,16 @@
 //! durante uma janela vigente, alertas ainda são criados, mas a linha do
 //! `notification_outbox` nasce `suppressed` com motivo `maintenance`.
 
-use backend::{
-    app::App,
-    models::notification_outbox,
-    services::monitoring::{
-        contracts::{CheckResult, MonitorStatus},
-        result_processor::process_result,
-    },
-};
+use backend::app::App;
+
+use netmonitor_core::models::notification_outbox;
+
 use chrono::{Duration, Utc};
 use loco_rs::testing::prelude::*;
+use netmonitor_nucleo::services::monitoring::{
+    contracts::{CheckResult, MonitorStatus},
+    result_processor::process_result,
+};
 use sea_orm::{EntityTrait, QueryOrder};
 use serde_json::{json, Value};
 use serial_test::serial;

@@ -18,14 +18,13 @@
 //! direta; o dump e a restauração usam a rota testada — então "pela ponte"
 //! precisa produzir exatamente o mesmo banco que "direto".
 
-use backend::{
-    app::App,
-    services::databases::{
-        dump::DumpWriter, reach::reach, restore::LineReader, DatabaseEngine, DatabaseTarget,
-        NoProgress, RestoreMode, SslMode,
-    },
-};
+use backend::app::App;
+
 use loco_rs::testing::prelude::*;
+use netmonitor_servers::databases::{
+    dump::DumpWriter, reach::reach, restore::LineReader, DatabaseEngine, DatabaseTarget,
+    NoProgress, RestoreMode, SslMode,
+};
 use serial_test::serial;
 use sqlx::{AssertSqlSafe, Connection, MySqlConnection, PgConnection, Row};
 
@@ -64,7 +63,7 @@ async fn dump_and_restore(
     source: &str,
     destination: &str,
     mode: RestoreMode,
-) -> (backend::services::databases::dump::DumpStats, String) {
+) -> (netmonitor_servers::databases::dump::DumpStats, String) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("dump.sql.gz");
     let mut writer = DumpWriter::create(&path).await.unwrap();
@@ -434,7 +433,7 @@ async fn mariadb_ida_e_volta_preserva_estrutura_e_dados() {
 async fn through_agent(
     ctx: &loco_rs::app::AppContext,
     target: &DatabaseTarget,
-) -> backend::services::databases::reach::Reached {
+) -> netmonitor_servers::databases::reach::Reached {
     let probe = tunnel_agent(ctx, "filial", &format!("{}:{}", target.host, target.port)).await;
     reach(ctx, target.clone(), Some(probe.id))
         .await
@@ -514,12 +513,12 @@ async fn agente_sem_permissao_database_nao_abre_ponte() {
             &ctx,
             probe.clone(),
             super::agent_harness::agent_hello(vec![
-                backend::services::agents::policy::Permission::Read,
+                netmonitor_nucleo::services::agents::policy::Permission::Read,
             ]),
             std::sync::Arc::new(super::agent_harness::NoCommands),
             std::sync::Arc::new(
-                backend::services::agent_runtime::tunnel::LocalTunnelOpener::new(
-                    backend::services::agents::policy::Policy::default(),
+                netmonitor_nucleo::services::agent_runtime::tunnel::LocalTunnelOpener::new(
+                    netmonitor_nucleo::services::agents::policy::Policy::default(),
                     Vec::new(),
                 ),
             ),

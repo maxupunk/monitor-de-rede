@@ -5,10 +5,10 @@
       Assistente de Configuração Inicial
     </v-card-title>
     <v-card-text class="mt-2">
-      <p class="text-caption text-grey-darken-1 mb-3">
-        Execute novamente o assistente de primeiro acesso para cadastrar novos locais (Sites),
-        sub-redes, servidores DNS, endereços deste servidor e ajustar parâmetros globais de forma
-        guiada e rápida.
+      <p class="text-body-2 mb-3">
+        Execute novamente o assistente de primeiro acesso para escolher o que a instalação gerencia
+        (Rede, Servidores e Docker, VPN) e configurar, de forma guiada, as etapas dessas áreas:
+        endereços deste servidor, sites, sub-redes, DNS, agentes e notificações.
       </p>
     </v-card-text>
     <v-card-actions class="justify-end">

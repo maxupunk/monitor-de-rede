@@ -110,7 +110,10 @@
       </v-col>
     </v-row>
 
-    <div v-if="gridWidgets.length === 0" class="dashboard-empty dashboard-surface rounded-lg">
+    <div
+      v-if="dashboardStore.ready && gridWidgets.length === 0"
+      class="dashboard-empty dashboard-surface rounded-lg"
+    >
       <v-icon size="40" color="primary">mdi-view-dashboard-edit-outline</v-icon>
       <div class="text-subtitle-1 font-weight-bold mt-2">O Dashboard está vazio</div>
       <div class="text-body-2 mb-4">Adicione widgets ou volte ao layout padrão.</div>
@@ -143,42 +146,31 @@ import { useDevicesStore } from '@/stores/devices'
 import { useAlertsStore } from '@/stores/alerts'
 import { useEventsStore } from '@/stores/events'
 import { useMonitorsStore } from '@/stores/monitors'
-import { useDockerStore } from '@/stores/docker'
 import { useAiStore } from '@/stores/ai'
 import { useConfirm } from '@/composables/useConfirm'
 import DashboardWidgetWrapper from '@/components/DashboardWidgetWrapper.vue'
 import AddWidgetDialog from '@/components/AddWidgetDialog.vue'
 import DashboardServerPromptDialog from '@/components/DashboardServerPromptDialog.vue'
 import PageHeader from '@/components/PageHeader.vue'
-import {
-  widgetComponentOf,
-  widgetPropsOf,
-  widgetTypeOf,
-} from '@/components/dashboard/widgetRegistry'
+import { widgetComponentOf, widgetPropsOf } from '@/components/dashboard/widgetRegistry'
 
 const dashboardStore = useDashboardStore()
 const devicesStore = useDevicesStore()
 const alertsStore = useAlertsStore()
 const eventsStore = useEventsStore()
 const monitorsStore = useMonitorsStore()
-const dockerStore = useDockerStore()
 const aiStore = useAiStore()
 const { confirm } = useConfirm()
 const loading = ref(false)
 const addWidgetDialog = ref(false)
 
 /**
- * Widgets que entram na grade: visíveis, de um tipo que esta versão conhece
- * e com a fonte de dados presente — o resumo do Docker some sem Engine.
+ * Widgets que entram na grade: visíveis, de área ligada e de um tipo que esta
+ * versão conhece. Cada widget decide sozinho se tem o que mostrar (o resumo
+ * do Docker some sem Engine) — a página não conhece fonte de dados de card.
  */
 const gridWidgets = computed(() =>
-  dashboardStore.visibleWidgets.filter((widget) => {
-    if (!widgetComponentOf(widget)) return false
-    if (widgetTypeOf(widget) === 'docker_summary') {
-      return dockerStore.localView.status?.available === true || dashboardStore.isEditMode
-    }
-    return true
-  })
+  dashboardStore.visibleWidgets.filter((widget) => widgetComponentOf(widget) !== null)
 )
 
 const headerSubtitle = computed(() =>
@@ -231,6 +223,8 @@ onMounted(async () => {
     )
   })
 
+  // O catálogo de cards (uma vez) monta o layout; depois, o salvo no servidor.
+  await dashboardStore.loadCatalog()
   await dashboardStore.checkServerPrompt()
   await refreshData()
 })
@@ -245,8 +239,6 @@ async function refreshData() {
     devicesStore.fetchDevices(),
     alertsStore.fetchActiveAlerts(),
     monitorsStore.fetchMonitors(),
-    // Qual host é o desta central (o agente local): o resumo Docker vem dele.
-    dockerStore.fetchHosts(),
   ])
   loading.value = false
 }
@@ -265,5 +257,10 @@ async function refreshData() {
 
 .dashboard-grid {
   margin-top: -4px;
+}
+
+/* Card sem nada a mostrar (ex.: Docker sem Engine) não deixa buraco na grade. */
+.dashboard-grid :deep(.v-col:has(.widget-wrapper__body:empty)) {
+  display: none;
 }
 </style>

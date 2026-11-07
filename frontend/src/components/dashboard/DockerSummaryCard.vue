@@ -1,5 +1,6 @@
 <template>
   <DashboardCard
+    v-if="shown"
     title="Docker"
     icon="mdi-docker"
     :subtitle="`${docker.status?.name || 'Engine ativa'} · tempo real`"
@@ -71,18 +72,36 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import DashboardCard from '@/components/dashboard/DashboardCard.vue'
 import MonitorSparkline, { type SparklinePoint } from '@/components/MonitorSparkline.vue'
 import { useDockerStore } from '@/stores/docker'
+import { useDashboardStore } from '@/stores/dashboard'
+import { useLiveInterest } from '@/composables/useLiveInterest'
 import { paletteColor } from '@/utils/charts/scale'
 import { formatBinaryBytes, formatDecimalBytes, formatPercent } from '@/utils/formatters'
 
 const dockerStore = useDockerStore()
+const dashboardStore = useDashboardStore()
+
+// O card carrega o que é dele: qual host é o desta central (o agente local) e,
+// enquanto estiver na tela, o snapshot ao vivo do Docker pelo SSE.
+useLiveInterest('docker')
+onMounted(() => {
+  void dockerStore.fetchHosts()
+})
+
+/**
+ * Sem Engine disponível o card não desenha nada (e a grade não reserva espaço
+ * para ele); na personalização aparece, para poder ser movido ou ocultado.
+ */
+const shown = computed(
+  () => dockerStore.localView.status?.available === true || dashboardStore.isEditMode
+)
+
 /**
  * O dashboard é da central: sempre o Docker dela (o agente local), qualquer
- * que seja o host aberto na tela Docker. Sem Engine disponível o widget nem
- * entra na grade (ver `widgetRegistry`).
+ * que seja o host aberto na tela Docker.
  */
 const docker = computed(() => {
   const local = dockerStore.localView

@@ -3,19 +3,7 @@
     <PageHeader
       title="Servidor VPN (WireGuard)"
       subtitle="Túnel para monitorar roteadores MikroTik e OpenWrt fora da rede local"
-    >
-      <template #actions>
-        <v-btn
-          color="primary"
-          variant="tonal"
-          prepend-icon="mdi-lan-connect"
-          :to="{ name: 'vpn-devices' }"
-        >
-          <span class="hidden-sm-and-down">Dispositivos VPN</span>
-          <span class="hidden-md-and-up">Dispositivos</span>
-        </v-btn>
-      </template>
-    </PageHeader>
+    />
 
     <v-row>
       <!-- Estado do serviço -->

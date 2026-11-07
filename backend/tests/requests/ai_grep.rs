@@ -6,19 +6,18 @@
 //! (`-C`) traz os vizinhos da mesma origem, e alertas e checagens também são
 //! pesquisáveis.
 
-use backend::{
-    app::App,
-    models::{
-        _entities::{alert_events, devices, monitor_results, monitors},
-        logs::device_logs,
-    },
-    services::{
-        ai::harness::tools::{ToolPolicy, ToolRegistry},
-        syslog::LogsDb,
-    },
+use backend::app::App;
+
+use netmonitor_core::models::{
+    _entities::{alert_events, devices, monitor_results, monitors},
+    logs::device_logs,
 };
+
+use netmonitor_assistant::harness::tools::{ToolPolicy, ToolRegistry};
+
 use chrono::{Duration, Utc};
 use loco_rs::{prelude::AppContext, testing::prelude::*};
+use netmonitor_nucleo::services::syslog::LogsDb;
 use sea_orm::{ActiveModelTrait, Set};
 use serde_json::{json, Value};
 use serial_test::serial;

@@ -1,0 +1,993 @@
+//! Consulta, live tail e diagnóstico do servidor de syslog.
+//!
+//! Controller extrai, valida, delega e serializa: a consulta vive em
+//! `services::syslog::repository` e a hidratação do nome do dispositivo, em
+//! `views::logs`.
+
+use std::convert::Infallible;
+
+use axum::{
+    extract::{Path, Query},
+    http::{header, uri::Authority, HeaderMap, HeaderValue},
+    response::{
+        sse::{Event, KeepAlive, Sse},
+        IntoResponse,
+    },
+};
+use chrono::{DateTime, Utc};
+use loco_rs::prelude::*;
+use tokio::sync::mpsc;
+use tokio_stream::{wrappers::ReceiverStream, StreamExt};
+
+use crate::{
+    dtos::logs::{
+        BindSourceInput, BindSourceResponse, LogEntry, LogExportQuery, LogStreamQuery,
+        LogTemplateUpdate, LogTemplatesQuery, LogsQuery, ProvisionHintsResponse,
+        ProvisionLoggingInput, ProvisionLoggingResponse,
+    },
+    services::{
+        audit::{self, AuditAction, ResourceType},
+        devices::{access, systems},
+        events::EventBus,
+        network_tools::mactelnet,
+        server_addresses,
+        shared::errors::{AppError, AppResult},
+        syslog::{
+            destination, hints, login, provision,
+            repository::{self, Cursor, LogFilters, LogQuery, MAX_EXPORT_LIMIT},
+            resolver, snippets, templates, LogsDb, SyslogService,
+        },
+    },
+    views::logs::{
+        export_filename, format_log_export, sanitize_label, serialize_page, serialize_sources,
+    },
+};
+
+/// O serviço de ingestão, ou um erro nomeado quando ele está desligado.
+fn service(ctx: &AppContext) -> AppResult<SyslogService> {
+    SyslogService::from_context(ctx).ok_or_else(|| {
+        AppError::BusinessRule(
+            "O servidor de syslog não está ativo neste processo (SYSLOG_ENABLED=false).".into(),
+        )
+    })
+}
+
+/// `GET /api/logs` — página filtrada, em envelope de cursor.
+async fn index(
+    State(ctx): State<AppContext>,
+    Query(query): Query<LogsQuery>,
+) -> AppResult<Response> {
+    let logs = LogsDb::from_context(&ctx)?;
+
+    let filtros = LogQuery::normalize(
+        LogFilters {
+            device_id: query.device_id,
+            severity: query.severity,
+            facility: query.facility,
+            from: instante(query.from.as_deref(), "from")?,
+            to: instante(query.to.as_deref(), "to")?,
+            q: query.q,
+            cursor: query.cursor.as_deref().map(Cursor::decode).transpose()?,
+            limit: query.limit,
+            category: query.category,
+        },
+        Utc::now(),
+    );
+
+    let pagina = repository::search(logs.connection(), &filtros).await?;
+    let resposta = serialize_page(&ctx.db, logs.connection(), pagina, &filtros).await?;
+    Ok(format::json(resposta)?)
+}
+
+/// `GET /api/logs/export` — exporta logs respeitando filtros em arquivo `.log`/`.txt` ou `.csv`.
+async fn export_logs(
+    State(ctx): State<AppContext>,
+    Query(query): Query<LogExportQuery>,
+) -> AppResult<Response> {
+    let logs = LogsDb::from_context(&ctx)?;
+
+    let max_rows = query.limit.unwrap_or(MAX_EXPORT_LIMIT);
+    let filtros = LogQuery::normalize(
+        LogFilters {
+            device_id: query.device_id,
+            severity: query.severity,
+            facility: query.facility,
+            from: instante(query.from.as_deref(), "from")?,
+            to: instante(query.to.as_deref(), "to")?,
+            q: query.q,
+            cursor: None,
+            limit: Some(max_rows),
+            category: query.category,
+        },
+        Utc::now(),
+    );
+
+    let rows = repository::export(logs.connection(), &filtros, max_rows).await?;
+
+    let is_csv = query
+        .format
+        .as_deref()
+        .is_some_and(|f| f.eq_ignore_ascii_case("csv"));
+
+    let device_label = if let Some(device_id) = query.device_id {
+        if let Ok(Some(device)) = crate::models::_entities::devices::Entity::find_by_id(device_id)
+            .one(&ctx.db)
+            .await
+        {
+            sanitize_label(&device.name)
+        } else {
+            format!("dispositivo-{device_id}")
+        }
+    } else {
+        "logs".to_string()
+    };
+
+    let filename = export_filename(&device_label, is_csv, Utc::now());
+    let (content_type, body) = format_log_export(&rows, is_csv);
+
+    let mut response = body.into_response();
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_str(content_type).unwrap(),
+    );
+    headers.insert(
+        header::CONTENT_DISPOSITION,
+        HeaderValue::try_from(format!("attachment; filename=\"{filename}\""))
+            .map_err(|_| AppError::validation("Nome de arquivo inválido."))?,
+    );
+    Ok(response)
+}
+
+/// Lê um instante em RFC 3339.
+///
+/// Data ilegível vira 422 com o nome do campo, e não uma janela silenciosamente
+/// diferente da pedida: o usuário que digitou errado precisa saber, senão vai
+/// concluir que o log sumiu.
+fn instante(valor: Option<&str>, campo: &str) -> AppResult<Option<DateTime<Utc>>> {
+    let Some(texto) = valor.map(str::trim).filter(|texto| !texto.is_empty()) else {
+        return Ok(None);
+    };
+    DateTime::parse_from_rfc3339(texto)
+        .map(|instante| Some(instante.with_timezone(&Utc)))
+        .map_err(|_| {
+            AppError::Validation(format!(
+                "Data inválida em `{campo}`: use o formato ISO 8601."
+            ))
+        })
+}
+
+/// `GET /api/logs/stream` — live tail filtrado, por SSE.
+///
+/// Barramento **próprio**, nunca o `EventBus` de domínio: a 12 msg/s o log
+/// rolaria o anel de 1024 do dashboard em ~85 s e faria o painel inteiro
+/// ressincronizar sem parar (ver `services::syslog::bus`).
+async fn stream(
+    State(ctx): State<AppContext>,
+    Query(query): Query<LogStreamQuery>,
+) -> AppResult<Response> {
+    let servico = service(&ctx)?;
+    let mut updates = servico.bus.subscribe();
+    let (sender, receiver) = mpsc::channel::<Option<LogEntry>>(64);
+
+    tokio::spawn(async move {
+        // Primeiro quadro com o `retry`: o `EventSource` do navegador tem
+        // backoff próprio, e sem esta linha uma queda de rede deixaria o tail
+        // mudo por muito mais do que os 3 s combinados.
+        if sender.send(None).await.is_err() {
+            return;
+        }
+        loop {
+            match updates.recv().await {
+                Ok(entry) => {
+                    if !passa_no_filtro(&entry, &query) {
+                        continue;
+                    }
+                    if sender.send(Some(entry)).await.is_err() {
+                        return;
+                    }
+                }
+                // Atraso do assinante é normal aqui: o tail mostra o que está
+                // chegando, e o que passou está na paginação. Segue lendo em
+                // vez de derrubar a conexão.
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+            }
+        }
+    });
+
+    let stream = ReceiverStream::new(receiver).map(|entry| {
+        let primeiro = entry.is_none();
+        let corpo = entry.map_or_else(
+            || r#"{"type":"stream:connected"}"#.to_owned(),
+            |entry| serde_json::to_string(&entry).unwrap_or_else(|_| "{}".into()),
+        );
+        let frame = Event::default().data(corpo);
+        Ok::<Event, Infallible>(if primeiro {
+            frame.retry(std::time::Duration::from_millis(3_000))
+        } else {
+            frame
+        })
+    });
+
+    let mut response = Sse::new(stream)
+        .keep_alive(
+            KeepAlive::new()
+                .interval(std::time::Duration::from_secs(25))
+                .text("keep-alive"),
+        )
+        .into_response();
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("no-cache, no-transform"),
+    );
+    headers.insert(header::CONNECTION, HeaderValue::from_static("keep-alive"));
+    headers.insert("x-accel-buffering", HeaderValue::from_static("no"));
+    Ok(response)
+}
+
+/// O filtro do tail espelha o da consulta: mesma semântica de severidade
+/// (número menor é mais grave), para o tempo real não mostrar o que a tabela
+/// filtrada esconderia.
+fn passa_no_filtro(entry: &LogEntry, query: &LogStreamQuery) -> bool {
+    if let Some(device_id) = query.device_id {
+        if entry.device_id != Some(device_id) {
+            return false;
+        }
+    }
+    if let Some(severity) = query.severity {
+        // Linha sem severidade não é escondida por um filtro de severidade:
+        // ela sumiria da tela sem o operador entender por quê.
+        if entry.severity.is_some_and(|atual| atual > severity) {
+            return false;
+        }
+    }
+    true
+}
+
+/// `GET /api/logs/sources` — o que está chegando, resolvido ou não.
+async fn sources(State(ctx): State<AppContext>) -> AppResult<Response> {
+    let servico = service(&ctx)?;
+    let resposta = serialize_sources(
+        &ctx.db,
+        servico.sources.list(),
+        servico.sources.unknown_count(),
+        servico.ingestor.metrics().snapshot(),
+        servico.ingestor.resolver().nat(),
+    )
+    .await?;
+    Ok(format::json(resposta)?)
+}
+
+/// `POST /api/logs/sources/{key}/bind` — vincula (ou desvincula) uma origem.
+///
+/// A chave é um IP ou um hostname prefixado (`host:MikroTik-CCR`), que é o que
+/// a tela devolve quando a origem chega mascarada por NAT.
+async fn bind_source(
+    State(ctx): State<AppContext>,
+    Path(chave): Path<String>,
+    body: String,
+) -> AppResult<Response> {
+    let entrada: BindSourceInput = crate::dtos::optional_body(&body);
+    let por_hostname = chave.starts_with(resolver::HOSTNAME_BIND_PREFIX);
+    let chave = if por_hostname {
+        resolver::hostname_bind_key(
+            chave
+                .strip_prefix(resolver::HOSTNAME_BIND_PREFIX)
+                .unwrap_or_default(),
+        )
+    } else {
+        chave
+    };
+
+    if !por_hostname {
+        let endereco = chave
+            .parse::<std::net::IpAddr>()
+            .map_err(|_| AppError::Validation(format!("`{chave}` não é um endereço IP válido.")))?;
+
+        // Vincular o gateway do NAT atribuiria **todos** os equipamentos atrás
+        // dele ao mesmo dispositivo. É o erro que a tela mais convida a
+        // cometer — a origem aparece como desconhecida e o seletor está logo
+        // ali — e o estrago (aba contaminada, alerta no alvo errado) só
+        // aparece depois. Recusar e dizer o caminho certo é mais barato.
+        if let Ok(servico) = service(&ctx) {
+            if servico.ingestor.resolver().nat().is_masked(endereco) {
+                return Err(AppError::business_rule(format!(
+                    "`{chave}` é o gateway do Docker, não o endereço de um equipamento: todos os \
+                     roteadores chegam por ele. Vincular aqui atribuiria o parque inteiro a um \
+                     dispositivo só. Vincule pelo nome que o equipamento envia no syslog, ou use \
+                     `network_mode: host` no compose para que o endereço real chegue."
+                )));
+            }
+        }
+    }
+
+    if let Some(device_id) = entrada.device_id {
+        if crate::models::devices::Entity::find_by_id(device_id)
+            .one(&ctx.db)
+            .await?
+            .is_none()
+        {
+            return Err(AppError::NotFound("Dispositivo não encontrado.".into()));
+        }
+    }
+
+    resolver::bind(&ctx.db, &chave, entrada.device_id).await?;
+
+    let mut resolvido = None;
+    if let Ok(servico) = service(&ctx) {
+        // O resolvedor guarda a decisão por 30 s; sem invalidar, o operador
+        // vincularia o IP e continuaria vendo "fonte desconhecida" por meio
+        // minuto.
+        servico.ingestor.resolver().invalidate().await;
+
+        // E o registro de origens guarda o que valia **quando a última linha
+        // chegou** — ele só aprende com mensagem nova. Num roteador que fala de
+        // hora em hora, a tela continuaria dizendo "Descartando" e o seletor
+        // voltaria a vazio: a resposta seria honesta e leria como se o vínculo
+        // não tivesse pegado. Reclassificar aqui é o que faz a escolha valer no
+        // mesmo instante.
+        //
+        // Resolvido de novo, e não assumido: no desvínculo o certo é o que a
+        // heurística disser agora — rede cadastrada, ambíguo ou desconhecido —
+        // e não "desconhecido" por decreto.
+        if let Some(fonte) = servico.sources.snapshot(&chave) {
+            if let Ok(origem) = fonte.source_ip.parse::<std::net::IpAddr>() {
+                let resolucao = servico
+                    .ingestor
+                    .resolver()
+                    .resolve(&ctx.db, origem, fonte.hostname.as_deref())
+                    .await?;
+                servico.sources.reclassify(&chave, &resolucao);
+                resolvido = resolucao.device_id();
+            }
+        }
+    }
+
+    Ok(format::json(BindSourceResponse {
+        bind_key: chave,
+        // O que o vínculo produziu de fato. No desvínculo pode não ser nulo: a
+        // origem volta a ser resolvida pelo cadastro, e a tela precisa mostrar
+        // isso em vez de um campo vazio que mente.
+        device_id: resolvido.or(entrada.device_id),
+    })?)
+}
+
+/// Dedução do sistema a partir **só** do cadastro — sem tocar a rede.
+///
+/// A ativação já tem o que precisa em mãos: quando a tela mandou um sistema, a
+/// escolha é dela; quando não mandou, sondar SNMP e SSH de novo aqui repetiria o
+/// que o `provision-hints` acabou de fazer, e ainda atrasaria o começo da
+/// sessão que o operador está esperando.
+fn do_cadastro(
+    dispositivo: &crate::models::devices::Model,
+    declarado: Option<&str>,
+) -> systems::Detection {
+    systems::detect(&systems::Evidence {
+        declared: declarado,
+        name: Some(&dispositivo.name),
+        vendor: dispositivo.vendor.as_deref(),
+        model: dispositivo.model.as_deref(),
+        ..systems::Evidence::default()
+    })
+}
+
+/// `POST /api/logs/devices/{id}/provision` — entra no equipamento e configura
+/// o envio de syslog.
+///
+/// O login é a credencial salva do equipamento ou o digitado, que só é gravado
+/// a pedido e depois de funcionar — ver [`crate::services::syslog::login`].
+async fn provision_device(
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+    Json(entrada): Json<ProvisionLoggingInput>,
+) -> AppResult<Response> {
+    let dispositivo = crate::models::devices::Entity::find_by_id(id)
+        .one(&ctx.db)
+        .await?
+        .ok_or_else(|| AppError::NotFound("Dispositivo não encontrado.".into()))?;
+
+    let escolha = entrada.saved_credential.map_or(
+        login::LoginChoice::Typed {
+            username: &entrada.username,
+            password: &entrada.password,
+        },
+        login::LoginChoice::Saved,
+    );
+    let device_access = netmonitor_core::devices::access::from_context(&ctx);
+    let acesso = login::resolve(&ctx.db, device_access.as_deref(), id, escolha).await?;
+    let salvar = entrada.save_credential && entrada.saved_credential.is_none();
+
+    let protocolo = provision::Protocol::parse(&entrada.protocol)?;
+
+    // O IP é obrigatório para SSH e Telnet, e **não** para o MAC-Telnet: chegar
+    // a um equipamento sem IP utilizável é justamente para o que ele serve.
+    let host = match dispositivo
+        .ip_address
+        .as_deref()
+        .map(str::trim)
+        .filter(|valor| !valor.is_empty())
+    {
+        Some(texto) => Some(texto.parse::<std::net::IpAddr>().map_err(|_| {
+            AppError::business_rule(
+                "O endereço cadastrado neste dispositivo não é um IP válido. Corrija o cadastro \
+                 antes de ativar o log.",
+            )
+        })?),
+        None if protocolo.by_mac() => None,
+        None => {
+            return Err(AppError::business_rule(
+                "Este dispositivo não tem endereço IP cadastrado — não há para onde conectar. \
+                 Use MAC-Telnet se o adapter do equipamento oferecer esse acesso e ele estiver na mesma rede local.",
+            ))
+        }
+    };
+    // O que a tela mandou é uma escolha do catálogo, e um id fora dele é erro de
+    // validação — não um valor que segue adiante para virar "não há receita"
+    // três camadas abaixo. Ausente, vale a mesma dedução do cadastro.
+    let sistema = match entrada
+        .operating_system
+        .as_deref()
+        .map(str::trim)
+        .filter(|valor| !valor.is_empty())
+    {
+        Some(escolhido) => systems::parse(escolhido)
+            .map_err(AppError::validation)?
+            .map_or_else(|| do_cadastro(&dispositivo, None).system, |sistema| sistema),
+        None => do_cadastro(&dispositivo, dispositivo.operating_system.as_deref()).system,
+    };
+    let operating_system = sistema.id.to_owned();
+
+    // O MAC-Telnet endereça por MAC, e `devices` não guarda MAC: ele vem das
+    // interfaces coletadas por SNMP ou do ARP do discovery. A tela pode mandar
+    // um digitado à mão, que vence os dois.
+    let mac = match entrada.mac_address.as_deref().map(str::trim) {
+        Some(texto) if !texto.is_empty() => Some(mactelnet::MacAddress::parse(texto)?),
+        _ => hints::mac_conhecido(&ctx.db, &dispositivo)
+            .await?
+            .as_deref()
+            .map(mactelnet::MacAddress::parse)
+            .transpose()?,
+    };
+    if protocolo.by_mac() && mac.is_none() {
+        return Err(AppError::business_rule(
+            "O MAC-Telnet endereça o equipamento pelo MAC, e não há um conhecido para este \
+             dispositivo. Rode uma coleta SNMP ou uma descoberta na rede, ou informe o MAC na \
+             tela.",
+        ));
+    }
+
+    // `localhost` é o motivo de este saneamento existir: é o host da barra de
+    // endereços de quem abre a interface na própria máquina, é aceito por todo
+    // comando de configuração, e faz o roteador mandar o syslog para si mesmo —
+    // sem erro, sem aviso e sem nada chegando. Ver `hints::sanitiza_endereco`.
+    let server_address = hints::sanitiza_endereco(entrada.server_address.as_deref())
+        .or_else(|| {
+            host.and_then(hints::local_address_toward)
+                .map(|ip| ip.to_string())
+        })
+        .or_else(|| hints::sanitiza_endereco(Some(&endereco_do_servidor())))
+        .ok_or_else(|| {
+            AppError::business_rule(
+                "Não foi possível determinar o endereço deste servidor que o equipamento deve \
+                 usar. Preencha o campo \"Endereço deste servidor\" com o IP pelo qual o roteador \
+                 alcança o NetMonitor — `localhost` não serve, porque aponta o roteador para ele \
+                mesmo.",
+            )
+        })?;
+    let server_address = destination::normalize(&server_address).ok_or_else(|| {
+        AppError::validation("Informe um endereço válido deste servidor para o Syslog.")
+    })?;
+
+    let server_port = snippets::published_port();
+    let servico = service(&ctx).ok();
+    let porta = entrada.port.unwrap_or_else(|| protocolo.default_port());
+    let pedido = provision::ProvisionRequest {
+        // Só o MAC-Telnet chega aqui sem IP, e ele não usa este campo.
+        host: host.unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED)),
+        mac,
+        port: porta,
+        protocol: protocolo,
+        login: acesso.clone(),
+        operating_system: operating_system.clone(),
+        server_address: server_address.clone(),
+        server_port,
+    };
+
+    let resultado = provision::run(
+        &pedido,
+        device_access.as_deref(),
+        servico.as_ref().map(|s| &s.sources),
+        id,
+    )
+    .await?;
+
+    let mut persistence_warnings = Vec::new();
+    // A sessão entrou no equipamento: só agora a senha digitada merece ser
+    // guardada. Falhar aqui não desfaz a configuração já aplicada.
+    let saved_credential = if salvar {
+        match login::remember(
+            &ctx.db,
+            device_access.as_deref(),
+            id,
+            protocolo,
+            &acesso,
+            porta,
+        )
+        .await
+        {
+            Ok(credencial) => {
+                audit::record(
+                    &ctx.db,
+                    &headers,
+                    AuditAction::Update,
+                    ResourceType::Device,
+                    (id, &dispositivo.name),
+                    format!(
+                        "Salvou a credencial {} de acesso ao ativar o log",
+                        credencial.kind.as_str().to_uppercase()
+                    ),
+                )
+                .await;
+                Some(credencial)
+            }
+            Err(error) => {
+                tracing::error!(device_id = id, %error, "log ativado, mas a credencial não foi salva");
+                persistence_warnings.push(
+                    "O log foi ativado, mas a credencial não foi salva. Cadastre-a na aba Plugins › Credenciais do dispositivo."
+                        .to_owned(),
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
+    if let Some(hostname) = resultado.identified_hostname.as_deref() {
+        let runtime = servico
+            .as_ref()
+            .map(|service| (service.ingestor.resolver(), service.sources.as_ref()));
+        if let Err(error) =
+            provision::associate_identified_hostname(&ctx.db, runtime, id, hostname).await
+        {
+            tracing::error!(
+                device_id = id,
+                hostname,
+                %error,
+                "configuração aplicada, mas a identidade não foi associada ao dispositivo"
+            );
+            persistence_warnings.push(
+                "A configuração foi aplicada, mas o NetMonitor não conseguiu lembrar a identidade anunciada pelo equipamento. Os logs ainda podem ser associados pelo IP ou pela linha de teste."
+                    .to_owned(),
+            );
+        }
+    }
+    if let (Some(service), Some(source)) = (servico.as_ref(), resultado.observed_source.as_ref()) {
+        if let Err(error) = provision::associate_confirmed_source(
+            &ctx.db,
+            service.ingestor.resolver(),
+            service.sources.as_ref(),
+            id,
+            source,
+        )
+        .await
+        {
+            tracing::error!(
+                device_id = id,
+                bind_key = %source.bind_key,
+                %error,
+                "linha de teste recebida, mas a origem não foi associada ao dispositivo"
+            );
+            persistence_warnings.push(
+                "A linha de teste chegou, mas o NetMonitor não conseguiu associar sua origem a este dispositivo. Os comandos foram aplicados; verifique o vínculo da fonte na tela de logs."
+                    .to_owned(),
+            );
+        }
+    }
+
+    let detector = servico
+        .as_ref()
+        .map_or_else(crate::services::syslog::NatDetector::detect, |service| {
+            service.ingestor.resolver().nat().clone()
+        });
+    let address_saved = match destination::remember(&ctx.db, id, &server_address, &detector).await {
+        Ok(_) => true,
+        Err(error) => {
+            tracing::error!(
+                device_id = id,
+                %error,
+                "configuração de Syslog aplicada, mas o destino não foi persistido"
+            );
+            persistence_warnings.push(
+                "A configuração foi aplicada no equipamento, mas o NetMonitor não conseguiu lembrar o endereço. Tente aplicar novamente para salvar a preferência."
+                    .to_owned(),
+            );
+            false
+        }
+    };
+    let persistence_warning =
+        (!persistence_warnings.is_empty()).then(|| persistence_warnings.join(" "));
+
+    Ok(format::json(ProvisionLoggingResponse {
+        operating_system,
+        identified_hostname: resultado.identified_hostname,
+        server_address,
+        server_port,
+        commands: resultado.commands,
+        transcript: resultado.transcript,
+        confirmed: resultado.confirmed,
+        address_saved,
+        persistence_warning,
+        saved_credential,
+    })?)
+}
+
+/// `GET /api/logs/devices/{id}/provision-hints` — o que a tela consegue
+/// preencher sozinha antes de pedir qualquer coisa ao operador.
+///
+/// Sonda portas e consulta o SNMP, então custa alguns segundos no pior caso.
+/// Vale: os três campos que ele preenche — endereço do servidor, meio de acesso
+/// e fabricante — eram chute, e chute errado falha em silêncio dentro do
+/// roteador.
+async fn provision_hints(
+    State(ctx): State<AppContext>,
+    Path(id): Path<i64>,
+    Query(query): Query<ProvisionHintsQuery>,
+    headers: HeaderMap,
+) -> AppResult<Response> {
+    let dispositivo = crate::models::devices::Entity::find_by_id(id)
+        .one(&ctx.db)
+        .await?
+        .ok_or_else(|| AppError::NotFound("Dispositivo não encontrado.".into()))?;
+
+    let detector = service(&ctx).map_or_else(
+        |_| crate::services::syslog::NatDetector::detect(),
+        |servico| servico.ingestor.resolver().nat().clone(),
+    );
+    let dicas = hints::collect(
+        &ctx.db,
+        netmonitor_core::devices::access::from_context(&ctx).as_deref(),
+        &dispositivo,
+        &detector,
+    )
+    .await?;
+
+    // A forma de acesso é resolvida uma vez e usada duas: para escolher o
+    // endereço e para explicar a escolha na tela. Resolver de novo lá dentro
+    // custaria as mesmas três consultas para chegar à mesma conclusão.
+    let contexto = access::AccessContext::load(&ctx.db).await?;
+    let acesso = contexto.resolve(&dispositivo);
+    // Dentro da bridge, a rota do processo termina no IP interno do container.
+    // O host observado na requisição é o lado externo dessa tradução: em
+    // produção vem da autoridade HTTP e, atrás do proxy de desenvolvimento, a
+    // tela envia explicitamente o mesmo `location.hostname`. O serviço decide
+    // se ele serve para este dispositivo e rejeita loopback, gateway da bridge
+    // e o próprio IP do equipamento.
+    let observed_address = query
+        .observed_address
+        .or_else(|| observed_address_from_headers(&headers));
+    // A lista de endereços do servidor é a fonte preferencial: ela carrega o
+    // que o operador corrigiu à mão, e é ela que a tela oferece no seletor. A
+    // detecção por rota só decide **qual** delas serve a este equipamento.
+    let lista = server_addresses::list_for_provision(
+        &ctx.db,
+        &detector,
+        &dispositivo,
+        &acesso,
+        observed_address.as_deref(),
+    )
+    .await?;
+    let sugestao =
+        server_addresses::suggest_with(&ctx.db, &dispositivo, &lista, &contexto, &acesso).await?;
+    let suggested_entry = sugestao
+        .as_ref()
+        .and_then(|(id, _)| lista.iter().find(|item| &item.id == id));
+    let sugerido = suggested_entry.and_then(|item| item.value.clone());
+    let suggested_source = suggested_entry.map(|item| item.source.clone());
+
+    // Ordem dos palpites, do mais confiável para o menos: a entrada sugerida da
+    // lista, a rota até o equipamento, e por fim a `FRONTEND_ORIGIN` — esta
+    // última com o mesmo crivo das outras, que é o que impede `localhost` de
+    // voltar pela porta dos fundos.
+    let sugestao_id = sugestao.as_ref().map(|(id, _)| id.clone());
+    let sugestao_motivo = sugestao.as_ref().map(|(_, motivo)| motivo.clone());
+    let salvo = destination::saved_hint(&dispositivo, &lista);
+    let (server_address, server_address_source, suggested_address_id, suggested_address_reason) =
+        if let Some(salvo) = salvo {
+            (
+                Some(salvo.address),
+                "último endereço aplicado".to_owned(),
+                salvo.address_id,
+                Some(salvo.reason),
+            )
+        } else {
+            let (address, source) = match (sugerido, dicas.server_address.clone()) {
+                (Some(endereco), _) => (
+                    Some(endereco),
+                    suggested_source.unwrap_or_else(|| "endereços deste servidor".to_owned()),
+                ),
+                (None, Some(endereco)) => (Some(endereco), dicas.server_address_source.to_owned()),
+                (None, None) => (
+                    hints::sanitiza_endereco(Some(&endereco_do_servidor())),
+                    "origem configurada".to_owned(),
+                ),
+            };
+            (address, source, sugestao_id, sugestao_motivo)
+        };
+
+    Ok(format::json(ProvisionHintsResponse {
+        server_address,
+        server_address_source,
+        suggested_address_id,
+        suggested_address_reason,
+        access_mode: acesso.mode.id().to_owned(),
+        access_mode_declared: acesso.declared,
+        access_mode_reason: acesso.reason,
+        server_port: snippets::published_port(),
+        operating_system: dicas.operating_system,
+        operating_system_source: dicas.operating_system_source.to_owned(),
+        operating_system_reason: dicas.operating_system_reason,
+        ssh_open: dicas.ssh_open,
+        telnet_open: dicas.telnet_open,
+        mac_address: dicas.mac_address,
+        layer2_reachable: dicas.layer2_reachable,
+    })?)
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProvisionHintsQuery {
+    /// Host pelo qual o navegador abriu o NetMonitor. É só evidência: o serviço
+    /// valida e classifica antes de usá-lo como endereço da LAN.
+    observed_address: Option<String>,
+}
+
+/// Extrai a autoridade pública sem misturar HTTP com a regra de endereçamento.
+///
+/// A query explícita da SPA tem precedência no chamador porque o proxy do Vite
+/// troca `Host` por `localhost:3333`. Estes cabeçalhos mantêm clientes antigos e
+/// instalações atrás de proxy reverso funcionando sem contrato adicional.
+fn observed_address_from_headers(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get("forwarded")
+        .and_then(|value| value.to_str().ok())
+        .and_then(forwarded_host)
+        .or_else(|| header_host(headers, "x-forwarded-host", false))
+        .or_else(|| header_host(headers, "origin", true))
+        .or_else(|| header_host(headers, "referer", true))
+        .or_else(|| header_host(headers, header::HOST.as_str(), false))
+}
+
+fn forwarded_host(value: &str) -> Option<String> {
+    value.split(',').next()?.split(';').find_map(|part| {
+        let (name, value) = part.trim().split_once('=')?;
+        name.eq_ignore_ascii_case("host")
+            .then(|| authority_host(value.trim().trim_matches('"')))
+            .flatten()
+    })
+}
+
+fn header_host(headers: &HeaderMap, name: &str, url: bool) -> Option<String> {
+    let raw = headers.get(name)?.to_str().ok()?.split(',').next()?.trim();
+    if url {
+        let (_, remainder) = raw.split_once("://")?;
+        authority_host(remainder.split('/').next()?)
+    } else {
+        authority_host(raw)
+    }
+}
+
+fn authority_host(raw: &str) -> Option<String> {
+    let authority = raw.parse::<Authority>().ok()?;
+    let host = authority.host().trim_matches(['[', ']']).trim();
+    (!host.is_empty()).then(|| host.to_owned())
+}
+
+/// `GET /api/logs/setup-snippet` — comandos prontos por fabricante.
+async fn setup_snippet(Query(query): Query<SetupQuery>) -> AppResult<Response> {
+    let endereco = query
+        .address
+        .as_deref()
+        .map(str::trim)
+        .filter(|valor| !valor.is_empty())
+        .map_or_else(endereco_do_servidor, str::to_owned);
+    Ok(format::json(snippets::build(&endereco))?)
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SetupQuery {
+    /// Endereço a estampar nos comandos.
+    ///
+    /// A tela manda o host da barra de endereços, que é o melhor palpite
+    /// possível: é o endereço pelo qual o operador de fato alcança o servidor.
+    /// De dentro do container o processo só enxerga o IP da bridge, que não
+    /// serve para roteador nenhum.
+    address: Option<String>,
+}
+
+/// Palpite de último recurso quando a tela não informou o endereço.
+fn endereco_do_servidor() -> String {
+    let Ok(origem) = std::env::var("FRONTEND_ORIGIN") else {
+        return String::new();
+    };
+    // Exige a forma de URL: uma `FRONTEND_ORIGIN` que não é URL é
+    // configuração errada, e adivinhar um host a partir dela produziria um
+    // snippet que falha em silêncio no roteador.
+    let Some((_, sem_esquema)) = origem.split_once("//") else {
+        return String::new();
+    };
+    let host = sem_esquema.split(['/', ':']).next().unwrap_or_default();
+    // `localhost` não serve: o roteador precisa alcançar este servidor pela
+    // rede, e um snippet com `remote=localhost` falha em silêncio no aparelho.
+    if host.is_empty() || host == "localhost" {
+        return String::new();
+    }
+    host.to_owned()
+}
+
+/// `GET /api/logs/templates` — os padrões de log e a categoria de cada um.
+async fn list_templates(
+    State(ctx): State<AppContext>,
+    Query(query): Query<LogTemplatesQuery>,
+) -> AppResult<Response> {
+    let logs = LogsDb::from_context(&ctx)?;
+    let lista = templates::list(logs.connection(), query.category.as_deref()).await?;
+    Ok(format::json(lista)?)
+}
+
+/// `PUT /api/logs/templates/{hash}` — o operador confirma ou corrige a
+/// categoria de um padrão. Vale mais que o palpite do Decisor.
+async fn update_template(
+    State(ctx): State<AppContext>,
+    Path(hash): Path<String>,
+    Json(input): Json<LogTemplateUpdate>,
+) -> AppResult<Response> {
+    let logs = LogsDb::from_context(&ctx)?;
+    let events = EventBus::from_context(&ctx).ok();
+    let info =
+        templates::confirm(logs.connection(), &hash, &input.category, events.as_ref()).await?;
+    Ok(format::json(info)?)
+}
+
+pub fn routes() -> Routes {
+    Routes::new()
+        .prefix("/logs")
+        .add("/", get(index))
+        .add("/export", get(export_logs))
+        .add("/templates", get(list_templates))
+        .add("/templates/{hash}", put(update_template))
+        .add("/stream", get(stream))
+        .add("/sources", get(sources))
+        .add("/sources/{ip}/bind", post(bind_source))
+        .add("/setup-snippet", get(setup_snippet))
+        .add("/devices/{id}/provision", post(provision_device))
+        .add("/devices/{id}/provision-hints", get(provision_hints))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serial_test::serial;
+
+    fn entrada(device_id: Option<i64>, severity: Option<i16>) -> LogEntry {
+        LogEntry {
+            id: 1,
+            device_id,
+            device_name: None,
+            source_ip: "10.0.0.1".into(),
+            received_at: "2026-08-15T12:00:00Z".into(),
+            device_time: None,
+            facility: None,
+            severity,
+            severity_label: None,
+            hostname: None,
+            app_name: None,
+            pid: None,
+            topics: Vec::new(),
+            message: "linha".into(),
+            template_hash: None,
+        }
+    }
+
+    #[test]
+    fn data_ausente_ou_em_branco_nao_e_erro() {
+        assert!(instante(None, "from").expect("ausente").is_none());
+        assert!(instante(Some("  "), "from").expect("branco").is_none());
+    }
+
+    #[test]
+    fn data_ilegivel_avisa_em_vez_de_calar() {
+        let erro = instante(Some("ontem"), "from").expect_err("tinha de recusar");
+        assert!(matches!(erro, AppError::Validation(_)));
+        assert!(
+            erro.to_string().contains("from"),
+            "a mensagem tem de dizer qual campo"
+        );
+    }
+
+    #[test]
+    fn a_data_valida_chega_em_utc() {
+        let instante = instante(Some("2026-08-15T09:00:00-03:00"), "from")
+            .expect("válida")
+            .expect("presente");
+        assert_eq!(instante.to_rfc3339(), "2026-08-15T12:00:00+00:00");
+    }
+
+    #[test]
+    fn sem_filtro_tudo_passa_no_tail() {
+        let query = LogStreamQuery::default();
+        assert!(passa_no_filtro(&entrada(None, None), &query));
+        assert!(passa_no_filtro(&entrada(Some(7), Some(6)), &query));
+    }
+
+    #[test]
+    fn o_tail_respeita_o_dispositivo() {
+        let query = LogStreamQuery {
+            device_id: Some(7),
+            severity: None,
+        };
+        assert!(passa_no_filtro(&entrada(Some(7), None), &query));
+        assert!(!passa_no_filtro(&entrada(Some(8), None), &query));
+        assert!(!passa_no_filtro(&entrada(None, None), &query));
+    }
+
+    #[test]
+    fn o_tail_filtra_severidade_do_nivel_para_baixo() {
+        let query = LogStreamQuery {
+            device_id: None,
+            severity: Some(3),
+        };
+        assert!(passa_no_filtro(&entrada(None, Some(2)), &query), "crítico");
+        assert!(passa_no_filtro(&entrada(None, Some(3)), &query), "erro");
+        assert!(!passa_no_filtro(&entrada(None, Some(6)), &query), "info");
+        // Sem severidade não é escondido: sumiria sem explicação.
+        assert!(passa_no_filtro(&entrada(None, None), &query));
+    }
+
+    #[test]
+    fn extrai_o_host_externo_dos_cabecalhos_http() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "forwarded",
+            "for=172.24.0.1;host=10.0.0.10:3333;proto=http"
+                .parse()
+                .unwrap(),
+        );
+        headers.insert(header::HOST, "172.24.0.2:3333".parse().unwrap());
+        assert_eq!(
+            observed_address_from_headers(&headers).as_deref(),
+            Some("10.0.0.10")
+        );
+
+        let mut direct = HeaderMap::new();
+        direct.insert(header::HOST, "[fd00::10]:3333".parse().unwrap());
+        assert_eq!(
+            observed_address_from_headers(&direct).as_deref(),
+            Some("fd00::10")
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn o_endereco_de_ultimo_recurso_recusa_localhost() {
+        // `remote=localhost` no roteador falha em silêncio no aparelho.
+        for origem in [
+            "http://localhost:3333",
+            "https://localhost",
+            "http://",
+            "lixo",
+        ] {
+            std::env::set_var("FRONTEND_ORIGIN", origem);
+            assert!(
+                endereco_do_servidor().is_empty(),
+                "aceitou {origem:?} como endereço de servidor"
+            );
+        }
+        std::env::set_var("FRONTEND_ORIGIN", "http://192.168.1.10:3333");
+        assert_eq!(endereco_do_servidor(), "192.168.1.10");
+        std::env::remove_var("FRONTEND_ORIGIN");
+    }
+}

@@ -1,5 +1,6 @@
-use backend::{app::App, models::users};
+use backend::app::App;
 use loco_rs::{task, testing::prelude::*};
+use netmonitor_core::models::users;
 
 use loco_rs::boot::run_task;
 use serial_test::serial;

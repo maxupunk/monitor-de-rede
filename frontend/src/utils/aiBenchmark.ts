@@ -226,4 +226,3 @@ export function deciderLatencyNoteOf(row: DeciderBenchmarkRow): string | null {
   if (!row.latencyFrom) return null
   return `Tempo medido no ${row.latencyFrom} (mesma arquitetura e tamanho; só os pesos mudam).`
 }
-

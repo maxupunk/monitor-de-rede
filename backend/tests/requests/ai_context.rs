@@ -14,32 +14,28 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use backend::{
-    app::App,
-    dtos::ai::{ChatMessageInput, TestConnectionResponse},
-    services::{
-        ai::{
-            context_window::{
-                self,
-                sources::{LearnedWindow, ModelsDevLookup, OllamaLookup, OpenRouterLookup},
-            },
-            drivers::traits::{
-                AiChatChunk, AiChatOptions, AiChunkStream, AiDriver, AiMessage, AiTool, AiUsage,
-            },
-            harness::{
-                agent::{
-                    run_agent_loop, AgentRequest, ConversationMemory, HarnessEvent, ToolLoading,
-                },
-                prompt::ChatContext,
-                tools::ToolPolicy,
-            },
-            settings::AiSettings,
-        },
-        shared::errors::{AppError, AppResult},
-    },
-};
+use backend::app::App;
 use futures::StreamExt;
 use loco_rs::{prelude::AppContext, testing::prelude::*};
+use netmonitor_assistant::{
+    dtos::{ChatMessageInput, TestConnectionResponse},
+    {
+        context_window::{
+            self,
+            sources::{LearnedWindow, ModelsDevLookup, OllamaLookup, OpenRouterLookup},
+        },
+        drivers::traits::{
+            AiChatChunk, AiChatOptions, AiChunkStream, AiDriver, AiMessage, AiTool, AiUsage,
+        },
+        harness::{
+            agent::{run_agent_loop, AgentRequest, ConversationMemory, HarnessEvent, ToolLoading},
+            prompt::ChatContext,
+            tools::ToolPolicy,
+        },
+        settings::AiSettings,
+    },
+};
+use netmonitor_nucleo::services::shared::errors::{AppError, AppResult};
 use serde_json::{json, Value};
 use serial_test::serial;
 
@@ -288,7 +284,7 @@ async fn conversar(
             policy: ToolPolicy::from_settings(&settings),
             tool_loading: ToolLoading::OnDemand,
             memory: memoria,
-            actor: backend::services::audit::AuditActor::default(),
+            actor: netmonitor_nucleo::services::audit::AuditActor::default(),
         },
     )
     .await

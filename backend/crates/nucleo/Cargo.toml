@@ -1,0 +1,146 @@
+[package]
+name = "netmonitor-nucleo"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Núcleo do NetMonitor (ADR 017): os serviços, rotas e telas do Núcleo — monitoramento, alertas, notificações, dispositivos, logs, sondas e agentes, usuários, configurações, dashboard, tarefas agendadas e backup. Depende só do `core` e do contrato de fio; nenhuma área depende dele."
+
+[lib]
+name = "netmonitor_nucleo"
+
+[dependencies]
+loco-rs = { workspace = true  }
+serde = { workspace = true }
+serde_json = { workspace = true }
+# `process` e `fs` existem por causa do fallback de ping no Windows (§3.2.3) e da
+# escrita atômica do wg0.conf (§8.10); `signal` desliga o scheduler com graça.
+tokio = { workspace = true }
+tokio-stream = { version = "0.1", features = ["sync"] }
+tokio-util = { workspace = true }
+# Serve o `dist` da SPA no lugar do nginx (ver `src/spa.rs`). Já está na árvore
+# via Loco; entra como dependência direta porque o `ServeDir` é usado aqui.
+tower-http = { version = "0.6", features = ["fs", "set-header"] }
+futures = { workspace = true }
+async-trait = { workspace = true }
+# `ws` atende o canal do agente remoto (`/api/agents/connect`, ADR 011).
+axum = { workspace = true }
+# Cliente do canal no binário `netmonitor-agent`. Mesma versão que o `axum`
+# puxa para o lado servidor; o TLS usa o `ring` já presente na árvore.
+tokio-tungstenite = { version = "0.29", features = ["rustls-tls-webpki-roots"] }
+async-compression = { version = "0.4", default-features = false, features = ["tokio", "gzip"] }
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+regex = { workspace = true }
+netmonitor-core = { workspace = true }
+netmonitor-agent-protocol = { workspace = true }
+sea-orm = { workspace = true }
+chrono = { workspace = true }
+# Expressões cron das tarefas agendadas (próximas execuções na hora local do
+# servidor). Já estava na árvore como transitiva do `loco-rs` (pelo
+# `tokio-cron-scheduler`), então promovê-la a direta não acrescenta download.
+croner = { version = "3.0" }
+validator = { workspace = true }
+uuid = { workspace = true }
+# Backup de bancos de terceiros (MySQL, MariaDB, PostgreSQL), nativo: o dump
+# sai pelo protocolo de cada SGBD — catálogo, `COPY` e `SHOW CREATE` —, sem
+# `pg_dump`/`mysqldump` na imagem. Não é crate nova: é o mesmo `sqlx` sobre o
+# qual o Sea-ORM roda; aqui ganha o driver MySQL. `mysql-rsa` é o que permite
+# autenticar no MySQL 8 (`caching_sha2_password`) sem TLS.
+sqlx = { version = "0.9", default-features = false, features = [
+  "runtime-tokio",
+  "tls-rustls",
+  "postgres",
+  "mysql",
+  "mysql-rsa",
+] }
+# ts-rs derives the TypeScript bindings for the `dtos` (the typed JSON API
+# contract). Present for every db app; the SPA frontend consumes the exports,
+# and a headless app can still emit them for external consumers.
+ts-rs = { workspace = true }
+include_dir = { version = "0.7" }
+
+# --- rede: ICMP nativo (substitui execFile('ping'), §3.2) ---
+surge-ping = { workspace = true }
+# 0.6, e não o 0.5 do rascunho da §3.1: `surge-ping` 0.8 pede `socket2 ^0.6`, e
+# `sock_type_hint` recebe o `socket2::Type` **daquela** versão. Com duas majors
+# na árvore o tipo não unifica e o ICMP DGRAM não compila (SPIKE-03).
+socket2 = { workspace = true }          # sock_type_hint / fallback DGRAM
+rand = { workspace = true }
+
+# --- rede: DNS (wire format + DoH, §3.4 SPIKE-04) ---
+hickory-proto = { version = "0.24", default-features = false }
+reqwest = { workspace = true }
+
+# --- rede: SNMP (§3.4 SPIKE-01) ---
+async-snmp = { version = "0.16", default-features = false, features = ["crypto-rustcrypto"] }
+
+# --- rede: syslog (roadmap_syslog_nativo.md) ---
+# O parser permissivo do Vector. Não devolve `Result`: linha que não casa com
+# RFC 3164 nem 5424 vira mensagem inteira, com os demais campos vazios — que é
+# o que se quer de um receptor que aceita o que o roteador mandar. Traz `nom 8`
+# como dependência transitiva; nenhum tipo dela cruza a fronteira do crate,
+# então não repete o problema de duas majors do `socket2` registrado acima.
+syslog_loose = { workspace = true }
+# Cliente SSH em Rust puro, para a ativação automática do log no roteador.
+# `default-features = false` de propósito: o padrão traz `aws-lc-rs`, que pede
+# cmake e clang no `builder` do Dockerfile (hoje só tem `pkg-config` e
+# `libssl-dev`) e nasm no Windows. O `ring` já está na árvore por causa do
+# `rustls` do `reqwest`/`sea-orm`, então reaproveitá-lo não acrescenta nenhum
+# requisito de toolchain. `rsa` fica ligado porque roteador antigo ainda
+# apresenta host key `ssh-rsa` — sem ela o handshake nem começa.
+russh = { workspace = true }
+# MD5 é o que o MAC-Telnet da MikroTik define para a resposta ao desafio de
+# autenticação — não é escolha de projeto, e trocá-lo tornaria o cliente
+# incompatível. Já estava na árvore como transitiva do `async-snmp` e do
+# `sqlx-postgres`, então promovê-la a direta não acrescenta download nenhum.
+md-5 = { version = "0.11" }
+
+# --- criptografia ---
+chacha20poly1305 = { workspace = true }
+p256 = { version = "0.13", default-features = false, features = ["ecdsa", "ecdh", "pem", "pkcs8", "std"] }
+aes-gcm = { version = "0.10", default-features = false, features = ["aes"] }
+hkdf = { version = "0.12" }
+base64 = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+
+# --- plugins de dispositivo ---
+# Motor de script dos plugins. Rust puro, sem runtime externo, e o script só
+# enxerga o que é registrado nele: não há acesso a arquivo, processo nem rede
+# fora do `device`. `sync` porque o motor roda em `spawn_blocking` e atravessa
+# threads; `serde` converte parâmetros e resultado de/para JSON; `no_module`
+# desliga o `import`, que por padrão resolveria arquivos do disco.
+rhai = { version = "1", features = ["sync", "serde", "no_module"] }
+
+# --- utilitários ---
+anyhow = { workspace = true }
+ipnet = { version = "2.9" }            # CIDR IPv4 (discovery + VPN)
+serde_yaml = { version = "0.9" }       # fixtures / seeds
+thiserror = { workspace = true }
+num_cpus = { version = "1.16" }
+
+# --- discovery e topologia (Fase 5) ---
+mdns-sd = { version = "0.13" }
+# A 0.4 exige generators nightly (`futures-async-stream`) e não compila no
+# Rust estável usado pelo Loco. A API 2.x mantém SSDP assíncrono sem esse risco.
+ssdp-client = { version = "2.1" }
+phf = { version = "0.11", features = ["macros"] }
+
+# `statvfs` para o armazenamento do coletor de saúde. Só em Unix: no Windows o
+# coletor declara a métrica indisponível, que é a resposta honesta — o alvo de
+# produção é o container Linux.
+[target.'cfg(unix)'.dependencies]
+libc = { version = "0.2" }
+
+[dev-dependencies]
+# Só nos testes: o esquema da VPN, que o endereço do túnel lê pelas entidades do core.
+netmonitor-vpn = { workspace = true }
+async-snmp = { version = "0.16", default-features = false, features = ["agent", "crypto-rustcrypto"] }
+loco-rs = { workspace = true, features = ["testing"] }
+serial_test = { version = "3.1.1" }
+tempfile = { version = "3" }
+rstest = { version = "0.25" }
+insta = { version = "1.34", features = ["redactions", "yaml", "filters"] }
+# `ServiceExt::oneshot` para exercitar middlewares sem subir servidor. Já na
+# árvore pelo axum; aqui só vira direto.
+tower = { version = "0.5", features = ["util"] }

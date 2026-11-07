@@ -7,16 +7,17 @@
 //! `vpn::monitor_provisioner::provision` — é chamado direto, sem HTTP, e por
 //! isso é testado pela função e não pela rota.
 
-use backend::{
-    app::App,
-    models::{devices, monitors},
-    services::{
-        devices::system_device::SystemDeviceService,
-        monitoring::{managed::SYSTEM_HEALTH, reachability},
-        vpn::monitor_provisioner::{provision, MonitorProvisioningOptions},
-    },
+use backend::app::App;
+
+use netmonitor_core::models::{devices, monitors};
+
+use netmonitor_nucleo::{
+    services::devices::system_device::SystemDeviceService,
+    services::monitoring::{managed::SYSTEM_HEALTH, reachability},
 };
+
 use loco_rs::testing::prelude::*;
+use netmonitor_vpn::monitor_provisioner::{provision, MonitorProvisioningOptions};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use serde_json::{json, Value};
 use serial_test::serial;
@@ -110,9 +111,12 @@ async fn mover_um_ping_existente_para_o_servidor_e_recusado() {
 async fn a_coleta_de_saude_continua_valendo_para_o_servidor() {
     request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
         let servidor = SystemDeviceService::new(&ctx.db).ensure().await.unwrap();
-        backend::services::monitoring::managed::ensure_system_health_monitor(&ctx.db, servidor.id)
-            .await
-            .expect("a coleta de saúde é o que mede o servidor");
+        netmonitor_nucleo::services::monitoring::managed::ensure_system_health_monitor(
+            &ctx.db,
+            servidor.id,
+        )
+        .await
+        .expect("a coleta de saúde é o que mede o servidor");
 
         let monitores = monitores_de(&ctx.db, servidor.id).await;
         assert_eq!(monitores.len(), 1);
@@ -173,9 +177,12 @@ async fn um_ping_preexistente_no_servidor_e_removido_no_boot() {
 async fn a_limpeza_de_boot_preserva_a_coleta_de_saude() {
     request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
         let servidor = SystemDeviceService::new(&ctx.db).ensure().await.unwrap();
-        backend::services::monitoring::managed::ensure_system_health_monitor(&ctx.db, servidor.id)
-            .await
-            .unwrap();
+        netmonitor_nucleo::services::monitoring::managed::ensure_system_health_monitor(
+            &ctx.db,
+            servidor.id,
+        )
+        .await
+        .unwrap();
 
         reachability::purge_system_device(&ctx.db, &servidor)
             .await

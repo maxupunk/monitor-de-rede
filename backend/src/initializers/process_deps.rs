@@ -14,14 +14,17 @@
 
 use loco_rs::app::AppContext;
 
-use crate::services::{
-    agents::hub::AgentHub,
-    ai::approvals::ApprovalDesk,
-    discovery::service::ScanSessionService,
-    docker::log_stream::LogStreams,
-    events::{EventBus, Presence},
-    monitoring::checkers::ping::PingClientCell,
+use netmonitor_nucleo::{
+    services::agents::hub::AgentHub,
+    services::events::{EventBus, Interests, Presence},
+    services::monitoring::checkers::ping::PingClientCell,
 };
+
+use netmonitor_assistant::approvals::ApprovalDesk;
+
+use netmonitor_network::discovery::service::ScanSessionService;
+
+use netmonitor_servers::docker::log_stream::LogStreams;
 
 /// Popula o `shared_store` do contexto.
 ///
@@ -40,7 +43,46 @@ pub fn install(ctx: &AppContext) {
     // Quem está com o NetMonitor aberto (stream SSE): decide se um pedido de
     // aprovação da IA vira notificação no celular.
     Presence::install(ctx);
+    // O que as abas estão olhando: decide se os agentes mandam o estado ao
+    // vivo do Docker (ARQ-05).
+    Interests::install(ctx);
     ApprovalDesk::install(ctx);
+    // Os tipos de monitor das áreas (ADR 017, `MonitorChecker`). Na central
+    // não há Docker Engine (ADR 014): o monitor de container responde que o
+    // Docker daqui é do agente local quando a execução local de reserva o roda.
+    ctx.shared_store
+        .insert(crate::registries::monitor_checkers(None));
+    // O que a área VPN pede ao resto da central (motor de alertas,
+    // apresentação de dispositivo, endereços): o scheduler avalia os túneis.
+    ctx.shared_store.insert(crate::registries::vpn_central());
+    // O que a área Rede pede ao resto da central (motor de alertas): o
+    // scheduler coleta o SNMP e avalia as interfaces.
+    ctx.shared_store
+        .insert(crate::registries::network_central());
+    // O que as áreas fazem no ciclo do scheduler e na purga (registro de
+    // rotinas) e os monitores que elas executam em grupo (o SNMP).
+    ctx.shared_store.insert(crate::registries::area_routines());
+    ctx.shared_store.insert(crate::registries::monitor_groups());
+    // As políticas das áreas opcionais (o que desligar cada uma implica).
+    ctx.shared_store
+        .insert(netmonitor_core::areas::AreaPolicies::new(
+            crate::registries::area_policies(),
+        ));
+    // O acesso ao equipamento que a Rede oferece ao núcleo (identidade SNMP,
+    // Wi-Fi, credencial e shell da ativação do log).
+    netmonitor_core::devices::access::install(ctx, crate::registries::device_access());
+    // O lado central dos comandos das áreas aos agentes (a varredura).
+    ctx.shared_store
+        .insert(crate::registries::agent_command_dispatchers());
+    // A IA (ADR 017, Fase 8): o classificador do núcleo pelo Decisor, o que o
+    // assistente pede ao resto da central e o catálogo de ferramentas que as
+    // áreas contribuem. Aqui, e não num initializer: o scheduler classifica
+    // logs e roda tarefas agendadas com essas ferramentas.
+    netmonitor_core::classifier::install(ctx, crate::registries::classifier());
+    ctx.shared_store
+        .insert(crate::registries::assistant_central());
+    crate::registries::install_dashboard_widgets();
+    crate::registries::install_ai_tools();
 
     // O socket ICMP é a única peça que pode falhar, e falha por configuração do
     // ambiente, não por bug: sem `net.ipv4.ping_group_range` liberado, o

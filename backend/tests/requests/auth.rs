@@ -1,6 +1,8 @@
-use backend::{app::App, models::users, services::auth::setup::SetupService};
+use backend::app::App;
 use insta::{assert_debug_snapshot, with_settings};
 use loco_rs::testing::prelude::*;
+use netmonitor_core::models::users;
+use netmonitor_nucleo::services::auth::setup::SetupService;
 use rstest::rstest;
 use sea_orm::IntoActiveModel;
 use serial_test::serial;
@@ -15,6 +17,15 @@ macro_rules! configure_insta {
         settings.set_snapshot_suffix("auth_request");
         let _guard = settings.bind_to_scope();
     };
+}
+
+/// Os filtros do Loco para o usuário, mais o fuso negativo: o filtro de data
+/// do Loco só reconhece `+HH:MM`, e um horário local como `-03:00` vazava para
+/// o snapshot — que então dependia do fuso da máquina e do banco.
+fn filtros_de_usuario() -> Vec<(&'static str, &'static str)> {
+    let mut filtros = cleanup_user_model();
+    filtros.push((r"DATE[+-]\d{2}:\d{2}", "DATE"));
+    filtros
 }
 
 /// Payload do cadastro inicial com o token vigente da instalação.
@@ -50,7 +61,7 @@ async fn setup_cria_o_primeiro_usuario_e_ja_devolve_a_sessao() {
             .await;
         assert_eq!(response.status_code(), 200, "{}", response.text());
 
-        let session: backend::views::auth::LoginResponse =
+        let session: netmonitor_nucleo::views::auth::LoginResponse =
             serde_json::from_str(&response.text()).unwrap();
         assert_eq!(session.user.email, "admin@netmonitor.local");
         assert!(!session.token.is_empty());
@@ -248,7 +259,7 @@ async fn can_register() {
         let saved_user = users::Model::find_by_email(&ctx.db, email).await;
 
         with_settings!({
-            filters => cleanup_user_model()
+            filters => filtros_de_usuario()
         }, {
             assert_debug_snapshot!(saved_user);
         });
@@ -305,7 +316,7 @@ async fn can_login_with_verify(#[case] test_name: &str, #[case] password: &str) 
         );
 
         with_settings!({
-            filters => cleanup_user_model()
+            filters => filtros_de_usuario()
         }, {
             assert_debug_snapshot!(test_name, (response.status_code(), response.text()));
         });
@@ -367,7 +378,7 @@ async fn can_login_without_verify() {
         );
 
         with_settings!({
-            filters => cleanup_user_model()
+            filters => filtros_de_usuario()
         }, {
             assert_debug_snapshot!(login_response.text());
         });
@@ -388,7 +399,7 @@ async fn seed_admin_local_autentica_no_ambiente_de_teste() {
             }))
             .await;
         assert_eq!(response.status_code(), 200);
-        let logged: backend::views::auth::LoginResponse =
+        let logged: netmonitor_nucleo::views::auth::LoginResponse =
             serde_json::from_str(&response.text()).unwrap();
         assert_eq!(logged.user.email, "admin@monitor.local");
         assert_eq!(logged.user.role, "admin");
@@ -508,7 +519,7 @@ async fn can_get_current_user() {
         );
 
         with_settings!({
-            filters => cleanup_user_model()
+            filters => filtros_de_usuario()
         }, {
             assert_debug_snapshot!((response.status_code(), response.text()));
         });
@@ -564,7 +575,7 @@ async fn can_auth_with_magic_link() {
         );
 
         with_settings!({
-            filters => cleanup_user_model()
+            filters => filtros_de_usuario()
         }, {
             assert_debug_snapshot!(magic_link_response.text());
         });
@@ -661,7 +672,7 @@ async fn can_resend_verification_email() {
             .expect("User should exist");
 
         with_settings!({
-            filters => cleanup_user_model()
+            filters => filtros_de_usuario()
         }, {
             assert_debug_snapshot!("resend_verification_user", user);
         });

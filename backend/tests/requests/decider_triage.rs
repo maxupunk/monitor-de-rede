@@ -6,17 +6,17 @@
 //! gravada e nada é suprimido; desligada, não há consulta; e fora do ar, a
 //! triagem não dá opinião — o resumo segue como sempre.
 
-use backend::{
-    app::App,
-    models::_entities::{alert_events, devices},
-    services::ai::{
-        decider::config::{AiDeciderSettings, DeciderTriageMode},
-        proactive::triage::{self, TRIAGE_FIELD},
-        settings,
-    },
-};
+use backend::app::App;
+
+use netmonitor_core::models::_entities::{alert_events, devices};
+
 use chrono::Utc;
 use loco_rs::{prelude::AppContext, testing::prelude::*};
+use netmonitor_assistant::{
+    decider::config::{AiDeciderSettings, DeciderTriageMode},
+    proactive::triage::{self, TRIAGE_FIELD},
+    settings,
+};
 use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 use serde_json::json;
 use serial_test::serial;
@@ -130,7 +130,7 @@ async fn desligada_nao_consulta_e_fora_do_ar_nao_opina() {
         };
         down.features.incident_triage = DeciderTriageMode::Enforce;
         settings::save_decider(&ctx.db, down).await.unwrap();
-        backend::services::ai::decider::runtime::DeciderRuntime::from_context(&ctx).invalidate();
+        netmonitor_assistant::decider::runtime::DeciderRuntime::from_context(&ctx).invalidate();
         assert!(
             triage::assess(&ctx, evento.id).await.unwrap().is_none(),
             "sem opinião o resumo segue como sempre"

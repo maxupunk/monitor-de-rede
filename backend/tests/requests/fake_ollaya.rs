@@ -21,7 +21,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use backend::services::ai::decider::config::{AiDeciderSettings, API_KEY_ENV};
+use netmonitor_assistant::decider::config::{AiDeciderSettings, API_KEY_ENV};
 use serde_json::{json, Value};
 
 pub const TOKEN: &str = "chave-do-ollaya";

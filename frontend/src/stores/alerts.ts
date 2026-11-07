@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import type { Area } from '@/bindings/Area'
 import { ref, computed } from 'vue'
 import { apiService } from '@/services/apiService'
 import type { AlertOperator, AlertProblemKind } from '@/utils/alertPresentation'
@@ -46,6 +47,8 @@ export interface AlertRuleTemplate {
   name: string
   description: string
   category: string
+  /** Área do produto (ADR 017): com ela desligada o modelo sai do catálogo. */
+  area?: Area
   type: AlertRuleType
   condition: AlertRuleCondition
   severity: AlertRule['severity']

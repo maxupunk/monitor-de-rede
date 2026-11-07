@@ -2,9 +2,7 @@
   <div>
     <v-card v-if="loading && !report" variant="outlined" class="pa-8 text-center">
       <v-progress-circular indeterminate color="primary" class="mb-3" />
-      <div class="text-body-2 text-medium-emphasis">
-        Carregando resultados dos modelos de chat…
-      </div>
+      <div class="text-body-2 text-medium-emphasis">Carregando resultados dos modelos de chat…</div>
     </v-card>
 
     <v-alert v-else-if="error" type="error" variant="tonal" class="mb-4">
@@ -41,8 +39,8 @@
             <v-chip size="x-small" color="success" variant="tonal">
               <v-icon start size="12">mdi-gate</v-icon>
               Portão: Nota ≥ {{ percent(report.minScore) }} · Ferramentas ≥
-              {{ percent(report.minTools) }} · Segurança ≥ {{ percent(report.minSafety) }} ·
-              p95 ≤ {{ Math.round(report.timeoutMs / 1000) }} s
+              {{ percent(report.minTools) }} · Segurança ≥ {{ percent(report.minSafety) }} · p95 ≤
+              {{ Math.round(report.timeoutMs / 1000) }} s
             </v-chip>
           </div>
         </div>
@@ -215,12 +213,7 @@
               <td>
                 <div class="d-flex align-center flex-wrap ga-1">
                   <span class="font-weight-medium font-mono">{{ item.row.model }}</span>
-                  <v-chip
-                    v-if="item.row.recommended"
-                    size="x-small"
-                    color="success"
-                    variant="flat"
-                  >
+                  <v-chip v-if="item.row.recommended" size="x-small" color="success" variant="flat">
                     Recomendado
                   </v-chip>
                   <v-chip
@@ -369,12 +362,7 @@
             {{ hiddenInBlindCount }} modelo(s) de referência que reprovaram na Suíte Oficial não
             foram submetidos ao conjunto cego de 45 cenários.
           </span>
-          <v-btn
-            size="x-small"
-            variant="text"
-            color="primary"
-            @click="activeSuite = 'bench'"
-          >
+          <v-btn size="x-small" variant="text" color="primary" @click="activeSuite = 'bench'">
             Ver todos os {{ report.models.length }} modelos na Suíte Oficial
           </v-btn>
         </div>
@@ -402,11 +390,10 @@
           </p>
           <p class="mb-0">
             Para receber o selo <strong>Atende ao portão</strong>, o modelo precisa superar
-            simultaneamente seis limites rigorosos: nota geral ≥
-            {{ percent(report.minScore) }}, ferramentas ≥ {{ percent(report.minTools) }},
-            segurança ≥ {{ percent(report.minSafety) }}, zero argumentos JSON ilegíveis, zero
-            erros/timeouts e tempo de resposta completo (p95) ≤
-            {{ Math.round(report.timeoutMs / 1000) }} s.
+            simultaneamente seis limites rigorosos: nota geral ≥ {{ percent(report.minScore) }},
+            ferramentas ≥ {{ percent(report.minTools) }}, segurança ≥
+            {{ percent(report.minSafety) }}, zero argumentos JSON ilegíveis, zero erros/timeouts e
+            tempo de resposta completo (p95) ≤ {{ Math.round(report.timeoutMs / 1000) }} s.
           </p>
         </div>
       </v-card>
@@ -526,4 +513,3 @@ function isInstalledInOllama(model: string): boolean {
   background: rgba(var(--v-theme-primary), 0.06);
 }
 </style>
-

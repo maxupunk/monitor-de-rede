@@ -6,16 +6,15 @@
 //! acontece; e o "identificar" do cadastro devolve o palpite quando a
 //! evidência dele é fraca.
 
-use backend::{
-    app::App,
-    models::{discovery_results, discovery_runs, networks},
-    services::{
-        ai::{decider::config::AiDeciderSettings, settings},
-        discovery::{decider_identity, merger::DiscoveredHost},
-    },
-};
+use backend::app::App;
+
+use netmonitor_core::models::{discovery_results, discovery_runs, networks};
+
+use netmonitor_assistant::{decider::config::AiDeciderSettings, settings};
+
 use chrono::Utc;
 use loco_rs::{app::AppContext, testing::prelude::*};
+use netmonitor_network::discovery::{decider_identity, merger::DiscoveredHost};
 use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 use serde_json::{json, Value};
 use serial_test::serial;
@@ -206,6 +205,57 @@ async fn identificar_devolve_o_palpite_quando_a_evidencia_e_fraca() {
 
         assert_eq!(body["source"], "padrão", "{body}");
         assert_eq!(body["decider"]["deviceType"]["value"], "camera", "{body}");
+    })
+    .await;
+}
+
+/// ADR 017: sem o assistente registrado, a identificação segue pela
+/// heurística — o Decisor configurado e no ar não é consultado, a varredura
+/// não ganha palpite e o "identificar" do cadastro responde sem `decider`.
+#[tokio::test]
+#[serial]
+async fn sem_o_assistente_a_identificacao_segue_pela_heuristica() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |request, ctx| async move {
+        with_key();
+        let fake = fake_ollaya::start(by_keyword(&[("hikvision", "camera")])).await;
+        settings::save_decider(&ctx.db, fake.settings())
+            .await
+            .unwrap();
+        netmonitor_core::classifier::uninstall(&ctx);
+
+        let host = camera_host();
+        let (run_id, row_id) = persisted_run(&ctx, &host).await;
+        assert_eq!(
+            decider_identity::enrich(&ctx, run_id, std::slice::from_ref(&host))
+                .await
+                .unwrap(),
+            0
+        );
+        let row = row_data(&ctx, row_id).await;
+        assert_eq!(row.device_type.as_deref(), Some("web_device"));
+        assert!(row.data.unwrap()["details"].get("decider").is_none());
+
+        let loopback = DiscoveredHost {
+            ip_address: "127.0.0.1".into(),
+            ..host
+        };
+        persisted_run(&ctx, &loopback).await;
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (h, v) = prepare_data::auth_header(&session.token);
+        let response = request
+            .post("/api/devices/identify")
+            .add_header(h, v)
+            .json(&json!({ "ipAddress": "127.0.0.1", "snmpCommunity": "nao-existe" }))
+            .await;
+        assert_eq!(response.status_code(), 200, "{}", response.text());
+        let body: Value = serde_json::from_str(&response.text()).unwrap();
+        assert_eq!(body["source"], "padrão", "{body}");
+        assert!(body["decider"].is_null(), "{body}");
+        assert_eq!(
+            fake.calls(),
+            0,
+            "sem o assistente, o Decisor não é consultado"
+        );
     })
     .await;
 }

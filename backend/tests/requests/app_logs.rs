@@ -7,20 +7,20 @@
 
 use std::{sync::Arc, time::Duration};
 
-use backend::{
-    app::App,
-    models::logs::device_logs,
-    services::{
-        devices::system_device::{self, SystemDeviceService},
-        syslog::{
-            app_layer::{self, AppLogLayer, LOCAL_SOURCE_IP},
-            db,
-            queue::{IngestMetrics, LogQueue},
-            writer,
-        },
+use backend::app::App;
+
+use netmonitor_core::models::logs::device_logs;
+
+use loco_rs::testing::prelude::*;
+use netmonitor_nucleo::{
+    services::devices::system_device::{self, SystemDeviceService},
+    services::syslog::{
+        app_layer::{self, AppLogLayer, LOCAL_SOURCE_IP},
+        db,
+        queue::{IngestMetrics, LogQueue},
+        writer,
     },
 };
-use loco_rs::testing::prelude::*;
 use sea_orm::{EntityTrait, PaginatorTrait, QueryOrder};
 use serial_test::serial;
 use tracing::Level;
@@ -35,7 +35,7 @@ use super::prepare_data;
 /// `writer::run_with`. Um dublê aqui provaria que o dublê funciona.
 async fn pipeline_em_memoria() -> (
     sea_orm::DatabaseConnection,
-    tokio::sync::mpsc::Receiver<backend::services::syslog::queue::PendingLog>,
+    tokio::sync::mpsc::Receiver<netmonitor_nucleo::services::syslog::queue::PendingLog>,
     LogQueue,
     Arc<IngestMetrics>,
 ) {
@@ -58,7 +58,9 @@ fn com_a_camada<T>(bloco: impl FnOnce() -> T) -> T {
 /// Drena a fila para o banco, com os gatilhos apertados.
 async fn descarrega(
     db: &sea_orm::DatabaseConnection,
-    receiver: &mut tokio::sync::mpsc::Receiver<backend::services::syslog::queue::PendingLog>,
+    receiver: &mut tokio::sync::mpsc::Receiver<
+        netmonitor_nucleo::services::syslog::queue::PendingLog,
+    >,
     metrics: Arc<IngestMetrics>,
     queue: LogQueue,
 ) {
@@ -221,7 +223,7 @@ async fn nao_existe_realimentacao_log_insert_log() {
         // O que o próprio escritor e o driver SQL emitem no caminho de
         // gravação. Se qualquer um destes virasse linha, o `INSERT` dela
         // emitiria o próximo, e o laço não fecharia.
-        tracing::info!(target: "backend::services::syslog::writer", "lote de logs gravado");
+        tracing::info!(target: "netmonitor_nucleo::services::syslog::writer", "lote de logs gravado");
         tracing::debug!(target: "sqlx::query", "INSERT INTO device_logs ...");
         tracing::debug!(target: "sea_orm::driver", "consulta executada");
     });

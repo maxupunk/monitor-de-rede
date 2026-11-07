@@ -1,0 +1,1134 @@
+//! Coletores puros sobre o cliente SNMP. A interpretação de OIDs não mistura
+//! transporte UDP nem persistência de banco.
+
+use std::collections::BTreeMap;
+
+use chrono::{DateTime, Utc};
+
+use super::client::{SnmpClient, SnmpError, SnmpValue};
+
+pub const OID_SYS_DESCR: &str = "1.3.6.1.2.1.1.1.0";
+pub const OID_SYS_OBJECT_ID: &str = "1.3.6.1.2.1.1.2.0";
+pub const OID_SYS_UPTIME: &str = "1.3.6.1.2.1.1.3.0";
+pub const OID_SYS_CONTACT: &str = "1.3.6.1.2.1.1.4.0";
+pub const OID_SYS_NAME: &str = "1.3.6.1.2.1.1.5.0";
+pub const OID_SYS_LOCATION: &str = "1.3.6.1.2.1.1.6.0";
+pub const OID_ENT_PHYSICAL_MFG_NAME: &str = "1.3.6.1.2.1.47.1.1.1.1.12.1";
+pub const OID_ENT_PHYSICAL_MODEL_NAME: &str = "1.3.6.1.2.1.47.1.1.1.1.13.1";
+
+/// A identidade SNMP é dado do núcleo (o assistente do log e a identificação
+/// de dispositivo a leem); o caminho da área continua valendo.
+pub use netmonitor_core::devices::access::SnmpSystemInfo;
+
+pub async fn collect_system(client: &SnmpClient) -> Result<SnmpSystemInfo, SnmpError> {
+    let values = client
+        .get(&[
+            OID_SYS_DESCR,
+            OID_SYS_OBJECT_ID,
+            OID_SYS_UPTIME,
+            OID_SYS_CONTACT,
+            OID_SYS_NAME,
+            OID_SYS_LOCATION,
+        ])
+        .await?;
+    Ok(SnmpSystemInfo {
+        sys_descr: text(&values, OID_SYS_DESCR),
+        sys_object_id: text(&values, OID_SYS_OBJECT_ID),
+        sys_up_time: number(&values, OID_SYS_UPTIME),
+        sys_contact: text(&values, OID_SYS_CONTACT),
+        sys_name: text(&values, OID_SYS_NAME),
+        sys_location: text(&values, OID_SYS_LOCATION),
+        hardware_vendor: None,
+        hardware_model: None,
+    })
+}
+
+/// Tenta enriquecer a identidade com o chassi sem comprometer o `system`.
+///
+/// ENTITY-MIB é opcional. A consulta fica separada porque agentes SNMPv1 podem
+/// rejeitar o pacote inteiro quando recebem um OID que não conhecem; nesse caso
+/// ainda preservamos `sysDescr`, `sysObjectID` e o restante da identificação.
+pub async fn collect_hardware(
+    client: &SnmpClient,
+) -> Result<(Option<String>, Option<String>), SnmpError> {
+    let values = client
+        .get(&[OID_ENT_PHYSICAL_MFG_NAME, OID_ENT_PHYSICAL_MODEL_NAME])
+        .await?;
+    Ok((
+        text(&values, OID_ENT_PHYSICAL_MFG_NAME),
+        text(&values, OID_ENT_PHYSICAL_MODEL_NAME),
+    ))
+}
+
+/// `ifTable` — RFC 1213.
+pub const OID_IF_TABLE: &str = "1.3.6.1.2.1.2.2.1";
+/// `ifXTable` — RFC 2863, contadores de 64 bits e nomes longos.
+pub const OID_IF_X_TABLE: &str = "1.3.6.1.2.1.31.1.1.1";
+/// `ipNetToMediaPhysAddress` — RFC 1213 / IP-MIB (tabela ARP do agente).
+pub const OID_IP_NET_TO_MEDIA_PHYS_ADDRESS: &str = "1.3.6.1.2.1.4.22.1.2";
+/// `ipNetToPhysicalPhysAddress` — RFC 4293 (IP-MIB moderno).
+pub const OID_IP_NET_TO_PHYSICAL_PHYS_ADDRESS: &str = "1.3.6.1.2.1.4.35.1.4";
+/// `ifPhysAddress` — RFC 1213 (endereço MAC de cada interface).
+pub const OID_IF_PHYS_ADDRESS: &str = "1.3.6.1.2.1.2.2.1.6";
+
+/// Entrada resolvida na tabela ARP de um agente SNMP (ex: roteador).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SnmpArpEntry {
+    pub ip_address: String,
+    pub mac_address: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SnmpInterface {
+    pub if_index: i32,
+    pub if_name: String,
+    pub if_descr: Option<String>,
+    pub if_alias: Option<String>,
+    pub if_type: Option<u64>,
+    pub if_speed: Option<u64>,
+    // A UI lê "up"/"down", não o inteiro da MIB; a conversão fica na
+    // serialização para o campo continuar comparável dentro do backend.
+    #[serde(serialize_with = "serialize_status")]
+    pub if_admin_status: Option<u64>,
+    #[serde(serialize_with = "serialize_status")]
+    pub if_oper_status: Option<u64>,
+    pub mac_address: Option<String>,
+    /// Já existe monitor habilitado para esta interface? Preenchido por quem
+    /// tem banco à mão (`service::scan_device`) — a coleta pura não sabe.
+    pub is_monitored: bool,
+}
+
+/// O rótulo de um `ifType` mora no núcleo (o classificador também o lê).
+pub use netmonitor_core::classifier::interfaces::if_type_label;
+
+pub async fn collect_interfaces(client: &SnmpClient) -> Result<Vec<SnmpInterface>, SnmpError> {
+    let (base, extended) = tokio::join!(client.walk(OID_IF_TABLE), client.walk(OID_IF_X_TABLE));
+    Ok(parse_interfaces(base?, extended.unwrap_or_default()))
+}
+
+/// As interfaces e seus contadores pertencem às mesmas tabelas SNMP. Uma coleta
+/// consolidada lê cada tabela só uma vez e então deriva as duas visões locais.
+pub async fn collect_interfaces_and_traffic(
+    client: &SnmpClient,
+) -> Result<(Vec<SnmpInterface>, Vec<InterfaceTraffic>), SnmpError> {
+    let (base, extended) = tokio::join!(client.walk(OID_IF_TABLE), client.walk(OID_IF_X_TABLE));
+    let base = base?;
+    let extended = extended.unwrap_or_default();
+    let interfaces = parse_interfaces(base.clone(), extended.clone());
+    let traffic = parse_traffic(base, extended);
+    Ok((interfaces, traffic))
+}
+
+/// Monta as interfaces a partir das linhas cruas das duas tabelas, sem
+/// transporte no meio.
+///
+/// As tabelas entram separadas de propósito: elas numeram colunas do zero cada
+/// uma, então juntá-las num mapa só fazia `ifHCInUcastPkts` (col. 7 da
+/// `ifXTable`) sobrescrever `ifAdminStatus` (col. 7 da `ifTable`) e
+/// `ifHCInOctets` (col. 6) sobrescrever o MAC — era daí que saíam os status e
+/// endereços com valores de contador.
+///
+/// Separado do `collect_interfaces` também porque é aqui que vive a regra da
+/// matriz de paridade #17 — `ifHighSpeed` prevalece sobre `ifSpeed` — e provar
+/// isso pede linhas montadas à mão, não um agente SNMP de verdade.
+#[must_use]
+pub fn parse_interfaces(
+    base: impl IntoIterator<Item = super::client::SnmpWalkEntry>,
+    extended: impl IntoIterator<Item = super::client::SnmpWalkEntry>,
+) -> Vec<SnmpInterface> {
+    let base = table_rows(base);
+    let extended = table_rows(extended);
+    base.keys()
+        .chain(extended.keys())
+        .copied()
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .map(|index| {
+            let row = base.get(&index);
+            let extra = extended.get(&index);
+            let column = |row: Option<&BTreeMap<u32, SnmpValue>>, column: u32| {
+                row.and_then(|fields| fields.get(&column)).cloned()
+            };
+            // `ifHighSpeed` (col. 15 da ifXTable) vem em Mbps e é a única leitura
+            // confiável acima de ~4,29 Gbps, onde o `ifSpeed` de 32 bits satura.
+            // O filtro `> 0` importa: agente que não implementa a coluna devolve
+            // 0, e aceitá-lo apagaria a velocidade real vinda do `ifSpeed`.
+            let high_speed = column(extra, 15)
+                .and_then(|value| value.number())
+                .filter(|value| *value > 0)
+                .map(|value| value * 1_000_000);
+            SnmpInterface {
+                if_index: index,
+                if_name: column(extra, 1)
+                    .or_else(|| column(row, 2))
+                    .map(|value| value.text())
+                    .filter(|name| !name.is_empty())
+                    .unwrap_or_else(|| format!("eth{index}")),
+                if_descr: non_empty_text(column(row, 2)),
+                if_alias: non_empty_text(column(extra, 18)),
+                if_type: column(row, 3).and_then(|value| value.number()),
+                if_speed: high_speed.or_else(|| column(row, 5).and_then(|value| value.number())),
+                if_admin_status: column(row, 7).and_then(|value| value.number()).or(Some(1)),
+                if_oper_status: column(row, 8).and_then(|value| value.number()).or(Some(1)),
+                mac_address: column(row, 6).and_then(|value| value.mac()),
+                is_monitored: false,
+            }
+        })
+        .collect()
+}
+
+pub async fn collect_arp_table(client: &SnmpClient) -> Result<Vec<SnmpArpEntry>, SnmpError> {
+    let entries = match client.walk(OID_IP_NET_TO_MEDIA_PHYS_ADDRESS).await {
+        Ok(entries) if !entries.is_empty() => entries,
+        _ => client
+            .walk(OID_IP_NET_TO_PHYSICAL_PHYS_ADDRESS)
+            .await
+            .unwrap_or_default(),
+    };
+    Ok(parse_arp_table(entries))
+}
+
+pub async fn collect_interface_macs(client: &SnmpClient) -> Result<Vec<String>, SnmpError> {
+    let entries = client.walk(OID_IF_PHYS_ADDRESS).await.unwrap_or_default();
+    Ok(parse_interface_macs(entries))
+}
+
+#[must_use]
+pub fn parse_arp_table(
+    entries: impl IntoIterator<Item = super::client::SnmpWalkEntry>,
+) -> Vec<SnmpArpEntry> {
+    let mut result = Vec::new();
+    for entry in entries {
+        if let Some(mac) = entry
+            .value
+            .mac()
+            .and_then(|m| netmonitor_core::network_tools::neighbor_cache::normalize_mac(&m))
+        {
+            let parts: Vec<&str> = entry.oid.split('.').collect();
+            if parts.len() >= 4 {
+                let len = parts.len();
+                let ip_str = format!(
+                    "{}.{}.{}.{}",
+                    parts[len - 4],
+                    parts[len - 3],
+                    parts[len - 2],
+                    parts[len - 1]
+                );
+                if let Ok(ip) = ip_str.parse::<std::net::Ipv4Addr>() {
+                    let s = ip.to_string();
+                    if !ip.is_multicast()
+                        && !ip.is_broadcast()
+                        && !ip.is_unspecified()
+                        && !s.ends_with(".255")
+                    {
+                        result.push(SnmpArpEntry {
+                            ip_address: s,
+                            mac_address: mac,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    result
+}
+
+#[must_use]
+pub fn parse_interface_macs(
+    entries: impl IntoIterator<Item = super::client::SnmpWalkEntry>,
+) -> Vec<String> {
+    entries
+        .into_iter()
+        .filter_map(|entry| entry.value.mac())
+        .filter_map(|mac| netmonitor_core::network_tools::neighbor_cache::normalize_mac(&mac))
+        .collect()
+}
+
+/// Indexa as linhas de uma tabela SNMP por `índice` e depois por `coluna`.
+fn table_rows(
+    entries: impl IntoIterator<Item = super::client::SnmpWalkEntry>,
+) -> BTreeMap<i32, BTreeMap<u32, SnmpValue>> {
+    let mut rows = BTreeMap::<i32, BTreeMap<u32, SnmpValue>>::new();
+    for entry in entries {
+        if let Some((column, index)) = oid_column_and_index(&entry.oid) {
+            rows.entry(index).or_default().insert(column, entry.value);
+        }
+    }
+    rows
+}
+
+fn non_empty_text(value: Option<SnmpValue>) -> Option<String> {
+    value
+        .map(|value| value.text())
+        .filter(|text| !text.is_empty())
+}
+
+/// Rótulo textual de `ifAdminStatus`/`ifOperStatus` (RFC 2863).
+#[must_use]
+pub const fn status_label(value: u64) -> &'static str {
+    match value {
+        1 => "up",
+        2 => "down",
+        3 => "testing",
+        5 => "dormant",
+        6 => "notPresent",
+        7 => "lowerLayerDown",
+        _ => "unknown",
+    }
+}
+
+fn serialize_status<S: serde::Serializer>(
+    value: &Option<u64>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    match value {
+        Some(value) => serializer.serialize_str(status_label(*value)),
+        None => serializer.serialize_none(),
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InterfaceTraffic {
+    pub if_index: i32,
+    pub in_octets: u64,
+    pub out_octets: u64,
+    pub in_errors: u64,
+    pub out_errors: u64,
+    pub counter_bits: u8,
+    pub recorded_at: DateTime<Utc>,
+}
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TrafficRates {
+    pub in_bps: f64,
+    pub out_bps: f64,
+    pub reboot_detected: bool,
+}
+
+pub async fn collect_traffic(client: &SnmpClient) -> Result<Vec<InterfaceTraffic>, SnmpError> {
+    let (base, high_capacity) =
+        tokio::join!(client.walk(OID_IF_TABLE), client.walk(OID_IF_X_TABLE));
+    Ok(parse_traffic(base?, high_capacity?))
+}
+
+/// Extrai contadores de tráfego das linhas já lidas de `ifTable` e `ifXTable`.
+/// Separar o parser do transporte permite reaproveitar as mesmas respostas na
+/// coleta consolidada do dispositivo.
+#[must_use]
+pub fn parse_traffic(
+    base: impl IntoIterator<Item = super::client::SnmpWalkEntry>,
+    high_capacity: impl IntoIterator<Item = super::client::SnmpWalkEntry>,
+) -> Vec<InterfaceTraffic> {
+    let mut counters = BTreeMap::<i32, BTreeMap<u32, u64>>::new();
+    for entry in base {
+        if let (Some((column, index)), Some(value)) =
+            (oid_column_and_index(&entry.oid), entry.value.number())
+        {
+            counters.entry(index).or_default().insert(column, value);
+        }
+    }
+    let mut high = BTreeMap::<i32, BTreeMap<u32, u64>>::new();
+    for entry in high_capacity {
+        if let (Some((column, index)), Some(value)) =
+            (oid_column_and_index(&entry.oid), entry.value.number())
+        {
+            high.entry(index).or_default().insert(column, value);
+        }
+    }
+    let recorded_at = Utc::now();
+    let all_indexes = counters
+        .keys()
+        .chain(high.keys())
+        .copied()
+        .collect::<std::collections::BTreeSet<_>>();
+    all_indexes
+        .into_iter()
+        .filter_map(|if_index| {
+            let hc = high.get(&if_index);
+            let fields = counters.get(&if_index);
+            let in_octets = hc
+                .and_then(|values| values.get(&6))
+                .copied()
+                .or_else(|| fields.and_then(|f| f.get(&10)).copied())?;
+            let out_octets = hc
+                .and_then(|values| values.get(&10))
+                .copied()
+                .or_else(|| fields.and_then(|f| f.get(&16)).copied())?;
+            Some(InterfaceTraffic {
+                if_index,
+                in_octets,
+                out_octets,
+                in_errors: fields.and_then(|f| f.get(&14)).copied().unwrap_or_default(),
+                out_errors: fields.and_then(|f| f.get(&20)).copied().unwrap_or_default(),
+                counter_bits: if hc
+                    .map(|values| values.contains_key(&6) || values.contains_key(&10))
+                    .unwrap_or(false)
+                {
+                    64
+                } else {
+                    32
+                },
+                recorded_at,
+            })
+        })
+        .collect()
+}
+#[must_use]
+pub fn calculate_rates(previous: &InterfaceTraffic, current: &InterfaceTraffic) -> (f64, f64) {
+    let rates = calculate_rates_detailed(previous, current, None, None);
+    (rates.in_bps, rates.out_bps)
+}
+#[must_use]
+pub fn calculate_rates_detailed(
+    previous: &InterfaceTraffic,
+    current: &InterfaceTraffic,
+    previous_uptime: Option<u64>,
+    current_uptime: Option<u64>,
+) -> TrafficRates {
+    let seconds = (current.recorded_at - previous.recorded_at).num_milliseconds() as f64 / 1_000.0;
+    let reboot_detected = previous_uptime
+        .zip(current_uptime)
+        .map(|(previous, current)| current < previous)
+        .unwrap_or(false);
+    if seconds <= 0.0 || reboot_detected {
+        return TrafficRates {
+            in_bps: 0.0,
+            out_bps: 0.0,
+            reboot_detected,
+        };
+    }
+    let counter_bits = previous.counter_bits.max(current.counter_bits);
+    TrafficRates {
+        in_bps: counter_diff(previous.in_octets, current.in_octets, counter_bits) as f64 * 8.0
+            / seconds,
+        out_bps: counter_diff(previous.out_octets, current.out_octets, counter_bits) as f64 * 8.0
+            / seconds,
+        reboot_detected,
+    }
+}
+fn counter_diff(previous: u64, current: u64, counter_bits: u8) -> u64 {
+    if current >= previous {
+        current - previous
+    } else if counter_bits >= 64 {
+        current.wrapping_sub(previous)
+    } else {
+        current + (u32::MAX as u64 + 1) - previous
+    }
+}
+
+pub(crate) fn oid_column_and_index(oid: &str) -> Option<(u32, i32)> {
+    let mut parts = oid.rsplit('.');
+    let index = parts.next()?.parse().ok()?;
+    let column = parts.next()?.parse().ok()?;
+    Some((column, index))
+}
+
+#[derive(Debug, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SnmpCpuInfo {
+    pub usage_percent: Option<f64>,
+}
+pub async fn collect_cpu(client: &SnmpClient) -> Result<SnmpCpuInfo, SnmpError> {
+    let entries = client.walk("1.3.6.1.2.1.25.3.3.1.2").await?;
+    let cores: Vec<_> = entries
+        .iter()
+        .filter_map(|entry| entry.value.number())
+        .collect();
+    Ok(SnmpCpuInfo {
+        usage_percent: (!cores.is_empty())
+            .then(|| cores.iter().sum::<u64>() as f64 / cores.len() as f64),
+    })
+}
+
+#[derive(Debug, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SnmpMemoryInfo {
+    pub total_kb: Option<u64>,
+    pub avail_kb: Option<u64>,
+    pub free_kb: Option<u64>,
+    pub used_kb: Option<u64>,
+    pub used_percent: Option<f64>,
+}
+
+pub const OID_MEM_TOTAL_REAL: &str = "1.3.6.1.4.1.2021.4.5.0";
+pub const OID_MEM_AVAIL_REAL: &str = "1.3.6.1.4.1.2021.4.6.0";
+pub const OID_MEM_BUFFER: &str = "1.3.6.1.4.1.2021.4.14.0";
+pub const OID_MEM_CACHED: &str = "1.3.6.1.4.1.2021.4.15.0";
+pub const OID_MEM_SYS_AVAILABLE: &str = "1.3.6.1.4.1.2021.4.27.0";
+
+pub async fn collect_memory(client: &SnmpClient) -> Result<SnmpMemoryInfo, SnmpError> {
+    let values = client
+        .get(&[
+            OID_MEM_TOTAL_REAL,
+            OID_MEM_AVAIL_REAL,
+            OID_MEM_BUFFER,
+            OID_MEM_CACHED,
+            OID_MEM_SYS_AVAILABLE,
+        ])
+        .await?;
+    Ok(memory_info(
+        number(&values, OID_MEM_TOTAL_REAL),
+        number(&values, OID_MEM_SYS_AVAILABLE),
+        number(&values, OID_MEM_AVAIL_REAL),
+        number(&values, OID_MEM_BUFFER),
+        number(&values, OID_MEM_CACHED),
+    ))
+}
+
+pub fn memory_info(
+    total: Option<u64>,
+    system_available: Option<u64>,
+    free: Option<u64>,
+    buffers: Option<u64>,
+    cached: Option<u64>,
+) -> SnmpMemoryInfo {
+    // Net-SNMP moderno expõe diretamente o equivalente a `MemAvailable`.
+    // Em agentes antigos, aproxima com RAM livre + buffers + page cache, sem
+    // misturar swap (`memTotalFree`) à capacidade física.
+    let available = system_available.or_else(|| {
+        free.map(|free| {
+            free.saturating_add(buffers.unwrap_or_default())
+                .saturating_add(cached.unwrap_or_default())
+        })
+    });
+    let available = total
+        .zip(available)
+        .map(|(total, available)| available.min(total));
+    let used = total
+        .zip(available)
+        .map(|(total, available)| total.saturating_sub(available));
+    SnmpMemoryInfo {
+        total_kb: total,
+        avail_kb: available,
+        free_kb: free,
+        used_kb: used,
+        used_percent: used
+            .zip(total.filter(|total| *total > 0))
+            .map(|(used, total)| {
+                #[allow(clippy::cast_precision_loss)]
+                {
+                    used as f64 * 100.0 / total as f64
+                }
+            }),
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LldpNeighbor {
+    pub local_port: String,
+    pub remote_port: Option<String>,
+    pub remote_sys_name: Option<String>,
+    pub remote_mgmt_address: Option<String>,
+    pub protocol: String,
+}
+/// `lldpRemTable` (LLDP-MIB): índice `timeMark.localPortNum.remIndex`.
+/// Colunas: 4 = `lldpRemChassisIdSubtype`, 5 = `lldpRemChassisId`,
+/// 7 = `lldpRemPortId`, 8 = `lldpRemPortDesc`, 9 = `lldpRemSysName`.
+pub const OID_LLDP_REM_TABLE: &str = "1.0.8802.1.1.2.1.4.1.1";
+/// `lldpRemManAddrTable`: o endereço de gerência mora **no índice**
+/// (`timeMark.localPortNum.remIndex.addrSubtype.addrLen.addr…`); as colunas
+/// acessíveis (3 = `lldpRemManAddrIfSubtype`, ...) só servem para o walk achar a linha.
+pub const OID_LLDP_REM_MAN_ADDR_TABLE: &str = "1.0.8802.1.1.2.1.4.2.1";
+/// `cdpCacheTable` (CISCO-CDP-MIB): índice `ifIndex.deviceIndex`.
+/// Colunas: 3 = `cdpCacheAddressType`, 4 = `cdpCacheAddress`,
+/// 6 = `cdpCacheDeviceId`, 7 = `cdpCacheDevicePort`.
+pub const OID_CDP_CACHE_TABLE: &str = "1.3.6.1.4.1.9.9.23.1.2.1.1";
+
+pub async fn collect_lldp(client: &SnmpClient) -> Result<Vec<LldpNeighbor>, SnmpError> {
+    let (remote, management, cdp) = tokio::join!(
+        client.walk(OID_LLDP_REM_TABLE),
+        client.walk(OID_LLDP_REM_MAN_ADDR_TABLE),
+        client.walk(OID_CDP_CACHE_TABLE)
+    );
+    Ok(parse_neighbors(
+        &remote.unwrap_or_default(),
+        &management.unwrap_or_default(),
+        &cdp.unwrap_or_default(),
+    ))
+}
+
+/// IPv4 de gerência codificado no índice da `lldpRemManAddrTable`, a partir
+/// do `addrSubtype`. O `lldpRemManAddr` é `OCTET STRING` não-`IMPLIED`, então
+/// vem prefixado pelo tamanho (`1.4.a.b.c.d`); alguns agentes omitem o
+/// tamanho (`1.a.b.c.d`) e os dois formatos são aceitos. Só IPv4 (subtipo 1).
+fn lldp_management_ipv4(address_index: &[u32]) -> Option<String> {
+    let octets = match address_index {
+        [1, 4, a, b, c, d] | [1, a, b, c, d] => [*a, *b, *c, *d],
+        _ => return None,
+    };
+    let [a, b, c, d] = octets.map(|octet| u8::try_from(octet).ok());
+    Some(std::net::Ipv4Addr::new(a?, b?, c?, d?).to_string())
+}
+
+/// IPv4 do `cdpCacheAddress` (tipo 1 = IP): 4 bytes crus, nunca texto — o
+/// `text()` de `0a 30 41 42` daria "0AB".
+fn cdp_address_ipv4(value: &SnmpValue) -> Option<String> {
+    match value {
+        SnmpValue::Bytes(bytes) if bytes.len() == 4 => {
+            Some(std::net::Ipv4Addr::new(bytes[0], bytes[1], bytes[2], bytes[3]).to_string())
+        }
+        SnmpValue::Text(text) => text
+            .parse::<std::net::Ipv4Addr>()
+            .ok()
+            .map(|ip| ip.to_string()),
+        _ => None,
+    }
+}
+
+/// Interpreta os walks de LLDP e CDP em vizinhos. Puro: sem transporte.
+#[must_use]
+pub fn parse_neighbors(
+    lldp_remote: &[super::client::SnmpWalkEntry],
+    lldp_management: &[super::client::SnmpWalkEntry],
+    cdp: &[super::client::SnmpWalkEntry],
+) -> Vec<LldpNeighbor> {
+    let mut neighbors = Vec::new();
+
+    // Chave (localPortNum, remIndex): o timeMark muda a cada alteração do
+    // vizinho e não identifica a linha.
+    let mut lldp_fields = BTreeMap::<(u32, u32), BTreeMap<u32, String>>::new();
+    for entry in lldp_remote {
+        if let Some((column, index)) = table_column_and_index(&entry.oid, OID_LLDP_REM_TABLE) {
+            if index.len() >= 3 {
+                lldp_fields
+                    .entry((index[1], index[2]))
+                    .or_default()
+                    .insert(column, entry.value.text());
+            }
+        }
+    }
+    let mut lldp_addresses = BTreeMap::<(u32, u32), String>::new();
+    for entry in lldp_management {
+        if let Some((_column, index)) =
+            table_column_and_index(&entry.oid, OID_LLDP_REM_MAN_ADDR_TABLE)
+        {
+            if index.len() > 3 {
+                if let Some(address) = lldp_management_ipv4(&index[3..]) {
+                    // Primeiro IPv4 da linha vence; as várias colunas repetem o índice.
+                    lldp_addresses
+                        .entry((index[1], index[2]))
+                        .or_insert(address);
+                }
+            }
+        }
+    }
+    neighbors.extend(lldp_fields.into_iter().filter_map(|(key, fields)| {
+        let non_empty = |column: u32| fields.get(&column).filter(|v| !v.is_empty()).cloned();
+        let remote_sys_name = non_empty(9);
+        let remote_port = non_empty(7).or_else(|| non_empty(8));
+        (remote_sys_name.is_some() || remote_port.is_some()).then(|| LldpNeighbor {
+            local_port: key.0.to_string(),
+            remote_port,
+            remote_sys_name,
+            remote_mgmt_address: lldp_addresses.get(&key).cloned(),
+            protocol: "lldp".into(),
+        })
+    }));
+
+    let mut cdp_fields = BTreeMap::<(u32, u32), BTreeMap<u32, &SnmpValue>>::new();
+    for entry in cdp {
+        if let Some((column, index)) = table_column_and_index(&entry.oid, OID_CDP_CACHE_TABLE) {
+            if index.len() >= 2 {
+                cdp_fields
+                    .entry((index[0], index[1]))
+                    .or_default()
+                    .insert(column, &entry.value);
+            }
+        }
+    }
+    neighbors.extend(
+        cdp_fields
+            .into_iter()
+            .filter_map(|((local_port, _remote_index), fields)| {
+                let text = |column: u32| {
+                    fields
+                        .get(&column)
+                        .map(|value| value.text())
+                        .filter(|value| !value.is_empty())
+                };
+                let remote_sys_name = text(6);
+                let remote_port = text(7);
+                let is_ip = fields.get(&3).is_none_or(|kind| kind.number() == Some(1));
+                let remote_mgmt_address = fields
+                    .get(&4)
+                    .filter(|_| is_ip)
+                    .and_then(|value| cdp_address_ipv4(value));
+                (remote_sys_name.is_some() || remote_port.is_some()).then(|| LldpNeighbor {
+                    local_port: local_port.to_string(),
+                    remote_port,
+                    remote_sys_name,
+                    remote_mgmt_address,
+                    protocol: "cdp".into(),
+                })
+            }),
+    );
+    neighbors
+}
+
+fn table_column_and_index(oid: &str, base: &str) -> Option<(u32, Vec<u32>)> {
+    let oid = oid
+        .split('.')
+        .map(str::parse)
+        .collect::<Result<Vec<u32>, _>>()
+        .ok()?;
+    let base = base
+        .split('.')
+        .map(str::parse)
+        .collect::<Result<Vec<u32>, _>>()
+        .ok()?;
+    oid.starts_with(&base).then_some(()).and_then(|_| {
+        oid.get(base.len())
+            .copied()
+            .map(|column| (column, oid[base.len() + 1..].to_vec()))
+    })
+}
+
+fn number(values: &BTreeMap<String, Option<SnmpValue>>, oid: &str) -> Option<u64> {
+    values
+        .get(oid)
+        .and_then(Option::as_ref)
+        .and_then(SnmpValue::number)
+}
+fn text(values: &BTreeMap<String, Option<SnmpValue>>, oid: &str) -> Option<String> {
+    values
+        .get(oid)
+        .and_then(Option::as_ref)
+        .map(SnmpValue::text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::snmp::client::SnmpWalkEntry;
+
+    #[test]
+    fn memoria_prefere_disponivel_do_sistema() {
+        let memory = memory_info(Some(1_000), Some(600), Some(100), Some(100), Some(200));
+        assert_eq!(memory.avail_kb, Some(600));
+        assert_eq!(memory.free_kb, Some(100));
+        assert_eq!(memory.used_kb, Some(400));
+        assert_eq!(memory.used_percent, Some(40.0));
+    }
+
+    #[test]
+    fn memoria_antiga_soma_livre_buffers_e_cache_sem_ultrapassar_total() {
+        let memory = memory_info(Some(1_000), None, Some(100), Some(200), Some(300));
+        assert_eq!(memory.avail_kb, Some(600));
+        assert_eq!(memory.used_kb, Some(400));
+
+        let clamped = memory_info(Some(1_000), None, Some(800), Some(300), Some(200));
+        assert_eq!(clamped.avail_kb, Some(1_000));
+        assert_eq!(clamped.used_percent, Some(0.0));
+    }
+
+    #[test]
+    fn memoria_sem_total_utilizavel_nao_inventa_percentual() {
+        let memory = memory_info(Some(0), Some(0), Some(0), None, None);
+        assert_eq!(memory.used_percent, None);
+    }
+
+    #[test]
+    fn calcula_rollover_de_32_bits() {
+        let previous = InterfaceTraffic {
+            if_index: 1,
+            in_octets: u32::MAX as u64 - 3,
+            out_octets: u32::MAX as u64 - 3,
+            in_errors: 0,
+            out_errors: 0,
+            counter_bits: 32,
+            recorded_at: Utc::now(),
+        };
+        let current = InterfaceTraffic {
+            if_index: 1,
+            in_octets: 4,
+            out_octets: 4,
+            in_errors: 0,
+            out_errors: 0,
+            counter_bits: 32,
+            recorded_at: previous.recorded_at + chrono::Duration::seconds(1),
+        };
+        assert_eq!(calculate_rates(&previous, &current), (64.0, 64.0));
+    }
+
+    #[test]
+    fn calcula_rollover_de_64_bits() {
+        let previous = InterfaceTraffic {
+            if_index: 1,
+            in_octets: u64::MAX - 3,
+            out_octets: u64::MAX - 3,
+            in_errors: 0,
+            out_errors: 0,
+            counter_bits: 64,
+            recorded_at: Utc::now(),
+        };
+        let current = InterfaceTraffic {
+            in_octets: 4,
+            out_octets: 4,
+            recorded_at: previous.recorded_at + chrono::Duration::seconds(1),
+            ..previous.clone()
+        };
+
+        assert_eq!(calculate_rates(&previous, &current), (64.0, 64.0));
+    }
+
+    #[test]
+    fn nao_interpreta_reboot_como_rollover() {
+        let previous = InterfaceTraffic {
+            if_index: 1,
+            in_octets: 1_000,
+            out_octets: 1_000,
+            in_errors: 0,
+            out_errors: 0,
+            counter_bits: 64,
+            recorded_at: Utc::now(),
+        };
+        let current = InterfaceTraffic {
+            in_octets: 10,
+            out_octets: 10,
+            recorded_at: previous.recorded_at + chrono::Duration::seconds(1),
+            ..previous.clone()
+        };
+
+        assert_eq!(
+            calculate_rates_detailed(&previous, &current, Some(10_000), Some(20)),
+            TrafficRates {
+                in_bps: 0.0,
+                out_bps: 0.0,
+                reboot_detected: true,
+            }
+        );
+    }
+
+    #[test]
+    fn identifica_coluna_e_indices_de_tabela_snmp() {
+        assert_eq!(
+            table_column_and_index("1.0.8802.1.1.2.1.4.1.1.9.10.4.2", "1.0.8802.1.1.2.1.4.1.1"),
+            Some((9, vec![10, 4, 2]))
+        );
+    }
+
+    fn linha(coluna: u32, indice: i32, value: SnmpValue) -> super::super::client::SnmpWalkEntry {
+        super::super::client::SnmpWalkEntry {
+            oid: format!("{OID_IF_TABLE}.{coluna}.{indice}"),
+            value,
+        }
+    }
+    fn linha_x(coluna: u32, indice: i32, value: SnmpValue) -> super::super::client::SnmpWalkEntry {
+        super::super::client::SnmpWalkEntry {
+            oid: format!("{OID_IF_X_TABLE}.{coluna}.{indice}"),
+            value,
+        }
+    }
+
+    #[test]
+    fn mesmos_walks_geram_interfaces_e_contadores_de_trafego() {
+        let base = [
+            linha(2, 4, SnmpValue::Bytes(b"uplink".to_vec())),
+            linha(10, 4, SnmpValue::Number(12)),
+            linha(16, 4, SnmpValue::Number(34)),
+        ];
+        let extended = [
+            linha_x(1, 4, SnmpValue::Bytes(b"uplink".to_vec())),
+            linha_x(6, 4, SnmpValue::Number(56)),
+            linha_x(10, 4, SnmpValue::Number(78)),
+        ];
+        let interfaces = parse_interfaces(base.clone(), extended.clone());
+        let traffic = parse_traffic(base, extended);
+
+        assert_eq!(interfaces[0].if_name, "uplink");
+        assert_eq!(traffic.len(), 1);
+        assert_eq!(traffic[0].if_index, 4);
+        assert_eq!(traffic[0].in_octets, 56);
+        assert_eq!(traffic[0].out_octets, 78);
+        assert_eq!(traffic[0].counter_bits, 64);
+    }
+
+    #[test]
+    fn parse_traffic_suporta_interfaces_apenas_em_if_x_table() {
+        let extended = [
+            linha_x(1, 19, SnmpValue::Bytes(b"pppoe-wan".to_vec())),
+            linha_x(6, 19, SnmpValue::Number(1024)),
+            linha_x(10, 19, SnmpValue::Number(2048)),
+        ];
+        let traffic = parse_traffic([], extended);
+        assert_eq!(traffic.len(), 1);
+        assert_eq!(traffic[0].if_index, 19);
+        assert_eq!(traffic[0].in_octets, 1024);
+        assert_eq!(traffic[0].out_octets, 2048);
+        assert_eq!(traffic[0].counter_bits, 64);
+    }
+
+    /// `ifSpeed` saturado (col. 5 = 4294967295) com `ifHighSpeed` (col. 15) real.
+    #[test]
+    fn if_high_speed_prevalece_sobre_if_speed_saturado() {
+        let interfaces = parse_interfaces(
+            [
+                linha(2, 1, SnmpValue::Bytes(b"Gi0/1".to_vec())),
+                linha(5, 1, SnmpValue::Number(4_294_967_295)),
+            ],
+            // 10 Gbps expressos em Mbps, como manda a MIB.
+            [linha_x(15, 1, SnmpValue::Number(10_000))],
+        );
+        assert_eq!(interfaces.len(), 1);
+        assert_eq!(interfaces[0].if_speed, Some(10_000_000_000));
+    }
+
+    #[test]
+    fn sem_if_high_speed_a_leitura_cai_para_if_speed() {
+        let interfaces = parse_interfaces(
+            [
+                linha(2, 1, SnmpValue::Bytes(b"Fa0/1".to_vec())),
+                linha(5, 1, SnmpValue::Number(100_000_000)),
+            ],
+            [],
+        );
+        assert_eq!(interfaces[0].if_speed, Some(100_000_000));
+    }
+
+    #[test]
+    fn if_high_speed_zerado_nao_apaga_a_velocidade_real() {
+        // Agente que não implementa a coluna devolve 0: aceitá-lo faria uma
+        // interface de 1 Gbps aparecer como velocidade desconhecida.
+        let interfaces = parse_interfaces(
+            [
+                linha(2, 1, SnmpValue::Bytes(b"Gi0/2".to_vec())),
+                linha(5, 1, SnmpValue::Number(1_000_000_000)),
+            ],
+            [linha_x(15, 1, SnmpValue::Number(0))],
+        );
+        assert_eq!(interfaces[0].if_speed, Some(1_000_000_000));
+    }
+
+    #[test]
+    fn interface_sem_nome_recebe_rotulo_derivado_do_indice() {
+        let interfaces = parse_interfaces([linha(5, 7, SnmpValue::Number(1_000))], []);
+        assert_eq!(interfaces[0].if_name, "eth7");
+        // Sem as colunas de status, o padrão é "1" (up) nos dois para não
+        // inventar queda de link.
+        assert_eq!(interfaces[0].if_admin_status, Some(1));
+        assert_eq!(interfaces[0].if_oper_status, Some(1));
+    }
+
+    /// As duas tabelas numeram colunas do zero cada uma: juntá-las num mapa só
+    /// fazia os contadores de 64 bits da `ifXTable` sobrescreverem status e MAC.
+    #[test]
+    fn contadores_da_if_x_table_nao_sobrescrevem_status_nem_mac() {
+        let interfaces = parse_interfaces(
+            [
+                linha(2, 2, SnmpValue::Bytes(b"eth0".to_vec())),
+                linha(3, 2, SnmpValue::Number(6)),
+                linha(
+                    6,
+                    2,
+                    SnmpValue::Bytes(vec![0x00, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e]),
+                ),
+                linha(7, 2, SnmpValue::Number(1)),
+                linha(8, 2, SnmpValue::Number(2)),
+            ],
+            [
+                linha_x(1, 2, SnmpValue::Bytes(b"br-lan".to_vec())),
+                // ifHCInOctets (col. 6) e ifHCInUcastPkts (col. 7).
+                linha_x(6, 2, SnmpValue::Number(8_382_243_847_261)),
+                linha_x(7, 2, SnmpValue::Number(1_874_150)),
+            ],
+        );
+
+        assert_eq!(interfaces[0].if_name, "br-lan");
+        assert_eq!(interfaces[0].if_descr.as_deref(), Some("eth0"));
+        assert_eq!(interfaces[0].if_type, Some(6));
+        assert_eq!(
+            interfaces[0].mac_address.as_deref(),
+            Some("00:1a:2b:3c:4d:5e")
+        );
+        assert_eq!(interfaces[0].if_admin_status, Some(1));
+        assert_eq!(interfaces[0].if_oper_status, Some(2));
+    }
+
+    #[test]
+    fn status_da_interface_sai_serializado_como_rotulo() {
+        let interfaces = parse_interfaces([linha(8, 1, SnmpValue::Number(2))], []);
+        let json = serde_json::to_value(&interfaces[0]).unwrap();
+
+        assert_eq!(json["ifOperStatus"], "down");
+        assert_eq!(json["ifAdminStatus"], "up");
+    }
+
+    #[test]
+    fn so_oid_de_identidade_prova_contato_com_o_agente() {
+        // Matriz de paridade #19: sem isso o poll marcaria "online" no escuro e
+        // o ping seguinte derrubaria o dispositivo, publicando transição a cada
+        // ciclo.
+        let mudo = SnmpSystemInfo::default();
+        assert!(!mudo.responded());
+
+        for info in [
+            SnmpSystemInfo {
+                sys_descr: Some("Cisco IOS".into()),
+                ..Default::default()
+            },
+            SnmpSystemInfo {
+                sys_name: Some("sw-core".into()),
+                ..Default::default()
+            },
+            SnmpSystemInfo {
+                sys_up_time: Some(0),
+                ..Default::default()
+            },
+        ] {
+            assert!(info.responded(), "OID de identidade ignorado: {info:?}");
+        }
+
+        // Texto livre nao conta como prova de vida.
+        let so_texto_livre = SnmpSystemInfo {
+            sys_contact: Some("noc@exemplo".into()),
+            sys_location: Some("Rack 3".into()),
+            ..Default::default()
+        };
+        assert!(!so_texto_livre.responded());
+    }
+
+    #[test]
+    fn parse_arp_table_extrai_ip_e_mac() {
+        let entries = vec![
+            SnmpWalkEntry {
+                oid: "1.3.6.1.2.1.4.22.1.2.1.10.0.0.10".into(),
+                value: SnmpValue::Bytes(vec![0x00, 0x12, 0x42, 0x51, 0x2b, 0xb0]),
+            },
+            SnmpWalkEntry {
+                oid: "1.3.6.1.2.1.4.22.1.2.1.10.0.0.255".into(),
+                value: SnmpValue::Bytes(vec![0xff, 0xff, 0xff, 0xff, 0xff, 0xff]),
+            },
+            SnmpWalkEntry {
+                oid: "1.3.6.1.2.1.4.35.1.4.2.1.4.10.0.0.106".into(),
+                value: SnmpValue::Bytes(vec![0xbc, 0xdd, 0xc2, 0x4c, 0x93, 0x95]),
+            },
+        ];
+        let parsed = parse_arp_table(entries);
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].ip_address, "10.0.0.10");
+        assert_eq!(parsed[0].mac_address, "00:12:42:51:2b:b0");
+
+        assert_eq!(parsed[1].ip_address, "10.0.0.106");
+        assert_eq!(parsed[1].mac_address, "bc:dd:c2:4c:93:95");
+    }
+
+    #[test]
+    fn parse_interface_macs_ignora_vazios_e_broadcast() {
+        let entries = vec![
+            SnmpWalkEntry {
+                oid: "1.3.6.1.2.1.2.2.1.6.1".into(),
+                value: SnmpValue::Bytes(vec![0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
+            },
+            SnmpWalkEntry {
+                oid: "1.3.6.1.2.1.2.2.1.6.2".into(),
+                value: SnmpValue::Bytes(vec![0xd6, 0x8c, 0x72, 0x59, 0x65, 0xfc]),
+            },
+        ];
+        let macs = parse_interface_macs(entries);
+        assert_eq!(macs.len(), 1);
+        assert_eq!(macs[0], "d6:8c:72:59:65:fc");
+    }
+    fn entrada(oid: String, value: SnmpValue) -> super::super::client::SnmpWalkEntry {
+        super::super::client::SnmpWalkEntry { oid, value }
+    }
+
+    #[test]
+    fn lldp_le_o_endereco_de_gerencia_do_indice_da_man_addr_table() {
+        // Vizinho na porta local 5, remIndex 2. A coluna 4 da lldpRemTable é o
+        // subtipo do chassis (4 = macAddress), não um endereço.
+        let remoto = vec![
+            entrada(
+                format!("{OID_LLDP_REM_TABLE}.4.0.5.2"),
+                SnmpValue::Text("4".into()),
+            ),
+            entrada(
+                format!("{OID_LLDP_REM_TABLE}.7.0.5.2"),
+                SnmpValue::Bytes(b"Gi0/1".to_vec()),
+            ),
+            entrada(
+                format!("{OID_LLDP_REM_TABLE}.9.0.5.2"),
+                SnmpValue::Bytes(b"core-sw".to_vec()),
+            ),
+        ];
+        let gerencia = vec![
+            entrada(
+                format!("{OID_LLDP_REM_MAN_ADDR_TABLE}.3.0.5.2.1.4.10.0.0.1"),
+                SnmpValue::Text("2".into()),
+            ),
+            entrada(
+                format!("{OID_LLDP_REM_MAN_ADDR_TABLE}.4.0.5.2.1.4.10.0.0.1"),
+                SnmpValue::Text("1".into()),
+            ),
+        ];
+        let vizinhos = parse_neighbors(&remoto, &gerencia, &[]);
+        assert_eq!(vizinhos.len(), 1);
+        let vizinho = &vizinhos[0];
+        assert_eq!(vizinho.local_port, "5");
+        assert_eq!(vizinho.remote_port.as_deref(), Some("Gi0/1"));
+        assert_eq!(vizinho.remote_sys_name.as_deref(), Some("core-sw"));
+        assert_eq!(vizinho.remote_mgmt_address.as_deref(), Some("10.0.0.1"));
+        assert_eq!(vizinho.protocol, "lldp");
+    }
+
+    #[test]
+    fn lldp_aceita_indice_sem_prefixo_de_tamanho_e_ignora_ipv6() {
+        assert_eq!(
+            lldp_management_ipv4(&[1, 192, 168, 0, 9]).as_deref(),
+            Some("192.168.0.9")
+        );
+        assert_eq!(
+            lldp_management_ipv4(&[1, 4, 192, 168, 0, 9]).as_deref(),
+            Some("192.168.0.9")
+        );
+        // Subtipo 2 = IPv6.
+        assert_eq!(lldp_management_ipv4(&[2, 16, 254, 128, 0, 0]), None);
+        assert_eq!(lldp_management_ipv4(&[1, 4, 300, 0, 0, 1]), None);
+    }
+
+    #[test]
+    fn lldp_sem_man_addr_fica_sem_endereco() {
+        let remoto = vec![entrada(
+            format!("{OID_LLDP_REM_TABLE}.9.100.3.1"),
+            SnmpValue::Text("ap-01".into()),
+        )];
+        let vizinhos = parse_neighbors(&remoto, &[], &[]);
+        assert_eq!(vizinhos.len(), 1);
+        assert_eq!(vizinhos[0].remote_mgmt_address, None);
+        assert_eq!(vizinhos[0].local_port, "3");
+    }
+
+    #[test]
+    fn cdp_le_o_endereco_cru_da_coluna_4() {
+        // 10.48.65.66 em bytes é "\n0AB": o texto daria lixo.
+        let cdp = vec![
+            entrada(
+                format!("{OID_CDP_CACHE_TABLE}.3.12.1"),
+                SnmpValue::Text("1".into()),
+            ),
+            entrada(
+                format!("{OID_CDP_CACHE_TABLE}.4.12.1"),
+                SnmpValue::Bytes(vec![10, 48, 65, 66]),
+            ),
+            entrada(
+                format!("{OID_CDP_CACHE_TABLE}.6.12.1"),
+                SnmpValue::Bytes(b"dist-sw".to_vec()),
+            ),
+            entrada(
+                format!("{OID_CDP_CACHE_TABLE}.7.12.1"),
+                SnmpValue::Bytes(b"Te1/0/1".to_vec()),
+            ),
+        ];
+        let vizinhos = parse_neighbors(&[], &[], &cdp);
+        assert_eq!(vizinhos.len(), 1);
+        assert_eq!(vizinhos[0].local_port, "12");
+        assert_eq!(vizinhos[0].remote_sys_name.as_deref(), Some("dist-sw"));
+        assert_eq!(vizinhos[0].remote_port.as_deref(), Some("Te1/0/1"));
+        assert_eq!(
+            vizinhos[0].remote_mgmt_address.as_deref(),
+            Some("10.48.65.66")
+        );
+        assert_eq!(vizinhos[0].protocol, "cdp");
+    }
+}

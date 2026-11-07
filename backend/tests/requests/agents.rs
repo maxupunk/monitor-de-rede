@@ -4,37 +4,35 @@
 use std::{sync::Arc, time::Duration};
 
 use async_trait::async_trait;
-use backend::{
-    app::App,
-    models::{devices, monitor_results, monitors, probes, users},
-    services::{
-        agent_runtime::{executor::CommandExecutor, tunnel::LocalTunnelOpener},
-        agents::{
-            background,
-            connection::{self, HandshakeError},
-            hub::AgentHub,
-            inbound,
-            policy::{Permission, Policy},
-            protocol::{
-                AgentEvent, Body, Capability, Command, DockerCall, Envelope, Hello, RemoteError,
-                WireFrame, PROTOCOL_VERSION,
-            },
-            service::AgentService,
-        },
-        docker::{
-            engine,
-            hosts::{self, HostKey},
-        },
-        events::EventBus,
-        probes::{dispatcher, DEFAULT_VPN_PROBE_TOKEN},
-        shared::crypto::sha256_hex,
-        telemetry::rollup::{ContainerRollup, HostRollup, MetricsRollup},
-        users::Role,
-    },
-    views::docker::{DockerLiveSnapshot, DockerStatusResponse},
-};
+use backend::app::App;
 use chrono::Utc;
 use loco_rs::{app::AppContext, testing::prelude::*};
+use netmonitor_core::models::{devices, monitor_results, monitors, probes};
+use netmonitor_nucleo::{
+    services::agent_runtime::{executor::CommandExecutor, tunnel::LocalTunnelOpener},
+    services::agents::{
+        background,
+        connection::{self, HandshakeError},
+        hub::AgentHub,
+        inbound,
+        policy::{Permission, Policy},
+        protocol::{
+            AgentEvent, Body, Capability, Command, DockerCall, Envelope, Hello, RemoteError,
+            WireFrame, PROTOCOL_VERSION,
+        },
+        service::AgentService,
+    },
+    services::events::EventBus,
+    services::probes::{dispatcher, DEFAULT_VPN_PROBE_TOKEN},
+    services::shared::crypto::sha256_hex,
+    services::telemetry::rollup::{ContainerRollup, HostRollup, MetricsRollup},
+    services::users::Role,
+    views::docker::{DockerLiveSnapshot, DockerStatusResponse},
+};
+use netmonitor_servers::docker::{
+    engine,
+    hosts::{self, HostKey},
+};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
 use serde_json::{json, Value};
 use serial_test::serial;
@@ -43,25 +41,11 @@ use tokio_util::sync::CancellationToken;
 
 use super::{
     agent_harness::{connect_agent_with, enrolled_agent},
-    prepare_data,
+    prepare_data::session_with_role,
 };
 
 fn json_of(text: &str) -> Value {
     serde_json::from_str(text).expect("resposta JSON")
-}
-
-async fn session_with_role(
-    request: &mut loco_rs::TestServer,
-    ctx: &AppContext,
-    role: Role,
-) -> users::Model {
-    let session = prepare_data::init_operator(ctx).await;
-    let mut active = session.user.into_active_model();
-    active.role = Set(role.as_str().to_string());
-    let user = active.update(&ctx.db).await.expect("papel");
-    let (header, value) = prepare_data::auth_header(&session.token);
-    request.add_header(header, value);
-    user
 }
 
 /// Executor falso do lado do agente: responde como um host com dois
@@ -578,7 +562,7 @@ fn rollup(bucket_at: chrono::DateTime<Utc>, cpu: f64) -> MetricsRollup {
 async fn rollup_do_agente_vira_historico_e_reenvio_nao_duplica() {
     request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
         let (probe, _) = enrolled_agent(&ctx, "srv-historico").await;
-        let bucket = backend::services::telemetry::rollup::bucket_of(Utc::now());
+        let bucket = netmonitor_nucleo::services::telemetry::rollup::bucket_of(Utc::now());
         for cpu in [40.0, 60.0] {
             inbound::handle(
                 &ctx,

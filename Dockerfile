@@ -123,7 +123,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     cargo build --release --examples \
     && cp target/release/examples/spike_icmp_dgram \
           target/release/examples/spike_dns_wire \
-          target/release/examples/spike_snmp_v2c \
+          target/release/examples/spike_async_snmp \
           /usr/local/bin/
 
 FROM debian:bookworm-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241 AS spike
@@ -136,7 +136,7 @@ RUN apt-get update \
 RUN useradd --create-home --shell /usr/sbin/nologin app
 COPY --from=spike-builder /usr/local/bin/spike_icmp_dgram /usr/local/bin/
 COPY --from=spike-builder /usr/local/bin/spike_dns_wire /usr/local/bin/
-COPY --from=spike-builder /usr/local/bin/spike_snmp_v2c /usr/local/bin/
+COPY --from=spike-builder /usr/local/bin/spike_async_snmp /usr/local/bin/
 USER app
 CMD ["spike_icmp_dgram", "1.1.1.1"]
 

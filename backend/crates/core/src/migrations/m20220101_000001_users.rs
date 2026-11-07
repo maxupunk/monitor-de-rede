@@ -1,0 +1,55 @@
+//! `users` — a tabela do scaffold do Loco, mais `active` e `role`.
+//!
+//! * `active` desliga um login sem apagar o histórico que aponta para o
+//!   usuário.
+//! * `role` é o perfil de acesso. Contas novas recebem um papel explícito pelo
+//!   serviço de usuários; o default `admin` vale para o primeiro cadastro.
+
+use loco_rs::schema::*;
+use sea_orm_migration::prelude::*;
+
+#[derive(DeriveMigrationName)]
+pub struct Migration;
+
+#[async_trait::async_trait]
+impl MigrationTrait for Migration {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        create_table(
+            m,
+            "users",
+            &[
+                ("id", ColType::PkAuto),
+                ("pid", ColType::Uuid),
+                ("email", ColType::StringUniq),
+                ("password", ColType::String),
+                ("api_key", ColType::StringUniq),
+                ("name", ColType::String),
+                ("reset_token", ColType::StringNull),
+                ("reset_sent_at", ColType::TimestampWithTimeZoneNull),
+                ("email_verification_token", ColType::StringNull),
+                (
+                    "email_verification_sent_at",
+                    ColType::TimestampWithTimeZoneNull,
+                ),
+                ("email_verified_at", ColType::TimestampWithTimeZoneNull),
+                ("magic_link_token", ColType::StringNull),
+                ("magic_link_expiration", ColType::TimestampWithTimeZoneNull),
+                ("active", ColType::BooleanWithDefault(true)),
+                ("role", ColType::StringWithDefault("admin".to_string())),
+                // Papel por área (ADR 019): `{"network": "viewer", ...}`. Sem
+                // chave (ou nulo), sem acesso à área — o admin vale em todas.
+                ("area_roles", ColType::JsonBinaryNull),
+                // O menu de cada um (Fase 16): `{"pinned": [...], "hidden": [...]}`.
+                ("menu_prefs", ColType::JsonBinaryNull),
+            ],
+            &[],
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn down(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        drop_table(m, "users").await?;
+        Ok(())
+    }
+}

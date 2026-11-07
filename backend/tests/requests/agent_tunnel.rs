@@ -3,15 +3,14 @@
 
 use std::time::{Duration, Instant};
 
-use backend::{
-    app::App,
-    services::agents::{
-        bridge::LocalBridge,
-        hub::AgentHub,
-        protocol::{Command, DockerCall, ErrorCode},
-    },
-};
+use backend::app::App;
+
 use loco_rs::testing::prelude::*;
+use netmonitor_nucleo::services::agents::{
+    bridge::LocalBridge,
+    hub::AgentHub,
+    protocol::{Command, DockerCall, ErrorCode},
+};
 use serial_test::serial;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},

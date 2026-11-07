@@ -6,20 +6,20 @@
 //! `/api/devices/{id}/metrics`, `/api/monitors/{id}` — e nunca por uma rota do
 //! servidor, porque essa rota não existe e não pode passar a existir.
 
-use backend::{
-    app::App,
-    models::{_entities::metrics, monitors},
-    services::{
-        devices::system_device::SystemDeviceService,
-        monitoring::{
-            health::series,
-            managed::{ensure_system_health_monitor, SYSTEM_HEALTH},
-            result_processor::process_result,
-            runner::{run_monitor, RunOptions},
-        },
+use backend::app::App;
+
+use netmonitor_core::models::{_entities::metrics, monitors};
+
+use loco_rs::testing::prelude::*;
+use netmonitor_nucleo::{
+    services::devices::system_device::SystemDeviceService,
+    services::monitoring::{
+        health::series,
+        managed::{ensure_system_health_monitor, SYSTEM_HEALTH},
+        result_processor::process_result,
+        runner::{run_monitor, RunOptions},
     },
 };
-use loco_rs::testing::prelude::*;
 use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
 use serde_json::Value;
 use serial_test::serial;
@@ -316,7 +316,7 @@ async fn as_series_de_dispositivo_sao_uma_lista_fechada() {
     // A fronteira de §3.1 é o que segura o volume do banco. O teste é sobre a
     // lista, e não sobre o coletor: um checker novo não passa a escrever em
     // `metrics` sem que alguém edite `DEVICE_SERIES`.
-    use backend::services::monitoring::result_processor::is_device_series;
+    use netmonitor_nucleo::services::monitoring::result_processor::is_device_series;
 
     for nome in [
         series::CPU_USAGE,

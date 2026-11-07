@@ -9,13 +9,13 @@
 //! contexto nasce com o seu, porque o `Hooks::truncate` do Loco não alcança um
 //! segundo banco e uma linha gravada aqui sobreviveria para o teste seguinte.
 
-use backend::{
-    app::App,
-    models::{_entities::devices, logs::device_logs},
-    services::syslog::{destination, LogsDb, NatDetector},
-};
+use backend::app::App;
+
+use netmonitor_core::models::{_entities::devices, logs::device_logs};
+
 use chrono::{Duration, Utc};
 use loco_rs::{app::AppContext, testing::prelude::*};
+use netmonitor_nucleo::services::syslog::{destination, LogsDb, NatDetector};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, DatabaseConnection, EntityTrait};
 use serial_test::serial;
 
@@ -331,7 +331,7 @@ async fn o_vinculo_recusa_o_gateway_do_docker_com_a_explicacao() {
         );
 
         // E nada foi gravado — recusar pela metade seria pior que não recusar.
-        let mapa = backend::services::syslog::resolver::bindings(&ctx.db)
+        let mapa = netmonitor_nucleo::services::syslog::resolver::bindings(&ctx.db)
             .await
             .expect("bindings");
         assert!(!mapa.contains_key("172.17.0.1"));
@@ -357,7 +357,7 @@ async fn o_vinculo_por_hostname_e_aceito_e_persiste_com_o_prefixo() {
             .await;
         assert_eq!(vinculo.status_code(), 200, "{}", vinculo.text());
 
-        let mapa = backend::services::syslog::resolver::bindings(&ctx.db)
+        let mapa = netmonitor_nucleo::services::syslog::resolver::bindings(&ctx.db)
             .await
             .expect("bindings");
         assert_eq!(mapa.get("host:mikrotik-borda"), Some(&device_id));
@@ -381,7 +381,7 @@ async fn o_vinculo_manual_persiste_e_pode_ser_desfeito() {
             .await;
         assert_eq!(vinculo.status_code(), 200, "{}", vinculo.text());
 
-        let mapa = backend::services::syslog::resolver::bindings(&ctx.db)
+        let mapa = netmonitor_nucleo::services::syslog::resolver::bindings(&ctx.db)
             .await
             .expect("bindings");
         assert_eq!(mapa.get("203.0.113.7"), Some(&device_id));
@@ -393,7 +393,7 @@ async fn o_vinculo_manual_persiste_e_pode_ser_desfeito() {
             .json(&serde_json::json!({ "deviceId": serde_json::Value::Null }))
             .await;
         assert_eq!(desfaz.status_code(), 200, "{}", desfaz.text());
-        let mapa = backend::services::syslog::resolver::bindings(&ctx.db)
+        let mapa = netmonitor_nucleo::services::syslog::resolver::bindings(&ctx.db)
             .await
             .expect("bindings");
         assert!(!mapa.contains_key("203.0.113.7"));

@@ -1,7 +1,10 @@
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { useAreasStore } from '@/stores/areas'
+import { AREA_ROUTES } from '@/areas'
+import { areaOfRoute, areaOffRedirect } from './areaGuard'
 
-const routes = [
+export const routes: RouteRecordRaw[] = [
   {
     path: '/login',
     name: 'login',
@@ -16,160 +19,9 @@ const routes = [
   },
   {
     path: '/',
-    component: () => import('../layouts/DefaultLayout.vue'),
-    children: [
-      { path: '', name: 'dashboard', component: () => import('../pages/DashboardPage.vue') },
-      { path: 'sites', name: 'sites', component: () => import('../pages/SitesPage.vue') },
-      { path: 'networks', name: 'networks', component: () => import('../pages/NetworksPage.vue') },
-      { path: 'devices', name: 'devices', component: () => import('../pages/DevicesPage.vue') },
-      {
-        path: 'devices/:id',
-        name: 'device-detail',
-        component: () => import('../pages/DeviceDetailPage.vue'),
-      },
-      {
-        path: 'wifi',
-        name: 'wifi-clients',
-        component: () => import('../pages/WifiClientsPage.vue'),
-      },
-      {
-        path: 'topology',
-        name: 'topology',
-        component: () => import('../pages/TopologyPage.vue'),
-        meta: { fullBleed: true },
-      },
-      {
-        path: 'link-tests',
-        name: 'link-tests',
-        component: () => import('../pages/LinkTestsPage.vue'),
-      },
-      {
-        path: 'scheduled-tasks',
-        name: 'scheduled-tasks',
-        component: () => import('../pages/ScheduledTasksPage.vue'),
-      },
-      {
-        path: 'discovery',
-        name: 'discovery',
-        component: () => import('../pages/DiscoveryPage.vue'),
-      },
-      { path: 'monitors', name: 'monitors', component: () => import('../pages/MonitorsPage.vue') },
-      {
-        path: 'monitors/:id',
-        name: 'monitor-detail',
-        component: () => import('../pages/MonitorDetailPage.vue'),
-      },
-      { path: 'alerts', name: 'alerts', component: () => import('../pages/AlertsPage.vue') },
-      {
-        path: 'maintenance-windows',
-        name: 'maintenance-windows',
-        component: () => import('../pages/MaintenanceWindowsPage.vue'),
-      },
-      { path: 'events', name: 'events', component: () => import('../pages/EventsPage.vue') },
-      { path: 'logs', name: 'logs', component: () => import('../pages/LogsPage.vue') },
-      {
-        path: 'docker',
-        component: () => import('../pages/docker/DockerLayout.vue'),
-        children: [
-          {
-            path: '',
-            name: 'docker-overview',
-            component: () => import('../pages/docker/DockerOverviewPage.vue'),
-          },
-          {
-            path: 'containers',
-            name: 'docker-containers',
-            component: () => import('../pages/docker/DockerContainersPage.vue'),
-          },
-          {
-            path: 'volumes',
-            name: 'docker-volumes',
-            component: () => import('../pages/docker/DockerVolumesPage.vue'),
-          },
-          {
-            path: 'networks',
-            name: 'docker-networks',
-            component: () => import('../pages/docker/DockerNetworksPage.vue'),
-          },
-          {
-            path: 'images',
-            name: 'docker-images',
-            component: () => import('../pages/docker/DockerImagesPage.vue'),
-          },
-          {
-            path: 'compose',
-            name: 'docker-compose',
-            component: () => import('../pages/docker/DockerComposePage.vue'),
-          },
-          {
-            path: 'history',
-            name: 'docker-history',
-            component: () => import('../pages/docker/DockerHistoryPage.vue'),
-          },
-        ],
-      },
-      {
-        path: 'remote-servers',
-        name: 'remote-servers',
-        component: () => import('../pages/remote-servers/RemoteServersPage.vue'),
-      },
-      { path: 'agents', redirect: '/remote-servers' },
-      { path: 'probes', name: 'probes', component: () => import('../pages/ProbesPage.vue') },
-      {
-        path: 'vpn',
-        name: 'vpn-server',
-        component: () => import('../pages/vpn/VpnServerPage.vue'),
-      },
-      {
-        path: 'vpn/devices',
-        name: 'vpn-devices',
-        component: () => import('../pages/vpn/VpnDevicesPage.vue'),
-      },
-      {
-        path: 'ai-chat',
-        name: 'ai-chat',
-        component: () => import('../pages/AiChatPage.vue'),
-        meta: { fullBleed: true },
-      },
-      { path: 'settings', name: 'settings', component: () => import('../pages/SettingsPage.vue') },
-      {
-        path: 'ai-benchmark',
-        name: 'decider-benchmark',
-        component: () => import('../pages/DeciderBenchmarkPage.vue'),
-      },
-      {
-        path: 'users',
-        name: 'users',
-        component: () => import('../pages/UsersPage.vue'),
-        meta: { requiresAdmin: true },
-      },
-      {
-        path: 'audit',
-        name: 'audit',
-        component: () => import('../pages/AuditPage.vue'),
-        meta: { requiresAdmin: true },
-      },
-      {
-        path: 'backup',
-        name: 'backup',
-        component: () => import('../pages/BackupPage.vue'),
-        meta: { requiresAdmin: true },
-      },
-      // Endereços antigos, de antes de o backup virar uma tela só.
-      { path: 'storages', redirect: { name: 'backup', query: { tab: 'destinos' } } },
-      { path: 'databases', redirect: { name: 'backup' } },
-      {
-        path: 'apps/:id',
-        name: 'plugin-app',
-        component: () => import('../pages/PluginAppPage.vue'),
-      },
-      {
-        path: 'plugins',
-        name: 'plugins',
-        component: () => import('../pages/PluginsPage.vue'),
-        meta: { requiresAdmin: true },
-      },
-    ],
+    component: () => import('@/layouts/DefaultLayout.vue'),
+    // As rotas vêm das áreas (`src/areas/*`), cada uma com `meta.area`.
+    children: AREA_ROUTES,
   },
 ]
 
@@ -182,7 +34,8 @@ export const router = createRouter({
  * Três destinos possíveis para quem chega, nesta ordem:
  *
  * 1. **Autenticado** — segue para onde pediu; login e cadastro inicial viram
- *    dashboard, porque não há o que fazer neles com sessão aberta.
+ *    dashboard, porque não há o que fazer neles com sessão aberta. Rota de
+ *    área desligada vira a `AreaOffPage`.
  * 2. **Instalação pendente** (banco sem nenhum usuário) — vai para `/setup`.
  *    Mandar para o login seria pedir uma credencial que ainda não existe, que
  *    é exatamente o beco sem saída de uma instalação nova.
@@ -198,7 +51,9 @@ router.beforeEach(async (to) => {
       await auth.fetchMe()
       if (!auth.isAdmin) return { name: 'dashboard' }
     }
-    return true
+    // Área desligada: a página que explica e oferece ligar, nunca um 404.
+    const areas = useAreasStore()
+    return areaOffRedirect(to, areas.isEnabled, auth.hasAccess) ?? true
   }
 
   if (await auth.ensureSetupStatus()) {
@@ -209,4 +64,9 @@ router.beforeEach(async (to) => {
   if (to.name === 'setup') return { name: 'login' }
   if (!to.meta.public) return { name: 'login', query: { redirect: to.fullPath } }
   return true
+})
+
+/** A área da página aberta: o `canWrite` vale o papel do usuário nela (ADR 019). */
+router.afterEach((to) => {
+  useAuthStore().currentArea = areaOfRoute(to) ?? 'core'
 })

@@ -150,6 +150,7 @@
 import { computed, ref, watch } from 'vue'
 import { useAlertsStore, type AlertRuleScope, type AlertRuleTemplate } from '@/stores/alerts'
 import { useDevicesStore } from '@/stores/devices'
+import { useAreasStore } from '@/stores/areas'
 import { describeRule, severityColor, severityLabel } from '@/utils/alertPresentation'
 
 /**
@@ -187,6 +188,7 @@ const emit = defineEmits<{
 
 const alertsStore = useAlertsStore()
 const devicesStore = useDevicesStore()
+const areasStore = useAreasStore()
 const selected = ref<string[]>([])
 
 /** `null` = todos os dispositivos, que é o padrão ao abrir por `/alerts`. */
@@ -214,11 +216,16 @@ interface TemplateGroup {
   templates: AlertRuleTemplate[]
 }
 
+/** Modelos de área desligada não aparecem (ADR 017); sem área, são do núcleo. */
+const visibleTemplates = computed(() =>
+  alertsStore.ruleTemplates.filter((template) => areasStore.isVisible(template.area ?? 'core'))
+)
+
 /** Agrupa por categoria preservando a ordem em que o backend enviou */
 const groups = computed<TemplateGroup[]>(() => {
   const byCategory = new Map<string, AlertRuleTemplate[]>()
 
-  for (const template of alertsStore.ruleTemplates) {
+  for (const template of visibleTemplates.value) {
     const bucket = byCategory.get(template.category)
     if (bucket) bucket.push(template)
     else byCategory.set(template.category, [template])
@@ -232,7 +239,7 @@ const groups = computed<TemplateGroup[]>(() => {
 })
 
 const pendingRecommended = computed(() =>
-  alertsStore.ruleTemplates.filter((template) => template.recommended && !bloqueado(template))
+  visibleTemplates.value.filter((template) => template.recommended && !bloqueado(template))
 )
 
 watch(
@@ -245,7 +252,7 @@ watch(
       if (devicesStore.devices.length === 0) void devicesStore.fetchDevices()
     }
     await alertsStore.fetchRuleCatalog(escopoEfetivo.value)
-    const sugerido = alertsStore.ruleTemplates.find((item) => item.key === props.preselectKey)
+    const sugerido = visibleTemplates.value.find((item) => item.key === props.preselectKey)
     if (sugerido && !bloqueado(sugerido)) selected.value = [sugerido.key]
   }
 )

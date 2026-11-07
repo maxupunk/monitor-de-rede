@@ -4,6 +4,12 @@ Um arquivo por defeito corrigido, com o que estava errado, por que estava errado
 foi feito e como foi validado. Diferente dos ADRs (`docs/adr/`), que registram **decisões
 de arquitetura**: aqui ficam os **defeitos** — inclusive os que só apareceram em produção.
 
+## 2026-11-07 — Endereço de rede oferecido como aparelho na descoberta
+
+| # | Correção | Severidade |
+|---|---|---|
+| [01](2026-11-07-01-host-fora-da-faixa-na-descoberta.md) | A tabela ARP do roteador (SNMP), o mDNS e o SSDP entravam sem o filtro da faixa — rede, broadcast e outras sub-redes viravam host | média |
+
 ## 2026-09-09 — Investigação a partir do relato de deslogamento e da duplicata `pppoe-wan`
 
 O relato inicial ("ao logar, poucos segundos e desloga") e o segundo ("duas `pppoe-wan` no

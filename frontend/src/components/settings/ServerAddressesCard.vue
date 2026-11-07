@@ -36,20 +36,22 @@
       </v-list>
     </v-card-text>
     <v-card-actions class="justify-end">
-      <v-btn color="primary" variant="tonal" @click="emit('open-dialog')">
+      <v-btn color="primary" variant="tonal" @click="dialog = true">
         <v-icon start>mdi-pencil-outline</v-icon>
         Gerenciar endereços
       </v-btn>
     </v-card-actions>
+    <ServerAddressesDialog v-model="dialog" />
   </v-card>
 </template>
 
 <script setup lang="ts">
+import { onMounted, ref } from 'vue'
+import ServerAddressesDialog from '@/components/ServerAddressesDialog.vue'
 import { useServerAddressesStore, addressIcon, addressColor } from '@/stores/serverAddresses'
 
-const emit = defineEmits<{
-  'open-dialog': []
-}>()
-
 const addressesStore = useServerAddressesStore()
+const dialog = ref(false)
+
+onMounted(() => void addressesStore.fetchAll())
 </script>

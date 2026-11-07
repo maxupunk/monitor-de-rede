@@ -38,7 +38,7 @@
               color="primary"
               rounded="lg"
               class="mb-1 font-weight-medium"
-              @click="item.click ? item.click() : undefined"
+              @click="item.action ? runAction(item.action) : undefined"
             />
 
             <v-list-group v-else :value="item.title">
@@ -62,18 +62,30 @@
                 color="primary"
                 rounded="lg"
                 class="mb-1 font-weight-medium pl-6"
-                @click="sub.click ? sub.click() : undefined"
+                @click="sub.action ? runAction(sub.action) : undefined"
               />
             </v-list-group>
           </template>
         </template>
       </v-list>
       <template #append>
+        <div class="px-3 pb-2">
+          <v-btn
+            block
+            color="primary"
+            variant="tonal"
+            prepend-icon="mdi-menu-open"
+            @click="menuDialog = true"
+          >
+            Personalizar menu
+          </v-btn>
+        </div>
         <div class="app-footer-bar justify-center px-4 text-caption text-grey border-t">
           &copy; 2026 Master Sistemas
         </div>
       </template>
     </v-navigation-drawer>
+    <MenuCustomizeDialog v-model="menuDialog" :base-sections="baseNavSections" />
 
     <!-- App Bar Superior -->
     <v-app-bar flat border="b" density="comfortable" class="px-2 pwa-app-bar">
@@ -209,6 +221,7 @@
         >
           Modo somente visualização: você pode consultar os dados, mas alterações estão desativadas.
         </v-alert>
+        <AreaSuggestions class="mb-4" />
         <router-view />
       </v-container>
     </v-main>
@@ -274,29 +287,16 @@ import DiagnosticPlaybookDialog from '@/components/DiagnosticPlaybookDialog.vue'
 import AiChatDrawer from '@/components/ai/AiChatDrawer.vue'
 import PluginApprovalDialog from '@/components/plugins/PluginApprovalDialog.vue'
 import AiApprovalNotice from '@/components/ai/AiApprovalNotice.vue'
+import AreaSuggestions from '@/components/areas/AreaSuggestions.vue'
 import { useAiStore } from '@/stores/ai'
 import { usePluginAppsStore } from '@/stores/pluginApps'
-
-interface NavSubItem {
-  title: string
-  icon: string
-  to?: string
-  click?: () => void
-}
-
-interface NavItem {
-  title: string
-  icon: string
-  to?: string
-  click?: () => void
-  children?: NavSubItem[]
-}
-
-/** Bloco do menu com título; seções sem itens (ex.: sem permissão) somem. */
-interface NavSection {
-  title: string
-  items: NavItem[]
-}
+import { buildBaseSections, buildNavSections, groupOfPath, type NavAction } from '@/navigation'
+import MenuCustomizeDialog from '@/components/menu/MenuCustomizeDialog.vue'
+import { useMenuPrefsStore } from '@/stores/menuPrefs'
+import { NAV_ENTRIES } from '@/areas'
+import { installAreaRealtime } from '@/areas/realtime'
+import { useAreasStore } from '@/stores/areas'
+import { areaOffRedirect } from '@/router/areaGuard'
 
 const display = useDisplay()
 const drawer = ref(!display.mdAndDown.value)
@@ -307,6 +307,8 @@ const aiStore = useAiStore()
 const pluginAppsStore = usePluginAppsStore()
 const eventsStore = useEventsStore()
 const authStore = useAuthStore()
+const areasStore = useAreasStore()
+const menuPrefsStore = useMenuPrefsStore()
 const onboardingStore = useOnboardingStore()
 const router = useRouter()
 const route = useRoute()
@@ -342,172 +344,59 @@ async function handleNotificationClick() {
   }
 }
 
+/** O menu vem das áreas (`src/areas`); o layout só executa as ações. */
+const navContext = computed(() => ({
+  isAdmin: authStore.isAdmin,
+  apps: pluginAppsStore.apps,
+  canInstallPwa: canInstall.value && !isInstalled.value,
+  enabledAreas: areasStore.visibleAreas,
+}))
+/** O menu de áreas e papéis — o que o usuário pode personalizar. */
+const baseNavSections = computed(() => buildBaseSections(navContext.value, NAV_ENTRIES))
+/** O menu desenhado: o de áreas e papéis com o menu pessoal aplicado (Fase 16). */
+const navSections = computed(() =>
+  buildNavSections({ ...navContext.value, menu: menuPrefsStore.prefs }, NAV_ENTRIES)
+)
+const menuDialog = ref(false)
+
 /*
- * O menu é lido de cima para baixo pela frequência de uso: o que se consulta o
- * dia todo (painel, topologia, alertas) vem primeiro; as ferramentas de
- * investigação logo depois — Diagnóstico à frente, por ser a mais usada —; a
- * infraestrutura que se configura uma vez e a administração ficam no fim.
+ * A área da página aberta desligou (aqui ou em outra aba, pelo SSE): a página
+ * dá lugar à que explica e oferece ligar — o mesmo destino do guard.
  */
-const navSections = computed<NavSection[]>(() =>
-  [
-    {
-      title: 'Monitoramento',
-      items: [
-        { title: 'Dashboard', icon: 'mdi-view-dashboard', to: '/' },
-        { title: 'Topologia', icon: 'mdi-sitemap', to: '/topology' },
-        { title: 'Dispositivos', icon: 'mdi-devices', to: '/devices' },
-        { title: 'Monitores', icon: 'mdi-heart-pulse', to: '/monitors' },
-        { title: 'Alertas', icon: 'mdi-bell-outline', to: '/alerts' },
-        { title: 'Eventos', icon: 'mdi-history', to: '/events' },
-        { title: 'Logs', icon: 'mdi-text-box-search-outline', to: '/logs' },
-      ],
-    },
-    {
-      title: 'Ferramentas',
-      items: [
-        {
-          title: 'Diagnóstico',
-          icon: 'mdi-stethoscope',
-          children: [
-            { title: 'Assistente IA', icon: 'mdi-robot-outline', to: '/ai-chat' },
-            {
-              title: 'Playbooks',
-              icon: 'mdi-clipboard-play-outline',
-              click: () => {
-                playbookDialog.value = true
-              },
-            },
-            {
-              title: 'Traceroute ICMP',
-              icon: 'mdi-routes',
-              click: () => {
-                tracerouteDialog.value = true
-              },
-            },
-            {
-              // "Testes de velocidade" (Rede) mede entre equipamentos; este mede do navegador.
-              title: 'Velocidade do navegador',
-              icon: 'mdi-speedometer-medium',
-              click: () => {
-                speedTestDialog.value = true
-              },
-            },
-            { title: 'Benchmark dos modelos', icon: 'mdi-podium', to: '/ai-benchmark' },
-          ],
-        },
-        /*
-         * A rede monitorada: as faixas IP ficam ao lado da varredura que as usa.
-         * Servidores DNS e endereços deste servidor são configuração do próprio
-         * NetMonitor — moram em Configurações › Rede, não aqui.
-         */
-        {
-          title: 'Rede',
-          icon: 'mdi-lan',
-          children: [
-            { title: 'Descoberta', icon: 'mdi-radar', to: '/discovery' },
-            { title: 'Redes IP', icon: 'mdi-ip-network-outline', to: '/networks' },
-            { title: 'Sites', icon: 'mdi-domain', to: '/sites' },
-            { title: 'Testes de velocidade', icon: 'mdi-speedometer', to: '/link-tests' },
-            { title: 'Sinais Wi-Fi', icon: 'mdi-wifi', to: '/wifi' },
-          ],
-        },
-        {
-          title: 'Docker',
-          icon: 'mdi-docker',
-          children: [
-            { title: 'Visão geral', icon: 'mdi-view-dashboard-outline', to: '/docker' },
-            { title: 'Containers', icon: 'mdi-cube-outline', to: '/docker/containers' },
-            { title: 'Volumes', icon: 'mdi-database-outline', to: '/docker/volumes' },
-            { title: 'Redes', icon: 'mdi-lan', to: '/docker/networks' },
-            { title: 'Imagens', icon: 'mdi-layers-outline', to: '/docker/images' },
-            { title: 'Projetos', icon: 'mdi-file-cabinet', to: '/docker/compose' },
-            { title: 'Histórico', icon: 'mdi-chart-timeline-variant', to: '/docker/history' },
-          ],
-        },
-        ...(pluginAppsStore.apps.length > 0
-          ? [
-              {
-                title: 'Aplicativos',
-                icon: 'mdi-apps',
-                children: pluginAppsStore.apps.map((app) => ({
-                  title: app.title,
-                  icon: app.icon,
-                  to: '/apps/' + app.id,
-                })),
-              },
-            ]
-          : []),
-      ],
-    },
-    {
-      title: 'Infraestrutura',
-      items: [
-        // Quem mede de fora da central.
-        {
-          title: 'Coleta remota',
-          icon: 'mdi-server-network',
-          children: [
-            { title: 'Servidores remotos', icon: 'mdi-server', to: '/remote-servers' },
-            { title: 'Sondas de rede', icon: 'mdi-access-point-network', to: '/probes' },
-          ],
-        },
-        {
-          title: 'VPN WireGuard',
-          icon: 'mdi-shield-lock-outline',
-          children: [
-            { title: 'Servidor VPN', icon: 'mdi-server-security', to: '/vpn' },
-            { title: 'Dispositivos VPN', icon: 'mdi-lan-connect', to: '/vpn/devices' },
-          ],
-        },
-        { title: 'Manutenção', icon: 'mdi-wrench-clock', to: '/maintenance-windows' },
-        { title: 'Tarefas agendadas', icon: 'mdi-calendar-clock', to: '/scheduled-tasks' },
-      ],
-    },
-    {
-      title: 'Administração',
-      items: [
-        ...(authStore.isAdmin
-          ? [
-              { title: 'Usuários e acessos', icon: 'mdi-account-multiple-outline', to: '/users' },
-              { title: 'Trilha de auditoria', icon: 'mdi-shield-account-outline', to: '/audit' },
-              { title: 'Plugins de dispositivo', icon: 'mdi-puzzle-outline', to: '/plugins' },
-              { title: 'Backup', icon: 'mdi-backup-restore', to: '/backup' },
-            ]
-          : []),
-        { title: 'Configurações', icon: 'mdi-cog', to: '/settings' },
-        ...(canInstall.value && !isInstalled.value
-          ? [
-              {
-                title: 'Instalar aplicativo',
-                icon: 'mdi-cellphone-arrow-down',
-                click: () => {
-                  void promptInstall()
-                },
-              },
-            ]
-          : []),
-      ],
-    },
-  ].filter((section) => section.items.length > 0)
+watch(
+  () => areasStore.visibleAreas,
+  () => {
+    const target = areaOffRedirect(route, areasStore.isEnabled, authStore.hasAccess)
+    if (target) void router.replace(target)
+  }
 )
 
-const navItems = computed<NavItem[]>(() => navSections.value.flatMap((section) => section.items))
+const ACTIONS: Record<NavAction, () => void> = {
+  playbook: () => {
+    playbookDialog.value = true
+  },
+  traceroute: () => {
+    tracerouteDialog.value = true
+  },
+  speedTest: () => {
+    speedTestDialog.value = true
+  },
+  installPwa: () => {
+    void promptInstall()
+  },
+}
+
+function runAction(action: NavAction) {
+  ACTIONS[action]()
+}
 
 /** Grupos abertos no menu; o da página atual abre sozinho ao navegar. */
 const openedGroups = ref<string[]>([])
 
-function groupOf(path: string): string | undefined {
-  return navItems.value.find((item) =>
-    item.children?.some(
-      (child) => child.to && (path === child.to || path.startsWith(child.to + '/'))
-    )
-  )?.title
-}
-
 watch(
   () => route.path,
   (path) => {
-    const group = groupOf(path)
+    const group = groupOfPath(navSections.value, path)
     if (group && !openedGroups.value.includes(group)) {
       openedGroups.value = [...openedGroups.value, group]
     }
@@ -515,8 +404,12 @@ watch(
   { immediate: true }
 )
 
+// As rotas SSE de cada área ligada; antes do `connect`, para o snapshot inicial.
+let uninstallAreaRealtime: (() => void) | null = null
+
 onMounted(() => {
   void authStore.fetchMe()
+  uninstallAreaRealtime = installAreaRealtime()
   eventsStore.connect()
   void onboardingStore.checkAndOpenIfNeeded()
   void pluginAppsStore.fetchApps()
@@ -524,6 +417,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   eventsStore.disconnect()
+  uninstallAreaRealtime?.()
 })
 
 async function handleLogout() {

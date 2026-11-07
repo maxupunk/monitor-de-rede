@@ -5,20 +5,20 @@
 //! 1 do contrato HTTP é a página 0 do `Paginator`, e que `total` conta o
 //! conjunto inteiro, não a página.
 
-use backend::{
-    app::App,
-    models::_entities::users,
-    services::shared::pagination::{normalize_limit, paginate},
-};
+use backend::app::App;
+
+use netmonitor_core::models::_entities::users;
+
 use loco_rs::testing::prelude::*;
+use netmonitor_nucleo::services::shared::pagination::{normalize_limit, paginate};
 use sea_orm::EntityTrait;
 use serial_test::serial;
 
 async fn semeie_usuarios(db: &sea_orm::DatabaseConnection, quantidade: usize) {
     for i in 0..quantidade {
-        backend::models::users::Model::create_with_password(
+        netmonitor_core::models::users::Model::create_with_password(
             db,
-            &backend::models::users::RegisterParams {
+            &netmonitor_core::models::users::RegisterParams {
                 email: format!("paginacao{i}@exemplo.com"),
                 password: "Senha1234".to_string(),
                 name: format!("Usuário {i}"),

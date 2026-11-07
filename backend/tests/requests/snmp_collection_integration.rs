@@ -4,24 +4,27 @@
 //! relay entre processos, transição de status de dispositivo, janela por
 //! monitor na apresentação e o ciclo do scheduler.
 
-use backend::{
-    app::App,
-    models::{device_interfaces, devices, metrics, monitor_results, monitors, networks, sites},
-    services::{
-        discovery::queue,
-        events::{
-            relay::{relay_pending, RELAY_BATCH_SIZE},
-            EventBus,
-        },
-        monitoring::{
-            device_status::{self, DeviceStatus},
-            metrics_repository,
-            presenter::{present_monitors, RECENT_RESULTS_LIMIT},
-        },
-    },
+use backend::app::App;
+
+use netmonitor_core::models::{
+    device_interfaces, devices, metrics, monitor_results, monitors, networks, sites,
 };
+
+use netmonitor_network::discovery::queue;
+
 use chrono::Utc;
 use loco_rs::testing::prelude::*;
+use netmonitor_nucleo::{
+    services::events::{
+        relay::{relay_pending, RELAY_BATCH_SIZE},
+        EventBus,
+    },
+    services::monitoring::{
+        device_status::{self, DeviceStatus},
+        metrics_repository,
+        presenter::{present_monitors, RECENT_RESULTS_LIMIT},
+    },
+};
 use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 use serial_test::serial;
 
@@ -175,18 +178,20 @@ async fn o_relay_so_trabalha_com_assinante_e_entrega_evento_de_outro_processo() 
 
     // Um processo diferente gravou backlog maior que uma passada.
     let backlog = (0..=RELAY_BATCH_SIZE)
-        .map(|monitor_id| backend::models::event_outbox::ActiveModel {
-            r#type: Set("monitor:result".into()),
-            origin: Set("outro-processo".into()),
-            payload: Set(serde_json::json!({
-                "type": "monitor:result",
-                "data": { "monitorId": monitor_id },
-                "timestamp": Utc::now().to_rfc3339(),
-            })),
-            ..Default::default()
-        })
+        .map(
+            |monitor_id| netmonitor_core::models::event_outbox::ActiveModel {
+                r#type: Set("monitor:result".into()),
+                origin: Set("outro-processo".into()),
+                payload: Set(serde_json::json!({
+                    "type": "monitor:result",
+                    "data": { "monitorId": monitor_id },
+                    "timestamp": Utc::now().to_rfc3339(),
+                })),
+                ..Default::default()
+            },
+        )
         .collect::<Vec<_>>();
-    backend::models::event_outbox::Entity::insert_many(backlog)
+    netmonitor_core::models::event_outbox::Entity::insert_many(backlog)
         .exec(&ctx.db)
         .await
         .expect("gravar no outbox");
@@ -351,7 +356,7 @@ async fn run_abandonada_e_fechada_e_libera_a_rede() {
         .await
         .expect("enfileirar");
     // Simula o processo que morreu no meio da varredura, 20 min atrás.
-    backend::models::discovery_runs::ActiveModel {
+    netmonitor_core::models::discovery_runs::ActiveModel {
         id: Set(run.id),
         status: Set("running".into()),
         started_at: Set((Utc::now() - chrono::Duration::minutes(20)).into()),
@@ -367,7 +372,7 @@ async fn run_abandonada_e_fechada_e_libera_a_rede() {
     assert!(!ja_existia, "a run órfã continuou bloqueando a rede");
     assert_ne!(nova.id, run.id);
 
-    let orfa = backend::models::discovery_runs::Entity::find_by_id(run.id)
+    let orfa = netmonitor_core::models::discovery_runs::Entity::find_by_id(run.id)
         .one(db)
         .await
         .unwrap()
@@ -396,7 +401,7 @@ async fn dois_cliques_em_escanear_nao_viram_duas_varreduras() {
     assert_eq!(primeira.id, segunda.id);
 
     // Mesmo com a run já em curso, o clique devolve a existente.
-    backend::models::discovery_runs::ActiveModel {
+    netmonitor_core::models::discovery_runs::ActiveModel {
         id: Set(primeira.id),
         status: Set("running".into()),
         started_at: Set(Utc::now().into()),
@@ -475,7 +480,7 @@ async fn o_scheduler_reserva_o_monitor_antes_de_executar() {
 #[tokio::test]
 #[serial]
 async fn discovery_results_e_cache_e_nao_acumula_entre_execucoes() {
-    use backend::models::discovery_results;
+    use netmonitor_core::models::discovery_results;
     use sea_orm::{ColumnTrait, QueryFilter};
 
     let boot = boot_test::<App>().await.expect("subir app de teste");
@@ -508,7 +513,8 @@ async fn discovery_results_e_cache_e_nao_acumula_entre_execucoes() {
     let contar = || async {
         discovery_results::Entity::find()
             .filter(
-                backend::models::_entities::discovery_results::Column::DiscoveryRunId.eq(run.id),
+                netmonitor_core::models::_entities::discovery_results::Column::DiscoveryRunId
+                    .eq(run.id),
             )
             .all(db)
             .await
@@ -520,14 +526,20 @@ async fn discovery_results_e_cache_e_nao_acumula_entre_execucoes() {
     // Uma reexecução limpa a run antes de gravar: o host que saiu da rede não
     // pode continuar aparecendo na tela de descoberta.
     discovery_results::Entity::delete_many()
-        .filter(backend::models::_entities::discovery_results::Column::DiscoveryRunId.eq(run.id))
+        .filter(
+            netmonitor_core::models::_entities::discovery_results::Column::DiscoveryRunId
+                .eq(run.id),
+        )
         .exec(db)
         .await
         .expect("limpar cache");
     semear("10.20.0.9").await;
 
     let restantes = discovery_results::Entity::find()
-        .filter(backend::models::_entities::discovery_results::Column::DiscoveryRunId.eq(run.id))
+        .filter(
+            netmonitor_core::models::_entities::discovery_results::Column::DiscoveryRunId
+                .eq(run.id),
+        )
         .all(db)
         .await
         .expect("listar");
@@ -579,9 +591,10 @@ async fn o_endpoint_de_scan_apenas_enfileira() {
         // Nenhum resultado foi produzido — a varredura é do scheduler.
         use sea_orm::{ColumnTrait, QueryFilter};
         let run_id = corpo["run"]["id"].as_i64().unwrap();
-        let resultados = backend::models::discovery_results::Entity::find()
+        let resultados = netmonitor_core::models::discovery_results::Entity::find()
             .filter(
-                backend::models::_entities::discovery_results::Column::DiscoveryRunId.eq(run_id),
+                netmonitor_core::models::_entities::discovery_results::Column::DiscoveryRunId
+                    .eq(run_id),
             )
             .all(&ctx.db)
             .await
@@ -604,7 +617,7 @@ async fn o_endpoint_de_scan_apenas_enfileira() {
 #[tokio::test]
 #[serial]
 async fn metricas_e_eventos_do_dispositivo_saem_no_formato_brasileiro() {
-    use backend::models::{alert_events, metrics};
+    use netmonitor_core::models::{alert_events, metrics};
 
     request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
         let session = super::prepare_data::init_user_login(&request, &ctx).await;
@@ -686,7 +699,7 @@ fn regex_lite_data() -> impl Fn(&str) -> bool {
 #[tokio::test]
 #[serial]
 async fn admin_status_escolhido_pelo_operador_sobrevive_ao_poll() {
-    use backend::services::snmp::{collectors::SnmpInterface, service::sync_interface};
+    use netmonitor_network::snmp::{collectors::SnmpInterface, service::sync_interface};
 
     let boot = boot_test::<App>().await.expect("subir app de teste");
     let db = &boot.app_context.db;
@@ -713,7 +726,7 @@ async fn admin_status_escolhido_pelo_operador_sobrevive_ao_poll() {
     assert_eq!(criada.interface.admin_status.as_deref(), Some("up"));
 
     // O operador desliga o monitoramento daquela porta.
-    backend::models::device_interfaces::ActiveModel {
+    netmonitor_core::models::device_interfaces::ActiveModel {
         id: Set(criada.interface.id),
         admin_status: Set(Some("down".into())),
         ..Default::default()
@@ -724,11 +737,12 @@ async fn admin_status_escolhido_pelo_operador_sobrevive_ao_poll() {
 
     // Recarrega a interface atualizada para simular o que o poll faz ao carregar
     // interfaces existentes em lote antes de chamar `sync_interface`.
-    let atualizada = backend::models::device_interfaces::Entity::find_by_id(criada.interface.id)
-        .one(db)
-        .await
-        .expect("buscar interface atualizada")
-        .expect("interface existe");
+    let atualizada =
+        netmonitor_core::models::device_interfaces::Entity::find_by_id(criada.interface.id)
+            .one(db)
+            .await
+            .expect("buscar interface atualizada")
+            .expect("interface existe");
 
     // Poll seguinte: o agente continua dizendo "up", mas a escolha prevalece.
     let repolada = sync_interface(db, device.id, &lida(2), Some(&atualizada), None)
@@ -752,7 +766,7 @@ async fn admin_status_escolhido_pelo_operador_sobrevive_ao_poll() {
 #[tokio::test]
 #[serial]
 async fn a_leitura_dos_contadores_fica_na_interface_e_serve_de_base_para_a_proxima() {
-    use backend::services::snmp::{
+    use netmonitor_network::snmp::{
         collectors::{InterfaceTraffic, SnmpInterface},
         service::sync_interface,
     };
@@ -825,7 +839,7 @@ async fn a_leitura_dos_contadores_fica_na_interface_e_serve_de_base_para_a_proxi
 #[tokio::test]
 #[serial]
 async fn a_interface_so_conta_como_monitorada_quando_tem_monitor_habilitado() {
-    use backend::services::snmp::{
+    use netmonitor_network::snmp::{
         client::SnmpConfig,
         collectors::SnmpInterface,
         service::{

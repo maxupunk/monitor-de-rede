@@ -1,8 +1,10 @@
 //! Backup e restauração das configurações.
 
-use backend::{app::App, models::_entities::monitor_results};
+use backend::app::App;
+
 use chrono::Utc;
 use loco_rs::{testing::prelude::*, TestServer};
+use netmonitor_core::models::_entities::monitor_results;
 use sea_orm::{ActiveModelTrait, EntityTrait, PaginatorTrait, Set};
 use serial_test::serial;
 
@@ -173,7 +175,7 @@ async fn restaurar_nao_derruba_a_sessao_nem_apaga_usuarios() {
 
         // Mesmo token, mesma sessão.
         assert_eq!(request.get("/api/sites").await.status_code(), 200);
-        let usuarios = backend::models::users::Entity::find()
+        let usuarios = netmonitor_core::models::users::Entity::find()
             .count(&ctx.db)
             .await
             .unwrap();

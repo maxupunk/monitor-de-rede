@@ -3,4 +3,8 @@
 /**
  * Resposta de status para o assistente de configuração.
  */
-export type OnboardingStatus = { completed: boolean, completedAt: string | null, needsOnboarding: boolean, sitesCount: number, networksCount: number, dnsServersCount: number, vpnConfigured: boolean, detectedLanIp: string | null, detectedPublicIp: string | null, };
+export type OnboardingStatus = { completed: boolean, completedAt: string | null, needsOnboarding: boolean, 
+/**
+ * A escolha das áreas (primeira etapa) já foi feita.
+ */
+intentChosen: boolean, sitesCount: number, networksCount: number, dnsServersCount: number, vpnConfigured: boolean, detectedLanIp: string | null, detectedPublicIp: string | null, };

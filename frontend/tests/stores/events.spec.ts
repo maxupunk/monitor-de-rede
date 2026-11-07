@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import { installAreaRealtime } from '@/areas/realtime'
 import { apiService } from '@/services/apiService'
 import { useDeviceDetailStore } from '@/stores/deviceDetail'
 import { useEventsStore } from '@/stores/events'
@@ -29,6 +30,8 @@ class FakeEventSource {
 describe('events store', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    // As rotas SSE das áreas ligadas, como o layout instala.
+    installAreaRealtime()
     FakeEventSource.latest = null
     vi.stubGlobal('EventSource', FakeEventSource)
     vi.stubGlobal('localStorage', {

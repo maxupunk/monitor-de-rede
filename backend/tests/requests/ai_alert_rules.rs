@@ -2,34 +2,37 @@
 //! cada regra, e criar/excluir só depois da confirmação — pelo mesmo serviço
 //! da tela.
 
-use backend::{
-    app::App,
-    models::_entities::{alert_events, alert_rules, audit_logs, devices},
-    services::{
-        ai::harness::tools::{ToolArgs, ToolPolicy, ToolRegistry},
-        audit::AuditActor,
-    },
-};
+use backend::app::App;
+
+use netmonitor_core::models::_entities::{alert_events, alert_rules, audit_logs, devices};
+
+use netmonitor_assistant::harness::tools::{ToolArgs, ToolPolicy, ToolRegistry};
+
 use chrono::{Duration, Utc};
 use loco_rs::{prelude::AppContext, testing::prelude::*};
+use netmonitor_nucleo::services::audit::AuditActor;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, Set};
 use serde_json::json;
 use serial_test::serial;
 
 const COM_ACOES: ToolPolicy = ToolPolicy {
     allow_active: false,
-    actions: backend::services::ai::settings::AiAutomationMode::Confirm,
+    actions: netmonitor_assistant::settings::AiAutomationMode::Confirm,
     confirm_active: false,
     interactive: true,
-    container_actions: backend::services::ai::settings::AiAutomationMode::Off,
+    container_actions: netmonitor_assistant::settings::AiAutomationMode::Off,
+    areas: netmonitor_core::areas::AreaSet::ALL,
+    writable: netmonitor_core::areas::AreaSet::ALL,
 };
 
 const SO_LEITURA: ToolPolicy = ToolPolicy {
     allow_active: false,
-    actions: backend::services::ai::settings::AiAutomationMode::Off,
+    actions: netmonitor_assistant::settings::AiAutomationMode::Off,
     confirm_active: false,
     interactive: true,
-    container_actions: backend::services::ai::settings::AiAutomationMode::Off,
+    container_actions: netmonitor_assistant::settings::AiAutomationMode::Off,
+    areas: netmonitor_core::areas::AreaSet::ALL,
+    writable: netmonitor_core::areas::AreaSet::ALL,
 };
 
 async fn aparelho(ctx: &AppContext) -> devices::Model {

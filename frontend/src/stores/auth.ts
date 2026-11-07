@@ -1,13 +1,27 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { apiService } from '@/services/apiService'
-import { roleLabel, type UserRole } from '@/utils/access'
+import type { Area } from '@/bindings/Area'
+import type { MenuPrefs } from '@/bindings/MenuPrefs'
+import {
+  isUserRole,
+  parseAreaRoles,
+  roleCanWrite,
+  roleInArea,
+  roleLabel,
+  type AreaRoles,
+  type UserRole,
+} from '@/utils/access'
 
 export interface User {
   id: number
   email: string
   fullName?: string
   role?: UserRole
+  /** Papel por área (ADR 019); sem a área, sem acesso. */
+  areaRoles?: AreaRoles
+  /** O menu do usuário (Fase 16). */
+  menuPrefs?: MenuPrefs
 }
 
 export interface LoginResponse {
@@ -56,7 +70,30 @@ export const useAuthStore = defineStore('auth', () => {
 
   const isAuthenticated = computed(() => Boolean(token.value))
   const isAdmin = computed(() => user.value?.role === 'admin')
-  const canWrite = computed(() => user.value?.role === 'admin' || user.value?.role === 'operator')
+
+  /** A área da página aberta — o roteador informa a cada navegação. */
+  const currentArea = ref<Area>('core')
+
+  /** O papel do usuário numa área (ADR 019); `null` é sem acesso. */
+  function roleIn(area: Area): UserRole | null {
+    return roleInArea(user.value?.role, user.value?.areaRoles, area)
+  }
+
+  /**
+   * Tem acesso à área? Sem usuário carregado ainda, nada some da tela — a
+   * mesma convenção das áreas sem snapshot; quem garante é o backend (403 e o
+   * SSE filtrado), e o `fetchMe` do layout traz o acesso logo em seguida.
+   */
+  function hasAccess(area: Area): boolean {
+    return !user.value || roleIn(area) !== null
+  }
+
+  /**
+   * Pode mudar algo **aqui**: vale o papel na área da página aberta — leitor
+   * da Rede vê as telas da Rede sem os botões de mudar, mesmo sendo operador
+   * no Núcleo.
+   */
+  const canWrite = computed(() => roleCanWrite(roleIn(currentArea.value)))
   /**
    * Instalar plugin e cadastrar o acesso (credencial) de um equipamento — a
    * mesma régua do `Role::can_manage_plugins` do backend: só administrador.
@@ -145,6 +182,26 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  /**
+   * O acesso deste usuário mudou (`user:access_updated`, pelo SSE): menu,
+   * rotas e botões se ajustam na hora, sem recarregar e sem nova consulta.
+   */
+  function applyAccess(payload: unknown) {
+    if (!user.value || typeof payload !== 'object' || payload === null) return
+    const userId: unknown = Reflect.get(payload, 'userId')
+    if (userId !== user.value.id) return
+    const role: unknown = Reflect.get(payload, 'role')
+    const areaRoles = parseAreaRoles(Reflect.get(payload, 'areaRoles'))
+    user.value = { ...user.value, role: isUserRole(role) ? role : user.value.role, areaRoles }
+    if (token.value) persistAuthSession(token.value, user.value, rememberMe.value)
+  }
+
+  /** Troca o usuário da sessão (e o guardado), mantendo o token. */
+  function updateUser(value: User) {
+    user.value = value
+    if (token.value) persistAuthSession(token.value, value, rememberMe.value)
+  }
+
   async function logout() {
     try {
       if (token.value) await apiService.post('/auth/logout')
@@ -166,6 +223,11 @@ export const useAuthStore = defineStore('auth', () => {
     isAuthenticated,
     isAdmin,
     canWrite,
+    currentArea,
+    roleIn,
+    hasAccess,
+    applyAccess,
+    updateUser,
     canManagePlugins,
     currentRoleLabel,
     clearError,

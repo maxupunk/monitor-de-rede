@@ -1,12 +1,15 @@
 //! Requisições da base CRUD e do motor de monitoramento (Fases 2 e 3).
 
-use backend::{
-    app::App,
-    models::_entities::{monitor_results, monitor_results_hourly, probes},
-    services::monitoring::{rollup::rollup_monitor_results, uptime::uptime_for_monitor},
-};
+use backend::app::App;
+
+use netmonitor_core::models::_entities::{monitor_results, monitor_results_hourly, probes};
+
 use chrono::{Duration, Utc};
 use loco_rs::testing::prelude::*;
+use netmonitor_nucleo::services::monitoring::{
+    rollup::{hourly_buckets, rollup_monitor_results, truncate_to_hour, HourlyBucket},
+    uptime::uptime_for_monitor,
+};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use serial_test::serial;
 
@@ -594,9 +597,7 @@ async fn rollup_agrega_resultados_brutos_em_buckets_horarios() {
         .await
         .unwrap();
 
-        let base = backend::services::monitoring::rollup::truncate_to_hour(
-            Utc::now() - Duration::hours(3),
-        ) + Duration::minutes(10);
+        let base = truncate_to_hour(Utc::now() - Duration::hours(3)) + Duration::minutes(10);
         for sequence in 0..5 {
             let timestamp = base + Duration::minutes(sequence);
             monitor_results::ActiveModel {
@@ -647,6 +648,137 @@ async fn rollup_agrega_resultados_brutos_em_buckets_horarios() {
 
 #[tokio::test]
 #[serial]
+async fn uptime_conta_a_hora_fechada_antes_do_proximo_rollup() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+
+        let monitor = request
+            .post("/api/monitors")
+            .json(&serde_json::json!({
+                "name": "Hora recém-fechada",
+                "type": "ping",
+                "target": "127.0.0.1",
+            }))
+            .await;
+        assert_eq!(monitor.status_code(), 201);
+        let monitor: serde_json::Value = serde_json::from_str(&monitor.text()).unwrap();
+        let monitor_id = monitor["id"].as_i64().unwrap();
+
+        // Um rollup anterior já cobriu horas antigas; a hora que acabou de
+        // fechar ainda espera o próximo ciclo.
+        let hora_atual = truncate_to_hour(Utc::now());
+        for (quando, status) in [
+            (hora_atual - Duration::hours(3) + Duration::minutes(5), "up"),
+            (hora_atual - Duration::minutes(30), "down"),
+        ] {
+            monitor_results::ActiveModel {
+                monitor_id: Set(monitor_id),
+                status: Set(status.into()),
+                started_at: Set(quando.into()),
+                finished_at: Set(quando.into()),
+                duration_ms: Set(1),
+                ..Default::default()
+            }
+            .insert(&ctx.db)
+            .await
+            .unwrap();
+            if quando < hora_atual - Duration::hours(2) {
+                rollup_monitor_results(&ctx.db, hora_atual - Duration::hours(2))
+                    .await
+                    .unwrap();
+            }
+        }
+
+        let antes = uptime_for_monitor(&ctx.db, monitor_id, 24).await.unwrap();
+        assert_eq!((antes.total_checks, antes.down_checks), (2, 1), "{antes:?}");
+
+        rollup_monitor_results(&ctx.db, Utc::now()).await.unwrap();
+        let depois = uptime_for_monitor(&ctx.db, monitor_id, 24).await.unwrap();
+        assert_eq!(
+            (depois.total_checks, depois.down_checks),
+            (2, 1),
+            "bucket e bruto não se somam: {depois:?}"
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn buckets_horarios_incluem_o_que_o_rollup_ainda_nao_agregou() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+
+        let monitor = request
+            .post("/api/monitors")
+            .json(&serde_json::json!({
+                "name": "Buckets da janela",
+                "type": "ping",
+                "target": "127.0.0.1",
+            }))
+            .await;
+        assert_eq!(monitor.status_code(), 201);
+        let monitor: serde_json::Value = serde_json::from_str(&monitor.text()).unwrap();
+        let monitor_id = monitor["id"].as_i64().unwrap();
+
+        let hora_atual = truncate_to_hour(Utc::now());
+        let antiga = hora_atual - Duration::hours(3) + Duration::minutes(5);
+        let recem_fechada = hora_atual - Duration::minutes(30);
+        for (quando, status, latencia) in [(antiga, "up", 10.0), (recem_fechada, "down", 30.0)] {
+            monitor_results::ActiveModel {
+                monitor_id: Set(monitor_id),
+                status: Set(status.into()),
+                started_at: Set(quando.into()),
+                finished_at: Set(quando.into()),
+                duration_ms: Set(1),
+                latency_ms: Set(Some(latencia)),
+                ..Default::default()
+            }
+            .insert(&ctx.db)
+            .await
+            .unwrap();
+            if quando == antiga {
+                rollup_monitor_results(&ctx.db, hora_atual - Duration::hours(2))
+                    .await
+                    .unwrap();
+            }
+        }
+
+        let resumo = |buckets: &[HourlyBucket]| {
+            buckets
+                .iter()
+                .map(|b| (b.bucket, b.total_checks, b.down_checks, b.avg_latency_ms))
+                .collect::<Vec<_>>()
+        };
+        let esperado = vec![
+            (truncate_to_hour(antiga), 1, 0, Some(10.0)),
+            (truncate_to_hour(recem_fechada), 1, 1, Some(30.0)),
+        ];
+        let desde = Utc::now() - Duration::days(7);
+        let antes = hourly_buckets(&ctx.db, monitor_id, desde, Utc::now())
+            .await
+            .unwrap();
+        assert_eq!(
+            resumo(&antes),
+            esperado,
+            "a hora recém-fechada vem do bruto"
+        );
+
+        rollup_monitor_results(&ctx.db, Utc::now()).await.unwrap();
+        let depois = hourly_buckets(&ctx.db, monitor_id, desde, Utc::now())
+            .await
+            .unwrap();
+        assert_eq!(resumo(&depois), esperado, "bucket e bruto não se somam");
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
 async fn rollup_limitado_nao_apaga_o_backlog_ainda_nao_agregado() {
     request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
         let session = prepare_data::init_user_login(&request, &ctx).await;
@@ -663,9 +795,7 @@ async fn rollup_limitado_nao_apaga_o_backlog_ainda_nao_agregado() {
             .await;
         let monitor: serde_json::Value = serde_json::from_str(&monitor.text()).unwrap();
         let monitor_id = monitor["id"].as_i64().unwrap();
-        let base = backend::services::monitoring::rollup::truncate_to_hour(
-            Utc::now() - Duration::hours(200),
-        ) + Duration::minutes(5);
+        let base = truncate_to_hour(Utc::now() - Duration::hours(200)) + Duration::minutes(5);
         let backlog = (0..170)
             .map(|hour| {
                 let timestamp = base + Duration::hours(hour);

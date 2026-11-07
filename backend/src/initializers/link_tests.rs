@@ -17,7 +17,7 @@ use loco_rs::{
     Result,
 };
 
-use crate::services::link_tests::{janitor, LinkTestEnv};
+use netmonitor_network_link_tests::{janitor, LinkTestEnv};
 
 pub struct LinkTestsInitializer;
 

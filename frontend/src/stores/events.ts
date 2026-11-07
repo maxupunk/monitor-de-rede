@@ -1,33 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { apiService } from '@/services/apiService'
-import { useDevicesStore } from './devices'
-import { useAlertsStore, type AlertEvent } from './alerts'
-import type { AiIncidentSummary } from '@/bindings/AiIncidentSummary'
-import type { DeciderTriage } from '@/bindings/DeciderTriage'
-import { useMonitorsStore } from './monitors'
-import { useProbesStore } from './probes'
-import { useDiscoveryStore } from './discovery'
-import { useDeviceDetailStore } from './deviceDetail'
-import { useTopologyStore } from './topology'
-import { useVpnStore } from './vpn'
-import { useMaintenanceWindowsStore } from './maintenanceWindows'
-import { useStoragesStore } from './storages'
-import { useBackupStore } from './backup'
-import { isDatabaseJobSnapshot, useDatabasesStore } from './databases'
-import { useDockerStore } from './docker'
-import { useAgentsStore } from './agents'
-import { useLogsStore } from './logs'
-import { usePluginsStore } from './plugins'
-import { usePluginAppsStore } from './pluginApps'
-import { useLinkTestsStore } from './linkTests'
-import { isScheduledTaskEvent, useScheduledTasksStore } from './scheduledTasks'
-import { isLogTemplateInfo } from '@/utils/logCategories'
-import { isDeciderModelState, useAiDeciderStore } from './aiDecider'
-import { asApprovalResolved, useAiApprovalsStore } from './aiApprovals'
-import { useAiStore } from './ai'
-import { useWifiClientsStore } from './wifiClients'
-import { isWifiDeviceSnapshot, isWifiWatchedSnapshot } from '@/utils/wifiPresentation'
 import { getStoredToken } from '@/utils/authStorage'
 
 export interface RealtimeEventPayload {
@@ -36,6 +9,33 @@ export interface RealtimeEventPayload {
   data: Record<string, unknown>
   timestamp: string
 }
+
+/** O que um handler de domínio recebe além do evento. */
+export interface SseBus {
+  /** Agrupa recargas disparadas em rajada numa chamada só por recurso. */
+  scheduleRefresh(key: string, action: () => void): void
+}
+
+export type SseHandler = (
+  data: Record<string, unknown>,
+  payload: RealtimeEventPayload,
+  bus: SseBus
+) => void
+
+export interface SseRoute {
+  handle: SseHandler
+  /**
+   * Telemetria ao vivo (estado, não notícia): fica fora do feed de eventos.
+   * Uma função decide por evento.
+   */
+  ephemeral?: boolean | ((data: Record<string, unknown>) => boolean)
+}
+
+/**
+ * Rotas de um domínio: o tipo exato (`alert:triggered`) ou um prefixo
+ * terminado em `*` (`docker:*`) → handler.
+ */
+export type SseRoutes = Record<string, SseHandler | SseRoute>
 
 export interface HourlyDistributionBin {
   label: string
@@ -64,7 +64,32 @@ const FEED_LIMIT = 50
 /** Janela de agrupamento para recargas que não podem ser aplicadas em memória */
 const REFRESH_DEBOUNCE_MS = 800
 const MAX_RECONNECT_DELAY_MS = 30_000
+/** Mudanças de interesse em rajada (troca de página) viram uma reconexão só. */
+const INTEREST_DEBOUNCE_MS = 300
 
+interface RegisteredRoute {
+  pattern: string
+  prefix: boolean
+  route: SseRoute
+}
+
+function matches(entry: RegisteredRoute, type: string): boolean {
+  return entry.prefix ? type.startsWith(entry.pattern) : type === entry.pattern
+}
+
+function isEphemeral(entry: RegisteredRoute, data: Record<string, unknown>): boolean {
+  const { ephemeral } = entry.route
+  return typeof ephemeral === 'function' ? ephemeral(data) : ephemeral === true
+}
+
+/**
+ * Barramento SSE compartilhado (`GET /api/events/stream`).
+ *
+ * O barramento não conhece domínio nenhum: cada área registra as rotas dos
+ * eventos que lhe interessam ({@link registerRoutes}, ver `src/areas/`) e as
+ * telas assinam pontualmente com {@link onEvent}. Área desligada não tem rota
+ * registrada — o evento passa sem tocar a store dela.
+ */
 export const useEventsStore = defineStore('events', () => {
   const isConnected = ref(false)
   const recentEvents = ref<RealtimeEventPayload[]>([])
@@ -77,6 +102,14 @@ export const useEventsStore = defineStore('events', () => {
 
   type EventHandler = (data: Record<string, unknown>, payload: RealtimeEventPayload) => void
   const handlers = new Map<string, Set<EventHandler>>()
+  const routes = new Set<RegisteredRoute>()
+
+  /** Interesses declarados pelas telas abertas (contagem de referências). */
+  const interests = new Map<string, number>()
+  let connectedInterests = ''
+  let interestTimer: ReturnType<typeof setTimeout> | null = null
+
+  const bus: SseBus = { scheduleRefresh }
 
   /**
    * Assinatura pontual usada por telas que mantêm estado local (gráficos, por
@@ -92,6 +125,35 @@ export const useEventsStore = defineStore('events', () => {
     return () => {
       for (const type of list) handlers.get(type)?.delete(handler)
     }
+  }
+
+  /**
+   * Registra as rotas de um domínio (tipo exato ou prefixo `x:*`). Rodam antes
+   * dos assinantes de {@link onEvent}. Retorna a função que as remove.
+   */
+  function registerRoutes(table: SseRoutes): () => void {
+    const added: RegisteredRoute[] = Object.entries(table).map(([key, value]) => {
+      const prefix = key.endsWith('*')
+      return {
+        pattern: prefix ? key.slice(0, -1) : key,
+        prefix,
+        route: typeof value === 'function' ? { handle: value } : value,
+      }
+    })
+    for (const entry of added) routes.add(entry)
+    return () => {
+      for (const entry of added) routes.delete(entry)
+    }
+  }
+
+  /** Algum domínio registrado trata este tipo de evento? */
+  function hasRoute(type: string): boolean {
+    for (const entry of routes) if (matches(entry, type)) return true
+    return false
+  }
+
+  function routesFor(type: string): RegisteredRoute[] {
+    return [...routes].filter((entry) => matches(entry, type))
   }
 
   function notifyHandlers(payload: RealtimeEventPayload) {
@@ -133,15 +195,23 @@ export const useEventsStore = defineStore('events', () => {
     )
   }
 
+  function interestKey(): string {
+    return [...interests.keys()].sort().join(',')
+  }
+
+  function streamUrl(): string {
+    const params: string[] = []
+    const token = getStoredToken()
+    if (token) params.push(`token=${encodeURIComponent(token)}`)
+    if (connectedInterests) params.push(`interest=${connectedInterests}`)
+    return params.length ? `/api/events/stream?${params.join('&')}` : '/api/events/stream'
+  }
+
   function connect() {
     if (eventSource) return
 
-    const token = getStoredToken()
-    const url = token
-      ? `/api/events/stream?token=${encodeURIComponent(token)}`
-      : '/api/events/stream'
-
-    eventSource = new EventSource(url)
+    connectedInterests = interestKey()
+    eventSource = new EventSource(streamUrl())
 
     eventSource.onopen = () => {
       isConnected.value = true
@@ -181,388 +251,58 @@ export const useEventsStore = defineStore('events', () => {
     }, delay)
   }
 
-  function isScheduledTaskNews(data: unknown): boolean {
-    return isScheduledTaskEvent(data) && (data.status === 'failed' || data.status === 'skipped')
+  /**
+   * O conjunto de interesses mudou: passada a rajada, reabre o stream **uma
+   * vez** com o conjunto novo — só se houver stream aberto e o conjunto for
+   * outro. Não é polling: sem mudança, nada acontece.
+   */
+  function scheduleInterestSync() {
+    if (interestTimer) clearTimeout(interestTimer)
+    interestTimer = setTimeout(() => {
+      interestTimer = null
+      if (!eventSource || interestKey() === connectedInterests) return
+      closeSource()
+      connect()
+    }, INTEREST_DEBOUNCE_MS)
+  }
+
+  /**
+   * Declara que uma tela aberta consome um dado ao vivo sob demanda (ex.:
+   * `docker`): o backend só o produz enquanto algum stream o declara.
+   * Retorna a função que libera o interesse.
+   */
+  function acquireInterest(name: string): () => void {
+    interests.set(name, (interests.get(name) ?? 0) + 1)
+    scheduleInterestSync()
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      const count = (interests.get(name) ?? 1) - 1
+      if (count > 0) interests.set(name, count)
+      else interests.delete(name)
+      scheduleInterestSync()
+    }
   }
 
   function handleIncomingEvent(payload: RealtimeEventPayload) {
     lastEventAt.value = payload.timestamp
 
-    const isEphemeralTelemetry =
-      payload.type === 'docker:snapshot' ||
-      payload.type === 'docker:inventory' ||
-      payload.type === 'docker:operation' ||
-      payload.type === 'docker:log' ||
-      payload.type === 'discovery:scan' ||
-      payload.type === 'interface:traffic' ||
-      // O teste de enlace publica um snapshot por etapa e uma amostra por
-      // segundo: estado ao vivo, não notícia para o feed.
-      payload.type === 'link_test:updated' ||
-      payload.type === 'link_test:sample' ||
-      payload.type === 'link_test:health' ||
-      // Clientes Wi-Fi: estado ao vivo de cada roteador, não notícia.
-      payload.type === 'wifi:snapshot' ||
-      payload.type === 'wifi:watched' ||
-      // Tarefa agendada: só a falha e o "não rodou" são notícia — o começo e
-      // o sucesso de uma tarefa de minuto em minuto encheriam o feed.
-      (payload.type === 'scheduled_task:updated' && !isScheduledTaskNews(payload.data))
-    if (payload.type !== 'stream:connected' && !isEphemeralTelemetry) {
+    const data = payload.data || {}
+    const matched = routesFor(payload.type)
+    const ephemeral = matched.some((entry) => isEphemeral(entry, data))
+    if (payload.type !== 'stream:connected' && !ephemeral) {
       recentEvents.value.unshift(payload)
       if (recentEvents.value.length > FEED_LIMIT) {
         recentEvents.value.length = FEED_LIMIT
       }
     }
 
-    const data = payload.data || {}
-
-    switch (payload.type) {
-      case 'monitor:result': {
-        const monitorsStore = useMonitorsStore()
-        const deviceDetailStore = useDeviceDetailStore()
-        monitorsStore.applyRealtimeResult(data)
-        monitorsStore.applyRealtimeMetrics(data)
-        deviceDetailStore.applyMonitorResult(data)
-        deviceDetailStore.applyRecordedMetrics(data)
-        useTopologyStore().applyRealtimeHealth(data)
-        break
-      }
-
-      case 'device:status':
-      case 'device:updated': {
-        const devicesStore = useDevicesStore()
-        const deviceDetailStore = useDeviceDetailStore()
-        const topologyStore = useTopologyStore()
-        devicesStore.applyRealtimeStatus(data)
-        deviceDetailStore.applyDeviceStatus(data)
-        topologyStore.applyRealtimeStatus(data)
-        break
-      }
-
-      case 'alert:triggered': {
-        const alertsStore = useAlertsStore()
-        // Traz o registro completo (com relações) sem esperar refetch geral
-        scheduleRefresh('alerts', () => alertsStore.fetchActiveAlerts())
-        alertsStore.upsertAlertEvent({
-          id: Number(data.id ?? data.alertEventId),
-          alertRuleId: (data.alertRuleId as number) ?? null,
-          deviceId: (data.deviceId as number) ?? null,
-          monitorId: (data.monitorId as number) ?? null,
-          severity: (data.severity as 'info' | 'warning' | 'critical') ?? 'warning',
-          status: (data.status as AlertEvent['status']) ?? 'active',
-          title: String(data.title ?? data.ruleName ?? 'Novo alerta'),
-          message: String(data.message ?? ''),
-          data: (data.data as AlertEvent['data']) ?? null,
-          startedAt: data.startedAt as string,
-          createdAt: String(data.createdAt ?? data.startedAt ?? payload.timestamp),
-        })
-        break
-      }
-
-      case 'alert:decider_triage': {
-        const triage = data.deciderTriage as DeciderTriage | undefined
-        if (triage)
-          useAlertsStore().applyDeciderTriage(Number(data.id ?? data.alertEventId), triage)
-        break
-      }
-
-      case 'alert:ai_summary': {
-        const summary = data.aiSummary as AiIncidentSummary | undefined
-        if (summary) useAlertsStore().applyAiSummary(Number(data.id ?? data.alertEventId), summary)
-        break
-      }
-
-      case 'alert:updated': {
-        const alertsStore = useAlertsStore()
-        // Payload é o evento serializado completo: patch em memória, sem refetch
-        alertsStore.upsertAlertEvent(data as never)
-        break
-      }
-
-      case 'alert:resolved': {
-        const alertsStore = useAlertsStore()
-        alertsStore.patchAlertEvent(Number(data.id ?? data.alertEventId), {
-          status: 'resolved',
-          resolvedAt: data.resolvedAt as string,
-        })
-        break
-      }
-
-      case 'alert:acknowledged':
-      case 'alert:silenced': {
-        const alertsStore = useAlertsStore()
-        alertsStore.patchAlertEvent(Number(data.id ?? data.alertEventId), {
-          status: payload.type === 'alert:silenced' ? 'silenced' : 'acknowledged',
-          silencedUntil: (data.silencedUntil as string) ?? undefined,
-        })
-        break
-      }
-
-      case 'alert_rule:created':
-      case 'alert_rule:updated': {
-        const alertsStore = useAlertsStore()
-        alertsStore.upsertAlertRule(data as never)
-        break
-      }
-
-      case 'alert_rule:deleted': {
-        const alertsStore = useAlertsStore()
-        alertsStore.removeAlertRule(Number(data.id))
-        break
-      }
-
-      case 'probe:status': {
-        const probesStore = useProbesStore()
-        probesStore.applyRealtimeStatus(data)
-        // Agentes remotos também são probes: a tela de agentes e o seletor
-        // de host Docker acompanham o mesmo evento (ADR 011).
-        useAgentsStore().applyRealtimeStatus(data)
-        useDockerStore().applyAgentStatus(data)
-        break
-      }
-
-      case 'device:updated': {
-        const devicesStore = useDevicesStore()
-        const devId = Number(data.deviceId)
-        if (devId && data.ipAddress) {
-          const dev = devicesStore.devices.find((d) => d.id === devId)
-          if (dev) {
-            dev.ipAddress = String(data.ipAddress)
-          }
-        }
-        break
-      }
-
-      case 'discovery:scan': {
-        // Estado inteiro da varredura ao vivo — e o snapshot de quem conecta.
-        useDiscoveryStore().applyScanSnapshot(data)
-        break
-      }
-
-      case 'discovery:started':
-      case 'discovery:completed':
-      case 'discovery:cancelled':
-      case 'discovery:failed': {
-        const discoveryStore = useDiscoveryStore()
-        scheduleRefresh('discovery', () => {
-          discoveryStore.fetchDiscoveryRuns()
-          discoveryStore.fetchConflicts()
-        })
-        break
-      }
-
-      case 'decider:model_state': {
-        if (isDeciderModelState(data)) useAiDeciderStore().applyModelState(data)
-        break
-      }
-
-      case 'logs:template_classified': {
-        // O payload é o `LogTemplateInfo` inteiro (backend `syslog::templates::info`).
-        if (isLogTemplateInfo(data)) useLogsStore().applyTemplateClassified(data)
-        break
-      }
-
-      case 'discovery:conflicts_detected': {
-        const discoveryStore = useDiscoveryStore()
-        if (Array.isArray(data.conflicts)) {
-          discoveryStore.conflicts = data.conflicts as never
-        } else {
-          discoveryStore.fetchConflicts()
-        }
-        break
-      }
-
-      case 'interface:traffic': {
-        const topologyStore = useTopologyStore()
-        const deviceDetailStore = useDeviceDetailStore()
-        const monitorsStore = useMonitorsStore()
-        topologyStore.applyRealtimeTraffic(data)
-        deviceDetailStore.applyInterfaceTraffic(data)
-        monitorsStore.applyInterfaceTraffic(data)
-        break
-      }
-
-      case 'interface:status_change':
-      case 'interface:speed_change':
-      case 'interface:speed_downgrade': {
-        const deviceDetailStore = useDeviceDetailStore()
-        const topologyStore = useTopologyStore()
-        deviceDetailStore.applyInterfaceChange(payload.type, data)
-        topologyStore.applyInterfaceChange(payload.type, data)
-        break
-      }
-
-      case 'metric:recorded': {
-        const deviceDetailStore = useDeviceDetailStore()
-        const monitorsStore = useMonitorsStore()
-        deviceDetailStore.applyRecordedMetrics(data)
-        monitorsStore.applyRealtimeMetrics(data)
-        break
-      }
-
-      case 'vpn:peers_updated': {
-        const vpnStore = useVpnStore()
-        vpnStore.applyRealtimePeers(data)
-        break
-      }
-
-      case 'topology:updated': {
-        const topologyStore = useTopologyStore()
-        // Novos enlaces exigem recarregar o grafo: não dá para deduzir
-        // a geometria do mapa a partir do evento. Recarrega em background
-        // (sem spinner, no site em exibição) e só para quem já abriu o mapa.
-        scheduleRefresh('topology', () => topologyStore.refreshIfLoaded())
-        break
-      }
-
-      case 'topology:layout_updated': {
-        useTopologyStore().applyLayoutUpdated(data)
-        break
-      }
-
-      case 'maintenance_windows:updated': {
-        const maintenanceStore = useMaintenanceWindowsStore()
-        scheduleRefresh('maintenance_windows', () => maintenanceStore.fetchWindows())
-        break
-      }
-
-      case 'backup_plan:updated': {
-        const backupStore = useBackupStore()
-        scheduleRefresh('backup_plan', () => backupStore.refreshPlanIfLoaded())
-        break
-      }
-
-      case 'storages:updated': {
-        const storagesStore = useStoragesStore()
-        scheduleRefresh('storages', () => storagesStore.refreshIfLoaded())
-        break
-      }
-
-      case 'database_connections:updated': {
-        const databasesStore = useDatabasesStore()
-        scheduleRefresh('database_connections', () => databasesStore.refreshIfLoaded())
-        break
-      }
-
-      case 'database_jobs:updated': {
-        if (isDatabaseJobSnapshot(data)) useDatabasesStore().applyJob(data)
-        break
-      }
-
-      case 'docker:snapshot': {
-        const dockerStore = useDockerStore()
-        dockerStore.applyLiveSnapshot(data as never)
-        break
-      }
-
-      case 'docker:inventory': {
-        const dockerStore = useDockerStore()
-        dockerStore.applyInventorySnapshot(data as never)
-        break
-      }
-
-      case 'docker:operation': {
-        useDockerStore().applyOperationEvent(data as never)
-        break
-      }
-
-      case 'docker:log': {
-        useDockerStore().applyLogStreamEvent(data as never)
-        break
-      }
-
-      case 'plugin:run_started': {
-        usePluginsStore().applyRunStarted(data)
-        break
-      }
-
-      case 'plugin:run_output': {
-        usePluginsStore().applyRunOutput(data)
-        usePluginAppsStore().applyRunOutput(data)
-        break
-      }
-
-      case 'plugin:run_finished': {
-        usePluginsStore().applyRunFinished(data)
-        break
-      }
-
-      case 'plugin:approval_required': {
-        usePluginsStore().applyApprovalRequired(data)
-        break
-      }
-
-      case 'plugin:batch_updated': {
-        usePluginAppsStore().applyBatchUpdated(data)
-        break
-      }
-
-      case 'plugin:run_step': {
-        usePluginAppsStore().applyRunOutput(data)
-        break
-      }
-
-      case 'plugin:run_progress': {
-        usePluginsStore().applyRunProgress(data)
-        break
-      }
-
-      case 'link_test:updated': {
-        useLinkTestsStore().applyUpdated(data)
-        break
-      }
-
-      case 'link_test:sample': {
-        useLinkTestsStore().applySample(data)
-        break
-      }
-
-      case 'link_test:health': {
-        useLinkTestsStore().applyHealth(data)
-        break
-      }
-
-      case 'link_test_schedule:updated': {
-        useLinkTestsStore().applyScheduleUpdated(data)
-        break
-      }
-
-      case 'scheduled_task:updated': {
-        useScheduledTasksStore().applyUpdated(data)
-        break
-      }
-
-      case 'plugin:apps_changed': {
-        void usePluginAppsStore().fetchApps()
-        break
-      }
-
-      case 'plugin:approval_resolved': {
-        usePluginsStore().applyApprovalResolved(data)
-        break
-      }
-
-      case 'ai:approval_pending': {
-        useAiApprovalsStore().applyPending(data)
-        break
-      }
-
-      case 'ai:approval_resolved': {
-        const resolved = asApprovalResolved(data)
-        if (!resolved) break
-        useAiApprovalsStore().applyResolved(resolved)
-        // Decidido em outra aba: o card da conversa aberta acompanha.
-        useAiStore().applyApprovalDecision(resolved)
-        break
-      }
-
-      case 'wifi:snapshot': {
-        if (isWifiDeviceSnapshot(data)) useWifiClientsStore().applySnapshot(data)
-        break
-      }
-
-      case 'wifi:watched': {
-        if (isWifiWatchedSnapshot(data)) useWifiClientsStore().applyWatched(data)
-        break
+    for (const entry of matched) {
+      try {
+        entry.route.handle(data, payload, bus)
+      } catch {
+        // Um domínio com defeito não pode interromper os demais
       }
     }
 
@@ -581,6 +321,10 @@ export const useEventsStore = defineStore('events', () => {
     if (reconnectTimer) {
       clearTimeout(reconnectTimer)
       reconnectTimer = null
+    }
+    if (interestTimer) {
+      clearTimeout(interestTimer)
+      interestTimer = null
     }
     for (const timer of pendingRefreshes.values()) clearTimeout(timer)
     pendingRefreshes.clear()
@@ -605,6 +349,9 @@ export const useEventsStore = defineStore('events', () => {
     connect,
     disconnect,
     onEvent,
+    registerRoutes,
+    hasRoute,
+    acquireInterest,
     fetchHourlyDistribution,
   }
 })

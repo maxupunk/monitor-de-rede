@@ -12,15 +12,15 @@ use axum::{
     routing::post,
     Json, Router,
 };
-use backend::{
-    app::App,
-    dtos::ai::{DeciderModelsResponse, TestDeciderResponse},
-    services::ai::decider::{
+use backend::app::App;
+use loco_rs::testing::prelude::*;
+use netmonitor_assistant::{
+    decider::{
         config::AiDeciderSettings,
         providers::{DeciderProvider, DecisionProtocol},
     },
+    dtos::{DeciderModelsResponse, TestDeciderResponse},
 };
-use loco_rs::testing::prelude::*;
 use serde_json::{json, Value};
 use serial_test::serial;
 

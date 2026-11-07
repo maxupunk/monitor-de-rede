@@ -25,26 +25,26 @@ fn production_part(relative: &str) -> String {
 
 #[test]
 fn syslog_nao_mantem_catalogo_ou_match_paralelo() {
-    let snippets = production_part("backend/src/services/syslog/snippets.rs");
+    let snippets = production_part("backend/crates/nucleo/src/services/syslog/snippets.rs");
     assert!(!snippets.contains("RECEITAS"));
     assert!(!snippets.contains("match sistema"));
     assert!(snippets.contains("adapters::registry"));
 
-    let parser = production_part("backend/src/services/syslog/parser.rs");
+    let parser = production_part("backend/crates/nucleo/src/services/syslog/parser.rs");
     assert!(!parser.contains("topicos_do_routeros"));
     assert!(parser.contains("registry::syslog_topics"));
 }
 
 #[test]
 fn consumidores_de_dispositivo_dependem_do_registro() {
-    let systems = production_part("backend/src/services/devices/systems.rs");
+    let systems = production_part("backend/crates/core/src/devices/systems.rs");
     assert!(!systems.contains("const CATALOGO"));
     assert!(systems.contains("adapters::{registry"));
 
-    let discovery = production_part("backend/src/services/discovery/device_identifier.rs");
+    let discovery = production_part("backend/crates/network/src/discovery/device_identifier.rs");
     assert!(discovery.contains("adapters::registry"));
 
-    let peers = production_part("backend/src/services/vpn/peer_service.rs");
+    let peers = production_part("backend/crates/vpn/src/peer_service.rs");
     assert!(peers.contains("adapters::registry::by_vpn_profile"));
     assert!(!peers.contains("payload.profile =="));
 }

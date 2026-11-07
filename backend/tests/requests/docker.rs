@@ -5,21 +5,18 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use backend::{
-    app::App,
-    models::{probes, users},
-    services::{
-        agent_runtime::{executor::CommandExecutor, tunnel::TunnelOpener},
-        agents::{
-            policy::Permission,
-            protocol::{Command, ErrorCode, RemoteError},
-            tunnel::TunnelStream,
-        },
-        users::Role,
-    },
-};
+use backend::app::App;
 use loco_rs::{app::AppContext, testing::prelude::*};
-use sea_orm::{ActiveModelTrait, IntoActiveModel, Set};
+use netmonitor_core::models::probes;
+use netmonitor_nucleo::{
+    services::agent_runtime::{executor::CommandExecutor, tunnel::TunnelOpener},
+    services::agents::{
+        policy::Permission,
+        protocol::{Command, ErrorCode, RemoteError},
+        tunnel::TunnelStream,
+    },
+    services::users::Role,
+};
 use serde_json::Value;
 use serial_test::serial;
 use tokio::{io::AsyncReadExt, sync::mpsc};
@@ -27,22 +24,8 @@ use tokio_util::sync::CancellationToken;
 
 use super::{
     agent_harness::{agent_hello, connect_agent_with, enrolled_agent},
-    prepare_data,
+    prepare_data::session_with_role,
 };
-
-async fn session_with_role(
-    request: &mut loco_rs::TestServer,
-    ctx: &loco_rs::app::AppContext,
-    role: Role,
-) -> users::Model {
-    let session = prepare_data::init_operator(ctx).await;
-    let mut active = session.user.into_active_model();
-    active.role = Set(role.as_str().to_string());
-    let user = active.update(&ctx.db).await.unwrap();
-    let (header, value) = prepare_data::auth_header(&session.token);
-    request.add_header(header, value);
-    user
-}
 
 /// Agente cujo host não tem Docker: toda chamada responde "indisponível".
 struct EngineDown;

@@ -1,0 +1,36 @@
+pub mod agents;
+pub mod alerts;
+pub mod areas;
+pub mod backup;
+pub mod common;
+pub mod devices;
+pub mod diagnostics;
+pub mod logs;
+pub mod monitors;
+pub mod resources;
+pub mod saas;
+pub mod server_addresses;
+pub mod storages;
+pub mod users;
+
+/// O leitor de corpo opcional mora no núcleo, para as áreas usarem o mesmo.
+pub use netmonitor_core::shared::body::optional_body;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dtos::resources::SilenceInput;
+
+    #[test]
+    fn corpo_ausente_ou_ilegivel_cai_no_default() {
+        assert!(optional_body::<SilenceInput>("").minutes.is_none());
+        assert!(optional_body::<SilenceInput>("   ").minutes.is_none());
+        assert!(optional_body::<SilenceInput>("{nao e json")
+            .minutes
+            .is_none());
+        assert_eq!(
+            optional_body::<SilenceInput>(r#"{"minutes":30}"#).minutes,
+            Some(30)
+        );
+    }
+}

@@ -6,18 +6,18 @@
 //! global por `template_key`, a segunda aplicação devolvia `already_exists` e
 //! não criava nada — em silêncio, que é o pior jeito de falhar.
 
-use backend::{
-    app::App,
-    models::alert_rules,
-    services::{
-        alerts::fields,
-        devices::system_device::SystemDeviceService,
-        monitoring::{
-            health::series, managed::ensure_system_health_monitor, result_processor::process_result,
-        },
+use backend::app::App;
+
+use netmonitor_core::models::alert_rules;
+
+use loco_rs::testing::prelude::*;
+use netmonitor_nucleo::{
+    services::alerts::fields,
+    services::devices::system_device::SystemDeviceService,
+    services::monitoring::{
+        health::series, managed::ensure_system_health_monitor, result_processor::process_result,
     },
 };
-use loco_rs::testing::prelude::*;
 use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
 use serde_json::Value;
 use serial_test::serial;
@@ -188,7 +188,7 @@ async fn o_catalogo_do_dispositivo_so_oferece_o_que_ele_publica() {
 #[serial]
 async fn as_regras_de_saude_sao_aplicadas_uma_unica_vez_por_dispositivo() {
     request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
-        use backend::services::alerts::catalog::health_defaults;
+        use netmonitor_nucleo::services::alerts::catalog::health_defaults;
 
         autenticado(&mut request, &ctx).await;
 
@@ -398,8 +398,10 @@ async fn uma_carga_curta_nao_alerta_e_a_sustentada_alerta() {
     // campos novos passam pelo mesmo caminho de `duration_seconds` que os
     // antigos, sem lógica de severidade dentro da coleta.
     request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
-        use backend::services::alerts::catalog::service::{apply_scoped, TemplateScope};
-        use backend::services::monitoring::contracts::{CheckMetric, CheckResult, MonitorStatus};
+        use netmonitor_nucleo::services::alerts::catalog::service::{apply_scoped, TemplateScope};
+        use netmonitor_nucleo::services::monitoring::contracts::{
+            CheckMetric, CheckResult, MonitorStatus,
+        };
 
         let device = SystemDeviceService::new(&ctx.db).ensure().await.unwrap();
         let monitor = ensure_system_health_monitor(&ctx.db, device.id)
@@ -434,7 +436,7 @@ async fn uma_carga_curta_nao_alerta_e_a_sustentada_alerta() {
 
         // `duration_seconds` do template é 300 s: uma única amostra alta não
         // abre evento.
-        use backend::models::_entities::alert_events;
+        use netmonitor_core::models::_entities::alert_events;
         assert_eq!(
             alert_events::Entity::find()
                 .filter(alert_events::Column::DeviceId.eq(device.id))
@@ -454,8 +456,10 @@ async fn a_leitura_de_cpu_do_snmp_passa_a_ser_avaliavel_por_regra() {
     // Antes desta fase o SNMP publicava `usagePercent`/`usedPercent` soltos, e
     // regra alguma podia falar sobre eles. Agora a mesma leitura vira o campo
     // de dispositivo, o que é o que torna o alerta de CPU válido para o parque.
-    use backend::services::alerts::{baseline, datasets::monitor_result};
-    use backend::services::monitoring::contracts::{CheckMetric, CheckResult, MonitorStatus};
+    use netmonitor_nucleo::services::alerts::{baseline, datasets::monitor_result};
+    use netmonitor_nucleo::services::monitoring::contracts::{
+        CheckMetric, CheckResult, MonitorStatus,
+    };
 
     let agora = chrono::Utc::now();
     let facts = monitor_result::build(

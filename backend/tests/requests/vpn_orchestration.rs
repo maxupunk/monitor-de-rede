@@ -4,13 +4,14 @@
 //! apontado para o `temp_dir` do processo antes de qualquer chamada, senão o
 //! serviço tentaria gravar em `/config`.
 
-use backend::{
-    app::App,
-    models::{vpn_peers, vpn_servers},
-    services::vpn::{key_generator, secret_store},
-};
+use backend::app::App;
+
+use netmonitor_core::alerts::fields::vpn_status_transition::DISCONNECTED;
+use netmonitor_core::models::{_entities::alert_events, vpn_peers, vpn_servers};
+
 use loco_rs::testing::prelude::*;
-use sea_orm::EntityTrait;
+use netmonitor_vpn::{alerts::watcher, key_generator, secret_store};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use serial_test::serial;
 
 use super::prepare_data;
@@ -732,6 +733,96 @@ async fn configuracao_do_servidor_vpn_valida_porta_mtu_dns_e_endpoint() {
             }))
             .await;
         assert_eq!(dns_invalido.status_code(), 422);
+    })
+    .await;
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// O dataset `vpn_peer` mora na área e chega ao motor de alertas pelo
+/// `CentralServices` registrado pelo ponto de montagem: a queda do túnel vira
+/// alerta com o `eventType`, a chave de escopo e a mensagem de sempre.
+#[tokio::test]
+#[serial]
+async fn queda_do_tunel_chega_ao_motor_pelo_dataset_da_area() {
+    let dir = isolar_volume_wireguard("alerta");
+    let _ = std::fs::remove_dir_all(&dir);
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+        request
+            .put("/api/vpn/server")
+            .json(&serde_json::json!({ "publicEndpoint": "vpn.exemplo.com.br" }))
+            .await;
+        let criado = json_of(
+            &request
+                .post("/api/vpn/peers")
+                .json(&serde_json::json!({ "name": "Filial 01", "profile": "linux" }))
+                .await
+                .text(),
+        );
+        let peer_id = criado["peer"]["id"].as_i64().unwrap();
+        // A regra "Túnel VPN caiu" (`vpn_peer_disconnected`) vem no conjunto
+        // recomendado da instalação.
+
+        // Estava conectado no ciclo anterior; o último handshake é de 2 h atrás.
+        let peer = vpn_peers::Entity::find_by_id(peer_id)
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        let server_id = peer.vpn_server_id;
+        let mut active: vpn_peers::ActiveModel = peer.into();
+        active.last_connection_status = Set(Some("connected".into()));
+        active.last_handshake_at = Set(Some(
+            (chrono::Utc::now() - chrono::Duration::hours(2)).into(),
+        ));
+        active.last_seen_at = Set(None);
+        active.update(&ctx.db).await.unwrap();
+
+        assert_eq!(
+            watcher::evaluate_server_peers(&ctx, server_id)
+                .await
+                .unwrap(),
+            1
+        );
+
+        let eventos = alert_events::Entity::find()
+            .filter(alert_events::Column::ScopeKey.eq(format!("vpn_peer:{peer_id}")))
+            .all(&ctx.db)
+            .await
+            .unwrap();
+        assert_eq!(eventos.len(), 1);
+        assert_eq!(eventos[0].severity, "critical");
+        let mensagem = eventos[0].message.clone().unwrap_or_default();
+        assert!(
+            mensagem.starts_with("Túnel VPN de Filial 01 caiu. Sem sinal há 2h"),
+            "{mensagem}"
+        );
+        let data = eventos[0].data.clone().unwrap();
+        assert_eq!(data["eventType"], "vpn_peer_state");
+        assert_eq!(data["vpnPeerId"], peer_id);
+        assert_eq!(data["vpnServerId"], server_id);
+        assert_eq!(data["vpnStatusTransition"], DISCONNECTED);
+        assert_eq!(data["vpnPreviousStatus"], "connected");
+
+        let gravado = vpn_peers::Entity::find_by_id(peer_id)
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            gravado.last_connection_status.as_deref(),
+            Some("disconnected")
+        );
+
+        // O ciclo seguinte não repete a transição.
+        assert_eq!(
+            watcher::evaluate_server_peers(&ctx, server_id)
+                .await
+                .unwrap(),
+            0
+        );
     })
     .await;
     let _ = std::fs::remove_dir_all(&dir);

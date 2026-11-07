@@ -40,8 +40,13 @@
 3. **Independência de Ambiente (Docker / Local)**:
    - O backend Rust roda em **SQLite** (teste, dev e produção) e **PostgreSQL**
      (instalações grandes, via `DATABASE_URL`). Toda consulta precisa valer nos
-     dois dialetos — a produção padrão passou a ser o SQLite, então quebrar o
-     dialeto dele agora quebra a instalação real, não só a suíte.
+     dois dialetos — o SQLite é o banco padrão de instalação, então quebrar o
+     dialeto dele quebra a instalação padrão, não só a suíte.
+   - **O sistema ainda não foi para produção.** Mudança de esquema **edita a
+     migration existente** e recria o banco de desenvolvimento: não crie
+     migration nova para alterar tabela, nem migration de compatibilidade,
+     initializer de upgrade ou *shim* de campo/rota/tópico antigo. Essa regra se
+     inverte na primeira instalação real, e isso será anunciado.
    - **Transação que escreve abre com `shared::transaction::begin_write`**,
      nunca com `begin()`: o `BEGIN` deferido do SQLite falha na hora com
      `database is locked` quando outra conexão escreve entre a leitura e a
@@ -71,7 +76,10 @@
 5. **Documentação & Roadmap**:
    - Atualize `docs/roadmap.md` marcando itens concluídos com `[x]` e badge
      `🟢 Concluído`.
-   - Consulte [arquitetura.md](docs/arquitetura.md) e [diretrizes_testes.md](docs/diretrizes_testes.md).
+   - Consulte [arquitetura.md](docs/arquitetura.md) (o sistema como ele é),
+     [adr/](docs/adr/README.md) (decisões vigentes) e, para a frente atual,
+     [roadmap_arquitetura_modular.md](docs/roadmap_arquitetura_modular.md).
+     Os padrões de teste são os do §4 acima.
 
 6. **Preservação e Regras de Negócio do Módulo `vpn-probe`**:
    - **Agente Dedicado (`vpn-probe`)**: mede ICMP/SNMP na faixa `10.8.0.x` de
@@ -82,7 +90,8 @@
      do agente, do registrador e do provisionador continua obrigatório: é ele
      que sustenta os dois arranjos.
    - **Token Fallback Padrão (`DEFAULT_VPN_PROBE_TOKEN`)**: o registrador
-     (`services/vpn/probe_registrar.rs`) e o agente (`services/probes/agent.rs`)
+     (`crates/nucleo/src/services/probes/vpn_registrar.rs`) e o agente
+     (`crates/nucleo/src/services/probes/agent.rs`)
      **DEVEM** usar `DEFAULT_VPN_PROBE_TOKEN = "default_vpn_probe_token"` como
      fallback quando `VPN_PROBE_TOKEN`/`PROBE_TOKEN` não estiverem definidos.
      **NUNCA remova este fallback**: é ele que garante registro e autenticação
@@ -90,7 +99,7 @@
      `probes.token_hash` não ter índice único.
    - **Comando CLI de Registro**: `backend-cli task vpn_probe_register`
      (`src/tasks/vpn_probe_register.rs`) gera ou reutiliza o token do probe e o
-     exibe no terminal. **NÃO remover** este comando nem o `probe_registrar`.
+     exibe no terminal. **NÃO remover** este comando nem o `vpn_registrar`.
    - **Fallback de Execução Local no Agendador** (`src/tasks/scheduler_run.rs`):
      se o probe estiver offline por qualquer motivo, o agendador **DEVE** tentar
      a execução local via `run_monitor` antes de reportar `unknown`. **NÃO
@@ -113,7 +122,7 @@
      abra porta nele nem faça a central chamá-lo. `docker compose` roda **só no
      agente**, no host dele; a central continua sem CLI `docker`. A política
      local (`AGENT_ALLOW`) é soberana — a central não a amplia — e comandos
-     Docker novos entram no enum fechado de `services/agents/protocol.rs`, cada
+     Docker novos entram no enum fechado de `crates/agent-protocol/src/protocol.rs`, cada
      um com a sua permissão. Proxy genérico para a Engine é proibido.
    - **O processo da API não monta o `docker.sock`** (ADR 014). O Docker da
      central é o do **agente local** — o serviço `netmonitor-agent` do compose,
@@ -148,7 +157,8 @@
      execução, saída ou transcrição e sem publicar no SSE. `runs::prepare` a
      recusa — não abra outro caminho (lote, IA, validação) para ela.
    - Controller extrai, valida, delega e serializa. Regra de negócio vive em
-     `src/services/`, testável sem HTTP.
+     `services/` do crate dono (`crates/nucleo` para o Núcleo, o crate da
+     área para as demais), testável sem HTTP.
 
 8. **Edições Cirúrgicas e Preservação de Formatação / Indentação (Economia de Tokens)**:
    - **Edições cirúrgicas**: Faça apenas modificações pontuais no escopo estrito da tarefa. **NUNCA** reformate arquivos inteiros nem altere a indentação, espaçamento ou quebras de linha de blocos de código não relacionados à mudança funcional.
@@ -173,10 +183,10 @@
 
 10. **Princípios de Design de Software (SOLID) & Clean Architecture**:
     - **S — Responsabilidade Única (Single Responsibility)**:
-      - **Controllers** (`src/controllers/`): Extraem parâmetros de rota/query/corpo, validam DTOs de entrada, delegam imediatamente para serviços (`src/services/`) e retornam a resposta formatada delegando a serialização para `src/views/` ou DTOs. Jamais escreva SQL, lógica de negócio, transformações complexas de dados ou formatação de exportação dentro de controllers.
-      - **Services** (`src/services/`): Contêm regras de negócio puras, orquestração e fluxos de domínio. Devem ser testáveis sem camada HTTP (sem axum/loco requests).
-      - **Views** (`src/views/`): Responsáveis por formatação, hidratação de apresentação, serialização de envelopes e renderização de relatórios/exportações (ex: CSV, plain text).
-      - **Entidades e Repositórios** (`src/models/`, `services/**/repository.rs`): Responsáveis pelo acesso a dados, mapeamento relacional e consultas otimizadas.
+      - **Controllers** (`controllers/` de cada crate): Extraem parâmetros de rota/query/corpo, validam DTOs de entrada, delegam imediatamente para serviços (`services/`) e retornam a resposta formatada delegando a serialização para `views/` ou DTOs. Jamais escreva SQL, lógica de negócio, transformações complexas de dados ou formatação de exportação dentro de controllers.
+      - **Services** (`services/` de cada crate — `crates/nucleo/src/services/` no Núcleo): Contêm regras de negócio puras, orquestração e fluxos de domínio. Devem ser testáveis sem camada HTTP (sem axum/loco requests).
+      - **Views** (`views/` de cada crate): Responsáveis por formatação, hidratação de apresentação, serialização de envelopes e renderização de relatórios/exportações (ex: CSV, plain text).
+      - **Entidades e Repositórios** (`crates/core/src/models/`, `services/**/repository.rs`): Responsáveis pelo acesso a dados, mapeamento relacional e consultas otimizadas.
       - **Frontend (Vue 3 / Vuetify / Pinia)**: Componentes tratam da interação do usuário e da árvore visual; Pinia stores (`src/stores/`) tratam do estado reativo e chamadas a endpoints; utilitários centralizados (`src/utils/formatters.ts`) tratam de formatação de valores, datas, latências e bytes (DRY absoluto).
     - **O — Aberto/Fechado (Open/Closed)**:
       - Módulos e serviços devem ser abertos para extensão e fechados para modificação.
@@ -198,14 +208,14 @@
       - Nunca reimplemente funções utilitárias de formatação, cálculo numérico, conversão de unidades ou parsing se já existirem no repositório.
       - Antes de criar qualquer nova função utilitária ou rotina de suporte, o agente **DEVE** inspecionar os módulos canônicos existentes (`grep_search` ou leitura dos módulos centrais).
     - **Backend (Rust)**:
-      - **Métricas e Sondas de Rede (`backend/src/services/network_tools/`)**:
+      - **Métricas e Sondas de Rede (`backend/crates/core/src/network_tools/`)**:
         - Sockets ICMP DGRAM, envio de pacotes, cálculo de RTT, estatísticas de perdas e jitter pertencem exclusivamente a `network_tools::icmp_probe` (`probe_icmp`, `create_icmp_client`, `calculate_jitter`, `duration_to_ms`, `round_two`).
         - Nunca instancie sockets de rede brutos/DGRAM ou HTTP clients repetidamente dentro de loops iterativos (ex: loops de sequência em traceroute, scans de porta). Reutilize o cliente/socket ao longo de toda a varredura ou hop.
         - Conversões de `Duration` para milissegundos com precisão decimal devem obrigatoriamente usar `duration_to_ms(duration)`.
         - Sondas TCP pontuais devem usar exclusivamente `network_tools::tcp_probe::probe_tcp`.
         - Sondas UDP com payloads conhecidos devem usar `network_tools::udp_probes::probe_for`.
       - **Tratamento e Propagação de Erros**:
-        - Utilize os tipos centrais `AppError` e `AppResult<T>` (`src/services/shared/errors.rs`). Jamais crie tipos ad-hoc de erro redundantes onde os existentes cobrem a semântica.
+        - Utilize os tipos centrais `AppError` e `AppResult<T>` (`crates/core/src/shared/errors.rs`). Jamais crie tipos ad-hoc de erro redundantes onde os existentes cobrem a semântica.
     - **Frontend (Vue 3 / TypeScript)**:
       - **Formatadores Centralizados (`frontend/src/utils/formatters.ts`)**:
         - Toda exibição de dados — bytes (`formatBytes`, `formatBinaryBytes`, `formatDecimalBytes`), taxas de rede (`formatBps`, `formatLinkSpeed`), latências (`formatLatency`), datas e horários (`formatDate`, `formatDateTime`, `formatShortDateTime`, `formatClockTime`, `formatRelativeTime`, `formatTimeSpan`) — **DEVE** ser importada de `@/utils/formatters`.
@@ -219,6 +229,40 @@
     - **Superfície Limpa dos Cards**: Os containers e cards devem adotar o fundo padrão da superfície do tema (`surface`), bordas nítidas e contraste consistente tanto no tema claro quanto no tema escuro.
 
 
+
+13. **Arquitetura Modular — Áreas do Produto ([ADR 017](docs/adr/017-arquitetura-modular.md))**:
+    - **Quatro áreas, nenhuma a mais:** Núcleo (sempre ligado), Rede, Servidores
+      e VPN. O catálogo de o que pertence a cada uma está no ADR; feature nova
+      **declara a sua área** no registro correspondente (menu, rota, widget,
+      ferramenta da IA, modelo de regra ou de tarefa, aba de configuração, etapa
+      do onboarding).
+    - **Nenhum `if área` fora dos registros.** A área é consultada por quem monta
+      o menu, as rotas, o catálogo e as rotinas — nunca espalhada em componentes
+      e serviços.
+    - **Ligar ou desligar a área não é controle de acesso.** A API continua
+      montada; quem autoriza é o papel. O papel vale **por área** ([ADR
+      019](docs/adr/019-papel-por-area.md)): o administrador vale em todas; no
+      Núcleo vale o papel global; em cada área, o papel atribuído a ela ou
+      nenhum (sem acesso). A regra mora em `netmonitor_core::roles::AreaAccess`
+      e é aplicada no guard único da API, no SSE (`EventAudience`), na IA
+      (`ToolPolicy::with_access`) e no Web Push — rota ou evento novo de área
+      entra nos prefixos do `AreaPolicy` dela, nunca num `if` próprio.
+    - **Desligar uma área nunca apaga dado e nunca para monitor.** Só esconde e
+      pausa as rotinas próprias dela.
+    - **Fronteira de dependência:** o núcleo (`crates/core`, `crates/nucleo`)
+      não depende de área e uma área não depende de outra nem do `nucleo` — o
+      `Cargo.toml` de cada crate garante, e `tests/conventions/architecture.rs`
+      guarda o que o compilador não vê (os manifestos, o ponto de montagem e
+      um consumidor por área). A conversa é por trait do `core`
+      (`MonitorChecker`, `MonitorGroup`, `Routine`/`RetentionJob`,
+      `Classifier`, `AiToolHandler`, `AgentCommandHandler`/`Dispatcher`,
+      `HostDocker`, `DeviceAccess`, `AreaPolicy`) ou pelo `CentralServices`
+      da área. Só o ponto de montagem (`src/app.rs`, `src/registries.rs`,
+      `src/initializers/`) nomeia crate de área. Não há exceções, e não se
+      cria nenhuma.
+    - **Reconstrução no lugar, sem reescrita:** um PR de extração só move código
+      e inverte dependências; mudança de comportamento vai em PR separado. A
+      ordem das fases está no roadmap da arquitetura modular.
 
 ## Limpeza (CLEAN UP) — não deixe lixo para trás
 

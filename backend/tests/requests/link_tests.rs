@@ -6,35 +6,22 @@
 use std::time::Duration;
 
 use axum::http::StatusCode;
-use backend::{
-    app::App,
-    models::{device_links, devices, plugins},
-    services::{
-        plugins::{
-            package::PluginPackage,
-            service::{self as plugin_service, source},
-        },
-        users::Role,
-    },
-};
+use backend::app::App;
 use loco_rs::{app::AppContext, testing::prelude::*};
+use netmonitor_core::models::{device_links, devices, plugins};
+use netmonitor_network::plugins::{
+    package::PluginPackage,
+    service::{self as plugin_service, source},
+};
+use netmonitor_nucleo::services::users::Role;
 use sea_orm::{ActiveModelTrait, EntityTrait, IntoActiveModel, Set};
 use serde_json::{json, Value};
 use serial_test::serial;
 
-use super::prepare_data;
+use super::prepare_data::session_with_role;
 
 fn json_of(text: &str) -> Value {
     serde_json::from_str(text).expect("resposta JSON")
-}
-
-async fn session_with_role(request: &mut loco_rs::TestServer, ctx: &AppContext, role: Role) {
-    let session = prepare_data::init_operator(ctx).await;
-    let mut active = session.user.into_active_model();
-    active.role = Set(role.as_str().to_string());
-    active.update(&ctx.db).await.unwrap();
-    let (header, value) = prepare_data::auth_header(&session.token);
-    request.add_header(header, value);
 }
 
 const SCRIPT: &str = r#"

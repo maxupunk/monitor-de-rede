@@ -20,9 +20,12 @@ fn rust_files(dir: &Path, found: &mut Vec<PathBuf>) {
 
 #[test]
 fn codigo_de_producao_nao_abre_transacao_deferida() {
-    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let src = root.to_path_buf();
     let mut files = Vec::new();
-    rust_files(&src, &mut files);
+    // O código de produção mora no pacote raiz e nos crates do workspace.
+    rust_files(&root.join("src"), &mut files);
+    rust_files(&root.join("crates"), &mut files);
     let offenders: Vec<String> = files
         .iter()
         .filter_map(|path| {

@@ -5,10 +5,6 @@
       subtitle="Roteadores e clientes conectados ao NetMonitor pelo túnel WireGuard"
     >
       <template #actions>
-        <v-btn variant="tonal" prepend-icon="mdi-cog-outline" :to="{ name: 'vpn-server' }">
-          <span class="hidden-sm-and-down">Servidor VPN</span>
-          <span class="hidden-md-and-up">Servidor</span>
-        </v-btn>
         <v-btn
           color="primary"
           prepend-icon="mdi-plus"

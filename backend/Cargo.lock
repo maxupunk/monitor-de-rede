@@ -683,7 +683,6 @@ dependencies = [
  "async-trait",
  "axum",
  "base64 0.22.1",
- "bollard",
  "chacha20poly1305",
  "chrono",
  "croner",
@@ -698,19 +697,24 @@ dependencies = [
  "loco-rs",
  "md-5",
  "mdns-sd",
- "migration",
+ "netmonitor-agent-protocol",
+ "netmonitor-assistant",
+ "netmonitor-core",
+ "netmonitor-network",
+ "netmonitor-network-link-tests",
+ "netmonitor-network-wifi",
+ "netmonitor-nucleo",
+ "netmonitor-servers",
+ "netmonitor-vpn",
  "num_cpus",
- "opendal",
  "p256 0.13.2",
  "phf 0.11.3",
- "qrcode",
  "rand 0.8.7",
  "regex",
  "reqwest 0.12.28",
  "rhai",
  "rstest",
  "russh",
- "russh-sftp",
  "sea-orm",
  "serde",
  "serde_json",
@@ -735,8 +739,6 @@ dependencies = [
  "ts-rs",
  "uuid",
  "validator",
- "x25519-dalek",
- "zstd",
 ]
 
 [[package]]
@@ -3896,15 +3898,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "migration"
-version = "0.1.0"
-dependencies = [
- "loco-rs",
- "sea-orm-migration",
- "tokio",
-]
-
-[[package]]
 name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4002,6 +3995,326 @@ dependencies = [
  "mime",
  "spin 0.9.9",
  "version_check",
+]
+
+[[package]]
+name = "netmonitor-agent-protocol"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-util",
+ "ts-rs",
+ "uuid",
+ "zstd",
+]
+
+[[package]]
+name = "netmonitor-assistant"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "chrono",
+ "futures",
+ "hex",
+ "loco-rs",
+ "netmonitor-core",
+ "regex",
+ "reqwest 0.12.28",
+ "sea-orm",
+ "sea-orm-migration",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "sha2 0.10.9",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tracing",
+ "ts-rs",
+ "uuid",
+]
+
+[[package]]
+name = "netmonitor-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "base64 0.22.1",
+ "chacha20poly1305",
+ "chrono",
+ "futures",
+ "hex",
+ "ipnet",
+ "libc",
+ "loco-rs",
+ "netmonitor-agent-protocol",
+ "opendal",
+ "rand 0.8.7",
+ "regex",
+ "reqwest 0.12.28",
+ "russh",
+ "russh-sftp",
+ "sea-orm",
+ "sea-orm-migration",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "sha2 0.10.9",
+ "socket2 0.6.5",
+ "surge-ping",
+ "syslog_loose",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-util",
+ "tower",
+ "tracing",
+ "ts-rs",
+ "uuid",
+ "validator",
+]
+
+[[package]]
+name = "netmonitor-network"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-snmp",
+ "async-trait",
+ "axum",
+ "chrono",
+ "futures",
+ "hickory-proto",
+ "insta",
+ "loco-rs",
+ "md-5",
+ "netmonitor-agent-protocol",
+ "netmonitor-core",
+ "phf 0.11.3",
+ "rand 0.8.7",
+ "regex",
+ "reqwest 0.12.28",
+ "rhai",
+ "russh",
+ "sea-orm",
+ "sea-orm-migration",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "sha2 0.10.9",
+ "surge-ping",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tracing",
+ "ts-rs",
+ "uuid",
+]
+
+[[package]]
+name = "netmonitor-network-link-tests"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-snmp",
+ "async-trait",
+ "axum",
+ "chrono",
+ "futures",
+ "hickory-proto",
+ "loco-rs",
+ "md-5",
+ "netmonitor-agent-protocol",
+ "netmonitor-core",
+ "netmonitor-network",
+ "phf 0.11.3",
+ "rand 0.8.7",
+ "regex",
+ "reqwest 0.12.28",
+ "rhai",
+ "russh",
+ "sea-orm",
+ "sea-orm-migration",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "sha2 0.10.9",
+ "surge-ping",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tracing",
+ "ts-rs",
+ "uuid",
+]
+
+[[package]]
+name = "netmonitor-network-wifi"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-snmp",
+ "async-trait",
+ "axum",
+ "chrono",
+ "futures",
+ "hickory-proto",
+ "loco-rs",
+ "md-5",
+ "netmonitor-agent-protocol",
+ "netmonitor-core",
+ "netmonitor-network",
+ "phf 0.11.3",
+ "rand 0.8.7",
+ "regex",
+ "reqwest 0.12.28",
+ "rhai",
+ "russh",
+ "sea-orm",
+ "sea-orm-migration",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "sha2 0.10.9",
+ "surge-ping",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tracing",
+ "ts-rs",
+ "uuid",
+]
+
+[[package]]
+name = "netmonitor-nucleo"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm 0.10.3",
+ "anyhow",
+ "async-compression",
+ "async-snmp",
+ "async-trait",
+ "axum",
+ "base64 0.22.1",
+ "chacha20poly1305",
+ "chrono",
+ "croner",
+ "futures",
+ "hex",
+ "hickory-proto",
+ "hkdf 0.12.4",
+ "include_dir",
+ "insta",
+ "ipnet",
+ "libc",
+ "loco-rs",
+ "md-5",
+ "mdns-sd",
+ "netmonitor-agent-protocol",
+ "netmonitor-core",
+ "netmonitor-vpn",
+ "num_cpus",
+ "p256 0.13.2",
+ "phf 0.11.3",
+ "rand 0.8.7",
+ "regex",
+ "reqwest 0.12.28",
+ "rhai",
+ "rstest",
+ "russh",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "serial_test",
+ "sha2 0.10.9",
+ "socket2 0.6.5",
+ "sqlx",
+ "ssdp-client",
+ "surge-ping",
+ "syslog_loose",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-stream",
+ "tokio-tungstenite",
+ "tokio-util",
+ "tower",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+ "ts-rs",
+ "uuid",
+ "validator",
+]
+
+[[package]]
+name = "netmonitor-servers"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-compression",
+ "async-trait",
+ "axum",
+ "bollard",
+ "chrono",
+ "futures",
+ "hex",
+ "insta",
+ "loco-rs",
+ "netmonitor-agent-protocol",
+ "netmonitor-core",
+ "sea-orm",
+ "sea-orm-migration",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "sha2 0.10.9",
+ "sqlx",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "ts-rs",
+ "uuid",
+]
+
+[[package]]
+name = "netmonitor-vpn"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "base64 0.22.1",
+ "chrono",
+ "insta",
+ "loco-rs",
+ "netmonitor-core",
+ "qrcode",
+ "rand 0.8.7",
+ "reqwest 0.12.28",
+ "sea-orm",
+ "sea-orm-migration",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "tokio",
+ "tracing",
+ "ts-rs",
+ "x25519-dalek",
 ]
 
 [[package]]

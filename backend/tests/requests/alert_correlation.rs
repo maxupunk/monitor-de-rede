@@ -1,6 +1,7 @@
-use backend::{app::App, models::alert_events};
+use backend::app::App;
 use chrono::Utc;
 use loco_rs::testing::prelude::*;
+use netmonitor_core::models::alert_events;
 use sea_orm::{ActiveModelTrait, Set};
 use serial_test::serial;
 
@@ -18,7 +19,7 @@ async fn correlaciona_queda_de_pai_com_filhos_na_mesma_janela() {
     request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
         authenticated_request(&mut request, &ctx).await;
 
-        let pai = backend::models::devices::ActiveModel {
+        let pai = netmonitor_core::models::devices::ActiveModel {
             name: Set("Roteador Principal".into()),
             r#type: Set("router".into()),
             ip_address: Set(Some("192.168.1.1".into())),
@@ -29,7 +30,7 @@ async fn correlaciona_queda_de_pai_com_filhos_na_mesma_janela() {
         .await
         .expect("pai");
 
-        let filho = backend::models::devices::ActiveModel {
+        let filho = netmonitor_core::models::devices::ActiveModel {
             parent_id: Set(Some(pai.id)),
             name: Set("Servidor atrás do roteador".into()),
             r#type: Set("server".into()),
@@ -101,7 +102,7 @@ async fn sem_eventos_relacionados_retorna_vazio() {
     request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
         authenticated_request(&mut request, &ctx).await;
 
-        let device = backend::models::devices::ActiveModel {
+        let device = netmonitor_core::models::devices::ActiveModel {
             name: Set("Dispositivo isolado".into()),
             r#type: Set("server".into()),
             status: Set("offline".into()),
@@ -165,7 +166,7 @@ async fn eventos_fechados_nao_entram_na_correlacao() {
 
         let agora: chrono::DateTime<chrono::FixedOffset> = Utc::now().into();
 
-        let device = backend::models::devices::ActiveModel {
+        let device = netmonitor_core::models::devices::ActiveModel {
             name: Set("Dispositivo".into()),
             r#type: Set("server".into()),
             status: Set("offline".into()),
@@ -219,7 +220,7 @@ async fn diagnostico_global_de_causa_raiz_agrupa_incidentes_ativos() {
     request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
         authenticated_request(&mut request, &ctx).await;
 
-        let switch = backend::models::devices::ActiveModel {
+        let switch = netmonitor_core::models::devices::ActiveModel {
             name: Set("Switch Distribuição".into()),
             r#type: Set("switch".into()),
             status: Set("offline".into()),
@@ -229,7 +230,7 @@ async fn diagnostico_global_de_causa_raiz_agrupa_incidentes_ativos() {
         .await
         .expect("switch");
 
-        let host1 = backend::models::devices::ActiveModel {
+        let host1 = netmonitor_core::models::devices::ActiveModel {
             parent_id: Set(Some(switch.id)),
             name: Set("Câmera 01".into()),
             r#type: Set("camera".into()),
@@ -240,7 +241,7 @@ async fn diagnostico_global_de_causa_raiz_agrupa_incidentes_ativos() {
         .await
         .expect("host1");
 
-        let host2 = backend::models::devices::ActiveModel {
+        let host2 = netmonitor_core::models::devices::ActiveModel {
             parent_id: Set(Some(switch.id)),
             name: Set("Câmera 02".into()),
             r#type: Set("camera".into()),

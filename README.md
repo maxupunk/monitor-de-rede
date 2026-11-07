@@ -1,8 +1,9 @@
 # NetMonitor
 
-Monitoramento de rede com backend em **Rust (Loco.rs)** e frontend em **Vue 3 +
-Vuetify**. A stack inteira é **um container**: API, interface web, ciclo de
-monitores, banco (SQLite) e servidor WireGuard.
+Monitoramento e gerenciamento de **redes** e de **servidores com Docker**, com
+backend em **Rust (Loco.rs)** e frontend em **Vue 3 + Vuetify**. A stack
+inteira é **um container**: API, interface web, ciclo de monitores, banco
+(SQLite) e servidor WireGuard — mais o agente local que atende o Docker do host.
 
 ## Principais recursos
 
@@ -26,7 +27,10 @@ monitores, banco (SQLite) e servidor WireGuard.
 
 Para detalhes de componentes, fluxos e decisões técnicas, consulte
 [`docs/arquitetura.md`](docs/arquitetura.md). O estado das entregas e dos itens
-planejados está em [`docs/roadmap.md`](docs/roadmap.md).
+planejados está em [`docs/roadmap.md`](docs/roadmap.md). A frente atual — separar
+Rede, Servidores e VPN em **áreas** que cada instalação liga conforme o uso — está
+no [ADR 017](docs/adr/017-arquitetura-modular.md) e no
+[roadmap da arquitetura modular](docs/roadmap_arquitetura_modular.md).
 
 ## Estrutura
 

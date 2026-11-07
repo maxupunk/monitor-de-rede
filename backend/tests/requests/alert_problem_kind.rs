@@ -6,17 +6,19 @@
 //! (porta 9 fechada em loopback = down determinístico); o resto do episódio é
 //! fabricado com resultados sintéticos para o teste não depender de tempo real.
 
-use backend::{
-    app::App,
+use backend::app::App;
+
+use netmonitor_core::{
     models::_entities::alert_events as alert_events_entity,
     models::{alert_events, devices, monitors},
-    services::monitoring::{
-        contracts::{CheckMetric, CheckResult, MonitorStatus},
-        result_processor::process_result,
-    },
 };
+
 use chrono::{Duration, Utc};
 use loco_rs::{testing::prelude::*, TestServer};
+use netmonitor_nucleo::services::monitoring::{
+    contracts::{CheckMetric, CheckResult, MonitorStatus},
+    result_processor::process_result,
+};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use serde_json::{json, Value};
 use serial_test::serial;
@@ -379,8 +381,8 @@ async fn icmp_filtrado_alerta_a_causa_sem_marcar_dispositivo_offline_ou_duplicar
         );
         let device_id = device["id"].as_i64().unwrap();
         let monitor = monitors::Entity::find()
-            .filter(backend::models::_entities::monitors::Column::DeviceId.eq(device_id))
-            .filter(backend::models::_entities::monitors::Column::Type.eq("ping"))
+            .filter(netmonitor_core::models::_entities::monitors::Column::DeviceId.eq(device_id))
+            .filter(netmonitor_core::models::_entities::monitors::Column::Type.eq("ping"))
             .one(&ctx.db)
             .await
             .unwrap()

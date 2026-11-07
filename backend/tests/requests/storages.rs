@@ -1,7 +1,11 @@
 //! Armazenamentos: cadastro, segredos e backup guardado num destino.
 
-use backend::{app::App, models::users, services::users::Role};
+use backend::app::App;
+
+use netmonitor_core::models::users;
+
 use loco_rs::{app::AppContext, testing::prelude::*, TestServer};
+use netmonitor_nucleo::services::users::Role;
 use sea_orm::{ActiveModelTrait, IntoActiveModel, Set};
 use serde_json::{json, Value};
 use serial_test::serial;

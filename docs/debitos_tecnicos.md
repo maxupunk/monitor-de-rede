@@ -1,10 +1,10 @@
 # Diagnóstico e Catálogo de Débitos Técnicos
 
-Este documento consolida a auditoria de arquitetura, código-fonte, padrões de design, duplicações, segurança e gaps de teste do **NetMonitor**. A última revisão completa foi em **2026-08-21**; o estado real do código prevalece sobre qualquer descrição deste arquivo.
+Este documento consolida a auditoria de arquitetura, código-fonte, padrões de design, duplicações, segurança e gaps de teste do **NetMonitor**. A última revisão completa foi em **2026-08-21**; a seção 7 (arquitetura modular) foi acrescentada em **2026-11-05**. O estado real do código prevalece sobre qualquer descrição deste arquivo.
 
 ---
 
-## 📊 Sumário Executivo & Métricas da Auditoria (2026-08-20)
+## 📊 Sumário Executivo & Métricas da Auditoria (2026-08-20 — retrato histórico)
 
 | Área Auditada | Escopo | Estado Geral | Débitos Críticos / Altos |
 | :--- | :--- | :--- | :--- |
@@ -50,6 +50,13 @@ Este documento consolida a auditoria de arquitetura, código-fonte, padrões de 
 | **QUA-05** | Qualidade | Coluna `monitors.timeout_seconds` escrita e nunca lida | Médio | Pequeno | 🟢 Concluído |
 | **QUA-06** | Qualidade | Buffer offline do probe sem teto e com reescrita O(n²) | Médio | Médio | 🟢 Concluído |
 | **DOC-01** | Documentação | Inconsistência entre tabela resumo e corpo deste documento | Médio | Pequeno | 🟢 Corrigido |
+| **DB-02** | Banco | 64 migrations históricas num crate só | Baixo | Médio | 🟢 Concluído (ADR 017) |
+| **ARQ-01** | Arquitetura | Composição estática: rotas, rotinas, menu e rotas da SPA ligados para toda instalação | Alto | Grande | 🟢 Concluído (ADR 017) |
+| **ARQ-02** | Arquitetura | Dependências na direção errada entre domínios no backend (A1–A5) | Médio | Grande | 🟢 Concluído (ADR 017; zero exceções) |
+| **ARQ-03** | Arquitetura | Barramento SSE central no frontend e Dashboard acoplado ao Docker (A6–A7) | Médio | Médio | 🟢 Concluído (ADR 017) |
+| **ARQ-04** | Arquitetura | Catálogo de widgets duplicado entre backend e frontend | Médio | Pequeno | 🟢 Concluído (ADR 017) |
+| **ARQ-05** | Performance | Snapshot Docker pedido com qualquer aba aberta | Médio | Pequeno | 🟢 Concluído (ADR 017) |
+| **ARQ-06** | Arquitetura | Crate único de ~185 mil linhas; fronteira só por convenção | Médio | Grande | 🟢 Concluído (ADR 017; pacote raiz só monta) |
 
 ---
 
@@ -123,8 +130,10 @@ Este documento consolida a auditoria de arquitetura, código-fonte, padrões de 
 ### 🟢 DB-01: Abstração de Busca Textual — Concluído
 - FTS5 no SQLite, `tsvector` + GIN no PostgreSQL, `LIKE` como fallback, escolha em runtime por densidade.
 
-### 🟢 DB-02: Versionamento de Migrations
-- Débito cosmético sem impacto operacional; manter como está para não invalidar `seaql_migrations`.
+### 🟢 DB-02: Versionamento de Migrations — Concluído (ADR 017)
+- **Descrição:** 64 migrations históricas, mais o `migration::purge_removed_migrations` para bancos que aplicaram migrations já removidas.
+- **Mudança de premissa (2026-11-05):** o sistema nunca foi para produção, então não há `seaql_migrations` real a preservar. A orientação anterior ("manter como está") caiu.
+- **Implementado:** 64 → 37 migrations (uma por tabela, com os `ALTER` dobrados) e 4 → 3 no banco de logs; esquema idêntico em SQLite e PostgreSQL; `purge_removed_migrations` removido. Mudança de esquema edita a migration da tabela.
 
 ---
 
@@ -149,30 +158,25 @@ Este documento consolida a auditoria de arquitetura, código-fonte, padrões de 
 
 ## 5. Débitos de Segurança Identificados na Auditoria de 2026-08-20
 
-### 🔴 SEC-01: Segredos de Fallback Públicos
-- **Arquivos Afetados:** `.env.example:55,63`, `docker-compose.yml:82,87`, `backend/config/{production.yaml:70,development.yaml:117,test.yaml:104}`
-- **Descrição:** `JWT_SECRET` e `ENCRYPTION_KEY` têm defaults públicos. Quem não customiza o `.env` roda com autenticação e cifra decorativas.
-- **Recomendação:** remover defaults dos três arquivos; em produção, fazer o boot falhar se os segredos não estiverem definidos (já existe o padrão para `ENCRYPTION_KEY` em `crypto.rs`).
+### 🟢 SEC-01: Segredos de Fallback Públicos — Concluído
+- **Descrição:** `JWT_SECRET` e `ENCRYPTION_KEY` tinham defaults públicos.
+- **Implementado:** `.env.example` sem valor padrão para `JWT_SECRET`; `require_jwt_secret_in_production` (`backend/src/app.rs`) falha o boot em produção sem o segredo.
 
-### 🔴 SEC-02: Chave Privada WireGuard em Claro no Repositório
-- **Arquivos Afetados:** `backend/tmp/wireguard/wg0.conf`, `.dockerignore`
-- **Descrição:** o arquivo contém `PrivateKey` de servidor WireGuard em claro, está rastreado pelo Git e não é excluído por `.dockerignore` (que só lista `.env` da raiz, não `**/.env`, e não lista `backend/tmp/`).
-- **Recomendação:** remover o arquivo do repositório, rotacionar a chave (considerá-la comprometida), adicionar `backend/tmp/` e `**/.env` ao `.dockerignore`.
+### 🟢 SEC-02: Chave Privada WireGuard em Claro no Repositório — Concluído
+- **Descrição:** `backend/tmp/wireguard/wg0.conf` com `PrivateKey` estava rastreado e entrava na imagem.
+- **Implementado:** arquivo fora do Git; `.dockerignore` lista `**/.env` e `backend/tmp/`.
 
-### 🔴 SEC-04: Receptor de Resultados de Probe Não Vincula Monitor ao Probe
-- **Arquivos Afetados:** `backend/src/services/probes/receiver.rs:40-67`, `backend/src/controllers/probes.rs:275-289`
-- **Descrição:** o receptor aceita `monitor_id` e grava sem conferir `monitor.probe_id == probe.id`. Combinado ao token padrão público (`DEFAULT_VPN_PROBE_TOKEN`), permite injetar resultados falsos em qualquer monitor. O endpoint de tarefas também não filtra por `role`.
-- **Recomendação:** descartar resultados cujo monitor não pertença ao probe; filtrar tarefas por role; logar `warn!` quando o token efetivo for o padrão.
+### 🟢 SEC-04: Receptor de Resultados de Probe Não Vincula Monitor ao Probe — Concluído
+- **Descrição:** o receptor gravava resultado de qualquer `monitor_id`.
+- **Implementado:** `services/probes/receiver.rs` descarta resultado e execução cujo `probe_id` não seja o do probe autenticado.
 
-### 🟡 SEC-05: Injeção de Configuração `wg0.conf` via Nome de Peer
-- **Arquivos Afetados:** `backend/src/services/vpn/config_builder.rs:69`, `backend/src/controllers/vpn_peers.rs:183-197,247-254`
-- **Descrição:** `controllers/devices.rs` valida nome/tipo de dispositivo contra `\n`/`\r`, mas `vpn_peers.rs` não valida nomes de peer. `config_builder.rs` interpola `peer.name` em comentário sem defesa em profundidade.
-- **Recomendação:** rejeitar controles em nomes de peer e sanitizar no gerador final.
+### 🟢 SEC-05: Injeção de Configuração `wg0.conf` via Nome de Peer — Concluído
+- **Descrição:** nomes de peer sem validação eram interpolados no `wg0.conf`.
+- **Implementado:** validação centralizada em `services/vpn/peer_name`, usada por `controllers/vpn_peers.rs`.
 
-### 🔴 SEC-06: `POST /api/probes` Aceita `token_hash` do Cliente
-- **Arquivos Afetados:** `backend/src/controllers/probes.rs:163-165`
-- **Descrição:** o endpoint permite que o cliente envie o hash que quiser, em vez de receber o token cru e hashear no servidor.
-- **Recomendação:** receber token cru, gerar `sha256` no servidor e nunca aceitar `token_hash` na criação.
+### 🟢 SEC-06: `POST /api/probes` Aceita `token_hash` do Cliente — Concluído
+- **Descrição:** o cliente podia enviar o hash que quisesse.
+- **Implementado:** `controllers/probes.rs` recebe o token cru e grava `sha256_hex(&token)`.
 
 ### 🟢 SEC-07: JWT Armazenado em `localStorage` — Concluído (mitigado)
 - **Arquivos Afetados:** `frontend/src/services/apiService.ts:28-30`, `backend/src/spa.rs`
@@ -250,28 +254,104 @@ Este documento consolida a auditoria de arquitetura, código-fonte, padrões de 
   - Leitura tolerante a arquivo ausente, vazio ou corrompido.
   - Testes cobrem acúmulo/limpeza, arquivo corrompido, buffer separado de discovery, limite de itens, limite de bytes, deduplicação, truncamento por idade e escrita atômica com recuperação de tmp órfão.
 
+### 🟡 QUA-07: Testes Intermitentes sob Carga — Em observação
+- **Arquivos Afetados:** `tests/requests/{wifi_telemetry,ai_analysis,ai_tools}.rs`, `services/network_tools/throughput/btest`
+- **Descrição:** durante a arquitetura modular (2026-11), quatro testes falharam
+  uma vez cada em `cargo test --workspace` com a máquina sob carga máxima
+  (compilação paralela de vários crates) e passaram em toda reexecução —
+  isolados e em quatro rodadas seguidas do binário `tests/mod` inteiro:
+  `wifi_telemetry::aparelho_vigiado_que_some_vira_alerta_e_volta_resolvendo`,
+  `throughput::btest::tests::cliente_envia_ao_servidor_armado`,
+  `ai_analysis::analises_sem_historico_respondem_sem_inventar` e
+  `ai_tools::historico_do_monitor_traz_uptime_e_falhas_recentes` (este duas
+  vezes, ambas na rodada completa do workspace) e
+  `probes::buffer::tests::escrita_e_atomica_e_recupera_de_crash_no_tmp` (uma
+  vez, na rodada contra o PostgreSQL; três vezes verde isolado).
+- **Não eram intermitentes, e foram corrigidos (2026-11-05):** a rodada
+  completa contra o PostgreSQL — que o CI não executava desde que o digest
+  fixado da imagem `postgres:17-alpine` deixou de existir — achou
+  `auth::can_register` e `auth::can_resend_verification_email` (o filtro de
+  data do Loco só reconhece fuso `+HH:MM`; o `-03:00` local vazava para o
+  snapshot, que falhava também no CI em UTC) e
+  `settings::database_size_retorna_tamanho_tipo_e_datas_do_banco` (esperava
+  `sqlite` fixo). Os três agora valem nos dois bancos, e o digest do CI foi
+  atualizado.
+- **Investigado (2026-11-05):** o caminho da ferramenta só lê o banco (sem
+  cache em memória); todo teste que sobe a aplicação é `#[serial]`, então não
+  há `truncate` concorrente; o ciclo do scheduler fica desligado nos testes.
+  Depois das duas falhas, o teste passou dez vezes: três isolado, quatro no
+  binário `tests/mod` inteiro e três no binário inteiro com todos os núcleos
+  ocupados por um queimador de CPU. As duas falhas foram em rodadas
+  `cargo test --workspace` logo após uma compilação completa.
+- **Causa achada e corrigida (2026-11-06) — `ai_tools::historico_do_monitor…`:**
+  não era carga, era relógio, e o defeito era do produto. Reproduzido na 5ª de
+  cinco rodadas seguidas do workspace: `checks.down` veio `0`. O teste grava
+  checagens de 1 a 3 minutos atrás; `uptime_for_monitor` (e o mapa de calor)
+  liam horas fechadas **só** de `monitor_results_hourly` e o bruto **só** da
+  hora aberta. Rodando nos primeiros minutos de uma hora, a checagem `down`
+  caía na hora recém-fechada, que o rollup (a cada 3 600 s) ainda não tinha
+  agregado — e sumia. Em produção, o mesmo buraco tirava do uptime e do mapa
+  de calor até uma hora de dados entre o fechamento da hora e o próximo
+  rollup. Agora `rollup::unrolled_since` devolve até onde o rollup já
+  agregou e os dois leem o bruto a partir dali, sem sobrepor buckets
+  (`devices_monitors_crud::uptime_conta_a_hora_fechada_antes_do_proximo_rollup`,
+  que falha sem a correção com o mesmo sintoma).
+- **Causa achada e corrigida (2026-11-06) — `throughput::btest::tests::cliente_envia_ao_servidor_armado`:**
+  reproduzido com 2 falhas em 160 execuções (8 em paralelo), sempre em
+  `servidor.tx_bytes <= cliente.tx_bytes`. A asserção não é invariante do
+  protocolo: o par só informa o que recebeu a cada segundo; se o informe chega
+  antes do fim de um teste de 1 s, o cliente reporta a soma dos informes
+  (menor que o total final do servidor), senão o que escreveu no socket
+  (maior). A comparação saiu, com o motivo no teste; 320 execuções dos 20
+  testes do `btest`, 8 em paralelo, sem falha.
+- **Ainda em observação:** `wifi_telemetry::aparelho_vigiado_que_some…`,
+  `ai_analysis::analises_sem_historico…` e `probes::buffer::…`, sem nova
+  falha. Se repetirem, procurar a mesma classe de causa — fronteira de
+  hora/minuto em `Utc::now()` relativo ou corrida de prazo.
+
 ---
 
-## 7. Roteiro Resumido de Ação
+## 7. Débitos de Arquitetura Modular (ADR 017)
 
-1. **Fase 0 — Segurança & CI (não negociável):**
-   - Remover segredos públicos e chave privada do repo; rotacionar chave.
-   - Mover CI para `.github/workflows/` e adicionar frontend/auditoria/build Docker.
-   - Vincular resultados de probe ao probe; sanitizar nomes de peer; corrigir `POST /probes`.
+Levantados em 2026-11-05. A decisão está no [ADR 017](adr/017-arquitetura-modular.md); o plano, no [roadmap da arquitetura modular](roadmap_arquitetura_modular.md), que cita estes IDs em cada fase.
 
-2. **Fase 1 — Higiene de frontend e infra:**
-   - Headers de segurança no servidor estático.
-   - Limpar `lastArtifact` ao fechar visualizador VPN; DOMPurify no QR code.
-   - Supervisão do watcher e hardening do container.
+### 🟢 ARQ-01: Composição Estática — Concluído
+- **Arquivos Afetados:** `backend/src/app.rs` (38 `add_route`), `backend/src/initializers/monitoring.rs`, `frontend/src/layouts/DefaultLayout.vue` (`navSections`), `frontend/src/router/index.ts`, `frontend/src/components/setup/InitialSetupDialog.vue`
+- **Descrição:** toda instalação recebe os dois domínios: ~36 entradas de menu, onboarding só de rede, ~60 ferramentas de IA e rotinas próprias de áreas que não usa.
+- **Plano:** áreas `on`/`off` com registros declarativos (Fases 0, 2, 3, 4 e 5).
 
-3. **Fase 2 — Qualidade e performance:**
-   - Infraestrutura de testes no frontend.
-   - Cachear `reqwest::Client`; timeouts em `lookup_host`.
-   - Reduzir N+1 SNMP; resolver `timeout_seconds`.
-   - Melhorar buffer offline do probe.
+### 🟢 ARQ-02: Dependências na Direção Errada no Backend — Concluído
+- **Arquivos Afetados:** `services/dashboard/catalog.rs` (A4); A2 e A3 resolvidos na Fase 8, A5 na Fase 9
+- **Descrição:** a Rede chama o Decisor diretamente e a IA conhece todos os domínios.
+- **Resolvido na Fase 6:** **A1** — `monitoring/runner.rs` não conhece mais Docker: o monitor `container` é um `MonitorChecker` (`netmonitor_core::monitoring`) do crate `servers`, registrado pelo ponto de montagem (`src/registries.rs`). Saíram também `agents → docker` (a `HostKey` e os tópicos `docker:snapshot`/`docker:inventory` são do núcleo; o `AgentEngine` foi para o crate `servers`) e `telemetry → docker` (o rollup é do `agent-protocol`, o histórico do `core` e o amostrador do lado do agente). O teste de arquitetura passou de **37 para 34 exceções** e conta `netmonitor_servers::…` como a área Servidores.
+- **Resolvido na Fase 7:** `agents → vpn`, `plugins → vpn` e `settings → vpn` (o cofre efêmero, o enrollment/cadastro dos agentes e o `vpn_probe` foram para o `core`; o registrador do `vpn-probe` foi para `services/probes`), `server_addresses → vpn` e `devices → vpn` (o cálculo CIDR já era do `core`; o teste que cruza perfis de VPN e sistemas foi para o crate `vpn`). **34 → 29 exceções**; restam da VPN `ai`, `monitoring` (`maintenance_runner` → telemetria dos túneis) e `onboarding`.
+- **Resolvido na Fase 8:** **A2** — `devices`, `discovery`, `snmp` e `syslog` dependem só do `Classifier` do núcleo (`netmonitor_core::classifier`), com a heurística como padrão; o assistente registra o Decisor no ponto de montagem. **A3** — o assistente virou crate (`crates/assistant`, depende só do `core`): o contrato das ferramentas (`AiToolHandler`, `ToolPolicy`, `ToolArgs`, risco, gráfico, fonte do `grep`, seção da plataforma) mora no `core`, as ferramentas `docker_*` e a fonte `docker` do `grep` no crate `servers`, a seção `vpn` no crate `vpn`, a topologia, a descoberta e os plugins nos módulos da Rede, e o catálogo é montado em `src/registries.rs`. Saíram também `scheduled_tasks → ai` (o catálogo agendável é do `core`). **29 → 18 exceções**; da IA resta `plugins → ai` (a revisão de segurança do plugin chama o provedor do chat).
+- **Resolvido na Fase 9:** **A5** — o agente não conhece mais a Rede: o executor (`agent_runtime/executor.rs`) aplica a política local e entrega `Discovery`, `DeviceIo` e `Throughput` aos `AgentCommandHandler`s (`netmonitor_core::agents::command`) que o crate `network` contribui (`agent_commands`), e o pump da central (`agents/background.rs`) entrega as varreduras pendentes pelo `AgentCommandDispatcher` da Rede (`discovery::remote::DiscoveryDispatch`); os dois são registrados em `src/registries.rs`. A Rede virou crate (`crates/network`, depende só de `core` e `agent-protocol`), com o que ela pede à central por `netmonitor_network::central::CentralServices` (motor de alertas, endereços, identificação de dispositivo, porta publicada, leitura da IA para a revisão de plugin — sai `plugins → ai`). Saíram `agent_runtime → discovery`, `agent_runtime → plugins`, `agents → discovery`, `agents → plugins`, `devices → discovery` (as chaves do palpite do Decisor são do `classifier`), `network_tools → plugins` (o alvo aceitável de equipamento é do `core`) e `plugins → ai`. **18 → 11 exceções**; o detector conta `netmonitor_network::<módulo>` pelo módulo.
+- **Resolvido na Fase 10:** as 11 restantes, por inversão. Registro de rotinas no `core` (`netmonitor_core::routines`: `Routine`, `RetentionJob`, `AreaRoutines`, cadência) e grupos de monitores (`MonitorGroup`): a coleta SNMP consolidada e a sem monitor, a varredura agendada, o vigia do Wi-Fi, os enlaces agendados e a retenção deles vêm da Rede; a telemetria dos túneis, da VPN (`monitoring → {link_tests, snmp, vpn, wifi}`, `maintenance → link_tests`). O Docker do agente virou `AgentCommandHandler` e `HostDocker` de Servidores (`agent_runtime → docker`). `DeviceAccess` no `core`, implementado pela Rede (identidade SNMP, leitor de Wi-Fi, credencial salva, shell SSH/Telnet, plugins no cadastro): saem `devices → wifi` e `syslog → {plugins, snmp}`. O probe por HTTP usa os `AgentCommandDispatcher`s (`probes → discovery`); o assistente inicial usa o IP público e a tabela do `core` (`onboarding → vpn`). **11 → 0 exceções.** Com o Núcleo no crate `nucleo` (Fase 10.2), a regra passou a ser do compilador; `tests/conventions/architecture.rs` guarda só o que ele não vê (manifestos, ponto de montagem, consumidor por área). O `WidgetSpec` não foi criado: o `docker_summary` é uma entrada de catálogo com `area()`, sem código que dependa de Servidores (A4 não é dependência).
 
-4. **Fase 3 — Evolução de produto (iniciada):**
-   - Janelas de manutenção: silenciar notificações por site/dispositivo em intervalo agendado.
-   - Rollup/agregação de métricas: tabela `monitor_results_hourly`, job no scheduler, endpoint `GET /api/monitors/:id/uptime` e card de estabilidade no detalhe do dispositivo.
+### 🟢 ARQ-03: Barramento SSE Central e Dashboard Acoplado ao Docker — Concluído
+- **Arquivos Afetados:** `frontend/src/stores/events.ts`, `frontend/src/pages/DashboardPage.vue`
+- **Descrição:** `events.ts` importa 26 stores e roteia ~58 tópicos num `switch`: área nova exige editar o centro (fere o Aberto/Fechado). O `case 'device:updated'` aparece duas vezes (o segundo nunca executa). `DashboardPage` sempre importa a store Docker.
+- **Plano:** registro de handlers por prefixo; o widget Docker carrega a própria store (Fase 3).
 
-O detalhamento completo das entregas, cronograma e critérios de aceite está em [`docs/roadmap.md`](roadmap.md).
+### 🟢 ARQ-04: Catálogo de Widgets Duplicado — Concluído
+- **Arquivos Afetados:** `backend/src/services/dashboard/catalog.rs`, `frontend/src/stores/dashboard.ts` (`CARD_TEMPLATES`, `DEFAULT_WIDGETS`, `parseSavedList`)
+- **Descrição:** os tipos de widget existem nos dois lados (fere o DRY), e `parseSavedList` devolve ao layout todo widget padrão ausente — com as áreas, traria o `docker_summary` de volta sozinho.
+- **Plano:** catálogo único no backend, lido pelo frontend via `ts-rs`, com `area()` por widget (Fase 2).
+
+### 🟢 ARQ-05: Snapshot Docker com Qualquer Aba Aberta — Concluído
+- **Arquivos Afetados:** `backend/src/services/agents/background.rs` (`desired_live_interval(has_subscribers)`)
+- **Descrição:** basta um assinante SSE, em qualquer página, para a central pedir `SetLive` a todos os agentes e distribuir snapshots Docker.
+- **Plano:** considerar a área Servidores e a presença de quem usa dados Docker (Fase 5).
+
+### 🟢 ARQ-06: Crate Único e Fronteira por Convenção — Concluído
+- **Arquivos Afetados:** `backend/` (workspace; o pacote raiz só monta)
+- **Descrição:** nada impede uma dependência nova entre domínios além da revisão humana; a compilação do crate inteiro estoura a paginação nesta máquina (erro 1455).
+- **Andamento:** Fase 1 criou o workspace e o `core`; a Fase 6 extraiu o `agent-protocol` e a área Servidores (`crates/servers`, que só depende de `core` e `agent-protocol` — garantido pelo `Cargo.toml`); a Fase 7, a VPN (`crates/vpn`, que só depende de `core`); a Fase 8, o assistente (`crates/assistant`, que só depende de `core`); a Fase 9, a Rede (`crates/network`, que só depende de `core` e `agent-protocol`). O custo medido está no "Portão da Fase 6" do ADR 017.
+- **Concluído na Fase 10:** o que restava do Núcleo no pacote raiz (serviços, controllers, DTOs, views, mailers — ~65 mil linhas) foi para `crates/nucleo`, que depende só de `core` e `agent-protocol` e do qual nenhuma área depende; o cadastro de redes foi para a Rede. O pacote raiz ficou com `app.rs`, `registries`, initializers, tarefas, binários e SPA. Ver ADR 017 (Fase 10) e [ADR 018](adr/018-loco-ou-axum.md).
+
+---
+
+## 8. Onde está o plano
+
+Entregas, ordem e critérios de aceite: [`roadmap.md`](roadmap.md) (roadmap mestre) e [`roadmap_arquitetura_modular.md`](roadmap_arquitetura_modular.md) (ADR 017).

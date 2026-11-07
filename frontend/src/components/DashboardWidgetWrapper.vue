@@ -88,7 +88,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import {
-  DEFAULT_WIDGETS,
+  useDashboardStore,
   WIDGET_SIZES,
   widgetSizeOf,
   type WidgetConfig,
@@ -112,7 +112,8 @@ const emit = defineEmits<{
 
 const isDragging = ref(false)
 const currentSize = computed(() => widgetSizeOf(props.widget))
-const isCustomCard = computed(() => !DEFAULT_WIDGETS.some((def) => def.id === props.widget.id))
+const dashboardStore = useDashboardStore()
+const isCustomCard = computed(() => !dashboardStore.isDefaultWidget(props.widget.id))
 
 function onDragStart(e: DragEvent) {
   if (!props.isEditMode) return

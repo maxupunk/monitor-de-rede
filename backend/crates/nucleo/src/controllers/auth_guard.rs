@@ -1,0 +1,142 @@
+//! Camada única de autenticação para as rotas de negócio.
+//!
+//! A validação usa o extractor JWT nativo do Loco, inclusive a cadeia de locais
+//! configurada em `auth.jwt.location` (Bearer e `?token=` para SSE).
+
+use axum::{
+    extract::{Request, State},
+    http::{HeaderValue, StatusCode},
+    middleware::Next,
+    response::{IntoResponse, Response},
+};
+use loco_rs::{app::AppContext, controller::extractor::auth};
+use netmonitor_core::{areas::AreaPolicies, roles::AreaAccess};
+use std::{collections::BTreeMap, str::FromStr};
+
+use crate::services::users::{request_is_allowed, Role};
+
+pub use netmonitor_core::audit::AUTHENTICATED_USER_HEADER;
+
+pub async fn require_jwt(
+    State(ctx): State<AppContext>,
+    mut request: Request,
+    next: Next,
+) -> Response {
+    let (mut parts, body) = request.into_parts();
+    let claims = match auth::extract_jwt_from_request_parts(&parts, &ctx) {
+        Ok(claims) => claims,
+        Err(error) => {
+            tracing::warn!(%error, path = %parts.uri.path(), "requisição de negócio sem JWT válido");
+            return (
+                StatusCode::UNAUTHORIZED,
+                axum::Json(serde_json::json!({ "message": "Não autenticado" })),
+            )
+                .into_response();
+        }
+    };
+
+    // Banco fora do ar **não** é sessão inválida. Enquanto os dois casos
+    // compartilhavam o 401, um "Connection pool timed out" — rotineiro quando o
+    // pool tinha uma conexão só — derrubava a sessão de quem estava logado: o
+    // `apiService` limpa o token e redireciona no 401, então o operador era
+    // deslogado por uma indisponibilidade de segundos. O 503 mantém a sessão e
+    // deixa o cliente tentar de novo.
+    let user = match crate::models::users::Model::find_by_pid(&ctx.db, &claims.claims.pid).await {
+        Ok(user) => user,
+        Err(loco_rs::model::ModelError::EntityNotFound) => {
+            tracing::warn!(pid = %claims.claims.pid, path = %parts.uri.path(), "usuário do JWT não existe no banco");
+            return (
+                StatusCode::UNAUTHORIZED,
+                axum::Json(serde_json::json!({ "message": "Não autenticado" })),
+            )
+                .into_response();
+        }
+        Err(error) => {
+            tracing::error!(%error, pid = %claims.claims.pid, path = %parts.uri.path(), "falha ao consultar o usuário do JWT");
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                axum::Json(
+                    serde_json::json!({ "message": "Serviço temporariamente indisponível. Tente novamente." }),
+                ),
+            )
+                .into_response();
+        }
+    };
+
+    if !user.active {
+        tracing::info!(user_pid = %user.pid, path = %parts.uri.path(), "requisição de negócio recusada: usuário desativado");
+        return (
+            StatusCode::UNAUTHORIZED,
+            axum::Json(serde_json::json!({ "message": "Este usuário está desativado. Procure um administrador." })),
+        )
+            .into_response();
+    }
+
+    let Ok(role) = Role::from_str(&user.role) else {
+        tracing::warn!(user_pid = %user.pid, role = %user.role, "requisição recusada: perfil inválido");
+        return (
+            StatusCode::FORBIDDEN,
+            axum::Json(serde_json::json!({ "message": "Seu perfil de acesso é inválido. Procure um administrador." })),
+        )
+            .into_response();
+    };
+
+    // Papel por área (ADR 019): a rota é de uma área? Vale o papel do usuário
+    // nela — o global no Núcleo, nenhum onde ele não tem acesso.
+    let area = AreaPolicies::from_context(&ctx).area_of_path(parts.uri.path());
+    let access =
+        AreaAccess::of_user(&user).unwrap_or_else(|_| AreaAccess::new(role, BTreeMap::new()));
+    let Some(role) = access.role_in(area) else {
+        tracing::info!(user_pid = %user.pid, area = %area, path = %parts.uri.path(), "requisição recusada: sem acesso à área");
+        return (
+            StatusCode::FORBIDDEN,
+            axum::Json(serde_json::json!({
+                "message": format!("Você não tem acesso à área {}. Peça a um administrador.", area.title()),
+                "area": area.id(),
+            })),
+        )
+            .into_response();
+    };
+
+    if !request_is_allowed(role, &parts.method, parts.uri.path()) {
+        tracing::info!(user_pid = %user.pid, role = %user.role, method = %parts.method, path = %parts.uri.path(), "requisição recusada pelo perfil de acesso");
+        return (
+            StatusCode::FORBIDDEN,
+            axum::Json(serde_json::json!({ "message": "Seu perfil não permite esta ação." })),
+        )
+            .into_response();
+    }
+
+    parts.headers.remove(AUTHENTICATED_USER_HEADER);
+    if let Ok(value) = HeaderValue::from_str(&claims.claims.pid) {
+        parts.headers.insert(AUTHENTICATED_USER_HEADER, value);
+    }
+
+    request = Request::from_parts(parts, body);
+    next.run(request).await
+}
+
+/// Usuário que passou pelo guarda — mora no núcleo, ao lado do cabeçalho.
+pub use netmonitor_core::audit::authenticated_user;
+
+/// Usuário autenticado **e** administrador.
+///
+/// `forbidden` é a frase da recusa — ela diz o que a pessoa tentou fazer
+/// ("Apenas administradores podem …").
+///
+/// # Errors
+///
+/// `401` sem sessão; `403` com `forbidden` quando o papel não é admin.
+pub async fn require_admin(
+    ctx: &AppContext,
+    headers: &axum::http::HeaderMap,
+    forbidden: &str,
+) -> crate::services::shared::errors::AppResult<crate::models::users::Model> {
+    use crate::services::shared::errors::AppError;
+
+    let user = authenticated_user(ctx, headers).await?;
+    if !Role::from_str(&user.role)?.can_manage_users() {
+        return Err(AppError::forbidden(forbidden));
+    }
+    Ok(user)
+}

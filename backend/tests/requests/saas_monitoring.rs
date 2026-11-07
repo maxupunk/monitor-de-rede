@@ -1,12 +1,14 @@
 //! Testes de integração para os serviços de Monitoramento SaaS e Heatmap Horário (§2.2.2).
 
-use backend::{
-    app::App,
-    dtos::saas::{HourlyHeatmapResponse, SaasPresetsResponse, SaasProvisionResponse},
-    models::{_entities::monitor_results_hourly, monitors},
+use backend::app::App;
+
+use netmonitor_nucleo::dtos::saas::{
+    HourlyHeatmapResponse, SaasPresetsResponse, SaasProvisionResponse,
 };
+
 use chrono::{Duration, Utc};
 use loco_rs::testing::prelude::*;
+use netmonitor_core::models::{_entities::monitor_results_hourly, monitors};
 use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 use serial_test::serial;
 

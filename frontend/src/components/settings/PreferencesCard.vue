@@ -60,7 +60,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive } from 'vue'
+import { computed, onMounted, reactive } from 'vue'
 import {
   usePreferencesStore,
   defaultPreferences,
@@ -86,21 +86,22 @@ function adotarPrefs(valores: Preferences): void {
 }
 
 const emit = defineEmits<{
-  saved: []
+  saved: [message: string]
 }>()
+
+onMounted(async () => {
+  await prefsStore.fetchAll()
+  adotarPrefs(prefsStore.preferences)
+})
 
 async function salvarPrefs(): Promise<void> {
   const ok = await prefsStore.save({ ...form })
   if (!ok) return
   adotarPrefs(prefsStore.preferences)
-  emit('saved')
+  emit('saved', 'Preferências salvas — já valem para os próximos monitores e dispositivos.')
 }
 
 function restaurarPrefs(): void {
   adotarPrefs(defaultPreferences())
 }
-
-defineExpose({
-  adotarPrefs,
-})
 </script>

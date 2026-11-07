@@ -6,24 +6,22 @@
 use std::time::Duration;
 
 use axum::http::StatusCode;
-use backend::{
-    app::App,
-    models::{_entities::audit_logs, scheduled_task_runs, scheduled_tasks, users},
-    services::{
-        ai::{
-            harness::tools::{AiToolRisk, ToolArgs, ToolPolicy, ToolRegistry, Verdict},
-            settings::AiAutomationMode,
-        },
-        audit::AuditActor,
-        scheduled_tasks::{
-            model::{ScheduledTaskInput, ScheduledTaskOrigin},
-            runner, service, Author,
-        },
-        users::Role,
-    },
-};
+use backend::app::App;
 use chrono::Utc;
 use loco_rs::{app::AppContext, testing::prelude::*};
+use netmonitor_assistant::{
+    harness::tools::{AiToolRisk, ToolArgs, ToolPolicy, ToolRegistry, Verdict},
+    settings::AiAutomationMode,
+};
+use netmonitor_core::models::{_entities::audit_logs, scheduled_task_runs, scheduled_tasks, users};
+use netmonitor_nucleo::{
+    services::audit::AuditActor,
+    services::scheduled_tasks::{
+        model::{ScheduledTaskInput, ScheduledTaskOrigin},
+        runner, service, Author,
+    },
+    services::users::Role,
+};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter, Set,
 };
@@ -38,6 +36,8 @@ const COM_ACOES: ToolPolicy = ToolPolicy {
     confirm_active: false,
     interactive: true,
     container_actions: AiAutomationMode::Off,
+    areas: netmonitor_core::areas::AreaSet::ALL,
+    writable: netmonitor_core::areas::AreaSet::ALL,
 };
 
 fn json_of(text: &str) -> Value {
@@ -520,4 +520,23 @@ async fn ia_agenda_altera_roda_e_exclui_so_com_confirmacao() {
         assert!(service::find(&ctx.db, id).await.is_err());
     })
     .await;
+}
+
+/// A área de uma ferramenta vem do catálogo montado no ponto de montagem
+/// (ADR 017): por isso o teste mora aqui, e não no crate do núcleo.
+#[test]
+fn ferramenta_de_area_desligada_e_pulada() {
+    use netmonitor_core::areas::{Area, EnabledAreas};
+    use netmonitor_nucleo::services::scheduled_tasks::areas::disabled_area;
+
+    backend::registries::install_ai_tools();
+    let mut enabled = EnabledAreas::all_on();
+    assert_eq!(disabled_area(&enabled, "get_docker_containers"), None);
+    enabled.set(Area::Servers, false);
+    assert_eq!(
+        disabled_area(&enabled, "get_docker_containers"),
+        Some(Area::Servers)
+    );
+    assert_eq!(disabled_area(&enabled, "list_devices"), None, "núcleo");
+    assert_eq!(disabled_area(&enabled, "nao_existe"), None);
 }

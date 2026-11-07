@@ -9,29 +9,25 @@
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use backend::{
-    app::App,
-    dtos::ai::{ChatMessageInput, TestConnectionResponse},
-    services::{
-        ai::{
-            decider::config::AiDeciderSettings,
-            drivers::traits::{
-                AiChatChunk, AiChatOptions, AiChunkStream, AiDriver, AiMessage, AiTool, AiToolCall,
-            },
-            harness::{
-                agent::{
-                    run_agent_loop, AgentRequest, ConversationMemory, HarnessEvent, ToolLoading,
-                },
-                prompt::ChatContext,
-                tools::{ToolPolicy, LOAD_TOOLS},
-            },
-            settings::{AiAutomationMode, AiSettings},
-        },
-        shared::errors::AppResult,
-    },
-};
+use backend::app::App;
 use futures::StreamExt;
 use loco_rs::{prelude::AppContext, testing::prelude::*};
+use netmonitor_assistant::{
+    dtos::{ChatMessageInput, TestConnectionResponse},
+    {
+        decider::config::AiDeciderSettings,
+        drivers::traits::{
+            AiChatChunk, AiChatOptions, AiChunkStream, AiDriver, AiMessage, AiTool, AiToolCall,
+        },
+        harness::{
+            agent::{run_agent_loop, AgentRequest, ConversationMemory, HarnessEvent, ToolLoading},
+            prompt::ChatContext,
+            tools::{ToolPolicy, LOAD_TOOLS},
+        },
+        settings::{AiAutomationMode, AiSettings},
+    },
+};
+use netmonitor_nucleo::services::shared::errors::AppResult;
 use serde_json::json;
 use serial_test::serial;
 
@@ -159,7 +155,7 @@ async fn conversar(
             policy: ToolPolicy::from_settings(&settings),
             tool_loading: carga,
             memory: ConversationMemory::default(),
-            actor: backend::services::audit::AuditActor::default(),
+            actor: netmonitor_nucleo::services::audit::AuditActor::default(),
         },
     )
     .await
@@ -330,7 +326,7 @@ async fn conversar_treinado(
             policy: ToolPolicy::from_settings(&settings),
             tool_loading: carga,
             memory: ConversationMemory::default(),
-            actor: backend::services::audit::AuditActor::default(),
+            actor: netmonitor_nucleo::services::audit::AuditActor::default(),
         },
     )
     .await
@@ -532,7 +528,7 @@ async fn ask_user_remove_opcoes_inventadas_e_preenche_todos_os_recursos_reais() 
                 policy: ToolPolicy::from_settings(&settings),
                 tool_loading: ToolLoading::Everything,
                 memory: ConversationMemory::default(),
-                actor: backend::services::audit::AuditActor::default(),
+                actor: netmonitor_nucleo::services::audit::AuditActor::default(),
             },
         )
         .await
