@@ -6,7 +6,8 @@ import { AREAS, type AreaModule } from './index'
 
 /**
  * Liga o barramento SSE às áreas: as rotas de cada área ficam registradas
- * enquanto ela está ligada e saem quando desliga. O núcleo fica sempre — é
+ * enquanto ela está visível (ligada e com acesso, ADR 019) e saem quando
+ * deixa de estar. O núcleo fica sempre — é
  * ele que recebe o `areas:updated`, então a mudança chega mesmo com tudo
  * desligado.
  *
@@ -19,7 +20,7 @@ export function installAreaRealtime(modules: readonly AreaModule[] = AREAS): () 
 
   function sync() {
     for (const module of modules) {
-      const on = areas.isEnabled(module.id)
+      const on = areas.isVisible(module.id)
       const current = installed.get(module.id)
       if (on && !current) installed.set(module.id, events.registerRoutes(module.sse))
       if (!on && current) {
@@ -30,7 +31,7 @@ export function installAreaRealtime(modules: readonly AreaModule[] = AREAS): () 
   }
 
   // `sync`: o evento seguinte ao `areas:updated` já encontra as rotas certas.
-  const stop = watch(() => areas.enabledAreas, sync, { immediate: true, flush: 'sync' })
+  const stop = watch(() => areas.visibleAreas, sync, { immediate: true, flush: 'sync' })
 
   return () => {
     stop()

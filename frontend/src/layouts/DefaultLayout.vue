@@ -336,7 +336,7 @@ const navSections = computed(() =>
       isAdmin: authStore.isAdmin,
       apps: pluginAppsStore.apps,
       canInstallPwa: canInstall.value && !isInstalled.value,
-      enabledAreas: areasStore.enabledAreas,
+      enabledAreas: areasStore.visibleAreas,
     },
     NAV_ENTRIES
   )
@@ -347,9 +347,9 @@ const navSections = computed(() =>
  * dá lugar à que explica e oferece ligar — o mesmo destino do guard.
  */
 watch(
-  () => areasStore.enabledAreas,
+  () => areasStore.visibleAreas,
   () => {
-    const target = areaOffRedirect(route, areasStore.isEnabled)
+    const target = areaOffRedirect(route, areasStore.isEnabled, authStore.hasAccess)
     if (target) void router.replace(target)
   }
 )

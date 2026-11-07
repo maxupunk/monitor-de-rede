@@ -1,3 +1,4 @@
+import { useAuthStore } from '@/stores/auth'
 import type { SseRoutes } from '@/stores/events'
 import type { AiIncidentSummary } from '@/bindings/AiIncidentSummary'
 import type { DeciderTriage } from '@/bindings/DeciderTriage'
@@ -30,6 +31,10 @@ function alertId(data: Record<string, unknown>): number {
 /** Núcleo: monitores, dispositivos, alertas, IA, backup, rotinas e as próprias áreas. */
 export const coreSse: SseRoutes = {
   'areas:updated': (data) => useAreasStore().apply(data),
+
+  // O acesso deste usuário mudou (ADR 019): o backend só entrega `user:*` à
+  // conexão do próprio usuário.
+  'user:access_updated': (data) => useAuthStore().applyAccess(data),
 
   'monitor:result': (data) => {
     const monitorsStore = useMonitorsStore()

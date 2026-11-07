@@ -46,7 +46,7 @@ import PageHeader from '@/components/PageHeader.vue'
 const areasStore = useAreasStore()
 
 /** As abas vêm das áreas (ADR 017): área desligada leva as dela junto. */
-const tabs = computed(() => buildSettingsTabs(AREAS, areasStore.isEnabled))
+const tabs = computed(() => buildSettingsTabs(AREAS, areasStore.isVisible))
 
 const route = useRoute()
 const router = useRouter()

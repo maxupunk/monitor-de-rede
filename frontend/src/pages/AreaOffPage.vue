@@ -2,12 +2,21 @@
   <div class="area-off d-flex justify-center">
     <v-card border rounded="lg" class="bg-surface pa-6 area-off__card">
       <div class="d-flex align-center ga-4 mb-4">
-        <v-avatar color="warning" variant="tonal" size="56" rounded="lg">
-          <v-icon size="30">{{ state?.icon ?? 'mdi-power-plug-off-outline' }}</v-icon>
+        <v-avatar :color="noAccess ? 'error' : 'warning'" variant="tonal" size="56" rounded="lg">
+          <v-icon size="30">{{
+            noAccess ? 'mdi-lock-outline' : (state?.icon ?? 'mdi-power-plug-off-outline')
+          }}</v-icon>
         </v-avatar>
         <div>
-          <div class="text-overline text-warning font-weight-bold">Área desligada</div>
-          <h1 class="text-h5 font-weight-bold">Esta área está desligada</h1>
+          <div
+            class="text-overline font-weight-bold"
+            :class="noAccess ? 'text-error' : 'text-warning'"
+          >
+            {{ noAccess ? 'Sem acesso' : 'Área desligada' }}
+          </div>
+          <h1 class="text-h5 font-weight-bold">
+            {{ noAccess ? 'Você não tem acesso a esta área' : 'Esta área está desligada' }}
+          </h1>
         </div>
       </div>
 
@@ -15,16 +24,23 @@
         <strong>{{ title }}</strong>
         <template v-if="state?.summary">: {{ state.summary }}</template>
       </p>
-      <p v-if="contents.length > 0" class="text-body-2 mb-4">
+      <p v-if="contents.length > 0 && !noAccess" class="text-body-2 mb-4">
         Ela reúne {{ contents.join(', ') }}. Enquanto estiver desligada, essas telas saem do menu e
         os cards dela não aparecem no Dashboard — nada do que foi cadastrado é apagado.
       </p>
-
       <v-alert v-if="error" type="error" variant="tonal" density="compact" class="mb-4">
         {{ error }}
       </v-alert>
 
-      <div v-if="authStore.isAdmin" class="d-flex flex-wrap ga-2">
+      <template v-if="noAccess">
+        <v-alert type="info" variant="tonal" density="compact" class="mb-4">
+          Seu usuário não tem papel nesta área. Peça a um administrador para liberar o acesso em
+          Administração › Usuários — assim que ele salvar, esta página abre sozinha.
+        </v-alert>
+        <v-btn color="primary" variant="tonal" to="/">Ir para o Dashboard</v-btn>
+      </template>
+
+      <div v-else-if="authStore.isAdmin" class="d-flex flex-wrap ga-2">
         <v-btn
           color="primary"
           variant="flat"
@@ -65,6 +81,8 @@ const areaModule = computed(() => AREAS.find((item) => item.id === route.params.
 const area = computed<Area>(() => areaModule.value?.id ?? 'core')
 const state = computed(() => areasStore.stateOf(area.value))
 const title = computed(() => state.value?.title ?? area.value)
+/** Chegou aqui por falta de papel na área (ADR 019), não por ela estar desligada. */
+const noAccess = computed(() => route.query.motivo === 'acesso')
 
 /** O que a área contém, a partir do próprio menu dela. */
 const contents = computed(() =>
@@ -88,9 +106,10 @@ async function turnOn() {
   }
 }
 
-// Ligada aqui ou em outra aba (o `areas:updated` chega pelo SSE): volta sozinho.
+// Ligada aqui ou em outra aba, ou o acesso liberado (os dois chegam pelo SSE):
+// volta sozinho.
 watch(
-  () => areasStore.isEnabled(area.value),
+  () => areasStore.isVisible(area.value),
   (on) => {
     if (on) goBack()
   },

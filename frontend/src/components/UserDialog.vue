@@ -94,6 +94,13 @@
               ></v-select>
             </v-col>
             <v-col cols="12">
+              <UserAreaAccessField
+                v-model="form.areaRoles"
+                :role="form.role"
+                :disabled="isCurrentUser"
+              />
+            </v-col>
+            <v-col cols="12">
               <v-switch
                 v-model="form.active"
                 color="success"
@@ -129,7 +136,8 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { useUsersStore, type ManagedUser } from '@/stores/users'
-import { ROLE_OPTIONS, type UserRole } from '@/utils/access'
+import UserAreaAccessField from '@/components/users/UserAreaAccessField.vue'
+import { ROLE_OPTIONS, type AreaRoles, type UserRole } from '@/utils/access'
 
 const props = defineProps<{
   modelValue: boolean
@@ -145,11 +153,21 @@ const emit = defineEmits<{
 const usersStore = useUsersStore()
 const formRef = ref<{ validate: () => Promise<{ valid: boolean }> } | null>(null)
 const showPassword = ref(false)
-const form = reactive({
+interface UserForm {
+  name: string
+  email: string
+  password: string
+  role: UserRole
+  areaRoles: AreaRoles
+  active: boolean
+}
+
+const form = reactive<UserForm>({
   name: '',
   email: '',
   password: '',
-  role: 'viewer' as UserRole,
+  role: 'viewer',
+  areaRoles: {},
   active: true,
 })
 
@@ -181,6 +199,7 @@ watch(
     form.email = user?.email ?? ''
     form.password = ''
     form.role = user?.role ?? 'viewer'
+    form.areaRoles = { ...(user?.areaRoles ?? {}) }
     form.active = user?.active ?? true
   },
   { immediate: true }
@@ -199,6 +218,7 @@ async function save() {
     email: form.email.trim(),
     password: form.password,
     role: form.role,
+    areaRoles: form.role === 'admin' ? {} : form.areaRoles,
     active: form.active,
   }
   const saved = props.user

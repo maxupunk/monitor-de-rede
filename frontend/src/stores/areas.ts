@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { apiService } from '@/services/apiService'
+import { useAuthStore } from '@/stores/auth'
 import type { Area } from '@/bindings/Area'
 import type { AreaImpact } from '@/bindings/AreaImpact'
 import type { AreasSnapshot } from '@/bindings/AreasSnapshot'
@@ -50,6 +51,20 @@ export const useAreasStore = defineStore('areas', () => {
     return area === 'core' || enabledAreas.value.has(area)
   }
 
+  /**
+   * A área aparece para **este** usuário: ligada e com acesso (ADR 019). É o
+   * filtro do menu, das rotas, dos widgets, das Configurações e do SSE.
+   */
+  function isVisible(area: Area): boolean {
+    return isEnabled(area) && useAuthStore().hasAccess(area)
+  }
+
+  /** As áreas que este usuário vê agora. */
+  const visibleAreas = computed<ReadonlySet<Area>>(
+    () =>
+      new Set((['core', 'network', 'servers', 'vpn'] as const).filter((area) => isVisible(area)))
+  )
+
   function stateOf(area: Area): AreaState | undefined {
     return states.value.find((state) => state.area === area)
   }
@@ -85,6 +100,8 @@ export const useAreasStore = defineStore('areas', () => {
     saving,
     enabledAreas,
     isEnabled,
+    visibleAreas,
+    isVisible,
     stateOf,
     apply,
     fetchImpact,

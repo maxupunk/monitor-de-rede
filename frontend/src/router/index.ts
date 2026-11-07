@@ -2,7 +2,7 @@ import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useAreasStore } from '@/stores/areas'
 import { AREA_ROUTES } from '@/areas'
-import { areaOffRedirect } from './areaGuard'
+import { areaOfRoute, areaOffRedirect } from './areaGuard'
 
 export const routes: RouteRecordRaw[] = [
   {
@@ -53,7 +53,7 @@ router.beforeEach(async (to) => {
     }
     // Área desligada: a página que explica e oferece ligar, nunca um 404.
     const areas = useAreasStore()
-    return areaOffRedirect(to, areas.isEnabled) ?? true
+    return areaOffRedirect(to, areas.isEnabled, auth.hasAccess) ?? true
   }
 
   if (await auth.ensureSetupStatus()) {
@@ -64,4 +64,9 @@ router.beforeEach(async (to) => {
   if (to.name === 'setup') return { name: 'login' }
   if (!to.meta.public) return { name: 'login', query: { redirect: to.fullPath } }
   return true
+})
+
+/** A área da página aberta: o `canWrite` vale o papel do usuário nela (ADR 019). */
+router.afterEach((to) => {
+  useAuthStore().currentArea = areaOfRoute(to) ?? 'core'
 })

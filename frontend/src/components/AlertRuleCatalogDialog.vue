@@ -218,7 +218,7 @@ interface TemplateGroup {
 
 /** Modelos de área desligada não aparecem (ADR 017); sem área, são do núcleo. */
 const visibleTemplates = computed(() =>
-  alertsStore.ruleTemplates.filter((template) => areasStore.isEnabled(template.area ?? 'core'))
+  alertsStore.ruleTemplates.filter((template) => areasStore.isVisible(template.area ?? 'core'))
 )
 
 /** Agrupa por categoria preservando a ordem em que o backend enviou */

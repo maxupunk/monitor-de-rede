@@ -151,7 +151,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
   }
 
   function isWidgetAreaOn(widget: Pick<WidgetConfig, 'id' | 'type'>): boolean {
-    return areasStore.isEnabled(areaOfWidget(widget))
+    return areasStore.isVisible(areaOfWidget(widget))
   }
 
   function defaultWidgets(): WidgetConfig[] {

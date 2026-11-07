@@ -1,13 +1,15 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { useCrudResource } from './crudResource'
-import type { UserRole } from '@/utils/access'
+import type { AreaRoles, UserRole } from '@/utils/access'
 
 export interface ManagedUser {
   id: number
   email: string
   fullName: string
   role: UserRole
+  /** Papel por área (ADR 019); sem a área, sem acesso. */
+  areaRoles: AreaRoles
   active: boolean
   createdAt: string
   updatedAt: string
@@ -18,6 +20,7 @@ export interface CreateUserPayload {
   email: string
   password: string
   role: UserRole
+  areaRoles: AreaRoles
   active: boolean
 }
 

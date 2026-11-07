@@ -337,14 +337,14 @@ as migrations por crate vêm antes das tabelas novas das Fases 15 e 16.
 
 ### Fase 15 — Papel por área ([ADR 019](adr/019-papel-por-area.md))
 
-- [ ] 🔴 Pendente — **Operator, viewer ou sem acesso, por área**
+- [x] 🟢 Concluído — **Operator, viewer ou sem acesso, por área**
   - **Entregas:**
-    - [ ] `user_area_roles` e `AreaAccess` no núcleo; admin global vale em tudo e é o único que atribui.
-    - [ ] Sem acesso: some do menu e das rotas, a IA perde as ferramentas da área, widgets e eventos SSE dela não chegam, notificações da área não são entregues ao usuário.
-    - [ ] Tela de usuário com a matriz área × nível e o atalho "mesmo papel em todas".
+    - [x] `user_area_roles` e `AreaAccess` no núcleo; admin global vale em tudo e é o único que atribui. — *ajustado:* coluna `users.area_roles` (JSON) no lugar da tabela; `netmonitor_core::roles::AreaAccess`; o guard único da API aplica a política de sempre com o papel da área da rota (prefixos declarados por cada `AreaPolicy`)
+    - [x] Sem acesso: some do menu e das rotas, a IA perde as ferramentas da área, widgets e eventos SSE dela não chegam, notificações da área não são entregues ao usuário. — `EventAudience` no SSE, `ToolPolicy::with_access` na IA (ações só onde o papel escreve), Web Push por área do alerta; e-mail/Telegram/Discord/webhook são destinos globais e não mudam. Achado: Docker e bancos seguem exigindo admin para escrever
+    - [x] Tela de usuário com a matriz área × nível e o atalho "mesmo papel em todas". — `UserAreaAccessField` (chips coloridos, "Todas como…", aviso "só o Núcleo"); a lista mostra as áreas de cada um; `AreaOffPage` explica "sem acesso"; o `canWrite` segue o papel da área da página aberta
   - **Aceite:**
-    - [ ] Testes de requisição: viewer e sem-acesso por área em rota, IA, SSE e notificação.
-    - [ ] Vitest: perda de acesso no meio da sessão muda menu e rotas pelo SSE, sem chamada HTTP.
+    - [x] Testes de requisição: viewer e sem-acesso por área em rota, IA, SSE e notificação. — `tests/requests/area_access.rs` (rota e cadastro); IA, SSE e regra em testes de unidade do `core` (`access_tests`, `events::audience`, `roles`)
+    - [x] Vitest: perda de acesso no meio da sessão muda menu e rotas pelo SSE, sem chamada HTTP. — `tests/areas/access.spec.ts`
 
 ### Fase 16 — Menu por usuário
 

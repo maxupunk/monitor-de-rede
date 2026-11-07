@@ -80,9 +80,34 @@
         </template>
 
         <template #item.role="{ item }">
-          <v-chip size="small" variant="tonal" :color="roleColor(item.role)">
-            {{ roleLabel(item.role) }}
-          </v-chip>
+          <div class="d-flex flex-wrap align-center ga-1 py-1">
+            <v-chip size="small" variant="tonal" :color="roleColor(item.role)">
+              {{ roleLabel(item.role) }}
+            </v-chip>
+            <template v-if="item.role !== 'admin'">
+              <v-chip
+                v-for="access in areaAccessOf(item)"
+                :key="access.area"
+                size="x-small"
+                variant="tonal"
+                :color="access.role === 'operator' ? 'primary' : 'info'"
+                :prepend-icon="
+                  access.role === 'operator' ? 'mdi-account-cog-outline' : 'mdi-eye-outline'
+                "
+              >
+                {{ access.title }}
+              </v-chip>
+              <v-chip
+                v-if="areaAccessOf(item).length === 0"
+                size="x-small"
+                variant="tonal"
+                color="warning"
+                prepend-icon="mdi-lock-outline"
+              >
+                Só o Núcleo
+              </v-chip>
+            </template>
+          </div>
         </template>
 
         <template #item.active="{ item }">
@@ -248,6 +273,8 @@ import { onMounted, ref } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
 import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
 import UserDialog from '@/components/UserDialog.vue'
+import type { Area } from '@/bindings/Area'
+import { useAreasStore } from '@/stores/areas'
 import { useAuthStore } from '@/stores/auth'
 import { useUsersStore, type ManagedUser } from '@/stores/users'
 import { ROLE_OPTIONS, roleLabel, type UserRole } from '@/utils/access'
@@ -265,7 +292,7 @@ const successMessage = ref('')
 
 const headers = [
   { title: 'Usuário', key: 'fullName' },
-  { title: 'Perfil', key: 'role', width: '160px' },
+  { title: 'Perfil e áreas', key: 'role', width: '300px' },
   { title: 'Status', key: 'active', width: '140px' },
   { title: 'Criado em', key: 'createdAt', width: '150px' },
   { title: 'Ações', key: 'actions', sortable: false, width: '110px', align: 'end' as const },
@@ -274,6 +301,16 @@ const headers = [
 onMounted(async () => {
   await Promise.all([usersStore.fetchUsers(), authStore.fetchMe()])
 })
+
+const areasStore = useAreasStore()
+
+/** As áreas em que o usuário tem papel, com o nome que a tela usa (ADR 019). */
+function areaAccessOf(user: ManagedUser): { area: Area; title: string; role: UserRole }[] {
+  return (['network', 'servers', 'vpn'] as const).flatMap((area) => {
+    const role = user.areaRoles?.[area]
+    return role ? [{ area, title: areasStore.stateOf(area)?.title ?? area, role }] : []
+  })
+}
 
 function roleColor(role: UserRole): string {
   if (role === 'admin') return 'deep-purple'
