@@ -36,6 +36,9 @@ impl MigrationTrait for Migration {
                 ("magic_link_expiration", ColType::TimestampWithTimeZoneNull),
                 ("active", ColType::BooleanWithDefault(true)),
                 ("role", ColType::StringWithDefault("admin".to_string())),
+                // Papel por área (ADR 019): `{"network": "viewer", ...}`. Sem
+                // chave (ou nulo), sem acesso à área — o admin vale em todas.
+                ("area_roles", ColType::JsonBinaryNull),
             ],
             &[],
         )

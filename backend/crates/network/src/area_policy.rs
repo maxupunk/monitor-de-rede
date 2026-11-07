@@ -27,6 +27,28 @@ impl AreaPolicy for NetworkPolicy {
         Area::Network
     }
 
+    fn api_prefixes(&self) -> &'static [&'static str] {
+        &[
+            "/api/discovery",
+            "/api/networks",
+            "/api/topology",
+            "/api/vendors",
+            "/api/plugin",
+            "/api/port-scan",
+            "/api/snmp",
+            "/api/package-mirror",
+            "/api/link-test",
+            "/api/wifi",
+            "/api/devices/*/snmp",
+            "/api/devices/*/plugins",
+            "/api/devices/*/credentials",
+        ]
+    }
+
+    fn event_prefixes(&self) -> &'static [&'static str] {
+        &["discovery:", "topology:", "plugin:", "link_test", "wifi:"]
+    }
+
     async fn evidence(&self, db: &DatabaseConnection) -> AppResult<Evidence> {
         let redes = networks::Entity::find().count(db).await?;
         if redes > 0 {

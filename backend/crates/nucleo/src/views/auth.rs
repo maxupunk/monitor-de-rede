@@ -37,6 +37,8 @@ pub struct UserResponse {
     pub email: String,
     pub full_name: String,
     pub role: String,
+    /// Papel por área (ADR 019); sem a área, sem acesso (o admin vale em todas).
+    pub area_roles: std::collections::BTreeMap<netmonitor_core::areas::Area, String>,
 }
 
 impl UserResponse {
@@ -48,6 +50,7 @@ impl UserResponse {
             full_name: user.name.clone(),
             // O esquema atual possui um único perfil de operador.
             role: user.role.clone(),
+            area_roles: super::users::area_roles_of(user),
         }
     }
 }

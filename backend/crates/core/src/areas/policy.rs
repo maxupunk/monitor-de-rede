@@ -80,6 +80,37 @@ pub trait AreaPolicy: Send + Sync {
     async fn blocker(&self, _db: &DatabaseConnection) -> AppResult<Option<Blocker>> {
         Ok(None)
     }
+
+    /// As rotas da API desta área (ADR 019): quem não tem acesso à área recebe
+    /// 403 nelas. `*` vale um segmento (`/api/devices/*/snmp`); o último
+    /// segmento casa por prefixo (`/api/plugin` cobre `/api/plugin-batches`).
+    fn api_prefixes(&self) -> &'static [&'static str] {
+        &[]
+    }
+
+    /// Os prefixos dos eventos do SSE desta área (`docker:`): não chegam a
+    /// quem não tem acesso a ela.
+    fn event_prefixes(&self) -> &'static [&'static str] {
+        &[]
+    }
+}
+
+/// O caminho casa com o padrão de rota de uma área? Ver
+/// [`AreaPolicy::api_prefixes`].
+#[must_use]
+pub fn path_matches(pattern: &str, path: &str) -> bool {
+    let path = path.split(['?', '#']).next().unwrap_or_default();
+    let padrao: Vec<&str> = pattern.trim_end_matches('/').split('/').collect();
+    let caminho: Vec<&str> = path.split('/').collect();
+    let Some((ultimo, antes)) = padrao.split_last() else {
+        return false;
+    };
+    caminho.len() >= padrao.len()
+        && antes
+            .iter()
+            .zip(&caminho)
+            .all(|(esperado, real)| *esperado == "*" || esperado == real)
+        && caminho[antes.len()].starts_with(ultimo)
 }
 
 /// Monitores nunca param pela área — a confirmação diz quantos seguem rodando.
@@ -112,10 +143,63 @@ impl AreaPolicies {
     }
 }
 
+impl AreaPolicies {
+    /// A área de uma rota da API; o Núcleo quando nenhuma área a declara.
+    #[must_use]
+    pub fn area_of_path(&self, path: &str) -> Area {
+        self.0
+            .iter()
+            .find(|policy| {
+                policy
+                    .api_prefixes()
+                    .iter()
+                    .any(|pattern| path_matches(pattern, path))
+            })
+            .map_or(Area::Core, |policy| policy.area())
+    }
+
+    /// A área de um evento do SSE; o Núcleo quando nenhuma área o declara.
+    #[must_use]
+    pub fn area_of_event(&self, event_type: &str) -> Area {
+        self.0
+            .iter()
+            .find(|policy| {
+                policy
+                    .event_prefixes()
+                    .iter()
+                    .any(|prefix| event_type.starts_with(prefix))
+            })
+            .map_or(Area::Core, |policy| policy.area())
+    }
+}
+
 impl std::ops::Deref for AreaPolicies {
     type Target = [Box<dyn AreaPolicy>];
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+#[cfg(test)]
+mod path_tests {
+    use super::path_matches;
+
+    #[test]
+    fn padrao_casa_por_segmento_com_curinga_e_prefixo_no_fim() {
+        assert!(path_matches("/api/docker", "/api/docker"));
+        assert!(path_matches("/api/docker", "/api/docker/hosts/agent-1"));
+        assert!(path_matches("/api/plugin", "/api/plugin-batches/3"));
+        assert!(path_matches(
+            "/api/devices/*/snmp",
+            "/api/devices/7/snmp/scan"
+        ));
+        assert!(path_matches("/api/vpn", "/api/vpn/peers?x=1"));
+        assert!(!path_matches(
+            "/api/devices/*/snmp",
+            "/api/devices/7/interfaces"
+        ));
+        assert!(!path_matches("/api/devices/*/snmp", "/api/devices"));
+        assert!(!path_matches("/api/docker", "/api/dashboard"));
     }
 }

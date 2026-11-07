@@ -26,6 +26,8 @@ pub struct Model {
     pub magic_link_expiration: Option<DateTimeWithTimeZone>,
     pub active: bool,
     pub role: String,
+    #[sea_orm(column_type = "JsonBinary", nullable)]
+    pub area_roles: Option<Json>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

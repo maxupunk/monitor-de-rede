@@ -10,7 +10,8 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use loco_rs::{app::AppContext, controller::extractor::auth};
-use std::str::FromStr;
+use netmonitor_core::{areas::AreaPolicies, roles::AreaAccess};
+use std::{collections::BTreeMap, str::FromStr};
 
 use crate::services::users::{request_is_allowed, Role};
 
@@ -76,6 +77,23 @@ pub async fn require_jwt(
         return (
             StatusCode::FORBIDDEN,
             axum::Json(serde_json::json!({ "message": "Seu perfil de acesso é inválido. Procure um administrador." })),
+        )
+            .into_response();
+    };
+
+    // Papel por área (ADR 019): a rota é de uma área? Vale o papel do usuário
+    // nela — o global no Núcleo, nenhum onde ele não tem acesso.
+    let area = AreaPolicies::from_context(&ctx).area_of_path(parts.uri.path());
+    let access =
+        AreaAccess::of_user(&user).unwrap_or_else(|_| AreaAccess::new(role, BTreeMap::new()));
+    let Some(role) = access.role_in(area) else {
+        tracing::info!(user_pid = %user.pid, area = %area, path = %parts.uri.path(), "requisição recusada: sem acesso à área");
+        return (
+            StatusCode::FORBIDDEN,
+            axum::Json(serde_json::json!({
+                "message": format!("Você não tem acesso à área {}. Peça a um administrador.", area.title()),
+                "area": area.id(),
+            })),
         )
             .into_response();
     };

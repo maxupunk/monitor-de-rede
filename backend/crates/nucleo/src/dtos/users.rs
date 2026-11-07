@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::Deserialize;
 use validator::Validate;
 
@@ -12,6 +14,10 @@ pub struct CreateUserInput {
     pub password: String,
     pub role: String,
     pub active: Option<bool>,
+    /// Papel por área (ADR 019): `{ "servers": "operator" }`. Área ausente é
+    /// sem acesso; o admin vale em todas.
+    #[serde(default)]
+    pub area_roles: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Deserialize, Validate)]
@@ -24,4 +30,6 @@ pub struct UpdateUserInput {
     pub password: Option<String>,
     pub role: String,
     pub active: bool,
+    #[serde(default)]
+    pub area_roles: BTreeMap<String, String>,
 }

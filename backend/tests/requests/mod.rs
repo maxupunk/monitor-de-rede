@@ -25,6 +25,7 @@ mod alert_problem_kind;
 mod alert_recovery;
 mod alert_rule_scope;
 mod app_logs;
+mod area_access;
 mod areas;
 mod audit;
 mod auth;

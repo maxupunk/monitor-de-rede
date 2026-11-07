@@ -36,6 +36,14 @@ impl AreaPolicy for ServersPolicy {
         Area::Servers
     }
 
+    fn api_prefixes(&self) -> &'static [&'static str] {
+        &["/api/docker", "/api/databases"]
+    }
+
+    fn event_prefixes(&self) -> &'static [&'static str] {
+        &["docker:", "database_jobs:", "database_connections:"]
+    }
+
     async fn evidence(&self, db: &DatabaseConnection) -> AppResult<Evidence> {
         // O agente local nasce com toda instalação (ADR 014): não é evidência.
         let remotos = probes::Entity::find()

@@ -6,9 +6,12 @@ use axum::{
 };
 use loco_rs::prelude::*;
 
+use netmonitor_core::roles::ACCESS_UPDATED_EVENT;
+
 use crate::{
     controllers::auth_guard::AUTHENTICATED_USER_HEADER,
     dtos::users::{CreateUserInput, UpdateUserInput},
+    models::_entities::users,
     services::{
         audit::{
             AuditAction, AuditActor, AuditChanges, AuditEntryInput, AuditService, ResourceType,
@@ -97,7 +100,24 @@ async fn update(
         )
         .await;
 
+    publish_access(&ctx, &user);
     Ok(format::json(UserDetailResponse::from(user))?)
+}
+
+/// Avisa a sessão do próprio usuário que o acesso dele mudou (ADR 019): o
+/// menu, as rotas e os eventos se ajustam na hora, sem recarregar. O SSE só
+/// entrega `user:*` à conexão desse usuário.
+fn publish_access(ctx: &AppContext, user: &users::Model) {
+    if let Ok(bus) = netmonitor_core::events::EventBus::from_context(ctx) {
+        bus.publish_ephemeral(
+            ACCESS_UPDATED_EVENT,
+            serde_json::json!({
+                "userId": user.id,
+                "role": user.role,
+                "areaRoles": crate::views::users::area_roles_of(user),
+            }),
+        );
+    }
 }
 
 async fn destroy(

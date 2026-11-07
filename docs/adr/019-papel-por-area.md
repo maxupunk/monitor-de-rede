@@ -50,9 +50,24 @@ rede, ou cuida da rede e não deve ver os túneis da VPN.
   conjunto "áreas visíveis para mim" (`enabledAreas ∩ minhasÁreas`), vindo do
   snapshot SSE da sessão. Menu, rotas, widgets e handlers SSE não mudam de
   forma; mudam de fonte.
-- **Armazenamento:** tabela `user_area_roles (user_id, area, role)`, no crate
-  do Núcleo (o usuário é do núcleo). Sistema ainda sem produção: entra na
-  migration existente de usuários.
+- **Armazenamento:** coluna `users.area_roles` (JSON, `{"servers": "operator"}`),
+  na migration existente de usuários (sistema ainda sem produção). *Ajustado na
+  implementação:* com três chaves fixas, uma coluna é mais simples que a
+  tabela `user_area_roles` pensada antes, não entra na lista de truncagem e é
+  lida junto do usuário que o guard já carrega.
+- **Onde a regra vale (implementado):** o guard único da API (`require_jwt`)
+  descobre a área da rota pelos prefixos que cada `AreaPolicy` declara e aplica
+  a política de sempre com o papel **naquela área**; o SSE filtra por
+  `EventAudience` (prefixos de evento da área; `user:*` só ao próprio
+  usuário, e o acesso novo vale na mesma conexão); a IA usa
+  `ToolPolicy::with_access` (só áreas visíveis; ações só onde o papel escreve);
+  o Web Push de alerta vai só a quem vê a área do alerta (a área sai do modelo
+  da regra; sem modelo, o Núcleo). E-mail, Telegram, Discord e webhook são
+  destinos globais configurados pelo administrador e não mudam.
+- **Achado:** escrever em `/api/docker` e tudo em `/api/databases` continua
+  exigindo **administrador** (`can_manage_docker`, regra anterior a este ADR).
+  Por isso o operador de Servidores, hoje, só lê ali — liberar ações de
+  container ao operador da área é decisão de segurança à parte.
 
 ## Usabilidade
 

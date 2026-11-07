@@ -239,8 +239,14 @@
     - **Nenhum `if área` fora dos registros.** A área é consultada por quem monta
       o menu, as rotas, o catálogo e as rotinas — nunca espalhada em componentes
       e serviços.
-    - **Área não é controle de acesso.** A API continua montada e quem autoriza é
-      o papel (`admin`, `operator`, `viewer`).
+    - **Ligar ou desligar a área não é controle de acesso.** A API continua
+      montada; quem autoriza é o papel. O papel vale **por área** ([ADR
+      019](docs/adr/019-papel-por-area.md)): o administrador vale em todas; no
+      Núcleo vale o papel global; em cada área, o papel atribuído a ela ou
+      nenhum (sem acesso). A regra mora em `netmonitor_core::roles::AreaAccess`
+      e é aplicada no guard único da API, no SSE (`EventAudience`), na IA
+      (`ToolPolicy::with_access`) e no Web Push — rota ou evento novo de área
+      entra nos prefixos do `AreaPolicy` dela, nunca num `if` próprio.
     - **Desligar uma área nunca apaga dado e nunca para monitor.** Só esconde e
       pausa as rotinas próprias dela.
     - **Fronteira de dependência:** o núcleo (`crates/core`, `crates/nucleo`)

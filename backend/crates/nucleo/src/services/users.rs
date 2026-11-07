@@ -29,7 +29,7 @@ use crate::{
 
 /// O papel do usuário é do núcleo (a área Rede também o consulta); o
 /// caminho antigo continua valendo.
-pub use netmonitor_core::roles::Role;
+pub use netmonitor_core::roles::{AreaAccess, Role};
 
 /// Rotas de plugin de dispositivo: `/api/plugins*`, `/api/plugin-runs*`,
 /// `/api/plugin-approvals*`, `/api/plugin-auto-accept*` e as de plugin e
@@ -114,6 +114,7 @@ impl<'a> UserService<'a> {
     pub async fn create(&self, input: &CreateUserInput) -> AppResult<users::Model> {
         input.validate()?;
         let role = Role::from_str(input.role.trim())?;
+        let area_roles = AreaAccess::parse_area_roles(&input.area_roles)?;
         let user = user_model::Model::create_with_password_and_role(
             self.db,
             &RegisterParams {
@@ -128,6 +129,7 @@ impl<'a> UserService<'a> {
 
         let mut active = user.into_active_model();
         active.active = Set(input.active.unwrap_or(true));
+        active.area_roles = Set(Some(AreaAccess::to_json(&area_roles)));
         active.email_verified_at = Set(Some(Local::now().into()));
         active.update(self.db).await.map_err(AppError::from)
     }
@@ -141,6 +143,7 @@ impl<'a> UserService<'a> {
         input.validate()?;
         let current = self.find(id).await?;
         let role = Role::from_str(input.role.trim())?;
+        let area_roles = AreaAccess::parse_area_roles(&input.area_roles)?;
         let active = input.active;
 
         if current.pid.to_string() == actor_pid && (role.as_str() != current.role || !active) {
@@ -166,6 +169,7 @@ impl<'a> UserService<'a> {
         model.name = Set(input.name.trim().to_string());
         model.email = Set(email);
         model.role = Set(role.as_str().to_string());
+        model.area_roles = Set(Some(AreaAccess::to_json(&area_roles)));
         model.active = Set(active);
 
         if let Some(password) = input

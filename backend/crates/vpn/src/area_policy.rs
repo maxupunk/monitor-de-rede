@@ -18,6 +18,14 @@ impl AreaPolicy for VpnPolicy {
         Area::Vpn
     }
 
+    fn api_prefixes(&self) -> &'static [&'static str] {
+        &["/api/vpn"]
+    }
+
+    fn event_prefixes(&self) -> &'static [&'static str] {
+        &["vpn:"]
+    }
+
     async fn evidence(&self, db: &DatabaseConnection) -> AppResult<Evidence> {
         let servidores = vpn_servers::Entity::find().count(db).await?;
         Ok(if servidores > 0 {

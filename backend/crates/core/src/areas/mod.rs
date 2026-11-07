@@ -152,6 +152,22 @@ impl AreaSet {
         matches!(area, Area::Core) || self.0 & area.bit() != 0
     }
 
+    /// Só as áreas que estão nos dois conjuntos (o núcleo fica).
+    #[must_use]
+    pub const fn intersect(self, other: Self) -> Self {
+        Self((self.0 & other.0) | Area::Core.bit())
+    }
+
+    /// O conjunto com exatamente estas áreas (e o núcleo).
+    #[must_use]
+    pub fn of(areas: impl IntoIterator<Item = Area>) -> Self {
+        Self(
+            areas
+                .into_iter()
+                .fold(Area::Core.bit(), |bits, area| bits | area.bit()),
+        )
+    }
+
     /// O mesmo conjunto sem a área (o núcleo não sai).
     #[must_use]
     pub const fn without(self, area: Area) -> Self {
