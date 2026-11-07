@@ -1,8 +1,11 @@
 use axum::http::{HeaderName, HeaderValue};
 use loco_rs::{app::AppContext, TestServer};
+use netmonitor_core::areas::Area;
 use netmonitor_core::models::{users, users::RegisterParams};
+use netmonitor_nucleo::services::users::Role;
 use netmonitor_nucleo::{mailers::auth::AuthMailer, views::auth::LoginResponse};
-use sea_orm::IntoActiveModel;
+use sea_orm::{ActiveModelTrait, IntoActiveModel, Set};
+use std::collections::BTreeMap;
 
 pub const USER_EMAIL: &str = "test@loco.com";
 pub const USER_PASSWORD: &str = "User1234";
@@ -91,4 +94,27 @@ pub fn auth_header(token: &str) -> (HeaderName, HeaderValue) {
     let auth_header_value = HeaderValue::from_str(&format!("Bearer {}", &token)).unwrap();
 
     (HeaderName::from_static("authorization"), auth_header_value)
+}
+
+/// Sessão com o papel global dado e, fora o administrador, o mesmo papel em
+/// todas as áreas (ADR 019) — o caso de quem só quer testar o papel.
+pub async fn session_with_role(
+    request: &mut TestServer,
+    ctx: &AppContext,
+    role: Role,
+) -> users::Model {
+    let session = init_operator(ctx).await;
+    let mut active = session.user.into_active_model();
+    active.role = Set(role.as_str().to_string());
+    if role != Role::Admin {
+        let every_area = Area::OPTIONAL.map(|area| (area.id(), role.as_str()));
+        active.area_roles = Set(Some(serde_json::json!(BTreeMap::from(every_area))));
+    }
+    let user = active
+        .update(&ctx.db)
+        .await
+        .expect("papel do usuário de teste");
+    let (header, value) = auth_header(&session.token);
+    request.add_header(header, value);
+    user
 }

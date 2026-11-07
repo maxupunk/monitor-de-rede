@@ -9,27 +9,14 @@ use backend::app::App;
 use loco_rs::testing::prelude::*;
 use netmonitor_core::models::devices;
 use netmonitor_nucleo::services::users::Role;
-use sea_orm::{ActiveModelTrait, IntoActiveModel, Set};
+use sea_orm::{ActiveModelTrait, Set};
 use serde_json::{json, Value};
 use serial_test::serial;
 
-use super::prepare_data;
+use super::prepare_data::session_with_role;
 
 fn json_of(text: &str) -> Value {
     serde_json::from_str(text).expect("resposta JSON")
-}
-
-async fn session_with_role(
-    request: &mut loco_rs::TestServer,
-    ctx: &loco_rs::app::AppContext,
-    role: Role,
-) {
-    let session = prepare_data::init_operator(ctx).await;
-    let mut active = session.user.into_active_model();
-    active.role = Set(role.as_str().to_string());
-    active.update(&ctx.db).await.unwrap();
-    let (header, value) = prepare_data::auth_header(&session.token);
-    request.add_header(header, value);
 }
 
 /// Um "roteador" com interface web em 127.0.0.1.

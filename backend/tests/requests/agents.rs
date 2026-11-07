@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use backend::app::App;
 use chrono::Utc;
 use loco_rs::{app::AppContext, testing::prelude::*};
-use netmonitor_core::models::{devices, monitor_results, monitors, probes, users};
+use netmonitor_core::models::{devices, monitor_results, monitors, probes};
 use netmonitor_nucleo::{
     services::agent_runtime::{executor::CommandExecutor, tunnel::LocalTunnelOpener},
     services::agents::{
@@ -41,25 +41,11 @@ use tokio_util::sync::CancellationToken;
 
 use super::{
     agent_harness::{connect_agent_with, enrolled_agent},
-    prepare_data,
+    prepare_data::session_with_role,
 };
 
 fn json_of(text: &str) -> Value {
     serde_json::from_str(text).expect("resposta JSON")
-}
-
-async fn session_with_role(
-    request: &mut loco_rs::TestServer,
-    ctx: &AppContext,
-    role: Role,
-) -> users::Model {
-    let session = prepare_data::init_operator(ctx).await;
-    let mut active = session.user.into_active_model();
-    active.role = Set(role.as_str().to_string());
-    let user = active.update(&ctx.db).await.expect("papel");
-    let (header, value) = prepare_data::auth_header(&session.token);
-    request.add_header(header, value);
-    user
 }
 
 /// Executor falso do lado do agente: responde como um host com dois

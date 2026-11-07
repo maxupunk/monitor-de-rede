@@ -17,23 +17,14 @@ use netmonitor_core::models::{
 };
 use netmonitor_network_wifi::{self as wifi, watchlist::WATCHED_EVENT, SNAPSHOT_EVENT};
 use netmonitor_nucleo::{services::events::EventBus, services::users::Role};
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use serde_json::{json, Value};
 use serial_test::serial;
 
-use super::prepare_data;
+use super::prepare_data::session_with_role as session;
 
 fn json_of(text: &str) -> Value {
     serde_json::from_str(text).expect("resposta JSON")
-}
-
-async fn session(request: &mut loco_rs::TestServer, ctx: &AppContext, role: Role) {
-    let session = prepare_data::init_operator(ctx).await;
-    let mut active = session.user.into_active_model();
-    active.role = Set(role.as_str().to_string());
-    active.update(&ctx.db).await.unwrap();
-    let (header, value) = prepare_data::auth_header(&session.token);
-    request.add_header(header, value);
 }
 
 async fn device(ctx: &AppContext, name: &str) -> devices::Model {
