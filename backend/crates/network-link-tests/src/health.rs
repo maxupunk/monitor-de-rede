@@ -26,11 +26,6 @@ use tokio_util::sync::CancellationToken;
 use ts_rs::TS;
 
 use super::endpoint::{Endpoint, Role};
-use crate::snmp::{
-    client::{SnmpClient, SnmpValue},
-    collectors,
-    service::device_config_with,
-};
 use netmonitor_core::{
     models::devices,
     monitoring::{
@@ -41,6 +36,11 @@ use netmonitor_core::{
         series,
     },
     preferences,
+};
+use netmonitor_network::snmp::{
+    client::{SnmpClient, SnmpValue},
+    collectors,
+    service::device_config_with,
 };
 
 /// Intervalo entre duas leituras de uma ponta.

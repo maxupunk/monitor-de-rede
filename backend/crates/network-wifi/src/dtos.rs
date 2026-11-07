@@ -1,7 +1,7 @@
 //! Telemetria Wi-Fi: o que a tela recebe (`docs/monitoramento_wifi_sinais.md`).
 //!
 //! Cada fabricante entrega as estações no contrato do plugin
-//! (`services::wifi::contract`); daqui para frente o formato é um só, e a
+//! (`crate::contract`); daqui para frente o formato é um só, e a
 //! classificação (faixas e saúde) já vem pronta — a tela só escolhe a cor.
 
 use serde::{Deserialize, Serialize};

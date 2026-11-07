@@ -10,10 +10,10 @@
 //! (`collapse`) e o recorte do grafo em que só transparentes ficam no meio
 //! (`segment_edges`). O plano só carrega os dados e chama.
 
-use crate::topology::path::PathEdge;
 use netmonitor_core::{
     devices::system_device::NETMONITOR_KEY, models::devices, shared::errors::AppError,
 };
+use netmonitor_network::topology::path::PathEdge;
 
 /// Sem IP o equipamento é transparente. O próprio NetMonitor nunca é: ele é
 /// a central, com os motores nativos.
@@ -59,7 +59,7 @@ pub fn single_edge(edge_ids: &[i64]) -> Option<i64> {
 /// equipamentos com IP de cada lado.
 ///
 /// `edge_ids[i]` liga `device_ids[i]` a `device_ids[i + 1]` (o formato de
-/// [`TopologyPath`](crate::topology::path::TopologyPath)).
+/// [`TopologyPath`](netmonitor_network::topology::path::TopologyPath)).
 ///
 /// # Errors
 ///
@@ -125,7 +125,7 @@ pub fn segment_edges(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::topology::{path::shortest_path, service::path_confidence};
+    use netmonitor_network::topology::{path::shortest_path, service::path_confidence};
 
     fn hop(a: i64, b: i64, via: &[i64], edges: &[i64]) -> Hop {
         Hop {
@@ -238,7 +238,7 @@ mod tests {
     #[test]
     fn rotas_compartilhadas_com_a_tela() {
         let fixture: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../tests/fixtures/link_test_routes.json"
+            "../../../tests/fixtures/link_test_routes.json"
         ))
         .expect("JSON das rotas");
         let int = |value: &serde_json::Value| value.as_i64().expect("inteiro");

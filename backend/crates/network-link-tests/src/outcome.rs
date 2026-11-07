@@ -122,7 +122,7 @@ pub fn first_failure(stages: &[LinkTestStage]) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::link_tests::model::LinkTestStageKey;
+    use crate::model::LinkTestStageKey;
     use LinkTestStepStatus::{Cancelled, Failed, Pending, Skipped, Succeeded};
 
     fn stages(statuses: [LinkTestStepStatus; 6]) -> Vec<LinkTestStage> {

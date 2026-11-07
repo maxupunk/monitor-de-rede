@@ -6,17 +6,11 @@ use std::net::IpAddr;
 use loco_rs::app::AppContext;
 use serde_json::json;
 
-use super::{
-    contract,
-    contract::PingReply,
-    quality,
-    source::{self, Requester},
-};
-use crate::{
-    dtos::wifi::{WifiPingInput, WifiPingResult},
-    plugins::actions,
-};
+use super::{contract, contract::PingReply, quality};
+use crate::dtos::{WifiPingInput, WifiPingResult};
 use netmonitor_core::shared::errors::{AppError, AppResult};
+use netmonitor_network::plugins::actions;
+use netmonitor_network::plugins::wifi_source::{self as source, Requester};
 
 /// Mede a latência do equipamento até `input.target`.
 ///
@@ -89,7 +83,7 @@ fn result(device_id: i64, target: IpAddr, reply: PingReply) -> WifiPingResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dtos::wifi::WifiGrade;
+    use crate::dtos::WifiGrade;
 
     fn alvo() -> IpAddr {
         "192.168.1.150".parse().unwrap()

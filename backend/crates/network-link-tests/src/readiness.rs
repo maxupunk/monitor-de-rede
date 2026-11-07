@@ -18,11 +18,11 @@ use super::{
     env::PluginInvoker,
     model::{LinkTestFix, LinkTestRole},
 };
-use crate::plugins::{
+use netmonitor_network::plugins::{
     invoke::{RunStatus, ServiceRunRequest},
     runs::Origin,
 };
-use crate::throughput::ThroughputEngine;
+use netmonitor_network::throughput::ThroughputEngine;
 
 /// Prazo de cada conferência no plano: um `command -v` não leva mais que
 /// isso, e o plano não pode ficar esperando um equipamento que não responde.

@@ -9,11 +9,9 @@
 //! de quem **dirige** (`Send`/`Receive`, `tx`/`rx`); a perna fala do enlace
 //! (`forward` = A→B, `reverse` = B→A).
 
-use crate::throughput::{Flow, TestDirection, ThroughputEngine};
-use crate::{
-    link_tests::model::{LinkTestEndpointKind, LinkTestFlow, LinkTestSide},
-    plugins::manifest::ThroughputRoles,
-};
+use crate::model::{LinkTestEndpointKind, LinkTestFlow, LinkTestSide};
+use netmonitor_network::plugins::manifest::ThroughputRoles;
+use netmonitor_network::throughput::{Flow, TestDirection, ThroughputEngine};
 
 /// Ordem de preferência dos motores.
 pub const ENGINE_PREFERENCE: [ThroughputEngine; 2] =

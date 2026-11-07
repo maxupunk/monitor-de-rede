@@ -173,8 +173,11 @@ backend/                 workspace Cargo; o pacote raiz (`backend`) é o ponto d
 │   ├── network/         área Rede: descoberta (+ despacho ao agente e ao probe), fabricantes,
 │   │                    varredura de portas, SNMP (+ monitor e grupo `snmp`), topologia,
 │   │                    redes, plugins de dispositivo (ADR 012) e o acesso ao equipamento,
-│   │                    espelho de pacotes, vazão e testes de enlace (ADR 015), Wi-Fi, as
-│   │                    rotinas da área, os comandos da Rede no agente e as rotas
+│   │                    espelho de pacotes, motores de vazão (ADR 015), as rotinas da
+│   │                    base, os comandos da Rede no agente e as rotas — a base da área
+│   ├── network-wifi/    submódulo da Rede: clientes Wi-Fi, vigia e dataset `wifi_client`
+│   ├── network-link-tests/ submódulo da Rede: testes de enlace (ADR 015), agendamentos
+│   │                    e retenção — os dois dependem só do core e da base da área
 │   ├── servers/         área Servidores: docker (+ comandos e Docker do host no agente),
 │   │                    databases, monitor de container, rotas /api/docker e /api/databases
 │   ├── vpn/             área VPN: servidor, peers, IPAM, chaves, config/status do watcher,

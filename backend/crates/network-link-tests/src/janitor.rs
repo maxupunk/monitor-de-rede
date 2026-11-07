@@ -18,11 +18,11 @@ use super::{
     repository,
     runner::PendingCleanup,
 };
-use crate::plugins::{
+use netmonitor_core::shared::errors::AppResult;
+use netmonitor_network::plugins::{
     invoke::{RunStatus, ServiceRunRequest},
     runs::Origin,
 };
-use netmonitor_core::shared::errors::AppResult;
 
 /// Erro dos testes interrompidos.
 pub const INTERRUPTED: &str = "interrompido pelo reinício do servidor";

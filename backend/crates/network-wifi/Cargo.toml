@@ -1,0 +1,53 @@
+[package]
+name = "netmonitor-network-wifi"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Submódulo Wi-Fi da área Rede do NetMonitor (ADR 017, Fase 14). Depende só do núcleo, do contrato de fio e da base da área."
+
+[lib]
+name = "netmonitor_network_wifi"
+
+[dependencies]
+netmonitor-network = { workspace = true }
+sea-orm-migration = { workspace = true }
+netmonitor-core = { workspace = true }
+netmonitor-agent-protocol = { workspace = true }
+loco-rs = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tokio-stream = { version = "0.1", features = ["sync"] }
+futures = { workspace = true }
+async-trait = { workspace = true }
+axum = { workspace = true }
+tracing = { workspace = true }
+sea-orm = { workspace = true }
+chrono = { workspace = true }
+ts-rs = { workspace = true }
+regex = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+sha2 = { workspace = true }
+rand = { workspace = true }
+reqwest = { workspace = true }
+surge-ping = { workspace = true }
+# Nomes por mDNS/NBNS na descoberta (wire format, §3.4 SPIKE-04).
+hickory-proto = { version = "0.24", default-features = false }
+# SNMP (§3.4 SPIKE-01).
+async-snmp = { version = "0.16", default-features = false, features = ["crypto-rustcrypto"] }
+phf = { version = "0.11", features = ["macros"] }
+uuid = { workspace = true }
+# SSH dos plugins e da ativação do log no roteador (Rust puro, ver o
+# comentário no `Cargo.toml` da raiz).
+russh = { workspace = true }
+# Motor de script dos plugins (ADR 012): só enxerga o que é registrado nele;
+# `no_module` desliga o `import` de arquivos.
+rhai = { version = "1", features = ["sync", "serde", "no_module"] }
+# Resposta ao desafio do btest da MikroTik (definido pelo protocolo).
+md-5 = { version = "0.11" }
+
+[dev-dependencies]
+loco-rs = { workspace = true, features = ["testing"] }
+serial_test = { version = "3.1.1" }

@@ -1,12 +1,11 @@
 //! O que a Rede contribui ao ciclo do scheduler e à purga (ADR 017, registro
 //! de rotinas): a coleta SNMP consolidada por dispositivo (um
-//! [`MonitorGroup`]), a coleta dos dispositivos sem monitor, a varredura
-//! agendada, o vigia dos clientes Wi-Fi, os testes de enlace agendados e a
-//! retenção do histórico deles. Montadas pelo ponto de montagem.
+//! [`MonitorGroup`]), a coleta dos dispositivos sem monitor e a varredura
+//! agendada. O vigia do Wi-Fi e os testes de enlace agendados vêm dos
+//! submódulos da área. Montadas pelo ponto de montagem.
 //!
-//! Área desligada pausa a varredura, o vigia e os agendamentos de enlace — as
-//! próprias rotinas consultam a área, como já faziam. A coleta SNMP alimenta
-//! monitores e não pausa.
+//! Área desligada pausa a varredura — a própria rotina consulta a área, como
+//! já fazia. A coleta SNMP alimenta monitores e não pausa.
 
 use std::{collections::HashSet, sync::Arc};
 
@@ -16,42 +15,22 @@ use chrono::{DateTime, Utc};
 use futures::{stream, StreamExt};
 use loco_rs::app::AppContext;
 use netmonitor_core::{
-    areas::{self, Area},
+    areas::Area,
     models::{devices, monitors},
     monitoring::{execution_guard::try_acquire_snmp_device, MonitorGroup},
-    routines::{
-        cadence::{is_device_collection_due, is_due},
-        retention_days, Cycle, RetentionJob, Routine,
-    },
+    routines::{cadence::is_device_collection_due, Cycle, Routine},
     shared::errors::{AppError, AppResult},
 };
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect, Set,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QuerySelect, Set};
 
 use crate::{
     discovery::queue::{process_pending_runs, schedule_due_networks, spawn_pending_run},
-    link_tests::{
-        repository as link_test_repository, schedules as link_test_schedules, LinkTestEnv,
-    },
     snmp::service as snmp_service,
-    wifi,
 };
 
 /// Coletas SNMP simultâneas de dispositivos sem monitor (o mesmo teto dos
 /// monitores no ciclo).
 const COLLECTION_CONCURRENCY: usize = 16;
-
-/// Cadência da conferência dos agendamentos de teste de enlace.
-pub const LINK_TEST_SCHEDULES_INTERVAL_SECONDS: i64 = 60;
-
-/// Cadência do vigia dos clientes Wi-Fi vigiados: uma sessão SSH por AP a
-/// cada 5 min — leve para o AP e fino o bastante para a regra de 10 min.
-pub const WIFI_WATCH_INTERVAL_SECONDS: i64 = 300;
-
-/// Testes de enlace terminados (com pernas e amostras): o mesmo prazo das
-/// execuções de plugin que cada etapa gerou.
-pub const DEFAULT_RETENTION_LINK_TESTS_DAYS: i64 = 90;
 
 /// Monitores SNMP locais do mesmo dispositivo compartilham uma única coleta.
 #[must_use]
@@ -269,116 +248,13 @@ impl Routine for DiscoveryQueue {
     }
 }
 
-/// Dispara o vigia dos clientes Wi-Fi vigiados. Roda em segundo plano: a
-/// leitura dos APs por SSH leva segundos e não pode atrasar os monitores.
-/// Com a área Rede desligada (ADR 017) o vigia fica pausado.
-pub struct WifiWatch;
-
-#[async_trait]
-impl Routine for WifiWatch {
-    fn name(&self) -> &'static str {
-        "vigia_wifi"
-    }
-
-    fn area(&self) -> Area {
-        Area::Network
-    }
-
-    async fn run(&self, ctx: &AppContext, cycle: Cycle) -> AppResult<()> {
-        if !is_due("wifi_watch", WIFI_WATCH_INTERVAL_SECONDS, cycle.now) {
-            return Ok(());
-        }
-        let ctx = ctx.clone();
-        tokio::spawn(async move {
-            if !areas::is_enabled(&ctx.db, Area::Network)
-                .await
-                .unwrap_or(true)
-            {
-                return;
-            }
-            if let Err(error) = wifi::watch::run(&ctx).await {
-                tracing::warn!(%error, "falha no vigia dos clientes Wi-Fi");
-            }
-        });
-        Ok(())
-    }
-}
-
-/// Dispara os agendamentos de teste de enlace vencidos (ADR 015 §5).
-///
-/// Confere a cada minuto; o teste em si roda em segundo plano, com a mesma
-/// trava de concorrência dos testes pedidos pela tela. Com a área Rede
-/// desligada (ADR 017) os agendamentos ficam pausados — não são apagados.
-pub struct LinkTestSchedules;
-
-#[async_trait]
-impl Routine for LinkTestSchedules {
-    fn name(&self) -> &'static str {
-        "agendamentos_de_enlace"
-    }
-
-    fn area(&self) -> Area {
-        Area::Network
-    }
-
-    async fn run(&self, ctx: &AppContext, cycle: Cycle) -> AppResult<()> {
-        if !is_due(
-            "link_test_schedules",
-            LINK_TEST_SCHEDULES_INTERVAL_SECONDS,
-            cycle.now,
-        ) {
-            return Ok(());
-        }
-        if !areas::is_enabled(&ctx.db, Area::Network).await? {
-            return Ok(());
-        }
-        let started =
-            link_test_schedules::run_due(LinkTestEnv::from_context(ctx), cycle.now).await?;
-        if started > 0 {
-            tracing::info!(started, "agendamentos de teste de enlace disparados");
-        }
-        Ok(())
-    }
-}
-
-/// O histórico dos testes de enlace. Teste em curso não tem `finished_at` e
-/// nunca envelhece.
-pub struct LinkTestRetention;
-
-#[async_trait]
-impl RetentionJob for LinkTestRetention {
-    fn name(&self) -> &'static str {
-        "testes_de_enlace"
-    }
-
-    fn area(&self) -> Area {
-        Area::Network
-    }
-
-    async fn prune(&self, db: &DatabaseConnection, now: DateTime<Utc>) -> AppResult<u64> {
-        let days = retention_days(
-            "RETENTION_LINK_TESTS_DAYS",
-            DEFAULT_RETENTION_LINK_TESTS_DAYS,
-        );
-        link_test_repository::prune(db, now - chrono::Duration::days(days)).await
-    }
-}
-
 /// As rotinas do ciclo, na ordem em que rodam.
 #[must_use]
 pub fn routines() -> Vec<Arc<dyn Routine>> {
     vec![
         Arc::new(UnmonitoredSnmpCollection),
         Arc::new(DiscoveryQueue),
-        Arc::new(WifiWatch),
-        Arc::new(LinkTestSchedules),
     ]
-}
-
-/// A retenção desta área.
-#[must_use]
-pub fn retention() -> Vec<Arc<dyn RetentionJob>> {
-    vec![Arc::new(LinkTestRetention)]
 }
 
 /// Os grupos de monitores desta área.

@@ -28,6 +28,13 @@ use std::{
 /// dele, e ele não depende de área).
 const AREAS: &[&str] = &["network", "servers", "vpn", "assistant"];
 
+/// Submódulos de área (Fase 14): crate próprio que continua sendo a área e só
+/// depende da base dela. `(diretório do crate, área)`.
+const SUBMODULOS: &[(&str, &str)] = &[
+    ("network-wifi", "network"),
+    ("network-link-tests", "network"),
+];
+
 /// O que cada crate pode ter como dependência do workspace (sem o prefixo
 /// `netmonitor-`). Cada crate leva o próprio esquema (Fase 13).
 const PERMITIDAS: &[(&str, &[&str])] = &[
@@ -38,6 +45,8 @@ const PERMITIDAS: &[(&str, &[&str])] = &[
     ("servers", &["core", "agent-protocol"]),
     ("vpn", &["core", "agent-protocol"]),
     ("assistant", &["core", "agent-protocol"]),
+    ("network-wifi", &["core", "agent-protocol", "network"]),
+    ("network-link-tests", &["core", "agent-protocol", "network"]),
 ];
 
 /// Arquivos do pacote raiz que montam as áreas.
@@ -136,14 +145,21 @@ fn sem_comentarios(source: &str) -> String {
     out
 }
 
-/// As áreas que um código-fonte nomeia (`netmonitor_network::…`).
+/// As áreas que um código-fonte nomeia (`netmonitor_network::…`, ou um
+/// submódulo dela, `netmonitor_network_wifi::…`).
 fn areas_citadas(source: &str) -> BTreeSet<&'static str> {
     let code = sem_comentarios(source);
-    AREAS
+    let mut citadas: BTreeSet<&'static str> = AREAS
         .iter()
         .copied()
         .filter(|area| code.contains(&format!("netmonitor_{area}::")))
-        .collect()
+        .collect();
+    for (submodulo, area) in SUBMODULOS {
+        if code.contains(&format!("netmonitor_{}::", submodulo.replace('-', "_"))) {
+            citadas.insert(area);
+        }
+    }
+    citadas
 }
 
 #[test]
@@ -285,15 +301,20 @@ fn tabela_de_area_so_aponta_para_o_nucleo_ou_para_a_propria_area() {
         "o detector achou as tabelas do núcleo"
     );
     let mut erradas = Vec::new();
-    for area in AREAS {
-        let (proprias, fks) = esquema(area);
+    let crates = AREAS
+        .iter()
+        .map(|area| (*area, None))
+        .chain(SUBMODULOS.iter().map(|(dir, area)| (*dir, Some(*area))));
+    for (dir, base) in crates {
+        let (proprias, fks) = esquema(dir);
         assert!(
             !proprias.is_empty(),
-            "a área `{area}` sem tabela no detector"
+            "o crate `{dir}` sem tabela no detector"
         );
+        let da_base = base.map(|area| esquema(area).0).unwrap_or_default();
         for (filha, pai) in fks {
-            if !nucleo.contains(&pai) && !proprias.contains(&pai) {
-                erradas.push(format!("{area}: {filha} → {pai}"));
+            if !nucleo.contains(&pai) && !proprias.contains(&pai) && !da_base.contains(&pai) {
+                erradas.push(format!("{dir}: {filha} → {pai}"));
             }
         }
     }
@@ -312,6 +333,10 @@ fn o_detector_ignora_comentarios_e_le_os_manifestos() {
     ";
     let citadas = areas_citadas(source);
     assert!(citadas.contains("network"));
+    assert!(
+        areas_citadas("fn g() { netmonitor_network_wifi::watch::run(); }").contains("network"),
+        "submódulo conta como a área"
+    );
     assert!(!citadas.contains("servers"), "comentário não conta");
     assert!(!citadas.contains("vpn"), "comentário de bloco não conta");
 

@@ -1,4 +1,6 @@
-//! Orquestrador do teste de enlace (ADR 015 §5).
+//! Submódulo de testes de enlace da área Rede (ADR 017, Fase 14): o
+//! orquestrador do teste de enlace (ADR 015 §5). Depende só do núcleo, do
+//! contrato de fio e da base da área (`netmonitor-network`).
 //!
 //! Mede **quanto passa** num enlace (`link`), ao longo de um caminho, enlace
 //! por enlace (`path`), ou do servidor até um equipamento (`server`). Cada
@@ -23,7 +25,11 @@
 //! | [`janitor`] | limpeza no boot |
 //! | [`env`] | os contratos que o orquestrador usa (plugins, motores, btest) |
 //! | [`service`] | os casos de uso que os controllers chamam |
+//! | [`controllers`] | as rotas `/api/link-tests*` |
+//! | [`routines`] | os agendamentos no ciclo do scheduler e a retenção |
+//! | [`migrations`] | as tabelas dos testes de enlace |
 
+pub mod controllers;
 pub mod endpoint;
 pub mod env;
 pub mod events;
@@ -31,12 +37,14 @@ pub mod fixes;
 pub mod guard;
 pub mod health;
 pub mod janitor;
+pub mod migrations;
 pub mod model;
 pub mod negotiate;
 pub mod outcome;
 pub mod plan;
 pub mod readiness;
 pub mod repository;
+pub mod routines;
 pub mod runner;
 pub mod schedules;
 pub mod service;

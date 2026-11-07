@@ -11,12 +11,12 @@ use super::{
     model::{LinkTestEndpoint, LinkTestEndpointKind, LinkTestFix},
     negotiate::{Capabilities, Party},
 };
-use crate::plugins::{credentials, manifest::ThroughputRoles, service};
 use netmonitor_core::{
     devices::system_device::NETMONITOR_DEFAULT_NAME,
     models::{device_credentials, devices, plugins, probes},
     shared::errors::{AppError, AppResult},
 };
+use netmonitor_network::plugins::{credentials, manifest::ThroughputRoles, service};
 
 /// O plugin que faz os papéis de teste num equipamento.
 #[derive(Debug, Clone)]
@@ -287,7 +287,7 @@ pub async fn agent_of<C: ConnectionTrait>(db: &C, device_id: i64) -> AppResult<O
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::throughput::ThroughputEngine;
+    use netmonitor_network::throughput::ThroughputEngine;
 
     #[test]
     fn central_sem_dispositivo_do_sistema_tem_nome_padrao() {

@@ -40,13 +40,18 @@ use super::{
     runner::PendingCleanup,
     schedules, service,
 };
-use crate::throughput::{
+use netmonitor_core::{
+    events::EventBus,
+    models::{device_links, devices, link_test_legs, plugins},
+    shared::errors::{AppError, AppResult},
+};
+use netmonitor_network::throughput::{
     btest::{self, BtestServer},
     driver::{LocalDriver, ThroughputDriver},
     iperf3::fake_server::{Behavior, FakeServer},
     sample_channel, TestDirection, TestProtocol, ThroughputEngine, ThroughputSpec,
 };
-use crate::{
+use netmonitor_network::{
     plugins::{
         credentials::{self, CredentialInput, SecretStorage},
         invoke::{RunOutcome, RunStatus, ServiceRunRequest},
@@ -56,11 +61,6 @@ use crate::{
         service::{self as plugin_service, source},
     },
     topology::service::parent_edge_id,
-};
-use netmonitor_core::{
-    events::EventBus,
-    models::{device_links, devices, link_test_legs, plugins},
-    shared::errors::{AppError, AppResult},
 };
 
 // --- Fakes -------------------------------------------------------------------

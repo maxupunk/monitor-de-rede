@@ -8,11 +8,11 @@ use ts_rs::TS;
 
 pub use super::health::LinkTestHealthSample;
 
-use crate::plugins::manifest::TransportKind;
-use crate::throughput::{
+use netmonitor_core::shared::errors::{AppError, AppResult};
+use netmonitor_network::plugins::manifest::TransportKind;
+use netmonitor_network::throughput::{
     ThroughputEngine, MAX_DURATION_S, MAX_STREAMS, MIN_DURATION_S, MIN_STREAMS,
 };
-use netmonitor_core::shared::errors::{AppError, AppResult};
 
 /// Duração padrão de cada sentido, em segundos.
 pub const DEFAULT_DURATION_S: u8 = 5;

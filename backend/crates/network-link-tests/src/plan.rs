@@ -23,15 +23,15 @@ use super::{
     readiness::{self, CheckOutcome, CheckTarget},
     transparent::{self, Hop},
 };
-use crate::throughput::ThroughputEngine;
-use crate::topology::{
-    path::{shortest_path, TopologyPath},
-    service::{find_path, load_path_edges, parent_edge_child},
-};
 use netmonitor_core::{
     devices::system_device::{SystemDeviceService, NETMONITOR_KEY},
     models::{device_links, devices},
     shared::errors::{AppError, AppResult},
+};
+use netmonitor_network::throughput::ThroughputEngine;
+use netmonitor_network::topology::{
+    path::{shortest_path, TopologyPath},
+    service::{find_path, load_path_edges, parent_edge_child},
 };
 
 /// Folga fixa de uma perna (conexões, relatórios), em segundos.
@@ -954,14 +954,14 @@ pub async fn build(env: &LinkTestEnv, request: &LinkTestRequest) -> AppResult<Bu
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::link_tests::{
+    use crate::{
         endpoint::central_endpoint,
         model::LinkTestEndpoint,
         negotiate::{Capabilities, DriveCap},
     };
 
     fn device_endpoint(id: i64, caps: Capabilities, with_prepare: bool) -> Endpoint {
-        use crate::plugins::manifest::{ThroughputActions, ThroughputRoles};
+        use netmonitor_network::plugins::manifest::{ThroughputActions, ThroughputRoles};
         let device = devices::Model {
             id,
             name: format!("D{id}"),

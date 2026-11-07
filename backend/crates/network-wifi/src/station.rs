@@ -5,11 +5,9 @@ use super::{
     contract::StationReading,
     quality::{self, Reading},
 };
-use crate::{
-    dtos::wifi::{WifiBand, WifiHealth, WifiStation},
-    vendors,
-};
+use crate::dtos::{WifiBand, WifiHealth, WifiStation};
 use netmonitor_core::network_tools::neighbor_cache::normalize_mac;
+use netmonitor_network::vendors;
 
 /// A estação pronta, ou `None` quando falta o que a identifica (MAC válido)
 /// ou o que a classifica (sinal).
@@ -104,7 +102,7 @@ fn non_empty(value: Option<String>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dtos::wifi::WifiGrade;
+    use crate::dtos::WifiGrade;
 
     fn leitura() -> StationReading {
         StationReading {

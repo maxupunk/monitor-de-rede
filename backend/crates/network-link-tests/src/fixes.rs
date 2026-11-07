@@ -12,14 +12,14 @@ use std::cmp::Reverse;
 use sea_orm::{ColumnTrait, Condition, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder};
 
 use super::{model::LinkTestFix, negotiate::Capabilities};
-use crate::plugins::{
-    compat::{self, Compat, DeviceFacts},
-    credentials::{self, AccessGap},
-    service,
-};
 use netmonitor_core::{
     models::{devices, plugins},
     shared::errors::AppResult,
+};
+use netmonitor_network::plugins::{
+    compat::{self, Compat, DeviceFacts},
+    credentials::{self, AccessGap},
+    service,
 };
 
 /// Um plugin de teste que o equipamento pode receber.
@@ -128,7 +128,7 @@ mod tests {
     use sea_orm::{ActiveModelTrait, Database, DatabaseConnection, Set};
 
     use super::*;
-    use crate::plugins::{
+    use netmonitor_network::plugins::{
         credentials::{CredentialInput, SecretStorage},
         manifest::TransportKind,
     };

@@ -15,7 +15,7 @@ use loco_rs::{app::AppContext, testing::prelude::*};
 use netmonitor_core::models::{
     _entities::alert_events, alert_rules, devices, wifi_watched_clients,
 };
-use netmonitor_network::wifi::{self, watchlist::WATCHED_EVENT, SNAPSHOT_EVENT};
+use netmonitor_network_wifi::{self as wifi, watchlist::WATCHED_EVENT, SNAPSHOT_EVENT};
 use netmonitor_nucleo::{services::events::EventBus, services::users::Role};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
 use serde_json::{json, Value};

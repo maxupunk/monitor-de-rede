@@ -39,6 +39,8 @@ const WORKSPACE_CRATES: &[&str] = &[
     "netmonitor_core",
     "netmonitor_nucleo",
     "netmonitor_network",
+    "netmonitor_network_wifi",
+    "netmonitor_network_link_tests",
     "netmonitor_servers",
     "netmonitor_vpn",
     "netmonitor_assistant",
@@ -238,10 +240,10 @@ impl Hooks for App {
                 netmonitor_network::controllers::plugins::routes().layer(business_auth.clone()),
             )
             .add_route(
-                netmonitor_network::controllers::link_tests::routes().layer(business_auth.clone()),
+                netmonitor_network_link_tests::controllers::routes().layer(business_auth.clone()),
             )
             .add_route(controllers::scheduled_tasks::routes().layer(business_auth.clone()))
-            .add_route(netmonitor_network::controllers::wifi::routes().layer(business_auth.clone()))
+            .add_route(netmonitor_network_wifi::controllers::routes().layer(business_auth.clone()))
             .add_route(netmonitor_vpn::controllers::vpn_peers::routes().layer(business_auth))
     }
 

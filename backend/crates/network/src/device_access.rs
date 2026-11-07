@@ -24,7 +24,6 @@ use crate::{
         client::{SnmpClient, SnmpConfig, SnmpVersion},
         collectors::{collect_hardware, collect_system},
     },
-    wifi,
 };
 
 /// O acesso da Rede.
@@ -103,7 +102,9 @@ impl DeviceAccess for NetworkDeviceAccess {
     }
 
     async fn has_wifi_reader(&self, db: &DatabaseConnection, device_id: i64) -> AppResult<bool> {
-        Ok(wifi::source::for_device(db, device_id).await?.is_some())
+        Ok(crate::plugins::wifi_source::for_device(db, device_id)
+            .await?
+            .is_some())
     }
 
     async fn stored_login(

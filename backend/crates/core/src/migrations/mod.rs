@@ -87,17 +87,18 @@ impl MigratorTrait for CoreMigrator {
     }
 }
 
-/// Migrator dos testes de um crate de área: o esquema do núcleo mais o da área
-/// (`netmonitor_core::area_test_migrator!(TestMigrator, migrations);`).
+/// Migrator dos testes de um crate: o esquema do núcleo mais o dos crates
+/// dados, na ordem (`netmonitor_core::area_test_migrator!(TestMigrator,
+/// migrations);` numa área; a base da área antes, num submódulo).
 #[macro_export]
 macro_rules! area_test_migrator {
-    ($name:ident, $area:path) => {
+    ($name:ident, $($schema:path),+ $(,)?) => {
         pub struct $name;
 
         impl $crate::migrations::MigratorTrait for $name {
             fn migrations() -> Vec<Box<dyn $crate::migrations::MigrationTrait>> {
                 let mut all = $crate::migrations::migrations();
-                all.extend($area());
+                $(all.extend($schema());)+
                 all
             }
         }

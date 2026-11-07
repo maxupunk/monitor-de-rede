@@ -25,6 +25,7 @@ crates/core/            # contratos e kernel: models (+ _entities GERADAS), shar
 crates/nucleo/          # o Núcleo: services/, controllers/, dtos/, views/, mailers/
 crates/agent-protocol/  # contrato de fio central ↔ agente
 crates/{network,servers,vpn}/  # as áreas, cada uma com services, controllers e dtos
+crates/network-{wifi,link-tests}/  # submódulos da Rede: dependem só do core e da base da área
 crates/assistant/       # a IA (chat, harness, Decisor)
 src/migrator.rs         # Migrator: o esquema do core + o de cada área (crates/*/src/migrations)
 config/*.yaml           # per-environment config (LOCO_ENV)

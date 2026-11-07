@@ -13,12 +13,8 @@ use sea_orm::{
 };
 
 use super::{collector, watch};
-use crate::central::Central;
-use crate::{
-    dtos::wifi::{
-        WifiWatchCreate, WifiWatchState, WifiWatchUpdate, WifiWatchedClient, WifiWatchedSnapshot,
-    },
-    vendors::builtin::is_locally_administered,
+use crate::dtos::{
+    WifiWatchCreate, WifiWatchState, WifiWatchUpdate, WifiWatchedClient, WifiWatchedSnapshot,
 };
 use netmonitor_core::{
     alerts::contracts::AlertScopeKey,
@@ -27,6 +23,8 @@ use netmonitor_core::{
     network_tools::neighbor_cache::normalize_mac,
     shared::errors::{AppError, AppResult},
 };
+use netmonitor_network::central::Central;
+use netmonitor_network::vendors::builtin::is_locally_administered;
 
 pub const WATCHED_EVENT: &str = "wifi:watched";
 const SNAPSHOT_KEY: &str = "wifi:watched";

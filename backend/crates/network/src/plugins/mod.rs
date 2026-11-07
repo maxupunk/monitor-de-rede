@@ -46,3 +46,5 @@ pub mod transport;
 pub mod ux_lint;
 pub mod version;
 pub mod widgets;
+/// Qual plugin do equipamento declara o bloco `wifi` (o leitor de clientes).
+pub mod wifi_source;

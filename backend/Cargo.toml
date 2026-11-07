@@ -1,8 +1,8 @@
 [workspace]
-members = [".", "crates/core", "crates/nucleo", "crates/agent-protocol", "crates/servers", "crates/vpn", "crates/assistant", "crates/network"]
+members = [".", "crates/core", "crates/nucleo", "crates/agent-protocol", "crates/servers", "crates/vpn", "crates/assistant", "crates/network", "crates/network-wifi", "crates/network-link-tests"]
 # Sem isto, `cargo test`/`cargo clippy` na raiz só cobririam o pacote raiz:
 # os testes que se mudam para um crate sairiam da suíte sem ninguém notar.
-default-members = [".", "crates/core", "crates/nucleo", "crates/agent-protocol", "crates/servers", "crates/vpn", "crates/assistant", "crates/network"]
+default-members = [".", "crates/core", "crates/nucleo", "crates/agent-protocol", "crates/servers", "crates/vpn", "crates/assistant", "crates/network", "crates/network-wifi", "crates/network-link-tests"]
 
 [package]
 name = "backend"
@@ -92,6 +92,8 @@ netmonitor-servers = { path = "crates/servers" }
 netmonitor-vpn = { path = "crates/vpn" }
 netmonitor-assistant = { path = "crates/assistant" }
 netmonitor-network = { path = "crates/network" }
+netmonitor-network-wifi = { path = "crates/network-wifi" }
+netmonitor-network-link-tests = { path = "crates/network-link-tests" }
 
 [dependencies]
 loco-rs = { workspace = true  }
@@ -123,6 +125,8 @@ netmonitor-servers = { workspace = true }
 netmonitor-vpn = { workspace = true }
 netmonitor-assistant = { workspace = true }
 netmonitor-network = { workspace = true }
+netmonitor-network-wifi = { workspace = true }
+netmonitor-network-link-tests = { workspace = true }
 sea-orm = { workspace = true }
 chrono = { workspace = true }
 # Expressões cron das tarefas agendadas (próximas execuções na hora local do

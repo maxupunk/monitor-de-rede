@@ -19,19 +19,18 @@ use serde_json::{json, Map};
 
 use super::{
     collector::{self, FleetReading},
-    source::Requester,
     watchlist,
 };
-use crate::central::Central;
 use crate::{
-    dtos::wifi::{WifiDeviceSnapshot, WifiReadStatus, WifiStation},
-    wifi::wifi_client::{WifiClientFacts, WifiClientPresence},
+    dtos::{WifiDeviceSnapshot, WifiReadStatus, WifiStation},
+    wifi_client::{WifiClientFacts, WifiClientPresence},
 };
 use netmonitor_core::{
     alerts::contracts::{AlertEvaluationContext, AlertEvaluationScope, AlertScopeKey, AlertTarget},
     models::{devices, wifi_watched_clients},
     shared::errors::AppResult,
 };
+use netmonitor_network::{central::Central, plugins::wifi_source::Requester};
 
 /// O que a leitura disse de um vigiado.
 #[derive(Debug, Clone, PartialEq)]
@@ -165,7 +164,7 @@ mod tests {
     use chrono::Duration;
 
     use super::*;
-    use crate::dtos::wifi::{WifiGrade, WifiHealth};
+    use crate::dtos::{WifiGrade, WifiHealth};
 
     const MAC: &str = "3c:84:6a:00:00:01";
 

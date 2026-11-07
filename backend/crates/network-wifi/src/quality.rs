@@ -2,7 +2,7 @@
 //! estação. Tabela e regras no §3 de `docs/monitoramento_wifi_sinais.md` —
 //! este é o único lugar que as aplica; plugin e tela só as consomem.
 
-use crate::dtos::wifi::{WifiGrade, WifiHealth};
+use crate::dtos::{WifiGrade, WifiHealth};
 
 /// Parada há mais que isto, com sinal bom, é economia de energia.
 pub const POWER_SAVE_INACTIVE_MS: u64 = 10_000;

@@ -328,12 +328,12 @@ as migrations por crate vêm antes das tabelas novas das Fases 15 e 16.
 
 ### Fase 14 — Crates de submódulo da Rede
 
-- [ ] 🔴 Pendente — **`network-wifi` e `network-link-tests`**
+- [x] 🟢 Concluído — **`network-wifi` e `network-link-tests`**
   - **Entregas:**
-    - [ ] Wi-Fi e testes de enlace viram crates que dependem do `network` (a base da área), continuando a área Rede.
-    - [ ] O teste de arquitetura conhece submódulo: depende só da base da própria área e do `core`.
+    - [x] Wi-Fi e testes de enlace viram crates que dependem do `network` (a base da área), continuando a área Rede. — cada um levou módulos, rotas, DTOs, rotinas e a própria tabela; a fonte do leitor Wi-Fi (qual plugin declara o bloco `wifi`) ficou na base como `plugins::wifi_source`, porque o acesso ao equipamento da base a consulta
+    - [x] O teste de arquitetura conhece submódulo: depende só da base da própria área e do `core`. — `SUBMODULOS` em `tests/conventions/architecture.rs` (dependência, detector de área e FKs)
   - **Aceite:**
-    - [ ] Só movimento (sem mudança de comportamento); suíte verde nos dois bancos.
+    - [x] Só movimento (sem mudança de comportamento); suíte verde nos dois bancos. — os 671 testes de unidade da Rede continuam 671 (519 + 115 + 37); integração de Wi-Fi, enlaces, vazão e áreas verde; suíte completa nos dois bancos no fechamento das Fases 11–16
 
 ### Fase 15 — Papel por área ([ADR 019](adr/019-papel-por-area.md))
 

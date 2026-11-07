@@ -6,7 +6,7 @@
 
 use serde_json::json;
 
-use crate::dtos::wifi::WifiHealth;
+use crate::dtos::WifiHealth;
 use netmonitor_core::alerts::datasets::format_seconds;
 use netmonitor_core::alerts::{
     contracts::{AlertDataset, AlertFacts},

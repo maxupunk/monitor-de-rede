@@ -24,14 +24,13 @@
 //!   origem do teste (ADR 015);
 //! * [`agent_commands`] — a descoberta, o acesso a equipamento e a vazão no
 //!   host do agente (`AgentCommandHandler`);
-//! * [`link_tests`] — os testes de enlace (ADR 015), orquestrados pelos
-//!   plugins e pelos motores de vazão;
-//! * [`routines`] — a coleta SNMP do ciclo, a varredura agendada, o vigia do
-//!   Wi-Fi, os testes de enlace agendados e a retenção deles (registro de
-//!   rotinas do núcleo);
-//! * [`wifi`] — as estações dos pontos de acesso e os clientes vigiados (o
-//!   dataset de alerta `wifi_client` incluso);
+//! * [`routines`] — a coleta SNMP do ciclo e a varredura agendada (registro
+//!   de rotinas do núcleo);
 //! * [`controllers`], [`dtos`] — as rotas da área.
+//!
+//! Este crate é a **base** da área: os submódulos `netmonitor-network-wifi`
+//! (clientes Wi-Fi) e `netmonitor-network-link-tests` (testes de enlace, ADR
+//! 015) dependem dele e continuam sendo a área Rede (Fase 14).
 
 pub mod agent_commands;
 pub mod area_policy;
@@ -40,7 +39,6 @@ pub mod controllers;
 pub mod device_access;
 pub mod discovery;
 pub mod dtos;
-pub mod link_tests;
 pub mod migrations;
 pub mod package_mirror;
 pub mod plugins;
@@ -51,7 +49,6 @@ pub mod throughput;
 pub mod topology;
 pub mod vendors;
 pub mod widgets;
-pub mod wifi;
 
 use std::sync::Arc;
 

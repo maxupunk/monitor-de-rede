@@ -12,7 +12,7 @@ use axum::{
 };
 use loco_rs::prelude::*;
 
-use crate::link_tests::{
+use crate::{
     model::{LinkTestQuery, LinkTestRequest, LinkTestScheduleInput, LinkTestStarted},
     schedules, service, LinkTestEnv,
 };
@@ -23,10 +23,10 @@ use netmonitor_core::{
 
 fn kind_label(request: &LinkTestRequest) -> &'static str {
     match request.kind {
-        crate::link_tests::model::LinkTestKind::Link => "do enlace",
-        crate::link_tests::model::LinkTestKind::Path => "do caminho",
-        crate::link_tests::model::LinkTestKind::Server => "do servidor ao equipamento",
-        crate::link_tests::model::LinkTestKind::EndToEnd => "ponta a ponta",
+        crate::model::LinkTestKind::Link => "do enlace",
+        crate::model::LinkTestKind::Path => "do caminho",
+        crate::model::LinkTestKind::Server => "do servidor ao equipamento",
+        crate::model::LinkTestKind::EndToEnd => "ponta a ponta",
     }
 }
 
@@ -103,7 +103,7 @@ async fn schedules_index(State(ctx): State<AppContext>) -> AppResult<Response> {
 async fn schedules_show(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
     let env = LinkTestEnv::from_context(&ctx);
     let row = schedules::find(&env, id).await?;
-    Ok(format::json(crate::link_tests::view::schedule(&row))?)
+    Ok(format::json(crate::view::schedule(&row))?)
 }
 
 async fn schedules_store(

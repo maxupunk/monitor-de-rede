@@ -53,21 +53,21 @@ use super::{
     readiness::{self, Readiness},
     repository, schedules, view,
 };
-use crate::plugins::{
-    invoke::{RunOutcome, RunStatus, ServiceRunRequest},
-    runs::Origin,
-    runtime::{ProgressFlow, ProgressSample},
-};
-use crate::throughput::{
-    btest::{self, ArmedSession, BtestAuth},
-    driver::DriveRequest,
-    is_cancelled, sample_channel, Flow, TestDirection, TestProtocol, ThroughputEngine,
-    ThroughputSample, ThroughputSpec,
-};
 use netmonitor_core::{
     events::EventBus,
     models::{devices, link_test_legs, link_tests},
     shared::errors::{AppError, AppResult},
+};
+use netmonitor_network::plugins::{
+    invoke::{RunOutcome, RunStatus, ServiceRunRequest},
+    runs::Origin,
+    runtime::{ProgressFlow, ProgressSample},
+};
+use netmonitor_network::throughput::{
+    btest::{self, ArmedSession, BtestAuth},
+    driver::DriveRequest,
+    is_cancelled, sample_channel, Flow, TestDirection, TestProtocol, ThroughputEngine,
+    ThroughputSample, ThroughputSpec,
 };
 
 /// Amostras guardadas por sentido de uma perna.
@@ -493,7 +493,7 @@ impl Job {
         self.reservation.cancel.is_cancelled()
     }
 
-    fn snapshot(&self) -> crate::link_tests::model::LinkTest {
+    fn snapshot(&self) -> crate::model::LinkTest {
         view::test(&self.test, &self.rows, self.requested_by.clone(), false)
     }
 
@@ -1405,9 +1405,7 @@ impl Job {
         let statuses: Vec<LinkTestStepStatus> = self
             .rows
             .iter()
-            .map(|row| {
-                crate::link_tests::model::from_db(&row.status).unwrap_or(LinkTestStepStatus::Failed)
-            })
+            .map(|row| crate::model::from_db(&row.status).unwrap_or(LinkTestStepStatus::Failed))
             .collect();
         let status = outcome::test_status(&statuses, self.cancelled());
         let rates: Vec<outcome::LegRates> = self
@@ -1417,7 +1415,7 @@ impl Job {
             .map(|(row, status)| {
                 (
                     u32::try_from(row.seq).unwrap_or_default(),
-                    crate::link_tests::model::from_db(&row.kind).unwrap_or(LinkTestLegKind::Link),
+                    crate::model::from_db(&row.kind).unwrap_or(LinkTestLegKind::Link),
                     *status,
                     row.forward_bps,
                     row.reverse_bps,
@@ -1530,7 +1528,7 @@ mod tests {
     /// derruba o teste só no equipamento real; aqui ele quebra antes.
     #[test]
     fn parametros_do_orquestrador_passam_nos_plugins_embutidos() {
-        use crate::plugins::{builtin, params};
+        use netmonitor_network::plugins::{builtin, params};
         let auth = TestAuth::generate();
         let mut checked = 0;
         for package in builtin::packages() {

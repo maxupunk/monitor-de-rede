@@ -6,4 +6,3 @@ pub mod plugins;
 pub mod port_scan;
 pub mod snmp;
 pub mod topology;
-pub mod wifi;

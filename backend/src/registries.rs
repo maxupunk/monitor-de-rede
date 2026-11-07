@@ -273,13 +273,19 @@ pub fn agent_host_docker() -> Arc<dyn HostDocker> {
 
 /// As rotinas que as áreas contribuem ao ciclo do scheduler e à purga
 /// (ADR 017, registro de rotinas): a coleta SNMP sem monitor, a varredura, o
-/// vigia do Wi-Fi e os testes de enlace agendados, da Rede; a telemetria dos
-/// túneis, da VPN; a retenção do histórico de enlace.
+/// vigia do Wi-Fi e os testes de enlace agendados, da Rede (base e
+/// submódulos); a telemetria dos túneis, da VPN; a retenção do histórico de
+/// enlace.
 #[must_use]
 pub fn area_routines() -> AreaRoutines {
     let mut routines = netmonitor_network::routines::routines();
+    routines.extend(netmonitor_network_wifi::routines::routines());
+    routines.extend(netmonitor_network_link_tests::routines::routines());
     routines.extend(netmonitor_vpn::routines::routines());
-    AreaRoutines::new(routines, netmonitor_network::routines::retention())
+    AreaRoutines::new(
+        routines,
+        netmonitor_network_link_tests::routines::retention(),
+    )
 }
 
 /// Os monitores que uma área executa em grupo (os SNMP locais de um mesmo

@@ -21,20 +21,17 @@ use loco_rs::app::AppContext;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde_json::json;
 
-use super::{
-    contract,
-    source::{self, Requester, WifiSource},
-    station,
-};
-use crate::{
-    dtos::wifi::{WifiDeviceSnapshot, WifiReadStatus, WifiRefreshStarted, WifiStation},
-    plugins::{actions, fleet},
-    vendors,
-};
+use super::{contract, station};
+use crate::dtos::{WifiDeviceSnapshot, WifiReadStatus, WifiRefreshStarted, WifiStation};
 use netmonitor_core::{
     events::EventBus,
     models::devices,
     shared::errors::{AppError, AppResult},
+};
+use netmonitor_network::plugins::wifi_source::{self as source, Requester, WifiSource};
+use netmonitor_network::{
+    plugins::{actions, fleet},
+    vendors,
 };
 
 pub const SNAPSHOT_EVENT: &str = "wifi:snapshot";

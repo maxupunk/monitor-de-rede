@@ -11,6 +11,8 @@ impl MigratorTrait for Migrator {
         [
             netmonitor_core::migrations::migrations(),
             netmonitor_network::migrations::migrations(),
+            netmonitor_network_wifi::migrations::migrations(),
+            netmonitor_network_link_tests::migrations::migrations(),
             netmonitor_servers::migrations::migrations(),
             netmonitor_vpn::migrations::migrations(),
             netmonitor_assistant::migrations::migrations(),

@@ -13,8 +13,8 @@ use axum::{
 use loco_rs::prelude::*;
 
 use crate::{
-    dtos::wifi::{WifiPingInput, WifiRefreshInput, WifiWatchCreate, WifiWatchUpdate},
-    wifi,
+    self as wifi,
+    dtos::{WifiPingInput, WifiRefreshInput, WifiWatchCreate, WifiWatchUpdate},
 };
 use netmonitor_core::{
     audit::authenticated_user,

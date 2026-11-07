@@ -17,19 +17,19 @@ use sea_orm::DatabaseConnection;
 use tokio::sync::oneshot;
 
 use super::health::{DefaultHealthReaders, HealthReaders};
-use crate::throughput::{
-    agent::agent_driver,
-    btest::{ArmedSession, BtestServer},
-    driver::{LocalDriver, ThroughputDriver},
-};
-use crate::{
-    central::Central,
-    plugins::invoke::{self, RunOutcome, ServiceRunRequest},
-};
 use netmonitor_core::{
     events::EventBus,
     models::devices,
     shared::errors::{AppError, AppResult},
+};
+use netmonitor_network::throughput::{
+    agent::agent_driver,
+    btest::{ArmedSession, BtestServer},
+    driver::{LocalDriver, ThroughputDriver},
+};
+use netmonitor_network::{
+    central::Central,
+    plugins::invoke::{self, RunOutcome, ServiceRunRequest},
 };
 
 /// Chama uma ação de plugin num equipamento.
@@ -122,11 +122,10 @@ impl BtestArmer for ServerArmer {
     }
 
     fn port(&self) -> u16 {
-        self.0
-            .as_ref()
-            .map_or(crate::throughput::btest::DEFAULT_PORT, |server| {
-                server.local_addr().port()
-            })
+        self.0.as_ref().map_or(
+            netmonitor_network::throughput::btest::DEFAULT_PORT,
+            |server| server.local_addr().port(),
+        )
     }
 
     fn arm(&self, peer: IpAddr, ttl: Duration) -> AppResult<ArmedSession> {
@@ -134,7 +133,7 @@ impl BtestArmer for ServerArmer {
             .as_ref()
             .ok_or_else(|| {
                 AppError::ServiceUnavailable(
-                    crate::throughput::btest::UNAVAILABLE_MESSAGE.to_owned(),
+                    netmonitor_network::throughput::btest::UNAVAILABLE_MESSAGE.to_owned(),
                 )
             })?
             .arm(peer, ttl)

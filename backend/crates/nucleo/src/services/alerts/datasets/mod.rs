@@ -5,5 +5,5 @@ pub mod log_pattern;
 pub mod monitor_result;
 
 // Os datasets das áreas implementam `AlertDataset` no crate de cada uma: o
-// cliente Wi-Fi vigiado na Rede (`netmonitor_network::wifi`) e o túnel
+// cliente Wi-Fi vigiado na Rede (`netmonitor_network_wifi`) e o túnel
 // WireGuard na VPN (`netmonitor_vpn::alerts`).
