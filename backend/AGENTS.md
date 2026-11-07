@@ -26,7 +26,7 @@ crates/nucleo/          # o Núcleo: services/, controllers/, dtos/, views/, mai
 crates/agent-protocol/  # contrato de fio central ↔ agente
 crates/{network,servers,vpn}/  # as áreas, cada uma com services, controllers e dtos
 crates/assistant/       # a IA (chat, harness, Decisor)
-migration/              # Sea-ORM migrations
+src/migrator.rs         # Migrator: o esquema do core + o de cada área (crates/*/src/migrations)
 config/*.yaml           # per-environment config (LOCO_ENV)
 tests/                  # request/model/task tests + conventions/
 ```
@@ -99,7 +99,10 @@ Ver `docs/adr/` para as decisões arquiteturais vigentes.
   recriar o banco de desenvolvimento. Não gere migration de `alter`, de
   compatibilidade nem rotina de upgrade (ver `AGENTS.md` §3 e o DB-02 em
   `docs/debitos_tecnicos.md`).
-- **Migrations:** use os helpers de `migration/src/shared.rs`. As FKs são
+- **Migrations:** cada crate leva as próprias tabelas em `src/migrations/`
+  (o núcleo em `crates/core`, cada área no seu crate; tabela de área só tem
+  FK para o núcleo — `tests/conventions/architecture.rs` confere) e usa os
+  helpers de `netmonitor_core::schema`. As FKs são
   declaradas à mão (`fk(...)` com a ação de `ON DELETE`) porque o parâmetro
   `refs` do `create_table` do Loco deriva a ação da nulabilidade, e o esquema
   tem FKs anuláveis com `CASCADE`. Índices levam **nome explícito**, nunca o

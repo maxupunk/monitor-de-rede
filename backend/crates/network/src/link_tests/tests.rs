@@ -13,9 +13,9 @@ use std::{
     time::Duration,
 };
 
+use crate::migrations::{MigratorTrait, TestMigrator as Migrator};
 use async_trait::async_trait;
 use chrono::Utc;
-use migration::{Migrator, MigratorTrait};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Database, DatabaseConnection, EntityTrait, IntoActiveModel,
     QueryFilter, Set,

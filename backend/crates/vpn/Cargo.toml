@@ -9,6 +9,7 @@ description = "Área VPN do NetMonitor (ADR 017): servidor e peers WireGuard, co
 name = "netmonitor_vpn"
 
 [dependencies]
+sea-orm-migration = { workspace = true }
 netmonitor-core = { workspace = true }
 loco-rs = { workspace = true }
 serde = { workspace = true }

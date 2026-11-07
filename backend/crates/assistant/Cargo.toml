@@ -9,6 +9,7 @@ description = "Assistente do NetMonitor (ADR 017): chat com ferramentas, provedo
 name = "netmonitor_assistant"
 
 [dependencies]
+sea-orm-migration = { workspace = true }
 netmonitor-core = { workspace = true }
 loco-rs = { workspace = true }
 serde = { workspace = true }

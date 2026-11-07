@@ -23,7 +23,7 @@
 
 use sea_orm_migration::prelude::*;
 
-use crate::shared::*;
+use netmonitor_core::schema::*;
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;

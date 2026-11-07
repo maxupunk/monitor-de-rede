@@ -1,7 +1,7 @@
 //! Entidade `log_templates` — **escrita à mão**, como `device_logs`: o banco
 //! de logs não passa pelo `db entities`. Inteiros no tamanho do PostgreSQL
 //! (`BIGINT` → `i64`, `SMALLINT` → `i16`). Ver
-//! `migration::logs::m20260930_000001_log_templates`.
+//! `crate::migrations::logs` (`m20260930_000001_log_templates`).
 
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};

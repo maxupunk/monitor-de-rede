@@ -41,6 +41,7 @@ pub mod device_access;
 pub mod discovery;
 pub mod dtos;
 pub mod link_tests;
+pub mod migrations;
 pub mod package_mirror;
 pub mod plugins;
 pub mod port_scanner;

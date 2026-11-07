@@ -13,6 +13,7 @@ name = "netmonitor_network"
 testing = []
 
 [dependencies]
+sea-orm-migration = { workspace = true }
 netmonitor-core = { workspace = true }
 netmonitor-agent-protocol = { workspace = true }
 loco-rs = { workspace = true }
@@ -53,7 +54,6 @@ md-5 = { version = "0.11" }
 [dev-dependencies]
 # O agente SNMP de teste (os testes do cliente sobem um em 127.0.0.1).
 async-snmp = { version = "0.16", default-features = false, features = ["agent", "crypto-rustcrypto"] }
-migration = { path = "../../migration" }
 loco-rs = { workspace = true, features = ["testing"] }
 serial_test = { version = "3.1.1" }
 insta = { version = "1.34", features = ["redactions", "yaml", "filters"] }

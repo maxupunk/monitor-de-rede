@@ -24,7 +24,7 @@
 
 use sea_orm_migration::prelude::*;
 
-use crate::shared::*;
+use crate::schema::*;
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;

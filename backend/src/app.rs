@@ -1,3 +1,4 @@
+use crate::migrator::Migrator;
 use async_trait::async_trait;
 use axum::Router as AxumRouter;
 use loco_rs::{
@@ -12,7 +13,6 @@ use loco_rs::{
     task::Tasks,
     Result,
 };
-use migration::Migrator;
 use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 use std::path::Path;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};

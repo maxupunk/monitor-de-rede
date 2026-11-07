@@ -222,8 +222,8 @@ impl<'a> AreaService<'a> {
 
 #[cfg(test)]
 mod tests {
+    use crate::migrations::{CoreMigrator as Migrator, MigratorTrait};
     use async_trait::async_trait;
-    use migration::{Migrator, MigratorTrait};
     use sea_orm::Database;
 
     use super::*;

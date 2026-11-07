@@ -6,6 +6,7 @@
 
 pub mod app;
 pub mod initializers;
+pub mod migrator;
 pub mod registries;
 pub mod spa;
 pub mod tasks;

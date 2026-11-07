@@ -149,7 +149,7 @@ pub async fn patch_layout(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use migration::{Migrator, MigratorTrait};
+    use crate::migrations::{MigratorTrait, TestMigrator as Migrator};
 
     async fn banco() -> DatabaseConnection {
         let db = sea_orm::Database::connect(

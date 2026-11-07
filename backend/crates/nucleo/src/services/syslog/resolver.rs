@@ -420,7 +420,7 @@ fn cidr_contem(cidr: &str, endereco: IpAddr) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use migration::{Migrator, MigratorTrait};
+    use netmonitor_core::migrations::{CoreMigrator as Migrator, MigratorTrait};
     use sea_orm::{ActiveModelTrait, ActiveValue::Set};
 
     async fn inventario() -> DatabaseConnection {

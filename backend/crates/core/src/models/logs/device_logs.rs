@@ -8,7 +8,7 @@
 //!
 //! Daí `facility`/`severity` serem `i16` (`smallint`) e `pid` ser `i32`
 //! (`integer`), casando com
-//! [`migration::logs`](../../../migration/src/logs/m20260815_000001_device_logs.rs).
+//! [`crate::migrations::logs`] (`m20260815_000001_device_logs`).
 //!
 //! Sem `updated_at`: a tabela é append-only.
 

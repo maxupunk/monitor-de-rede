@@ -153,7 +153,7 @@ pub async fn save(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use migration::{Migrator, MigratorTrait};
+    use crate::migrations::{CoreMigrator as Migrator, MigratorTrait};
 
     async fn banco() -> DatabaseConnection {
         let db = sea_orm::Database::connect(

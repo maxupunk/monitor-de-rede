@@ -317,14 +317,14 @@ as migrations por crate vêm antes das tabelas novas das Fases 15 e 16.
 
 ### Fase 13 — Migrations por crate
 
-- [ ] 🔴 Pendente — **Cada crate leva o próprio esquema**
+- [x] 🟢 Concluído — **Cada crate leva o próprio esquema**
   - **Entregas:**
-    - [ ] Cada crate (`core`, `nucleo`, `servers`, `vpn`, `network`, `assistant`) expõe `migrations()` com as tabelas dele; o Migrator do ponto de montagem junta na ordem core → núcleo → áreas, num só histórico `seaql_migrations`.
-    - [ ] O crate comum `migration` fica só com os helpers de esquema (ou some).
-    - [ ] Teste de arquitetura: tabela de área só tem FK para o `core`/núcleo.
+    - [x] Cada crate (`core`, `nucleo`, `servers`, `vpn`, `network`, `assistant`) expõe `migrations()` com as tabelas dele; o Migrator do ponto de montagem junta na ordem core → núcleo → áreas, num só histórico `seaql_migrations`. — *ajustado:* as tabelas do Núcleo ficaram no `core` (25 + o banco de logs), junto das entidades de todas as tabelas, que moram lá desde a Fase 1 — um `nucleo` à parte obrigaria os testes das áreas a depender dele; Rede 8, VPN 2, Servidores 1, assistente 1; `src/migrator.rs` monta; `area_test_migrator!` dá a cada crate o banco dos testes (núcleo + o dele)
+    - [x] O crate comum `migration` fica só com os helpers de esquema (ou some). — some: os helpers viraram `netmonitor_core::schema`
+    - [x] Teste de arquitetura: tabela de área só tem FK para o `core`/núcleo. — `tabela_de_area_so_aponta_para_o_nucleo_ou_para_a_propria_area`
   - **Aceite:**
-    - [ ] Banco recriado do zero com o mesmo esquema exportado (SQLite e PostgreSQL).
-    - [ ] Entidades regeneradas contra o PostgreSQL sem diff.
+    - [x] Banco recriado do zero com o mesmo esquema exportado (SQLite e PostgreSQL). — SQLite: os 123 objetos do `sqlite_master` iguais, texto a texto, ao banco criado pelo Migrator antigo; PostgreSQL 17: `db migrate` do zero, 37 migrations e 47 tabelas
+    - [x] Entidades regeneradas contra o PostgreSQL sem diff. — campos e tipos idênticos nas 46 tabelas; em 7 a ordem de declaração de um campo difere, o que já valia antes desta fase (as entidades não mudam desde a Fase 1) e não afeta o SeaORM, que lê por nome
 
 ### Fase 14 — Crates de submódulo da Rede
 

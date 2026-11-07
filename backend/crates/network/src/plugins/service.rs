@@ -939,7 +939,7 @@ pub async fn record_compatibility<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use migration::{Migrator, MigratorTrait};
+    use crate::migrations::{MigratorTrait, TestMigrator as Migrator};
     use sea_orm::{Database, DatabaseConnection};
     use serde_json::json;
 

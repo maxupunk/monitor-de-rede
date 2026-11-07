@@ -16,7 +16,8 @@ use std::{net::IpAddr, sync::Arc, time::Duration};
 
 use netmonitor_core::models::logs::device_logs;
 
-use migration::{Migrator, MigratorTrait};
+use backend::migrator::Migrator;
+use netmonitor_core::migrations::MigratorTrait;
 use netmonitor_nucleo::services::syslog::{
     config::SyslogConfig,
     db,

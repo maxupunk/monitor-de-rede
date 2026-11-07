@@ -27,6 +27,7 @@ pub mod harness;
 pub mod local_models;
 pub mod local_server;
 pub mod mentions;
+pub mod migrations;
 pub mod ollama;
 pub mod opencode;
 pub mod openrouter;

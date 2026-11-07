@@ -136,7 +136,7 @@ pub async fn revoke<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use migration::{Migrator, MigratorTrait};
+    use crate::migrations::{MigratorTrait, TestMigrator as Migrator};
     use sea_orm::Database;
 
     #[tokio::test]

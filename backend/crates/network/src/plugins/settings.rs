@@ -360,7 +360,7 @@ pub fn for_test(manifest: &PluginManifest, given: Option<&Value>) -> Effective {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use migration::{Migrator, MigratorTrait};
+    use crate::migrations::{MigratorTrait, TestMigrator as Migrator};
     use sea_orm::{Database, DatabaseConnection};
 
     async fn setup() -> (DatabaseConnection, plugins::Model, i64) {

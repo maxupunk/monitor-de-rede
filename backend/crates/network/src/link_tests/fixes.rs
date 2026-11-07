@@ -124,7 +124,7 @@ pub async fn offers<C: ConnectionTrait>(
 
 #[cfg(test)]
 mod tests {
-    use migration::{Migrator, MigratorTrait};
+    use crate::migrations::{MigratorTrait, TestMigrator as Migrator};
     use sea_orm::{ActiveModelTrait, Database, DatabaseConnection, Set};
 
     use super::*;

@@ -122,7 +122,7 @@ pub async fn remember(
 
 #[cfg(test)]
 mod tests {
-    use migration::{Migrator, MigratorTrait};
+    use crate::test_schema::{MigratorTrait, TestMigrator as Migrator};
     use sea_orm::{ActiveModelTrait, ConnectOptions, Database};
 
     use super::*;

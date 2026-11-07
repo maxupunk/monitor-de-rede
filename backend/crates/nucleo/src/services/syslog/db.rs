@@ -13,7 +13,7 @@
 //! `SYSLOG_DB_URL` explícito sempre vence.
 
 use loco_rs::app::AppContext;
-use migration::{logs::LogsMigrator, MigratorTrait};
+use netmonitor_core::migrations::{logs::LogsMigrator, MigratorTrait};
 use sea_orm::{
     ConnectOptions, ConnectionTrait, Database, DatabaseBackend, DatabaseConnection, Statement,
 };

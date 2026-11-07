@@ -25,6 +25,7 @@ pub mod controllers;
 pub mod databases;
 pub mod docker;
 pub mod dtos;
+pub mod migrations;
 pub mod views;
 pub mod widgets;
 

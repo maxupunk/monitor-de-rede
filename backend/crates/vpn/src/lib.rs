@@ -24,6 +24,7 @@ pub mod config_writer;
 pub mod controllers;
 pub mod ip_allocator;
 pub mod key_generator;
+pub mod migrations;
 pub mod monitor_provisioner;
 pub mod peer_hints;
 pub mod peer_name;

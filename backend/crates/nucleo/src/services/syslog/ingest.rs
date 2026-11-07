@@ -164,7 +164,7 @@ impl Ingestor {
 mod tests {
     use super::*;
     use crate::services::syslog::sources::SourceKind;
-    use migration::{Migrator, MigratorTrait};
+    use netmonitor_core::migrations::{CoreMigrator as Migrator, MigratorTrait};
     use serial_test::serial;
 
     /// Banco principal vazio em memória: sem `devices` e sem `networks`, toda

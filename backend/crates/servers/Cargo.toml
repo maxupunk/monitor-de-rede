@@ -9,6 +9,7 @@ description = "Área Servidores do NetMonitor (ADR 017): Docker pelo agente, mon
 name = "netmonitor_servers"
 
 [dependencies]
+sea-orm-migration = { workspace = true }
 netmonitor-core = { workspace = true }
 netmonitor-agent-protocol = { workspace = true }
 loco-rs = { workspace = true }

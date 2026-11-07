@@ -181,7 +181,8 @@ backend/                 workspace Cargo; o pacote raiz (`backend`) é o ponto d
 │   │                    perfis de cliente, telemetria dos túneis (rotina), rotas /api/vpn
 │   └── assistant/       o assistente: chat e harness, provedores de LLM, Decisor, rotinas
 │                        automáticas, marcações, conversas, rotas /api/ai
-├── migration/           uma migration por tabela + helpers em shared.rs
+├── src/migrator.rs      o Migrator: esquema do core + o de cada área (crates/*/src/migrations),
+│                        uma migration por tabela; helpers em netmonitor_core::schema
 ├── config/              development.yaml, test.yaml, production.yaml
 ├── examples/spikes/     protótipos que sustentam as ADRs
 └── tests/               requests/, models/, conventions/ (inclui a regra de arquitetura)
@@ -410,7 +411,7 @@ Notas que valem mais que a lista:
 - **FKs anuláveis com `CASCADE`** existem de propósito (`probes.site_id`,
   `networks.site_id`, `devices.site_id`, `monitors.device_id`, as três de
   `alert_rules`). Por isso as FKs são declaradas à mão em
-  `migration/src/shared.rs`, e não pelo `refs` do Loco, que derivaria a ação da
+  `netmonitor_core::schema`, e não pelo `refs` do Loco, que derivaria a ação da
   nulabilidade.
 - **`auth_tokens` não existe.** A autenticação é JWT stateless.
 - **Não existe usuário semeado em produção.** Banco vazio significa instalação

@@ -38,3 +38,12 @@ pub fn app_version() -> String {
             .unwrap_or("dev")
     )
 }
+
+/// Banco dos testes de unidade do Núcleo: o esquema do núcleo e o da VPN, que
+/// o endereço do túnel (`server_addresses`) lê pelas entidades do `core`.
+#[cfg(test)]
+pub(crate) mod test_schema {
+    pub use netmonitor_core::migrations::MigratorTrait;
+
+    netmonitor_core::area_test_migrator!(TestMigrator, netmonitor_vpn::migrations::migrations);
+}

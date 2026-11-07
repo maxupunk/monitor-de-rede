@@ -576,7 +576,7 @@ async fn query_single_i64<C: ConnectionTrait>(
 mod tests {
     use super::*;
     use chrono::Utc;
-    use migration::{Migrator, MigratorTrait};
+    use netmonitor_core::migrations::{CoreMigrator as Migrator, MigratorTrait};
     use sea_orm::{ActiveModelTrait, ActiveValue::Set, DatabaseConnection};
 
     async fn sqlite_memory() -> DatabaseConnection {

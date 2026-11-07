@@ -481,7 +481,7 @@ impl Sessao {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use migration::{Migrator, MigratorTrait};
+    use netmonitor_core::migrations::{CoreMigrator as Migrator, MigratorTrait};
     use sea_orm::Database;
 
     #[test]

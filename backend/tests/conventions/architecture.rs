@@ -29,7 +29,7 @@ use std::{
 const AREAS: &[&str] = &["network", "servers", "vpn", "assistant"];
 
 /// O que cada crate pode ter como dependência do workspace (sem o prefixo
-/// `netmonitor-`). `migration` é o esquema, comum a todos.
+/// `netmonitor-`). Cada crate leva o próprio esquema (Fase 13).
 const PERMITIDAS: &[(&str, &[&str])] = &[
     ("agent-protocol", &[]),
     ("core", &["agent-protocol"]),
@@ -41,7 +41,13 @@ const PERMITIDAS: &[(&str, &[&str])] = &[
 ];
 
 /// Arquivos do pacote raiz que montam as áreas.
-const PONTO_DE_MONTAGEM: &[&str] = &["app.rs", "registries.rs", "registries/", "initializers/"];
+const PONTO_DE_MONTAGEM: &[&str] = &[
+    "app.rs",
+    "migrator.rs",
+    "registries.rs",
+    "registries/",
+    "initializers/",
+];
 
 fn backend() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -227,6 +233,74 @@ fn toda_area_tem_consumidor() {
             );
         }
     }
+}
+
+/// Tabelas criadas e FKs (`fk("filha", "coluna", "pai", ...)`) das migrations
+/// de um crate.
+fn esquema(crate_dir: &str) -> (BTreeSet<String>, Vec<(String, String)>) {
+    let mut arquivos = Vec::new();
+    rust_files(
+        &backend()
+            .join("crates")
+            .join(crate_dir)
+            .join("src/migrations"),
+        &mut arquivos,
+    );
+    let mut tabelas = BTreeSet::new();
+    let mut fks = Vec::new();
+    for arquivo in arquivos {
+        if arquivo
+            .components()
+            .any(|parte| parte.as_os_str() == "logs")
+        {
+            continue;
+        }
+        let fonte = sem_comentarios(&fs::read_to_string(&arquivo).expect("migration"));
+        let compacta: String = fonte.split_whitespace().collect();
+        // `table("x")` (helper do esquema) ou `create_table(m, "x", ...)` (o do Loco).
+        let criadas = compacta
+            .split("table(\"")
+            .skip(1)
+            .chain(compacta.split("create_table(m,\"").skip(1));
+        for trecho in criadas {
+            if let Some(nome) = trecho.split('"').next() {
+                tabelas.insert(nome.to_owned());
+            }
+        }
+        for trecho in compacta.split("fk(\"").skip(1) {
+            let partes: Vec<&str> = trecho.split('"').collect();
+            if partes.len() > 4 {
+                fks.push((partes[0].to_owned(), partes[4].to_owned()));
+            }
+        }
+    }
+    (tabelas, fks)
+}
+
+#[test]
+fn tabela_de_area_so_aponta_para_o_nucleo_ou_para_a_propria_area() {
+    let (nucleo, _) = esquema("core");
+    assert!(
+        nucleo.contains("devices"),
+        "o detector achou as tabelas do núcleo"
+    );
+    let mut erradas = Vec::new();
+    for area in AREAS {
+        let (proprias, fks) = esquema(area);
+        assert!(
+            !proprias.is_empty(),
+            "a área `{area}` sem tabela no detector"
+        );
+        for (filha, pai) in fks {
+            if !nucleo.contains(&pai) && !proprias.contains(&pai) {
+                erradas.push(format!("{area}: {filha} → {pai}"));
+            }
+        }
+    }
+    assert!(
+        erradas.is_empty(),
+        "FK de área para fora do núcleo: {erradas:?}"
+    );
 }
 
 #[test]

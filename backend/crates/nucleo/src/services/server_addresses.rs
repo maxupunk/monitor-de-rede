@@ -737,7 +737,7 @@ fn com_valor(lista: &[ServerAddress], id: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use migration::{Migrator, MigratorTrait};
+    use crate::test_schema::{MigratorTrait, TestMigrator as Migrator};
     use sea_orm::{ActiveModelTrait, ActiveValue::Set};
 
     async fn banco() -> DatabaseConnection {

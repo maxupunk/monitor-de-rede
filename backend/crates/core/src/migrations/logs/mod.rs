@@ -10,7 +10,7 @@
 //! O preço está registrado em [`m20260815_000001_device_logs`]: sem FK e sem
 //! `JOIN` com `devices`.
 //!
-//! Estas migrations **não** entram no [`crate::Migrator`] nem em
+//! Estas migrations **não** entram no `Migrator` do banco principal nem em
 //! `models::tables::CREATION_ORDER` — aquela lista é o catálogo da base
 //! principal e alimenta o `Hooks::truncate` do Loco, que não alcança este banco.
 
