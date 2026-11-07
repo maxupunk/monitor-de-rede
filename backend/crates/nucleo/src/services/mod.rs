@@ -18,6 +18,7 @@ pub mod dashboard;
 pub mod devices;
 pub mod maintenance;
 pub mod maintenance_windows;
+pub mod menu_prefs;
 pub mod monitoring;
 pub mod network_tools;
 pub mod notifications;

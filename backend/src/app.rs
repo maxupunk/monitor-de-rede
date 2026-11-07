@@ -217,6 +217,7 @@ impl Hooks for App {
             .add_route(controllers::server_addresses::routes().layer(business_auth.clone()))
             .add_route(controllers::settings::routes().layer(business_auth.clone()))
             .add_route(controllers::users::routes().layer(business_auth.clone()))
+            .add_route(controllers::me::routes().layer(business_auth.clone()))
             .add_route(
                 netmonitor_network::controllers::vendors::routes().layer(business_auth.clone()),
             )

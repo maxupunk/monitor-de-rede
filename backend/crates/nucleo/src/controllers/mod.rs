@@ -13,6 +13,7 @@ pub mod dns_servers;
 pub mod events;
 pub mod logs;
 pub mod maintenance_windows;
+pub mod me;
 pub mod monitors;
 pub mod probes;
 pub mod push;

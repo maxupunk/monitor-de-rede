@@ -28,6 +28,8 @@ pub struct Model {
     pub role: String,
     #[sea_orm(column_type = "JsonBinary", nullable)]
     pub area_roles: Option<Json>,
+    #[sea_orm(column_type = "JsonBinary", nullable)]
+    pub menu_prefs: Option<Json>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

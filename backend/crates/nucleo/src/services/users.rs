@@ -60,7 +60,13 @@ pub fn request_is_allowed(role: Role, method: &Method, path: &str) -> bool {
         return role.can_manage_users();
     }
 
-    if path == "/api/push" || path.starts_with("/api/push/") {
+    // Push e o próprio menu (`/api/me`) são do usuário, não do sistema: todo
+    // papel mexe neles.
+    if path == "/api/push"
+        || path.starts_with("/api/push/")
+        || path == "/api/me"
+        || path.starts_with("/api/me/")
+    {
         return true;
     }
 

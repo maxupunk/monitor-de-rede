@@ -39,6 +39,8 @@ impl MigrationTrait for Migration {
                 // Papel por área (ADR 019): `{"network": "viewer", ...}`. Sem
                 // chave (ou nulo), sem acesso à área — o admin vale em todas.
                 ("area_roles", ColType::JsonBinaryNull),
+                // O menu de cada um (Fase 16): `{"pinned": [...], "hidden": [...]}`.
+                ("menu_prefs", ColType::JsonBinaryNull),
             ],
             &[],
         )

@@ -39,6 +39,8 @@ pub struct UserResponse {
     pub role: String,
     /// Papel por área (ADR 019); sem a área, sem acesso (o admin vale em todas).
     pub area_roles: std::collections::BTreeMap<netmonitor_core::areas::Area, String>,
+    /// O menu do usuário (Fase 16): fixados e ocultos.
+    pub menu_prefs: crate::services::menu_prefs::MenuPrefs,
 }
 
 impl UserResponse {
@@ -51,6 +53,7 @@ impl UserResponse {
             // O esquema atual possui um único perfil de operador.
             role: user.role.clone(),
             area_roles: super::users::area_roles_of(user),
+            menu_prefs: crate::services::menu_prefs::MenuPrefs::of_user(user),
         }
     }
 }

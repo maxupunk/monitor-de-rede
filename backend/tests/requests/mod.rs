@@ -53,6 +53,7 @@ mod health_rules;
 mod link_tests;
 mod local_agent;
 mod maintenance_windows;
+mod menu_prefs;
 mod monitor_interface_binding;
 mod package_mirror;
 mod plugin_fleet;

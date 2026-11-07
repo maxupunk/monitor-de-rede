@@ -26,5 +26,6 @@ Ok(
         active: true,
         role: "operator",
         area_roles: None,
+        menu_prefs: None,
     },
 )
