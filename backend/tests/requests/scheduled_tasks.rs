@@ -37,6 +37,7 @@ const COM_ACOES: ToolPolicy = ToolPolicy {
     interactive: true,
     container_actions: AiAutomationMode::Off,
     areas: netmonitor_core::areas::AreaSet::ALL,
+    writable: netmonitor_core::areas::AreaSet::ALL,
 };
 
 fn json_of(text: &str) -> Value {

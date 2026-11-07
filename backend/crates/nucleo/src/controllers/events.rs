@@ -8,6 +8,7 @@ use axum::response::{
 };
 use chrono::Utc;
 use loco_rs::prelude::*;
+use netmonitor_core::{areas::AreaPolicies, events::EventAudience, roles::AreaAccess};
 use sea_orm::{EntityTrait, QueryOrder};
 use std::convert::Infallible;
 use tokio::sync::mpsc;
@@ -73,11 +74,15 @@ async fn stream(
         Interests::from_context(&ctx).connect(query.interest.as_deref().unwrap_or_default());
     // Enquanto o stream estiver aberto, o usuário conta como online: um pedido
     // de aprovação da IA chega na tela, não como notificação no celular.
-    let presence = AuditActor::from_headers(&headers, &ctx.db)
+    let user_id = AuditActor::from_headers(&headers, &ctx.db)
         .await
         .ok()
-        .and_then(|actor| actor.user_id)
-        .map(|user_id| Presence::from_context(&ctx).connect(user_id));
+        .and_then(|actor| actor.user_id);
+    let presence = user_id.map(|user_id| Presence::from_context(&ctx).connect(user_id));
+    // Papel por área (ADR 019): esta conexão só recebe o que o usuário pode
+    // ver. Sem usuário identificado, só o Núcleo.
+    let access = AreaAccess::load(&ctx.db, user_id).await;
+    let mut audience = EventAudience::new(user_id, access, AreaPolicies::from_context(&ctx));
     let mut updates = bus.subscribe();
     let snapshots = bus.current_snapshots();
     let (sender, receiver) = mpsc::channel(32);
@@ -96,6 +101,9 @@ async fn stream(
         // Estado inicial dos recursos em tempo real (Docker de cada host):
         // chega logo após o `connected`, sem esperar o próximo ciclo.
         for snapshot in snapshots {
+            if !audience.admits(&snapshot) {
+                continue;
+            }
             if sender.send((snapshot, false)).await.is_err() {
                 return;
             }
@@ -103,6 +111,9 @@ async fn stream(
         loop {
             match updates.recv().await {
                 Ok(event) => {
+                    if !audience.admits(&event) {
+                        continue;
+                    }
                     if sender.send((event, false)).await.is_err() {
                         return;
                     }

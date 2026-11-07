@@ -23,15 +23,16 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, Duration, Utc};
 use loco_rs::app::AppContext;
+use netmonitor_core::areas::Area;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, EntityTrait, QueryFilter,
     QueryOrder, QuerySelect, Set,
 };
 
 use crate::{
-    models::{devices, notification_outbox, sites},
+    models::{alert_rules, devices, notification_outbox, sites},
     services::{
-        alerts::inhibition,
+        alerts::{catalog::templates, inhibition},
         maintenance_windows::is_under_maintenance,
         notifications::{
             contracts::{NotificationMessage, Severity},
@@ -252,7 +253,7 @@ pub async fn dispatch_pending(ctx: &AppContext) -> AppResult<DispatchStats> {
     let channels = NotificationService::with_default_channels();
     for (group, rows) in by_group(deliverable) {
         let ids: Vec<i64> = rows.iter().map(|row| row.id).collect();
-        let message = if rows.len() == 1 {
+        let mut message = if rows.len() == 1 {
             stats.delivered += 1;
             single_message(&rows[0])
         } else {
@@ -261,6 +262,14 @@ pub async fn dispatch_pending(ctx: &AppContext) -> AppResult<DispatchStats> {
             let label = group_label(&ctx.db, &group).await?;
             formatter::alert_digest(&label, &digest_items(&rows), highest_severity(&rows))
         };
+        // A área do alerta (ADR 019): o canal por usuário (Web Push) só
+        // entrega a quem tem acesso a ela.
+        let area = area_of_rows(&ctx.db, &rows).await?;
+        if let Some(metadata) = message.metadata.as_object_mut() {
+            metadata.insert("area".into(), area.id().into());
+        } else {
+            message.metadata = serde_json::json!({ "area": area.id() });
+        }
         channels.notify(ctx, &message).await;
         mark(ctx, &ids, SENT, None, now).await?;
     }
@@ -308,6 +317,35 @@ fn single_message(row: &notification_outbox::Model) -> NotificationMessage {
         severity: Severity::parse(&row.severity),
         metadata: row.metadata.clone(),
     }
+}
+
+/// A área das notificações de um lote: a da regra que as gerou (pelo modelo
+/// do catálogo). Lote de áreas diferentes, regra manual ou sem regra: o
+/// Núcleo, que todo usuário vê.
+async fn area_of_rows<C: ConnectionTrait>(
+    db: &C,
+    rows: &[notification_outbox::Model],
+) -> AppResult<Area> {
+    let rule_ids: Vec<i64> = rows.iter().filter_map(|row| row.alert_rule_id).collect();
+    if rule_ids.len() != rows.len() {
+        return Ok(Area::Core);
+    }
+    let rules = alert_rules::Entity::find()
+        .filter(alert_rules::Column::Id.is_in(rule_ids))
+        .all(db)
+        .await?;
+    let mut areas = rules.iter().map(|rule| {
+        rule.template_key
+            .as_deref()
+            .and_then(templates::find)
+            .map_or(Area::Core, |template| template.category.area())
+    });
+    let first = areas.next().unwrap_or(Area::Core);
+    Ok(if areas.all(|area| area == first) {
+        first
+    } else {
+        Area::Core
+    })
 }
 
 /// Os pares (título, corpo) que a mensagem consolidada enumera.

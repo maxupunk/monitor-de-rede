@@ -24,6 +24,7 @@ use super::{
 use crate::{
     areas::{Area, AreaSet},
     audit::AuditActor,
+    roles::AreaAccess,
     shared::errors::{AppError, AppResult},
 };
 
@@ -283,6 +284,9 @@ pub struct ToolPolicy {
     /// Áreas do produto ligadas (ADR 017): ferramenta de área desligada não
     /// entra no catálogo — nem no chat, nem nas rotinas, nem nas tarefas.
     pub areas: AreaSet,
+    /// Áreas em que a sessão pode mudar algo (ADR 019): fora delas a IA só
+    /// consulta — as ferramentas de ação daquela área não entram.
+    pub writable: AreaSet,
 }
 
 impl ToolPolicy {
@@ -296,6 +300,7 @@ impl ToolPolicy {
             interactive: false,
             container_actions: AiAutomationMode::Off,
             areas: AreaSet::ALL,
+            writable: AreaSet::ALL,
         }
     }
 
@@ -310,6 +315,7 @@ impl ToolPolicy {
             interactive: false,
             container_actions: AiAutomationMode::Auto,
             areas: AreaSet::ALL,
+            writable: AreaSet::ALL,
         }
     }
 
@@ -323,6 +329,7 @@ impl ToolPolicy {
             interactive: true,
             container_actions: settings.container_actions(),
             areas: AreaSet::ALL,
+            writable: AreaSet::ALL,
         }
     }
 
@@ -335,6 +342,29 @@ impl ToolPolicy {
             self.container_actions = AiAutomationMode::Off;
         }
         self
+    }
+
+    /// A mesma política restrita ao que o usuário da sessão pode (ADR 019):
+    /// só as áreas que ele enxerga, e ações só onde ele pode mudar algo.
+    #[must_use]
+    pub fn with_access(self, access: &AreaAccess) -> Self {
+        let mut policy = self.with_areas(self.areas.intersect(access.visible()));
+        policy.writable = policy.writable.intersect(access.writable());
+        if !policy.writable.contains(Area::Servers) {
+            policy.container_actions = AiAutomationMode::Off;
+        }
+        policy
+    }
+
+    /// A ferramenta entra no catálogo desta sessão? A área precisa estar
+    /// visível; se a ferramenta muda algo, a área precisa aceitar escrita.
+    #[must_use]
+    pub const fn admits(self, kind: ToolKind, area: Area) -> bool {
+        let writes = matches!(
+            kind,
+            ToolKind::Action | ToolKind::ContainerAction | ToolKind::DeviceAccess
+        );
+        self.areas.contains(area) && (!writes || self.writable.contains(area))
     }
 
     /// O modo que vale para o tipo de ferramenta.
@@ -653,7 +683,7 @@ impl UnattendedTools {
                 handler.enabled()
                     && policy.allows(handler.kind())
                     && handler.schedulable()
-                    && policy.areas.contains(handler.area())
+                    && policy.admits(handler.kind(), handler.area())
             })
             .collect();
         Self { handlers }
@@ -768,7 +798,7 @@ impl ToolRegistry {
             .filter(|handler| {
                 handler.enabled()
                     && policy.allows(handler.kind())
-                    && policy.areas.contains(handler.area())
+                    && policy.admits(handler.kind(), handler.area())
             })
             .collect();
         Self { handlers, policy }
@@ -1057,4 +1087,33 @@ pub async fn audit(ctx: &AppContext, args: &ToolArgs, entry: crate::audit::Audit
     let _ = crate::audit::AuditService::new(&ctx.db)
         .log(args.actor().clone(), entry)
         .await;
+}
+
+#[cfg(test)]
+mod access_tests {
+    use std::collections::BTreeMap;
+
+    use super::*;
+    use crate::roles::Role;
+
+    #[test]
+    fn leitor_na_area_ve_as_consultas_dela_mas_nao_as_acoes() {
+        let acesso = AreaAccess::new(
+            Role::Operator,
+            BTreeMap::from([
+                (Area::Servers, Role::Viewer),
+                (Area::Network, Role::Operator),
+            ]),
+        );
+        let politica = ToolPolicy::passive().with_access(&acesso);
+        assert!(politica.admits(ToolKind::Passive, Area::Servers));
+        assert!(!politica.admits(ToolKind::ContainerAction, Area::Servers));
+        assert!(!politica.admits(ToolKind::Action, Area::Servers));
+        assert!(politica.admits(ToolKind::Action, Area::Network));
+        assert!(
+            !politica.admits(ToolKind::Passive, Area::Vpn),
+            "sem acesso à VPN"
+        );
+        assert_eq!(politica.container_actions, AiAutomationMode::Off);
+    }
 }

@@ -3,6 +3,7 @@
 //! Coordena a troca de mensagens com o provedor de IA e a execução iterativa de ferramentas.
 
 use netmonitor_core::areas::AreaSet;
+use netmonitor_core::roles::AreaAccess;
 use std::{
     pin::Pin,
     time::{Duration, Instant},
@@ -734,7 +735,12 @@ pub async fn run_agent_loop(
             .await
             .map(|enabled| AreaSet::from_enabled(&enabled))
             .unwrap_or_default();
-        let policy = request.policy.with_areas(areas);
+        let mut policy = request.policy.with_areas(areas);
+        // Papel por área (ADR 019): a IA do chat só alcança o que o usuário
+        // alcança. Rotina sem usuário (o proativo) segue só as áreas ligadas.
+        if let Some(user_id) = request.actor.user_id {
+            policy = policy.with_access(&AreaAccess::load(&ctx.db, Some(user_id)).await);
+        }
         let registry = ToolRegistry::new(policy);
         let options = AiChatOptions {
             max_tokens: settings.response_style.max_output_tokens(),

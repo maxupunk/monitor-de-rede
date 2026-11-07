@@ -39,6 +39,7 @@ const POLICY: ToolPolicy = ToolPolicy {
     interactive: true,
     container_actions: AiAutomationMode::Confirm,
     areas: netmonitor_core::areas::AreaSet::ALL,
+    writable: netmonitor_core::areas::AreaSet::ALL,
 };
 
 const TODAY: &str = "{{today}}";

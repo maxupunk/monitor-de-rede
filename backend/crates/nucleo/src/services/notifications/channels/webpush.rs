@@ -4,6 +4,7 @@
 //! funcionando mesmo quando a aba ou o aplicativo PWA estiver fechado.
 
 use loco_rs::app::AppContext;
+use netmonitor_core::areas::Area;
 use serde_json::json;
 use tracing::{debug, warn};
 
@@ -46,7 +47,16 @@ impl NotificationChannel for WebPushChannel {
             }
         });
 
-        match deliver(&ctx.db, Audience::Everyone, &payload).await {
+        // Alerta de área só a quem tem acesso a ela (ADR 019); o do Núcleo, a
+        // todos.
+        let audience = message
+            .metadata
+            .get("area")
+            .and_then(serde_json::Value::as_str)
+            .and_then(Area::from_id)
+            .filter(|area| area.is_optional())
+            .map_or(Audience::Everyone, Audience::WithAccessTo);
+        match deliver(&ctx.db, audience, &payload).await {
             Ok(delivery) => {
                 debug!(
                     delivered = delivery.sent,

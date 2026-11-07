@@ -75,6 +75,7 @@ fn ferramentas_ativas_so_entram_quando_liberadas() {
         interactive: true,
         container_actions: AiAutomationMode::Confirm,
         areas: AreaSet::ALL,
+        writable: AreaSet::ALL,
     });
     assert_eq!(todas.definitions().len(), ai_tool_catalog().len());
 }
@@ -90,6 +91,7 @@ fn catalogo_sob_demanda_manda_o_nucleo_e_so_o_que_foi_carregado() {
         interactive: true,
         container_actions: AiAutomationMode::Confirm,
         areas: AreaSet::ALL,
+        writable: AreaSet::ALL,
     });
     let nomes = |carregados: &ToolGroups| -> Vec<String> {
         registro
@@ -241,6 +243,7 @@ fn acoes_sempre_pedem_confirmacao_e_testes_ativos_so_quando_configurado() {
         interactive: true,
         container_actions: AiAutomationMode::Confirm,
         areas: AreaSet::ALL,
+        writable: AreaSet::ALL,
     };
     assert!(!sem.needs_confirmation(ToolKind::Passive));
     assert!(!sem.needs_confirmation(ToolKind::Active));
@@ -304,6 +307,7 @@ fn acesso_a_equipamento_nunca_e_liberado_pelo_risco() {
         interactive: true,
         container_actions: AiAutomationMode::Auto,
         areas: AreaSet::ALL,
+        writable: AreaSet::ALL,
     };
     assert!(politica.needs_confirmation(ToolKind::DeviceAccess));
     assert_eq!(

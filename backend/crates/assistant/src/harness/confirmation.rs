@@ -10,6 +10,7 @@
 //! tira de lá — e a mesma proposta, decidida numa aba, não roda na outra.
 
 use loco_rs::prelude::AppContext;
+use netmonitor_core::roles::AreaAccess;
 use serde_json::Value;
 
 use super::tools::{ToolArgs, ToolOutput, ToolPolicy, ToolRegistry};
@@ -46,7 +47,11 @@ pub async fn execute_confirmed(
         .await
         .map(|enabled| netmonitor_core::areas::AreaSet::from_enabled(&enabled))
         .unwrap_or_default();
-    ToolRegistry::new(ToolPolicy::from_settings(settings).with_areas(areas))
+    let mut policy = ToolPolicy::from_settings(settings).with_areas(areas);
+    if let Some(user_id) = actor.user_id {
+        policy = policy.with_access(&AreaAccess::load(&ctx.db, Some(user_id)).await);
+    }
+    ToolRegistry::new(policy)
         .execute_confirmed(
             ctx,
             name,
