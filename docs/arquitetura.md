@@ -30,7 +30,7 @@ produto** que usa (Rede, Servidores, VPN; o Núcleo sempre) — ver
 | :--- | :--- |
 | API, scheduler, probe | Rust — [Loco.rs](https://loco.rs/) sobre `axum` e `tokio` |
 | ORM e migrations | SeaORM + `sea-orm-migration` |
-| Banco | SQLite em WAL (produção e testes); PostgreSQL suportado por `DATABASE_URL` |
+| Banco | PostgreSQL 18 no compose (serviço `postgres`, [ADR 020](adr/020-postgresql-padrao-do-container.md)); SQLite em WAL no desenvolvimento, nos testes e na imagem sem compose |
 | Autenticação | JWT (`loco_rs::auth`), HS512 |
 | Tempo real | SSE |
 | Frontend | Vue 3 + TypeScript + Vite + Vuetify + Pinia + PWA, servido pela própria API |
@@ -56,9 +56,9 @@ Não há Redis, nem fila externa, nem broker. Ver [§12](#12-o-que-não-existe).
 │             SSE             ─┤    └─ ciclo de monitores a cada 5 s           │
 │                              │    └─ relay do event_outbox                   │
 │                              └────────────┬──────────────┐                   │
-│                                           │ wg0.conf     │ SQLite (WAL)      │
+│                                           │ wg0.conf     │ TCP 5432          │
 │                                           ▼              ▼                   │
-│                              wireguard-watcher.sh    /data/netmonitor.sqlite │
+│                              wireguard-watcher.sh    serviço `postgres`      │
 │                              (root, NET_ADMIN)                               │
 │                                     │  ▲                                     │
 │                                     ▼  │ wg0.status                          │
@@ -76,7 +76,7 @@ Eram oito serviços. O que aconteceu com cada um:
 | `vpn-probe` | A `wg0` passou a ser do próprio processo. Não é mais registrado no boot, e os monitores da VPN rodam locais. |
 | `wireguard` | O watcher virou um processo deste container. |
 | `frontend` | A SPA é servida pela API (`src/spa.rs`): mesma porta, mesma origem, sem proxy e sem CORS. |
-| `postgres` | SQLite em WAL no volume. |
+| `postgres` | Continua um serviço: PostgreSQL 18 com volume próprio, sem porta publicada. Bancos `netmonitor` (sistema) e `netmonitor_logs` (syslog). Ver [ADR 020](adr/020-postgresql-padrao-do-container.md). |
 
 **O processo da API continua sem executar `wg` e sem `docker exec`.** Ele
 escreve `<iface>.conf` e lê `<iface>.status` num diretório combinado
@@ -130,7 +130,7 @@ confundido com arquivo — e é por isso que a identificação do serviço saiu 
   servidor. O probe fala por HTTP autenticado; **nunca** acessa o banco.
 - **Central com túnel** — os equipamentos remotos chegam pela `wg0` do próprio
   container e são medidos direto.
-- **Instalação grande** — `DATABASE_URL` para um Postgres externo e, se o ciclo
+- **Instalação grande** — `DATABASE_URL` (e `SYSLOG_DB_URL`) para um Postgres externo e, se o ciclo
   de monitores começar a disputar CPU com a API, `SCHEDULER_ENABLED=false` no
   servidor mais um container só com `task scheduler_loop`.
 
@@ -731,9 +731,9 @@ SNMP consulta o último contador de cada `(interface, série)` por lookup indexa
 sem materializar o passado. Séries para gráficos percorrem cursores e mantêm
 somente acumuladores fixos; o histórico DNS entrega no máximo 720 pontos por
 série. O rollup de `monitor_results` agrega no banco em janelas de até sete dias
-por ciclo e o relay SSE lê no máximo 500 linhas do outbox por passagem. Como o
-banco padrão de produção é SQLite, seu pool também usa uma conexão por padrão;
-instalações PostgreSQL dimensionam `DB_MAX_CONNECTIONS` explicitamente.
+por ciclo e o relay SSE lê no máximo 500 linhas do outbox por passagem. O
+compose usa PostgreSQL com `DB_MAX_CONNECTIONS=10`; o padrão do YAML (5) é o
+dimensionamento do SQLite, que tem um escritor só.
 
 ## 11-B. Agentes remotos
 

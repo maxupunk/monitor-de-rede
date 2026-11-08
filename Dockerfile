@@ -169,7 +169,8 @@ COPY docker/entrypoint.sh docker/wireguard-watcher.sh docker/healthcheck.sh dock
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/wireguard-watcher.sh /usr/local/bin/healthcheck.sh \
     /usr/local/bin/ping-group-range.sh
 
-# Banco (SQLite) e configuração do túnel, no mesmo volume — um só. O entrypoint
+# Configuração do túnel e, no arranjo sem compose, o banco SQLite (o compose usa
+# o PostgreSQL do serviço `postgres`, ADR 020), no mesmo volume. O entrypoint
 # acerta o dono antes de largar o privilégio: volume nomeado nasce do root.
 RUN mkdir -p /data/wg && chown -R app:app /data
 ENV LOCO_ENV=production \

@@ -56,6 +56,9 @@ services:
       OLLAYA_URL: http://127.0.0.1:${OLLAYA_HOST_PORT:-11435}
       # O mesmo para o Ollama do chat.
       OLLAMA_URL: http://127.0.0.1:${OLLAMA_HOST_PORT:-11434}
+      # E para o PostgreSQL, que vai junto para o loopback do host (abaixo).
+      DATABASE_URL: postgres://netmonitor:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@127.0.0.1:${POSTGRES_HOST_PORT:-15432}/netmonitor
+      SYSLOG_DB_URL: postgres://netmonitor:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@127.0.0.1:${POSTGRES_HOST_PORT:-15432}/netmonitor_logs
 
   # Com a API na rede do host o nome `netmonitor` não resolve: o agente local
   # vai junto para a rede do host e a alcança no loopback, sem publicação no
@@ -75,6 +78,25 @@ services:
     network_mode: host
     environment:
       OLLAYA_HOST: 127.0.0.1:${OLLAYA_HOST_PORT:-11435}
+
+  # O PostgreSQL, pelo mesmo motivo do Ollaya: rede do host, só no loopback,
+  # invisível para a rede. A porta não é a 5432 de propósito — é a que um
+  # Postgres já instalado no host costuma ocupar. `PGPORT` vale para o servidor
+  # e para o `pg_isready` do healthcheck.
+  postgres:
+    network_mode: host
+    environment:
+      PGPORT: ${POSTGRES_HOST_PORT:-15432}
+    command:
+      - postgres
+      - -c
+      - listen_addresses=127.0.0.1
+      - -c
+      - max_wal_size=2GB
+      - -c
+      - checkpoint_timeout=15min
+      - -c
+      - idle_in_transaction_session_timeout=5min
 
   # O Ollama do chat, pelo mesmo motivo do Ollaya: rede do host, só no loopback.
   ollama:

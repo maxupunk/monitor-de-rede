@@ -34,12 +34,11 @@ workers:
   mode: BackgroundAsync
 
 database:
-  # SQLite no volume, por padrão — é o banco da instalação de um container só.
-  # O WAL é ligado no boot (`app::enable_sqlite_wal`), sem o qual uma escrita
-  # bloquearia toda leitura do processo.
-  #
-  # Instalação grande troca por Postgres definindo `DATABASE_URL`; o código
-  # atende aos dois dialetos e os testes rodam nos dois.
+  # O `docker-compose.yml` define a `DATABASE_URL` para o PostgreSQL do
+  # serviço `postgres` (ADR 020). Este padrão SQLite só vale para a imagem
+  # rodada sozinha, sem compose: o WAL é ligado no boot
+  # (`app::enable_sqlite_wal`), sem o qual uma escrita bloquearia toda leitura
+  # do processo. O código atende aos dois dialetos e os testes rodam nos dois.
   uri: {{ get_env(name="DATABASE_URL", default="sqlite:///data/netmonitor.sqlite?mode=rwc") }}
   enable_logging: false
   # ⚠️ Em **milissegundos** — o Loco os passa a `Duration::from_millis`, e o

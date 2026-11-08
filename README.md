@@ -2,8 +2,9 @@
 
 Monitoramento e gerenciamento de **redes** e de **servidores com Docker**, com
 backend em **Rust (Loco.rs)** e frontend em **Vue 3 + Vuetify**. A stack
-inteira é **um container**: API, interface web, ciclo de monitores, banco
-(SQLite) e servidor WireGuard — mais o agente local que atende o Docker do host.
+inteira sobe por `docker compose`: um container com API, interface web, ciclo
+de monitores e servidor WireGuard, o **PostgreSQL 18** ao lado e o agente local
+que atende o Docker do host.
 
 ## Principais recursos
 
@@ -23,7 +24,7 @@ inteira é **um container**: API, interface web, ciclo de monitores, banco
 | **Ferramentas de rede** | Scanner de portas, consultas e benchmark DNS e diagnóstico complementar quando ICMP é filtrado. |
 | **Docker** | Visão geral da Engine, containers e métricas, logs, volumes e exportação, redes, imagens e operações administrativas auditadas. |
 | **Operação e segurança** | Usuários com perfis `admin`, `operator` e `viewer`, auditoria, backup e restauração das configurações, primeiro acesso protegido e segredos cifrados em repouso. |
-| **Plataforma** | SPA instalável como PWA, eventos via SSE, SQLite por padrão, PostgreSQL opcional e automonitoramento do próprio servidor. |
+| **Plataforma** | SPA instalável como PWA, eventos via SSE, PostgreSQL 18 no compose, SQLite como alternativa de container único e automonitoramento do próprio servidor. |
 
 Para detalhes de componentes, fluxos e decisões técnicas, consulte
 [`docs/arquitetura.md`](docs/arquitetura.md). O estado das entregas e dos itens
@@ -291,5 +292,10 @@ Os mesmos atalhos existem na raiz como `npm run dev:frontend`, `build:frontend`,
 do backend está em `backend/config/{development,test,production}.yaml`;
 o `.env` apenas preenche os `get_env(...)` desses arquivos e as substituições do
 compose. O banco é apontado por **`DATABASE_URL`** (uma URL só, não campos
-separados): o padrão é o SQLite do volume, e apontar a variável para um
-Postgres é o que basta para trocar — o código atende aos dois dialetos.
+separados). No compose ela aponta para o serviço `postgres` (PostgreSQL 18,
+[ADR 020](docs/adr/020-postgresql-padrao-do-container.md)), e os logs de syslog
+vão para o banco `netmonitor_logs` do mesmo servidor. **`POSTGRES_PASSWORD` é
+obrigatória no `.env`**: sem ela o compose não sobe. Use só letras e números
+(`openssl rand -hex 24`), porque ela entra numa URL. O SQLite continua
+suportado (`sqlite:///data/netmonitor.sqlite?mode=rwc`) para quem roda a imagem
+sem compose. O código atende aos dois dialetos.

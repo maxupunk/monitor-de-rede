@@ -679,6 +679,15 @@ Cada item carrega severidade, esforço, responsável sugerido e critério de ace
     - Exportar volume em qualquer host: `Command::VolumeExport` (permissão `volume_export`, fora do padrão) pelos quadros binários da ponte; protocolo na **versão 3**. Compose também vale para o host da central.
     - Testes: contrato HTTP por host com a Engine fora do ar, export de volume de ponta a ponta (gzip idêntico) e recusa pela política, cadastro e rotação do token do agente local, adoção de monitores e histórico, recusa de revogar/remover o agente local, projeto compose protegido.
 
+- [x] **PostgreSQL 18 como banco do container** 🟢 Concluído ([ADR 020](adr/020-postgresql-padrao-do-container.md))
+  - **Arquivos:** `docker-compose.yml`, `docker-compose.host.yml`, `docker/postgres/initdb/10-netmonitor-logs.sql`, `.env.example`, `backend/config/production.yaml`, `.github/workflows/ci.yaml`
+  - **Implementado:**
+    - Serviço `postgres` (`postgres:18-alpine`) com volume próprio, `scram-sha-256`, healthcheck por TCP e sem porta publicada; a API só sobe com ele saudável. No modo host ele vai ao loopback, na porta `POSTGRES_HOST_PORT` (15432).
+    - Banco do sistema `netmonitor` e banco dos logs de syslog `netmonitor_logs` (separado, no mesmo servidor, criado no primeiro boot); `DB_MAX_CONNECTIONS` do container em 10.
+    - `POSTGRES_PASSWORD` obrigatória no `.env`: sem ela o compose não sobe.
+    - Comparativo com MySQL/MariaDB, SQLite, TimescaleDB e ClickHouse no ADR; o SQLite continua suportado (desenvolvimento, testes, imagem sem compose) e o job `test-postgres` do CI passou para o 18.
+    - Validado com a stack de pé: migrations nos dois bancos (índice GIN da busca nos logs), cadastro do primeiro usuário, login e `GET /api/settings/database-size` respondendo `postgres`.
+
 ---
 
 ## 7. Matriz obrigatória de validação

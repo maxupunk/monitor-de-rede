@@ -38,10 +38,12 @@
    - Usar props `:title` e `:subtitle` no `<v-list-item>` do Vuetify 3 para evitar ambiguidades de slot.
 
 3. **Independência de Ambiente (Docker / Local)**:
-   - O backend Rust roda em **SQLite** (teste, dev e produção) e **PostgreSQL**
-     (instalações grandes, via `DATABASE_URL`). Toda consulta precisa valer nos
-     dois dialetos — o SQLite é o banco padrão de instalação, então quebrar o
-     dialeto dele quebra a instalação padrão, não só a suíte.
+   - O backend Rust roda em **PostgreSQL 18** (o banco do `docker compose`,
+     [ADR 020](docs/adr/020-postgresql-padrao-do-container.md), com os logs de
+     syslog no banco `netmonitor_logs` do mesmo servidor) e em **SQLite**
+     (desenvolvimento, testes e a imagem rodada sem compose). Toda consulta
+     precisa valer nos dois dialetos: quebrar o Postgres quebra a instalação
+     padrão, e quebrar o SQLite quebra a suíte e o container único.
    - **O sistema ainda não foi para produção.** Mudança de esquema **edita a
      migration existente** e recria o banco de desenvolvimento: não crie
      migration nova para alterar tabela, nem migration de compatibilidade,

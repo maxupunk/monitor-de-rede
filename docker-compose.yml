@@ -108,19 +108,23 @@ services:
       # falhar e todo login responder 401 com a mensagem de senha inválida.
       # Em produção a variável é obrigatória: o boot falha se não estiver definida.
       JWT_SECRET: ${JWT_SECRET:-}
-      # SQLite no volume. Sem interpolação de propósito: a `DATABASE_URL` do
-      # `.env` descreve o caminho visto **da máquina**, e ela não vale aqui
-      # dentro. Para apontar a um Postgres externo, edite esta linha.
-      DATABASE_URL: sqlite:///data/netmonitor.sqlite?mode=rwc
+      # PostgreSQL do serviço `postgres`, logo abaixo (ADR 020). A URL é
+      # montada aqui, e não lida do `.env`: a `DATABASE_URL` de lá descreve o
+      # banco visto **da máquina**, e ela não vale aqui dentro. Para um Postgres
+      # externo, edite esta linha (e a `SYSLOG_DB_URL`) e remova o serviço.
+      # Container único sem Postgres? `sqlite:///data/netmonitor.sqlite?mode=rwc`
+      # continua suportado.
+      DATABASE_URL: postgres://netmonitor:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@postgres:5432/netmonitor
       # Pool de conexões, em milissegundos. Repassados aqui porque o
       # `config/*.yaml` vai assado dentro da imagem: sem estas linhas, ajustar
       # os tempos exigiria `--build`.
       DB_CONNECT_TIMEOUT: ${DB_CONNECT_TIMEOUT:-5000}
       DB_IDLE_TIMEOUT: ${DB_IDLE_TIMEOUT:-300000}
       DB_MIN_CONNECTIONS: ${DB_MIN_CONNECTIONS:-1}
-      # SQLite é o padrão e usa um único writer; pools maiores multiplicam o
-      # cache e os buffers temporários. PostgreSQL pode sobrescrever para 10.
-      DB_MAX_CONNECTIONS: ${DB_MAX_CONNECTIONS:-5}
+      # O PostgreSQL atende escritas concorrentes: com 10 conexões o
+      # scheduler, os polls SNMP, o syslog e as requisições não disputam a vez.
+      # Em SQLite, volte para 5 (um escritor só; mais conexões só gastam cache).
+      DB_MAX_CONNECTIONS: ${DB_MAX_CONNECTIONS:-10}
       # Token exigido no cadastro do primeiro usuário. Deixe vazio e o servidor
       # sorteia um no primeiro boot, imprimindo-o no log (`docker compose logs
       # netmonitor | grep setup_token`). Definir aqui só interessa a
@@ -147,12 +151,13 @@ services:
       # `DATABASE_URL`: é um caminho visto de dentro do container.
       STORAGE_LOCAL_ROOT: /data/storage
       # --- servidor de syslog ---
-      # Sem interpolação no caminho do banco, pelo mesmo motivo da
-      # `DATABASE_URL`: o `.env` descreve a máquina, não o container. Vazio
-      # (o padrão) faz o banco de logs nascer ao lado do principal, em
-      # /data/logs.sqlite.
+      # Banco **separado** no mesmo servidor (`netmonitor_logs`, criado pelo
+      # `docker/postgres/initdb/`): a ingestão e a retenção dos logs não
+      # incham o banco principal nem o backup dele. Sem interpolação do `.env`,
+      # pelo mesmo motivo da `DATABASE_URL`. Vazia, a variável põe os logs no
+      # banco principal (Postgres) ou em /data/logs.sqlite (SQLite).
       SYSLOG_ENABLED: ${SYSLOG_ENABLED:-true}
-      SYSLOG_DB_URL: ${SYSLOG_DB_URL:-}
+      SYSLOG_DB_URL: postgres://netmonitor:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@postgres:5432/netmonitor_logs
       # Porta real dos listeners sem privilégio dentro do container. O override
       # de rede host anuncia esta mesma porta aos equipamentos.
       SYSLOG_UDP_PORT: ${SYSLOG_LISTEN_PORT:-5514}
@@ -185,10 +190,15 @@ services:
       # — o arquivo só existe no volume que os dois compartilham. Sem esta
       # variável o Docker deste host simplesmente não aparece na tela.
       LOCAL_AGENT_TOKEN_FILE: /local-agent/token
+    # A API só sobe com o banco aceitando conexões: sem isso o primeiro boot
+    # (o `initdb` leva alguns segundos) derrubava as migrations.
+    depends_on:
+      postgres:
+        condition: service_healthy
     volumes:
-      # Um volume só: o banco em /data/netmonitor.sqlite e a configuração do
-      # túnel em /data/wg. O `wg0.conf` é reescrito a partir do banco a cada
-      # mudança de peer, então o que precisa mesmo sobreviver é o banco.
+      # Configuração do túnel em /data/wg, a pasta dos armazenamentos locais e,
+      # no arranjo SQLite, o próprio banco. O banco PostgreSQL mora no volume
+      # do serviço `postgres`.
       - netmonitor-data:/data
       # Só o token do agente local: a API escreve, o agente lê.
       - netmonitor-local-agent:/local-agent
@@ -212,6 +222,61 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+
+  # PostgreSQL 18 (ADR 020): o banco do sistema e, em outro banco do mesmo
+  # servidor, os logs de syslog. Sem porta publicada — só a rede interna do
+  # compose o alcança. A senha é obrigatória (`POSTGRES_PASSWORD` no `.env`):
+  # sem ela o `docker compose` nem sobe. Ela entra numa URL, então use só
+  # letras e números (`openssl rand -hex 24`).
+  #
+  # ⚠ Trocar a senha no `.env` depois do primeiro boot **não** troca a do
+  # banco: o `initdb` só roda com o volume vazio. Mude as duas
+  # (`ALTER USER netmonitor PASSWORD '...'`) ou recrie o volume.
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: netmonitor
+      POSTGRES_DB: netmonitor
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
+      # `scram-sha-256` também nas conexões da rede do compose.
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+      TZ: ${TZ:-America/Fortaleza}
+    command:
+      - postgres
+      # Retenção dos logs apaga em blocos e o scheduler grava a cada ciclo:
+      # checkpoints espaçados e um WAL maior evitam picos de escrita no disco.
+      - -c
+      - max_wal_size=2GB
+      - -c
+      - checkpoint_timeout=15min
+      # Consulta presa não segura conexão do pool para sempre.
+      - -c
+      - idle_in_transaction_session_timeout=5min
+    volumes:
+      # A partir do 18 a imagem guarda os dados em /var/lib/postgresql/18/docker:
+      # o volume vai na pasta-mãe, o que deixa um `pg_upgrade` futuro no lugar.
+      - netmonitor-postgres:/var/lib/postgresql
+      # Cria o banco dos logs no primeiro boot (volume vazio).
+      - ./docker/postgres/initdb:/docker-entrypoint-initdb.d:ro
+    # O `/dev/shm` de 64 MB do Docker estoura em consultas paralelas grandes.
+    shm_size: 256mb
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    # Por TCP, e não pelo socket: no primeiro boot a imagem roda o `initdb`
+    # num servidor temporário só no socket, e um teste por lá liberaria a API
+    # antes de o servidor de verdade (e o banco dos logs) existir.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U netmonitor -d netmonitor"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   # Agente local (ADR 014): o Docker deste host, gerenciado pela tela. É ele —
   # e não a API — que monta o socket da Engine; a API o comanda pelo canal dos
@@ -348,6 +413,7 @@ services:
 
 volumes:
   netmonitor-data:
+  netmonitor-postgres:
   netmonitor-local-agent:
   netmonitor-agent-state:
   ollaya-models:
