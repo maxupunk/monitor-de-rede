@@ -1,17 +1,8 @@
 <template>
   <div>
-    <PageHeader title="Volumes" subtitle="Persistência, inspeção, exportação e remoção segura">
-      <template #actions>
-        <v-btn
-          color="primary"
-          prepend-icon="mdi-refresh"
-          :loading="docker.loading"
-          @click="docker.refreshAll()"
-        >
-          Atualizar
-        </v-btn>
-      </template>
-    </PageHeader>
+    <DockerSectionBar
+      description="Onde os containers guardam dados. Clique num volume para ver os detalhes; exportar baixa uma cópia .tar.gz."
+    />
 
     <v-alert v-if="docker.error" type="error" variant="tonal" closable class="mb-4">
       {{ docker.error }}
@@ -39,7 +30,7 @@
         <template #item.name="{ item }">
           <div class="py-2">
             <div class="font-weight-bold">{{ item.name }}</div>
-            <div class="text-caption text-medium-emphasis">{{ projectName(item.labels) }}</div>
+            <div class="text-caption text-high-emphasis">{{ projectName(item.labels) }}</div>
           </div>
         </template>
         <template #item.createdAt="{ item }">
@@ -47,40 +38,29 @@
         </template>
         <template #item.actions="{ item }">
           <div class="d-flex justify-end ga-1" @click.stop>
-            <v-btn
-              icon="mdi-eye-outline"
-              size="small"
-              variant="text"
-              title="Inspecionar"
-              @click="openDetail(item)"
-            ></v-btn>
-            <v-btn
+            <IconAction icon="mdi-eye-outline" label="Ver detalhes" @click="openDetail(item)" />
+            <IconAction
               v-if="canExport"
               icon="mdi-download-outline"
-              size="small"
-              color="primary"
-              variant="text"
-              title="Exportar"
+              label="Exportar .tar.gz"
               :loading="exportingName === item.name"
               @click="exportVolume(item.name)"
-            ></v-btn>
-            <v-btn
+            />
+            <IconAction
               v-if="auth.isAdmin"
               icon="mdi-delete-outline"
-              size="small"
+              label="Remover volume"
               color="error"
-              variant="text"
-              title="Remover"
               :loading="docker.actionLoading"
               @click="removeVolume(item.name)"
-            ></v-btn>
+            />
           </div>
         </template>
         <template #mobile-item="{ item }">
           <div class="d-flex align-start justify-space-between ga-2">
             <div class="min-w-0">
               <div class="font-weight-bold text-truncate">{{ item.name }}</div>
-              <div class="text-caption text-medium-emphasis">
+              <div class="text-caption text-high-emphasis">
                 {{ item.driver }} · {{ item.scope }}
               </div>
             </div>
@@ -141,11 +121,13 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import PageHeader from '@/components/PageHeader.vue'
+import DockerSectionBar from '@/components/docker/DockerSectionBar.vue'
+import IconAction from '@/components/IconAction.vue'
 import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
 import { confirm } from '@/composables/useConfirm'
 import { useAuthStore } from '@/stores/auth'
 import { useDockerStore } from '@/stores/docker'
+import { composeProject } from '@/utils/dockerPresentation'
 import { formatDateTime } from '@/utils/formatters'
 import type { DockerVolumeDetail } from '@/bindings/DockerVolumeDetail'
 import type { DockerVolumeSummary } from '@/bindings/DockerVolumeSummary'
@@ -183,7 +165,7 @@ const filteredVolumes = computed(() => {
 })
 
 function projectName(labels: Record<string, string>): string {
-  return labels['com.docker.compose.project'] || 'Sem projeto Compose'
+  return composeProject(labels) ?? 'Sem projeto compose'
 }
 
 function onRowClick(_event: MouseEvent, row: { item: DockerVolumeSummary }): void {

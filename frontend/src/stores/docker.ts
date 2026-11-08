@@ -130,6 +130,13 @@ export const useDockerStore = defineStore('docker', () => {
   /** Host aberto quando ninguém escolheu: o desta central, senão o primeiro. */
   const defaultHostKey = computed(() => localHost.value?.key ?? hosts.value[0]?.key ?? '')
   /** Serviço do host selecionado: as telas nunca montam caminho sozinhas. */
+  /** O host padrão (o desta central) não vai na URL; os demais, sim. */
+  const hostQuery = computed<Record<string, string>>(() => {
+    const key = selectedHostKey.value
+    const query: Record<string, string> = {}
+    if (key && key !== defaultHostKey.value) query.host = key
+    return query
+  })
   const api = computed<DockerService>(() => createDockerService(selectedHostKey.value))
 
   /** O que a política do host selecionado libera (ADR 011). */
@@ -392,6 +399,7 @@ export const useDockerStore = defineStore('docker', () => {
     hostsLoaded,
     hostStates,
     selectedHostKey,
+    hostQuery,
     selectedHost,
     localHost,
     localView,

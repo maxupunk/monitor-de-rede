@@ -14,6 +14,16 @@ fn filled(password: Option<String>) -> Option<String> {
     password.filter(|value| !value.is_empty())
 }
 
+/// "Usar este contêiner": qual host e qual contêiner testar.
+#[derive(Debug, Clone, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DatabaseContainerResolveInput {
+    /// `agent-<id>`.
+    pub host_key: String,
+    pub container_id: String,
+}
+
 /// Formulário de criação e edição.
 #[derive(Debug, Clone, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]

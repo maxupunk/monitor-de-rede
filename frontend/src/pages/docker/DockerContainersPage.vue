@@ -1,18 +1,8 @@
 <template>
   <div>
-    <PageHeader title="Containers" subtitle="Inventário, consumo, logs e controle do ciclo de vida">
-      <template #actions>
-        <LiveIndicator :updated-at="docker.lastUpdatedAt" />
-        <v-btn
-          color="primary"
-          prepend-icon="mdi-refresh"
-          :loading="docker.loading"
-          @click="docker.refreshContainers()"
-        >
-          Atualizar
-        </v-btn>
-      </template>
-    </PageHeader>
+    <DockerSectionBar
+      description="Agrupados por projeto compose. Clique num container para ver consumo, configuração, redes, volumes e logs."
+    />
 
     <v-alert v-if="docker.error" type="error" variant="tonal" closable class="mb-4">
       {{ docker.error }}
@@ -25,8 +15,9 @@
     >
       Métricas parciais: {{ docker.metrics.failedContainerCount }} container(s) sem amostra.
     </v-alert>
+
     <v-card rounded="xl" variant="outlined" class="mb-4">
-      <div class="d-flex flex-column flex-md-row ga-3 pa-4">
+      <div class="d-flex flex-column flex-md-row align-md-center ga-3 pa-3 pa-md-4">
         <v-text-field
           v-model="search"
           prepend-inner-icon="mdi-magnify"
@@ -35,22 +26,32 @@
           density="compact"
           hide-details
           clearable
+          class="flex-grow-1"
         ></v-text-field>
-        <v-select
+        <v-chip-group
           v-model="stateFilter"
-          :items="stateOptions"
-          label="Estado"
-          variant="outlined"
-          density="compact"
-          hide-details
-          class="docker-filter"
-        ></v-select>
+          mandatory
+          selected-class="font-weight-bold"
+          aria-label="Filtrar por estado"
+        >
+          <v-chip
+            v-for="option in CONTAINER_STATE_FILTERS"
+            :key="option.value"
+            :value="option.value"
+            :color="option.color"
+            variant="outlined"
+            filter
+          >
+            {{ option.label }}
+            <v-badge :content="counts[option.value]" :color="option.color" inline></v-badge>
+          </v-chip>
+        </v-chip-group>
       </div>
     </v-card>
 
-    <v-expansion-panels v-if="containerGroups.length" v-model="expandedGroups" multiple>
+    <v-expansion-panels v-if="groups.length" v-model="expandedGroups" multiple>
       <v-expansion-panel
-        v-for="group in containerGroups"
+        v-for="group in groups"
         :key="group.key"
         :value="group.key"
         rounded="xl"
@@ -58,18 +59,21 @@
       >
         <v-expansion-panel-title>
           <div class="d-flex flex-wrap align-center ga-2 w-100 pr-2">
-            <v-avatar color="primary" variant="tonal" size="32">
-              <v-icon size="18">mdi-folder-multiple-outline</v-icon>
+            <v-avatar :color="group.standalone ? 'info' : 'primary'" variant="tonal" size="32">
+              <v-icon size="18">
+                {{ group.standalone ? 'mdi-cube-outline' : 'mdi-folder-multiple-outline' }}
+              </v-icon>
             </v-avatar>
             <div class="font-weight-bold">{{ group.label }}</div>
-            <v-chip size="x-small" color="primary" variant="tonal">
-              {{ group.containers.length }}
-            </v-chip>
-            <v-chip size="x-small" color="success" variant="tonal">
-              {{ group.running }} ativos
+            <v-chip
+              size="x-small"
+              :color="group.running === group.containers.length ? 'success' : 'warning'"
+              variant="flat"
+            >
+              {{ group.running }}/{{ group.containers.length }} rodando
             </v-chip>
             <v-spacer></v-spacer>
-            <div class="docker-group-totals text-caption text-medium-emphasis">
+            <div class="docker-group-totals text-caption text-high-emphasis">
               CPU {{ formatPercent(group.cpuPercent, 1) }} · RAM
               {{ formatBinaryBytes(group.memoryBytes) }}
             </div>
@@ -88,411 +92,71 @@
             <template #item.name="{ item }">
               <div class="py-2">
                 <div class="font-weight-bold">{{ containerName(item) }}</div>
-                <div class="text-caption text-medium-emphasis font-mono">
-                  {{ shortId(item.id) }}
-                </div>
+                <div class="text-caption text-high-emphasis font-mono">{{ shortId(item.id) }}</div>
               </div>
             </template>
             <template #item.state="{ item }">
-              <v-chip :color="stateColor(item.state)" size="small" variant="tonal">
-                {{ stateLabel(item.state) }}
+              <v-chip
+                :color="containerState(item.state).color"
+                :prepend-icon="containerState(item.state).icon"
+                size="small"
+                variant="tonal"
+              >
+                {{ containerState(item.state).label }}
               </v-chip>
             </template>
             <template #item.resources="{ item }">
               <div v-if="metricFor(item.id)" class="resource-cell py-1">
-                <v-icon size="14" class="text-medium-emphasis">mdi-cpu-64-bit</v-icon>
-                <span class="resource-cell__label">CPU</span>
+                <v-icon size="14" color="info">mdi-cpu-64-bit</v-icon>
+                <span>CPU</span>
                 <span class="resource-cell__value">
                   {{ formatPercent(metricFor(item.id)?.cpu.usagePercent, 1) }}
                 </span>
-                <v-icon size="14" class="text-medium-emphasis">mdi-memory</v-icon>
-                <span class="resource-cell__label">RAM</span>
+                <v-icon size="14" color="primary">mdi-memory</v-icon>
+                <span>RAM</span>
                 <span class="resource-cell__value">
                   {{ formatBinaryBytes(metricFor(item.id)?.memory.usageBytes) }}
                 </span>
               </div>
-              <span v-else class="text-medium-emphasis">—</span>
+              <span v-else>—</span>
             </template>
             <template #item.actions="{ item }">
-              <div class="d-flex ga-1 justify-end" @click.stop>
-                <v-btn
-                  icon="mdi-eye-outline"
-                  size="small"
-                  variant="text"
-                  title="Inspecionar"
-                  @click="openDetail(item)"
-                ></v-btn>
-                <v-icon
-                  v-if="item.protected"
-                  color="info"
-                  size="small"
-                  class="ma-2"
-                  aria-label="Container protegido"
-                >
-                  mdi-shield-lock
-                  <v-tooltip activator="parent" location="top" max-width="280">
-                    Container da instalação NetMonitor: parar, reiniciar, recriar ou remover
-                    derrubaria a central.
-                  </v-tooltip>
-                </v-icon>
-                <v-btn
-                  v-if="canOperate && item.state !== 'running'"
-                  icon="mdi-play"
-                  size="small"
-                  color="success"
-                  variant="text"
-                  title="Iniciar"
-                  :loading="docker.actionLoading"
-                  @click="runContainerAction(item, 'start')"
-                ></v-btn>
-                <v-btn
-                  v-if="canOperate && !item.protected && item.state === 'running'"
-                  icon="mdi-stop"
-                  size="small"
-                  color="warning"
-                  variant="text"
-                  title="Parar"
-                  :loading="docker.actionLoading"
-                  @click="runContainerAction(item, 'stop')"
-                ></v-btn>
-                <v-btn
-                  v-if="canOperate && !item.protected"
-                  icon="mdi-restart"
-                  size="small"
-                  color="info"
-                  variant="text"
-                  title="Reiniciar"
-                  :loading="docker.actionLoading"
-                  @click="runContainerAction(item, 'restart')"
-                ></v-btn>
-                <v-btn
-                  v-if="canUpdate && !item.protected"
-                  icon="mdi-update"
-                  size="small"
-                  color="primary"
-                  variant="text"
-                  title="Atualizar imagem e recriar"
-                  :loading="docker.actionLoading"
-                  @click="updateContainer(item)"
-                ></v-btn>
-                <v-btn
-                  v-if="canOperate && !item.protected"
-                  icon="mdi-delete-outline"
-                  size="small"
-                  color="error"
-                  variant="text"
-                  title="Remover"
-                  :loading="docker.actionLoading"
-                  @click="runContainerAction(item, 'remove')"
-                ></v-btn>
-              </div>
+              <DockerContainerActions :container="item" @done="onActionDone" />
             </template>
             <template #mobile-item="{ item }">
-              <div class="d-flex align-start justify-space-between ga-2">
+              <div class="d-flex flex-wrap align-start justify-space-between ga-2">
                 <div class="min-w-0">
                   <div class="font-weight-bold text-truncate">{{ containerName(item) }}</div>
-                  <div class="text-caption text-medium-emphasis text-truncate">
-                    {{ item.image }}
+                  <div class="text-caption text-high-emphasis text-truncate">{{ item.image }}</div>
+                  <div v-if="metricFor(item.id)" class="text-caption text-high-emphasis">
+                    CPU {{ formatPercent(metricFor(item.id)?.cpu.usagePercent, 1) }} · RAM
+                    {{ formatBinaryBytes(metricFor(item.id)?.memory.usageBytes) }}
                   </div>
                 </div>
-                <v-chip :color="stateColor(item.state)" size="small" variant="tonal">
-                  {{ stateLabel(item.state) }}
+                <v-chip
+                  :color="containerState(item.state).color"
+                  :prepend-icon="containerState(item.state).icon"
+                  size="small"
+                  variant="tonal"
+                >
+                  {{ containerState(item.state).label }}
                 </v-chip>
               </div>
+              <DockerContainerActions :container="item" class="mt-2" @done="onActionDone" />
             </template>
           </ResponsiveDataTable>
         </v-expansion-panel-text>
       </v-expansion-panel>
     </v-expansion-panels>
-    <v-alert v-else type="info" variant="tonal">
-      Nenhum container encontrado para os filtros selecionados.
+    <v-alert v-else-if="!docker.loading" type="info" variant="tonal">
+      {{
+        docker.containers.length
+          ? 'Nenhum container combina com a busca e o filtro.'
+          : 'Nenhum container neste host.'
+      }}
     </v-alert>
 
-    <v-dialog v-model="detailDialog" :fullscreen="$vuetify.display.xs" max-width="980" scrollable>
-      <v-card rounded="xl" class="docker-detail-card">
-        <v-card-title class="d-flex align-center ga-2">
-          <v-icon color="primary">mdi-cube-outline</v-icon>
-          <span class="text-truncate">{{ detail?.name || 'Container' }}</span>
-          <v-spacer></v-spacer>
-          <v-btn icon="mdi-close" variant="text" @click="detailDialog = false"></v-btn>
-        </v-card-title>
-        <v-tabs v-model="detailTab" color="primary" show-arrows>
-          <v-tab value="usage" prepend-icon="mdi-chart-areaspline">Consumo</v-tab>
-          <v-tab value="overview">Detalhes</v-tab>
-          <v-tab value="mounts">Volumes</v-tab>
-          <v-tab value="networks">Redes</v-tab>
-          <v-tab value="logs">Logs</v-tab>
-        </v-tabs>
-        <v-divider></v-divider>
-        <v-card-text class="pa-0 docker-detail-body">
-          <v-window v-model="detailTab">
-            <v-window-item value="usage" class="pa-5">
-              <div class="d-flex flex-wrap align-center ga-2 mb-4">
-                <v-chip
-                  v-if="detailMetric"
-                  color="info"
-                  variant="tonal"
-                  prepend-icon="mdi-cpu-64-bit"
-                >
-                  CPU agora: {{ formatPercent(detailMetric.cpu.usagePercent, 1) }}
-                </v-chip>
-                <v-chip
-                  v-if="detailMetric"
-                  color="primary"
-                  variant="tonal"
-                  prepend-icon="mdi-memory"
-                >
-                  RAM agora: {{ formatBinaryBytes(detailMetric.memory.usageBytes) }}
-                </v-chip>
-                <v-spacer></v-spacer>
-                <v-btn-toggle
-                  v-model="usageRange"
-                  mandatory
-                  color="primary"
-                  variant="outlined"
-                  density="compact"
-                  divided
-                >
-                  <v-btn v-for="option in usageRanges" :key="option" :value="option" size="small">
-                    {{ option }}
-                  </v-btn>
-                </v-btn-toggle>
-              </div>
-              <v-skeleton-loader
-                v-if="usageLoading && !usage"
-                type="card, card"
-              ></v-skeleton-loader>
-              <v-alert v-else-if="usageError" type="error" variant="tonal" density="compact">
-                {{ usageError }}
-              </v-alert>
-              <v-alert
-                v-else-if="!usage || usage.points.length === 0"
-                type="info"
-                variant="tonal"
-                density="compact"
-              >
-                Ainda não há consumo registrado nesta janela. O primeiro minuto aparece cerca de um
-                minuto depois de o container começar a enviar métricas.
-              </v-alert>
-              <v-row v-else dense>
-                <v-col cols="12" md="6">
-                  <div class="text-subtitle-2 mb-2">CPU</div>
-                  <BaseMetricChart
-                    :series="usageCpuSeries"
-                    unit-type="percentage"
-                  ></BaseMetricChart>
-                </v-col>
-                <v-col cols="12" md="6">
-                  <div class="text-subtitle-2 mb-2">Memória</div>
-                  <BaseMetricChart :series="usageMemorySeries" unit-type="bytes"></BaseMetricChart>
-                </v-col>
-              </v-row>
-              <div class="text-caption mt-3">
-                Médias de 1 minuto guardadas por 30 dias.
-                <router-link :to="{ name: 'docker-history' }">Ver histórico do host</router-link>
-              </div>
-            </v-window-item>
-            <v-window-item value="overview" class="pa-5">
-              <v-skeleton-loader v-if="detailLoading" type="article"></v-skeleton-loader>
-              <v-row v-else-if="detail">
-                <v-col cols="12" md="6">
-                  <v-list density="compact">
-                    <v-list-item title="ID" :subtitle="detail.id"></v-list-item>
-                    <v-list-item title="Imagem" :subtitle="detail.image"></v-list-item>
-                    <v-list-item
-                      title="Hostname"
-                      :subtitle="detail.config.hostname || '—'"
-                    ></v-list-item>
-                    <v-list-item
-                      title="Usuário"
-                      :subtitle="detail.config.user || 'padrão da imagem'"
-                    ></v-list-item>
-                  </v-list>
-                </v-col>
-                <v-col cols="12" md="6">
-                  <v-list density="compact">
-                    <v-list-item title="Estado" :subtitle="detail.state.status"></v-list-item>
-                    <v-list-item
-                      title="PID"
-                      :subtitle="String(detail.state.pid || '—')"
-                    ></v-list-item>
-                    <v-list-item
-                      title="Reinício"
-                      :subtitle="detail.hostConfig.restartPolicy.name || 'não'"
-                    ></v-list-item>
-                    <v-list-item
-                      title="Modo de rede"
-                      :subtitle="detail.hostConfig.networkMode || '—'"
-                    ></v-list-item>
-                  </v-list>
-                </v-col>
-                <v-col cols="12">
-                  <div class="text-subtitle-2 mb-2">Comando</div>
-                  <pre class="docker-code">{{ detail.config.command.join(' ') || '—' }}</pre>
-                  <div class="text-subtitle-2 mt-4 mb-2">
-                    Ambiente (segredos ocultados pelo servidor)
-                  </div>
-                  <pre class="docker-code">{{ detail.config.environment.join('\n') || '—' }}</pre>
-                </v-col>
-              </v-row>
-            </v-window-item>
-            <v-window-item value="mounts" class="pa-5">
-              <v-table density="compact">
-                <thead>
-                  <tr>
-                    <th>Tipo</th>
-                    <th>Origem</th>
-                    <th>Destino</th>
-                    <th>Modo</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr
-                    v-for="mount in detail?.mounts || []"
-                    :key="`${mount.source}-${mount.destination}`"
-                  >
-                    <td>{{ mount.mountType }}</td>
-                    <td>{{ mount.name || mount.source }}</td>
-                    <td>{{ mount.destination }}</td>
-                    <td>{{ mount.readWrite ? 'RW' : 'RO' }}</td>
-                  </tr>
-                </tbody>
-              </v-table>
-            </v-window-item>
-            <v-window-item value="networks" class="pa-5">
-              <div
-                v-if="auth.isAdmin"
-                class="d-flex flex-column flex-sm-row align-sm-center ga-2 mb-4"
-              >
-                <v-select
-                  v-model="networkToConnect"
-                  :items="availableNetworks"
-                  item-title="name"
-                  item-value="id"
-                  label="Adicionar rede ao container"
-                  variant="outlined"
-                  density="compact"
-                  hide-details
-                  clearable
-                  no-data-text="Nenhuma outra rede disponível"
-                  class="flex-grow-1"
-                ></v-select>
-                <v-btn
-                  color="primary"
-                  prepend-icon="mdi-lan-connect"
-                  :disabled="!networkToConnect"
-                  :loading="docker.actionLoading"
-                  @click="connectSelectedNetwork"
-                >
-                  Adicionar
-                </v-btn>
-              </div>
-              <v-table density="compact">
-                <thead>
-                  <tr>
-                    <th>Rede</th>
-                    <th>IP</th>
-                    <th>Gateway</th>
-                    <th v-if="auth.isAdmin" class="text-right">Ações</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="network in detail?.networks || []" :key="network.networkId">
-                    <td>{{ network.networkName }}</td>
-                    <td>{{ network.ipAddress || '—' }}</td>
-                    <td>{{ network.gateway || '—' }}</td>
-                    <td v-if="auth.isAdmin" class="text-right">
-                      <v-btn
-                        icon="mdi-lan-disconnect"
-                        size="small"
-                        color="error"
-                        variant="text"
-                        :disabled="(detail?.networks.length || 0) <= 1"
-                        :title="
-                          (detail?.networks.length || 0) <= 1
-                            ? 'O container precisa permanecer em pelo menos uma rede'
-                            : `Remover da rede ${network.networkName}`
-                        "
-                        @click="disconnectNetwork(network.networkId, network.networkName)"
-                      ></v-btn>
-                    </td>
-                  </tr>
-                </tbody>
-              </v-table>
-              <v-alert
-                v-if="auth.isAdmin && (detail?.networks.length || 0) <= 1"
-                type="info"
-                variant="tonal"
-                density="compact"
-                class="mt-4"
-              >
-                A última rede não pode ser removida, evitando deixar o container sem conectividade.
-              </v-alert>
-            </v-window-item>
-            <v-window-item value="logs" class="pa-4">
-              <div class="d-flex flex-wrap align-center ga-2 mb-3">
-                <v-select
-                  v-model="logTail"
-                  :items="logTailOptions"
-                  label="Linhas"
-                  variant="outlined"
-                  density="compact"
-                  hide-details
-                  max-width="180"
-                ></v-select>
-                <v-btn
-                  prepend-icon="mdi-refresh"
-                  :loading="logsLoading"
-                  :disabled="Boolean(followStreamId)"
-                  @click="loadLogs()"
-                >
-                  Atualizar
-                </v-btn>
-                <v-btn
-                  :color="followStreamId ? 'success' : 'primary'"
-                  :variant="followStreamId ? 'flat' : 'tonal'"
-                  :prepend-icon="followStreamId ? 'mdi-pause' : 'mdi-play-circle-outline'"
-                  :loading="followStarting"
-                  @click="toggleFollow"
-                >
-                  {{ followStreamId ? 'Pausar ao vivo' : 'Ao vivo' }}
-                </v-btn>
-                <v-spacer></v-spacer>
-                <v-btn
-                  color="primary"
-                  variant="tonal"
-                  prepend-icon="mdi-download"
-                  :loading="logsDownloading"
-                  @click="downloadLogs"
-                >
-                  Baixar logs
-                </v-btn>
-                <v-btn
-                  v-if="auth.isAdmin"
-                  color="error"
-                  variant="tonal"
-                  prepend-icon="mdi-delete-forever-outline"
-                  :loading="logsClearing"
-                  @click="clearLogs"
-                >
-                  Limpar logs
-                </v-btn>
-              </div>
-              <v-alert
-                v-if="followEnded"
-                type="info"
-                variant="tonal"
-                density="compact"
-                class="mb-2"
-              >
-                {{ followEnded }}
-              </v-alert>
-              <pre class="docker-logs">{{ formattedLogs }}</pre>
-            </v-window-item>
-          </v-window>
-        </v-card-text>
-      </v-card>
-    </v-dialog>
+    <DockerContainerDetailDialog v-model="detailOpen" :container="selected" @notify="notify" />
 
     <v-snackbar v-model="feedback.visible" :color="feedback.color" timeout="4500">
       {{ feedback.message }}
@@ -501,483 +165,84 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import PageHeader from '@/components/PageHeader.vue'
+import { computed, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import DockerContainerActions from '@/components/docker/DockerContainerActions.vue'
+import DockerContainerDetailDialog from '@/components/docker/DockerContainerDetailDialog.vue'
+import DockerSectionBar from '@/components/docker/DockerSectionBar.vue'
 import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
-import { confirm } from '@/composables/useConfirm'
-import { useAuthStore } from '@/stores/auth'
+import type { ActionOutcome } from '@/composables/useContainerActions'
 import { useDockerStore } from '@/stores/docker'
-import type { DockerContainerDetail } from '@/bindings/DockerContainerDetail'
 import type { DockerContainerSummary } from '@/bindings/DockerContainerSummary'
-import type { DockerLogEntry } from '@/bindings/DockerLogEntry'
+import {
+  CONTAINER_STATE_FILTERS,
+  containerName,
+  containerState,
+  filterContainers,
+  groupContainers,
+  isContainerStateFilter,
+  shortId,
+  stateFilterCounts,
+  type ContainerStateFilter,
+} from '@/utils/dockerPresentation'
 import { formatBinaryBytes, formatPercent } from '@/utils/formatters'
-import LiveIndicator from '@/components/LiveIndicator.vue'
-import BaseMetricChart, { type ChartSeriesInput } from '@/components/BaseMetricChart.vue'
-import type { ContainerHistoryResponse } from '@/bindings/ContainerHistoryResponse'
-import type { MetricsRange } from '@/bindings/MetricsRange'
-
-type ContainerActionName = 'start' | 'stop' | 'restart' | 'remove'
-interface ContainerGroup {
-  key: string
-  label: string
-  containers: DockerContainerSummary[]
-  running: number
-  cpuPercent: number
-  memoryBytes: number
-  standalone: boolean
-}
 
 const docker = useDockerStore()
-const auth = useAuthStore()
+const route = useRoute()
+const router = useRouter()
+
 const search = ref('')
-const stateFilter = ref('all')
+/** O filtro vem da URL: a visão geral leva direto aos parados ou aos ativos. */
+const stateFilter = ref<ContainerStateFilter>(
+  isContainerStateFilter(route.query.state) ? route.query.state : 'all'
+)
 const expandedGroups = ref<string[]>([])
-const detailDialog = ref(false)
-const detailLoading = ref(false)
-const detail = ref<DockerContainerDetail | null>(null)
-const detailTab = ref('usage')
-const usageRanges: MetricsRange[] = ['1h', '6h', '24h', '7d', '30d']
-const usageRange = ref<MetricsRange>('1h')
-const usage = ref<ContainerHistoryResponse | null>(null)
-const usageLoading = ref(false)
-const usageError = ref<string | null>(null)
-let usageContainerName = ''
-const logs = ref<DockerLogEntry[]>([])
-const logsLoading = ref(false)
-const logsDownloading = ref(false)
-const logsClearing = ref(false)
-const logTail = ref<number | 'all'>(500)
-const followStreamId = ref<string | null>(null)
-const followStarting = ref(false)
-/** Ações da política do host selecionado (ADR 011), sempre só para admin. */
-const canOperate = computed(() => auth.isAdmin && docker.allows('lifecycle'))
-const canUpdate = computed(() => auth.isAdmin && docker.allows('update'))
-const networkToConnect = ref<string | null>(null)
+const detailOpen = ref(false)
+const selected = ref<DockerContainerSummary | null>(null)
 const feedback = ref({ visible: false, color: 'success', message: '' })
-let detailRefreshing = false
-let logsRefreshing = false
 
 const headers = [
   { title: 'Container', key: 'name' },
   { title: 'Imagem', key: 'image' },
-  { title: 'Estado', key: 'state', width: '120px' },
+  { title: 'Estado', key: 'state', width: '140px' },
   { title: 'Recursos', key: 'resources', width: '160px', sortable: false },
-  { title: 'Ações', key: 'actions', width: '220px', sortable: false },
+  { title: 'Ações', key: 'actions', width: '200px', sortable: false, align: 'end' as const },
 ]
-const stateOptions = [
-  { title: 'Todos', value: 'all' },
-  { title: 'Em execução', value: 'running' },
-  { title: 'Parados', value: 'stopped' },
-]
-const logTailOptions = [100, 500, 1000, 5000, { title: 'Todos', value: 'all' }]
 
-const filteredContainers = computed(() => {
-  const term = search.value.trim().toLocaleLowerCase()
-  return docker.containers.filter((container) => {
-    const stateMatches =
-      stateFilter.value === 'all' ||
-      (stateFilter.value === 'running' && container.state === 'running') ||
-      (stateFilter.value === 'stopped' && container.state !== 'running')
-    const textMatches =
-      !term ||
-      [containerName(container), container.image, container.projectName || '']
-        .join(' ')
-        .toLocaleLowerCase()
-        .includes(term)
-    return stateMatches && textMatches
-  })
-})
-
-const containerGroups = computed<ContainerGroup[]>(() => {
-  const groups = new Map<string, ContainerGroup>()
-  for (const container of filteredContainers.value) {
-    const projectName = container.projectName?.trim() || ''
-    const key = projectName ? projectName.toLocaleLowerCase() : '__standalone__'
-    const metric = metricFor(container.id)
-    const existing = groups.get(key)
-    if (existing) {
-      existing.containers.push(container)
-      existing.running += container.state === 'running' ? 1 : 0
-      existing.cpuPercent += metric?.cpu.usagePercent ?? 0
-      existing.memoryBytes += metric?.memory.usageBytes ?? 0
-      continue
-    }
-    groups.set(key, {
-      key,
-      label: projectName || 'Containers avulsos',
-      containers: [container],
-      running: container.state === 'running' ? 1 : 0,
-      cpuPercent: metric?.cpu.usagePercent ?? 0,
-      memoryBytes: metric?.memory.usageBytes ?? 0,
-      standalone: !projectName,
-    })
-  }
-  return [...groups.values()]
-    .map((group) => ({
-      ...group,
-      containers: [...group.containers].sort((left, right) =>
-        containerName(left).localeCompare(containerName(right))
-      ),
-    }))
-    .sort((left, right) => {
-      if (left.standalone !== right.standalone) return left.standalone ? 1 : -1
-      return left.label.localeCompare(right.label)
-    })
-})
-
-const availableNetworks = computed(() => {
-  const connected = new Set((detail.value?.networks ?? []).map((network) => network.networkId))
-  return docker.networks
-    .filter((network) => !connected.has(network.id))
-    .sort((left, right) => left.name.localeCompare(right.name))
-})
-
-/** No modo ao vivo o log vem do stream SSE (`docker:log`), não de nova consulta. */
-const shownLogs = computed<DockerLogEntry[]>(() =>
-  followStreamId.value ? (docker.logStreams[followStreamId.value]?.entries ?? []) : logs.value
+const counts = computed(() => stateFilterCounts(docker.containers))
+const groups = computed(() =>
+  groupContainers(filterContainers(docker.containers, search.value, stateFilter.value), metricFor)
 )
 
-const followEnded = computed(() =>
-  followStreamId.value ? (docker.logStreams[followStreamId.value]?.ended ?? null) : null
-)
-
-const formattedLogs = computed(() =>
-  shownLogs.value.length
-    ? shownLogs.value
-        .map(
-          (entry) =>
-            `${entry.timestamp ? `[${entry.timestamp}] ` : ''}${entry.stream}: ${entry.message}`
-        )
-        .join('\n')
-    : 'Nenhum log encontrado.'
-)
-
+// Grupo novo entra aberto; o que o operador fechou continua fechado.
 watch(
-  () => containerGroups.value.map((group) => group.key),
-  (keys) => {
+  () => groups.value.map((group) => group.key),
+  (keys, previous) => {
+    const known = new Set(previous ?? [])
     const current = expandedGroups.value.filter((key) => keys.includes(key))
-    expandedGroups.value = [...new Set([...current, ...keys])]
+    expandedGroups.value = [...new Set([...current, ...keys.filter((key) => !known.has(key))])]
   },
   { immediate: true }
 )
 
-const detailMetric = computed(() => (detail.value ? metricFor(detail.value.id) : undefined))
-
-const usageCpuSeries = computed<ChartSeriesInput[]>(() => [
-  {
-    id: 'usage-cpu-avg',
-    label: 'Média',
-    color: '#2196F3',
-    fillArea: true,
-    data: (usage.value?.points ?? []).map((point) => ({ time: point.at, value: point.cpuAvg })),
-  },
-  {
-    id: 'usage-cpu-max',
-    label: 'Pico',
-    color: '#FF7043',
-    data: (usage.value?.points ?? []).map((point) => ({ time: point.at, value: point.cpuMax })),
-  },
-])
-
-const usageMemorySeries = computed<ChartSeriesInput[]>(() => [
-  {
-    id: 'usage-memory',
-    label: 'Pico',
-    color: '#7E57C2',
-    fillArea: true,
-    data: (usage.value?.points ?? []).map((point) => ({
-      time: point.at,
-      value: point.memoryMax,
-      formattedValue: formatBinaryBytes(point.memoryMax),
-    })),
-  },
-])
-
-/** Histórico sob demanda (não-live): só carrega ao abrir a aba ou trocar a janela. */
-async function loadUsage(): Promise<void> {
-  if (!usageContainerName) return
-  usageLoading.value = true
-  usageError.value = null
-  try {
-    usage.value = await docker.api.containerHistory(usageContainerName, usageRange.value)
-  } catch (reason: unknown) {
-    usageError.value = reason instanceof Error ? reason.message : 'Erro ao carregar o consumo'
-  } finally {
-    usageLoading.value = false
-  }
-}
-
-watch(detailTab, (tab) => {
-  if (tab === 'logs' && logs.value.length === 0) void loadLogs()
+watch(stateFilter, (state) => {
+  const query = { ...route.query }
+  if (state === 'all') delete query.state
+  else query.state = state
+  void router.replace({ query })
 })
-
-watch(usageRange, () => void loadUsage())
-
-function containerName(container: DockerContainerSummary): string {
-  return container.names[0]?.replace(/^\//, '') || shortId(container.id)
-}
-
-function shortId(id: string): string {
-  return id.replace(/^sha256:/, '').slice(0, 12)
-}
-
-function stateColor(state: string): string {
-  if (state === 'running') return 'success'
-  if (state === 'paused' || state === 'restarting') return 'warning'
-  return 'grey'
-}
-
-function stateLabel(state: string): string {
-  return (
-    {
-      running: 'Executando',
-      exited: 'Parado',
-      created: 'Criado',
-      paused: 'Pausado',
-      restarting: 'Reiniciando',
-      dead: 'Inativo',
-    }[state] || state
-  )
-}
 
 function metricFor(id: string) {
   return docker.metrics?.containers.find((metric) => metric.containerId === id)
 }
 
 function onRowClick(_event: MouseEvent, row: { item: DockerContainerSummary }): void {
-  void openDetail(row.item)
+  selected.value = row.item
+  detailOpen.value = true
 }
 
-async function openDetail(container: DockerContainerSummary): Promise<void> {
-  detail.value = null
-  detailDialog.value = true
-  detailTab.value = 'usage'
-  detailLoading.value = true
-  logs.value = []
-  usage.value = null
-  usageContainerName = containerName(container)
-  void loadUsage()
-  networkToConnect.value = null
-  try {
-    detail.value = await docker.api.container(container.id)
-  } catch (reason: unknown) {
-    notify(reason instanceof Error ? reason.message : 'Erro ao inspecionar container', 'error')
-  } finally {
-    detailLoading.value = false
-  }
-}
-
-async function refreshDetail(silent = false): Promise<void> {
-  if (!detail.value || detailRefreshing) return
-  detailRefreshing = true
-  if (!silent) detailLoading.value = true
-  try {
-    detail.value = await docker.api.container(detail.value.id)
-  } catch (reason: unknown) {
-    if (!silent) {
-      notify(reason instanceof Error ? reason.message : 'Erro ao atualizar container', 'error')
-    }
-  } finally {
-    detailRefreshing = false
-    if (!silent) detailLoading.value = false
-  }
-}
-
-async function loadLogs(): Promise<void> {
-  if (!detail.value || logsRefreshing) return
-  logsRefreshing = true
-  logsLoading.value = true
-  try {
-    logs.value = await docker.api.logs(detail.value.id, {
-      tail: logTail.value,
-      timestamps: true,
-    })
-  } catch (reason: unknown) {
-    notify(reason instanceof Error ? reason.message : 'Erro ao carregar logs', 'error')
-  } finally {
-    logsRefreshing = false
-    logsLoading.value = false
-  }
-}
-
-async function downloadLogs(): Promise<void> {
-  if (!detail.value) return
-  logsDownloading.value = true
-  try {
-    const entries = await docker.api.logs(detail.value.id, {
-      tail: 'all',
-      timestamps: true,
-    })
-    const content = entries
-      .map(
-        (entry) =>
-          `${entry.timestamp ? `[${entry.timestamp}] ` : ''}${entry.stream}: ${entry.message}`
-      )
-      .join('\n')
-    const url = URL.createObjectURL(new Blob([content], { type: 'text/plain;charset=utf-8' }))
-    const anchor = document.createElement('a')
-    anchor.href = url
-    anchor.download = `${sanitizeFileName(detail.value.name || detail.value.id)}-logs.txt`
-    document.body.appendChild(anchor)
-    anchor.click()
-    anchor.remove()
-    URL.revokeObjectURL(url)
-    notify('Download dos logs iniciado.', 'success')
-  } catch (reason: unknown) {
-    notify(reason instanceof Error ? reason.message : 'Erro ao baixar logs', 'error')
-  } finally {
-    logsDownloading.value = false
-  }
-}
-
-async function clearLogs(): Promise<void> {
-  if (!detail.value) return
-  const accepted = await confirm({
-    title: 'Apagar logs da Docker Engine',
-    message:
-      'Esta ação é irreversível. Containers ativos serão parados brevemente e iniciados novamente para apagar o arquivo de log com segurança.',
-    confirmText: 'Apagar logs',
-    confirmColor: 'error',
-    icon: 'mdi-delete-forever-outline',
-  })
-  if (!accepted) return
-  logsClearing.value = true
-  try {
-    const response = await docker.api.clearLogs(detail.value.id)
-    logs.value = []
-    await refreshDetail(true)
-    notify(response.message, 'success')
-  } catch (reason: unknown) {
-    notify(reason instanceof Error ? reason.message : 'Erro ao apagar logs do container', 'error')
-  } finally {
-    logsClearing.value = false
-  }
-}
-
-async function connectSelectedNetwork(): Promise<void> {
-  if (!detail.value || !networkToConnect.value) return
-  const containerId = detail.value.id
-  const networkId = networkToConnect.value
-  const success = await docker.runAction(
-    () => docker.api.connectNetwork(networkId, containerId),
-    async () => {
-      await refreshDetail(true)
-    }
-  )
-  if (success) networkToConnect.value = null
-  notify(
-    success ? 'Rede adicionada ao container.' : docker.error || 'Erro ao adicionar rede',
-    success ? 'success' : 'error'
-  )
-}
-
-async function disconnectNetwork(networkId: string, networkName: string): Promise<void> {
-  if (!detail.value || detail.value.networks.length <= 1) return
-  const accepted = await confirm({
-    title: 'Remover rede do container',
-    message: `Desconectar o container da rede "${networkName}"?`,
-    confirmText: 'Desconectar',
-    confirmColor: 'error',
-    icon: 'mdi-lan-disconnect',
-  })
-  if (!accepted) return
-  const containerId = detail.value.id
-  const success = await docker.runAction(
-    () => docker.api.disconnectNetwork(networkId, containerId),
-    async () => {
-      await refreshDetail(true)
-    }
-  )
-  notify(
-    success ? 'Rede removida do container.' : docker.error || 'Erro ao remover rede',
-    success ? 'success' : 'error'
-  )
-}
-
-function sanitizeFileName(value: string): string {
-  return value.replace(/^\//, '').replace(/[^a-zA-Z0-9._-]+/g, '-') || 'container'
-}
-
-async function toggleFollow(): Promise<void> {
-  if (followStreamId.value) {
-    await stopFollow()
-    return
-  }
-  if (!detail.value) return
-  followStarting.value = true
-  try {
-    followStreamId.value = await docker.startLogStream(detail.value.id, logTail.value)
-  } catch (reason: unknown) {
-    notify(reason instanceof Error ? reason.message : 'Erro ao acompanhar os logs', 'error')
-  } finally {
-    followStarting.value = false
-  }
-}
-
-async function stopFollow(): Promise<void> {
-  const streamId = followStreamId.value
-  followStreamId.value = null
-  if (streamId) await docker.stopLogStream(streamId)
-}
-
-async function updateContainer(container: DockerContainerSummary): Promise<void> {
-  const name = containerName(container)
-  const accepted = await confirm({
-    title: 'Atualizar container',
-    message: `Baixar a versão atual de "${container.image}" e recriar "${name}" com a mesma configuração? Se algo falhar, o container original é restaurado.`,
-    confirmText: 'Atualizar',
-    confirmColor: 'primary',
-    icon: 'mdi-update',
-  })
-  if (!accepted) return
-  const success = await docker.runAction(() => docker.api.updateContainer(container.id))
-  notify(
-    success
-      ? 'Atualização iniciada. O progresso aparece no topo da tela.'
-      : docker.error || 'Operação não concluída',
-    success ? 'success' : 'error'
-  )
-}
-
-watch(detailDialog, (open) => {
-  if (!open) void stopFollow()
-})
-
-onBeforeUnmount(() => {
-  void stopFollow()
-})
-
-async function runContainerAction(
-  container: DockerContainerSummary,
-  action: ContainerActionName
-): Promise<void> {
-  const name = containerName(container)
-  const destructive = action === 'remove' || action === 'stop'
-  if (destructive) {
-    const accepted = await confirm({
-      title: action === 'remove' ? 'Remover container' : 'Parar container',
-      message: `${action === 'remove' ? 'Remover' : 'Parar'} o container "${name}"?`,
-      confirmText: action === 'remove' ? 'Remover' : 'Parar',
-      confirmColor: action === 'remove' ? 'error' : 'warning',
-      icon: action === 'remove' ? 'mdi-delete-alert-outline' : 'mdi-stop-circle-outline',
-    })
-    if (!accepted) return
-  }
-
-  let responseMessage = ''
-  const success = await docker.runAction(async () => {
-    const response = await {
-      start: () => docker.api.startContainer(container.id),
-      stop: () => docker.api.stopContainer(container.id),
-      restart: () => docker.api.restartContainer(container.id),
-      remove: () => docker.api.removeContainer(container.id),
-    }[action]()
-    responseMessage = response.message
-  })
-  notify(
-    success ? responseMessage : docker.error || 'Operação não concluída',
-    success ? 'success' : 'error'
-  )
+function onActionDone(outcome: ActionOutcome) {
+  notify(outcome.message, outcome.ok ? 'success' : 'error')
 }
 
 function notify(message: string, color: string): void {
@@ -995,64 +260,14 @@ function notify(message: string, color: string): void {
   font-size: 0.8125rem;
 }
 
-.resource-cell__label {
-  color: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity));
-}
-
 .resource-cell__value {
   text-align: right;
-  font-weight: 500;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
-.docker-filter {
-  max-width: 220px;
-}
 .docker-group-panel {
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.1);
-}
-.docker-detail-card {
-  background: rgb(var(--v-theme-surface));
-  color: rgb(var(--v-theme-on-surface));
-}
-/*
- * O card do diálogo é um flex column: título, abas e corpo dividem a altura
- * disponível. O corpo é o único item rolável, mas o `min-height` fixo o
- * impedia de encolher — num viewport curto o excedente espremia o título e as
- * abas, que ficavam por baixo do conteúdo. Travar o cabeçalho elimina a
- * sobreposição e o `min()` mantém a altura estável entre as abas sem pedir
- * mais espaço do que o diálogo tem para dar.
- */
-.docker-detail-card > .v-card-title,
-.docker-detail-card > .v-tabs,
-.docker-detail-card > .v-divider {
-  flex: 0 0 auto;
-}
-.docker-detail-body {
-  min-height: min(420px, 45vh);
-}
-.docker-code,
-.docker-logs {
-  border-radius: 8px;
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 0.78rem;
-  overflow: auto;
-  padding: 12px;
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-.docker-code {
-  background: rgba(var(--v-theme-primary), 0.065);
-  border: 1px solid rgba(var(--v-theme-primary), 0.18);
-  color: rgb(var(--v-theme-on-surface));
-}
-.docker-logs {
-  background: #0f172a;
-  border: 1px solid #334155;
-  color: #e2e8f0;
-  min-height: 340px;
-  max-height: 55vh;
-  white-space: pre;
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
 }
 
 @media (max-width: 700px) {

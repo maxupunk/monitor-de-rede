@@ -35,6 +35,9 @@
               <div class="text-caption text-high-emphasis">{{ item.hint }}</div>
             </v-card>
           </v-col>
+          <v-col v-if="showPickerOnEngineStep" cols="12" class="mt-2">
+            <DatabaseContainerPicker :key="session" :engine="null" @picked="applyResolution" />
+          </v-col>
         </v-row>
 
         <!-- Passo 2: conexão, bancos, destino e agenda -->
@@ -49,6 +52,51 @@
           ></v-text-field>
 
           <div class="section-title">Conexão</div>
+          <DatabaseContainerPicker
+            v-if="!connectionId"
+            :key="session"
+            :engine="form.engine"
+            :selected="selectedContainer"
+            @picked="applyResolution"
+          />
+          <v-alert
+            v-if="resolution && summary"
+            :type="summary.tone"
+            variant="tonal"
+            density="compact"
+            class="mb-4"
+            data-test="resolution"
+          >
+            <div class="font-weight-bold">{{ summary.title }}</div>
+            <div class="text-body-2">{{ summary.text }}</div>
+            <v-expansion-panels
+              v-if="resolution.attempts.length > 1"
+              variant="accordion"
+              class="mt-2"
+            >
+              <v-expansion-panel elevation="0" bg-color="transparent">
+                <v-expansion-panel-title class="px-0 py-1 text-body-2 font-weight-bold">
+                  Ver os {{ resolution.attempts.length }} endereços testados
+                </v-expansion-panel-title>
+                <v-expansion-panel-text>
+                  <div
+                    v-for="attempt in resolution.attempts"
+                    :key="addressText(attempt.address)"
+                    class="d-flex align-start ga-2 text-body-2 py-1"
+                  >
+                    <v-icon :color="attempt.reachable ? 'success' : 'error'" size="18">
+                      {{ attempt.reachable ? 'mdi-check-circle' : 'mdi-close-circle' }}
+                    </v-icon>
+                    <div>
+                      <code class="text-break">{{ addressText(attempt.address) }}</code>
+                      — {{ ADDRESS_KINDS[attempt.address.kind].label
+                      }}{{ attempt.message ? `: ${attempt.message}` : '' }}
+                    </div>
+                  </div>
+                </v-expansion-panel-text>
+              </v-expansion-panel>
+            </v-expansion-panels>
+          </v-alert>
           <v-select
             v-model="form.viaProbeId"
             :items="routes"
@@ -89,7 +137,7 @@
                 placeholder="10.0.0.20 ou db.empresa.local"
                 variant="outlined"
                 :rules="[requiredRule('Informe o servidor')]"
-                v-bind="form.viaProbeId == null ? loopbackFieldHint(form.host) : {}"
+                v-bind="showLoopbackHint ? loopbackFieldHint(form.host) : {}"
               ></v-text-field>
             </v-col>
             <v-col cols="4" sm="3">
@@ -256,12 +304,14 @@
 import { computed, reactive, ref, watch } from 'vue'
 import type { DatabaseConnectionInput } from '@/bindings/DatabaseConnectionInput'
 import type { DatabaseConnectionResponse } from '@/bindings/DatabaseConnectionResponse'
+import type { DatabaseContainerResolution } from '@/bindings/DatabaseContainerResolution'
 import type { DatabaseEngine } from '@/bindings/DatabaseEngine'
 import type { DatabaseProbeResponse } from '@/bindings/DatabaseProbeResponse'
 import type { SslMode } from '@/bindings/SslMode'
 import BackupPolicyFields from '@/components/backup/BackupPolicyFields.vue'
 import CopyableCommand from '@/components/CopyableCommand.vue'
 import DestinationSelect from '@/components/backup/DestinationSelect.vue'
+import DatabaseContainerPicker from '@/components/databases/DatabaseContainerPicker.vue'
 import { useSecretFields } from '@/composables/useSecretFields'
 import { useVerifiedSave } from '@/composables/useVerifiedSave'
 import { useDatabasesStore } from '@/stores/databases'
@@ -270,6 +320,14 @@ import { DATABASE_ENGINES, engineInfo, SSL_MODES } from '@/utils/databasePresent
 import { requiredRule } from '@/utils/formRules'
 import { loopbackFieldHint } from '@/utils/hostHints'
 import { agentRouteItems } from '@/utils/agentRoutes'
+import {
+  ADDRESS_KINDS,
+  addressText,
+  addressToUse,
+  agentTargetHost,
+  containerKey,
+  resolutionSummary,
+} from '@/utils/databaseContainers'
 
 const props = defineProps<{
   modelValue: boolean
@@ -287,6 +345,11 @@ const storagesStore = useStoragesStore()
 const secrets = useSecretFields({ password: 'Senha' })
 
 const formRef = ref<{ validate: () => Promise<{ valid: boolean }> } | null>(null)
+/** Muda a cada abertura: as listas de contêineres voltam sem escolha anterior. */
+const session = ref(0)
+/** O contêiner escolhido e o endereço que respondeu. */
+const resolution = ref<DatabaseContainerResolution | null>(null)
+const summary = computed(() => (resolution.value ? resolutionSummary(resolution.value) : null))
 const step = ref<'engine' | 'form'>('engine')
 const scope = ref<'all' | 'some'>('all')
 const saving = ref(false)
@@ -323,7 +386,21 @@ const viaAgent = computed(
 const targetPort = computed(() => Number(form.port) || engine.value.defaultPort)
 const allowLine = 'AGENT_ALLOW=read,lifecycle,monitor,discovery,database'
 const targetLine = computed(
-  () => `AGENT_DATABASE_TARGETS=${form.host.trim() || '<ip-do-banco>'}:${targetPort.value}`
+  () =>
+    `AGENT_DATABASE_TARGETS=${agentTargetHost(form.host.trim(), resolution.value) || '<ip-do-banco>'}:${targetPort.value}`
+)
+/** A dica do loopback não vale para o endereço que acabou de responder daqui. */
+const showLoopbackHint = computed(
+  () => form.viaProbeId == null && resolution.value?.chosen?.host !== form.host.trim()
+)
+const selectedContainer = computed(() =>
+  resolution.value ? containerKey(resolution.value.container) : null
+)
+/** No passo 1 a lista só aparece quando há o que mostrar. */
+const showPickerOnEngineStep = computed(
+  () =>
+    !props.connectionId &&
+    (databasesStore.containersLoading || databasesStore.containers.containers.length > 0)
 )
 
 function signature(): string {
@@ -386,6 +463,8 @@ function resetForm() {
     backupRetention: 7,
   })
   scope.value = 'all'
+  resolution.value = null
+  session.value += 1
   secrets.reset()
   verified.reset()
   saveError.value = null
@@ -415,6 +494,8 @@ watch(
   () => props.modelValue,
   async (open) => {
     if (!open) return
+    // Não segura o diálogo: a lista chega enquanto o operador escolhe o SGBD.
+    if (!props.connectionId) void databasesStore.fetchContainers()
     await Promise.all([
       storagesStore.loaded ? Promise.resolve() : storagesStore.fetchStorages(),
       databasesStore.fetchAgents(),
@@ -440,6 +521,29 @@ function chooseEngine(value: DatabaseEngine) {
   if (!form.name || form.name === previous.label) form.name = engineInfo(value).label
   if (!form.username) form.username = value === 'postgres' ? 'postgres' : 'root'
   step.value = 'form'
+}
+
+/** Nomes que o formulário mesmo sugeriu — esses o contêiner pode trocar. */
+const DEFAULT_USERS = ['', 'postgres', 'root']
+
+/** Preenche a conexão com o contêiner escolhido e o endereço que respondeu. */
+function applyResolution(picked: DatabaseContainerResolution) {
+  const container = picked.container
+  if (step.value === 'engine' || form.engine !== container.engine) chooseEngine(container.engine)
+  resolution.value = picked
+  const address = addressToUse(picked)
+  form.viaProbeId = container.viaProbeId
+  if (address) {
+    form.host = address.host
+    form.port = address.port
+  }
+  if (picked.username && DEFAULT_USERS.includes(form.username.trim())) {
+    form.username = picked.username
+  }
+  const defaultName = !form.name || DATABASE_ENGINES.some((item) => item.label === form.name)
+  if (defaultName) form.name = container.containerName
+  // Contêiner na rede interna raramente tem TLS: "Usar se disponível" já cobre.
+  if (form.sslMode === 'require') form.sslMode = 'prefer'
 }
 
 function buildInput(): DatabaseConnectionInput {

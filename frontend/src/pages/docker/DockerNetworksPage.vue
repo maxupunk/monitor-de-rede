@@ -1,25 +1,17 @@
 <template>
   <div>
-    <PageHeader title="Redes Docker" subtitle="Topologia virtual e conexões entre containers">
-      <template #actions>
-        <v-btn
-          v-if="auth.isAdmin"
-          color="primary"
-          prepend-icon="mdi-plus"
-          @click="createDialog = true"
-        >
-          Nova rede
-        </v-btn>
-        <v-btn
-          variant="tonal"
-          prepend-icon="mdi-refresh"
-          :loading="docker.loading"
-          @click="docker.refreshAll()"
-        >
-          Atualizar
-        </v-btn>
-      </template>
-    </PageHeader>
+    <DockerSectionBar
+      description="Como os containers se enxergam. Containers na mesma rede se acham pelo nome; clique numa rede para ligar ou desligar containers."
+    >
+      <v-btn
+        v-if="auth.isAdmin"
+        color="primary"
+        prepend-icon="mdi-plus"
+        @click="createDialog = true"
+      >
+        Nova rede
+      </v-btn>
+    </DockerSectionBar>
 
     <v-alert v-if="docker.error" type="error" variant="tonal" closable class="mb-4">
       {{ docker.error }}
@@ -36,7 +28,7 @@
         <template #item.name="{ item }">
           <div class="py-2">
             <div class="font-weight-bold">{{ item.name }}</div>
-            <div class="text-caption text-medium-emphasis font-mono">{{ shortId(item.id) }}</div>
+            <div class="text-caption text-high-emphasis font-mono">{{ shortId(item.id) }}</div>
           </div>
         </template>
         <template #item.internal="{ item }">
@@ -49,30 +41,22 @@
         </template>
         <template #item.actions="{ item }">
           <div class="d-flex justify-end ga-1" @click.stop>
-            <v-btn
-              icon="mdi-eye-outline"
-              size="small"
-              variant="text"
-              title="Inspecionar"
-              @click="openDetail(item)"
-            ></v-btn>
-            <v-btn
+            <IconAction icon="mdi-eye-outline" label="Ver detalhes" @click="openDetail(item)" />
+            <IconAction
               v-if="auth.isAdmin && !isBuiltIn(item.name)"
               icon="mdi-delete-outline"
-              size="small"
+              label="Remover rede"
               color="error"
-              variant="text"
-              title="Remover"
               :loading="docker.actionLoading"
               @click="removeNetwork(item)"
-            ></v-btn>
+            />
           </div>
         </template>
         <template #mobile-item="{ item }">
           <div class="d-flex align-start justify-space-between ga-2">
             <div>
               <div class="font-weight-bold">{{ item.name }}</div>
-              <div class="text-caption text-medium-emphasis">
+              <div class="text-caption text-high-emphasis">
                 {{ item.driver }} · {{ item.scope }}
               </div>
               <div class="text-caption">{{ item.connectedContainers }} container(s)</div>
@@ -204,7 +188,7 @@
                   </td>
                 </tr>
                 <tr v-if="detail.containers.length === 0">
-                  <td :colspan="auth.isAdmin ? 4 : 3" class="text-center text-medium-emphasis py-6">
+                  <td :colspan="auth.isAdmin ? 4 : 3" class="text-center text-high-emphasis py-6">
                     Nenhum container conectado.
                   </td>
                 </tr>
@@ -223,13 +207,15 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
-import PageHeader from '@/components/PageHeader.vue'
+import DockerSectionBar from '@/components/docker/DockerSectionBar.vue'
+import IconAction from '@/components/IconAction.vue'
 import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
 import { confirm } from '@/composables/useConfirm'
 import { useAuthStore } from '@/stores/auth'
 import { useDockerStore } from '@/stores/docker'
 import type { DockerNetworkDetail } from '@/bindings/DockerNetworkDetail'
 import type { DockerNetworkSummary } from '@/bindings/DockerNetworkSummary'
+import { shortId } from '@/utils/dockerPresentation'
 
 const docker = useDockerStore()
 const auth = useAuthStore()
@@ -263,10 +249,6 @@ const connectableContainers = computed(() => {
       value: container.id,
     }))
 })
-
-function shortId(id: string): string {
-  return id.slice(0, 12)
-}
 
 function isBuiltIn(name: string): boolean {
   return ['bridge', 'host', 'none'].includes(name)

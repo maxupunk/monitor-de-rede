@@ -1,27 +1,19 @@
 <template>
   <div>
-    <PageHeader title="Imagens Docker" subtitle="Camadas, metadados e limpeza de imagens sem uso">
-      <template #actions>
-        <v-btn
-          v-if="auth.isAdmin"
-          color="warning"
-          variant="tonal"
-          prepend-icon="mdi-broom"
-          :loading="docker.actionLoading"
-          @click="pruneImages"
-        >
-          Limpar sem uso
-        </v-btn>
-        <v-btn
-          variant="tonal"
-          prepend-icon="mdi-refresh"
-          :loading="docker.loading"
-          @click="docker.refreshAll()"
-        >
-          Atualizar
-        </v-btn>
-      </template>
-    </PageHeader>
+    <DockerSectionBar
+      description="As imagens baixadas neste host. Limpar remove as que nenhum container usa."
+    >
+      <v-btn
+        v-if="auth.isAdmin"
+        color="warning"
+        variant="tonal"
+        prepend-icon="mdi-broom"
+        :loading="docker.actionLoading"
+        @click="pruneImages"
+      >
+        Limpar sem uso
+      </v-btn>
+    </DockerSectionBar>
 
     <v-alert v-if="docker.error" type="error" variant="tonal" closable class="mb-4">
       {{ docker.error }}
@@ -49,37 +41,29 @@
         <template #item.name="{ item }">
           <div class="py-2">
             <div class="font-weight-bold">{{ imageName(item) }}</div>
-            <div class="text-caption text-medium-emphasis font-mono">{{ shortId(item.id) }}</div>
+            <div class="text-caption text-high-emphasis font-mono">{{ shortId(item.id) }}</div>
           </div>
         </template>
         <template #item.created="{ item }">{{ formatEpoch(item.created) }}</template>
         <template #item.size="{ item }">{{ formatDecimalBytes(item.size) }}</template>
         <template #item.actions="{ item }">
           <div class="d-flex justify-end ga-1" @click.stop>
-            <v-btn
-              icon="mdi-eye-outline"
-              size="small"
-              variant="text"
-              title="Inspecionar"
-              @click="openDetail(item)"
-            ></v-btn>
-            <v-btn
+            <IconAction icon="mdi-eye-outline" label="Ver detalhes" @click="openDetail(item)" />
+            <IconAction
               v-if="auth.isAdmin"
               icon="mdi-delete-outline"
-              size="small"
+              label="Remover imagem"
               color="error"
-              variant="text"
-              title="Remover"
               :loading="docker.actionLoading"
               @click="removeImage(item)"
-            ></v-btn>
+            />
           </div>
         </template>
         <template #mobile-item="{ item }">
           <div class="d-flex align-start justify-space-between ga-2">
             <div class="min-w-0">
               <div class="font-weight-bold text-truncate">{{ imageName(item) }}</div>
-              <div class="text-caption text-medium-emphasis">
+              <div class="text-caption text-high-emphasis">
                 {{ formatDecimalBytes(item.size) }}
               </div>
               <div class="text-caption">{{ formatEpoch(item.created) }}</div>
@@ -141,7 +125,8 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import PageHeader from '@/components/PageHeader.vue'
+import DockerSectionBar from '@/components/docker/DockerSectionBar.vue'
+import IconAction from '@/components/IconAction.vue'
 import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
 import { confirm } from '@/composables/useConfirm'
 import { useAuthStore } from '@/stores/auth'
@@ -149,6 +134,7 @@ import { useDockerStore } from '@/stores/docker'
 import { formatDateTime, formatDecimalBytes } from '@/utils/formatters'
 import type { DockerImageDetail } from '@/bindings/DockerImageDetail'
 import type { DockerImageSummary } from '@/bindings/DockerImageSummary'
+import { shortId } from '@/utils/dockerPresentation'
 
 const docker = useDockerStore()
 const auth = useAuthStore()
@@ -180,10 +166,6 @@ const filteredImages = computed(() => {
 
 function imageName(image: DockerImageSummary): string {
   return image.repoTags[0] || '<sem tag>'
-}
-
-function shortId(id: string): string {
-  return id.replace(/^sha256:/, '').slice(0, 12)
 }
 
 function formatEpoch(epoch: number): string {

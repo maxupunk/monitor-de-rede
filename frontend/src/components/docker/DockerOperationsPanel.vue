@@ -18,7 +18,7 @@
         <div class="flex-grow-1 operation-text">
           <div class="text-body-2 font-weight-medium">
             {{ kindLabel(operation.kind) }} · {{ operation.target }}
-            <span class="text-medium-emphasis">({{ hostName(operation.hostKey) }})</span>
+            <span class="text-high-emphasis">({{ hostName(operation.hostKey) }})</span>
           </div>
           <div class="text-caption operation-line">
             {{ operation.message || operation.lines.at(-1) || 'Aguardando o host…' }}

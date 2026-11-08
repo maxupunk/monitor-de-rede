@@ -24,9 +24,12 @@ use netmonitor_core::{
 use crate::{
     databases::{
         backups::{self, Trigger},
-        service, DatabaseEngine,
+        discovery, service, DatabaseEngine,
     },
-    dtos::databases::{DatabaseConnectionInput, DatabaseProbeInput, DatabaseRestoreInput},
+    dtos::databases::{
+        DatabaseConnectionInput, DatabaseContainerResolveInput, DatabaseProbeInput,
+        DatabaseRestoreInput,
+    },
     views::databases::{DatabaseBackupResponse, DatabaseConnectionResponse, DatabaseProbeResponse},
 };
 
@@ -189,6 +192,21 @@ async fn agents(State(ctx): State<AppContext>) -> AppResult<Response> {
     )?)
 }
 
+/// Bancos que rodam em contêineres dos hosts Docker (agentes).
+async fn containers(State(ctx): State<AppContext>) -> AppResult<Response> {
+    Ok(format::json(discovery::list(&ctx).await?)?)
+}
+
+/// Testa os endereços de um contêiner e escolhe o primeiro que responde.
+async fn resolve_container(
+    State(ctx): State<AppContext>,
+    Json(input): Json<DatabaseContainerResolveInput>,
+) -> AppResult<Response> {
+    Ok(format::json(
+        discovery::resolve(&ctx, &input.host_key, &input.container_id).await?,
+    )?)
+}
+
 async fn history(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
     service::find(&ctx.db, id).await?;
     let rows = backups::history(&ctx.db, id).await?;
@@ -258,6 +276,8 @@ pub fn routes() -> Routes {
         .add("/", get(index).post(store))
         .add("/probe", post(probe))
         .add("/agents", get(agents))
+        .add("/containers", get(containers))
+        .add("/containers/resolve", post(resolve_container))
         .add("/{id}", get(show).put(update).delete(destroy))
         .add("/{id}/backups", get(history).post(run_backup))
         .add("/backups/{backup_id}/restore", post(restore))

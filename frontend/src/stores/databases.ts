@@ -5,6 +5,8 @@ import type { AgentRouteOption } from '@/bindings/AgentRouteOption'
 import type { DatabaseBackupResponse } from '@/bindings/DatabaseBackupResponse'
 import type { DatabaseConnectionInput } from '@/bindings/DatabaseConnectionInput'
 import type { DatabaseConnectionResponse } from '@/bindings/DatabaseConnectionResponse'
+import type { DatabaseContainerResolution } from '@/bindings/DatabaseContainerResolution'
+import type { DatabaseContainersResponse } from '@/bindings/DatabaseContainersResponse'
 import type { DatabaseJobSnapshot } from '@/bindings/DatabaseJobSnapshot'
 import type { DatabaseProbeInput } from '@/bindings/DatabaseProbeInput'
 import type { DatabaseProbeResponse } from '@/bindings/DatabaseProbeResponse'
@@ -38,6 +40,10 @@ export const useDatabasesStore = defineStore('databases', () => {
   const jobs = ref<Record<string, DatabaseJobSnapshot>>({})
   /** Agentes que podem levar a central até um banco (ADR 013). */
   const agents = ref<AgentRouteOption[]>([])
+  /** Bancos em contêineres dos agentes, lidos ao abrir o formulário. */
+  const containers = ref<DatabaseContainersResponse>({ containers: [], issues: [] })
+  const containersLoading = ref(false)
+  const containersError = ref<string | null>(null)
   const loading = ref(false)
   const loaded = ref(false)
   const error = ref<string | null>(null)
@@ -64,6 +70,32 @@ export const useDatabasesStore = defineStore('databases', () => {
     } catch {
       agents.value = []
     }
+  }
+
+  /** Lido ao abrir o formulário e no "Procurar de novo" — nunca em ciclo. */
+  async function fetchContainers(): Promise<void> {
+    containersLoading.value = true
+    containersError.value = null
+    try {
+      containers.value = await apiService.get<DatabaseContainersResponse>('/databases/containers')
+    } catch (err) {
+      containers.value = { containers: [], issues: [] }
+      containersError.value =
+        err instanceof Error ? err.message : 'Não foi possível consultar os contêineres'
+    } finally {
+      containersLoading.value = false
+    }
+  }
+
+  /** Testa os endereços do contêiner pela rota da conexão e escolhe o que responde. */
+  function resolveContainer(
+    hostKey: string,
+    containerId: string
+  ): Promise<DatabaseContainerResolution> {
+    return apiService.post<DatabaseContainerResolution>('/databases/containers/resolve', {
+      hostKey,
+      containerId,
+    })
   }
 
   /** O que o SSE chama: sem efeito para quem nunca abriu a tela (rota de admin). */
@@ -147,6 +179,11 @@ export const useDatabasesStore = defineStore('databases', () => {
     jobs,
     agents,
     fetchAgents,
+    containers,
+    containersLoading,
+    containersError,
+    fetchContainers,
+    resolveContainer,
     loading,
     loaded,
     error,

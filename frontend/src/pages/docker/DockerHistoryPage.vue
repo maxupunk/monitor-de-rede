@@ -1,22 +1,19 @@
 <template>
   <div>
-    <PageHeader
-      title="Histórico do host"
-      subtitle="Médias de 1 minuto guardadas por 30 dias: CPU, memória, rede e disco do servidor e dos containers"
+    <DockerSectionBar
+      description="Médias de 1 minuto guardadas por 30 dias: CPU, memória, rede e disco do servidor e dos containers"
     >
-      <template #actions>
-        <v-btn-toggle
-          v-model="range"
-          mandatory
-          color="primary"
-          variant="outlined"
-          density="comfortable"
-          divided
-        >
-          <v-btn v-for="option in ranges" :key="option" :value="option">{{ option }}</v-btn>
-        </v-btn-toggle>
-      </template>
-    </PageHeader>
+      <v-btn-toggle
+        v-model="range"
+        mandatory
+        color="primary"
+        variant="outlined"
+        density="comfortable"
+        divided
+      >
+        <v-btn v-for="option in ranges" :key="option" :value="option">{{ option }}</v-btn>
+      </v-btn-toggle>
+    </DockerSectionBar>
 
     <v-alert v-if="error" type="error" variant="tonal" class="mb-4">{{ error }}</v-alert>
 
@@ -77,7 +74,7 @@
                   rounded
                 ></v-progress-linear>
               </div>
-              <div v-if="latestDisks.length === 0" class="text-medium-emphasis text-body-2">
+              <div v-if="latestDisks.length === 0" class="text-high-emphasis text-body-2">
                 Nenhum disco informado por este host.
               </div>
             </v-card-text>
@@ -107,7 +104,7 @@
             >
               <td>
                 <div class="font-weight-medium">{{ container.name }}</div>
-                <div v-if="container.project" class="text-caption text-medium-emphasis">
+                <div v-if="container.project" class="text-caption text-high-emphasis">
                   {{ container.project }}
                 </div>
               </td>
@@ -153,7 +150,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import BaseMetricChart, { type ChartSeriesInput } from '@/components/BaseMetricChart.vue'
-import PageHeader from '@/components/PageHeader.vue'
+import DockerSectionBar from '@/components/docker/DockerSectionBar.vue'
 import { useDockerStore } from '@/stores/docker'
 import { formatBinaryBytes, formatDecimalBytes, formatPercent } from '@/utils/formatters'
 import type { ContainerHistoryResponse } from '@/bindings/ContainerHistoryResponse'

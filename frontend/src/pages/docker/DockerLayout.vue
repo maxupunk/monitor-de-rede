@@ -1,42 +1,76 @@
 <template>
   <div>
+    <!-- Cabeçalho único: de qual host se trata, como a Engine está e as abas. -->
     <v-card variant="outlined" rounded="xl" class="mb-4 overflow-hidden">
-      <div class="d-flex flex-wrap align-center pr-3">
-        <v-tabs color="primary" show-arrows class="flex-grow-1">
-          <v-tab
-            v-for="item in tabs"
-            :key="item.to"
-            :to="{ path: item.to, query: hostQuery }"
-            exact
+      <div class="d-flex flex-wrap align-center ga-3 pa-3 pa-md-4">
+        <v-avatar color="primary" variant="tonal" size="44" class="flex-shrink-0">
+          <v-icon size="26">mdi-docker</v-icon>
+        </v-avatar>
+        <div class="flex-grow-1 min-w-0">
+          <h1 class="text-h6 text-md-h5 font-weight-bold ma-0">Docker</h1>
+          <div class="d-flex flex-wrap align-center ga-2 mt-1">
+            <v-chip
+              v-for="chip in statusChips"
+              :key="chip.label"
+              size="small"
+              :color="chip.color"
+              :prepend-icon="chip.icon"
+              variant="tonal"
+            >
+              {{ chip.label }}
+            </v-chip>
+            <LiveIndicator :updated-at="docker.lastUpdatedAt" />
+          </div>
+        </div>
+        <div class="docker-header__actions d-flex flex-wrap align-center ga-2">
+          <v-select
+            :model-value="docker.selectedHostKey"
+            :items="hostItems"
+            item-title="title"
+            item-value="value"
+            label="Host"
+            density="compact"
+            variant="outlined"
+            hide-details
+            prepend-inner-icon="mdi-server"
+            class="docker-host-select"
+            @update:model-value="changeHost"
           >
-            <v-icon start>{{ item.icon }}</v-icon>
-            {{ item.title }}
-          </v-tab>
-        </v-tabs>
-        <v-select
-          :model-value="docker.selectedHostKey"
-          :items="hostItems"
-          item-title="title"
-          item-value="value"
-          density="compact"
-          variant="outlined"
-          hide-details
-          prepend-inner-icon="mdi-server"
-          class="docker-host-select my-2 mx-2"
-          aria-label="Host Docker"
-          @update:model-value="changeHost"
-        >
-          <template #item="{ props: itemProps, item }">
-            <v-list-item v-bind="itemProps" :title="item.title" :subtitle="item.subtitle">
-              <template #prepend>
-                <v-icon :color="item.online ? 'success' : 'error'" size="small">
-                  mdi-circle
-                </v-icon>
-              </template>
-            </v-list-item>
-          </template>
-        </v-select>
+            <template #item="{ props: itemProps, item }">
+              <v-list-item v-bind="itemProps" :title="item.title" :subtitle="item.subtitle">
+                <template #prepend>
+                  <v-icon :color="item.online ? 'success' : 'error'" size="small">
+                    mdi-circle
+                  </v-icon>
+                </template>
+              </v-list-item>
+            </template>
+          </v-select>
+          <v-btn
+            color="primary"
+            variant="flat"
+            prepend-icon="mdi-refresh"
+            :loading="docker.loading"
+            :disabled="!docker.selectedHost?.online"
+            @click="docker.refreshAll()"
+          >
+            Atualizar
+          </v-btn>
+        </div>
       </div>
+      <v-divider></v-divider>
+      <v-tabs color="primary" show-arrows density="comfortable">
+        <v-tab
+          v-for="item in tabs"
+          :key="item.to"
+          :to="{ path: item.to, query: docker.hostQuery }"
+          :prepend-icon="item.icon"
+          exact
+        >
+          {{ item.title }}
+          <v-badge v-if="item.count != null" :content="item.count" color="primary" inline></v-badge>
+        </v-tab>
+      </v-tabs>
     </v-card>
     <v-alert
       v-if="docker.hostsLoaded && docker.hosts.length === 0"
@@ -74,6 +108,7 @@ import { computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import DockerOperationsPanel from '@/components/docker/DockerOperationsPanel.vue'
 import DockerUnavailableAlert from '@/components/docker/DockerUnavailableAlert.vue'
+import LiveIndicator from '@/components/LiveIndicator.vue'
 import { useDockerStore } from '@/stores/docker'
 import { useLiveInterest } from '@/composables/useLiveInterest'
 
@@ -85,22 +120,76 @@ const router = useRouter()
 // vivo dos agentes (ARQ-05); ao sair, deixa de pedir.
 useLiveInterest('docker')
 
-const tabs = [
-  { title: 'Visão geral', icon: 'mdi-view-dashboard-outline', to: '/docker' },
-  { title: 'Containers', icon: 'mdi-cube-outline', to: '/docker/containers' },
-  { title: 'Projetos', icon: 'mdi-file-cabinet', to: '/docker/compose' },
-  { title: 'Volumes', icon: 'mdi-database-outline', to: '/docker/volumes' },
-  { title: 'Redes', icon: 'mdi-lan', to: '/docker/networks' },
-  { title: 'Imagens', icon: 'mdi-layers-outline', to: '/docker/images' },
-  { title: 'Histórico', icon: 'mdi-chart-timeline-variant', to: '/docker/history' },
-]
+/** Quantos itens a aba tem — só onde o número diz algo e a Engine respondeu. */
+function count(value: number): number | null {
+  return docker.available ? value : null
+}
 
-/** O host padrão (o desta central) não vai na URL; os demais, sim. */
-const hostQuery = computed(() =>
-  docker.selectedHostKey && docker.selectedHostKey !== docker.defaultHostKey
-    ? { host: docker.selectedHostKey }
-    : {}
-)
+const tabs = computed(() => [
+  { title: 'Visão geral', icon: 'mdi-view-dashboard-outline', to: '/docker', count: null },
+  {
+    title: 'Containers',
+    icon: 'mdi-cube-outline',
+    to: '/docker/containers',
+    count: count(docker.containers.length),
+  },
+  { title: 'Projetos', icon: 'mdi-file-cabinet', to: '/docker/compose', count: null },
+  {
+    title: 'Volumes',
+    icon: 'mdi-database-outline',
+    to: '/docker/volumes',
+    count: count(docker.volumes.length),
+  },
+  { title: 'Redes', icon: 'mdi-lan', to: '/docker/networks', count: count(docker.networks.length) },
+  {
+    title: 'Imagens',
+    icon: 'mdi-layers-outline',
+    to: '/docker/images',
+    count: count(docker.images.length),
+  },
+  { title: 'Histórico', icon: 'mdi-chart-timeline-variant', to: '/docker/history', count: null },
+])
+
+/** O estado do host num relance: conexão, Engine e containers. */
+const statusChips = computed(() => {
+  const host = docker.selectedHost
+  if (!host) return []
+  if (!host.online) {
+    return [{ label: 'Agente desconectado', color: 'error', icon: 'mdi-lan-disconnect' }]
+  }
+  if (docker.status && !docker.available) {
+    return [{ label: 'Engine indisponível', color: 'warning', icon: 'mdi-alert' }]
+  }
+  const status = docker.status
+  return [
+    {
+      label: host.kind === 'local' ? 'Docker desta central' : 'Servidor remoto',
+      color: 'primary',
+      icon: host.kind === 'local' ? 'mdi-server' : 'mdi-transit-connection-variant',
+    },
+    ...(status?.engineVersion
+      ? [{ label: `Engine ${status.engineVersion}`, color: 'info', icon: 'mdi-docker' }]
+      : []),
+    ...(status
+      ? [
+          {
+            label: `${docker.runningContainers} rodando`,
+            color: 'success',
+            icon: 'mdi-play-circle-outline',
+          },
+          ...(docker.stoppedContainers
+            ? [
+                {
+                  label: `${docker.stoppedContainers} parados`,
+                  color: 'warning',
+                  icon: 'mdi-stop-circle-outline',
+                },
+              ]
+            : []),
+        ]
+      : []),
+  ]
+})
 
 const hostItems = computed(() =>
   docker.hosts.map((host) => ({
@@ -142,14 +231,17 @@ onMounted(async () => {
 
 <style scoped>
 .docker-host-select {
-  flex: 0 0 240px;
-  max-width: 280px;
+  width: 260px;
 }
 
 @media (max-width: 700px) {
+  .docker-header__actions,
   .docker-host-select {
-    flex: 1 1 100%;
-    max-width: none;
+    width: 100%;
+  }
+
+  .docker-header__actions > * {
+    flex: 1 1 auto;
   }
 }
 </style>

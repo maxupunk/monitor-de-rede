@@ -1,15 +1,18 @@
 <template>
   <div>
-    <PageHeader
-      title="Projetos compose"
-      subtitle="Stacks descobertas pelas labels dos containers; as ações rodam no próprio servidor"
+    <DockerSectionBar
+      description="Projetos compose descobertos pelas labels dos containers. As ações rodam no próprio servidor, pelo agente."
     >
-      <template #actions>
-        <v-btn color="primary" prepend-icon="mdi-refresh" :loading="loading" @click="load">
-          Atualizar
-        </v-btn>
-      </template>
-    </PageHeader>
+      <v-btn
+        color="primary"
+        variant="tonal"
+        prepend-icon="mdi-refresh"
+        :loading="loading"
+        @click="load"
+      >
+        Recarregar projetos
+      </v-btn>
+    </DockerSectionBar>
 
     <v-alert
       v-if="error"
@@ -59,7 +62,7 @@
 
           <v-card-text class="pb-2">
             <template v-if="canAct">
-              <div class="text-overline text-medium-emphasis">Projeto inteiro</div>
+              <div class="text-overline text-high-emphasis">Projeto inteiro</div>
               <div class="d-flex flex-wrap ga-2 mb-4">
                 <v-btn
                   v-for="action in projectActionsFor(project)"
@@ -78,7 +81,7 @@
               </div>
             </template>
 
-            <div class="text-overline text-medium-emphasis">
+            <div class="text-overline text-high-emphasis">
               Serviços ({{ project.services.length }})
             </div>
             <v-list density="compact" class="bg-transparent pa-0">
@@ -120,7 +123,7 @@
       </v-col>
     </v-row>
     <v-card v-else-if="!loading" rounded="xl" variant="outlined" class="pa-8 text-center">
-      <v-icon size="40" color="medium-emphasis">mdi-file-cabinet</v-icon>
+      <v-icon size="40" color="primary">mdi-file-cabinet</v-icon>
       <div class="text-body-1 mt-2">Nenhum projeto compose neste host.</div>
     </v-card>
 
@@ -129,7 +132,7 @@
         <v-card-title>{{ confirmTitle }}</v-card-title>
         <v-card-text>
           <p class="mb-2">{{ confirmHint }}</p>
-          <p class="text-medium-emphasis mb-0">
+          <p class="text-high-emphasis mb-0">
             Alvo: <strong>{{ confirm.target }}</strong
             >. O progresso aparece no topo da tela.
           </p>
@@ -153,7 +156,7 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import PageHeader from '@/components/PageHeader.vue'
+import DockerSectionBar from '@/components/docker/DockerSectionBar.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useDockerStore } from '@/stores/docker'
 import type { ComposeAction } from '@/bindings/ComposeAction'

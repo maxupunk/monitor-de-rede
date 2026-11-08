@@ -30,8 +30,10 @@
 //! | [`backups`] | uma execução: dump de cada banco, envio, histórico, retenção |
 //! | [`jobs`] | o andamento ao vivo, pelo SSE |
 //! | [`schedule`] | o ciclo que dispara os backups automáticos |
+//! | [`discovery`] | os bancos em contêineres dos agentes e por qual endereço chegar |
 
 pub mod backups;
+pub mod discovery;
 pub mod dump;
 pub mod jobs;
 pub mod mysql;

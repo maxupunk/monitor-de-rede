@@ -238,6 +238,15 @@ O desenho de A foi seguido; o que mudou ao implementar, e por quê:
 - **Tela**: "Acessar a partir de" no formulário da conexão, com os agentes que
   servem (mesma lista dos plugins, `agents::routes::route_options`) e as duas
   linhas a configurar no host do agente; a conexão mostra "pelo agente X".
+- **Contêineres dos agentes** (`servers::databases::discovery`): o "Nova
+  conexão" lista os bancos em contêineres de todo host Docker conectado e,
+  ao escolher um, testa os endereços dele em ordem — nome na rede Docker, IP
+  do contêiner, porta publicada, loopback — pela rota que a conexão vai usar.
+  Pela ponte, um endereço por vez (o agente abre no máximo duas pontes), e a
+  política local continua decidindo: endereço fora de
+  `AGENT_DATABASE_TARGETS` volta como recusa, com a linha a acrescentar já
+  com o IP do contêiner. A senha não sai do agente; só o usuário sugerido
+  pelas variáveis da imagem.
 - **Auditoria**: backup manual e restauração registram por qual agente
   passaram; toda abertura de ponte vai ao log.
 

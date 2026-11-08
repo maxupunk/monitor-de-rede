@@ -1,20 +1,8 @@
 <template>
   <div>
-    <PageHeader
-      title="Docker"
-      subtitle="Saúde da Engine, inventário e consumo dos containers em tempo quase real"
-    >
-      <template #actions>
-        <v-btn
-          color="primary"
-          prepend-icon="mdi-refresh"
-          :loading="docker.loading"
-          @click="docker.refreshAll()"
-        >
-          Atualizar
-        </v-btn>
-      </template>
-    </PageHeader>
+    <DockerSectionBar
+      description="Saúde da Engine, inventário e consumo dos containers. Clique num número para ver a lista."
+    />
 
     <v-alert v-if="docker.error" type="error" variant="tonal" closable class="mb-4">
       {{ docker.error }}
@@ -31,14 +19,23 @@
     <template v-if="docker.available">
       <v-row dense class="mb-2">
         <v-col v-for="card in summaryCards" :key="card.label" cols="6" md="3">
-          <v-card rounded="xl" variant="outlined" class="pa-4 h-100">
+          <v-card
+            rounded="xl"
+            variant="outlined"
+            class="summary-card pa-4 h-100"
+            :to="{ path: card.to, query: { ...docker.hostQuery, ...card.query } }"
+            :aria-label="`${card.label}: ${card.value}`"
+          >
             <div class="d-flex align-center justify-space-between mb-2">
               <v-avatar :color="card.color" variant="tonal" size="38">
                 <v-icon>{{ card.icon }}</v-icon>
               </v-avatar>
               <span class="text-h5 font-weight-bold">{{ card.value }}</span>
             </div>
-            <div class="text-caption text-medium-emphasis">{{ card.label }}</div>
+            <div class="d-flex align-center justify-space-between text-body-2 text-high-emphasis">
+              {{ card.label }}
+              <v-icon size="18" :color="card.color">mdi-chevron-right</v-icon>
+            </div>
           </v-card>
         </v-col>
       </v-row>
@@ -81,7 +78,7 @@
                   {{ formatBinaryBytes(latestAggregate?.memoryUsageBytes ?? 0) }}
                   <span
                     v-if="latestAggregate && docker.status?.memoryTotalBytes"
-                    class="text-caption text-medium-emphasis"
+                    class="text-caption text-high-emphasis"
                   >
                     {{ formatPercent(latestAggregate.memoryPercent) }} da Engine
                   </span>
@@ -131,7 +128,7 @@
                 <v-icon color="primary">mdi-chart-box-outline</v-icon>
                 Containers em execução
               </span>
-              <span class="text-caption text-medium-emphasis">
+              <span class="text-caption text-high-emphasis">
                 {{
                   docker.metrics?.collectedAt ? formatRelativeTime(docker.metrics.collectedAt) : ''
                 }}
@@ -150,7 +147,7 @@
                 <tr v-for="metric in topMetrics" :key="metric.containerId">
                   <td>
                     <div class="font-weight-medium">{{ metric.containerName }}</div>
-                    <div class="text-caption text-medium-emphasis">
+                    <div class="text-caption text-high-emphasis">
                       {{ metric.projectName || 'Avulso' }}
                     </div>
                   </td>
@@ -166,7 +163,7 @@
                   </td>
                 </tr>
                 <tr v-if="topMetrics.length === 0">
-                  <td colspan="4" class="text-center text-medium-emphasis py-8">
+                  <td colspan="4" class="text-center text-high-emphasis py-8">
                     Nenhum container em execução.
                   </td>
                 </tr>
@@ -183,7 +180,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import PageHeader from '@/components/PageHeader.vue'
+import DockerSectionBar from '@/components/docker/DockerSectionBar.vue'
 import LiveIndicator from '@/components/LiveIndicator.vue'
 import StackedUsageChart from '@/components/StackedUsageChart.vue'
 import { useDockerStore } from '@/stores/docker'
@@ -203,24 +200,32 @@ const summaryCards = computed(() => [
     value: docker.runningContainers,
     icon: 'mdi-play-circle-outline',
     color: 'success',
+    to: '/docker/containers',
+    query: { state: 'running' },
   },
   {
     label: 'Containers parados',
     value: docker.stoppedContainers,
     icon: 'mdi-stop-circle-outline',
     color: 'warning',
+    to: '/docker/containers',
+    query: { state: 'stopped' },
   },
   {
     label: 'Volumes',
     value: docker.volumes.length,
     icon: 'mdi-database-outline',
     color: 'info',
+    to: '/docker/volumes',
+    query: {},
   },
   {
     label: 'Imagens',
     value: docker.images.length,
     icon: 'mdi-layers-outline',
     color: 'primary',
+    to: '/docker/images',
+    query: {},
   },
 ])
 
@@ -264,3 +269,12 @@ function formatMemory(value: number): string {
   return formatBinaryBytes(value)
 }
 </script>
+
+<style scoped>
+.summary-card {
+  transition: border-color 0.15s;
+}
+.summary-card:hover {
+  border-color: rgb(var(--v-theme-primary));
+}
+</style>
