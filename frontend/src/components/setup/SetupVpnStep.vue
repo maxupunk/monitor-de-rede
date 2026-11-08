@@ -3,7 +3,7 @@
     <div class="d-flex align-center justify-space-between mb-3">
       <div>
         <div class="text-h6 font-weight-bold">Servidor WireGuard VPN (Opcional)</div>
-        <div class="text-caption text-medium-emphasis">
+        <div class="text-caption text-high-emphasis">
           Permite que roteadores (MikroTik, OpenWrt, Linux) criem túneis seguros para este servidor.
         </div>
       </div>

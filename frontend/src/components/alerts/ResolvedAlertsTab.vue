@@ -43,7 +43,7 @@
             </v-chip>
           </div>
 
-          <span class="text-caption text-grey d-flex align-center ga-1 flex-shrink-0">
+          <span class="text-caption text-high-emphasis d-flex align-center ga-1 flex-shrink-0">
             <v-icon size="12">mdi-clock-check-outline</v-icon>
             {{ formatDateTime(item.resolvedAt || item.createdAt) }}
           </span>
@@ -52,12 +52,12 @@
         <div class="text-subtitle-1 font-weight-bold text-break text-high-emphasis leading-tight">
           {{ item.title }}
         </div>
-        <div class="text-body-2 text-grey-darken-1 text-break">
+        <div class="text-body-2 text-high-emphasis text-break">
           {{ item.message }}
         </div>
 
         <div
-          class="text-caption text-grey pt-2 mt-1 border-t d-flex align-center justify-space-between flex-wrap ga-1"
+          class="text-caption text-high-emphasis pt-2 mt-1 border-t d-flex align-center justify-space-between flex-wrap ga-1"
         >
           <span>Início: {{ formatDateTime(item.startedAt || item.createdAt) }}</span>
           <span v-if="item.resolvedAt" class="text-success font-weight-medium">

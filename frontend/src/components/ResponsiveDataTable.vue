@@ -62,11 +62,12 @@
 
       <v-card
         v-else-if="!loading"
-        variant="outlined"
+        border
+        flat
         rounded="lg"
-        class="pa-6 text-center text-grey"
+        class="pa-6 text-center text-high-emphasis"
       >
-        <v-icon size="40" color="grey-lighten-1" class="mb-2">mdi-inbox-outline</v-icon>
+        <v-icon size="40" color="primary" class="mb-2">mdi-inbox-outline</v-icon>
         <div class="text-subtitle-2 font-weight-medium">{{ noDataText }}</div>
       </v-card>
 

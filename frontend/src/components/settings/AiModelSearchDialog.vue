@@ -169,10 +169,11 @@
           <v-row dense>
             <v-col v-for="item in paginatedModels" :key="item.id" cols="12">
               <v-card
-                variant="outlined"
+                border
+                :variant="isItemActive(item.id) ? 'tonal' : 'flat'"
                 class="pa-3 transition-swing"
                 :color="isItemActive(item.id) ? 'primary' : undefined"
-                :class="{ 'border-primary': isItemActive(item.id) }"
+                :class="{ 'border-primary border-opacity-100': isItemActive(item.id) }"
               >
                 <div class="d-flex align-start justify-space-between ga-2">
                   <div class="flex-grow-1" style="min-width: 0">

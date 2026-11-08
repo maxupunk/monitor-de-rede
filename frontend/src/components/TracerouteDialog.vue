@@ -100,7 +100,7 @@
             </v-btn>
           </div>
 
-          <div v-if="hops.length > 0" class="text-caption text-grey-darken-1 font-weight-medium">
+          <div v-if="hops.length > 0" class="text-caption text-high-emphasis font-weight-medium">
             {{ hops.length }} salto(s) resolvido(s)
             <span v-if="reachedTarget" class="text-success ml-2 font-weight-bold">
               <v-icon size="14" color="success">mdi-check-circle</v-icon> Destino alcançado
@@ -117,10 +117,10 @@
         ></v-progress-linear>
 
         <!-- Tabela de Saltos -->
-        <v-card v-if="hops.length > 0" variant="outlined" class="rounded-lg overflow-hidden">
+        <v-card v-if="hops.length > 0" border flat class="rounded-lg overflow-hidden">
           <v-table density="compact" hover>
             <thead>
-              <tr class="bg-grey-lighten-4">
+              <tr class="bg-surface-light">
                 <th style="width: 70px" class="font-weight-bold"># Salto</th>
                 <th class="font-weight-bold">Endereço IP / Hostname</th>
                 <th class="font-weight-bold text-center">Sondas (RTT)</th>
@@ -132,7 +132,7 @@
               <tr
                 v-for="hop in hops"
                 :key="hop.hop"
-                :class="{ 'bg-green-lighten-5': hop.status === 'reached' }"
+                :class="{ 'tint-success': hop.status === 'reached' }"
               >
                 <td class="font-weight-bold text-primary">
                   <v-avatar size="24" color="primary" variant="tonal" class="text-caption">
@@ -144,12 +144,12 @@
                     <span v-if="hop.ip" class="font-weight-bold text-body-2 font-monospace">
                       {{ hop.ip }}
                     </span>
-                    <span v-else class="text-grey font-italic text-caption">
+                    <span v-else class="text-high-emphasis font-italic text-caption">
                       * * * (Tempo esgotado / Sem resposta)
                     </span>
                     <span
                       v-if="hop.hostname"
-                      class="text-caption text-grey-darken-1 d-flex align-center"
+                      class="text-caption text-high-emphasis d-flex align-center"
                     >
                       <v-icon size="12" class="mr-1">mdi-dns-outline</v-icon>
                       {{ hop.hostname }}
@@ -176,7 +176,7 @@
                   >
                     {{ hop.avgRttMs.toFixed(1) }} ms
                   </span>
-                  <span v-else class="text-grey">*</span>
+                  <span v-else class="text-high-emphasis">*</span>
                 </td>
                 <td class="text-right">
                   <v-chip
@@ -195,9 +195,9 @@
 
         <div
           v-else-if="!diagnosticsStore.tracerouteRunning"
-          class="text-center text-grey py-12 border rounded-lg bg-grey-lighten-5"
+          class="text-center text-high-emphasis py-12 border rounded-lg"
         >
-          <v-icon size="48" color="grey-lighten-1" class="mb-2">mdi-routes-clock</v-icon>
+          <v-icon size="48" color="primary" class="mb-2">mdi-routes-clock</v-icon>
           <div class="text-body-1 font-weight-medium">Nenhum traceroute executado ainda</div>
           <div class="text-caption">
             Clique em "Iniciar Traceroute" para traçar o caminho da rede até o destino.

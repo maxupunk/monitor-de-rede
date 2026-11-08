@@ -1,8 +1,8 @@
 <template>
   <div>
-    <v-card v-if="loading && !report" variant="outlined" class="pa-8 text-center">
+    <v-card v-if="loading && !report" elevation="2" class="pa-8 text-center">
       <v-progress-circular indeterminate color="primary" class="mb-3" />
-      <div class="text-body-2 text-medium-emphasis">Carregando resultados do Decisor…</div>
+      <div class="text-body-2 text-high-emphasis">Carregando resultados do Decisor…</div>
     </v-card>
 
     <v-alert v-else-if="error" type="error" variant="tonal" class="mb-4">
@@ -38,33 +38,33 @@
               </v-chip>
             </div>
             <div class="text-h6 font-weight-bold font-mono">{{ recommended.model }}</div>
-            <div v-if="recommended.description" class="text-body-2 text-medium-emphasis mt-1">
+            <div v-if="recommended.description" class="text-body-2 text-high-emphasis mt-1">
               {{ recommended.description }}
             </div>
           </div>
 
           <div class="d-flex flex-wrap ga-6 align-center">
             <div>
-              <div class="text-caption text-medium-emphasis">Nota geral</div>
+              <div class="text-caption text-high-emphasis">Nota geral</div>
               <div class="text-h4 font-weight-bold text-success">
                 {{ percent(recommended.overall) }}
               </div>
-              <div class="text-caption text-medium-emphasis">
+              <div class="text-caption text-high-emphasis">
                 IC 90%:
                 {{ formatConfidenceInterval(recommended.overallLow, recommended.overallHigh) }}
               </div>
             </div>
             <div>
-              <div class="text-caption text-medium-emphasis">Sugestões na tela</div>
+              <div class="text-caption text-high-emphasis">Sugestões na tela</div>
               <div class="text-h5 font-weight-bold">{{ percent(recommended.screen) }}</div>
-              <div class="text-caption text-medium-emphasis">acima da confiança mínima</div>
+              <div class="text-caption text-high-emphasis">acima da confiança mínima</div>
             </div>
             <div>
-              <div class="text-caption text-medium-emphasis">Tempo em CPU</div>
+              <div class="text-caption text-high-emphasis">Tempo em CPU</div>
               <div class="text-h5 font-weight-bold">
                 {{ deciderSpeedOf(recommended, report.timeoutMs).label }}
               </div>
-              <div class="text-caption text-medium-emphasis">
+              <div class="text-caption text-high-emphasis">
                 mediana e 95% das decisões
                 <span v-if="deciderLatencyNoteOf(recommended)">
                   · {{ deciderLatencyNoteOf(recommended) }}
@@ -76,7 +76,7 @@
       </v-card>
 
       <!-- Tabela completa -->
-      <v-card variant="outlined">
+      <v-card elevation="2">
         <v-card-title class="d-flex flex-wrap align-center justify-space-between ga-2 py-3 px-4">
           <div class="d-flex align-center ga-2">
             <v-icon size="20" color="primary">mdi-table</v-icon>
@@ -84,7 +84,7 @@
               {{ report.models.length }} modelos de decisão comparados
             </span>
           </div>
-          <div class="text-caption text-medium-emphasis">
+          <div class="text-caption text-high-emphasis">
             {{ report.cases }} perguntas do NetMonitor · {{ report.hardware }} · tempo máximo de
             {{ Math.round(report.timeoutMs / 1000) }} s por decisão · medido em
             {{ report.measuredOn }}
@@ -118,7 +118,7 @@
               :class="{ 'recommended-row': row.recommended }"
               data-testid="benchmark-row"
             >
-              <td class="text-medium-emphasis font-mono">{{ row.position }}</td>
+              <td class="text-high-emphasis font-mono">{{ row.position }}</td>
               <td>
                 <div class="d-flex align-center flex-wrap ga-1">
                   <span class="font-weight-medium font-mono">{{ row.model }}</span>
@@ -140,7 +140,7 @@
                     Em uso
                   </v-chip>
                 </div>
-                <div v-if="row.description" class="text-caption text-medium-emphasis mt-1">
+                <div v-if="row.description" class="text-caption text-high-emphasis mt-1">
                   {{ row.description }}
                 </div>
               </td>
@@ -163,7 +163,7 @@
                     {{ percent(row.overall) }}
                   </v-chip>
                 </div>
-                <div class="text-caption text-medium-emphasis font-mono">
+                <div class="text-caption text-high-emphasis font-mono">
                   {{ formatConfidenceInterval(row.overallLow, row.overallHigh) }}
                 </div>
               </td>
@@ -193,7 +193,7 @@
                 </v-chip>
                 <div
                   v-if="deciderLatencyNoteOf(row)"
-                  class="text-caption text-medium-emphasis mt-1"
+                  class="text-caption text-high-emphasis mt-1"
                   style="white-space: normal"
                 >
                   {{ deciderLatencyNoteOf(row) }}
@@ -205,11 +205,11 @@
       </v-card>
 
       <!-- Como ler -->
-      <v-card variant="outlined" class="mt-4 pa-4">
+      <v-card elevation="2" class="mt-4 pa-4">
         <div class="text-subtitle-2 font-weight-bold mb-2">
           Como ler os números do Decisor (Ollaya)
         </div>
-        <div class="text-body-2 text-medium-emphasis">
+        <div class="text-body-2 text-high-emphasis">
           <p class="mb-2">
             Cada modelo respondeu às mesmas <strong>{{ report.cases }}</strong> perguntas reais das
             seis frentes em que o Decisor atua no NetMonitor, em português, rodando em CPU sem placa

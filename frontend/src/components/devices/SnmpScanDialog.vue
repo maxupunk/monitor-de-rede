@@ -37,7 +37,9 @@
             <div class="text-subtitle-1">
               Escaneando dispositivo via SNMP em {{ detailStore.device?.ipAddress }}...
             </div>
-            <div class="text-caption text-grey">Consultando interfaces e uso de CPU/memória...</div>
+            <div class="text-caption text-high-emphasis">
+              Consultando interfaces e uso de CPU/memória...
+            </div>
           </div>
 
           <div v-else-if="detailStore.scanResult">
@@ -132,7 +134,8 @@
             <!-- Telemetria & Sensores Mapeados -->
             <v-card
               v-if="detailStore.scanResult.sensors && detailStore.scanResult.sensors.length > 0"
-              variant="outlined"
+              border
+              flat
               class="mb-6 rounded-lg pa-4"
             >
               <div class="d-flex align-center justify-space-between mb-3">
@@ -147,7 +150,7 @@
                   <v-btn size="small" variant="text" color="primary" @click="selectAllSensors">
                     Selecionar Todos
                   </v-btn>
-                  <v-btn size="small" variant="text" color="grey" @click="unselectAllSensors">
+                  <v-btn size="small" variant="text" color="primary" @click="unselectAllSensors">
                     Desmarcar Todos
                   </v-btn>
                 </div>
@@ -187,7 +190,7 @@
                       </div>
                       <v-tooltip v-if="sensor.oid" location="top">
                         <template #activator="{ props: tooltipProps }">
-                          <v-icon v-bind="tooltipProps" size="16" color="grey-darken-1">
+                          <v-icon v-bind="tooltipProps" size="16" color="info">
                             mdi-information-outline
                           </v-icon>
                         </template>
@@ -199,11 +202,7 @@
               </v-row>
             </v-card>
 
-            <v-card
-              v-if="hasCpuData || hasMemoryData"
-              variant="outlined"
-              class="mb-6 rounded-lg pa-4"
-            >
+            <v-card v-if="hasCpuData || hasMemoryData" border flat class="mb-6 rounded-lg pa-4">
               <div
                 class="text-subtitle-1 font-weight-bold mb-3 d-flex align-center ga-2"
                 style="gap: 8px"
@@ -219,7 +218,7 @@
                     label="Monitorar Uso de CPU (%)"
                     hide-details
                   ></v-switch>
-                  <div class="text-caption text-grey ml-8">
+                  <div class="text-caption text-high-emphasis ml-8">
                     {{
                       detailStore.scanResult.cpuInfo.coresCount
                         ? `${detailStore.scanResult.cpuInfo.coresCount} núcleos detectados`
@@ -237,7 +236,7 @@
                     label="Monitorar memória RAM"
                     hide-details
                   ></v-switch>
-                  <div class="text-caption text-grey ml-8">
+                  <div class="text-caption text-high-emphasis ml-8">
                     <span v-if="detailStore.scanResult.memoryInfo.usedKb != null">
                       Uso: {{ formatBinaryBytes(detailStore.scanResult.memoryInfo.usedKb * 1024) }}
                       <template v-if="detailStore.scanResult.memoryInfo.totalKb">
@@ -274,7 +273,7 @@
                 <v-btn size="small" variant="text" color="primary" @click="selectAllInterfaces">
                   Selecionar Todas
                 </v-btn>
-                <v-btn size="small" variant="text" color="grey" @click="unselectAllInterfaces">
+                <v-btn size="small" variant="text" color="primary" @click="unselectAllInterfaces">
                   Desmarcar Todas
                 </v-btn>
               </div>
@@ -357,7 +356,7 @@
                     </td>
                   </tr>
                   <tr v-if="detailStore.scanResult.interfaces.length === 0">
-                    <td colspan="6" class="text-center text-grey py-6">
+                    <td colspan="6" class="text-center text-high-emphasis py-6">
                       <div class="d-flex flex-column align-center ga-1">
                         <v-icon size="32" color="grey">mdi-ethernet-off</v-icon>
                         <div class="font-weight-medium">
@@ -412,7 +411,7 @@
               </v-btn>
             </div>
           </div>
-          <div v-else class="text-center py-8 text-grey">
+          <div v-else class="text-center py-8 text-high-emphasis">
             Nenhuma informação disponível para exibição.
           </div>
         </v-card-text>
@@ -450,7 +449,7 @@
             Os seguintes itens foram desmarcados ou não constam mais na varredura SNMP do
             equipamento:
           </p>
-          <v-list density="compact" class="bg-grey-lighten-4 rounded-lg mb-3 pa-2">
+          <v-list density="compact" class="bg-surface-light rounded-lg mb-3 pa-2">
             <v-list-item
               v-for="(item, idx) in removedItems"
               :key="idx"
@@ -459,7 +458,7 @@
               :title="item"
             ></v-list-item>
           </v-list>
-          <p class="text-body-2 text-grey-darken-1 mb-0">
+          <p class="text-body-2 text-high-emphasis mb-0">
             Deseja apagar o histórico de métricas, coletas e eventos dos itens removidos, ou deseja
             manter o histórico existente?
           </p>

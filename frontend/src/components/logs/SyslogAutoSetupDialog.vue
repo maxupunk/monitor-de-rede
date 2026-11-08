@@ -15,7 +15,10 @@
       <v-divider></v-divider>
 
       <v-card-text>
-        <div v-if="loadingHints" class="d-flex align-center ga-2 mb-4 text-caption text-grey">
+        <div
+          v-if="loadingHints"
+          class="d-flex align-center ga-2 mb-4 text-caption text-high-emphasis"
+        >
           <v-progress-circular indeterminate size="16" width="2"></v-progress-circular>
           Verificando o equipamento — portas de acesso, SNMP e endereço deste servidor...
         </div>
@@ -271,7 +274,7 @@
             {{ result.persistenceWarning }}
           </v-alert>
 
-          <div class="text-caption text-grey mt-4 mb-1">
+          <div class="text-caption text-high-emphasis mt-4 mb-1">
             Enviado para {{ result.serverAddress }}:{{ result.serverPort }}
           </div>
           <v-sheet class="pa-3 rounded-lg border" color="surface-variant">

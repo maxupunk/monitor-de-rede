@@ -16,30 +16,24 @@
           <!-- Passo 1: perfil do equipamento -->
           <template #item.1>
             <div class="text-subtitle-1 font-weight-medium mb-1">Qual equipamento?</div>
-            <div class="text-caption text-grey-darken-1 mb-4">
+            <div class="text-caption text-high-emphasis mb-4">
               A escolha define o formato do artefato gerado — roteadores recebem script para colar
               no terminal.
             </div>
 
             <v-row>
               <v-col v-for="option in profiles" :key="option.profile" cols="12" sm="6" md="4">
-                <v-card
-                  :color="form.profile === option.profile ? 'primary' : undefined"
-                  :variant="form.profile === option.profile ? 'flat' : 'outlined'"
-                  class="pa-4 text-center h-100 cursor-pointer"
+                <ChoiceCard
+                  :selected="form.profile === option.profile"
+                  class="pa-4 text-center h-100"
                   @click="form.profile = option.profile"
                 >
                   <v-icon size="40" class="mb-2">{{ option.icon }}</v-icon>
                   <div class="text-body-2 font-weight-medium">{{ option.label }}</div>
-                  <v-chip
-                    size="x-small"
-                    class="mt-2"
-                    :color="form.profile === option.profile ? 'white' : 'grey'"
-                    variant="tonal"
-                  >
+                  <v-chip size="x-small" class="mt-2" color="primary" variant="tonal">
                     {{ option.supportsQrCode ? 'QR Code' : 'Script / arquivo' }}
                   </v-chip>
-                </v-card>
+                </ChoiceCard>
               </v-col>
             </v-row>
           </template>
@@ -110,7 +104,7 @@
                   density="comfortable"
                   hide-details
                 ></v-switch>
-                <div class="text-caption text-medium-emphasis ml-2">
+                <div class="text-caption text-high-emphasis ml-2">
                   O script do túnel termina instalando o agente NetMonitor, que se conecta pela VPN
                   com um código de uso único. Acompanhe em Coleta remota → Servidores remotos.
                 </div>
@@ -165,6 +159,7 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
+import ChoiceCard from '@/components/ChoiceCard.vue'
 import { useVpnStore, type VpnArtifact } from '@/stores/vpn'
 import { useSitesStore } from '@/stores/sites'
 

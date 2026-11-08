@@ -7,7 +7,7 @@
     persistent
     @update:model-value="$emit('update:modelValue', $event)"
   >
-    <v-card class="rounded-xl overflow-hidden elevation-12 dialog-card-container">
+    <v-card class="rounded-lg overflow-hidden elevation-12 dialog-card-container">
       <!-- Header do Modal -->
       <v-card-item class="bg-indigo-darken-2 text-white py-4 px-6 flex-shrink-0">
         <div class="d-flex align-center justify-space-between w-100">
@@ -77,7 +77,7 @@
             </v-col>
 
             <v-col v-if="!isEditMode" cols="12">
-              <div class="text-caption font-weight-bold mb-2 text-medium-emphasis">
+              <div class="text-caption font-weight-bold mb-2 text-high-emphasis">
                 Quantidade de Portas Físicas *
               </div>
               <v-btn-toggle
@@ -100,7 +100,7 @@
             <v-col v-if="!isEditMode" cols="12" class="mb-3">
               <div class="ports-preview-container pa-3 rounded-lg">
                 <div class="d-flex align-center justify-space-between mb-2">
-                  <span class="text-caption font-weight-bold text-medium-emphasis">
+                  <span class="text-caption font-weight-bold text-high-emphasis">
                     Portas Virtuais Criadas Automaticamente:
                   </span>
                   <v-chip size="x-small" color="indigo" variant="flat">
@@ -118,7 +118,7 @@
                   </div>
                   <div
                     v-if="form.portCount > 24"
-                    class="port-badge text-caption pa-1 rounded text-center text-medium-emphasis"
+                    class="port-badge text-caption pa-1 rounded text-center text-high-emphasis"
                   >
                     +{{ form.portCount - 24 }} portas...
                   </div>

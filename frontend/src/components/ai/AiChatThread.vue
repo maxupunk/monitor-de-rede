@@ -64,9 +64,8 @@
                 cols="12"
                 sm="6"
               >
-                <v-card
-                  variant="outlined"
-                  class="pa-3 rounded-lg fill-height ai-thread__card"
+                <ChoiceCard
+                  class="pa-3 fill-height"
                   :disabled="!canSend"
                   @click="send(suggestion.prompt)"
                 >
@@ -75,7 +74,7 @@
                     <span class="text-body-small font-weight-bold">{{ suggestion.title }}</span>
                   </div>
                   <p class="text-body-small mb-0">{{ suggestion.prompt }}</p>
-                </v-card>
+                </ChoiceCard>
               </v-col>
             </v-row>
           </div>
@@ -124,6 +123,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import ChoiceCard from '@/components/ChoiceCard.vue'
 import { useAiStore } from '@/stores/ai'
 import { useChatAutoScroll } from '@/composables/useChatAutoScroll'
 import AiChatMessage from './AiChatMessage.vue'
@@ -257,17 +257,6 @@ defineExpose({
 .ai-thread__suggestion :deep(.v-btn__content) {
   white-space: normal;
   text-align: left;
-}
-
-.ai-thread__card {
-  transition:
-    transform 0.2s ease,
-    border-color 0.2s ease;
-}
-
-.ai-thread__card:hover {
-  transform: translateY(-2px);
-  border-color: rgb(var(--v-theme-primary));
 }
 
 .ai-thread__jump {

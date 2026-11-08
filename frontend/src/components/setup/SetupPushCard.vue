@@ -7,7 +7,7 @@
         </v-avatar>
         <div>
           <div class="font-weight-bold text-subtitle-1">Notificações PWA do Navegador</div>
-          <div class="text-caption text-medium-emphasis">
+          <div class="text-caption text-high-emphasis">
             Receba alertas imediatos na área de trabalho quando dispositivos caírem.
           </div>
         </div>

@@ -194,10 +194,15 @@ async function deleteProfile(profile: SnmpDeviceProfile) {
           <v-window-item value="list">
             <div v-if="profilesStore.loading" class="text-center py-8">
               <v-progress-circular indeterminate color="primary"></v-progress-circular>
-              <div class="text-caption text-grey mt-2">Carregando catálogo de perfis...</div>
+              <div class="text-caption text-high-emphasis mt-2">
+                Carregando catálogo de perfis...
+              </div>
             </div>
 
-            <div v-else-if="profilesStore.profiles.length === 0" class="text-center py-8 text-grey">
+            <div
+              v-else-if="profilesStore.profiles.length === 0"
+              class="text-center py-8 text-high-emphasis"
+            >
               Nenhum perfil cadastrado.
             </div>
 
@@ -205,7 +210,8 @@ async function deleteProfile(profile: SnmpDeviceProfile) {
               <v-card
                 v-for="profile in profilesStore.profiles"
                 :key="profile.id"
-                variant="outlined"
+                border
+                flat
                 class="pa-4 rounded-lg"
               >
                 <div class="d-flex align-center justify-space-between mb-2">
@@ -243,7 +249,7 @@ async function deleteProfile(profile: SnmpDeviceProfile) {
                   </div>
                 </div>
 
-                <div class="text-caption text-grey mb-3">
+                <div class="text-caption text-high-emphasis mb-3">
                   <span v-if="profile.sysObjectIdPrefix">
                     <strong>sysObjectID Prefixo:</strong>
                     <code>{{ profile.sysObjectIdPrefix }}</code>
@@ -301,6 +307,7 @@ async function deleteProfile(profile: SnmpDeviceProfile) {
                               :key="k"
                               size="x-small"
                               variant="outlined"
+                              color="info"
                               class="text-xxs"
                             >
                               {{ k }}: {{ typeof st === 'string' ? st : st.label }}
@@ -323,7 +330,7 @@ async function deleteProfile(profile: SnmpDeviceProfile) {
           <!-- CRIAR / IMPORTAR PERFIL -->
           <v-window-item value="create">
             <div class="d-flex align-center justify-space-between mb-3">
-              <div class="text-body-2 text-grey">
+              <div class="text-body-2 text-high-emphasis">
                 Cole a definição do perfil SNMP em formato JSON ou use o modelo pré-formatado:
               </div>
               <v-btn

@@ -68,19 +68,24 @@
                     equipamento não sobrevive à publicação de porta.
                   </v-tooltip>
                 </div>
-                <div v-if="!source.masked && source.hostname" class="text-caption text-grey">
+                <div
+                  v-if="!source.masked && source.hostname"
+                  class="text-caption text-high-emphasis"
+                >
                   {{ source.hostname }}
                 </div>
-                <div v-else-if="source.masked" class="text-caption text-grey">
+                <div v-else-if="source.masked" class="text-caption text-high-emphasis">
                   via {{ source.sourceIp }}
                 </div>
-                <div class="text-caption text-grey log-preview">{{ source.lastMessage }}</div>
+                <div class="text-caption text-high-emphasis log-preview">
+                  {{ source.lastMessage }}
+                </div>
               </td>
               <td>
                 <v-chip :color="kindColor(source.kind)" size="x-small" variant="tonal">
                   {{ kindLabel(source.kind) }}
                 </v-chip>
-                <div v-if="source.deviceName" class="text-caption text-grey mt-1">
+                <div v-if="source.deviceName" class="text-caption text-high-emphasis mt-1">
                   {{ source.deviceName }}
                 </div>
               </td>
@@ -96,7 +101,10 @@
                   compartilhado, e escolher um dispositivo aqui atribuiria a ele
                   o log de todo o parque. O backend recusa; a tela não oferece.
                 -->
-                <div v-if="source.masked && !source.hostname" class="text-caption text-grey">
+                <div
+                  v-if="source.masked && !source.hostname"
+                  class="text-caption text-high-emphasis"
+                >
                   Sem nome no syslog — não há como separar este equipamento dos outros atrás do
                   mesmo endereço.
                 </div>
@@ -119,8 +127,8 @@
           </tbody>
         </v-table>
 
-        <div v-if="logsStore.sources.length === 0" class="pa-8 text-center text-grey">
-          <v-icon size="48" color="grey-lighten-1" class="mb-2">mdi-lan-disconnect</v-icon>
+        <div v-if="logsStore.sources.length === 0" class="pa-8 text-center text-high-emphasis">
+          <v-icon size="48" color="primary" class="mb-2">mdi-lan-disconnect</v-icon>
           <div class="text-subtitle-2 font-weight-medium">Nenhuma origem enviou syslog ainda</div>
           <div class="text-caption">
             No cadastro de um novo dispositivo, marque “Configurar envio de logs (Syslog)” para o

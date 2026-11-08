@@ -20,16 +20,10 @@
           layout do roadmap: nada de aba depósito, o detalhe abre de onde o
           número apareceu. `role`/`tabindex` mantêm a navegação por teclado.
         -->
-        <v-card
-          border
-          flat
-          class="pa-4 rounded-lg h-100 card-clicavel"
-          role="button"
-          tabindex="0"
+        <ChoiceCard
+          class="pa-4 h-100"
           :aria-label="`Ver histórico de ${card.titulo}`"
           @click="abrir(card)"
-          @keydown.enter="abrir(card)"
-          @keydown.space.prevent="abrir(card)"
         >
           <div class="d-flex align-center justify-space-between mb-2 ga-2">
             <span class="text-subtitle-2 font-weight-bold d-flex align-center ga-2">
@@ -61,14 +55,16 @@
             class="mb-3"
           />
 
-          <div class="d-flex align-center justify-space-between text-caption text-grey ga-2">
+          <div
+            class="d-flex align-center justify-space-between text-caption text-high-emphasis ga-2"
+          >
             <span class="text-truncate">{{ card.legenda }}</span>
             <span class="text-no-wrap d-flex align-center ga-1">
               {{ card.coletadoEm }}
               <v-icon size="14">mdi-chart-line</v-icon>
             </span>
           </div>
-        </v-card>
+        </ChoiceCard>
       </v-col>
     </v-row>
 
@@ -102,6 +98,7 @@
  * alguém chama um monitor de ping de "CPU do roteador".
  */
 import { computed, ref } from 'vue'
+import ChoiceCard from '@/components/ChoiceCard.vue'
 import MetricHistoryDialog from '@/components/devices/MetricHistoryDialog.vue'
 import MonitorSparkline from '@/components/MonitorSparkline.vue'
 import type { DeviceMetric } from '@/stores/deviceDetail'
@@ -309,14 +306,4 @@ function abrir(card: Card): void {
 }
 </script>
 
-<style scoped>
-.card-clicavel {
-  cursor: pointer;
-  transition: border-color 0.15s ease;
-}
-
-.card-clicavel:hover,
-.card-clicavel:focus-visible {
-  border-color: rgb(var(--v-theme-primary));
-}
-</style>
+<style scoped></style>

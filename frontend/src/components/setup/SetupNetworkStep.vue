@@ -3,7 +3,7 @@
     <div class="d-flex align-center justify-space-between mb-3">
       <div>
         <div class="text-h6 font-weight-bold">Primeira Sub-rede (Network CIDR)</div>
-        <div class="text-caption text-medium-emphasis">
+        <div class="text-caption text-high-emphasis">
           Cadastre a faixa de IP para que o NetMonitor descubra seus dispositivos.
         </div>
       </div>

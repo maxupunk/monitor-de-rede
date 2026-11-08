@@ -16,7 +16,7 @@
                   : `Configurar: ${selectedTemplate?.title}`
               }}
             </div>
-            <div class="text-caption text-grey">
+            <div class="text-caption text-high-emphasis">
               {{
                 step === 1
                   ? 'Escolha um template de card ou reative um painel do dashboard'
@@ -64,7 +64,8 @@
           <v-row>
             <v-col v-for="tmpl in filteredTemplates" :key="tmpl.type" cols="12" sm="6">
               <v-card
-                variant="outlined"
+                border
+                flat
                 class="h-100 d-flex flex-column rounded-lg transition-all border-dashed"
               >
                 <v-card-item class="pb-2">
@@ -89,14 +90,14 @@
                   </v-card-subtitle>
                 </v-card-item>
 
-                <v-card-text class="pt-0 text-caption text-grey-darken-1 flex-grow-1">
+                <v-card-text class="pt-0 text-caption text-high-emphasis flex-grow-1">
                   {{ tmpl.description }}
                 </v-card-text>
 
                 <v-divider></v-divider>
 
                 <v-card-actions class="pa-3 justify-space-between bg-surface-light">
-                  <span class="text-caption text-grey">Múltiplas instâncias</span>
+                  <span class="text-caption text-high-emphasis">Múltiplas instâncias</span>
                   <v-btn
                     color="primary"
                     variant="flat"
@@ -115,7 +116,7 @@
         <!-- Seção 2: Painéis Padrão do Dashboard -->
         <div v-if="selectedTab === 'all' || selectedTab === 'standard'">
           <div
-            class="text-subtitle-2 font-weight-bold mb-2 text-grey-darken-2 d-flex align-center ga-2"
+            class="text-subtitle-2 font-weight-bold mb-2 text-high-emphasis d-flex align-center ga-2"
           >
             <v-icon size="18">mdi-view-dashboard-outline</v-icon>
             Painéis Integrados do Sistema
@@ -124,14 +125,15 @@
           <v-row>
             <v-col v-for="widget in filteredStandardWidgets" :key="widget.id" cols="12" sm="6">
               <v-card
-                variant="outlined"
+                border
+                flat
                 class="h-100 d-flex flex-column rounded-lg transition-all"
-                :class="{ 'border-info': widget.visible }"
+                :class="{ 'border-info border-opacity-100': widget.visible }"
               >
                 <v-card-item class="pb-2">
                   <template #prepend>
                     <v-avatar
-                      :color="widget.visible ? 'info' : 'grey-lighten-1'"
+                      :color="widget.visible ? 'info' : 'grey'"
                       variant="tonal"
                       size="40"
                       class="mr-3"
@@ -149,7 +151,7 @@
                   </v-card-subtitle>
                 </v-card-item>
 
-                <v-card-text class="pt-0 text-caption text-grey-darken-1 flex-grow-1">
+                <v-card-text class="pt-0 text-caption text-high-emphasis flex-grow-1">
                   {{ widget.description }}
                 </v-card-text>
 

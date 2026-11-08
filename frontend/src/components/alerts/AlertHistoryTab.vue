@@ -1,6 +1,6 @@
 <template>
   <div class="d-flex align-center justify-space-between mb-3 flex-wrap ga-2">
-    <div class="text-body-2 text-grey-darken-1">
+    <div class="text-body-2 text-high-emphasis">
       Todos os alertas já registrados, do mais recente para o mais antigo.
     </div>
     <v-chip v-if="history.total.value > 0" size="small" variant="outlined" color="primary">
@@ -55,7 +55,7 @@
             <td>{{ formatDateTime(alert.startedAt || alert.createdAt) }}</td>
             <td>
               <span v-if="alert.resolvedAt">{{ formatDateTime(alert.resolvedAt) }}</span>
-              <span v-else class="text-grey">Em aberto</span>
+              <span v-else class="text-high-emphasis">Em aberto</span>
             </td>
           </tr>
         </tbody>
@@ -87,7 +87,7 @@
               {{ problemKindLabel(alert.data?.problemKind) }}
             </v-chip>
           </div>
-          <span class="text-caption text-grey d-flex align-center ga-1">
+          <span class="text-caption text-high-emphasis d-flex align-center ga-1">
             <v-icon size="12">mdi-clock-outline</v-icon>
             {{ formatDateTime(alert.startedAt || alert.createdAt) }}
           </span>
@@ -96,12 +96,12 @@
         <div class="text-subtitle-1 font-weight-bold text-break text-high-emphasis leading-tight">
           {{ alert.title }}
         </div>
-        <div v-if="alert.message" class="text-body-2 text-grey-darken-1 text-break mt-1">
+        <div v-if="alert.message" class="text-body-2 text-high-emphasis text-break mt-1">
           {{ alert.message }}
         </div>
 
         <div
-          class="text-caption text-grey pt-2 mt-1 border-t d-flex align-center justify-space-between flex-wrap ga-1"
+          class="text-caption text-high-emphasis pt-2 mt-1 border-t d-flex align-center justify-space-between flex-wrap ga-1"
         >
           <span>Início: {{ formatDateTime(alert.startedAt || alert.createdAt) }}</span>
           <span>
@@ -116,7 +116,9 @@
     </div>
 
     <template #empty>
-      <div class="text-caption text-grey text-center py-4">Nenhum outro alerta no histórico.</div>
+      <div class="text-caption text-high-emphasis text-center py-4">
+        Nenhum outro alerta no histórico.
+      </div>
     </template>
   </v-infinite-scroll>
 </template>

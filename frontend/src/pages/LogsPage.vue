@@ -136,7 +136,7 @@
           ></v-select>
         </v-col>
       </v-row>
-      <div v-if="windowLabel" class="text-caption text-grey mt-2">
+      <div v-if="windowLabel" class="text-caption text-high-emphasis mt-2">
         Mostrando registros {{ windowLabel }}.
       </div>
     </v-card>

@@ -26,7 +26,7 @@
     <template v-else>
       <v-row dense class="mb-2">
         <v-col v-for="tile in tiles" :key="tile.title" cols="4">
-          <v-card rounded="lg" border class="pa-3 pa-sm-4 h-100">
+          <v-card elevation="2" rounded="lg" class="pa-3 pa-sm-4 h-100">
             <div class="d-flex align-center justify-space-between ga-2">
               <div>
                 <div class="text-body-2 font-weight-medium">{{ tile.title }}</div>
@@ -68,7 +68,7 @@
 
       <WifiWatchedPanel class="mb-4" />
 
-      <v-card rounded="lg" border>
+      <v-card elevation="2" rounded="lg">
         <v-card-text class="d-flex flex-column ga-4">
           <WifiStationFilters v-model="filter" :counts="counts" :devices="deviceOptions" />
           <WifiStationsTable

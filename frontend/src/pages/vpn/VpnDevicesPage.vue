@@ -223,13 +223,13 @@
             </div>
 
             <!-- Middle: Perfil, IP e Tráfego -->
-            <div class="d-flex flex-column ga-1 text-caption text-grey">
+            <div class="d-flex flex-column ga-1 text-caption text-high-emphasis">
               <div class="d-flex flex-wrap align-center ga-2">
                 <v-chip size="x-small" variant="tonal">
                   <v-icon start size="12">{{ profileIcon(item.deviceProfile) }}</v-icon>
                   {{ profileLabel(item.deviceProfile) }}
                 </v-chip>
-                <span class="font-mono text-medium-emphasis">{{
+                <span class="font-mono text-high-emphasis">{{
                   item.device?.ipAddress || '—'
                 }}</span>
               </div>
@@ -325,7 +325,7 @@
             @keyup.enter="submitRename"
           ></v-text-field>
 
-          <div class="text-caption text-medium-emphasis">
+          <div class="text-caption text-high-emphasis">
             O IP na VPN e as chaves não mudam — o túnel continua no ar. Os monitores de ping e SNMP
             acompanham o novo nome.
           </div>

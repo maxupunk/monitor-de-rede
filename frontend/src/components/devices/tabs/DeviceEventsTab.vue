@@ -30,7 +30,7 @@
                 </v-chip>
               </td>
               <td class="text-body-2">{{ evt.message }}</td>
-              <td class="text-caption text-grey">{{ evt.createdAt }}</td>
+              <td class="text-caption text-high-emphasis">{{ evt.createdAt }}</td>
             </tr>
           </tbody>
         </v-table>
@@ -60,7 +60,7 @@
             >
               {{ (evt.severity || 'INFO').toUpperCase() }}
             </v-chip>
-            <span class="text-caption text-grey d-flex align-center ga-1">
+            <span class="text-caption text-high-emphasis d-flex align-center ga-1">
               <v-icon size="12">mdi-clock-outline</v-icon>
               {{ evt.createdAt }}
             </span>
@@ -72,7 +72,7 @@
       </div>
 
       <template #empty>
-        <div class="text-caption text-grey text-center py-4">
+        <div class="text-caption text-high-emphasis text-center py-4">
           Nenhum outro evento registrado no histórico.
         </div>
       </template>

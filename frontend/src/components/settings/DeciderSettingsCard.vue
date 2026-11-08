@@ -1,5 +1,5 @@
 <template>
-  <v-card class="rounded-lg">
+  <v-card elevation="2" class="rounded-lg">
     <v-card-title class="font-weight-bold d-flex align-center justify-space-between flex-wrap ga-2">
       <div class="d-flex align-center flex-wrap ga-2">
         <v-icon color="primary">mdi-tools</v-icon>

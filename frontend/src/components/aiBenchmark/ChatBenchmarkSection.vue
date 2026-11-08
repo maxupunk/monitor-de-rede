@@ -1,8 +1,8 @@
 <template>
   <div>
-    <v-card v-if="loading && !report" variant="outlined" class="pa-8 text-center">
+    <v-card v-if="loading && !report" elevation="2" class="pa-8 text-center">
       <v-progress-circular indeterminate color="primary" class="mb-3" />
-      <div class="text-body-2 text-medium-emphasis">Carregando resultados dos modelos de chat…</div>
+      <div class="text-body-2 text-high-emphasis">Carregando resultados dos modelos de chat…</div>
     </v-card>
 
     <v-alert v-else-if="error" type="error" variant="tonal" class="mb-4">
@@ -11,7 +11,7 @@
 
     <template v-else-if="report">
       <!-- Barra de seleção de suíte e portão de qualidade -->
-      <v-card variant="outlined" class="mb-4 pa-3">
+      <v-card elevation="2" class="mb-4 pa-3">
         <div class="d-flex flex-wrap align-center justify-space-between ga-3">
           <div class="d-flex flex-wrap align-center ga-3">
             <span class="text-subtitle-2 font-weight-bold">Suíte de avaliação:</span>
@@ -35,7 +35,7 @@
             </v-btn-toggle>
           </div>
 
-          <div class="d-flex flex-wrap align-center ga-2 text-caption text-medium-emphasis">
+          <div class="d-flex flex-wrap align-center ga-2 text-caption text-high-emphasis">
             <v-chip size="x-small" color="success" variant="tonal">
               <v-icon start size="12">mdi-gate</v-icon>
               Portão: Nota ≥ {{ percent(report.minScore) }} · Ferramentas ≥
@@ -55,7 +55,7 @@
               Família ajustada para o NetMonitor (3 quantizações aprovadas no portão)
             </span>
           </div>
-          <span class="text-caption text-medium-emphasis">
+          <span class="text-caption text-high-emphasis">
             Dispensa o roteamento de ferramentas do Decisor (envia prompt enxuto direto ao Ollama)
           </span>
         </div>
@@ -69,7 +69,8 @@
             data-testid="chat-benchmark-quant-card"
           >
             <v-card
-              :variant="card.row.recommended ? 'tonal' : 'outlined'"
+              border
+              :variant="card.row.recommended ? 'tonal' : 'flat'"
               :color="card.row.recommended ? 'primary' : undefined"
               class="pa-4 fill-height d-flex flex-column justify-space-between"
             >
@@ -112,7 +113,7 @@
                 <div class="text-subtitle-1 font-weight-bold font-mono">
                   {{ card.row.model }}
                 </div>
-                <div class="text-caption text-medium-emphasis mb-3">
+                <div class="text-caption text-high-emphasis mb-3">
                   {{ card.row.label }} · {{ card.row.parameterSize }}
                 </div>
               </div>
@@ -121,24 +122,24 @@
                 <v-divider class="mb-3" />
                 <div class="d-flex align-center justify-space-between flex-wrap ga-2">
                   <div>
-                    <div class="text-caption text-medium-emphasis">
+                    <div class="text-caption text-high-emphasis">
                       {{ activeSuite === 'blind' ? 'Cenários reais' : 'Suíte oficial' }}
                     </div>
                     <div class="text-h5 font-weight-bold text-success font-mono">
                       {{ percent(card.split.overall) }}
                     </div>
-                    <div class="text-caption text-medium-emphasis font-mono">
+                    <div class="text-caption text-high-emphasis font-mono">
                       {{ activeSuite === 'blind' ? 'Bench' : 'Blind' }}:
                       {{ percent(card.otherSplit.overall) }}
                     </div>
                   </div>
 
                   <div class="text-right">
-                    <div class="text-caption text-medium-emphasis">Ferramentas · Segurança</div>
+                    <div class="text-caption text-high-emphasis">Ferramentas · Segurança</div>
                     <div class="text-body-2 font-weight-bold font-mono">
                       {{ percent(card.split.tools) }} · {{ percent(card.split.safety) }}
                     </div>
-                    <div class="text-caption text-medium-emphasis font-mono">
+                    <div class="text-caption text-high-emphasis font-mono">
                       {{ formatTokensPerSecond(card.split.tokensPerS) }} · p95
                       {{ formatSecondsPt(card.split.turnP95Ms) }}
                     </div>
@@ -151,7 +152,7 @@
       </div>
 
       <!-- Tabela comparativa completa -->
-      <v-card variant="outlined">
+      <v-card elevation="2">
         <v-card-title class="d-flex flex-wrap align-center justify-space-between ga-2 py-3 px-4">
           <div class="d-flex align-center ga-2">
             <v-icon size="20" color="primary">mdi-table</v-icon>
@@ -163,7 +164,7 @@
               }})
             </span>
           </div>
-          <div class="text-caption text-medium-emphasis">
+          <div class="text-caption text-high-emphasis">
             Janela {{ (report.numCtx / 1024).toFixed(0) }}k tokens · {{ report.hardware }} · medido
             em {{ report.measuredOn }}
           </div>
@@ -209,7 +210,7 @@
               :class="{ 'recommended-row': item.row.recommended }"
               data-testid="chat-benchmark-row"
             >
-              <td class="text-medium-emphasis font-mono">{{ item.position }}</td>
+              <td class="text-high-emphasis font-mono">{{ item.position }}</td>
               <td>
                 <div class="d-flex align-center flex-wrap ga-1">
                   <span class="font-weight-medium font-mono">{{ item.row.model }}</span>
@@ -243,7 +244,7 @@
                     Em uso
                   </v-chip>
                 </div>
-                <div v-if="item.row.description" class="text-caption text-medium-emphasis mt-1">
+                <div v-if="item.row.description" class="text-caption text-high-emphasis mt-1">
                   {{ item.row.description }}
                 </div>
               </td>
@@ -264,7 +265,7 @@
                 </v-chip>
                 <div
                   v-if="!item.verdict.passed"
-                  class="text-caption text-medium-emphasis mt-1"
+                  class="text-caption text-high-emphasis mt-1"
                   style="font-size: 11px; max-width: 150px; margin: 0 auto"
                 >
                   {{ item.verdict.reason }}
@@ -290,13 +291,13 @@
                     {{ percent(item.split.overall) }}
                   </v-chip>
                 </div>
-                <div class="text-caption text-medium-emphasis font-mono">
+                <div class="text-caption text-high-emphasis font-mono">
                   IC 90%:
                   {{ formatConfidenceInterval(item.split.overallLow, item.split.overallHigh) }}
                 </div>
                 <div
                   v-if="item.otherSplit"
-                  class="text-caption text-medium-emphasis font-mono"
+                  class="text-caption text-high-emphasis font-mono"
                   style="font-size: 11px"
                 >
                   {{ activeSuite === 'blind' ? 'Suíte oficial' : 'Cenários reais' }}:
@@ -344,7 +345,7 @@
                 <v-chip size="x-small" :color="item.speed.color" variant="tonal">
                   {{ item.speed.label }}
                 </v-chip>
-                <div class="text-caption text-medium-emphasis mt-1">
+                <div class="text-caption text-high-emphasis mt-1">
                   {{ formatTokensPerSecond(item.split.tokensPerS) }} ·
                   {{ percent(item.split.perfect) }} perfeitos
                 </div>
@@ -356,7 +357,7 @@
         <v-divider v-if="activeSuite === 'blind' && hiddenInBlindCount > 0" />
         <div
           v-if="activeSuite === 'blind' && hiddenInBlindCount > 0"
-          class="px-4 py-2 d-flex align-center justify-space-between flex-wrap ga-2 bg-surface-light text-caption text-medium-emphasis"
+          class="px-4 py-2 d-flex align-center justify-space-between flex-wrap ga-2 bg-surface-light text-caption text-high-emphasis"
         >
           <span>
             {{ hiddenInBlindCount }} modelo(s) de referência que reprovaram na Suíte Oficial não
@@ -369,11 +370,11 @@
       </v-card>
 
       <!-- Como ler -->
-      <v-card variant="outlined" class="mt-4 pa-4">
+      <v-card elevation="2" class="mt-4 pa-4">
         <div class="text-subtitle-2 font-weight-bold mb-2">
           Como ler os números do Assistente do Chat (Ollama)
         </div>
-        <div class="text-body-2 text-medium-emphasis">
+        <div class="text-body-2 text-high-emphasis">
           <p class="mb-2">
             O benchmark avalia o ciclo multi-turno completo do assistente local: descobrir e chamar
             as ferramentas certas do NetMonitor (<code class="font-mono">load_tools</code> + 61

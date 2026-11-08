@@ -5,7 +5,7 @@
       Notificações PWA & Web Push
     </v-card-title>
     <v-card-text class="mt-2">
-      <p class="text-caption text-grey-darken-1 mb-3">
+      <p class="text-caption text-high-emphasis mb-3">
         Configure as notificações Web Push para receber alertas de queda e falhas críticas
         diretamente no seu dispositivo,
         <strong>mesmo com o navegador ou o aplicativo fechados</strong>.
@@ -16,7 +16,7 @@
           <div class="d-flex align-center justify-space-between pa-3 rounded border h-100">
             <div>
               <div class="font-weight-bold text-subtitle-2">Permissão do Navegador</div>
-              <div class="text-caption text-grey">
+              <div class="text-caption text-high-emphasis">
                 {{
                   permissionState === 'granted'
                     ? 'Permissão concedida'
@@ -49,7 +49,7 @@
           <div class="d-flex align-center justify-space-between pa-3 rounded border h-100">
             <div>
               <div class="font-weight-bold text-subtitle-2">Web Push em 2º Plano</div>
-              <div class="text-caption text-grey">
+              <div class="text-caption text-high-emphasis">
                 {{
                   !isWebPushSupported
                     ? 'Não suportado no navegador'

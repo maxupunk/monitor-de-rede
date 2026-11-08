@@ -43,13 +43,13 @@
           <v-progress-circular indeterminate color="primary"></v-progress-circular>
         </div>
 
-        <div v-else-if="groups.length === 0" class="pa-8 text-center text-grey">
+        <div v-else-if="groups.length === 0" class="pa-8 text-center text-high-emphasis">
           Nenhuma regra pré-configurada disponível.
         </div>
 
         <div v-else>
           <div v-for="group in groups" :key="group.category">
-            <div class="px-6 py-2 bg-grey-lighten-4 text-caption font-weight-bold text-uppercase">
+            <div class="px-6 py-2 bg-surface-light text-caption font-weight-bold text-uppercase">
               {{ group.label }}
             </div>
             <v-list density="comfortable" class="py-0">
@@ -82,7 +82,7 @@
                   >
                     Básica
                   </v-chip>
-                  <v-chip v-if="template.applied" size="x-small" variant="outlined">
+                  <v-chip v-if="template.applied" size="x-small" variant="outlined" color="success">
                     Já configurada
                   </v-chip>
                   <v-chip
@@ -98,7 +98,7 @@
                 <v-list-item-subtitle class="text-wrap">
                   {{ template.description }}
                 </v-list-item-subtitle>
-                <div class="text-caption text-grey-darken-1 mt-1">
+                <div class="text-caption text-high-emphasis mt-1">
                   {{
                     describeRule(
                       template.condition,
@@ -131,7 +131,9 @@
           Marcar básicas
         </v-btn>
         <v-spacer></v-spacer>
-        <span class="text-caption text-grey mr-3">{{ selected.length }} selecionada(s)</span>
+        <span class="text-caption text-high-emphasis mr-3"
+          >{{ selected.length }} selecionada(s)</span
+        >
         <v-btn variant="text" @click="close">Cancelar</v-btn>
         <v-btn
           color="primary"

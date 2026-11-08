@@ -46,7 +46,7 @@
                 </v-chip>
               </div>
 
-              <div class="text-caption text-medium-emphasis">
+              <div class="text-caption text-high-emphasis">
                 Janela de {{ correlation.windowSeconds }}s
               </div>
             </div>
@@ -59,7 +59,7 @@
 
             <div
               v-if="correlation.impactedDevicesCount > 0"
-              class="text-caption text-medium-emphasis mt-2"
+              class="text-caption text-high-emphasis mt-2"
             >
               <v-icon size="small" class="mr-1">mdi-alert-octagon</v-icon>
               Raio de impacto: {{ correlation.impactedDevicesCount }} dispositivo{{
@@ -125,9 +125,11 @@
             </div>
             <div class="d-flex align-center flex-wrap ga-2">
               <span class="font-weight-medium">{{ correlation.primaryCause.title }}</span>
-              <span class="text-caption text-grey">{{ correlation.primaryCause.message }}</span>
+              <span class="text-caption text-high-emphasis">{{
+                correlation.primaryCause.message
+              }}</span>
             </div>
-            <div class="text-caption text-grey mt-1">
+            <div class="text-caption text-high-emphasis mt-1">
               Iniciado em {{ formatDateTime(correlation.primaryCause.startedAt) }}
             </div>
           </v-alert>
@@ -148,7 +150,7 @@
                 :key="imp.id"
                 size="x-small"
                 variant="outlined"
-                color="grey-darken-2"
+                color="primary"
               >
                 {{ imp.name }}
                 <span v-if="imp.ipAddress" class="text-caption opacity-75 ml-1">
@@ -186,7 +188,7 @@
             </v-list>
           </div>
 
-          <div v-else-if="!correlation.primaryCause" class="text-center py-4 text-medium-emphasis">
+          <div v-else-if="!correlation.primaryCause" class="text-center py-4 text-high-emphasis">
             <v-icon size="36" color="grey" class="mb-1">mdi-check-circle-outline</v-icon>
             <div class="text-caption">
               Nenhuma correlação em cascata identificada. O alerta parece ser um evento isolado.
@@ -250,7 +252,7 @@ function categoryColor(cat?: string): string {
     case 'site_outage':
       return 'amber-darken-3'
     default:
-      return 'grey-darken-1'
+      return 'grey'
   }
 }
 

@@ -6,7 +6,7 @@
           <v-icon color="primary">mdi-history</v-icon>
           Histórico de Execuções Recentes
         </h2>
-        <div class="text-subtitle-2 text-grey">Resultados das últimas verificações</div>
+        <div class="text-subtitle-2 text-high-emphasis">Resultados das últimas verificações</div>
       </div>
       <div class="d-flex align-center ga-2">
         <v-btn
@@ -60,10 +60,10 @@
                       >
                         {{ formatLatency(item.latencyMs) }}
                       </span>
-                      <span v-else class="text-grey">-</span>
+                      <span v-else class="text-high-emphasis">-</span>
                     </td>
                     <td>
-                      <span class="text-grey">{{ item.durationMs }} ms</span>
+                      <span class="text-high-emphasis">{{ item.durationMs }} ms</span>
                     </td>
                     <td>
                       <span>{{ formatDateTime(item.finishedAt, '-') }}</span>
@@ -100,14 +100,14 @@
                   >
                     {{ item.status ? item.status.toUpperCase() : 'UNKNOWN' }}
                   </v-chip>
-                  <span class="text-caption text-grey d-flex align-center ga-1">
+                  <span class="text-caption text-high-emphasis d-flex align-center ga-1">
                     <v-icon size="12">mdi-clock-outline</v-icon>
                     {{ formatDateTime(item.finishedAt, '-') }}
                   </span>
                 </div>
 
                 <div
-                  class="d-flex flex-wrap align-center justify-space-between ga-2 text-caption text-grey my-1"
+                  class="d-flex flex-wrap align-center justify-space-between ga-2 text-caption text-high-emphasis my-1"
                 >
                   <span>
                     Latência:
@@ -127,7 +127,7 @@
                   :class="
                     item.status === 'down'
                       ? 'text-error font-weight-medium'
-                      : 'text-body-2 text-grey-darken-1'
+                      : 'text-body-2 text-high-emphasis'
                   "
                   class="pt-1 mt-1 border-t text-break"
                 >
@@ -137,7 +137,7 @@
             </div>
 
             <template #empty>
-              <div class="text-caption text-grey text-center py-3">
+              <div class="text-caption text-high-emphasis text-center py-3">
                 Nenhum outro registro no histórico.
               </div>
             </template>

@@ -7,7 +7,7 @@
           <v-icon size="26" color="primary">mdi-chart-box-outline</v-icon>
           <h1 class="text-h5 font-weight-bold">Benchmark dos modelos de IA</h1>
         </div>
-        <p class="text-body-2 text-medium-emphasis mt-1 mb-0">
+        <p class="text-body-2 text-high-emphasis mt-1 mb-0">
           {{
             activeTab === 'chat'
               ? 'Desempenho real dos modelos locais do Assistente do Chat (Ollama) nas 61 ferramentas e cenários de rede do NetMonitor.'
@@ -29,7 +29,7 @@
     </div>
 
     <!-- Navegação por abas: Assistente do Chat × Decisor -->
-    <v-card variant="outlined" class="mb-4">
+    <v-card elevation="2" class="mb-4">
       <v-tabs
         :model-value="activeTab"
         color="primary"

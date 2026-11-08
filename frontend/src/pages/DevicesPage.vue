@@ -192,9 +192,9 @@
             </div>
 
             <!-- Middle: IP, Tipo, Monitorado, Site e Pai -->
-            <div class="d-flex flex-column ga-1 text-caption text-grey">
+            <div class="d-flex flex-column ga-1 text-caption text-high-emphasis">
               <div class="d-flex flex-wrap align-center ga-2">
-                <span v-if="item.ipAddress" class="font-mono text-medium-emphasis">
+                <span v-if="item.ipAddress" class="font-mono text-high-emphasis">
                   {{ item.ipAddress }}
                 </span>
                 <v-chip
@@ -218,7 +218,7 @@
 
               <div
                 v-if="item.site || item.parent"
-                class="d-flex flex-wrap align-center ga-2 text-caption text-medium-emphasis mt-0.5"
+                class="d-flex flex-wrap align-center ga-2 text-caption text-high-emphasis mt-0.5"
               >
                 <span v-if="item.site" class="d-inline-flex align-center ga-1">
                   <v-icon size="13">mdi-map-marker-outline</v-icon>
@@ -296,13 +296,13 @@
 
     <!-- Diálogo de Associação em Lote do Dispositivo Pai -->
     <v-dialog v-model="batchParentDialog" :fullscreen="$vuetify.display.xs" max-width="500">
-      <v-card class="rounded-xl pa-4 elevation-12">
+      <v-card class="rounded-lg pa-4 elevation-12">
         <v-card-title class="font-weight-bold d-flex align-center ga-2 pa-0 mb-3">
           <v-icon color="primary">mdi-sitemap</v-icon>
           <span>Definir Dispositivo Pai em Lote</span>
         </v-card-title>
         <v-card-text class="pa-0 mb-4">
-          <p class="text-body-2 text-medium-emphasis mb-3">
+          <p class="text-body-2 text-high-emphasis mb-3">
             Associar <strong>{{ selectedDeviceIds.length }}</strong> equipamento(s) selecionado(s) a
             um Switch ou Roteador pai para construção da topologia e inibição de alertas em cascata.
           </p>
@@ -328,10 +328,12 @@
                 </template>
                 <template #subtitle>
                   <div class="d-flex align-center ga-1 text-caption">
-                    <span v-if="item.ipAddress" class="font-mono text-grey-darken-1">
+                    <span v-if="item.ipAddress" class="font-mono text-high-emphasis">
                       {{ item.ipAddress }}
                     </span>
-                    <span v-if="item.siteName" class="text-grey">• {{ item.siteName }}</span>
+                    <span v-if="item.siteName" class="text-high-emphasis"
+                      >• {{ item.siteName }}</span
+                    >
                   </div>
                 </template>
                 <template #append>

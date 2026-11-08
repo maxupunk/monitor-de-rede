@@ -13,7 +13,7 @@
     </PageHeader>
 
     <!-- Disparo da varredura -->
-    <v-card variant="outlined" rounded="lg" class="mb-4 pa-3 pa-md-4">
+    <v-card elevation="2" rounded="lg" class="mb-4 pa-3 pa-md-4">
       <div class="d-flex flex-column flex-md-row align-stretch align-md-center ga-3">
         <v-select
           v-model="selectedNetworkId"
@@ -69,7 +69,7 @@
       class="mb-4"
     />
 
-    <v-card variant="outlined" rounded="lg">
+    <v-card elevation="2" rounded="lg">
       <v-tabs v-model="tab" color="primary" show-arrows>
         <v-tab value="results" prepend-icon="mdi-devices">
           Equipamentos

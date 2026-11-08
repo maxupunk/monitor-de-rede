@@ -23,17 +23,13 @@
         <!-- Passo 1: qual SGBD -->
         <v-row v-if="step === 'engine'" dense>
           <v-col v-for="item in DATABASE_ENGINES" :key="item.value" cols="12" sm="4">
-            <v-card
-              variant="outlined"
-              class="engine-card pa-4 text-center h-100"
-              @click="chooseEngine(item.value)"
-            >
+            <ChoiceCard class="pa-4 text-center h-100" @click="chooseEngine(item.value)">
               <v-avatar :color="item.color" variant="tonal" rounded="lg" size="52" class="mb-2">
                 <v-icon size="30">{{ item.icon }}</v-icon>
               </v-avatar>
               <div class="font-weight-bold">{{ item.label }}</div>
               <div class="text-caption text-high-emphasis">{{ item.hint }}</div>
-            </v-card>
+            </ChoiceCard>
           </v-col>
           <v-col v-if="showPickerOnEngineStep" cols="12" class="mt-2">
             <DatabaseContainerPicker :key="session" :engine="null" @picked="applyResolution" />
@@ -229,6 +225,7 @@
                 filter
                 variant="outlined"
                 color="primary"
+                base-color="primary"
               >
                 {{ name }}
               </v-chip>
@@ -302,6 +299,7 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
+import ChoiceCard from '@/components/ChoiceCard.vue'
 import type { DatabaseConnectionInput } from '@/bindings/DatabaseConnectionInput'
 import type { DatabaseConnectionResponse } from '@/bindings/DatabaseConnectionResponse'
 import type { DatabaseContainerResolution } from '@/bindings/DatabaseContainerResolution'
@@ -594,13 +592,6 @@ function close() {
 </script>
 
 <style scoped>
-.engine-card {
-  cursor: pointer;
-  transition: border-color 0.15s;
-}
-.engine-card:hover {
-  border-color: rgb(var(--v-theme-primary));
-}
 .section-title {
   font-weight: 700;
   font-size: 0.875rem;

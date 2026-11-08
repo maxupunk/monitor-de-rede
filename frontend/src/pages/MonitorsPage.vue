@@ -76,7 +76,7 @@
             Down ({{ counts.down }})
           </v-chip>
           <v-chip
-            :color="statusFilter === 'unknown' ? 'grey-darken-1' : undefined"
+            :color="statusFilter === 'unknown' ? 'grey' : undefined"
             :variant="statusFilter === 'unknown' ? 'flat' : 'tonal'"
             size="small"
             class="font-weight-medium cursor-pointer"
@@ -85,7 +85,7 @@
             Desconhecido ({{ counts.unknown }})
           </v-chip>
           <v-chip
-            :color="statusFilter === 'disabled' ? 'grey-darken-1' : undefined"
+            :color="statusFilter === 'disabled' ? 'grey' : undefined"
             :variant="statusFilter === 'disabled' ? 'flat' : 'tonal'"
             size="small"
             class="font-weight-medium cursor-pointer"

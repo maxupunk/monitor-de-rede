@@ -42,7 +42,7 @@
           <v-chip v-if="item.site?.name || item.siteId" size="small" variant="tonal" color="info">
             {{ item.site?.name || `Site #${item.siteId}` }}
           </v-chip>
-          <span v-else class="text-caption text-grey">Sem site</span>
+          <span v-else class="text-caption text-high-emphasis">Sem site</span>
         </template>
 
         <template #item.gateway="{ item }">
@@ -61,7 +61,7 @@
               </router-link>
             </template>
           </div>
-          <span v-else class="text-caption text-grey">Não configurado</span>
+          <span v-else class="text-caption text-high-emphasis">Não configurado</span>
         </template>
 
         <template #item.devicesCount="{ item }">
@@ -74,7 +74,7 @@
         <template #item.cidr="{ item }">
           <div class="d-flex align-center ga-2">
             <span class="font-weight-medium font-mono">{{ item.cidr }}</span>
-            <v-chip v-if="item.scannable" size="x-small" variant="tonal" color="grey-darken-1">
+            <v-chip v-if="item.scannable" size="x-small" variant="tonal" color="info">
               {{ item.usableHosts }} host(s)
             </v-chip>
             <v-chip v-else size="x-small" variant="tonal" color="error">
@@ -90,7 +90,7 @@
           <span v-if="item.lastScanAt" class="text-body-2">
             {{ formatDateTime(item.lastScanAt) }}
           </span>
-          <span v-else class="text-caption text-grey">Nunca varrida</span>
+          <span v-else class="text-caption text-high-emphasis">Nunca varrida</span>
         </template>
 
         <template #item.actions="{ item }">
@@ -132,12 +132,12 @@
             </div>
 
             <!-- Middle: CIDR, Hosts, Gateway e Site -->
-            <div class="d-flex flex-column ga-1 text-caption text-grey">
+            <div class="d-flex flex-column ga-1 text-caption text-high-emphasis">
               <div class="d-flex flex-wrap align-center ga-2">
                 <span class="font-weight-medium font-mono text-body-2 text-high-emphasis">{{
                   item.cidr
                 }}</span>
-                <v-chip v-if="item.scannable" size="x-small" variant="tonal" color="grey-darken-1">
+                <v-chip v-if="item.scannable" size="x-small" variant="tonal" color="info">
                   {{ item.usableHosts }} hosts
                 </v-chip>
                 <v-chip v-else size="x-small" variant="tonal" color="error">
@@ -147,7 +147,7 @@
 
               <div v-if="item.gateway" class="d-flex align-center ga-1 text-truncate">
                 <span>Gateway:</span>
-                <span class="font-mono text-medium-emphasis">{{ item.gateway }}</span>
+                <span class="font-mono text-high-emphasis">{{ item.gateway }}</span>
                 <span v-if="getGatewayDevice(item.gateway)">
                   ({{ getGatewayDevice(item.gateway)?.name }})
                 </span>
@@ -160,7 +160,7 @@
                     item.site?.name || (item.siteId ? `Site #${item.siteId}` : 'Sem local definido')
                   }}
                 </span>
-                <span class="d-inline-flex align-center ga-1 text-grey">
+                <span class="d-inline-flex align-center ga-1 text-high-emphasis">
                   <v-icon size="12">mdi-history</v-icon>
                   {{ item.lastScanAt ? formatDateTime(item.lastScanAt) : 'Nunca varrida' }}
                 </span>

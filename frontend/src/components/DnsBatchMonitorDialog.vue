@@ -78,12 +78,12 @@
 
         <!-- Etapa 1: Lista de Resolvedores DNS -->
         <div class="d-flex align-center justify-space-between mb-2">
-          <div class="text-overline text-medium-emphasis">
+          <div class="text-overline text-high-emphasis">
             1 · Selecione os Resolvedores ({{ selectedKeys.length }} selecionado{{
               selectedKeys.length === 1 ? '' : 's'
             }})
           </div>
-          <span class="text-caption text-grey">
+          <span class="text-caption text-high-emphasis">
             {{ filteredResolvers.length }} disponível{{
               filteredResolvers.length === 1 ? '' : 'is'
             }}
@@ -92,13 +92,10 @@
 
         <v-row dense class="mb-4">
           <v-col v-for="item in filteredResolvers" :key="item.key" cols="12" sm="6">
-            <v-card
-              variant="outlined"
-              class="h-100 pa-3 rounded-lg transition-all resolver-card cursor-pointer"
-              :class="{
-                'border-deep-purple bg-deep-purple-lighten-5': isSelected(item),
-                'opacity-75': item.isMonitored,
-              }"
+            <ChoiceCard
+              :selected="isSelected(item)"
+              class="h-100 pa-3"
+              :class="{ 'opacity-75': item.isMonitored }"
               @click="toggleItem(item)"
             >
               <div class="d-flex align-center justify-space-between ga-2">
@@ -126,7 +123,7 @@
                       {{ item.name }}
                     </div>
                     <div
-                      class="text-caption text-medium-emphasis text-truncate font-family-monospace"
+                      class="text-caption text-high-emphasis text-truncate font-family-monospace"
                       :title="item.server"
                     >
                       {{ item.server }}
@@ -150,12 +147,12 @@
                   </v-chip>
                 </div>
               </div>
-            </v-card>
+            </ChoiceCard>
           </v-col>
         </v-row>
 
         <!-- Etapa 2: Configurações do Monitoramento -->
-        <div class="text-overline text-medium-emphasis mt-6 mb-2">
+        <div class="text-overline text-high-emphasis mt-6 mb-2">
           2 · Configuração dos Testes DNS
         </div>
 
@@ -250,7 +247,7 @@
       <!-- Rodapé de Ações -->
       <v-card-actions class="pa-4 justify-space-between flex-wrap ga-2">
         <div class="d-flex align-center ga-2">
-          <span class="text-caption text-medium-emphasis">
+          <span class="text-caption text-high-emphasis">
             {{ selectedKeys.length }} servidor{{
               selectedKeys.length === 1 ? '' : 'es'
             }}
@@ -282,6 +279,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import ChoiceCard from '@/components/ChoiceCard.vue'
 import {
   useDnsPerformanceStore,
   type DnsBatchProvisionRequest,
@@ -526,11 +524,4 @@ async function submit() {
 }
 </script>
 
-<style scoped>
-.resolver-card {
-  transition: all 0.2s ease-in-out;
-}
-.resolver-card:hover {
-  border-color: rgba(103, 58, 183, 0.5) !important;
-}
-</style>
+<style scoped></style>

@@ -6,7 +6,7 @@
       <h1 class="text-h5 text-md-h4 font-weight-bold text-break">{{ title }}</h1>
       <p
         v-if="subtitle"
-        class="text-subtitle-2 text-md-subtitle-1 text-grey-darken-1 mt-1 text-break"
+        class="text-subtitle-2 text-md-subtitle-1 text-high-emphasis mt-1 text-break"
       >
         {{ subtitle }}
       </p>

@@ -129,7 +129,8 @@
 
           <v-col cols="12" md="6" xl="4">
             <v-card
-              variant="outlined"
+              border
+              flat
               rounded="lg"
               class="add-card h-100 pa-6 d-flex flex-column align-center justify-center text-center"
               @click="openDatabaseForm(null)"
@@ -474,6 +475,7 @@ async function removeStorage(storage: StorageDestinationResponse) {
 .add-card {
   cursor: pointer;
   border-style: dashed;
+  border-color: rgba(var(--v-theme-primary), 0.5);
   min-height: 220px;
   transition: border-color 0.15s;
 }

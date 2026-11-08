@@ -2,7 +2,7 @@
   <div>
     <div class="mb-4">
       <div class="text-h6 font-weight-bold">Endereços por onde este Servidor é Alcançado</div>
-      <div class="text-caption text-medium-emphasis">
+      <div class="text-caption text-high-emphasis">
         Equipamentos na mesma rede usam a LAN; quem vem pela internet usa o IP público. O NetMonitor
         usa essa lista para sugerir configurações de Syslog e VPN.
       </div>
@@ -21,7 +21,7 @@
                 <span class="font-weight-bold">Rede Local (LAN)</span>
                 <v-chip size="x-small" color="primary" variant="flat"> Recomendado Padrão </v-chip>
               </div>
-              <div class="text-caption text-medium-emphasis mb-2">
+              <div class="text-caption text-high-emphasis mb-2">
                 Usado por switches, roteadores e servidores na mesma rede física.
               </div>
               <v-text-field
@@ -62,7 +62,7 @@
                   Detectar IP Externo
                 </v-btn>
               </div>
-              <div class="text-caption text-medium-emphasis mb-2">
+              <div class="text-caption text-high-emphasis mb-2">
                 Usado por filiais e dispositivos remotos que acessam o servidor via internet.
               </div>
               <v-text-field
@@ -89,7 +89,7 @@
             </v-avatar>
             <div class="flex-grow-1 min-width-0">
               <span class="font-weight-bold">Túnel VPN (WireGuard)</span>
-              <div class="text-caption text-medium-emphasis mb-2">
+              <div class="text-caption text-high-emphasis mb-2">
                 Endereço interno do servidor dentro do túnel criptografado.
               </div>
               <v-text-field
@@ -116,7 +116,7 @@
             </v-avatar>
             <div class="flex-grow-1 min-width-0">
               <span class="font-weight-bold">Domínio (opcional)</span>
-              <div class="text-caption text-medium-emphasis mb-2">
+              <div class="text-caption text-high-emphasis mb-2">
                 Nome pelo qual o servidor é acessado. Quando preenchido, vira o endereço padrão dos
                 comandos de instalação dos servidores remotos.
               </div>

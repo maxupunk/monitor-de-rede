@@ -79,7 +79,11 @@
       </v-col>
     </v-row>
 
-    <v-card v-else-if="store.library.length === 0" border flat class="rounded-lg text-center pa-8">
+    <v-card
+      v-else-if="store.library.length === 0"
+      elevation="2"
+      class="rounded-lg text-center pa-8"
+    >
       <v-icon size="48" color="primary">mdi-puzzle-plus-outline</v-icon>
       <div class="text-h6 mt-2">Nenhum plugin ainda</div>
       <p class="text-body-2 mb-4">Crie um no editor, peça à IA ou importe um pacote.</p>

@@ -226,7 +226,7 @@
                   hide-details
                   label="Permitir que os dispositivos VPN se enxerguem entre si"
                 ></v-switch>
-                <div class="text-caption text-grey-darken-1 ml-1">
+                <div class="text-caption text-high-emphasis ml-1">
                   Desligado (recomendado): cada roteador fala apenas com o NetMonitor, então um
                   equipamento comprometido não alcança os demais.
                 </div>

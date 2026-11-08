@@ -76,11 +76,11 @@
           <v-icon size="14" class="mr-1">mdi-router-network</v-icon>
           {{ deviceName(item.deviceId) }}
         </RouterLink>
-        <span v-if="item.monitorId" class="text-caption text-grey">
+        <span v-if="item.monitorId" class="text-caption text-high-emphasis">
           Monitor #{{ item.monitorId }}
         </span>
       </div>
-      <span v-else class="text-caption text-grey">Todos os dispositivos</span>
+      <span v-else class="text-caption text-high-emphasis">Todos os dispositivos</span>
     </template>
 
     <template #item.metric="{ item }">
@@ -169,7 +169,7 @@
         </div>
 
         <!-- Middle: Métrica e Condição -->
-        <div class="text-body-2 text-grey-darken-1">
+        <div class="text-body-2 text-high-emphasis">
           <span>{{ metricLabel(item.condition?.field) }}</span>
           <span class="mx-1">{{ operatorLabel(item.condition?.operator).toLowerCase() }}</span>
           <strong class="text-high-emphasis">
@@ -178,7 +178,7 @@
         </div>
 
         <!-- Meta: Tolerância e Escopo -->
-        <div class="text-caption text-grey d-flex align-center flex-wrap ga-2">
+        <div class="text-caption text-high-emphasis d-flex align-center flex-wrap ga-2">
           <span class="d-flex align-center ga-1">
             <v-icon size="12">mdi-timer-outline</v-icon>
             Tolerância: {{ durationLabel(item.durationSeconds) }}

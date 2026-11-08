@@ -1,6 +1,6 @@
 <template>
   <div>
-    <v-card v-if="canWrite" border flat class="rounded-lg mb-4">
+    <v-card v-if="canWrite" elevation="2" class="rounded-lg mb-4">
       <v-card-text class="d-flex flex-wrap align-center ga-3">
         <v-autocomplete
           v-model="candidateId"
@@ -52,8 +52,7 @@
     <v-row dense>
       <v-col v-for="member in view.members" :key="member.deviceId" cols="12" md="6" xl="4">
         <v-card
-          border
-          flat
+          elevation="2"
           class="rounded-lg h-100"
           :link="canConfigure(member)"
           @click="canConfigure(member) && emit('configure', member.deviceId)"

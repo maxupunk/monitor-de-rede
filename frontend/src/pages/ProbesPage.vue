@@ -69,17 +69,17 @@
             </div>
 
             <!-- Middle: Localização, IP e Heartbeat -->
-            <div class="d-flex flex-column ga-1 text-caption text-grey">
+            <div class="d-flex flex-column ga-1 text-caption text-high-emphasis">
               <div class="d-flex flex-wrap align-center ga-2">
                 <span v-if="item.location" class="d-inline-flex align-center ga-1">
                   <v-icon size="13">mdi-map-marker-outline</v-icon>
                   {{ item.location }}
                 </span>
-                <span v-if="item.ipAddress" class="font-mono text-medium-emphasis">
+                <span v-if="item.ipAddress" class="font-mono text-high-emphasis">
                   {{ item.ipAddress }}
                 </span>
               </div>
-              <div class="d-flex align-center ga-1 text-grey-darken-1 mt-0.5">
+              <div class="d-flex align-center ga-1 text-high-emphasis mt-0.5">
                 <v-icon size="12">mdi-heart-pulse</v-icon>
                 <span>Último heartbeat: {{ item.lastHeartbeatAt || '—' }}</span>
               </div>

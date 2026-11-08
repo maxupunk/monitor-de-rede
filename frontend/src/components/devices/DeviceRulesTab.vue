@@ -11,7 +11,7 @@
           diferente: apagar uma regra deste equipamento afeta só ele; apagar
           uma global afeta o inventário inteiro.
         -->
-        <div class="text-caption text-grey mt-1">
+        <div class="text-caption text-high-emphasis mt-1">
           {{ contagem }} São as mesmas regras da Central de Alertas — editar aqui ou lá altera o
           mesmo registro.
         </div>
@@ -74,7 +74,7 @@
           <tr v-for="regra in regras" :key="regra.id">
             <td class="font-weight-medium">
               {{ regra.name }}
-              <div v-if="escopoDaRegra(regra)" class="text-caption text-grey">
+              <div v-if="escopoDaRegra(regra)" class="text-caption text-high-emphasis">
                 {{ escopoDaRegra(regra) }}
               </div>
             </td>
@@ -172,12 +172,12 @@
             </v-icon>
             {{ ehGlobal(regra) ? 'Global' : 'Dispositivo' }}
           </v-chip>
-          <span v-if="escopoDaRegra(regra)" class="text-caption text-grey">
+          <span v-if="escopoDaRegra(regra)" class="text-caption text-high-emphasis">
             {{ escopoDaRegra(regra) }}
           </span>
         </div>
 
-        <div class="text-caption text-grey-darken-1 mt-1">
+        <div class="text-caption text-high-emphasis mt-1">
           {{
             describeRule(
               regra.condition,
@@ -204,7 +204,7 @@
               :aria-label="`Ativar ou desativar a regra ${regra.name}`"
               @update:model-value="alternar(regra, $event)"
             />
-            <span class="text-caption text-grey">{{
+            <span class="text-caption text-high-emphasis">{{
               regra.enabled !== false ? 'Ativa' : 'Desativada'
             }}</span>
           </div>

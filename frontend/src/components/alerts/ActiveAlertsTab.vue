@@ -168,7 +168,7 @@
             </v-chip>
           </div>
 
-          <span class="text-caption text-grey d-flex align-center ga-1 flex-shrink-0">
+          <span class="text-caption text-high-emphasis d-flex align-center ga-1 flex-shrink-0">
             <v-icon size="12">mdi-clock-outline</v-icon>
             {{ formatDateTime(item.startedAt || item.createdAt) }}
           </span>
@@ -179,7 +179,7 @@
           <div class="text-subtitle-1 font-weight-bold text-break text-high-emphasis leading-tight">
             {{ item.title }}
           </div>
-          <div class="text-body-2 text-grey-darken-1 text-break">
+          <div class="text-body-2 text-high-emphasis text-break">
             {{ item.message }}
           </div>
           <v-alert

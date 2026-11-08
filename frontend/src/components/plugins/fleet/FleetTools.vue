@@ -5,7 +5,7 @@
     </v-alert>
     <v-row dense>
       <v-col v-for="tool in tools" :key="tool.id" cols="12" md="6" xl="4">
-        <v-card border flat class="rounded-lg h-100 d-flex flex-column">
+        <v-card elevation="2" class="rounded-lg h-100 d-flex flex-column">
           <v-card-item>
             <template #prepend>
               <v-avatar color="primary" variant="tonal" rounded="lg">

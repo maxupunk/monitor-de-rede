@@ -63,6 +63,7 @@
       :value="pluginTab(plugin.id)"
       :prepend-icon="plugin.icon"
       :color="blockedStatus(plugin)?.color ?? PLUGIN_COLOR"
+      :base-color="blockedStatus(plugin)?.color ?? PLUGIN_COLOR"
       variant="outlined"
       filter
     >
@@ -76,6 +77,7 @@
       :value="section.value"
       :prepend-icon="section.icon"
       color="secondary"
+      base-color="secondary"
       variant="outlined"
       filter
     >

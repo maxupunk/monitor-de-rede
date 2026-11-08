@@ -157,45 +157,35 @@
         <template #item.resource="{ item }">
           <div>
             <div class="font-weight-medium">{{ resourceLabel(item.resourceType) }}</div>
-            <div v-if="item.resourceLabel" class="text-caption text-grey">
+            <div v-if="item.resourceLabel" class="text-caption text-high-emphasis">
               {{ item.resourceLabel }}
             </div>
           </div>
         </template>
         <template #expanded-row="{ columns, item }">
           <tr>
-            <td :colspan="columns.length" class="pa-4 bg-grey-lighten-4">
+            <td :colspan="columns.length" class="pa-4 bg-surface-light">
               <div class="text-subtitle-2 font-weight-bold mb-2">Detalhes do evento</div>
               <v-row>
                 <v-col cols="12" md="6">
-                  <div class="text-caption text-grey mb-1">Endereço IP</div>
+                  <div class="text-caption text-high-emphasis mb-1">Endereço IP</div>
                   <div>{{ item.ipAddress ?? '—' }}</div>
                 </v-col>
                 <v-col cols="12" md="6">
-                  <div class="text-caption text-grey mb-1">User-Agent</div>
+                  <div class="text-caption text-high-emphasis mb-1">User-Agent</div>
                   <div class="text-truncate">{{ item.userAgent ?? '—' }}</div>
                 </v-col>
               </v-row>
               <div v-if="hasChanges(item.changes)" class="mt-4">
-                <div class="text-caption text-grey mb-1">Alterações</div>
+                <div class="text-caption text-high-emphasis mb-1">Alterações</div>
                 <div class="d-flex flex-column flex-md-row ga-4">
-                  <v-card
-                    v-if="item.changes?.old"
-                    variant="outlined"
-                    rounded="lg"
-                    class="flex-1-1-0 pa-3"
-                  >
+                  <v-card v-if="item.changes?.old" border flat rounded="lg" class="flex-1-1-0 pa-3">
                     <div class="text-caption font-weight-bold text-error mb-1">Anterior</div>
                     <pre class="text-body-2 overflow-x-auto">{{
                       JSON.stringify(item.changes.old, null, 2)
                     }}</pre>
                   </v-card>
-                  <v-card
-                    v-if="item.changes?.new"
-                    variant="outlined"
-                    rounded="lg"
-                    class="flex-1-1-0 pa-3"
-                  >
+                  <v-card v-if="item.changes?.new" border flat rounded="lg" class="flex-1-1-0 pa-3">
                     <div class="text-caption font-weight-bold text-success mb-1">Novo</div>
                     <pre class="text-body-2 overflow-x-auto">{{
                       JSON.stringify(item.changes.new, null, 2)
@@ -220,7 +210,7 @@
         </v-btn>
         <div class="mx-4 text-body-2">
           Página {{ auditStore.meta.currentPage }} de {{ auditStore.meta.lastPage }}
-          <span class="text-grey">({{ auditStore.meta.total }} registros)</span>
+          <span class="text-high-emphasis">({{ auditStore.meta.total }} registros)</span>
         </div>
         <v-btn
           variant="tonal"

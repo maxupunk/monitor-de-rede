@@ -29,8 +29,7 @@
 
     <v-card
       v-if="store.loaded && store.tasks.length === 0"
-      border
-      flat
+      elevation="2"
       rounded="lg"
       class="empty pa-8"
     >
@@ -57,7 +56,7 @@
       </p>
     </v-card>
 
-    <v-card v-else border flat rounded="lg">
+    <v-card v-else elevation="2" rounded="lg">
       <ResponsiveDataTable
         :headers="headers"
         :items="store.tasks"

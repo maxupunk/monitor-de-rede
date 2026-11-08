@@ -77,7 +77,7 @@
     <v-row class="mb-4">
       <v-col cols="12" sm="6">
         <v-card border flat class="pa-4 rounded-lg text-center">
-          <div class="text-caption text-grey">Total Recebido (RX)</div>
+          <div class="text-caption text-high-emphasis">Total Recebido (RX)</div>
           <div class="text-h6 font-weight-bold text-success">
             {{ formatBytes(vpnPeer.bytesRx) }}
           </div>
@@ -85,7 +85,7 @@
       </v-col>
       <v-col cols="12" sm="6">
         <v-card border flat class="pa-4 rounded-lg text-center">
-          <div class="text-caption text-grey">Total Enviado (TX)</div>
+          <div class="text-caption text-high-emphasis">Total Enviado (TX)</div>
           <div class="text-h6 font-weight-bold text-primary">
             {{ formatBytes(vpnPeer.bytesTx) }}
           </div>
@@ -98,8 +98,8 @@
       :series="vpnTrafficSeries"
       unit-type="bandwidth"
     />
-    <div v-else class="text-center text-grey py-10 border rounded-lg bg-grey-lighten-5">
-      <v-icon size="40" color="grey-lighten-1">mdi-chart-line-variant</v-icon>
+    <div v-else class="text-center text-high-emphasis py-10 border rounded-lg">
+      <v-icon size="40" color="primary">mdi-chart-line-variant</v-icon>
       <div class="mt-2 text-subtitle-2">
         Sem amostras de tráfego ainda. O histórico é coletado a cada 30s pelo scheduler.
       </div>

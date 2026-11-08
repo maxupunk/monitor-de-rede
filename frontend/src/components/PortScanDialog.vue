@@ -76,7 +76,7 @@
           </v-col>
 
           <v-col cols="12" class="pt-0">
-            <div class="text-caption text-grey-darken-1">
+            <div class="text-caption text-high-emphasis">
               {{ selectedPortCount.toLocaleString('pt-BR') }} porta(s) · pior caso aproximado:
               {{ estimatedDuration }}. Portas que recusam conexão terminam antes.
             </div>
@@ -170,14 +170,14 @@
             rounded
             class="mb-2"
           ></v-progress-linear>
-          <div class="text-caption text-grey-darken-1">
+          <div class="text-caption text-high-emphasis">
             {{ results?.length ?? 0 }} / {{ totalPortsBeingScanned }} portas verificadas
             <span v-if="openCount > 0"> — {{ openCount }} aberta(s) encontrada(s) até agora</span>
           </div>
         </div>
 
         <div v-if="results !== null">
-          <div class="text-caption text-grey-darken-1 mb-2">
+          <div class="text-caption text-high-emphasis mb-2">
             {{ openCount }} porta(s) aberta(s)<span v-if="openFilteredCount > 0"
               >, {{ openFilteredCount }} aberta(s)/filtrada(s)</span
             >
@@ -208,7 +208,7 @@
                   <td>{{ formatLatency(item.latencyMs) }}</td>
                 </tr>
                 <tr v-if="filteredResults.length === 0">
-                  <td colspan="5" class="text-center text-grey py-4">
+                  <td colspan="5" class="text-center text-high-emphasis py-4">
                     {{
                       portScanStore.scanning
                         ? 'Aguardando resultados...'
@@ -221,8 +221,8 @@
           </div>
         </div>
 
-        <div v-else-if="!portScanStore.scanning" class="text-center text-grey py-8">
-          <v-icon size="40" color="grey-lighten-1">mdi-lan-pending</v-icon>
+        <div v-else-if="!portScanStore.scanning" class="text-center text-high-emphasis py-8">
+          <v-icon size="40" color="primary">mdi-lan-pending</v-icon>
           <div class="mt-2 text-subtitle-2">
             Configure o host e o intervalo de portas acima e clique em "Iniciar Varredura".
           </div>

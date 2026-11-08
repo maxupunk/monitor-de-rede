@@ -1,5 +1,5 @@
 <template>
-  <v-card border rounded="lg" class="bg-surface">
+  <v-card elevation="2" rounded="lg">
     <v-card-item>
       <template #prepend>
         <v-avatar color="primary" variant="tonal" rounded="lg">

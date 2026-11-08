@@ -7,7 +7,7 @@
           <v-icon color="primary">mdi-chart-bell-curve-cumulative</v-icon>
           Linha de Base Estatística & Anomalias
         </h2>
-        <div class="text-subtitle-2 text-grey">
+        <div class="text-subtitle-2 text-high-emphasis">
           Média móvel (μ), desvio padrão (σ) e detecção de anomalias estatísticas (Z-Score de 7
           dias)
         </div>
@@ -86,7 +86,7 @@
         <v-col cols="12" sm="6" md="4">
           <div class="pa-4 rounded-lg bg-surface-variant h-100 border">
             <div class="d-flex align-center justify-space-between mb-1">
-              <span class="text-caption font-weight-bold text-medium-emphasis">
+              <span class="text-caption font-weight-bold text-high-emphasis">
                 LATÊNCIA (MÉDIA & DESVIO)
               </span>
               <v-chip
@@ -103,11 +103,11 @@
               <span class="text-h5 font-weight-bold text-primary">
                 {{ formatLatency(baseline?.latencyBaselineMs) }}
               </span>
-              <span class="text-caption text-grey">
+              <span class="text-caption text-high-emphasis">
                 ± {{ formatLatency(baseline?.latencyStddevMs) }} (1σ)
               </span>
             </div>
-            <div class="text-caption text-grey-darken-1 mt-2">
+            <div class="text-caption text-high-emphasis mt-2">
               <div class="d-flex justify-space-between">
                 <span>Faixa Normal (3σ):</span>
                 <strong>
@@ -123,7 +123,7 @@
         <v-col cols="12" sm="6" md="4">
           <div class="pa-4 rounded-lg bg-surface-variant h-100 border">
             <div class="d-flex align-center justify-space-between mb-1">
-              <span class="text-caption font-weight-bold text-medium-emphasis">
+              <span class="text-caption font-weight-bold text-high-emphasis">
                 PERDA DE PACOTES (HISTÓRICO)
               </span>
               <v-chip
@@ -142,11 +142,11 @@
               <span class="text-h5 font-weight-bold text-info">
                 {{ formatPercent(baseline?.packetLossBaselinePercent) }}
               </span>
-              <span class="text-caption text-grey">
+              <span class="text-caption text-high-emphasis">
                 ± {{ formatPercent(baseline?.packetLossStddevPercent) }}
               </span>
             </div>
-            <div class="text-caption text-grey-darken-1 mt-2">
+            <div class="text-caption text-high-emphasis mt-2">
               <div class="d-flex justify-space-between">
                 <span>Teto Normal (3σ):</span>
                 <strong>{{ formatPercent(baseline?.packetLossUpperBandPercent) }}</strong>
@@ -159,7 +159,7 @@
         <v-col cols="12" sm="12" md="4">
           <div class="pa-4 rounded-lg bg-surface-variant h-100 border">
             <div class="d-flex align-center justify-space-between mb-1">
-              <span class="text-caption font-weight-bold text-medium-emphasis">
+              <span class="text-caption font-weight-bold text-high-emphasis">
                 UPTIME HISTÓRICO (7 DIAS)
               </span>
               <v-chip size="x-small" color="success" variant="outlined">
@@ -170,11 +170,11 @@
               <span class="text-h5 font-weight-bold text-success">
                 {{ formatPercent(baseline?.uptimeBaselinePercent) }}
               </span>
-              <span class="text-caption text-grey">
+              <span class="text-caption text-high-emphasis">
                 ± {{ formatPercent(baseline?.uptimeStddevPercent) }}
               </span>
             </div>
-            <div class="text-caption text-grey-darken-1 mt-2">
+            <div class="text-caption text-high-emphasis mt-2">
               <div class="d-flex justify-space-between">
                 <span>Janela Amostral:</span>
                 <strong>{{ baseline?.windowDays }} dias históricos</strong>
@@ -186,12 +186,12 @@
     </div>
 
     <!-- Estado de Coleta Inicial -->
-    <div v-else class="text-center text-grey py-6 border rounded-lg bg-grey-lighten-5">
-      <v-icon size="40" color="grey-lighten-1">mdi-chart-scatter-plot</v-icon>
+    <div v-else class="text-center text-high-emphasis py-6 border rounded-lg">
+      <v-icon size="40" color="primary">mdi-chart-scatter-plot</v-icon>
       <div class="mt-2 text-subtitle-2 font-weight-medium">
         Histórico insuficiente para cálculo de desvio padrão e Z-Score.
       </div>
-      <div class="text-caption text-grey">
+      <div class="text-caption text-high-emphasis">
         A linha de base estatística exige pelo menos 6 buckets horários de dados para estimar médias
         e bandas de 3σ com precisão estatística.
       </div>

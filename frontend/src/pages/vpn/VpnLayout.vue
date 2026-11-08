@@ -1,6 +1,6 @@
 <template>
   <div>
-    <v-card variant="outlined" rounded="xl" class="mb-4 overflow-hidden">
+    <v-card elevation="2" rounded="lg" class="mb-4 overflow-hidden">
       <v-tabs color="primary" show-arrows>
         <v-tab v-for="item in TABS" :key="item.name" :to="{ name: item.name }" exact>
           <v-icon start>{{ item.icon }}</v-icon>

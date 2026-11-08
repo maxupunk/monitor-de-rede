@@ -1,5 +1,5 @@
 <template>
-  <v-card variant="outlined" rounded="lg" class="pa-3 pa-md-4">
+  <v-card elevation="2" rounded="lg" class="pa-3 pa-md-4">
     <div class="d-flex flex-wrap align-center justify-space-between ga-3">
       <div class="d-flex align-center ga-3 min-w-0">
         <v-progress-circular

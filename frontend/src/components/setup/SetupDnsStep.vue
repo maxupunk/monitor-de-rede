@@ -2,22 +2,18 @@
   <div>
     <div class="mb-3">
       <div class="text-h6 font-weight-bold">Servidores DNS para Monitoramento & Benchmark</div>
-      <div class="text-caption text-medium-emphasis">
+      <div class="text-caption text-high-emphasis">
         Selecione quais resolvedores DNS você deseja monitorar continuamente para comparar latência
         e qualidade de navegação.
       </div>
     </div>
 
-    <div class="text-overline text-medium-emphasis mb-2">Provedores Públicos Populares</div>
+    <div class="text-overline text-high-emphasis mb-2">Provedores Públicos Populares</div>
     <v-row dense class="mb-4">
       <v-col v-for="dns in POPULAR_DNS_PRESETS" :key="dns.address" cols="12" sm="6" md="4">
-        <v-card
-          border
-          rounded="lg"
-          class="pa-3 cursor-pointer h-100 d-flex flex-column justify-space-between"
-          :class="{
-            'border-primary bg-primary-lighten-5': isDnsSelected(dns.address),
-          }"
+        <ChoiceCard
+          :selected="isDnsSelected(dns.address)"
+          class="pa-3 h-100 d-flex flex-column justify-space-between"
           @click="toggleDnsPreset(dns)"
         >
           <div class="d-flex align-start ga-2">
@@ -30,7 +26,7 @@
             <div>
               <div class="font-weight-bold text-subtitle-2">{{ dns.name }}</div>
               <div class="text-body-2 font-weight-medium">{{ dns.address }}</div>
-              <div class="text-caption text-medium-emphasis">{{ dns.description }}</div>
+              <div class="text-caption text-high-emphasis">{{ dns.description }}</div>
             </div>
           </div>
           <div class="d-flex justify-end mt-2">
@@ -38,13 +34,11 @@
               {{ dns.protocol.toUpperCase() }}
             </v-chip>
           </div>
-        </v-card>
+        </ChoiceCard>
       </v-col>
     </v-row>
 
-    <div class="text-overline text-medium-emphasis mb-2">
-      Adicionar DNS Personalizado (Opcional)
-    </div>
+    <div class="text-overline text-high-emphasis mb-2">Adicionar DNS Personalizado (Opcional)</div>
     <v-sheet border rounded="lg" class="pa-4 bg-surface">
       <v-row dense>
         <v-col cols="12" sm="5">
@@ -86,6 +80,7 @@
 
 <script setup lang="ts">
 import { reactive } from 'vue'
+import ChoiceCard from '@/components/ChoiceCard.vue'
 import type { DnsServerPayload } from '@/stores/dnsServers'
 import { POPULAR_DNS_PRESETS } from './setupForm'
 

@@ -13,21 +13,15 @@
 
     <v-row>
       <v-col v-for="card in telemetryCards" :key="card.key" cols="12" sm="6" md="4" lg="3">
-        <v-card
-          border
-          flat
-          class="pa-3 rounded-lg h-100 card-clicavel d-flex flex-column justify-space-between"
-          role="button"
-          tabindex="0"
+        <ChoiceCard
+          class="pa-3 h-100 d-flex flex-column justify-space-between"
           :aria-label="`Ver histórico de ${card.title}`"
           @click="abrir(card)"
-          @keydown.enter="abrir(card)"
-          @keydown.space.prevent="abrir(card)"
         >
           <div>
             <div class="d-flex align-center justify-space-between mb-2 ga-2">
               <span
-                class="text-caption font-weight-bold text-truncate d-flex align-center ga-1 text-grey-darken-1"
+                class="text-caption font-weight-bold text-truncate d-flex align-center ga-1 text-high-emphasis"
               >
                 <v-icon size="16" :color="card.color">{{ card.icon }}</v-icon>
                 {{ card.title }}
@@ -54,12 +48,14 @@
               class="mb-2"
             />
 
-            <div class="d-flex align-center justify-space-between text-caption text-grey ga-1">
+            <div
+              class="d-flex align-center justify-space-between text-caption text-high-emphasis ga-1"
+            >
               <span class="text-truncate text-xxs">{{ card.collectedAt }}</span>
               <v-icon size="14" color="grey">mdi-chart-line</v-icon>
             </div>
           </div>
-        </v-card>
+        </ChoiceCard>
       </v-col>
     </v-row>
 
@@ -80,6 +76,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import ChoiceCard from '@/components/ChoiceCard.vue'
 import MetricHistoryDialog from '@/components/devices/MetricHistoryDialog.vue'
 import MonitorSparkline from '@/components/MonitorSparkline.vue'
 import {
@@ -510,19 +507,6 @@ function abrir(card: TelemetryCardItem): void {
 </script>
 
 <style scoped>
-.card-clicavel {
-  cursor: pointer;
-  transition:
-    border-color 0.15s ease,
-    transform 0.15s ease;
-}
-
-.card-clicavel:hover,
-.card-clicavel:focus-visible {
-  border-color: rgb(var(--v-theme-primary));
-  transform: translateY(-1px);
-}
-
 .text-xxs {
   font-size: 0.7rem;
 }

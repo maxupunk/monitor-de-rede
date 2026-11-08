@@ -16,6 +16,7 @@
         :key="mode.value"
         :value="mode.value"
         :prepend-icon="mode.icon"
+        base-color="primary"
         variant="outlined"
         filter
       >
@@ -112,6 +113,7 @@
             :key="day.value"
             :value="day.value"
             :aria-label="day.long"
+            base-color="primary"
             variant="outlined"
             filter
           >

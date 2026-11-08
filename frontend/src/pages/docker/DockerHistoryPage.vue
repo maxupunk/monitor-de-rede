@@ -31,7 +31,7 @@
 
       <v-row v-if="history.host.length > 0" dense class="mb-2">
         <v-col cols="12" lg="6">
-          <v-card rounded="xl" variant="outlined" class="h-100">
+          <v-card rounded="lg" elevation="2" class="h-100">
             <v-card-title class="text-subtitle-1">CPU do host</v-card-title>
             <v-card-text>
               <BaseMetricChart :series="cpuSeries" unit-type="percentage"></BaseMetricChart>
@@ -39,7 +39,7 @@
           </v-card>
         </v-col>
         <v-col cols="12" lg="6">
-          <v-card rounded="xl" variant="outlined" class="h-100">
+          <v-card rounded="lg" elevation="2" class="h-100">
             <v-card-title class="text-subtitle-1">Memória usada</v-card-title>
             <v-card-subtitle>{{ memoryCaption }}</v-card-subtitle>
             <v-card-text>
@@ -48,7 +48,7 @@
           </v-card>
         </v-col>
         <v-col cols="12" lg="6">
-          <v-card rounded="xl" variant="outlined" class="h-100">
+          <v-card rounded="lg" elevation="2" class="h-100">
             <v-card-title class="text-subtitle-1">Tráfego de rede</v-card-title>
             <v-card-text>
               <BaseMetricChart :series="networkSeries" unit-type="bandwidth"></BaseMetricChart>
@@ -56,7 +56,7 @@
           </v-card>
         </v-col>
         <v-col cols="12" lg="6">
-          <v-card rounded="xl" variant="outlined" class="h-100">
+          <v-card rounded="lg" elevation="2" class="h-100">
             <v-card-title class="text-subtitle-1">Discos</v-card-title>
             <v-card-text>
               <div v-for="disk in latestDisks" :key="disk.mount" class="mb-3">
@@ -82,7 +82,7 @@
         </v-col>
       </v-row>
 
-      <v-card v-if="history.containers.length > 0" rounded="xl" variant="outlined">
+      <v-card v-if="history.containers.length > 0" elevation="2" rounded="lg">
         <v-card-title class="text-subtitle-1">Containers na janela</v-card-title>
         <v-table density="comfortable" hover>
           <thead>
@@ -120,7 +120,7 @@
         </v-table>
       </v-card>
 
-      <v-card v-if="containerHistory" rounded="xl" variant="outlined" class="mt-4">
+      <v-card v-if="containerHistory" rounded="lg" elevation="2" class="mt-4">
         <v-card-title class="d-flex align-center">
           <v-icon class="mr-2" color="primary">mdi-cube-outline</v-icon>
           {{ containerHistory.containerName }}

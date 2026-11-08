@@ -1,5 +1,5 @@
 <template>
-  <v-card rounded="lg" border>
+  <v-card elevation="2" rounded="lg">
     <v-card-item>
       <v-card-title class="d-flex align-center ga-2">
         <v-icon color="primary">mdi-eye</v-icon>

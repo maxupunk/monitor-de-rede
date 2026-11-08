@@ -16,7 +16,7 @@
       Métricas parciais: {{ docker.metrics.failedContainerCount }} container(s) sem amostra.
     </v-alert>
 
-    <v-card rounded="xl" variant="outlined" class="mb-4">
+    <v-card rounded="lg" elevation="2" class="mb-4">
       <div class="d-flex flex-column flex-md-row align-md-center ga-3 pa-3 pa-md-4">
         <v-text-field
           v-model="search"
@@ -39,6 +39,7 @@
             :key="option.value"
             :value="option.value"
             :color="option.color"
+            :base-color="option.color"
             variant="outlined"
             filter
           >
@@ -54,8 +55,9 @@
         v-for="group in groups"
         :key="group.key"
         :value="group.key"
-        rounded="xl"
-        class="mb-3 docker-group-panel"
+        elevation="2"
+        rounded="lg"
+        class="mb-3"
       >
         <v-expansion-panel-title>
           <div class="d-flex flex-wrap align-center ga-2 w-100 pr-2">
@@ -264,10 +266,6 @@ function notify(message: string, color: string): void {
   text-align: right;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-}
-
-.docker-group-panel {
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
 }
 
 @media (max-width: 700px) {

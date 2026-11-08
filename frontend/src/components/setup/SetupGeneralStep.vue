@@ -2,7 +2,7 @@
   <div>
     <div class="mb-4">
       <div class="text-h6 font-weight-bold">Notificações & Parâmetros de Monitoramento</div>
-      <div class="text-caption text-medium-emphasis">
+      <div class="text-caption text-high-emphasis">
         Configure os alertas do navegador e as preferências padrão de coleta do sistema.
       </div>
     </div>

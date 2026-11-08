@@ -32,7 +32,7 @@
     </v-alert>
 
     <v-dialog v-model="confirm.open" max-width="520">
-      <v-card rounded="xl">
+      <v-card rounded="lg">
         <v-card-title class="d-flex align-center ga-2">
           <v-icon color="warning">mdi-eye-off-outline</v-icon>
           Ocultar a área {{ confirm.title }}?

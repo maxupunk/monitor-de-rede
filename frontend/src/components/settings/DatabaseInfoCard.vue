@@ -5,7 +5,7 @@
       Banco de Dados
     </v-card-title>
     <v-card-text class="mt-2">
-      <p class="text-caption text-grey-darken-1 mb-4">
+      <p class="text-caption text-high-emphasis mb-4">
         Tamanho ocupado pelo arquivo do banco de dados do NetMonitor no servidor e intervalo
         histórico armazenado.
       </p>
@@ -15,7 +15,7 @@
           <div class="d-flex align-center justify-space-between pa-3 rounded border h-100">
             <div>
               <div class="font-weight-bold text-subtitle-2">Tamanho Total</div>
-              <div class="text-caption text-grey">{{ formattedSize }}</div>
+              <div class="text-caption text-high-emphasis">{{ formattedSize }}</div>
             </div>
             <v-icon color="info" size="28">mdi-harddisk</v-icon>
           </div>
@@ -25,7 +25,7 @@
           <div class="d-flex align-center justify-space-between pa-3 rounded border h-100">
             <div>
               <div class="font-weight-bold text-subtitle-2">Tipo</div>
-              <div class="text-caption text-grey">{{ dbTypeLabel }}</div>
+              <div class="text-caption text-high-emphasis">{{ dbTypeLabel }}</div>
             </div>
             <v-icon color="info" size="28">mdi-server-network</v-icon>
           </div>
@@ -35,7 +35,7 @@
           <div class="d-flex align-center justify-space-between pa-3 rounded border h-100">
             <div>
               <div class="font-weight-bold text-subtitle-2">Total de Histórico</div>
-              <div class="text-caption text-grey">{{ formattedHistorySpan }}</div>
+              <div class="text-caption text-high-emphasis">{{ formattedHistorySpan }}</div>
             </div>
             <v-icon color="info" size="28">mdi-history</v-icon>
           </div>
@@ -45,7 +45,7 @@
           <div class="d-flex align-center justify-space-between pa-3 rounded border h-100">
             <div>
               <div class="font-weight-bold text-subtitle-2">Primeiro Registro</div>
-              <div class="text-caption text-grey">{{ formattedEarliestRecord }}</div>
+              <div class="text-caption text-high-emphasis">{{ formattedEarliestRecord }}</div>
             </div>
             <v-icon color="info" size="28">mdi-calendar-start-outline</v-icon>
           </div>
@@ -55,7 +55,7 @@
           <div class="d-flex align-center justify-space-between pa-3 rounded border h-100">
             <div>
               <div class="font-weight-bold text-subtitle-2">Último Registro</div>
-              <div class="text-caption text-grey">{{ formattedLatestRecord }}</div>
+              <div class="text-caption text-high-emphasis">{{ formattedLatestRecord }}</div>
             </div>
             <v-icon color="info" size="28">mdi-calendar-end-outline</v-icon>
           </div>
@@ -137,7 +137,7 @@
             Esta ação apagará <strong>permanentemente</strong> todo o histórico técnico armazenado
             para liberar espaço em disco:
           </p>
-          <ul class="text-body-2 pl-4 mb-3 text-grey-darken-2">
+          <ul class="text-body-2 pl-4 mb-3 text-high-emphasis">
             <li>Séries temporais de métricas de telemetria</li>
             <li>Resultados históricos de monitores (ping, SNMP, portas, etc.)</li>
             <li>Histórico de logs de dispositivos (Syslog)</li>
@@ -180,7 +180,7 @@
             Esta ação apagará <strong>permanentemente todos os cadastros e dados</strong> do
             sistema:
           </p>
-          <ul class="text-body-2 pl-4 mb-3 text-grey-darken-2">
+          <ul class="text-body-2 pl-4 mb-3 text-high-emphasis">
             <li>Todos os dispositivos, interfaces e enlaces de topologia</li>
             <li>Todos os monitores, métricas e histórico de coletas</li>
             <li>Todas as redes e histórico de descoberta (Discovery)</li>

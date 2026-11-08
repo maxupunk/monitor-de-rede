@@ -1,6 +1,6 @@
 <template>
   <v-dialog v-model="open" :fullscreen="$vuetify.display.xs" max-width="980" scrollable>
-    <v-card rounded="xl" class="docker-detail-card">
+    <v-card rounded="lg" class="docker-detail-card">
       <v-card-title class="d-flex align-center ga-2">
         <v-icon color="primary">mdi-cube-outline</v-icon>
         <span class="text-truncate">{{ live ? containerName(live) : 'Container' }}</span>

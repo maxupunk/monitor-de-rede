@@ -36,7 +36,7 @@
 
     <v-row v-if="projects.length > 0" dense>
       <v-col v-for="project in projects" :key="project.name" cols="12" lg="6">
-        <v-card rounded="xl" variant="outlined" class="h-100">
+        <v-card rounded="lg" elevation="2" class="h-100">
           <v-card-title class="d-flex align-center ga-2">
             <v-icon color="primary">mdi-file-cabinet</v-icon>
             <span class="text-truncate">{{ project.name }}</span>
@@ -122,13 +122,13 @@
         </v-card>
       </v-col>
     </v-row>
-    <v-card v-else-if="!loading" rounded="xl" variant="outlined" class="pa-8 text-center">
+    <v-card v-else-if="!loading" rounded="lg" elevation="2" class="pa-8 text-center">
       <v-icon size="40" color="primary">mdi-file-cabinet</v-icon>
       <div class="text-body-1 mt-2">Nenhum projeto compose neste host.</div>
     </v-card>
 
     <v-dialog v-model="confirm.open" max-width="460">
-      <v-card rounded="xl">
+      <v-card rounded="lg">
         <v-card-title>{{ confirmTitle }}</v-card-title>
         <v-card-text>
           <p class="mb-2">{{ confirmHint }}</p>

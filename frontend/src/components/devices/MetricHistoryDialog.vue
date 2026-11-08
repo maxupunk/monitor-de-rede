@@ -26,13 +26,13 @@
       <v-card-text class="pa-6">
         <div class="d-flex flex-wrap align-center ga-4 mb-4">
           <div>
-            <div class="text-caption text-grey">Leitura atual</div>
+            <div class="text-caption text-high-emphasis">Leitura atual</div>
             <div class="text-h5 font-weight-bold">{{ atual }}</div>
           </div>
           <template v-if="!isDiscrete">
             <v-divider vertical class="d-none d-sm-block" />
             <div>
-              <div class="text-caption text-grey">Mínimo · Médio · Máximo</div>
+              <div class="text-caption text-high-emphasis">Mínimo · Médio · Máximo</div>
               <div class="text-body-1 font-weight-medium">
                 {{ minimo }} · {{ medio }} · {{ maximo }}
               </div>
@@ -41,7 +41,7 @@
           <template v-else>
             <v-divider vertical class="d-none d-sm-block" />
             <div>
-              <div class="text-caption text-grey">Tipo de Medição</div>
+              <div class="text-caption text-high-emphasis">Tipo de Medição</div>
               <div class="text-body-1 font-weight-medium">
                 {{
                   props.dataType === 'boolean' || props.unitType === 'boolean'
@@ -53,7 +53,7 @@
           </template>
           <v-divider vertical class="d-none d-sm-block" />
           <div>
-            <div class="text-caption text-grey">Amostras</div>
+            <div class="text-caption text-high-emphasis">Amostras</div>
             <div class="text-body-1 font-weight-medium">{{ pontos.length }}</div>
           </div>
         </div>

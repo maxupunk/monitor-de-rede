@@ -5,7 +5,7 @@
       Sincronização do Dashboard
     </v-card-title>
     <v-card-text class="mt-2">
-      <p class="text-caption text-grey-darken-1 mb-3">
+      <p class="text-caption text-high-emphasis mb-3">
         Escolha se deseja utilizar a organização de cards compartilhada no servidor ou manter uma
         distribuição customizada apenas neste navegador.
       </p>
@@ -22,7 +22,7 @@
               <div class="font-weight-bold text-subtitle-2">
                 Sincronizado com o Servidor (Global)
               </div>
-              <div class="text-caption text-grey">
+              <div class="text-caption text-high-emphasis">
                 Recebe atualizações de layout em tempo real (SSE) emitidas por qualquer dispositivo.
               </div>
             </div>
@@ -33,7 +33,7 @@
           <template #label>
             <div>
               <div class="font-weight-bold text-subtitle-2">Personalizado Localmente</div>
-              <div class="text-caption text-grey">
+              <div class="text-caption text-high-emphasis">
                 Mantém a disposição dos cards exclusiva deste navegador/dispositivo.
               </div>
             </div>

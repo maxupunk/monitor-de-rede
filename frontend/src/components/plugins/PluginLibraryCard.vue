@@ -1,5 +1,5 @@
 <template>
-  <v-card border flat class="rounded-lg h-100 d-flex flex-column">
+  <v-card elevation="2" class="rounded-lg h-100 d-flex flex-column">
     <v-card-item>
       <template #prepend>
         <v-avatar :color="status.color" variant="tonal" rounded="lg">

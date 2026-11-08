@@ -3,7 +3,7 @@
     <div class="d-flex align-center justify-space-between mb-3">
       <div>
         <div class="text-h6 font-weight-bold">Identificação do Site Local</div>
-        <div class="text-caption text-medium-emphasis">
+        <div class="text-caption text-high-emphasis">
           Define o local físico ou sede onde o servidor NetMonitor está operando.
         </div>
       </div>

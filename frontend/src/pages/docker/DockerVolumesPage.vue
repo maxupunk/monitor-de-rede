@@ -7,7 +7,7 @@
     <v-alert v-if="docker.error" type="error" variant="tonal" closable class="mb-4">
       {{ docker.error }}
     </v-alert>
-    <v-card rounded="xl" variant="outlined">
+    <v-card rounded="lg" elevation="2">
       <div class="pa-4">
         <v-text-field
           v-model="search"
@@ -71,7 +71,7 @@
     </v-card>
 
     <v-dialog v-model="detailDialog" :fullscreen="$vuetify.display.xs" max-width="760">
-      <v-card rounded="xl">
+      <v-card rounded="lg">
         <v-card-title class="d-flex align-center ga-2">
           <v-icon color="primary">mdi-database-outline</v-icon>
           {{ detail?.name || 'Volume' }}

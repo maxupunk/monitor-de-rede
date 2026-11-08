@@ -41,7 +41,7 @@
         <template #item.scope="{ item }">
           <span v-if="item.siteId">{{ siteName(item.siteId) }}</span>
           <span v-else-if="item.deviceId">{{ deviceName(item.deviceId) }}</span>
-          <span v-else class="text-grey">—</span>
+          <span v-else class="text-high-emphasis">—</span>
         </template>
 
         <template #item.period="{ item }">
@@ -93,8 +93,8 @@
             </div>
 
             <!-- Middle: Escopo e Período -->
-            <div class="d-flex flex-column ga-1 text-caption text-grey">
-              <div class="d-flex align-center ga-1 text-medium-emphasis">
+            <div class="d-flex flex-column ga-1 text-caption text-high-emphasis">
+              <div class="d-flex align-center ga-1 text-high-emphasis">
                 <v-icon size="14">mdi-map-marker-outline</v-icon>
                 <span>
                   {{
@@ -106,7 +106,7 @@
                   }}
                 </span>
               </div>
-              <div class="d-flex align-center ga-1 text-grey-darken-1 mt-0.5">
+              <div class="d-flex align-center ga-1 text-high-emphasis mt-0.5">
                 <v-icon size="12">mdi-clock-outline</v-icon>
                 <span>{{ formatDateTime(item.startsAt) }} — {{ formatDateTime(item.endsAt) }}</span>
               </div>

@@ -20,7 +20,7 @@
     </v-expand-transition>
 
     <v-form ref="formRef" validate-on="lazy invalid-input" @submit.prevent="handleSetup">
-      <div class="text-overline text-medium-emphasis mb-2">Administrador</div>
+      <div class="text-overline text-high-emphasis mb-2">Administrador</div>
 
       <v-text-field
         v-model="name"
@@ -82,7 +82,7 @@
           rounded
         ></v-progress-linear>
         <div class="d-flex justify-space-between align-center mt-1">
-          <span class="text-caption text-medium-emphasis">Mínimo de 8 caracteres</span>
+          <span class="text-caption text-high-emphasis">Mínimo de 8 caracteres</span>
           <span
             v-if="strength.label"
             class="text-caption font-weight-medium"
@@ -112,7 +112,7 @@
       <v-divider class="mb-5"></v-divider>
 
       <div class="d-flex align-center justify-space-between mb-2">
-        <span class="text-overline text-medium-emphasis">Token de instalação</span>
+        <span class="text-overline text-high-emphasis">Token de instalação</span>
         <v-btn
           variant="text"
           size="small"
@@ -148,7 +148,7 @@
             </v-tooltip>
           </div>
 
-          <p class="text-caption text-medium-emphasis mb-0">
+          <p class="text-caption text-high-emphasis mb-0">
             Definiu <code>SETUP_TOKEN</code> no ambiente? Use aquele valor.
           </p>
         </v-sheet>

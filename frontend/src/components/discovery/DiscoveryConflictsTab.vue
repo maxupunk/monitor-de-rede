@@ -52,7 +52,8 @@
       <v-card
         v-for="conflict in conflicts"
         :key="conflict.id"
-        variant="outlined"
+        border
+        flat
         rounded="lg"
         class="pa-4"
       >

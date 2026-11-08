@@ -40,7 +40,7 @@
             <v-icon size="18" start color="primary">mdi-qrcode-scan</v-icon>
             Leia com o aplicativo WireGuard
           </div>
-          <div class="text-caption text-medium-emphasis mb-3">
+          <div class="text-caption text-high-emphasis mb-3">
             No app, toque em "+" › "Ler a partir do código QR".
           </div>
           <div
@@ -68,7 +68,7 @@
             <v-expansion-panel-text>
               <v-row dense>
                 <v-col v-for="item in artifact.summary" :key="item.label" cols="12" sm="6">
-                  <div class="text-caption text-medium-emphasis">{{ item.label }}</div>
+                  <div class="text-caption text-high-emphasis">{{ item.label }}</div>
                   <div class="text-body-2 summary-value">{{ item.value }}</div>
                 </v-col>
               </v-row>
@@ -91,7 +91,7 @@
         </v-tabs>
 
         <div v-if="activeDocument" class="pt-2">
-          <div class="text-caption text-medium-emphasis mb-2">
+          <div class="text-caption text-high-emphasis mb-2">
             {{ activeDocument.hint }} · <code>{{ activeDocument.fileName }}</code>
           </div>
 

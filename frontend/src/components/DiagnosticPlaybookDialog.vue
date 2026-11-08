@@ -94,7 +94,7 @@
         </v-alert>
 
         <!-- Checklist de Passos -->
-        <v-card variant="outlined" class="rounded-lg mb-6 overflow-hidden">
+        <v-card border flat class="rounded-lg mb-6 overflow-hidden">
           <v-list density="comfortable" lines="two">
             <template v-for="(step, idx) in displaySteps" :key="step.stepIndex">
               <v-list-item :title="step.stepName" :subtitle="step.message || step.description">

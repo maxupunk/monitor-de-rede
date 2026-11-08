@@ -6,14 +6,14 @@
     persistent
     @update:model-value="close"
   >
-    <v-card rounded="xl">
+    <v-card rounded="lg">
       <v-card-title class="d-flex align-center pa-5 pb-3">
         <v-avatar color="primary" variant="tonal" size="40" class="mr-3">
           <v-icon>{{ user ? 'mdi-account-edit-outline' : 'mdi-account-plus-outline' }}</v-icon>
         </v-avatar>
         <div>
           <div class="text-h6">{{ user ? 'Editar usuário' : 'Novo usuário' }}</div>
-          <div class="text-caption text-medium-emphasis">
+          <div class="text-caption text-high-emphasis">
             {{
               user
                 ? 'Atualize os dados e o nível de acesso.'

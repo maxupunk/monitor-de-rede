@@ -15,7 +15,7 @@
           </v-avatar>
           <div>
             <div class="text-h6 font-weight-bold">Catálogo de Serviços SaaS & Bancos</div>
-            <div class="text-caption text-medium-emphasis">
+            <div class="text-caption text-high-emphasis">
               Monitore a latência e qualidade de experiência (QoE) para bancos, nuvem, IA e serviços
               críticos
             </div>
@@ -95,9 +95,7 @@
         <!-- Indicador de Carregamento -->
         <div v-if="loading && presets.length === 0" class="text-center py-12">
           <v-progress-circular indeterminate color="primary" size="48"></v-progress-circular>
-          <div class="text-body-2 text-medium-emphasis mt-3">
-            Carregando catálogo de serviços...
-          </div>
+          <div class="text-body-2 text-high-emphasis mt-3">Carregando catálogo de serviços...</div>
         </div>
 
         <!-- Alerta de Erro -->
@@ -119,13 +117,10 @@
             lg="4"
             class="pa-2"
           >
-            <v-card
-              variant="outlined"
-              class="h-100 d-flex flex-column rounded-lg saas-preset-card transition-all"
-              :class="{
-                'saas-card-selected': isSelected(preset.id),
-                'saas-card-provisioned': preset.isProvisioned,
-              }"
+            <ChoiceCard
+              :selected="isSelected(preset.id)"
+              :color="preset.isProvisioned ? 'success' : 'primary'"
+              class="h-100 d-flex flex-column"
               @click="toggleSelection(preset)"
             >
               <!-- Topo do Card: Avatar, Provedor e Checkbox -->
@@ -147,7 +142,7 @@
                     >
                       {{ preset.name }}
                     </div>
-                    <div class="text-caption text-medium-emphasis text-truncate">
+                    <div class="text-caption text-high-emphasis text-truncate">
                       {{ preset.provider }}
                     </div>
                   </div>
@@ -204,7 +199,7 @@
               <v-card-text
                 class="pt-0 px-4 pb-3 flex-grow-1 d-flex flex-column justify-space-between"
               >
-                <div class="text-caption text-medium-emphasis mb-3 saas-desc-clamp">
+                <div class="text-caption text-high-emphasis mb-3 saas-desc-clamp">
                   {{ preset.description }}
                 </div>
 
@@ -224,7 +219,7 @@
 
                   <!-- Intervalo e Threshold de Alerta -->
                   <div
-                    class="d-flex align-center justify-space-between text-caption text-medium-emphasis"
+                    class="d-flex align-center justify-space-between text-caption text-high-emphasis"
                   >
                     <span class="d-flex align-center ga-1">
                       <v-icon size="13">mdi-timer-outline</v-icon>
@@ -258,7 +253,7 @@
                 </div>
 
                 <div v-else>
-                  <span class="text-caption text-medium-emphasis">Não provisionado</span>
+                  <span class="text-caption text-high-emphasis">Não provisionado</span>
                 </div>
 
                 <v-btn
@@ -284,7 +279,7 @@
                   Detalhes
                 </v-btn>
               </v-card-actions>
-            </v-card>
+            </ChoiceCard>
           </v-col>
         </v-row>
       </v-card-text>
@@ -307,7 +302,7 @@
                 : 'Selecionar Todos Não Monitorados'
             }}
           </v-btn>
-          <span v-if="selectedIds.length > 0" class="text-caption text-medium-emphasis">
+          <span v-if="selectedIds.length > 0" class="text-caption text-high-emphasis">
             ({{ selectedIds.length }} selecionado{{ selectedIds.length > 1 ? 's' : '' }})
           </span>
         </div>
@@ -343,6 +338,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
+import ChoiceCard from '@/components/ChoiceCard.vue'
 import { useMonitorsStore } from '@/stores/monitors'
 import type { SaasPreset } from '@/bindings/SaasPreset'
 
@@ -548,27 +544,6 @@ function statusColor(status?: string | null): string {
 </script>
 
 <style scoped>
-.saas-preset-card {
-  border-color: rgba(var(--v-border-color), var(--v-border-opacity));
-  cursor: pointer;
-  background-color: rgb(var(--v-theme-surface));
-}
-
-.saas-preset-card:hover {
-  border-color: rgba(var(--v-theme-primary), 0.6);
-  transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
-}
-
-.saas-card-selected {
-  border-color: rgb(var(--v-theme-primary)) !important;
-  background-color: rgba(var(--v-theme-primary), 0.04) !important;
-}
-
-.saas-card-provisioned {
-  border-color: rgba(var(--v-theme-success), 0.45) !important;
-}
-
 .saas-service-title {
   font-size: 0.95rem;
   line-height: 1.25;

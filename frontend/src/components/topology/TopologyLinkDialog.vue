@@ -7,7 +7,7 @@
     persistent
     @update:model-value="$emit('update:modelValue', $event)"
   >
-    <v-card class="rounded-xl overflow-hidden elevation-12 dialog-card-container">
+    <v-card class="rounded-lg overflow-hidden elevation-12 dialog-card-container">
       <!-- Header com gradiente moderno -->
       <v-card-item class="bg-primary text-white py-4 px-6 flex-shrink-0">
         <div class="d-flex align-center justify-space-between w-100">
@@ -53,7 +53,7 @@
 
         <!-- Visual Connection Preview Banner -->
         <div class="connection-preview-card pa-4 rounded-lg mb-6 elevation-1">
-          <div class="text-caption font-weight-bold text-medium-emphasis mb-2 text-uppercase">
+          <div class="text-caption font-weight-bold text-high-emphasis mb-2 text-uppercase">
             Prévia da Interconexão
           </div>
           <div class="d-flex align-center justify-space-between flex-wrap gap-2">
@@ -101,7 +101,7 @@
           <v-row dense>
             <!-- Lado Esquerdo: Origem -->
             <v-col cols="12" md="6">
-              <v-card variant="outlined" class="pa-3 rounded-lg fill-height border-primary-subtle">
+              <v-card border flat class="pa-3 rounded-lg fill-height border-primary-subtle">
                 <div class="d-flex align-center mb-3">
                   <v-avatar color="primary" size="28" class="mr-2 text-white">
                     <span class="text-caption font-weight-bold">A</span>
@@ -136,7 +136,7 @@
                 <!-- Interface de Saída (Origem) -->
                 <div class="mt-2">
                   <div class="d-flex align-center justify-space-between mb-1">
-                    <span class="text-caption font-weight-bold text-medium-emphasis">
+                    <span class="text-caption font-weight-bold text-high-emphasis">
                       Interface de Saída (Porta)
                     </span>
                     <v-progress-circular
@@ -190,7 +190,7 @@
 
             <!-- Lado Direito: Destino -->
             <v-col cols="12" md="6">
-              <v-card variant="outlined" class="pa-3 rounded-lg fill-height border-success-subtle">
+              <v-card border flat class="pa-3 rounded-lg fill-height border-success-subtle">
                 <div class="d-flex align-center mb-3">
                   <v-avatar color="success" size="28" class="mr-2 text-white">
                     <span class="text-caption font-weight-bold">B</span>
@@ -225,7 +225,7 @@
                 <!-- Interface de Chegada (Destino) -->
                 <div class="mt-2">
                   <div class="d-flex align-center justify-space-between mb-1">
-                    <span class="text-caption font-weight-bold text-medium-emphasis">
+                    <span class="text-caption font-weight-bold text-high-emphasis">
                       Interface de Chegada (Porta)
                     </span>
                     <v-progress-circular

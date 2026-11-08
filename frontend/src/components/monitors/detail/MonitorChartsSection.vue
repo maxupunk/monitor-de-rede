@@ -8,7 +8,7 @@
             <v-icon color="primary">mdi-chart-areaspline</v-icon>
             Histórico de Tráfego de Rede
           </h2>
-          <div class="text-subtitle-2 text-grey">
+          <div class="text-subtitle-2 text-high-emphasis">
             Throughput de transmissão e recepção coletado via SNMP
           </div>
         </div>
@@ -36,8 +36,8 @@
         unit-type="bandwidth"
       />
 
-      <div v-else class="text-center text-grey py-8 border rounded-lg bg-grey-lighten-5">
-        <v-icon size="40" color="grey-lighten-1">mdi-chart-line-variant</v-icon>
+      <div v-else class="text-center text-high-emphasis py-8 border rounded-lg">
+        <v-icon size="40" color="primary">mdi-chart-line-variant</v-icon>
         <div class="mt-2 text-subtitle-2">
           Histórico de tráfego insuficiente para gerar o gráfico.
         </div>
@@ -59,7 +59,9 @@
             <v-icon color="primary">mdi-chart-timeline-variant</v-icon>
             Linha do Tempo de Status
           </h2>
-          <div class="text-subtitle-2 text-grey">Histórico recente de verificações de status</div>
+          <div class="text-subtitle-2 text-high-emphasis">
+            Histórico recente de verificações de status
+          </div>
         </div>
         <div class="d-flex align-center ga-3 text-caption flex-wrap">
           <span v-if="statusBreakdown.up" class="d-flex align-center ga-1">
@@ -81,11 +83,11 @@
             <span class="status-indicator-dot" style="background-color: #b0bec5"></span>
             DESCONHECIDO ({{ statusBreakdown.unknown }})
           </span>
-          <span class="text-grey font-weight-bold">Total: {{ totalChecks }}</span>
+          <span class="text-high-emphasis font-weight-bold">Total: {{ totalChecks }}</span>
         </div>
       </div>
 
-      <div class="pa-2 pa-sm-3 bg-grey-lighten-4 rounded-lg d-flex w-100">
+      <div class="pa-2 pa-sm-3 bg-surface-light rounded-lg d-flex w-100">
         <MonitorTimelineBar
           :results="recentResults"
           :max-blocks="60"
@@ -107,7 +109,7 @@
             <v-icon color="info">mdi-sine-wave</v-icon>
             Gráfico de Uso de {{ gaugeType === 'MEMÓRIA' ? 'Memória' : 'CPU' }}
           </h2>
-          <div class="text-subtitle-2 text-grey">
+          <div class="text-subtitle-2 text-high-emphasis">
             {{
               gaugeType === 'MEMÓRIA'
                 ? 'Quantidade usada coletada via SNMP no dispositivo ao longo do tempo'
@@ -128,8 +130,8 @@
         :avg-value="gaugeAvg ?? undefined"
       />
 
-      <div v-else class="text-center text-grey py-8 border rounded-lg bg-grey-lighten-5">
-        <v-icon size="40" color="grey-lighten-1">mdi-chart-line-variant</v-icon>
+      <div v-else class="text-center text-high-emphasis py-8 border rounded-lg">
+        <v-icon size="40" color="primary">mdi-chart-line-variant</v-icon>
         <div class="mt-2 text-subtitle-2">Histórico insuficiente para gerar o gráfico de uso.</div>
         <div class="text-caption">As amostras vêm da varredura SNMP periódica do dispositivo.</div>
       </div>
@@ -147,7 +149,7 @@
             <v-icon color="info">mdi-sine-wave</v-icon>
             Gráfico de Tempo de Resposta (Ping Latency)
           </h2>
-          <div class="text-subtitle-2 text-grey">
+          <div class="text-subtitle-2 text-high-emphasis">
             Variação da latência em milissegundos (ms) ao longo do tempo
           </div>
         </div>
@@ -164,8 +166,8 @@
         :avg-value="avgLatency || undefined"
       />
 
-      <div v-else class="text-center text-grey py-8 border rounded-lg bg-grey-lighten-5">
-        <v-icon size="40" color="grey-lighten-1">mdi-chart-line-variant</v-icon>
+      <div v-else class="text-center text-high-emphasis py-8 border rounded-lg">
+        <v-icon size="40" color="primary">mdi-chart-line-variant</v-icon>
         <div class="mt-2 text-subtitle-2">
           Histórico insuficiente para gerar o gráfico de latência.
         </div>
@@ -190,7 +192,7 @@
               {{ linkInterfaceLabel }}
             </v-chip>
           </div>
-          <div class="text-subtitle-2 text-grey">
+          <div class="text-subtitle-2 text-high-emphasis">
             Throughput de download e upload da interface de entrada principal coletado via SNMP
           </div>
         </div>
@@ -231,8 +233,8 @@
         unit-type="bandwidth"
       />
 
-      <div v-else class="text-center text-grey py-8 border rounded-lg bg-grey-lighten-5">
-        <v-icon size="40" color="grey-lighten-1">mdi-chart-line-variant</v-icon>
+      <div v-else class="text-center text-high-emphasis py-8 border rounded-lg">
+        <v-icon size="40" color="primary">mdi-chart-line-variant</v-icon>
         <div class="mt-2 text-subtitle-2">
           Histórico de tráfego ainda não registrado para a interface {{ linkInterfaceLabel }}.
         </div>

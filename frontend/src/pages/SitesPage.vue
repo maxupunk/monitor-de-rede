@@ -56,7 +56,7 @@
               <span class="text-subtitle-1 font-weight-bold text-truncate">{{ item.name }}</span>
               <span
                 v-if="item.location"
-                class="text-caption text-grey d-flex align-center ga-1 flex-shrink-0"
+                class="text-caption text-high-emphasis d-flex align-center ga-1 flex-shrink-0"
               >
                 <v-icon size="13">mdi-map-marker-outline</v-icon>
                 {{ item.location }}
@@ -64,7 +64,7 @@
             </div>
 
             <!-- Middle: Descrição -->
-            <div v-if="item.description" class="text-body-2 text-grey-darken-1 text-break">
+            <div v-if="item.description" class="text-body-2 text-high-emphasis text-break">
               {{ item.description }}
             </div>
 

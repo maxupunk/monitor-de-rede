@@ -106,7 +106,7 @@
               <tr v-for="item in selectedSample.monitorsDetail" :key="item.id">
                 <td class="py-2">
                   <div class="font-weight-bold text-body-2">{{ item.name }}</div>
-                  <div v-if="item.deviceName" class="text-caption text-grey">
+                  <div v-if="item.deviceName" class="text-caption text-high-emphasis">
                     {{ item.deviceName }}
                   </div>
                 </td>

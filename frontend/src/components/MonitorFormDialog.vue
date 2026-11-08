@@ -24,20 +24,20 @@
       <v-card-text class="pa-5">
         <v-form @submit.prevent="save(false)">
           <!-- Etapa 1: o que verificar -->
-          <div class="text-overline text-medium-emphasis mb-2">1 · Tipo de checagem</div>
+          <div class="text-overline text-high-emphasis mb-2">1 · Tipo de checagem</div>
           <div class="d-flex flex-wrap ga-2 mb-2">
-            <v-card
+            <ChoiceCard
               v-for="def in MONITOR_KINDS"
               :key="def.kind"
               class="kind-card pa-3 text-center"
-              :variant="form.kind === def.kind ? 'tonal' : 'outlined'"
-              :color="form.kind === def.kind ? def.color : undefined"
+              :selected="form.kind === def.kind"
+              :color="def.color"
               @click="selectKind(def.kind)"
             >
               <v-icon size="24">{{ def.icon }}</v-icon>
               <div class="text-body-2 font-weight-medium mt-1">{{ def.label }}</div>
-              <div class="text-caption text-medium-emphasis">{{ def.tagline }}</div>
-            </v-card>
+              <div class="text-caption text-high-emphasis">{{ def.tagline }}</div>
+            </ChoiceCard>
           </div>
 
           <v-alert
@@ -50,7 +50,7 @@
           ></v-alert>
 
           <!-- Etapa 2: alvo da verificação -->
-          <div class="text-overline text-medium-emphasis mt-8 mb-3">2 · Alvo da verificação</div>
+          <div class="text-overline text-high-emphasis mt-8 mb-3">2 · Alvo da verificação</div>
           <v-row class="form-rows">
             <v-col cols="12">
               <v-select
@@ -230,7 +230,7 @@
 
           <!-- Etapa 3: de onde a checagem parte (somente exibida se houver mais de 1 probe) -->
           <template v-if="probeItems.length > 1">
-            <div class="text-overline text-medium-emphasis mt-8 mb-3">3 · Origem da checagem</div>
+            <div class="text-overline text-high-emphasis mt-8 mb-3">3 · Origem da checagem</div>
             <v-row class="form-rows">
               <v-col cols="12" md="6">
                 <v-select
@@ -257,7 +257,7 @@
           </template>
 
           <!-- Etapa de intervalo de coleta e ajustes finos -->
-          <div class="text-overline text-medium-emphasis mt-8 mb-3">
+          <div class="text-overline text-high-emphasis mt-8 mb-3">
             {{ frequencyStepNumber }} · Intervalo de coleta
           </div>
           <v-row class="form-rows">
@@ -321,7 +321,7 @@
                       <div class="text-subtitle-2 font-weight-bold mb-1">
                         Alerta inteligente de latência externa
                       </div>
-                      <div class="text-caption text-medium-emphasis mb-3">
+                      <div class="text-caption text-high-emphasis mb-3">
                         Compara com a média deste destino, exige leituras consecutivas e considera o
                         consumo da interface WAN antes de notificar. Falhas, perda e erros de
                         protocolo continuam alertando normalmente.
@@ -444,7 +444,7 @@
                           ></DataRateInput>
                         </v-col>
                         <v-col cols="12" class="pt-0">
-                          <div class="text-caption text-medium-emphasis">
+                          <div class="text-caption text-high-emphasis">
                             Capacidades vazias usam a velocidade negociada da interface. Para links
                             assimétricos, informe os valores contratados para medir a ocupação real.
                           </div>
@@ -486,7 +486,7 @@
             class="mt-5"
             icon="mdi-clipboard-check-outline"
           >
-            <div class="text-caption text-medium-emphasis">Resumo da checagem</div>
+            <div class="text-caption text-high-emphasis">Resumo da checagem</div>
             <div class="text-body-2">{{ summary }}</div>
           </v-alert>
 
@@ -506,7 +506,7 @@
       <v-card-actions class="pa-4">
         <v-tooltip v-if="validationErrors.length > 0" location="top">
           <template #activator="{ props: tooltipProps }">
-            <span v-bind="tooltipProps" class="text-caption text-medium-emphasis">
+            <span v-bind="tooltipProps" class="text-caption text-high-emphasis">
               <v-icon size="16" class="mr-1">mdi-alert-circle-outline</v-icon>
               {{ validationErrors.length }} pendência(s) no formulário
             </span>
@@ -549,6 +549,7 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
+import ChoiceCard from '@/components/ChoiceCard.vue'
 import { useMonitorsStore, type Monitor } from '@/stores/monitors'
 import { useDevicesStore, type Device } from '@/stores/devices'
 import { useProbesStore } from '@/stores/probes'
@@ -1133,8 +1134,6 @@ async function save(runAfterSave: boolean) {
 .kind-card {
   flex: 1 1 140px;
   min-width: 140px;
-  cursor: pointer;
-  transition: transform 0.12s ease;
 }
 
 /* Respiro entre os campos: com dicas persistentes o padrão do Vuetify fica apertado */
@@ -1142,9 +1141,5 @@ async function save(runAfterSave: boolean) {
 .form-rows > [class*='v-col-'] {
   padding-top: 10px;
   padding-bottom: 10px;
-}
-
-.kind-card:hover {
-  transform: translateY(-2px);
 }
 </style>

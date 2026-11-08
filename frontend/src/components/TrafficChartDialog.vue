@@ -98,7 +98,7 @@
         <v-row class="mb-6">
           <v-col cols="12" sm="3">
             <v-card border flat class="pa-3 rounded-lg text-center">
-              <div class="text-caption text-grey">Atual</div>
+              <div class="text-caption text-high-emphasis">Atual</div>
               <div class="text-subtitle-1 font-weight-bold text-primary">
                 {{ formattedStats.current }}
               </div>
@@ -106,7 +106,7 @@
           </v-col>
           <v-col cols="12" sm="3">
             <v-card border flat class="pa-3 rounded-lg text-center">
-              <div class="text-caption text-grey">Média</div>
+              <div class="text-caption text-high-emphasis">Média</div>
               <div class="text-subtitle-1 font-weight-bold text-info">
                 {{ formattedStats.avg }}
               </div>
@@ -114,7 +114,7 @@
           </v-col>
           <v-col cols="12" sm="3">
             <v-card border flat class="pa-3 rounded-lg text-center">
-              <div class="text-caption text-grey">Mínimo</div>
+              <div class="text-caption text-high-emphasis">Mínimo</div>
               <div class="text-subtitle-1 font-weight-bold text-success">
                 {{ formattedStats.min }}
               </div>
@@ -122,7 +122,7 @@
           </v-col>
           <v-col cols="12" sm="3">
             <v-card border flat class="pa-3 rounded-lg text-center">
-              <div class="text-caption text-grey">Máximo</div>
+              <div class="text-caption text-high-emphasis">Máximo</div>
               <div class="text-subtitle-1 font-weight-bold text-error">
                 {{ formattedStats.max }}
               </div>
@@ -137,8 +137,8 @@
           :unit-type="isRateMetric ? 'bandwidth' : 'bytes'"
         />
 
-        <div v-else class="text-center text-grey py-10 border rounded-lg bg-grey-lighten-5">
-          <v-icon size="48" color="grey-lighten-1">mdi-chart-line-variant</v-icon>
+        <div v-else class="text-center text-high-emphasis py-10 border rounded-lg">
+          <v-icon size="48" color="primary">mdi-chart-line-variant</v-icon>
           <div class="mt-2 text-subtitle-1 font-weight-medium">
             Nenhuma métrica capturada ainda para este filtro.
           </div>
@@ -155,7 +155,7 @@
       <v-divider></v-divider>
 
       <v-card-actions class="pa-4 justify-end">
-        <v-btn variant="text" color="grey-darken-1" @click="emit('update:modelValue', false)">
+        <v-btn variant="text" color="primary" @click="emit('update:modelValue', false)">
           Fechar
         </v-btn>
       </v-card-actions>

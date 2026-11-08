@@ -73,7 +73,7 @@
                     {{ entrada.id === preferred ? 'Padrão' : 'Padrão (automático)' }}
                   </v-chip>
                 </div>
-                <div class="text-caption text-medium-emphasis">{{ entrada.description }}</div>
+                <div class="text-caption text-high-emphasis">{{ entrada.description }}</div>
 
                 <v-text-field
                   v-model="drafts[entrada.id]"
@@ -98,7 +98,7 @@
                 >
                   <template #label>
                     <span class="text-body-2">Atrás de um proxy HTTPS</span>
-                    <span class="text-caption text-medium-emphasis ms-2 hidden-xs">
+                    <span class="text-caption text-high-emphasis ms-2 hidden-xs">
                       agentes conectam em https://{{
                         (drafts[entrada.id] ?? '').trim() || 'domínio'
                       }}
@@ -314,7 +314,7 @@ function sourceTone(entrada: ServerAddressEntry): {
       textClass: 'text-warning',
     }
   }
-  return { icon: 'mdi-check-circle-outline', color: 'success', textClass: 'text-medium-emphasis' }
+  return { icon: 'mdi-check-circle-outline', color: 'success', textClass: 'text-high-emphasis' }
 }
 
 function canReset(entrada: ServerAddressEntry): boolean {

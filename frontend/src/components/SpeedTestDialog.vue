@@ -74,7 +74,7 @@
         </div>
 
         <!-- Painel do Gráfico em Tempo Real -->
-        <v-card variant="outlined" class="rounded-lg overflow-hidden mb-6 chart-card">
+        <v-card border flat class="rounded-lg overflow-hidden mb-6 chart-card">
           <!-- HUD Superior do Gráfico -->
           <div
             class="d-flex flex-wrap align-center justify-space-between pa-4 bg-surface-light border-b ga-2"

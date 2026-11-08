@@ -1,5 +1,5 @@
 <template>
-  <v-card variant="outlined" class="pa-4 rounded-lg">
+  <v-card border flat class="pa-4 rounded-lg">
     <div class="d-flex align-center ga-2 mb-1">
       <v-icon color="primary" size="20">mdi-download-box-outline</v-icon>
       <span class="font-weight-bold">Baixar modelo no Ollama</span>

@@ -1,8 +1,6 @@
 <template>
-  <v-card
-    variant="outlined"
-    rounded="lg"
-    class="host-card d-flex flex-column fill-height"
+  <ChoiceCard
+    class="d-flex flex-column fill-height"
     :aria-label="`Detalhes de ${name}`"
     @click="emit('open', host)"
   >
@@ -100,11 +98,12 @@
         Detalhes
       </v-btn>
     </div>
-  </v-card>
+  </ChoiceCard>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import ChoiceCard from '@/components/ChoiceCard.vue'
 import DeciderSuggestionChip from '@/components/ai/DeciderSuggestionChip.vue'
 import type { StreamedDiscoveryHost } from '@/stores/discovery'
 import { deviceTypeLabel } from '@/utils/deviceTypes'
@@ -145,19 +144,6 @@ const confidenceLabel = computed(() => formatPercent(props.host.confidence, 0))
 </script>
 
 <style scoped>
-.host-card {
-  cursor: pointer;
-  transition:
-    border-color 0.15s ease,
-    transform 0.15s ease;
-}
-
-.host-card:hover,
-.host-card:focus-visible {
-  border-color: rgb(var(--v-theme-primary));
-  transform: translateY(-1px);
-}
-
 .host-card__clamp {
   display: -webkit-box;
   -webkit-line-clamp: 2;

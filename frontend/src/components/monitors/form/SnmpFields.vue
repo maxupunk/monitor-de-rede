@@ -62,11 +62,12 @@
 
       <v-card
         v-else
-        variant="outlined"
+        border
+        flat
         class="pa-3 rounded-lg border-dashed d-flex align-center justify-space-between ga-2 flex-wrap"
         style="min-height: 48px"
       >
-        <div class="d-flex align-center ga-2 text-caption text-medium-emphasis">
+        <div class="d-flex align-center ga-2 text-caption text-high-emphasis">
           <v-icon size="20" color="warning">mdi-information-outline</v-icon>
           <span>Nenhuma interface descoberta para este dispositivo.</span>
         </div>

@@ -43,13 +43,13 @@
 
     <v-card
       v-else-if="agentsStore.agents.length === 0"
-      rounded="xl"
-      variant="outlined"
+      rounded="lg"
+      elevation="2"
       class="pa-8 text-center"
     >
       <v-icon size="48" color="primary">mdi-server</v-icon>
       <div class="text-h6 mt-3">Nenhum servidor remoto conectado</div>
-      <p class="text-body-2 text-medium-emphasis mt-2 mb-0">
+      <p class="text-body-2 text-high-emphasis mt-2 mb-0">
         Conecte um servidor aqui ou marque "Conectar este servidor à central" ao criar um peer Linux
         na VPN: o script do túnel já faz a instalação.
       </p>
@@ -57,7 +57,7 @@
 
     <v-row v-else dense>
       <v-col v-for="agent in agentsStore.agents" :key="agent.id" cols="12" lg="6">
-        <v-card rounded="xl" variant="outlined" class="h-100">
+        <v-card rounded="lg" elevation="2" class="h-100">
           <v-card-title class="d-flex align-center ga-2 flex-wrap">
             <v-icon :color="statusMeta(agent).color">mdi-server</v-icon>
             <span class="text-truncate">{{ agent.name }}</span>
@@ -182,7 +182,7 @@
     </v-row>
 
     <v-dialog v-model="createOpen" max-width="480">
-      <v-card rounded="xl">
+      <v-card rounded="lg">
         <v-card-title>Conectar servidor</v-card-title>
         <v-card-text>
           <v-text-field
@@ -198,7 +198,7 @@
             label="Exigir conexão pelo túnel VPN do dispositivo vinculado"
             hide-details
           ></v-switch>
-          <p class="text-caption text-medium-emphasis mt-2 mb-0">
+          <p class="text-caption text-high-emphasis mt-2 mb-0">
             Servidores criados pela VPN já nascem vinculados ao dispositivo do túnel. No próximo
             passo você escolhe por qual endereço desta central ele vai se conectar.
           </p>
@@ -220,7 +220,7 @@
     </v-dialog>
 
     <v-dialog v-model="confirm.open" max-width="440">
-      <v-card rounded="xl">
+      <v-card rounded="lg">
         <v-card-title>{{
           confirm.kind === 'revoke' ? 'Revogar acesso' : 'Remover servidor'
         }}</v-card-title>

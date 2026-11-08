@@ -4,7 +4,7 @@
     scrollable
     @update:model-value="$emit('update:modelValue', $event)"
   >
-    <v-card class="mobile-sheet">
+    <v-card class="mobile-sheet" rounded="t-lg">
       <v-card-title class="d-flex align-center">
         <v-icon color="primary" class="mr-2">mdi-tune-variant</v-icon>
         Opções do mapa

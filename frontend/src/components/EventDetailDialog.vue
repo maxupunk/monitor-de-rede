@@ -13,7 +13,9 @@
           </v-avatar>
           <div>
             <div class="text-h6 font-weight-bold">{{ details.title }}</div>
-            <div class="text-caption text-grey">{{ formattedFullDate }} ({{ details.time }})</div>
+            <div class="text-caption text-high-emphasis">
+              {{ formattedFullDate }} ({{ details.time }})
+            </div>
           </div>
         </div>
         <v-btn icon variant="text" size="small" @click="emit('update:modelValue', false)">
@@ -29,7 +31,7 @@
           <v-chip size="small" :color="details.color" variant="flat" class="font-weight-medium">
             {{ event.type }}
           </v-chip>
-          <span class="text-body-2 font-weight-medium text-grey-darken-2">
+          <span class="text-body-2 font-weight-medium text-high-emphasis">
             {{ details.message }}
           </span>
         </div>
@@ -84,21 +86,21 @@
                   >
                     Interface #{{ m.interfaceId }}
                   </v-chip>
-                  <span v-else class="text-caption text-grey">Sistema (Host)</span>
+                  <span v-else class="text-caption text-high-emphasis">Sistema (Host)</span>
                 </td>
                 <td class="font-weight-bold">
                   {{ m.value }}
                   <span
                     v-if="humanFormatted(m.value, m.unit) !== String(m.value)"
-                    class="text-caption text-grey ml-1 font-weight-regular"
+                    class="text-caption text-high-emphasis ml-1 font-weight-regular"
                   >
                     ({{ humanFormatted(m.value, m.unit) }})
                   </span>
                 </td>
-                <td class="text-grey">{{ m.unit || '-' }}</td>
+                <td class="text-high-emphasis">{{ m.unit || '-' }}</td>
               </tr>
               <tr v-if="filteredMetrics.length === 0">
-                <td colspan="4" class="text-center text-grey py-4">
+                <td colspan="4" class="text-center text-high-emphasis py-4">
                   Nenhuma métrica corresponde ao filtro "{{ metricSearch }}"
                 </td>
               </tr>
@@ -123,9 +125,9 @@
               {{ copied ? 'Copiado!' : 'Copiar JSON' }}
             </v-btn>
           </div>
-          <v-card variant="outlined" class="bg-grey-lighten-4 pa-3 overflow-x-auto rounded">
+          <v-card border flat class="pa-3 overflow-x-auto">
             <pre
-              class="text-caption font-mono text-grey-darken-3 mb-0"
+              class="text-caption font-mono mb-0"
               style="white-space: pre-wrap; word-break: break-word"
               >{{ details.rawJson }}</pre>
           </v-card>
@@ -135,7 +137,7 @@
       <v-divider></v-divider>
 
       <v-card-actions class="pa-3 justify-end">
-        <v-btn variant="tonal" color="grey" @click="emit('update:modelValue', false)">
+        <v-btn variant="tonal" color="primary" @click="emit('update:modelValue', false)">
           Fechar
         </v-btn>
       </v-card-actions>

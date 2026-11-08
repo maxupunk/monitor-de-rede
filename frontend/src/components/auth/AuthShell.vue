@@ -6,14 +6,14 @@
       <v-container class="auth-shell__content pa-4 pa-sm-6" fluid>
         <v-row justify="center" class="ma-0 w-100">
           <v-col cols="12" :sm="10" :md="columns.md" :lg="columns.lg" class="pa-0">
-            <v-card class="auth-card" :elevation="0" rounded="xl">
+            <v-card class="auth-card" :elevation="0" rounded="lg">
               <div class="auth-card__brand">
                 <v-avatar class="auth-card__mark" size="44" rounded="lg">
                   <v-icon size="24" color="white">mdi-shield-network-outline</v-icon>
                 </v-avatar>
                 <div class="ms-3">
                   <div class="text-subtitle-1 font-weight-bold lh-tight">NetMonitor</div>
-                  <div class="text-caption text-medium-emphasis">
+                  <div class="text-caption text-high-emphasis">
                     Plataforma de Monitoramento de Redes
                   </div>
                 </div>
@@ -23,7 +23,7 @@
 
               <div class="auth-card__body">
                 <h1 class="auth-card__title text-h5 font-weight-bold mb-1">{{ title }}</h1>
-                <p class="text-body-2 text-medium-emphasis mb-5">{{ subtitle }}</p>
+                <p class="text-body-2 text-high-emphasis mb-5">{{ subtitle }}</p>
 
                 <slot></slot>
               </div>

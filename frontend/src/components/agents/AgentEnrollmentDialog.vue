@@ -5,7 +5,7 @@
     scrollable
     @update:model-value="emit('update:modelValue', $event)"
   >
-    <v-card v-if="enrollment && commands" rounded="xl">
+    <v-card v-if="enrollment && commands" rounded="lg">
       <v-card-title class="d-flex align-center ga-2">
         <v-icon :color="connected ? 'success' : 'primary'">
           {{ connected ? 'mdi-check-circle' : 'mdi-server' }}
@@ -40,7 +40,7 @@
           ></v-select>
           <ServerAddressesButton density="compact" @saved="reloadAddresses" />
         </div>
-        <p class="text-caption text-medium-emphasis mb-4">
+        <p class="text-caption text-high-emphasis mb-4">
           O servidor vai conectar em <code>{{ commands.serverUrl }}</code
           >. Escolha o caminho pelo qual ele alcança esta central: domínio, túnel VPN, rede local ou
           internet.
@@ -58,7 +58,7 @@
           label="Container Docker"
           :command="commands.dockerCommand"
         ></CopyableCommand>
-        <p class="text-caption text-medium-emphasis mt-4 mb-0">
+        <p class="text-caption text-high-emphasis mt-4 mb-0">
           Rode <strong>um</strong> dos comandos no servidor. Ele instala o agente NetMonitor, que só
           disca para esta central e não abre nenhuma porta. A política local
           <code>AGENT_ALLOW</code> decide o que o servidor aceita: acrescente <code>update</code> e

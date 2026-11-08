@@ -121,7 +121,7 @@
                   </span>
                 </div>
               </v-alert>
-              <div v-else class="text-caption text-medium-emphasis d-flex align-center ga-1 px-1">
+              <div v-else class="text-caption text-high-emphasis d-flex align-center ga-1 px-1">
                 <v-icon size="16" color="primary">mdi-lan</v-icon>
                 <span>
                   Sub-rede detectada: <strong>{{ matchedNetwork.name }}</strong> ({{
@@ -161,15 +161,17 @@
                     </template>
                     <template #subtitle>
                       <div class="d-flex align-center ga-1 text-caption">
-                        <span v-if="item.ipAddress" class="font-mono text-grey-darken-1">
+                        <span v-if="item.ipAddress" class="font-mono text-high-emphasis">
                           {{ item.ipAddress }}
                         </span>
-                        <span v-else class="text-grey-darken-1 font-italic">
+                        <span v-else class="text-high-emphasis font-italic">
                           {{
                             item.type === 'unmanaged_switch' ? 'Switch não gerenciável' : 'Sem IP'
                           }}
                         </span>
-                        <span v-if="item.siteName" class="text-grey"> • {{ item.siteName }} </span>
+                        <span v-if="item.siteName" class="text-high-emphasis">
+                          • {{ item.siteName }}
+                        </span>
                       </div>
                     </template>
                     <template #append>
@@ -185,7 +187,7 @@
                   </v-list-item>
                 </template>
                 <template #append-item>
-                  <div class="pa-2 text-caption text-grey text-center border-t">
+                  <div class="pa-2 text-caption text-high-emphasis text-center border-t">
                     Priorizando switches e roteadores para topologia e inibição de alertas
                   </div>
                 </template>
@@ -564,7 +566,7 @@
             <strong>{{ originalIpAddress }}</strong> para <strong>{{ formModel.ipAddress }}</strong
             >.
           </p>
-          <p class="text-body-2 text-grey-darken-1 mb-0">
+          <p class="text-body-2 text-high-emphasis mb-0">
             Deseja apagar o histórico de coletas, métricas de tráfego, eventos e logs acumulados com
             o IP antigo, ou deseja manter o histórico existente?
           </p>

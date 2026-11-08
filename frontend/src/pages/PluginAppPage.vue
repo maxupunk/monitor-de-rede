@@ -124,7 +124,7 @@
         </v-window-item>
 
         <v-window-item v-if="fleetSchema" value="settings">
-          <v-card border flat class="rounded-lg">
+          <v-card elevation="2" class="rounded-lg">
             <v-card-text>
               <v-alert type="info" variant="tonal" density="compact" class="mb-4">
                 Esta é a configuração desejada, guardada aqui no sistema. Salvar não altera os

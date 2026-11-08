@@ -6,7 +6,7 @@
           <v-icon color="warning">mdi-bell-alert</v-icon>
           Histórico de Alertas
         </h2>
-        <div class="text-subtitle-2 text-grey">
+        <div class="text-subtitle-2 text-high-emphasis">
           Alertas disparados e normalizações deste monitor
         </div>
       </div>
@@ -91,7 +91,7 @@
                       <span v-if="item.resolvedAt" class="text-success font-weight-medium">
                         {{ formatDateTime(item.resolvedAt, '—') }}
                       </span>
-                      <span v-else class="text-grey">—</span>
+                      <span v-else class="text-high-emphasis">—</span>
                     </td>
                     <td>
                       <div v-if="item.status === 'active'" class="d-flex ga-1">
@@ -146,7 +146,7 @@
                       >
                         Silenciado
                       </v-chip>
-                      <span v-else class="text-grey">—</span>
+                      <span v-else class="text-high-emphasis">—</span>
                     </td>
                   </tr>
                 </tbody>
@@ -180,7 +180,7 @@
                       {{ statusLabel(item.status) }}
                     </v-chip>
                   </div>
-                  <span class="text-caption text-grey d-flex align-center ga-1">
+                  <span class="text-caption text-high-emphasis d-flex align-center ga-1">
                     <v-icon size="12">mdi-clock-outline</v-icon>
                     {{ formatDateTime(item.startedAt, '—') }}
                   </span>
@@ -189,14 +189,14 @@
                 <div class="text-subtitle-1 font-weight-bold text-break text-high-emphasis">
                   {{ item.title || '—' }}
                 </div>
-                <div v-if="item.message" class="text-body-2 text-grey-darken-1 text-break mt-1">
+                <div v-if="item.message" class="text-body-2 text-high-emphasis text-break mt-1">
                   {{ item.message }}
                 </div>
 
                 <div
                   class="d-flex align-center justify-space-between pt-2 mt-1 border-t flex-wrap ga-1"
                 >
-                  <span class="text-caption text-grey">
+                  <span class="text-caption text-high-emphasis">
                     Normalizado:
                     <strong v-if="item.resolvedAt" class="text-success font-weight-medium">
                       {{ formatDateTime(item.resolvedAt, '—') }}
@@ -245,7 +245,7 @@
             </div>
 
             <template #empty>
-              <div class="text-caption text-grey text-center py-3">
+              <div class="text-caption text-high-emphasis text-center py-3">
                 Nenhum outro registro no histórico de alertas.
               </div>
             </template>

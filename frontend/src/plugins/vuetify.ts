@@ -7,6 +7,19 @@ import * as directives from 'vuetify/directives'
 export default createVuetify({
   components,
   directives,
+  /**
+   * Superfícies — o padrão visual de todas as telas, num lugar só:
+   * - card de página: `elevation="2"`, sem contorno;
+   * - painel dentro de outro card ou diálogo: `border flat` (a borda do tema,
+   *   discreta nos dois temas);
+   * - card de escolha clicável: `<ChoiceCard>`;
+   * - canto sempre `lg`. `variant="outlined"` sem `color` desenha a borda com a
+   *   cor do texto (quase branca no tema escuro) e `xl` destoa do resto — os
+   *   dois são barrados por `tests/conventions/surfaces.test.ts`.
+   */
+  defaults: {
+    VCard: { rounded: 'lg' },
+  },
   theme: {
     defaultTheme: 'dark',
     themes: {

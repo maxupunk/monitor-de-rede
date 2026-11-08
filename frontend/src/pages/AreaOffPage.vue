@@ -1,6 +1,6 @@
 <template>
   <div class="area-off d-flex justify-center">
-    <v-card border rounded="lg" class="bg-surface pa-6 area-off__card">
+    <v-card elevation="2" rounded="lg" class="pa-6 area-off__card">
       <div class="d-flex align-center ga-4 mb-4">
         <v-avatar :color="noAccess ? 'error' : 'warning'" variant="tonal" size="56" rounded="lg">
           <v-icon size="30">{{

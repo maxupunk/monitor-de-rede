@@ -14,7 +14,7 @@
         </v-avatar>
         <div>
           <div class="text-h6 font-weight-bold lh-1">NetMonitor</div>
-          <div class="text-caption text-grey">Monitor de Rede v1.0</div>
+          <div class="text-caption text-high-emphasis">Monitor de Rede v1.0</div>
         </div>
       </div>
 
@@ -80,7 +80,7 @@
             Personalizar menu
           </v-btn>
         </div>
-        <div class="app-footer-bar justify-center px-4 text-caption text-grey border-t">
+        <div class="app-footer-bar justify-center px-4 text-caption text-high-emphasis border-t">
           &copy; 2026 Master Sistemas
         </div>
       </template>
@@ -95,7 +95,7 @@
 
       <!-- Status SSE Tempo Real -->
       <v-chip
-        :color="eventsStore.isConnected ? 'success' : 'grey-darken-1'"
+        :color="eventsStore.isConnected ? 'success' : 'grey'"
         size="small"
         class="mr-2 font-weight-bold"
         variant="tonal"
@@ -239,13 +239,13 @@
 
     <!-- Diálogo de Instruções de Instalação no iOS -->
     <v-dialog v-model="showIosDialog" :fullscreen="$vuetify.display.xs" max-width="420">
-      <v-card class="rounded-xl pa-4">
+      <v-card class="rounded-lg pa-4">
         <v-card-title class="d-flex align-center font-weight-bold">
           <v-icon color="primary" class="mr-2">mdi-apple</v-icon>
           Instalar no iOS (Safari)
         </v-card-title>
         <v-card-text class="text-body-2 pt-2">
-          <p class="mb-3 text-grey-darken-1">
+          <p class="mb-3 text-high-emphasis">
             Para instalar o <strong>NetMonitor</strong> no seu iPhone ou iPad:
           </p>
           <ol class="pl-4 d-flex flex-column ga-2 text-caption font-weight-medium">

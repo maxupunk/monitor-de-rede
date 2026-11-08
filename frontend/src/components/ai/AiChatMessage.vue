@@ -39,7 +39,7 @@
           v-if="message.content || message.isStreaming || message.error || message.notice"
           :color="message.role === 'user' ? 'primary' : 'surface'"
           :class="[
-            'pa-3 rounded-xl elevation-1 message-bubble',
+            'pa-3 rounded-lg elevation-1 message-bubble',
             message.role === 'user' ? 'text-white' : 'text-body-medium',
           ]"
         >

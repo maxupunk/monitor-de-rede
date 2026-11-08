@@ -20,9 +20,9 @@
       <v-row dense class="mb-2">
         <v-col v-for="card in summaryCards" :key="card.label" cols="6" md="3">
           <v-card
-            rounded="xl"
-            variant="outlined"
-            class="summary-card pa-4 h-100"
+            rounded="lg"
+            elevation="2"
+            class="pa-4 h-100"
             :to="{ path: card.to, query: { ...docker.hostQuery, ...card.query } }"
             :aria-label="`${card.label}: ${card.value}`"
           >
@@ -40,7 +40,7 @@
         </v-col>
       </v-row>
 
-      <v-card rounded="xl" variant="outlined" class="mb-4">
+      <v-card rounded="lg" elevation="2" class="mb-4">
         <v-card-title class="d-flex flex-wrap align-center ga-2">
           <span class="d-flex align-center ga-2">
             <v-icon color="primary">mdi-chart-timeline-variant</v-icon>
@@ -99,7 +99,7 @@
 
       <v-row>
         <v-col cols="12" lg="5">
-          <v-card rounded="xl" variant="outlined" height="100%">
+          <v-card rounded="lg" elevation="2" height="100%">
             <v-card-title class="d-flex align-center ga-2">
               <v-icon color="primary">mdi-server-outline</v-icon>
               Docker Engine
@@ -122,7 +122,7 @@
           </v-card>
         </v-col>
         <v-col cols="12" lg="7">
-          <v-card rounded="xl" variant="outlined" height="100%">
+          <v-card rounded="lg" elevation="2" height="100%">
             <v-card-title class="d-flex align-center justify-space-between ga-2">
               <span class="d-flex align-center ga-2">
                 <v-icon color="primary">mdi-chart-box-outline</v-icon>
@@ -269,12 +269,3 @@ function formatMemory(value: number): string {
   return formatBinaryBytes(value)
 }
 </script>
-
-<style scoped>
-.summary-card {
-  transition: border-color 0.15s;
-}
-.summary-card:hover {
-  border-color: rgb(var(--v-theme-primary));
-}
-</style>

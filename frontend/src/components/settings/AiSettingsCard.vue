@@ -1,5 +1,5 @@
 <template>
-  <v-card class="rounded-lg fill-height d-flex flex-column">
+  <v-card elevation="2" class="rounded-lg fill-height d-flex flex-column">
     <v-card-title class="font-weight-bold d-flex align-center justify-space-between flex-wrap ga-2">
       <div class="d-flex align-center">
         <v-icon start color="primary">mdi-robot-outline</v-icon>

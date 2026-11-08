@@ -20,7 +20,7 @@
             </v-avatar>
             <div>
               <div class="font-weight-bold">{{ role.title }}</div>
-              <div class="text-body-2 text-medium-emphasis">{{ role.description }}</div>
+              <div class="text-body-2 text-high-emphasis">{{ role.description }}</div>
             </div>
           </v-card-text>
         </v-card>
@@ -75,7 +75,7 @@
                 Você
               </v-chip>
             </div>
-            <div class="text-caption text-medium-emphasis">{{ item.email }}</div>
+            <div class="text-caption text-high-emphasis">{{ item.email }}</div>
           </div>
         </template>
 
@@ -114,7 +114,7 @@
           <v-chip
             size="small"
             variant="tonal"
-            :color="item.active ? 'success' : 'grey-darken-1'"
+            :color="item.active ? 'success' : 'grey'"
             :prepend-icon="item.active ? 'mdi-check-circle-outline' : 'mdi-cancel'"
           >
             {{ item.active ? 'Ativo' : 'Desativado' }}
@@ -184,7 +184,7 @@
               <v-chip
                 size="small"
                 variant="tonal"
-                :color="item.active ? 'success' : 'grey-darken-1'"
+                :color="item.active ? 'success' : 'grey'"
                 class="font-weight-medium px-2.5 flex-shrink-0"
               >
                 {{ item.active ? 'Ativo' : 'Desativado' }}
@@ -193,9 +193,9 @@
 
             <!-- Middle: Email e Perfil de Acesso -->
             <div
-              class="d-flex flex-wrap align-center justify-space-between ga-2 text-caption text-grey"
+              class="d-flex flex-wrap align-center justify-space-between ga-2 text-caption text-high-emphasis"
             >
-              <span class="text-body-2 text-medium-emphasis text-truncate font-mono">{{
+              <span class="text-body-2 text-high-emphasis text-truncate font-mono">{{
                 item.email
               }}</span>
               <v-chip
@@ -244,7 +244,7 @@
     ></UserDialog>
 
     <v-dialog v-model="deleteDialog" :fullscreen="$vuetify.display.xs" max-width="460">
-      <v-card rounded="xl">
+      <v-card rounded="lg">
         <v-card-title class="pa-5 pb-2">Excluir usuário?</v-card-title>
         <v-card-text>
           A conta de <strong>{{ userToDelete?.fullName }}</strong> será removida permanentemente e

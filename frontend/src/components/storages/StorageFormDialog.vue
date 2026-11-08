@@ -23,10 +23,9 @@
         <!-- Passo 1: onde guardar -->
         <v-row v-if="step === 'provider'" dense>
           <v-col v-for="item in STORAGE_PROVIDERS" :key="item.value" cols="12" sm="6">
-            <v-card
-              variant="outlined"
-              class="provider-card pa-3 d-flex align-center ga-3 h-100"
-              :class="{ 'provider-card--active': provider === item.value }"
+            <ChoiceCard
+              :selected="provider === item.value"
+              class="pa-3 d-flex align-center ga-3 h-100"
               @click="chooseProvider(item.value)"
             >
               <v-avatar :color="item.color" variant="tonal" rounded="lg" size="44">
@@ -36,7 +35,7 @@
                 <div class="font-weight-bold">{{ item.label }}</div>
                 <div class="text-caption text-high-emphasis">{{ item.hint }}</div>
               </div>
-            </v-card>
+            </ChoiceCard>
           </v-col>
         </v-row>
 
@@ -337,6 +336,7 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
+import ChoiceCard from '@/components/ChoiceCard.vue'
 import type { StorageConfig } from '@/bindings/StorageConfig'
 import type { StorageDestinationDetail } from '@/bindings/StorageDestinationDetail'
 import type { StorageDestinationInput } from '@/bindings/StorageDestinationInput'
@@ -616,20 +616,6 @@ function close() {
 </script>
 
 <style scoped>
-.provider-card {
-  cursor: pointer;
-  border-width: 1px;
-  transition:
-    border-color 0.15s,
-    box-shadow 0.15s;
-}
-.provider-card:hover {
-  border-color: rgb(var(--v-theme-primary));
-}
-.provider-card--active {
-  border-color: rgb(var(--v-theme-primary));
-  box-shadow: 0 0 0 1px rgb(var(--v-theme-primary));
-}
 .section-title {
   font-weight: 700;
   font-size: 0.875rem;

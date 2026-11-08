@@ -19,37 +19,29 @@
       <v-card-text class="pt-3">
         <v-row>
           <v-col cols="12" sm="6">
-            <v-card
-              variant="outlined"
-              class="pa-4 h-100 rounded-lg cursor-pointer choice-card border-info"
-              @click="choose('server')"
-            >
+            <ChoiceCard color="info" class="pa-4 h-100" @click="choose('server')">
               <div class="d-flex align-center ga-2 mb-2">
                 <v-icon color="info">mdi-cloud-sync</v-icon>
                 <span class="font-weight-bold text-subtitle-2">Usar Layout do Servidor</span>
               </div>
-              <p class="text-caption text-grey-darken-1 mb-0">
+              <p class="text-caption text-high-emphasis mb-0">
                 Sincroniza a organização e os gráficos em tempo real (via SSE) com todos os outros
                 computadores e celulares conectados.
               </p>
-            </v-card>
+            </ChoiceCard>
           </v-col>
 
           <v-col cols="12" sm="6">
-            <v-card
-              variant="outlined"
-              class="pa-4 h-100 rounded-lg cursor-pointer choice-card"
-              @click="choose('local')"
-            >
+            <ChoiceCard class="pa-4 h-100" @click="choose('local')">
               <div class="d-flex align-center ga-2 mb-2">
-                <v-icon color="grey-darken-2">mdi-laptop</v-icon>
+                <v-icon color="primary">mdi-laptop</v-icon>
                 <span class="font-weight-bold text-subtitle-2">Manter Layout Local</span>
               </div>
-              <p class="text-caption text-grey-darken-1 mb-0">
+              <p class="text-caption text-high-emphasis mb-0">
                 Mantém uma organização de cards exclusiva armazenada apenas neste navegador. Você
                 pode alterar essa escolha nas Configurações.
               </p>
-            </v-card>
+            </ChoiceCard>
           </v-col>
         </v-row>
       </v-card-text>
@@ -57,7 +49,7 @@
       <v-divider class="my-2"></v-divider>
 
       <v-card-actions class="px-4 pb-3 justify-end ga-2">
-        <v-btn color="grey-darken-1" variant="text" size="small" @click="choose('local')">
+        <v-btn color="primary" variant="text" size="small" @click="choose('local')">
           Usar Local
         </v-btn>
         <v-btn
@@ -76,6 +68,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import ChoiceCard from '@/components/ChoiceCard.vue'
 import { useDashboardStore, type SyncMode } from '@/stores/dashboard'
 
 const dashboardStore = useDashboardStore()
@@ -93,16 +86,6 @@ function choose(mode: SyncMode) {
 </script>
 
 <style scoped>
-.choice-card {
-  transition: all 0.2s ease-in-out;
-}
-
-.choice-card:hover {
-  border-color: rgba(var(--v-theme-info), 0.8) !important;
-  box-shadow: 0 4px 12px rgba(2, 132, 199, 0.15);
-  transform: translateY(-2px);
-}
-
 .ga-2 {
   gap: 8px;
 }

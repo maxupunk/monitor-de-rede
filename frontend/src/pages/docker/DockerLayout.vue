@@ -1,7 +1,7 @@
 <template>
   <div>
     <!-- Cabeçalho único: de qual host se trata, como a Engine está e as abas. -->
-    <v-card variant="outlined" rounded="xl" class="mb-4 overflow-hidden">
+    <v-card elevation="2" rounded="lg" class="mb-4 overflow-hidden">
       <div class="d-flex flex-wrap align-center ga-3 pa-3 pa-md-4">
         <v-avatar color="primary" variant="tonal" size="44" class="flex-shrink-0">
           <v-icon size="26">mdi-docker</v-icon>

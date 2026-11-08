@@ -6,7 +6,7 @@
     :persistent="state.options.persistent"
     @update:model-value="onModelUpdate"
   >
-    <v-card class="rounded-xl pa-2">
+    <v-card class="rounded-lg pa-2">
       <v-card-item class="pb-2">
         <template #prepend>
           <v-avatar :color="state.options.confirmColor || 'primary'" variant="tonal" rounded="lg">
@@ -19,7 +19,7 @@
       </v-card-item>
 
       <v-card-text class="pt-2">
-        <div v-if="state.options.message" class="text-body-1 text-medium-emphasis mb-3">
+        <div v-if="state.options.message" class="text-body-1 text-high-emphasis mb-3">
           {{ state.options.message }}
         </div>
 

@@ -44,7 +44,7 @@
       </div>
     </section>
 
-    <v-card rounded="lg" border>
+    <v-card elevation="2" rounded="lg">
       <v-tabs v-model="tab" color="primary">
         <v-tab value="history" prepend-icon="mdi-history">Histórico</v-tab>
         <v-tab value="schedules" prepend-icon="mdi-calendar-clock">Agendamentos</v-tab>

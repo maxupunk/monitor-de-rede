@@ -293,6 +293,18 @@ body,
     0 4px 16px rgba(15, 23, 42, 0.06) !important;
 }
 
+/*
+ * Realce suave de uma linha ou bloco na cor do tema (a linha que chegou ao
+ * destino, o item em edição). Cor fixa clara (`bg-*-lighten-5`) vira um
+ * bloco quase branco com texto claro no tema escuro — o tom acompanha os dois.
+ */
+.tint-primary {
+  background: rgba(var(--v-theme-primary), 0.12);
+}
+.tint-success {
+  background: rgba(var(--v-theme-success), 0.12);
+}
+
 /* Estado vazio dos widgets do Dashboard: centralizado, texto legível. */
 .dashboard-empty {
   display: flex;

@@ -41,7 +41,7 @@
             <ServerAddressesButton @saved="recarrega" />
           </div>
           <div v-if="guide" class="text-body-2">
-            <span class="text-grey">Porta:</span>
+            <span class="text-high-emphasis">Porta:</span>
             <strong class="ml-1">{{ guide.port }}/udp e /tcp</strong>
           </div>
         </div>
@@ -73,7 +73,7 @@
             :key="snippet.system"
             :value="snippet.system"
           >
-            <p class="text-caption text-grey mb-3">{{ snippet.note }}</p>
+            <p class="text-caption text-high-emphasis mb-3">{{ snippet.note }}</p>
             <v-sheet class="pa-3 rounded-lg border position-relative" color="surface-variant">
               <v-btn
                 :icon="copied === snippet.system ? 'mdi-check' : 'mdi-content-copy'"
@@ -88,7 +88,7 @@
           </v-window-item>
         </v-window>
 
-        <div v-if="!guide" class="pa-8 text-center text-grey">
+        <div v-if="!guide" class="pa-8 text-center text-high-emphasis">
           <v-progress-circular indeterminate size="32"></v-progress-circular>
         </div>
       </v-card-text>

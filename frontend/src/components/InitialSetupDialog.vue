@@ -7,7 +7,7 @@
     scrollable
     @update:model-value="emit('update:modelValue', $event)"
   >
-    <v-card class="rounded-xl initial-setup-card d-flex flex-column">
+    <v-card class="rounded-lg initial-setup-card d-flex flex-column">
       <!-- Cabeçalho do Diálogo -->
       <v-card-item class="pa-5 pb-4 border-b bg-surface">
         <template #prepend>

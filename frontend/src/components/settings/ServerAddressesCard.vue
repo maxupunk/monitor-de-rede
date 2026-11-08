@@ -5,7 +5,7 @@
       Endereços deste servidor
     </v-card-title>
     <v-card-text class="mt-2 flex-grow-1">
-      <p class="text-caption text-grey-darken-1 mb-4">
+      <p class="text-caption text-high-emphasis mb-4">
         Um servidor, várias portas de entrada. Cada equipamento alcança o NetMonitor pelo endereço
         da rede em que ele está — e é essa lista que aparece na hora de configurar o envio de logs.
       </p>
@@ -30,7 +30,7 @@
           </template>
           <template #subtitle>
             <span v-if="entrada.value" class="font-weight-medium">{{ entrada.value }}</span>
-            <span v-else class="text-medium-emphasis">Não definido</span>
+            <span v-else class="text-high-emphasis">Não definido</span>
           </template>
         </v-list-item>
       </v-list>

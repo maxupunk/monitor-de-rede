@@ -35,8 +35,8 @@
               >
                 {{ entry.deviceName ?? `Dispositivo ${entry.deviceId}` }}
               </RouterLink>
-              <span v-else class="text-grey">{{ entry.hostname ?? entry.sourceIp }}</span>
-              <div class="text-grey text-caption">{{ entry.sourceIp }}</div>
+              <span v-else class="text-high-emphasis">{{ entry.hostname ?? entry.sourceIp }}</span>
+              <div class="text-high-emphasis text-caption">{{ entry.sourceIp }}</div>
             </td>
             <td class="text-body-2">
               <span class="log-message">{{ entry.message }}</span>
@@ -46,12 +46,13 @@
                   :key="topic"
                   size="x-small"
                   variant="outlined"
+                  color="info"
                   class="mr-1"
                 >
                   {{ topic }}
                 </v-chip>
               </div>
-              <div v-else-if="entry.appName" class="text-caption text-grey mt-1">
+              <div v-else-if="entry.appName" class="text-caption text-high-emphasis mt-1">
                 {{ entry.appName }}<template v-if="entry.pid">[{{ entry.pid }}]</template>
               </div>
               <div v-if="categoryOf(entry)" class="mt-1">
@@ -100,14 +101,14 @@
         </tbody>
       </v-table>
       <template #empty>
-        <div class="text-caption text-grey text-center py-4">
+        <div class="text-caption text-high-emphasis text-center py-4">
           Não há mais registros no período consultado.
         </div>
       </template>
     </v-infinite-scroll>
 
-    <div v-if="entries.length === 0" class="pa-8 text-center text-grey">
-      <v-icon size="48" color="grey-lighten-1" class="mb-2">mdi-text-box-search-outline</v-icon>
+    <div v-if="entries.length === 0" class="pa-8 text-center text-high-emphasis">
+      <v-icon size="48" color="primary" class="mb-2">mdi-text-box-search-outline</v-icon>
       <div class="text-subtitle-2 font-weight-medium">Nenhum registro encontrado</div>
       <div class="text-caption">{{ emptyHint }}</div>
     </div>

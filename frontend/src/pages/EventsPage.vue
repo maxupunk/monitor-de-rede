@@ -65,7 +65,7 @@
           </template>
           <v-list-item-title class="font-weight-bold">
             {{ formatEventDetails(evt).title }}
-            <v-chip size="x-small" class="ml-2 font-weight-medium" variant="outlined">
+            <v-chip size="x-small" class="ml-2 font-weight-medium" variant="outlined" color="info">
               {{ evt.type }}
             </v-chip>
           </v-list-item-title>
@@ -73,18 +73,18 @@
             {{ formatEventDetails(evt).message }}
           </v-list-item-subtitle>
           <template #append>
-            <span class="text-caption text-grey">{{ formatEventDetails(evt).time }}</span>
+            <span class="text-caption text-high-emphasis">{{ formatEventDetails(evt).time }}</span>
           </template>
         </v-list-item>
       </v-list>
       <template #empty>
-        <div class="text-caption text-grey text-center py-4">
+        <div class="text-caption text-high-emphasis text-center py-4">
           Nenhum outro evento registrado no histórico.
         </div>
       </template>
     </v-infinite-scroll>
-    <div v-if="allFilteredEvents.length === 0" class="pa-8 text-center text-grey">
-      <v-icon size="48" color="grey-lighten-1" class="mb-2">mdi-filter-remove-outline</v-icon>
+    <div v-if="allFilteredEvents.length === 0" class="pa-8 text-center text-high-emphasis">
+      <v-icon size="48" color="primary" class="mb-2">mdi-filter-remove-outline</v-icon>
       <div class="text-subtitle-2 font-weight-medium">Nenhum evento encontrado</div>
       <div class="text-caption">
         Tente ajustar os termos de busca ou remover o filtro selecionado.

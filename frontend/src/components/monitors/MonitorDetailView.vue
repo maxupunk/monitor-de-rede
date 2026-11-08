@@ -22,7 +22,7 @@
       class="pa-8 text-center rounded-lg"
     >
       <v-progress-circular indeterminate color="primary" size="48"></v-progress-circular>
-      <div class="mt-4 text-subtitle-1 text-grey">
+      <div class="mt-4 text-subtitle-1 text-high-emphasis">
         Carregando métricas e histórico do monitor...
       </div>
     </v-card>
@@ -134,7 +134,9 @@
     <v-card v-else elevation="2" class="pa-8 text-center rounded-lg">
       <v-icon size="64" color="error" class="mb-4">mdi-alert-circle-outline</v-icon>
       <div class="text-h6 text-error">Monitor não encontrado</div>
-      <div class="text-body-2 text-grey mt-1">O monitor solicitado não existe ou foi removido.</div>
+      <div class="text-body-2 text-high-emphasis mt-1">
+        O monitor solicitado não existe ou foi removido.
+      </div>
       <v-btn v-if="!embedded" color="primary" class="mt-4" to="/monitors">
         Voltar para Monitores
       </v-btn>

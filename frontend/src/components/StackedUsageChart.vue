@@ -80,13 +80,13 @@
         </div>
       </div>
 
-      <div class="stacked-usage__times text-medium-emphasis">
+      <div class="stacked-usage__times text-high-emphasis">
         <span>{{ formatClockTime(stack.times[0]) }}</span>
         <span>{{ formatClockTime(stack.times[stack.times.length - 1]) }}</span>
       </div>
     </div>
 
-    <div v-else class="stacked-usage__empty text-medium-emphasis">
+    <div v-else class="stacked-usage__empty text-high-emphasis">
       <v-icon size="32">mdi-chart-areaspline-variant</v-icon>
       <div class="text-caption mt-1">Aguardando a primeira amostra do SSE.</div>
     </div>

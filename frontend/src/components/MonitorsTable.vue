@@ -26,7 +26,7 @@
         </a>
         <div
           v-if="showDevice"
-          class="text-caption text-grey-darken-1 mb-1 d-flex align-center ga-1"
+          class="text-caption text-high-emphasis mb-1 d-flex align-center ga-1"
         >
           <v-icon size="12">mdi-router-network</v-icon>
           {{ item.device?.name || 'Dispositivo não vinculado' }}
@@ -149,7 +149,7 @@
         <v-chip v-else :color="getStatusColor(item.status)" size="small">
           {{ (item.status || 'UNKNOWN').toUpperCase() }}
         </v-chip>
-        <span v-if="!item.isEnabled" class="text-caption text-grey-darken-1 mt-1 font-italic">
+        <span v-if="!item.isEnabled" class="text-caption text-high-emphasis mt-1 font-italic">
           Última informação
           <v-tooltip activator="parent" location="top">
             Monitor desativado - exibindo última informação registrada
@@ -245,12 +245,12 @@
         <div class="d-flex flex-column ga-1 text-caption">
           <div
             v-if="showDevice && item.device?.name"
-            class="d-flex align-center ga-1 text-grey-darken-1"
+            class="d-flex align-center ga-1 text-high-emphasis"
           >
             <v-icon size="14">mdi-router-network</v-icon>
             <span class="text-truncate">{{ item.device.name }}</span>
           </div>
-          <div v-else-if="showDevice" class="text-grey-darken-1">Dispositivo não vinculado</div>
+          <div v-else-if="showDevice" class="text-high-emphasis">Dispositivo não vinculado</div>
 
           <div class="d-flex flex-wrap align-center ga-2 mt-0.5">
             <v-chip
@@ -262,7 +262,7 @@
               <v-icon start size="12">{{ typeChip(item).icon }}</v-icon>
               {{ typeChip(item).label }}
             </v-chip>
-            <span class="text-caption text-truncate font-mono text-grey-darken-1">{{
+            <span class="text-caption text-truncate font-mono text-high-emphasis">{{
               formatTarget(item)
             }}</span>
           </div>
@@ -359,7 +359,7 @@
               @update:model-value="(val) => toggle(item, Boolean(val))"
             >
               <template #label>
-                <span class="text-caption text-grey" style="font-size: 11px">
+                <span class="text-caption text-high-emphasis" style="font-size: 11px">
                   {{ item.isEnabled ? 'Ativo' : 'Pausado' }}
                 </span>
               </template>

@@ -34,7 +34,7 @@
         <!-- Formulário de cadastro / edição -->
         <v-form ref="formRef" validate-on="submit lazy" @submit.prevent="submit">
           <v-sheet border rounded class="pa-4 mb-5">
-            <div class="text-overline text-medium-emphasis mb-3">
+            <div class="text-overline text-high-emphasis mb-3">
               {{ editingId ? 'Editando servidor' : 'Adicionar servidor' }}
             </div>
             <v-row dense>
@@ -114,7 +114,7 @@
         </v-form>
 
         <!-- Lista cadastrada -->
-        <div class="text-overline text-medium-emphasis mb-2">
+        <div class="text-overline text-high-emphasis mb-2">
           Cadastrados ({{ store.servers.length }})
         </div>
 
@@ -123,7 +123,7 @@
             v-for="server in store.servers"
             :key="server.id"
             class="px-4 py-3 border-b"
-            :class="{ 'bg-deep-purple-lighten-5': editingId === server.id }"
+            :class="{ 'tint-primary': editingId === server.id }"
           >
             <template #prepend>
               <v-avatar
@@ -161,8 +161,8 @@
             </template>
           </v-list-item>
         </v-list>
-        <div v-else class="text-center text-grey py-8 border rounded">
-          <v-icon size="40" color="grey-lighten-1" class="mb-2">mdi-server-off</v-icon>
+        <div v-else class="text-center text-high-emphasis py-8 border rounded">
+          <v-icon size="40" color="primary" class="mb-2">mdi-server-off</v-icon>
           <div class="text-body-2">Nenhum servidor cadastrado ainda.</div>
         </div>
       </v-card-text>

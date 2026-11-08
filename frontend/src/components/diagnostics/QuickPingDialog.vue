@@ -6,7 +6,7 @@
     scrollable
     @update:model-value="$emit('update:modelValue', $event)"
   >
-    <v-card class="rounded-xl" :aria-busy="diagnostics.quickPingRunning">
+    <v-card class="rounded-lg" :aria-busy="diagnostics.quickPingRunning">
       <v-card-item class="py-4 px-6">
         <div class="d-flex align-start ga-3">
           <v-avatar color="info" variant="flat" size="38">

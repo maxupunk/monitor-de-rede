@@ -46,7 +46,7 @@
       ></v-alert>
     </v-card-text>
     <v-card-actions class="justify-end align-center">
-      <span v-if="prefsDirty" class="text-caption text-medium-emphasis mr-2">
+      <span v-if="prefsDirty" class="text-caption text-high-emphasis mr-2">
         Alterações não salvas
       </span>
       <v-btn variant="text" size="small" :disabled="prefsStore.saving" @click="restaurarPrefs">
