@@ -249,6 +249,13 @@ export async function readPackageFile(file: File): Promise<PluginPackage> {
   return parsed as PluginPackage
 }
 
+/**
+ * Cor (token do tema) de tudo o que vem de plugin — a aba Plugins e as abas
+ * que só existem por causa de um plugin, como Clientes Wi-Fi. Fixa por
+ * decisão de produto (AGENTS.md §12): não trocar por `primary`.
+ */
+export const PLUGIN_COLOR = 'plugin'
+
 /** Valor da aba de um plugin instalado em `/devices/{id}` (também no `?tab=`). */
 export const pluginTab = (pluginId: number): string => `plugin-${pluginId}`
 
@@ -271,6 +278,31 @@ export function installedPluginTabs(
       icon: item.plugin.list?.icon ?? 'mdi-puzzle',
       item,
     }))
+}
+
+/** Seções de gerenciamento da aba Plugins (ao lado dos plugins instalados). */
+export type PluginManageSection = 'catalog' | 'credentials' | 'history'
+
+export const PLUGIN_MANAGE_SECTIONS: { value: PluginManageSection; title: string; icon: string }[] =
+  [
+    { value: 'catalog', title: 'Catálogo', icon: 'mdi-storefront-outline' },
+    { value: 'credentials', title: 'Credenciais', icon: 'mdi-key-variant' },
+    { value: 'history', title: 'Histórico', icon: 'mdi-history' },
+  ]
+
+/**
+ * A seção da aba Plugins que aparece: a pedida, se existe (um plugin pedido
+ * que não está instalado não existe); sem pedido, o primeiro instalado — é o
+ * que o operador veio usar —, ou o catálogo quando nada está instalado.
+ */
+export function resolvePluginSection(
+  requested: string | null | undefined,
+  installed: InstalledPluginTab[]
+): string {
+  const installedValues = installed.map((plugin) => pluginTab(plugin.id))
+  const known = [...installedValues, ...PLUGIN_MANAGE_SECTIONS.map((section) => section.value)]
+  if (requested && known.includes(requested)) return requested
+  return installedValues[0] ?? 'catalog'
 }
 
 const BATCH_STATUS: Record<string, Presentation> = {

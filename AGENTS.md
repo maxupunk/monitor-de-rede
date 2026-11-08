@@ -227,6 +227,7 @@
     - **Proibição de Contrastes Baixos (Branco e Cinza)**: É expressamente proibido utilizar combinações visuais que resultem em baixo contraste e prejudiquem a legibilidade, tais como textos ou chips cinzas sobre fundos brancos/cinzas, `bg-surface-variant` associado a textos claros, e classes como `text-medium-emphasis` em textos essenciais ou informativos.
     - **Cores Semânticas e Vivas**: Chips, badges, alertas e indicadores visuais devem utilizar cores semânticas bem contrastadas (`primary`, `secondary`, `info`, `warning`, `success`, `error`) e evitar chips cinzas desbotados (`color="default"`).
     - **Superfície Limpa dos Cards**: Os containers e cards devem adotar o fundo padrão da superfície do tema (`surface`), bordas nítidas e contraste consistente tanto no tema claro quanto no tema escuro.
+    - **Cor de plugin é fixa — não alterar**: tudo o que vem de plugin usa o token de tema `plugin` (`PLUGIN_COLOR` em `utils/pluginPresentation.ts`): a aba **Plugins** e as abas que só existem por causa de um plugin, como **Clientes Wi-Fi** em `/devices/{id}` — cor no estado normal e no selecionado (`base-color`, `color`, `slider-color`). As abas nativas do equipamento ficam em `primary`. É decisão de produto, para o operador separar o que é do equipamento do que é extensão: não troque por `primary`, não reaproveite o token para outra coisa, e aba nova alimentada por plugin entra com ele.
 
 
 

@@ -27,11 +27,19 @@ export default createVuetify({
           warning: '#FFC107',
           /** Uso alto (CPU/memória ≥ 70%): laranja, entre o aviso e o erro. */
           caution: '#FF9100',
+          /**
+           * Tudo o que vem de plugin (aba Plugins, Clientes Wi-Fi e qualquer
+           * aba alimentada por plugin): cor própria, para o operador separar o
+           * que é do equipamento do que é extensão. NÃO trocar por `primary`
+           * nem reaproveitar em outra coisa — ver AGENTS.md §12.
+           */
+          plugin: '#1DE9B6',
         },
       },
       light: {
         colors: {
           caution: '#E65100',
+          plugin: '#00796B',
         },
       },
     },

@@ -3,7 +3,7 @@
     <!-- Cabeçalho do plugin -->
     <div class="d-flex align-center flex-wrap ga-2 mb-3">
       <v-icon color="primary" size="28">{{ item.plugin.list?.icon ?? 'mdi-puzzle' }}</v-icon>
-      <div class="min-w-0">
+      <div class="plugin-heading min-w-0">
         <div class="text-subtitle-1 font-weight-bold">
           {{ item.plugin.list?.title ?? item.plugin.name }}
           <span class="text-body-small">v{{ item.plugin.version }}</span>
@@ -20,160 +20,196 @@
       </v-chip>
     </div>
 
-    <v-alert v-if="blocked" type="error" variant="tonal" density="compact" class="mb-3">
-      {{
-        item.plugin.status === 'quarantine'
-          ? 'Plugin em quarentena: aceite a revisão de segurança antes de usar.'
-          : 'Plugin desativado na biblioteca.'
-      }}
-    </v-alert>
-    <v-alert
-      v-else-if="item.plugin.status !== 'active'"
-      type="warning"
-      variant="tonal"
-      density="compact"
-      class="mb-3"
-    >
-      Plugin ainda não ativo: cada acesso ao equipamento vai pedir sua aprovação.
-      <template v-if="item.plugin.status === 'tested'" #append>
-        <v-btn size="small" color="success" variant="flat" @click="promote">Ativar</v-btn>
-      </template>
-    </v-alert>
-
-    <!-- Tela própria do plugin, ou a lista de ações -->
-    <DeviceItemList
-      v-if="item.plugin.list"
-      :device-id="deviceId"
-      :plugin-id="item.plugin.id"
-      :list="item.plugin.list"
-      :actions="item.plugin.actions"
-      :autoload="item.plugin.status === 'active'"
-      :disabled="blocked"
-      :last-action-run-id="runDialog.runId"
-      @run="openAction"
-      @error="(message) => notify(message, 'error')"
-    />
-    <v-list v-else density="compact" border class="rounded-lg">
-      <v-list-item
-        v-for="action in item.plugin.actions"
-        :key="action.id"
-        :title="action.title"
-        :subtitle="action.description ?? action.id"
-      >
-        <template #prepend>
-          <v-icon :color="effectPresentation(action.effect).color">
-            {{ effectPresentation(action.effect).icon }}
-          </v-icon>
-        </template>
-        <template #append>
-          <v-btn
-            size="small"
-            :color="action.effect === 'write' ? 'error' : 'primary'"
-            variant="flat"
-            prepend-icon="mdi-play"
-            :disabled="blocked"
-            @click="openAction(action, {})"
-          >
-            Executar
-          </v-btn>
-        </template>
-      </v-list-item>
-    </v-list>
-
-    <!-- Ajuste deste equipamento (configuração `device` do plugin) -->
-    <v-card v-if="deviceSchema" border flat class="rounded-lg mt-4">
-      <v-card-title class="d-flex align-center ga-2 text-subtitle-1 font-weight-bold">
-        <v-icon color="primary">mdi-tune-variant</v-icon>
-        Ajustes deste equipamento
-      </v-card-title>
-      <v-card-subtitle>
-        Guardados no sistema; valem só aqui e sobrepõem a configuração geral do aplicativo.
-      </v-card-subtitle>
-      <v-card-text>
-        <SettingsForm ref="settingsForm" v-model="settingsDraft" :schema="deviceSchema" />
-      </v-card-text>
-      <v-card-actions>
-        <v-spacer></v-spacer>
+    <!-- Bloqueado: nada do plugin aparece — só o motivo e como liberar -->
+    <v-card v-if="blocked" border flat class="rounded-lg pa-6 text-center">
+      <v-icon :color="status.color" size="48" class="mb-3">{{ status.icon }}</v-icon>
+      <div class="text-h6 font-weight-bold mb-1">
+        {{ quarantined ? 'Plugin em quarentena' : 'Plugin desativado' }}
+      </div>
+      <p class="text-body-2 mb-4 mx-auto blocked-text">
+        {{
+          quarantined
+            ? 'Ele foi importado e precisa passar pela revisão de segurança antes de acessar este equipamento.'
+            : 'Ele está desligado na biblioteca: não acessa nenhum equipamento e as telas dele ficam escondidas até você ativá-lo de novo.'
+        }}
+      </p>
+      <div class="d-flex flex-wrap justify-center ga-2">
         <v-btn
-          color="primary"
+          v-if="quarantined"
+          color="warning"
           variant="flat"
-          prepend-icon="mdi-content-save-outline"
-          :loading="savingSettings"
-          @click="saveSettings"
+          prepend-icon="mdi-shield-search"
+          @click="emit('review', item.plugin.id)"
         >
-          Salvar ajustes
+          Revisar segurança
         </v-btn>
-      </v-card-actions>
+        <v-btn
+          v-else
+          color="success"
+          variant="flat"
+          prepend-icon="mdi-power-plug"
+          :loading="enabling"
+          @click="enable"
+        >
+          Ativar plugin
+        </v-btn>
+        <v-btn
+          color="error"
+          variant="outlined"
+          prepend-icon="mdi-puzzle-remove-outline"
+          @click="uninstall"
+        >
+          Desinstalar
+        </v-btn>
+      </div>
     </v-card>
 
-    <!-- Operação do plugin neste equipamento -->
-    <div class="d-flex flex-wrap ga-2 mt-4">
-      <v-btn
-        v-if="item.plugin.surfaces.includes('fleet')"
-        size="small"
-        color="secondary"
-        variant="flat"
-        prepend-icon="mdi-apps"
-        :to="'/apps/' + item.plugin.id"
+    <template v-else>
+      <v-alert
+        v-if="item.plugin.status !== 'active'"
+        type="warning"
+        variant="tonal"
+        density="compact"
+        class="mb-3"
       >
-        Abrir aplicativo
-      </v-btn>
-      <v-btn
-        size="small"
-        color="success"
-        variant="flat"
-        prepend-icon="mdi-check-decagram-outline"
-        :disabled="blocked"
-        @click="validate"
-      >
-        Validar neste equipamento
-      </v-btn>
-      <v-btn
-        size="small"
-        color="primary"
-        variant="flat"
-        prepend-icon="mdi-code-braces"
-        @click="editorOpen = true"
-      >
-        {{ item.plugin.source === 'builtin' ? 'Ver código' : 'Editar' }}
-      </v-btn>
-      <v-btn
-        size="small"
-        color="secondary"
-        variant="flat"
-        prepend-icon="mdi-download-outline"
-        @click="exportPlugin"
-      >
-        Exportar
-      </v-btn>
-      <v-spacer></v-spacer>
-      <v-btn
-        size="small"
-        color="error"
-        variant="outlined"
-        prepend-icon="mdi-puzzle-remove-outline"
-        @click="uninstall"
-      >
-        Desinstalar
-      </v-btn>
-    </div>
+        Plugin ainda não ativo: cada acesso ao equipamento vai pedir sua aprovação.
+        <template v-if="item.plugin.status === 'tested'" #append>
+          <v-btn size="small" color="success" variant="flat" @click="promote">Ativar</v-btn>
+        </template>
+      </v-alert>
 
-    <v-expansion-panels class="mt-4" variant="accordion">
-      <v-expansion-panel>
-        <v-expansion-panel-title>
-          <v-icon color="primary" class="mr-2">mdi-book-open-variant</v-icon>
-          Como usar, compatibilidade e testes
-        </v-expansion-panel-title>
-        <v-expansion-panel-text>
-          <PluginAbout
-            :plugin-id="item.plugin.id"
-            :device-id="deviceId"
-            :last-test-ok="item.plugin.lastTestOk"
-            @error="(message) => notify(message, 'error')"
-          />
-        </v-expansion-panel-text>
-      </v-expansion-panel>
-    </v-expansion-panels>
+      <!-- Tela própria do plugin, ou a lista de ações -->
+      <DeviceItemList
+        v-if="item.plugin.list"
+        :device-id="deviceId"
+        :plugin-id="item.plugin.id"
+        :list="item.plugin.list"
+        :actions="item.plugin.actions"
+        :autoload="item.plugin.status === 'active'"
+        :last-action-run-id="runDialog.runId"
+        @run="openAction"
+        @error="(message) => notify(message, 'error')"
+      />
+      <v-list v-else density="compact" border class="rounded-lg">
+        <v-list-item
+          v-for="action in item.plugin.actions"
+          :key="action.id"
+          :title="action.title"
+          :subtitle="action.description ?? action.id"
+        >
+          <template #prepend>
+            <v-icon :color="effectPresentation(action.effect).color">
+              {{ effectPresentation(action.effect).icon }}
+            </v-icon>
+          </template>
+          <template #append>
+            <v-btn
+              size="small"
+              :color="action.effect === 'write' ? 'error' : 'primary'"
+              variant="flat"
+              prepend-icon="mdi-play"
+              @click="openAction(action, {})"
+            >
+              Executar
+            </v-btn>
+          </template>
+        </v-list-item>
+      </v-list>
+
+      <!-- Ajuste deste equipamento (configuração `device` do plugin) -->
+      <v-card v-if="deviceSchema" border flat class="rounded-lg mt-4">
+        <v-card-title class="d-flex align-center ga-2 text-subtitle-1 font-weight-bold">
+          <v-icon color="primary">mdi-tune-variant</v-icon>
+          Ajustes deste equipamento
+        </v-card-title>
+        <v-card-subtitle>
+          Guardados no sistema; valem só aqui e sobrepõem a configuração geral do aplicativo.
+        </v-card-subtitle>
+        <v-card-text>
+          <SettingsForm ref="settingsForm" v-model="settingsDraft" :schema="deviceSchema" />
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer></v-spacer>
+          <v-btn
+            color="primary"
+            variant="flat"
+            prepend-icon="mdi-content-save-outline"
+            :loading="savingSettings"
+            @click="saveSettings"
+          >
+            Salvar ajustes
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+
+      <!-- Operação do plugin neste equipamento -->
+      <div class="d-flex flex-wrap ga-2 mt-4">
+        <v-btn
+          v-if="item.plugin.surfaces.includes('fleet')"
+          size="small"
+          color="secondary"
+          variant="flat"
+          prepend-icon="mdi-apps"
+          :to="'/apps/' + item.plugin.id"
+        >
+          Abrir aplicativo
+        </v-btn>
+        <v-btn
+          size="small"
+          color="success"
+          variant="flat"
+          prepend-icon="mdi-check-decagram-outline"
+          @click="validate"
+        >
+          Validar neste equipamento
+        </v-btn>
+        <v-btn
+          size="small"
+          color="primary"
+          variant="flat"
+          prepend-icon="mdi-code-braces"
+          @click="editorOpen = true"
+        >
+          {{ item.plugin.source === 'builtin' ? 'Ver código' : 'Editar' }}
+        </v-btn>
+        <v-btn
+          size="small"
+          color="secondary"
+          variant="flat"
+          prepend-icon="mdi-download-outline"
+          @click="exportPlugin"
+        >
+          Exportar
+        </v-btn>
+        <v-spacer></v-spacer>
+        <v-btn
+          size="small"
+          color="error"
+          variant="outlined"
+          prepend-icon="mdi-puzzle-remove-outline"
+          @click="uninstall"
+        >
+          Desinstalar
+        </v-btn>
+      </div>
+
+      <v-expansion-panels class="mt-4" variant="accordion">
+        <v-expansion-panel>
+          <v-expansion-panel-title>
+            <v-icon color="primary" class="mr-2">mdi-book-open-variant</v-icon>
+            Como usar, compatibilidade e testes
+          </v-expansion-panel-title>
+          <v-expansion-panel-text>
+            <PluginAbout
+              :plugin-id="item.plugin.id"
+              :device-id="deviceId"
+              :last-test-ok="item.plugin.lastTestOk"
+              @error="(message) => notify(message, 'error')"
+            />
+          </v-expansion-panel-text>
+        </v-expansion-panel>
+      </v-expansion-panels>
+    </template>
 
     <PluginActionDialog
       v-model="actionDialog.open"
@@ -234,6 +270,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   uninstalled: []
+  /** Abrir a revisão de segurança (plugin em quarentena). */
+  review: [pluginId: number]
 }>()
 
 const store = usePluginsStore()
@@ -290,9 +328,22 @@ async function saveSettings() {
 
 const status = computed(() => statusPresentation(props.item.plugin.status))
 const compat = computed(() => compatPresentation(props.item.compat))
-const blocked = computed(
-  () => props.item.plugin.status === 'quarantine' || props.item.plugin.status === 'disabled'
-)
+const quarantined = computed(() => props.item.plugin.status === 'quarantine')
+const blocked = computed(() => quarantined.value || props.item.plugin.status === 'disabled')
+const enabling = ref(false)
+
+/** Religa o plugin na biblioteca; a visão do equipamento recarrega com ele ativo. */
+async function enable() {
+  enabling.value = true
+  try {
+    await store.lifecycle(props.item.plugin.id, 'enable', props.deviceId)
+    notify('Plugin ativado.', 'success')
+  } catch (err: unknown) {
+    notify(describe(err, 'Falha ao ativar o plugin'), 'error')
+  } finally {
+    enabling.value = false
+  }
+}
 
 function describe(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback
@@ -400,6 +451,15 @@ async function uninstall() {
 </script>
 
 <style scoped>
+/* O título ocupa a linha com o ícone; os chips de estado descem quando falta espaço. */
+.plugin-heading {
+  flex: 1 1 260px;
+}
+
+.blocked-text {
+  max-width: 520px;
+}
+
 .min-w-0 {
   min-width: 0;
 }

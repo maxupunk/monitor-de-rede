@@ -14,6 +14,7 @@ import {
   installedPluginTabs,
   orderedKeys,
   pluginTab,
+  resolvePluginSection,
   stepLabel,
 } from '@/utils/pluginPresentation'
 
@@ -92,6 +93,23 @@ describe('abas de plugins instalados', () => {
 
   it('sem visão carregada não há abas', () => {
     expect(installedPluginTabs(undefined)).toEqual([])
+  })
+
+  it('a aba Plugins abre no pedido, senão no primeiro instalado, senão no catálogo', () => {
+    const installed = installedPluginTabs({
+      deviceId: 2,
+      platform: 'openwrt',
+      firmware: null,
+      plugins: [item(3, true), item(5, true)],
+      credentials: [],
+      runs: [],
+      agents: [],
+    })
+    expect(resolvePluginSection('plugin-5', installed)).toBe('plugin-5')
+    expect(resolvePluginSection('credentials', installed)).toBe('credentials')
+    expect(resolvePluginSection(null, installed)).toBe('plugin-3')
+    expect(resolvePluginSection('plugin-9', installed)).toBe('plugin-3')
+    expect(resolvePluginSection('plugin-9', [])).toBe('catalog')
   })
 })
 

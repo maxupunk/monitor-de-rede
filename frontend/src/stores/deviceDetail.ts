@@ -52,6 +52,11 @@ export interface DeviceInterface {
   isMonitored?: boolean
 }
 
+/** Nome da interface na tela: o `ifName`, o nome cadastrado ou o id. */
+export function interfaceLabel(intf: DeviceInterface): string {
+  return intf.ifName || intf.name || `if-${intf.id}`
+}
+
 export interface DeviceMetric {
   id: number
   deviceId: number

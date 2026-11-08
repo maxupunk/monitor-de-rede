@@ -123,7 +123,7 @@
 </template>
 
 <script setup lang="ts">
-import { useDeviceDetailStore, type DeviceInterface } from '@/stores/deviceDetail'
+import { interfaceLabel, useDeviceDetailStore, type DeviceInterface } from '@/stores/deviceDetail'
 import { formatLinkSpeed } from '@/utils/formatters'
 
 const emit = defineEmits<{
@@ -131,8 +131,4 @@ const emit = defineEmits<{
 }>()
 
 const detailStore = useDeviceDetailStore()
-
-function interfaceLabel(intf: DeviceInterface): string {
-  return intf.ifName || intf.name || `if-${intf.id}`
-}
 </script>

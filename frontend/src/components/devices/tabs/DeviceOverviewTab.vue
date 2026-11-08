@@ -422,6 +422,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
 import {
+  interfaceLabel,
   useDeviceDetailStore,
   type DeviceInterface,
   type DeviceMetric,
@@ -534,10 +535,6 @@ watch(() => detailStore.monitors.map((m) => m.id).join(','), loadUptime, { immed
 function toggleShowMetricsHistory() {
   showMetricsHistory.value = !showMetricsHistory.value
   if (showMetricsHistory.value) metricsHistory.reset()
-}
-
-function interfaceLabel(intf: DeviceInterface): string {
-  return intf.ifName || intf.name || `if-${intf.id}`
 }
 
 function formatMetricValue(metric: DeviceMetric): string {

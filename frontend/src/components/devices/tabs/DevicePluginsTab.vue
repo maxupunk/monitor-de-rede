@@ -28,78 +28,88 @@
     </v-alert>
 
     <template v-if="view">
-      <v-tabs v-model="section" color="primary" density="compact" show-arrows class="mb-4">
-        <v-tab value="catalog" prepend-icon="mdi-storefront-outline">Catálogo</v-tab>
-        <v-tab value="credentials" prepend-icon="mdi-key-variant">
-          Credenciais ({{ view.credentials.length }})
-        </v-tab>
-        <v-tab value="history" prepend-icon="mdi-history">Histórico</v-tab>
-      </v-tabs>
+      <div class="plugins-layout">
+        <PluginSectionNav
+          :current="current"
+          :installed="installed"
+          :credentials-count="view.credentials.length"
+          @select="(value) => (section = value)"
+        />
 
-      <v-window v-model="section" :touch="false">
-        <v-window-item value="catalog">
-          <div class="d-flex align-center flex-wrap ga-2 mb-3">
-            <span class="text-body-2">
-              Instale um plugin e ele ganha uma aba própria neste equipamento, ao lado das demais.
-            </span>
-            <v-spacer></v-spacer>
-            <v-btn
-              color="primary"
-              variant="flat"
-              prepend-icon="mdi-plus"
-              size="small"
-              @click="openEditor(null)"
-            >
-              Novo plugin
-            </v-btn>
-            <v-btn
-              color="secondary"
-              variant="flat"
-              prepend-icon="mdi-file-import-outline"
-              size="small"
-              @click="fileInput?.click()"
-            >
-              Importar
-            </v-btn>
-            <v-btn
-              color="secondary"
-              variant="text"
-              size="small"
-              to="/plugins"
-              prepend-icon="mdi-bookshelf"
-            >
-              Biblioteca
-            </v-btn>
-            <input
-              ref="fileInput"
-              type="file"
-              accept=".json,application/json"
-              class="d-none"
-              @change="importFile"
-            />
-          </div>
-          <PluginCatalog
-            :plugins="view.plugins"
-            :installing="installing"
-            @install="install"
-            @open="openInstalled"
+        <div class="plugins-layout__content min-w-0">
+          <!-- Plugin instalado: a tela dele -->
+          <InstalledPluginView
+            v-if="currentPlugin"
+            :key="currentPlugin.id"
+            :item="currentPlugin.item"
+            :device-id="deviceId"
+            :device-name="deviceName"
+            @uninstalled="section = 'catalog'"
             @review="openReview"
-            @edit="openEditor"
           />
-        </v-window-item>
 
-        <v-window-item value="credentials">
+          <template v-else-if="current === 'catalog'">
+            <div class="d-flex align-center flex-wrap ga-2 mb-3">
+              <span class="text-body-2">
+                Plugins conversam com o equipamento (SSH, HTTP…) e trazem telas que o monitoramento
+                padrão não tem. Instale um e ele aparece em <b>Instalados neste equipamento</b>.
+              </span>
+              <v-spacer></v-spacer>
+              <v-btn
+                color="primary"
+                variant="flat"
+                prepend-icon="mdi-plus"
+                size="small"
+                @click="openEditor(null)"
+              >
+                Novo plugin
+              </v-btn>
+              <v-btn
+                color="secondary"
+                variant="flat"
+                prepend-icon="mdi-file-import-outline"
+                size="small"
+                @click="fileInput?.click()"
+              >
+                Importar
+              </v-btn>
+              <v-btn
+                color="secondary"
+                variant="text"
+                size="small"
+                to="/plugins"
+                prepend-icon="mdi-bookshelf"
+              >
+                Biblioteca
+              </v-btn>
+              <input
+                ref="fileInput"
+                type="file"
+                accept=".json,application/json"
+                class="d-none"
+                @change="importFile"
+              />
+            </div>
+            <PluginCatalog
+              :plugins="view.plugins"
+              :installing="installing"
+              @install="install"
+              @open="openInstalled"
+              @review="openReview"
+              @edit="openEditor"
+            />
+          </template>
+
           <DeviceCredentials
+            v-else-if="current === 'credentials'"
             :device-id="deviceId"
             :credentials="view.credentials"
             @notify="notify"
           />
-        </v-window-item>
 
-        <v-window-item value="history">
-          <PluginRunsList :runs="view.runs" :plugins="view.plugins" />
-        </v-window-item>
-      </v-window>
+          <PluginRunsList v-else :runs="view.runs" :plugins="view.plugins" />
+        </div>
+      </div>
     </template>
 
     <PluginEditorDialog
@@ -123,44 +133,39 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, onMounted, reactive, ref } from 'vue'
 import type { PluginDetail } from '@/bindings/PluginDetail'
 import { usePluginsStore } from '@/stores/plugins'
 import { useAiStore } from '@/stores/ai'
 import { confirm } from '@/composables/useConfirm'
-import { readPackageFile } from '@/utils/pluginPresentation'
+import {
+  installedPluginTabs,
+  pluginTab,
+  readPackageFile,
+  resolvePluginSection,
+} from '@/utils/pluginPresentation'
 import PluginEditorDialog from '@/components/plugins/PluginEditorDialog.vue'
 import PluginReviewDialog from '@/components/plugins/PluginReviewDialog.vue'
 import PluginCatalog from '@/components/plugins/device/PluginCatalog.vue'
 import DeviceCredentials from '@/components/plugins/device/DeviceCredentials.vue'
 import PluginRunsList from '@/components/plugins/device/PluginRunsList.vue'
+import PluginSectionNav from '@/components/plugins/device/PluginSectionNav.vue'
+import InstalledPluginView from '@/components/plugins/device/InstalledPluginView.vue'
 
 const props = defineProps<{
   deviceId: number
   deviceName: string
 }>()
 
-const emit = defineEmits<{
-  /** Abrir a aba do plugin instalado (ela mora na página do dispositivo). */
-  openPlugin: [pluginId: number]
-}>()
-
 const store = usePluginsStore()
 const aiStore = useAiStore()
 const fileInput = ref<HTMLInputElement | null>(null)
-const route = useRoute()
-const section = ref('catalog')
-
-// `?section=credentials` abre direto nas credenciais — é o link de quem chega
-// da ativação do log para gerenciar o login salvo.
-watch(
-  () => route.query.section,
-  (pedida) => {
-    if (pedida === 'credentials' || pedida === 'history') section.value = pedida
-  },
-  { immediate: true }
-)
+/**
+ * Seção pedida (um plugin instalado, o catálogo, as credenciais ou o
+ * histórico). A página é dona dela porque é ela que lê a URL; `null` deixa
+ * `resolvePluginSection` escolher.
+ */
+const section = defineModel<string | null>('section', { default: null })
 const installing = ref<number | null>(null)
 
 const feedback = reactive({ show: false, text: '', color: 'success' })
@@ -172,6 +177,11 @@ const review = reactive({
 })
 
 const view = computed(() => store.deviceViews[props.deviceId] ?? null)
+const installed = computed(() => installedPluginTabs(view.value))
+const current = computed(() => resolvePluginSection(section.value, installed.value))
+const currentPlugin = computed(
+  () => installed.value.find((plugin) => pluginTab(plugin.id) === current.value) ?? null
+)
 
 onMounted(() => {
   // A página já carrega a visão para montar as abas dos instalados.
@@ -212,7 +222,7 @@ async function install(pluginId: number) {
 }
 
 function openInstalled(pluginId: number) {
-  emit('openPlugin', pluginId)
+  section.value = pluginTab(pluginId)
 }
 
 function openEditor(pluginId: number | null) {
@@ -278,3 +288,18 @@ async function importFile(event: Event) {
   }
 }
 </script>
+
+<style scoped>
+.plugins-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+
+@media (min-width: 960px) {
+  .plugins-layout {
+    grid-template-columns: 240px minmax(0, 1fr);
+    align-items: start;
+  }
+}
+</style>

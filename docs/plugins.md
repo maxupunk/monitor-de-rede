@@ -6,15 +6,26 @@ status, alterar um SSID. Decisão de arquitetura: [ADR 012](adr/012-plugins-de-d
 
 ## Onde ficam
 
-- **Uma aba por plugin instalado** em `/devices/{id}`, depois das abas nativas
-  (separada por um divisor e destacada em `secondary` quando selecionada): a
-  tela do plugin (ver "A tela do plugin") ou a lista de ações, mais validação,
-  código, exportação e "Desinstalar". O título e o ícone vêm da `list`; o
-  `?tab=plugin-<id>` abre direto nela.
-- **Aba Plugins** só para gerenciar: **Catálogo** (instalar — não toca o
-  equipamento, é escolha de cadastro em `device_plugin_installs`; exclusivo já
-  nasce instalado), **Credenciais** e **Histórico** (cada execução com cada
-  acesso registrado).
+- **Tudo de plugin mora na aba Plugins** de `/devices/{id}` — as abas ao lado
+  são só do próprio equipamento, para não confundir o que é do sistema com o
+  que é extensão. A aba mostra o número de instalados e tem navegação própria
+  (lista ao lado no computador, chips no celular):
+  - **Instalados neste equipamento** — um item por plugin: a tela do plugin (ver
+    "A tela do plugin") ou a lista de ações, mais validação, código, exportação
+    e "Desinstalar". O título e o ícone vêm da `list`; `?tab=plugin-<id>` abre
+    direto nele. Sem pedido, a aba abre no primeiro instalado.
+  - **Gerenciar** — **Catálogo** (instalar — não toca o equipamento, é escolha
+    de cadastro em `device_plugin_installs`; exclusivo já nasce instalado),
+    **Credenciais** e **Histórico** (cada execução com cada acesso registrado);
+    `?tab=plugins&section=credentials` abre direto numa delas.
+  - **Cor própria:** a aba Plugins e as abas que só existem por causa de um
+    plugin (como **Clientes Wi-Fi**) usam o token de tema `plugin`
+    (`PLUGIN_COLOR`), nunca o `primary` das abas nativas — regra fixa do
+    AGENTS.md §12.
+  - **Plugin desativado ou em quarentena** continua na lista de instalados, com
+    o selo do estado, mas não mostra ações, dados nem ajustes: só o motivo,
+    **Ativar plugin** (desativado, religa na biblioteca) ou **Revisar
+    segurança** (quarentena) e **Desinstalar**.
 - Ação pela tela só roda com o plugin instalado no equipamento; a IA e a
   validação funcional não exigem a instalação. Leitura sem parâmetro roda
   direto e abre o resultado; escrita sempre passa pela confirmação.
