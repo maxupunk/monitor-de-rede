@@ -22,14 +22,21 @@ services:
       AGENT_ENROLL_CODE: ${AGENT_ENROLL_CODE:-}
       # Política local: a central não consegue ampliá-la. Acrescente `update`
       # e `compose` só se este host deve aceitar pull/recriação/compose;
-      # `device_io` (plugins), `database`, `volume_export` e `throughput`
-      # (teste de vazão a partir deste site) também ficam fora do padrão.
+      # `deploy` (deploy contínuo de stacks, ADR 021), `device_io` (plugins),
+      # `database`, `volume_export` e `throughput` (teste de vazão a partir
+      # deste site) também ficam fora do padrão.
       AGENT_ALLOW: ${AGENT_ALLOW:-read,lifecycle,monitor,discovery}
+      # Raiz das stacks do deploy contínuo: o único diretório que o agente
+      # escreve. Monte-a abaixo, no mesmo caminho.
+      AGENT_STACKS_DIR: ${AGENT_STACKS_DIR:-/srv/netmonitor/stacks}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /proc:/host/proc:ro
       - /:/host:ro
       - agent-state:/var/lib/netmonitor-agent
+      # Deploy contínuo (com `deploy` no AGENT_ALLOW): **mesmo caminho** dos
+      # dois lados — quem resolve os bind mounts da stack é a Engine do host.
+      - ${AGENT_STACKS_DIR:-/srv/netmonitor/stacks}:${AGENT_STACKS_DIR:-/srv/netmonitor/stacks}
       # Compose: os projetos precisam aparecer no mesmo caminho do host.
       # Descomente e ajuste para as pastas dos seus projetos.
       # - /srv:/srv:ro

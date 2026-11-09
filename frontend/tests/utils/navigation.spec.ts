@@ -26,7 +26,11 @@ describe('buildNavSections', () => {
     const sections = buildNavSections(BASE)
     const servidores = sections.find((s) => s.title === 'Servidores')
     const rede = sections.find((s) => s.title === 'Rede')
-    expect(servidores?.items.map((i) => i.title)).toEqual(['Docker', 'Servidores remotos'])
+    expect(servidores?.items.map((i) => i.title)).toEqual([
+      'Docker',
+      'Deploys',
+      'Servidores remotos',
+    ])
     expect(rede?.items.map((i) => i.title)).toContain('Sondas de rede')
   })
 
@@ -40,9 +44,9 @@ describe('buildNavSections', () => {
     expect(all).not.toContain('Benchmark dos modelos')
   })
 
-  it('perfil completo, para admin, tem 26 entradas (eram ~36)', () => {
+  it('perfil completo, para admin, tem 27 entradas (eram ~36)', () => {
     // Sem plugin-apps nem PWA, que variam por instalação.
-    expect(leaves(buildNavSections({ ...BASE, isAdmin: true }))).toHaveLength(26)
+    expect(leaves(buildNavSections({ ...BASE, isAdmin: true }))).toHaveLength(27)
   })
 
   it('itens de administração só para admin', () => {

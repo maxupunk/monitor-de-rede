@@ -8,6 +8,7 @@
 //! (ADR 014). O processo da API não monta o socket: vê todo host Docker pelo
 //! canal do agente ([`hosts`]).
 
+pub mod cli;
 pub mod compose;
 pub mod engine;
 pub mod hosts;
@@ -20,6 +21,7 @@ pub mod protection;
 pub mod realtime;
 pub mod remote_engine;
 pub mod source;
+pub mod stacks;
 pub mod update;
 pub mod volume_export;
 

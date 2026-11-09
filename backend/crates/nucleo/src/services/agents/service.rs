@@ -115,7 +115,9 @@ fn agent_image() -> String {
 ///
 /// O container recebe o socket do Docker, `/proc` e a raiz do host somente
 /// leitura (métricas de host) e roda na rede do host — é por ela que o
-/// túnel WireGuard do servidor está acessível.
+/// túnel WireGuard do servidor está acessível. A raiz das stacks do deploy
+/// contínuo (ADR 021) já vai montada, no mesmo caminho: liberar `deploy` no
+/// `AGENT_ALLOW` depois não pede outra montagem.
 #[must_use]
 pub fn install_commands(server_url: &str, code: &str) -> (String, String) {
     let common = format!(
@@ -124,6 +126,7 @@ pub fn install_commands(server_url: &str, code: &str) -> (String, String) {
          -v /var/run/docker.sock:/var/run/docker.sock \\\n  \
          -v /proc:/host/proc:ro -v /:/host:ro \\\n  \
          -v netmonitor-agent:/var/lib/netmonitor-agent \\\n  \
+         -v /srv/netmonitor/stacks:/srv/netmonitor/stacks \\\n  \
          -e AGENT_SERVER_URL={server_url} \\\n  \
          -e AGENT_ENROLL_CODE={code} \\\n  \
          -e AGENT_ALLOW=read,lifecycle,monitor,discovery \\\n  "

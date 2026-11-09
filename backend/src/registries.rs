@@ -114,6 +114,35 @@ pub fn vpn_central() -> Central {
     Central::new(Arc::new(VpnCentral))
 }
 
+/// O que a área Servidores pede ao resto da central: os canais de
+/// notificação e o Web Push a quem tem a área (os avisos do deploy).
+struct ServersCentral;
+
+#[async_trait]
+impl netmonitor_servers::central::CentralServices for ServersCentral {
+    async fn notify(&self, ctx: &AppContext, message: &NotificationMessage) {
+        NotificationService::with_default_channels()
+            .notify(ctx, message)
+            .await;
+    }
+
+    async fn push_to_servers(&self, db: &DatabaseConnection, payload: &Value) -> AppResult<u64> {
+        Ok(deliver(
+            db,
+            Audience::WithAccessTo(netmonitor_core::areas::Area::Servers),
+            payload,
+        )
+        .await?
+        .sent)
+    }
+}
+
+/// Os serviços da central para a área Servidores, para o `shared_store`.
+#[must_use]
+pub fn servers_central() -> netmonitor_servers::central::Central {
+    netmonitor_servers::central::Central::new(Arc::new(ServersCentral))
+}
+
 /// O que a área Rede pede ao resto da central: o motor de alertas, os
 /// endereços da central, a identificação de dispositivo, a porta publicada
 /// da API e a IA.
@@ -354,6 +383,9 @@ pub fn ai_tool_catalog() -> Vec<Box<dyn AiToolHandler>> {
         Box::new(docker::DockerContainers),
         Box::new(docker::DockerUsage),
         Box::new(docker::DockerContainerAction),
+        Box::new(netmonitor_servers::deploys::ai_tools::DeployStatus),
+        Box::new(netmonitor_servers::deploys::ai_tools::DeployLog),
+        Box::new(netmonitor_servers::deploys::ai_tools::DeployAction),
         Box::new(platform::PlatformStatus::new(vec![
             Box::new(netmonitor_vpn::ai_tools::VpnStatus),
             Box::new(netmonitor_network::discovery::ai_tools::DiscoveryStatus),

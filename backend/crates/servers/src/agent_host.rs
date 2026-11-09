@@ -27,6 +27,7 @@ use crate::docker::{
     protection::{is_current_container, is_protected_inspect},
     realtime::{inventory_snapshot, live_snapshot},
     source::{DockerEngine, LocalEngine, LogChunk},
+    stacks::{StackChunk, StackDeployRequest, StackHost},
     DockerError,
 };
 
@@ -105,6 +106,28 @@ impl DockerCommands {
     {
         let (progress, forward) = progress_to_chunks(chunks);
         let result = operation(progress).await;
+        let _ = forward.await;
+        docker(result)
+    }
+
+    /// Deploy de stack: cada etapa e cada linha vão num chunk `StackChunk`.
+    async fn deploy(
+        engine: &LocalEngine,
+        request: &StackDeployRequest,
+        chunks: mpsc::UnboundedSender<Value>,
+    ) -> Result<Value, RemoteError> {
+        let (events, mut received) = mpsc::unbounded_channel::<StackChunk>();
+        let forward = tokio::spawn(async move {
+            while let Some(chunk) = received.recv().await {
+                let Ok(value) = serde_json::to_value(chunk) else {
+                    continue;
+                };
+                if chunks.send(value).is_err() {
+                    break;
+                }
+            }
+        });
+        let result = engine.deploy_stack(request, events).await;
         let _ = forward.await;
         docker(result)
     }
@@ -206,6 +229,10 @@ impl DockerCommands {
                     engine.compose(&request, progress).await
                 })
                 .await
+            }
+            DockerCall::StackDeploy { request } => Self::deploy(engine, &request, chunks).await,
+            DockerCall::StackReadiness { project } => {
+                docker(engine.stack_readiness(&project).await)
             }
         }
     }

@@ -29,6 +29,13 @@ anyhow = { workspace = true }
 thiserror = { workspace = true }
 hex = { workspace = true }
 sha2 = { workspace = true }
+base64 = { workspace = true }
+# Deploy contínuo (ADR 021): a API do GitHub (commits entre versões) e as
+# chaves públicas do OIDC do Actions.
+reqwest = { workspace = true }
+# O token OIDC do GitHub Actions (RS256). Mesma versão e mesmo backend
+# (`rust_crypto`) que o Loco já compila para o JWT das sessões.
+jsonwebtoken = { version = "10", default-features = false, features = ["rust_crypto"] }
 # A Docker Engine do host — usada só no agente (ADR 014).
 bollard = { version = "0.18.1", default-features = false, features = ["http", "pipe"] }
 async-compression = { version = "0.4", default-features = false, features = ["tokio", "gzip"] }

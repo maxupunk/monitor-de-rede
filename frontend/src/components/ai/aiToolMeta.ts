@@ -44,6 +44,7 @@ export type AiToolKind = 'lookup' | 'test' | 'chart' | 'action' | 'device'
 /** Ferramentas que alteram a plataforma (ou interrompem a IA para perguntar). */
 const ACTION_TOOLS = new Set([
   'docker_container_action',
+  'deploy_action',
   'acknowledge_alert',
   'silence_alert',
   'create_maintenance_window',
@@ -151,6 +152,9 @@ const TOOL_META: Record<string, AiToolLook> = {
     icon: 'mdi-restart',
     color: 'warning',
   },
+  get_deploys: { label: 'Deploys', icon: 'mdi-rocket-launch-outline', color: 'info' },
+  get_deploy_log: { label: 'Log de Deploy', icon: 'mdi-console', color: 'info' },
+  deploy_action: { label: 'Ação de Deploy', icon: 'mdi-rocket-launch', color: 'warning' },
   get_platform_status: {
     label: 'Estado da Plataforma',
     icon: 'mdi-view-dashboard-outline',

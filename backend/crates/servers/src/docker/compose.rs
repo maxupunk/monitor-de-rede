@@ -9,12 +9,12 @@
 use std::{collections::BTreeMap, process::Stdio, time::Duration};
 
 use serde::{Deserialize, Serialize};
-use tokio::io::{AsyncBufReadExt, BufReader};
 use ts_rs::TS;
 
 use crate::views::docker::{DockerActionResponse, DockerContainerSummary};
 
 use super::{
+    cli::Cli,
     engine,
     maintenance::{ComposeAction, ComposeRequest, Progress},
     protection::{is_current_container, is_protected},
@@ -22,10 +22,10 @@ use super::{
     DockerError,
 };
 
-const PROJECT_LABEL: &str = "com.docker.compose.project";
+pub(crate) const PROJECT_LABEL: &str = "com.docker.compose.project";
 const WORKING_DIR_LABEL: &str = "com.docker.compose.project.working_dir";
 const CONFIG_FILES_LABEL: &str = "com.docker.compose.project.config_files";
-const SERVICE_LABEL: &str = "com.docker.compose.service";
+pub(crate) const SERVICE_LABEL: &str = "com.docker.compose.service";
 const RUN_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const VERSION_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -243,53 +243,12 @@ pub async fn run(
     request: &ComposeRequest,
     progress: &Progress,
 ) -> Result<DockerActionResponse, DockerError> {
-    let mut child = tokio::process::Command::new("docker")
-        .args(&args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-        .map_err(|_| DockerError::Unavailable)?;
-    let stdout = child.stdout.take().ok_or(DockerError::Engine)?;
-    let stderr = child.stderr.take().ok_or(DockerError::Engine)?;
-    let (lines_tx, mut lines_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-    for reader in [
-        Box::new(stdout) as Box<dyn tokio::io::AsyncRead + Unpin + Send>,
-        Box::new(stderr),
-    ] {
-        let lines_tx = lines_tx.clone();
-        tokio::spawn(async move {
-            let mut lines = BufReader::new(reader).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                if lines_tx.send(line).is_err() {
-                    break;
-                }
-            }
-        });
-    }
-    drop(lines_tx);
-
-    let mut tail: Vec<String> = Vec::new();
-    let collect = async {
-        while let Some(line) = lines_rx.recv().await {
-            let _ = progress.send(line.clone());
-            tail.push(line);
-            if tail.len() > 20 {
-                tail.remove(0);
-            }
-        }
-        child.wait().await
-    };
-    let status = tokio::time::timeout(RUN_TIMEOUT, collect)
-        .await
-        .map_err(|_| DockerError::Unavailable)?
-        .map_err(|_| DockerError::Engine)?;
+    let outcome = Cli::new("docker", &args, RUN_TIMEOUT).run(progress).await?;
     let target = request.service.as_ref().map_or_else(
         || request.project.clone(),
         |service| format!("{}/{service}", request.project),
     );
-    if status.success() {
+    if outcome.success {
         Ok(DockerActionResponse {
             success: true,
             message: format!("compose {} concluído em {target}.", request.action.label()),
@@ -298,7 +257,7 @@ pub async fn run(
         Err(DockerError::Validation(format!(
             "compose {} falhou em {target}: {}",
             request.action.label(),
-            tail.join(" | ")
+            outcome.summary()
         )))
     }
 }

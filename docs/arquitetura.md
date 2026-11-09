@@ -17,7 +17,9 @@ Atende dois públicos na mesma instalação:
   e, opcionalmente, sobe um servidor WireGuard para alcançar redes remotas.
 - **Servidores** — gerencia hosts e containers Docker por agentes
   ([ADR 011](adr/011-agente-remoto.md), [ADR 014](adr/014-docker-local-pelo-agente.md))
-  e faz backup de bancos ([ADR 013](adr/013-ponte-de-banco-pelo-agente.md)).
+  e faz backup de bancos ([ADR 013](adr/013-ponte-de-banco-pelo-agente.md)) e o
+  deploy contínuo das stacks compose a partir do GitHub
+  ([ADR 021](adr/021-deploy-continuo-pelo-agente.md)).
 
 Os dois compartilham alertas, notificações, eventos, Assistente IA e a SPA, que
 recebe tudo em tempo real por SSE. Cada instalação liga só as **áreas do
@@ -179,7 +181,8 @@ backend/                 workspace Cargo; o pacote raiz (`backend`) é o ponto d
 │   ├── network-link-tests/ submódulo da Rede: testes de enlace (ADR 015), agendamentos
 │   │                    e retenção — os dois dependem só do core e da base da área
 │   ├── servers/         área Servidores: docker (+ comandos e Docker do host no agente),
-│   │                    databases, monitor de container, rotas /api/docker e /api/databases
+│   │                    databases, deploys (deploy contínuo, ADR 021), monitor de
+│   │                    container, rotas /api/docker, /api/databases e /api/deploys
 │   ├── vpn/             área VPN: servidor, peers, IPAM, chaves, config/status do watcher,
 │   │                    perfis de cliente, telemetria dos túneis (rotina), rotas /api/vpn
 │   └── assistant/       o assistente: chat e harness, provedores de LLM, Decisor, rotinas

@@ -42,10 +42,14 @@ pub enum Permission {
     /// equipamento da rede deste site (ADR 015 §6). Fora do padrão: satura o
     /// enlace medido. O agente só disca para fora — nunca serve o teste.
     Throughput,
+    /// Deploy contínuo de stacks (ADR 021): sincronizar o repositório, gravar
+    /// o `.env` e subir o compose dentro de `AGENT_STACKS_DIR`. Fora do
+    /// padrão: escreve no disco do host e troca a versão de uma aplicação.
+    Deploy,
 }
 
 impl Permission {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::Read,
         Self::Lifecycle,
         Self::Update,
@@ -56,6 +60,7 @@ impl Permission {
         Self::Database,
         Self::VolumeExport,
         Self::Throughput,
+        Self::Deploy,
     ];
 
     #[must_use]
@@ -71,6 +76,7 @@ impl Permission {
             Self::Database => "database",
             Self::VolumeExport => "volume_export",
             Self::Throughput => "throughput",
+            Self::Deploy => "deploy",
         }
     }
 }
@@ -217,6 +223,14 @@ mod tests {
         assert!(Policy::parse("all")
             .expect("all")
             .allows(Permission::Throughput));
+    }
+
+    #[test]
+    fn deploy_de_stack_fica_fora_do_padrao() {
+        assert!(!Policy::default().allows(Permission::Deploy));
+        let policy = Policy::parse("read,deploy").expect("política");
+        assert!(policy.allows(Permission::Deploy));
+        assert_eq!(Permission::Deploy.to_string(), "deploy");
     }
 
     #[test]

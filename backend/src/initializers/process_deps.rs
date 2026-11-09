@@ -59,6 +59,10 @@ pub fn install(ctx: &AppContext) {
     // scheduler coleta o SNMP e avalia as interfaces.
     ctx.shared_store
         .insert(crate::registries::network_central());
+    // O que a área Servidores pede ao resto da central (canais de
+    // notificação e Web Push): os avisos do deploy contínuo.
+    ctx.shared_store
+        .insert(crate::registries::servers_central());
     // O que as áreas fazem no ciclo do scheduler e na purga (registro de
     // rotinas) e os monitores que elas executam em grupo (o SNMP).
     ctx.shared_store.insert(crate::registries::area_routines());

@@ -54,6 +54,20 @@
               </v-tooltip>
             </v-chip>
             <v-spacer></v-spacer>
+            <v-btn
+              v-if="canAutomate && !project.protected"
+              color="primary"
+              variant="tonal"
+              size="small"
+              prepend-icon="mdi-rocket-launch"
+              :to="automateLink(project)"
+            >
+              Automatizar deploy
+              <v-tooltip activator="parent" location="top" max-width="300">
+                Atualizar este projeto sozinho a cada versão nova no GitHub — com aprovação, backup
+                e rollback.
+              </v-tooltip>
+            </v-btn>
             <v-chip size="small" variant="tonal" :color="runningColor(project)">
               {{ project.running }}/{{ project.containers }} rodando
             </v-chip>
@@ -244,6 +258,15 @@ const composeReady = computed(
   () => Boolean(docker.selectedHost?.composeAvailable) && docker.allows('compose')
 )
 const canAct = computed(() => composeReady.value && auth.isAdmin)
+
+/** Deploy contínuo (ADR 021): quem administra a área configura. */
+const canAutomate = computed(() => auth.roleIn('servers') === 'admin')
+
+/** O assistente de deploy já com o servidor e o projeto deste card. */
+function automateLink(project: ComposeProject) {
+  const probe = docker.selectedHostKey.replace(/^agent-/, '')
+  return { name: 'deploys', query: { setup: '1', probe, project: project.name } }
+}
 
 const composeUnavailableReason = computed(() => {
   if (!docker.selectedHost?.composeAvailable) {

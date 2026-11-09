@@ -40,6 +40,7 @@ mod decider_logs;
 mod decider_model_load;
 mod decider_triage;
 mod dedicated_access;
+mod deploys;
 mod device_access_mode;
 mod device_history_cleanup;
 mod device_operating_system;

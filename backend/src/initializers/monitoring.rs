@@ -54,6 +54,9 @@ impl Initializer for MonitoringInitializer {
         netmonitor_nucleo::services::backup::schedule::spawn(ctx);
         // Backup automático dos bancos de dados cadastrados.
         netmonitor_servers::databases::schedule::spawn(ctx);
+        // Deploy contínuo (ADR 021): o despachante da fila mora aqui porque é
+        // este processo que tem os canais dos agentes.
+        netmonitor_servers::deploys::orchestrator::spawn(ctx);
         // Tarefas agendadas (cron): ferramentas do catálogo da IA nos horários
         // marcados, em nome de quem as salvou.
         netmonitor_nucleo::services::scheduled_tasks::runner::spawn(ctx);

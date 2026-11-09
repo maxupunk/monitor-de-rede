@@ -23,6 +23,9 @@ use super::{
     maintenance::{ComposeRequest, DockerMaintenance, Progress, VolumeArchive},
     metrics,
     source::{DockerEngine, EngineStatusRaw, LogChunk},
+    stacks::{
+        StackChunk, StackDeployOutcome, StackDeployRequest, StackEvents, StackHost, StackReadiness,
+    },
     volume_export, DockerError,
 };
 use crate::views::docker::{DockerActionResponse, DockerMetricsResponse};
@@ -308,5 +311,52 @@ impl DockerMaintenance for AgentEngine {
             file_name: volume_export::file_name(name),
             reader: Box::pin(reader),
         })
+    }
+}
+
+/// Deploy de stack pelo agente (ADR 021). O pedido é validado aqui também:
+/// a central não manda ao fio o que o agente recusaria.
+#[async_trait]
+impl StackHost for AgentEngine {
+    async fn deploy_stack(
+        &self,
+        request: &StackDeployRequest,
+        events: StackEvents,
+    ) -> Result<StackDeployOutcome, DockerError> {
+        request.validate()?;
+        let (chunks, mut received) = mpsc::unbounded_channel::<Value>();
+        let forward = tokio::spawn(async move {
+            while let Some(chunk) = received.recv().await {
+                if let Ok(chunk) = serde_json::from_value::<StackChunk>(chunk) {
+                    if events.send(chunk).is_err() {
+                        break;
+                    }
+                }
+            }
+        });
+        let result = self
+            .session
+            .call(
+                Call::new(
+                    Command::Docker {
+                        call: DockerCall::StackDeploy {
+                            request: request.clone(),
+                        },
+                    },
+                    OPERATION_TIMEOUT,
+                )
+                .with_chunks(chunks),
+            )
+            .await
+            .map_err(DockerError::from);
+        let _ = forward.await;
+        decode(result?)
+    }
+
+    async fn stack_readiness(&self, project: &str) -> Result<StackReadiness, DockerError> {
+        self.query(DockerCall::StackReadiness {
+            project: project.into(),
+        })
+        .await
     }
 }

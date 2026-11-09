@@ -227,8 +227,8 @@ const copied = ref<string | null>(null)
 const showHint = ref(true)
 
 const commands = [
-  'docker compose logs server',
-  'docker compose exec server backend-cli task auth_setup_token',
+  'docker compose logs netmonitor',
+  'docker compose exec netmonitor backend-cli task auth_setup_token',
 ]
 
 const strength = computed(() => passwordStrength(password.value))

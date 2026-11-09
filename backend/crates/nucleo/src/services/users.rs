@@ -82,6 +82,16 @@ pub fn request_is_allowed(role: Role, method: &Method, path: &str) -> bool {
             || role.can_manage_plugins();
     }
 
+    // Deploy contínuo (ADR 021): ver é de quem tem a área; mudar, aprovar e
+    // abrir o `.env` (senhas da aplicação) é do administrador dela.
+    if path == "/api/deploys" || path.starts_with("/api/deploys/") {
+        if path.contains("/env") {
+            return role.can_manage_docker();
+        }
+        return matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS)
+            || role.can_manage_docker();
+    }
+
     if path == "/api/docker" || path.starts_with("/api/docker/") {
         if path.ends_with("/export") {
             return role.can_manage_docker();

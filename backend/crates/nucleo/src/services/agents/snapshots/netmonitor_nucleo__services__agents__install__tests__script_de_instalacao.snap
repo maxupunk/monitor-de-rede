@@ -31,6 +31,9 @@ chmod 0755 /usr/local/bin/netmonitor-agent.new
 mv /usr/local/bin/netmonitor-agent.new /usr/local/bin/netmonitor-agent
 
 install -d -m 0755 /etc/netmonitor-agent
+# Raiz das stacks do deploy contínuo (ADR 021): só vale com `deploy` no
+# AGENT_ALLOW, e pede o `git` instalado no host.
+install -d -m 0750 /srv/netmonitor/stacks
 umask 077
 {
   echo "AGENT_SERVER_URL=$AGENT_SERVER_URL"

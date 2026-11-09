@@ -297,6 +297,7 @@ const PERMISSION_LABELS: Record<Permission, string> = {
   database: 'Ponte de banco (backup)',
   volume_export: 'Exportar volumes',
   throughput: 'Teste de vazão (enlace)',
+  deploy: 'Deploy contínuo',
 }
 
 function permissionLabel(permission: Permission): string {
@@ -304,7 +305,7 @@ function permissionLabel(permission: Permission): string {
 }
 
 function permissionColor(permission: Permission): string {
-  return ['update', 'compose', 'volume_export', 'throughput'].includes(permission)
+  return ['update', 'compose', 'volume_export', 'throughput', 'deploy'].includes(permission)
     ? 'warning'
     : 'primary'
 }

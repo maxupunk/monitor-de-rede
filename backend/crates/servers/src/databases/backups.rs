@@ -21,7 +21,7 @@ use sea_orm::{
 
 use super::{
     dump::{DumpFile, DumpStats, DumpWriter},
-    jobs::{DatabaseJobKind, DatabaseJobSnapshot, Job},
+    jobs::{DatabaseJobKind, DatabaseJobSnapshot, DatabaseJobStatus, Job},
     reach::{reach, Reached},
     restore::LineReader,
     service::{self, Connection},
@@ -57,6 +57,8 @@ const KEEP_FAILED: usize = 10;
 pub enum Trigger {
     Manual,
     Scheduled,
+    /// Antes de um deploy contínuo (ADR 021).
+    PreDeploy,
 }
 
 impl Trigger {
@@ -65,6 +67,7 @@ impl Trigger {
         match self {
             Self::Manual => "manual",
             Self::Scheduled => "scheduled",
+            Self::PreDeploy => "pre_deploy",
         }
     }
 }
@@ -139,6 +142,71 @@ pub async fn start_backup(
         service::publish_updated(&ctx).await;
     });
     Ok(snapshot)
+}
+
+/// Backup antes de um deploy (ADR 021): só volta quando terminou, com os
+/// ids das cópias feitas. O deploy só segue se **todos** os bancos foram
+/// copiados — atualizar sem a cópia é justamente o que a opção evita.
+///
+/// # Errors
+///
+/// `409` com outro backup da conexão em andamento; o motivo da falha.
+pub async fn backup_before_deploy(ctx: &AppContext, connection_id: i64) -> AppResult<Vec<i64>> {
+    let _guard = RunGuard::acquire(
+        BACKUP_SCOPE,
+        connection_id,
+        "Já há um backup em andamento para esta conexão",
+    )?;
+    let connection = service::load(&ctx.db, connection_id).await?;
+    let destination = destination_of(&ctx.db, &connection).await?;
+    let job = Job::start(
+        EventBus::from_context(ctx).ok(),
+        DatabaseJobKind::Backup,
+        connection_id,
+        u32::try_from(connection.databases.len()).unwrap_or(0),
+    );
+    let started = Utc::now();
+    run_backup(ctx, &connection, &destination, &job, Trigger::PreDeploy).await;
+    service::publish_updated(ctx).await;
+    let snapshot = job.snapshot();
+    if snapshot.status != DatabaseJobStatus::Success {
+        return Err(AppError::validation(
+            snapshot
+                .message
+                .unwrap_or_else(|| "o backup não terminou".to_string()),
+        ));
+    }
+    Ok(
+        copies_since(&ctx.db, connection_id, Trigger::PreDeploy, started, None)
+            .await?
+            .into_iter()
+            .map(|row| row.id)
+            .collect(),
+    )
+}
+
+/// As cópias de um gatilho numa janela de tempo — as feitas antes de um
+/// deploy, para a tela oferecer a restauração.
+///
+/// # Errors
+///
+/// Banco.
+pub async fn copies_since(
+    db: &DatabaseConnection,
+    connection_id: i64,
+    trigger: Trigger,
+    since: DateTime<Utc>,
+    until: Option<DateTime<Utc>>,
+) -> AppResult<Vec<database_backups::Model>> {
+    let mut query = database_backups::Entity::find()
+        .filter(database_backups::Column::ConnectionId.eq(connection_id))
+        .filter(database_backups::Column::Trigger.eq(trigger.as_str()))
+        .filter(database_backups::Column::StartedAt.gte(since))
+        .order_by_asc(database_backups::Column::Id);
+    if let Some(until) = until {
+        query = query.filter(database_backups::Column::StartedAt.lte(until));
+    }
+    Ok(query.all(db).await?)
 }
 
 /// O armazenamento para onde a conexão manda as cópias.

@@ -366,6 +366,19 @@ Cada item carrega severidade, esforço, responsável sugerido e critério de ace
 
 > **Objetivo:** novas capacidades que aumentam o valor do produto. Só entram depois que as Fases 0 e 1 estiverem estáveis.
 
+- [x] **Deploy contínuo pelo agente (GitHub → central → servidor)** 🟢 Concluído
+  - **Severidade:** 🟡 Média
+  - **Esforço:** Grande
+  - **Decisão:** [ADR 021](adr/021-deploy-continuo-pelo-agente.md) · **Guia:** [deploy_continuo_github.md](deploy_continuo_github.md)
+  - **Arquivos:** `backend/crates/agent-protocol/src/docker/stacks.rs`, `backend/crates/servers/src/docker/{cli.rs,stacks/}`, `backend/crates/servers/src/deploys/`, `backend/crates/servers/src/controllers/deploys.rs`, `backend/crates/servers/src/migrations/m20261108_000001_deploys.rs`, `frontend/src/pages/deploys/`, `frontend/src/components/deploys/`, `frontend/src/stores/deploys.ts`
+  - **Implementado:**
+    - Protocolo 6: `DockerCall::StackDeploy`/`StackReadiness` sob a permissão nova `deploy` (fora do padrão), validados dos dois lados; o agente escreve só em `AGENT_STACKS_DIR`, montado no mesmo caminho do host, e ganhou o `git`.
+    - No agente: fetch raso por SHA com o token só em `GIT_CONFIG_*`, `.env` atômico `0600`, login de uso único no registry (`DOCKER_CONFIG` temporário), `up --no-build --wait`, as últimas linhas de quem caiu no console e limpeza das tags antigas guardando N para o rollback. O executor de CLI do compose virou peça comum (`docker/cli.rs`).
+    - Na central: aplicações, alvos, cofre de credenciais e versões do `.env` cifrados; webhook `POST /api/deploy-hooks/github` provado por OIDC do GitHub (assinatura, emissor, `audience`, validade, reuso); fila com aprovação do administrador da área, janela de manutenção, substituição de pendentes, um deploy por alvo, canário sequencial, espera do agente; backup do banco antes (ADR 013); rollback com commit, tag e `.env` da versão anterior, avisando que migration não volta.
+    - Andamento só por SSE (`deploys:run` como snapshot, `deploys:log`, `deploys:updated`); avisos pelos canais e por Web Push com o botão "Revisar e publicar"; IA com `get_deploys`, `get_deploy_log` e `deploy_action` (sempre confirmada); auditoria "Deploy contínuo".
+    - Tela **Deploys** (menu Servidores) e atalho "Automatizar deploy" na aba Compose: assistente em 3 passos com checagem de prontidão, workflow do GitHub gerado sem segredo e sem interpolação em `run:`, editor de `.env` (lista ou texto, diff só de nomes, histórico), console ao vivo com etapas e commits na aprovação, publicar/restaurar versão, histórico.
+    - Testes: validação do contrato, montagem de comandos, segredos fora do `Debug` e da linha de comando, limpeza de imagens, prontidão, janela, refs, `.env`, OIDC com chave de teste, idempotência do webhook, estado inicial da fila, avisos, workflow (snapshot) e o SSE da tela sem chamar a API.
+
 - [x] **Janelas de manutenção** 🟢 Concluído
   - **Severidade:** 🟡 Média
   - **Esforço:** Médio

@@ -24,3 +24,4 @@ decisão cria.
 | [018](018-loco-ou-axum.md) | Manter o Loco.rs como ponto de montagem, sem trocar por `axum` + `sea-orm` direto | — | aceito |
 | [019](019-papel-por-area.md) | Papel por área: operator, viewer ou sem acesso em Rede, Servidores e VPN; admin global vale em tudo | — | aceito |
 | [020](020-postgresql-padrao-do-container.md) | PostgreSQL 18 como banco padrão do container (logs em banco separado); SQLite continua alternativa | — | aceito |
+| [021](021-deploy-continuo-pelo-agente.md) | Deploy contínuo: GitHub compila, central decide (OIDC, aprovação, janela, rollback), agente aplica numa raiz só | — | aceito |

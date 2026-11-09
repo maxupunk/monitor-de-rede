@@ -307,11 +307,13 @@ services:
       AGENT_TOKEN_FILE: /local-agent/token
       # Política local. O padrão libera o que a tela oferece para este host:
       # ver, ciclo de vida, pull/recriação, compose, exportar volume e rodar os
-      # monitores de container deste servidor (`monitor`). Para um host só de
-      # leitura, `read,monitor`.
-      AGENT_ALLOW: ${LOCAL_AGENT_ALLOW:-read,lifecycle,update,compose,volume_export,monitor}
+      # monitores de container deste servidor (`monitor`) e o deploy contínuo
+      # de stacks (`deploy`, ADR 021). Para um host só de leitura,
+      # `read,monitor`.
+      AGENT_ALLOW: ${LOCAL_AGENT_ALLOW:-read,lifecycle,update,compose,volume_export,monitor,deploy}
       # Desliga o acesso à Engine sem reconstruir a imagem.
       DOCKER_ENABLED: ${DOCKER_ENABLED:-true}
+      AGENT_STACKS_DIR: ${AGENT_STACKS_DIR:-/srv/netmonitor/stacks}
       TZ: ${TZ:-America/Fortaleza}
     volumes:
       # API nativa da Engine. Só este container a monta.
@@ -322,6 +324,10 @@ services:
       - netmonitor-local-agent:/local-agent:ro
       # Resultados que esperam a central voltar (buffer offline).
       - netmonitor-agent-state:/var/lib/netmonitor-agent
+      # Deploy contínuo (ADR 021): o único diretório do host que o agente
+      # escreve. **Mesmo caminho** dos dois lados: o compose roda aqui, mas
+      # quem resolve os bind mounts relativos da stack é a Engine do host.
+      - ${AGENT_STACKS_DIR:-/srv/netmonitor/stacks}:${AGENT_STACKS_DIR:-/srv/netmonitor/stacks}
       # Compose: os projetos precisam aparecer no mesmo caminho do host.
       # Descomente e ajuste para as pastas dos seus projetos.
       # - /srv:/srv:ro

@@ -45,6 +45,7 @@ export const RESOURCE_OPTIONS = [
   { value: 'docker_network', label: 'Rede Docker' },
   { value: 'docker_image', label: 'Imagem Docker' },
   { value: 'plugin', label: 'Plugin de dispositivo' },
+  { value: 'deploy', label: 'Deploy contínuo' },
 ] as const
 
 export function defaultFilters(): AuditFilters {

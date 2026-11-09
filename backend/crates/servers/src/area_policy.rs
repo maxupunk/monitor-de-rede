@@ -37,11 +37,16 @@ impl AreaPolicy for ServersPolicy {
     }
 
     fn api_prefixes(&self) -> &'static [&'static str] {
-        &["/api/docker", "/api/databases"]
+        &["/api/docker", "/api/databases", "/api/deploys"]
     }
 
     fn event_prefixes(&self) -> &'static [&'static str] {
-        &["docker:", "database_jobs:", "database_connections:"]
+        &[
+            "docker:",
+            "database_jobs:",
+            "database_connections:",
+            "deploys:",
+        ]
     }
 
     async fn evidence(&self, db: &DatabaseConnection) -> AppResult<Evidence> {

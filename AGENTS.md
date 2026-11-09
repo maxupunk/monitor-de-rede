@@ -65,7 +65,7 @@
 
 4. **Práticas de Teste (Rust)**:
    - **Isolamento de Banco**: testes de requisição usam
-     `request_with_config::<App, _, _>`; o `Hooks::truncate` limpa as 47 tabelas
+     `request_with_config::<App, _, _>`; o `Hooks::truncate` limpa as 52 tabelas
      entre eles.
    - **`#[serial]`** em tudo que toca estado global de processo: `ScanSessionService`,
      o cofre de chaves da VPN, o rate limiter e qualquer teste que mexa em
@@ -144,6 +144,17 @@
      prioridade — não os mova para o canal de controle. Mudança que um lado
      não entenderia sobe `PROTOCOL_VERSION` (o handshake é estrito); não
      crie campo de "recursos opcionais" para conviver com versão antiga.
+   - **Deploy contínuo** (ADR 021): o agente só escreve dentro de
+     `AGENT_STACKS_DIR` (montado no **mesmo caminho** do host), só com a
+     permissão `deploy` (fora do padrão) e só pela operação fechada
+     `DockerCall::StackDeploy` — nunca um shell nem um caminho vindo da
+     central. Token do Git e senha do registry vão no ambiente do processo
+     filho (nunca na linha de comando, no `.git/config` ou no
+     `~/.docker/config.json` do host); o `.env` mora cifrado na central e é
+     gravado `0600`. Quem decide quando é a central (aprovação, janela,
+     fila, rollback); o agente só aplica uma revisão. O aviso do GitHub é
+     provado por OIDC — não troque por token na URL nem por segredo
+     compartilhado.
    - **Plugins de dispositivo** (ADR 012): o script Rhai roda **só** no sandbox
      da central e **nunca** abre socket — toda E/S passa por
      `plugins::transport::DeviceTransport`, que só alcança o IP cadastrado. O

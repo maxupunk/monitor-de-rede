@@ -103,11 +103,13 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
 # oficial do CLI do Docker porque o agente executa `docker compose` no host
 # (a central nunca executa — AGENTS §7). Roda como root dentro do container:
 # o socket da Engine já é equivalente a root no host, e o GID do grupo docker
-# muda de servidor para servidor.
+# muda de servidor para servidor. O `git` é do deploy contínuo (ADR 021): o
+# agente sincroniza o repositório da stack no commit da imagem.
 FROM docker:27-cli@sha256:851f91d241214e7c6db86513b270d58776379aacc5eb9c4a87e5b47115e3065c AS agent
-RUN apk add --no-cache tini ca-certificates
+RUN apk add --no-cache tini ca-certificates git
 COPY --from=agent-builder /usr/local/bin/netmonitor-agent /usr/local/bin/netmonitor-agent
 ENV AGENT_STATE_DIR=/var/lib/netmonitor-agent \
+    AGENT_STACKS_DIR=/srv/netmonitor/stacks \
     HOST_PROC=/host/proc \
     HOST_ROOT=/host
 VOLUME ["/var/lib/netmonitor-agent"]

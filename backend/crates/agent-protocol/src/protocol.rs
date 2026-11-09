@@ -30,6 +30,7 @@ use uuid::Uuid;
 use crate::{
     device_io::DeviceIoCall,
     docker::{
+        stacks::StackDeployRequest,
         views::{DockerInventorySnapshot, DockerLiveSnapshot},
         ComposeRequest, ContainerAction, DockerError, LogFilters,
     },
@@ -51,8 +52,10 @@ use crate::{
 /// * **4** — `Command::Throughput` e saída de `DeviceIo` em `Chunk`
 ///   (ADR 015 §6);
 /// * **5** — `Login` do `DeviceIo` com chave privada e chave de host fixada
-///   (ADR 016, acesso dedicado por chave).
-pub const PROTOCOL_VERSION: u16 = 5;
+///   (ADR 016, acesso dedicado por chave);
+/// * **6** — `DockerCall::StackDeploy` e `DockerCall::StackReadiness`, sob a
+///   permissão `deploy` (ADR 021, deploy contínuo).
+pub const PROTOCOL_VERSION: u16 = 6;
 
 /// Teto de um quadro. Logs e inventários grandes são quebrados em chunks.
 pub const MAX_FRAME_BYTES: usize = 4 * 1024 * 1024;
@@ -451,6 +454,16 @@ pub enum DockerCall {
     Compose {
         request: ComposeRequest,
     },
+    /// Deploy de uma stack em `AGENT_STACKS_DIR` (ADR 021). Cada etapa e cada
+    /// linha de saída vão num `Chunk` (`StackChunk`); o `Response` leva o
+    /// `StackDeployOutcome`.
+    StackDeploy {
+        request: StackDeployRequest,
+    },
+    /// O que falta no host para deployar `project` (só leitura).
+    StackReadiness {
+        project: String,
+    },
 }
 
 impl Command {
@@ -497,6 +510,9 @@ impl DockerCall {
             | Self::PruneImages => Permission::Lifecycle,
             Self::PullImage { .. } | Self::UpdateContainer { .. } => Permission::Update,
             Self::Compose { .. } => Permission::Compose,
+            // A prontidão só lê, mas só interessa a quem pode deployar — e diz
+            // o caminho e o espaço do disco do host.
+            Self::StackDeploy { .. } | Self::StackReadiness { .. } => Permission::Deploy,
         }
     }
 }
@@ -844,6 +860,13 @@ mod tests {
             })
             .permission(),
             Permission::Compose
+        );
+        assert_eq!(
+            docker(DockerCall::StackReadiness {
+                project: "sgc".into()
+            })
+            .permission(),
+            Permission::Deploy
         );
         assert_eq!(
             Command::SetLive { interval_ms: 0 }.permission(),

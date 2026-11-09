@@ -184,6 +184,9 @@ impl Hooks for App {
             // O gerenciador de pacotes do roteador não tem sessão: o espelho
             // (ADR 015 §10) confere o token da execução do plugin no handler.
             .add_route(netmonitor_network::controllers::package_mirror::routes())
+            // O GitHub Actions não tem sessão: prova o repositório com o token
+            // OIDC, conferido no handler (ADR 021). Fora do guarda JWT.
+            .add_route(netmonitor_servers::controllers::deploys::hook_routes())
             .add_route(controllers::dashboard::routes().layer(business_auth.clone()))
             .add_route(controllers::backup::routes().layer(business_auth.clone()))
             .add_route(controllers::storages::routes().layer(business_auth.clone()))
@@ -213,6 +216,9 @@ impl Hooks for App {
             .add_route(controllers::dns_servers::routes().layer(business_auth.clone()))
             .add_route(
                 netmonitor_servers::controllers::docker::routes().layer(business_auth.clone()),
+            )
+            .add_route(
+                netmonitor_servers::controllers::deploys::routes().layer(business_auth.clone()),
             )
             .add_route(controllers::server_addresses::routes().layer(business_auth.clone()))
             .add_route(controllers::settings::routes().layer(business_auth.clone()))

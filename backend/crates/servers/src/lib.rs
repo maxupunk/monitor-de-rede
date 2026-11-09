@@ -14,15 +14,19 @@
 //! * [`ai_tools`] — as ferramentas `docker_*` da IA e a fonte `docker` do
 //!   `grep`, contribuídas ao catálogo pelo ponto de montagem;
 //! * [`databases`] — dump e restauração nativos, pela ponte do agente;
+//! * [`deploys`] — o deploy contínuo (ADR 021): aplicações, alvos, a fila
+//!   com aprovação e janela, o webhook OIDC do GitHub e o rollback;
 //! * [`controllers`], [`dtos`], [`views`] — as rotas `/api/docker` e
 //!   `/api/databases`.
 
 pub mod agent_host;
 pub mod ai_tools;
 pub mod area_policy;
+pub mod central;
 pub mod container_monitor;
 pub mod controllers;
 pub mod databases;
+pub mod deploys;
 pub mod docker;
 pub mod dtos;
 pub mod migrations;

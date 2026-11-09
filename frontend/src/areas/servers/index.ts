@@ -1,7 +1,10 @@
 import { defineArea, lazyComponent } from '../defineArea'
 import { serversSse } from './sse'
 
-/** Servidores: o Docker dos hosts (cada host é um agente, ADR 014). */
+/**
+ * Servidores: o Docker dos hosts (cada host é um agente, ADR 014) e o deploy
+ * contínuo das stacks deles (ADR 021).
+ */
 export const serversArea = defineArea({
   id: 'servers',
   routes: [
@@ -46,12 +49,22 @@ export const serversArea = defineArea({
         },
       ],
     },
+    {
+      path: 'deploys',
+      name: 'deploys',
+      component: () => import('@/pages/deploys/DeploysPage.vue'),
+    },
   ],
   nav: [
     {
       section: 'servers',
       order: 10,
       item: { title: 'Docker', icon: 'mdi-docker', to: '/docker' },
+    },
+    {
+      section: 'servers',
+      order: 15,
+      item: { title: 'Deploys', icon: 'mdi-rocket-launch-outline', to: '/deploys' },
     },
   ],
   widgets: {

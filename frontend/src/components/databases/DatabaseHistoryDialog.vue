@@ -222,6 +222,13 @@ function statusIcon(status: string): string {
   return 'mdi-progress-clock'
 }
 
+/** Quem disparou a cópia, como a linha mostra. */
+const TRIGGER_LABEL: Record<string, string> = {
+  manual: 'manual',
+  scheduled: 'automático',
+  pre_deploy: 'antes de um deploy',
+}
+
 function details(item: DatabaseBackupResponse): string {
   if (item.status === 'running') return 'Em andamento…'
   return [
@@ -229,7 +236,7 @@ function details(item: DatabaseBackupResponse): string {
     `${item.tables} tabelas`,
     `${formatCompactCount(item.rows)} linhas`,
     formatElapsedMs(item.durationMs),
-    item.trigger === 'scheduled' ? 'automático' : 'manual',
+    TRIGGER_LABEL[item.trigger] ?? 'manual',
   ]
     .filter(Boolean)
     .join(' · ')

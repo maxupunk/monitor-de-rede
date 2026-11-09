@@ -110,6 +110,9 @@ pub enum ResourceType {
     LinkTestSchedule,
     /// Tarefa agendada (ferramenta do catálogo num horário cron).
     ScheduledTask,
+    /// Deploy contínuo (ADR 021): aplicação, alvo, credencial, `.env` e cada
+    /// deploy pedido ou aprovado.
+    Deploy,
 }
 
 impl ResourceType {
@@ -137,6 +140,7 @@ impl ResourceType {
             ResourceType::LinkTest => "link_test",
             ResourceType::LinkTestSchedule => "link_test_schedule",
             ResourceType::ScheduledTask => "scheduled_task",
+            ResourceType::Deploy => "deploy",
         }
     }
 }

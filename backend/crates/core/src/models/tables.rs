@@ -16,8 +16,8 @@ use std::collections::HashSet;
 use loco_rs::Result;
 use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 
-/// As 47 tabelas do esquema, na ordem de criação da §6 (pais antes de filhos).
-pub const CREATION_ORDER: [&str; 47] = [
+/// As 52 tabelas do esquema, na ordem de criação da §6 (pais antes de filhos).
+pub const CREATION_ORDER: [&str; 52] = [
     "users",
     "sites",
     "probes",
@@ -73,6 +73,13 @@ pub const CREATION_ORDER: [&str; 47] = [
     // `storage_destinations` pela FK do destino.
     "database_connections",
     "database_backups",
+    // Deploy contínuo (ADR 021). Depois de `probes` e `database_connections`
+    // pelas FKs dos alvos; cada filha depois do pai.
+    "deploy_credentials",
+    "deploy_applications",
+    "deploy_targets",
+    "deploy_env_versions",
+    "deploy_runs",
     // Plano de backup do próprio NetMonitor. Depois de `storage_destinations`.
     "system_backup_plan",
     // Teste de enlace (ADR 015). Agendamentos antes dos testes (FK
@@ -181,9 +188,9 @@ mod tests {
 
     #[test]
     fn cobre_as_27_tabelas_sem_repetir() {
-        assert_eq!(CREATION_ORDER.len(), 47);
+        assert_eq!(CREATION_ORDER.len(), 52);
         let unicas: HashSet<&&str> = CREATION_ORDER.iter().collect();
-        assert_eq!(unicas.len(), 47, "há nome de tabela repetido");
+        assert_eq!(unicas.len(), 52, "há nome de tabela repetido");
     }
 
     #[test]
