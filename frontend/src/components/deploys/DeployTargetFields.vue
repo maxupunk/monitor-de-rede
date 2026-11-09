@@ -35,15 +35,21 @@
         ></v-text-field>
       </v-col>
       <v-col cols="12" sm="6">
-        <v-text-field
+        <v-combobox
           v-model="model.reference"
+          :items="referenceItems"
           label="Acompanha *"
-          hint="Branch (main) ou tags (v*)"
+          :hint="
+            references
+              ? `Branches do repositório ou um padrão de tag (v*). Padrão: ${references.defaultBranch}`
+              : 'Branch (main) ou tags (v*)'
+          "
           persistent-hint
           variant="outlined"
           prepend-inner-icon="mdi-source-branch"
+          :loading="referencesLoading"
           :rules="[requiredRule('Informe a branch ou o padrão de tag')]"
-        ></v-text-field>
+        ></v-combobox>
       </v-col>
     </v-row>
 
@@ -167,15 +173,24 @@ import { computed, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useDatabasesStore } from '@/stores/databases'
 import { useDeploysStore } from '@/stores/deploys'
-import type { TargetForm } from '@/utils/deployForms'
+import type { DeployReferencesView } from '@/bindings/DeployReferencesView'
+import { referenceChoices, type TargetForm } from '@/utils/deployForms'
 import { requiredRule } from '@/utils/formRules'
 
 const model = defineModel<TargetForm>({ required: true })
-defineProps<{ lockAgent?: boolean; lockProject?: boolean }>()
+const props = defineProps<{
+  lockAgent?: boolean
+  lockProject?: boolean
+  /** Branches e tags do repositório, quando o GitHub está conectado. */
+  references?: DeployReferencesView | null
+  referencesLoading?: boolean
+}>()
 
 const deploys = useDeploysStore()
 const databases = useDatabasesStore()
 const auth = useAuthStore()
+
+const referenceItems = computed(() => referenceChoices(props.references ?? null))
 
 const hasWindow = computed(() => Boolean(model.value.windowStart && model.value.windowEnd))
 

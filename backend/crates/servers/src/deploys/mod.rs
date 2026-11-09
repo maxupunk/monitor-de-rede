@@ -37,9 +37,11 @@
 //! O processo da API nunca executa `git` nem `docker` (ADR 010, ADR 014):
 //! tudo o que toca o host vai ao agente como `DockerCall::StackDeploy`.
 
+pub mod access;
 pub mod ai_tools;
 pub mod applications;
 pub mod catalog;
+pub mod connections;
 pub mod credentials;
 pub mod env;
 pub mod env_versions;

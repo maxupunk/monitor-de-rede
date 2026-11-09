@@ -9,7 +9,8 @@ use ts_rs::TS;
 
 use agent_protocol::docker::stacks::StackReadiness;
 use netmonitor_core::models::{
-    deploy_applications, deploy_credentials, deploy_env_versions, deploy_runs, deploy_targets,
+    deploy_applications, deploy_credentials, deploy_env_versions, deploy_github_connections,
+    deploy_runs, deploy_targets,
 };
 
 use crate::{
@@ -278,6 +279,10 @@ pub struct DeployApplicationView {
     #[ts(type = "number | null")]
     pub credential_id: Option<i64>,
     pub credential_name: Option<String>,
+    #[ts(type = "number | null")]
+    pub github_connection_id: Option<i64>,
+    /// A conta do GitHub da conexão (`maxupunk`).
+    pub github_account: Option<String>,
     pub compose_files: Vec<String>,
     pub image_tag_variable: String,
     pub images: Vec<BuildImage>,
@@ -291,6 +296,7 @@ impl DeployApplicationView {
     pub fn new(
         row: &deploy_applications::Model,
         credential_name: Option<String>,
+        github_account: Option<String>,
         targets: Vec<DeployTargetView>,
     ) -> Self {
         Self {
@@ -301,6 +307,8 @@ impl DeployApplicationView {
             repository_url: repository_url(&row.repository),
             credential_id: row.credential_id,
             credential_name,
+            github_connection_id: row.github_connection_id,
+            github_account,
             compose_files: compose_files_of(row),
             image_tag_variable: row.image_tag_variable.clone(),
             images: images_of(row),
@@ -334,6 +342,7 @@ pub struct DeployOverview {
     pub recent_runs: Vec<DeployRunView>,
     pub counts: DeployCounts,
     pub credentials: Vec<DeployCredentialView>,
+    pub github_connections: Vec<DeployGithubConnectionView>,
     /// O endereço que o workflow chama (`…/api/deploy-hooks/github`).
     pub hook_path: String,
     /// O `audience` que o token OIDC precisa ter.
@@ -446,4 +455,158 @@ pub struct DeployBackupView {
     pub database_name: String,
     pub status: String,
     pub started_at: String,
+}
+
+// ── GitHub ───────────────────────────────────────────────────────────────
+
+/// Uma conexão com o GitHub (o GitHub App que esta central criou).
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DeployGithubConnectionView {
+    #[ts(type = "number")]
+    pub id: i64,
+    /// Conta ou organização dona do app.
+    pub account: String,
+    pub organization: bool,
+    pub app_slug: String,
+    /// Instalado: já enxerga repositórios.
+    pub installed: bool,
+    /// Pode abrir o PR do workflow.
+    pub can_write: bool,
+    /// Onde instalar (ou escolher outros repositórios).
+    pub install_url: String,
+    /// As configurações do app no GitHub (permissões, excluir).
+    pub settings_url: String,
+    pub created_at: String,
+}
+
+impl From<&deploy_github_connections::Model> for DeployGithubConnectionView {
+    fn from(row: &deploy_github_connections::Model) -> Self {
+        let organization = row.account_type == "Organization";
+        let settings_url = if organization {
+            format!(
+                "https://github.com/organizations/{}/settings/apps/{}",
+                row.account_login, row.app_slug
+            )
+        } else {
+            format!("https://github.com/settings/apps/{}", row.app_slug)
+        };
+        Self {
+            id: row.id,
+            account: row.account_login.clone(),
+            organization,
+            app_slug: row.app_slug.clone(),
+            installed: row.installation_id.is_some(),
+            can_write: row.can_write,
+            install_url: format!("https://github.com/apps/{}/installations/new", row.app_slug),
+            settings_url,
+            created_at: timestamp(&row.created_at),
+        }
+    }
+}
+
+/// O formulário que a tela envia ao GitHub para criar o app.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DeployGithubManifestView {
+    /// O `action` do formulário (já com o `state`).
+    pub action_url: String,
+    /// O campo `manifest`: JSON.
+    pub manifest: String,
+}
+
+/// Um repositório que a credencial enxerga.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DeployRepositoryView {
+    /// `dono/repo`.
+    pub full_name: String,
+    pub private: bool,
+    pub default_branch: String,
+    pub description: Option<String>,
+    pub pushed_at: Option<String>,
+}
+
+/// Branches e tags, para escolher o que cada alvo acompanha.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DeployReferencesView {
+    pub default_branch: String,
+    pub branches: Vec<String>,
+    pub tags: Vec<String>,
+}
+
+/// O que o compose do repositório preenche sozinho.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DeployComposeDiscovery {
+    /// Os arquivos compose na raiz do repositório.
+    pub files: Vec<String>,
+    /// O que o `docker compose` usaria sozinho.
+    pub suggested_files: Vec<String>,
+    pub services: Vec<String>,
+    pub images: Vec<BuildImage>,
+    pub image_tag_variable: Option<String>,
+    /// O que ajustar no compose antes do primeiro deploy.
+    pub notes: Vec<String>,
+}
+
+/// O `deploy.yml` do repositório comparado ao gerado.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub enum DeployWorkflowState {
+    /// Não há `deploy.yml` na branch padrão.
+    Missing,
+    /// Igual ao gerado.
+    Current,
+    /// Diferente: editado à mão ou gerado antes de mudar a aplicação.
+    Different,
+    /// Não deu para ler.
+    Unknown,
+}
+
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DeployPullRequestView {
+    pub number: u64,
+    pub url: String,
+}
+
+/// A última execução do workflow no Actions.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DeployBuildView {
+    /// `queued`, `in_progress`, `completed`…
+    pub status: String,
+    /// `success`, `failure`, `cancelled`… (só quando terminou).
+    pub conclusion: Option<String>,
+    pub url: String,
+    pub branch: Option<String>,
+    pub short_sha: String,
+    pub created_at: String,
+}
+
+/// Como está a ligação com o GitHub de uma aplicação.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DeployGithubStatusView {
+    pub workflow: DeployWorkflowState,
+    /// O arquivo no GitHub, quando existe.
+    pub workflow_url: Option<String>,
+    /// O PR do NetMonitor ainda aberto.
+    pub pull_request: Option<DeployPullRequestView>,
+    pub last_build: Option<DeployBuildView>,
+    /// A conexão pode abrir o PR.
+    pub can_write: bool,
+    /// Por que não deu para conferir.
+    pub unavailable_reason: Option<String>,
 }

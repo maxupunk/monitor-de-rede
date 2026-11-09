@@ -65,7 +65,7 @@
 
 4. **Práticas de Teste (Rust)**:
    - **Isolamento de Banco**: testes de requisição usam
-     `request_with_config::<App, _, _>`; o `Hooks::truncate` limpa as 52 tabelas
+     `request_with_config::<App, _, _>`; o `Hooks::truncate` limpa as 53 tabelas
      entre eles.
    - **`#[serial]`** em tudo que toca estado global de processo: `ScanSessionService`,
      o cofre de chaves da VPN, o rate limiter e qualquer teste que mexa em
@@ -154,7 +154,12 @@
      gravado `0600`. Quem decide quando é a central (aprovação, janela,
      fila, rollback); o agente só aplica uma revisão. O aviso do GitHub é
      provado por OIDC — não troque por token na URL nem por segredo
-     compartilhado.
+     compartilhado. O acesso ao GitHub é o **GitHub App da central** (um por
+     central, criado pelo manifest): a chave dele nunca sai da central, o
+     agente recebe um token de instalação de uma hora, só leitura e só do
+     repositório; qual credencial vai em cada uso é decidido só em
+     `deploys::access`. O PR do workflow sai de uma branch do NetMonitor,
+     nunca direto na branch padrão.
    - **Plugins de dispositivo** (ADR 012): o script Rhai roda **só** no sandbox
      da central e **nunca** abre socket — toda E/S passa por
      `plugins::transport::DeviceTransport`, que só alcança o IP cadastrado. O

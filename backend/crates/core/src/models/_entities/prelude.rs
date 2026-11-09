@@ -9,6 +9,7 @@ pub use super::database_connections::Entity as DatabaseConnections;
 pub use super::deploy_applications::Entity as DeployApplications;
 pub use super::deploy_credentials::Entity as DeployCredentials;
 pub use super::deploy_env_versions::Entity as DeployEnvVersions;
+pub use super::deploy_github_connections::Entity as DeployGithubConnections;
 pub use super::deploy_runs::Entity as DeployRuns;
 pub use super::deploy_targets::Entity as DeployTargets;
 pub use super::device_credentials::Entity as DeviceCredentials;

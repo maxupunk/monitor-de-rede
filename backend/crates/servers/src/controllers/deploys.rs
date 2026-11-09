@@ -24,13 +24,13 @@ use netmonitor_core::{
 use crate::{
     databases::backups::{self, Trigger},
     deploys::{
-        applications, catalog, credentials, env_versions, events, github, oidc, orchestrator,
-        readiness, runs, short_sha, webhook,
-        workflow::{self, WorkflowSpec},
+        access, applications, catalog, credentials, env_versions, events,
+        github::{self, app::normalize_origin, app::Scope},
+        oidc, orchestrator, readiness, runs, short_sha, webhook, workflow,
     },
     dtos::deploys::{
-        ApplicationInput, ApproveInput, CredentialInput, DeployInput, DeployWhen, EnvPreviewInput,
-        EnvSaveInput, HookInput, RejectInput, SetupInput, TargetInput,
+        ApplicationInput, ApproveInput, CentralUrlQuery, CredentialInput, DeployInput, DeployWhen,
+        EnvPreviewInput, EnvSaveInput, HookInput, RejectInput, SetupInput, TargetInput,
     },
     views::deploys::{
         DeployBackupView, DeployCredentialView, DeployEnvContentView, DeployEnvSaved,
@@ -41,7 +41,7 @@ use crate::{
 /// Quantos deploys o histórico de um alvo mostra.
 const HISTORY_LIMIT: u64 = 50;
 
-async fn audit(
+pub(crate) async fn audit(
     ctx: &AppContext,
     headers: &HeaderMap,
     action: AuditAction,
@@ -234,27 +234,31 @@ async fn destroy_application(
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
-async fn workflow(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
+async fn workflow(
+    State(ctx): State<AppContext>,
+    Path(id): Path<i64>,
+    Query(query): Query<CentralUrlQuery>,
+) -> AppResult<Response> {
     let application = applications::find(&ctx.db, id).await?;
-    let references: Vec<String> = applications::targets_of(&ctx.db, id)
-        .await?
-        .into_iter()
-        .map(|target| target.reference)
-        .collect();
-    let images = applications::images_of(&application);
-    let audience = oidc::audience();
+    let central = central_url(&query)?;
     Ok(format::json(DeployWorkflowView {
         path: workflow::WORKFLOW_PATH.to_string(),
-        yaml: workflow::render(&WorkflowSpec {
-            application_name: &application.name,
-            images: &images,
-            references: &references,
-            audience: &audience,
-        }),
+        yaml: applications::workflow_yaml(&ctx.db, &application, central.as_deref()).await?,
         url_variable: workflow::URL_VARIABLE.to_string(),
         hook_path: workflow::HOOK_PATH.to_string(),
-        audience,
+        audience: oidc::audience(),
     })?)
+}
+
+/// O endereço público da central, normalizado (vazio = sem endereço).
+pub(crate) fn central_url(query: &CentralUrlQuery) -> AppResult<Option<String>> {
+    query
+        .central_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(normalize_origin)
+        .transpose()
 }
 
 async fn store_target(
@@ -557,13 +561,19 @@ async fn run_changes(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppR
         .await?
         .filter(|live| live.id != run.id)
         .map(|live| live.commit_sha);
-    let token = match application.credential_id {
-        Some(credential) => credentials::open(&ctx.db, credential)
-            .await
-            .ok()
-            .map(|credential| credential.secret),
-        None => None,
-    };
+    // Sem acesso (app desinstalado, token revogado) a tela ainda mostra o
+    // link do "Compare": os commits são informação, não condição.
+    let client = access::repository_client(
+        &ctx.db,
+        access::Source::of(&application),
+        &application.repository,
+        Scope::Read,
+    )
+    .await
+    .ok();
+    let token = client
+        .as_ref()
+        .and_then(|client| client.token().map(ToString::to_string));
     Ok(format::json(
         github::changes(
             &application.repository,

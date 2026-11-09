@@ -8,10 +8,10 @@
         <v-btn
           color="primary"
           variant="tonal"
-          prepend-icon="mdi-key-chain"
-          @click="credentialsOpen = true"
+          prepend-icon="mdi-github"
+          @click="openConnections(false)"
         >
-          Credenciais
+          Conexões
         </v-btn>
         <v-btn
           color="primary"
@@ -26,6 +26,20 @@
 
     <v-alert v-if="deploys.error" type="error" variant="tonal" class="mb-4">
       {{ deploys.error }}
+    </v-alert>
+
+    <v-alert
+      v-if="githubProgress"
+      type="info"
+      variant="tonal"
+      class="mb-4"
+      icon="mdi-github"
+      data-test="github-progress"
+    >
+      <div class="d-flex align-center ga-3">
+        <v-progress-circular indeterminate size="20" width="2" color="info"></v-progress-circular>
+        {{ githubProgress }}
+      </div>
     </v-alert>
 
     <v-alert
@@ -149,7 +163,7 @@
     </v-card>
 
     <DeploySetupDialog v-model="setupOpen" :preset="setupPreset" @done="onSetupDone" />
-    <DeployCredentialsDialog v-model="credentialsOpen" />
+    <DeployConnectionsDialog v-model="connectionsOpen" :start-connecting="connectNow" />
     <DeployApplicationDialog
       v-model="applicationOpen"
       :application="selectedApplication"
@@ -183,7 +197,7 @@ import { useRoute, useRouter } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
 import DeployApplicationCard from '@/components/deploys/DeployApplicationCard.vue'
 import DeployApplicationDialog from '@/components/deploys/DeployApplicationDialog.vue'
-import DeployCredentialsDialog from '@/components/deploys/DeployCredentialsDialog.vue'
+import DeployConnectionsDialog from '@/components/deploys/DeployConnectionsDialog.vue'
 import DeployEnvDialog from '@/components/deploys/DeployEnvDialog.vue'
 import DeployHistoryDialog from '@/components/deploys/DeployHistoryDialog.vue'
 import DeployPublishDialog from '@/components/deploys/DeployPublishDialog.vue'
@@ -199,6 +213,12 @@ import type { DeployTargetView } from '@/bindings/DeployTargetView'
 import { useAuthStore } from '@/stores/auth'
 import { useDeploysStore } from '@/stores/deploys'
 import type { SetupPreset } from '@/utils/deployForms'
+import {
+  GITHUB_CALLBACK_KEYS,
+  parseGithubCallback,
+  takeGithubReturn,
+  type GithubCallback,
+} from '@/utils/githubConnect'
 
 const deploys = useDeploysStore()
 const auth = useAuthStore()
@@ -220,7 +240,7 @@ const ONBOARDING = [
   },
   {
     title: 'Ligue o GitHub',
-    text: 'Copie o workflow gerado: ele compila, publica e avisa a central. Nenhum segredo vai para o GitHub.',
+    text: 'Com o GitHub conectado, a central abre o PR do workflow: ele compila, publica e avisa a central. Nenhum segredo vai para o GitHub.',
   },
 ]
 
@@ -266,7 +286,9 @@ function notify(message: string, color = 'success') {
 
 const setupOpen = ref(false)
 const setupPreset = ref<SetupPreset | null>(null)
-const credentialsOpen = ref(false)
+const connectionsOpen = ref(false)
+const connectNow = ref(false)
+const githubProgress = ref<string | null>(null)
 const applicationOpen = ref(false)
 const targetOpen = ref(false)
 const workflowOpen = ref(false)
@@ -278,6 +300,11 @@ const runId = ref<number | null>(null)
 const selectedApplication = ref<DeployApplicationView | null>(null)
 const selectedTarget = ref<DeployTargetView | null>(null)
 const editingTarget = ref<DeployTargetView | null>(null)
+
+function openConnections(connect: boolean) {
+  connectNow.value = connect
+  connectionsOpen.value = true
+}
 
 function openSetup(preset: SetupPreset | null) {
   setupPreset.value = preset
@@ -365,6 +392,37 @@ async function removeTarget(target: DeployTargetView) {
   }
 }
 
+// ── A volta do GitHub (criar e instalar o app) ─────────────────────────────
+
+/** Retoma onde a pessoa estava antes de ir ao GitHub. */
+function resume() {
+  const target = takeGithubReturn()
+  if (target === 'setup') openSetup(null)
+  if (target === 'connections') openConnections(false)
+}
+
+async function finishGithub(callback: GithubCallback) {
+  try {
+    if (callback.kind === 'created') {
+      githubProgress.value = 'App criado no GitHub. Abrindo a instalação…'
+      const connection = await deploys.connectGithub(callback.code, callback.state)
+      // Sem instalar o app não enxerga nada: segue direto para lá (a volta
+      // cai aqui de novo, com o `installation_id`).
+      window.location.assign(connection.installUrl)
+      return
+    }
+    githubProgress.value = 'Conferindo a instalação no GitHub…'
+    const connection = await deploys.claimGithubInstallation(callback.installationId)
+    githubProgress.value = null
+    notify(`GitHub conectado: ${connection.account}.`)
+    resume()
+  } catch (err) {
+    githubProgress.value = null
+    notify(err instanceof Error ? err.message : 'Não foi possível concluir a conexão', 'error')
+    resume()
+  }
+}
+
 // ── Links diretos: a notificação (`?run=`) e a aba Compose (`?setup=`) ─────
 
 function applyQuery() {
@@ -377,7 +435,11 @@ function applyQuery() {
       project: typeof route.query.project === 'string' ? route.query.project : undefined,
     })
   }
-  if (route.query.run || route.query.setup) {
+  const callback = parseGithubCallback(route.query)
+  if (callback && canAdmin.value) void finishGithub(callback)
+  const handled =
+    route.query.run || route.query.setup || GITHUB_CALLBACK_KEYS.some((key) => key in route.query)
+  if (handled) {
     void router.replace({ name: 'deploys', query: {} })
   }
 }

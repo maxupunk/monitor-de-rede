@@ -54,6 +54,12 @@ export const serversArea = defineArea({
       name: 'deploys',
       component: () => import('@/pages/deploys/DeploysPage.vue'),
     },
+    {
+      // A volta do GitHub ao criar e ao instalar o app (o manifest aponta
+      // para cá): a página de deploys conclui pela query.
+      path: 'deploys/github',
+      redirect: (to) => ({ name: 'deploys', query: to.query }),
+    },
   ],
   nav: [
     {

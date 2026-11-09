@@ -2,6 +2,10 @@
 //!
 //! * `deploy_credentials` — o cofre: token do GitHub (leitura do repositório
 //!   e `read:packages`), cifrado com a `ENCRYPTION_KEY`. Nunca volta à tela.
+//! * `deploy_github_connections` — o GitHub App que a central criou na conta
+//!   (ou organização) pelo manifest: lê o repositório, lista o que ele vê e,
+//!   com permissão de escrita, abre o PR do workflow. A chave privada fica
+//!   cifrada; os tokens de instalação duram uma hora e não são gravados.
 //! * `deploy_applications` — um repositório: de onde vêm o compose e as
 //!   imagens, e como o CI as publica (`images`, para o gerador do workflow).
 //! * `deploy_targets` — onde a aplicação roda: o agente, o projeto compose, a
@@ -39,6 +43,28 @@ impl MigrationTrait for Migration {
             .await?;
         }
 
+        if !m.has_table("deploy_github_connections").await? {
+            let mut stmt = table("deploy_github_connections");
+            stmt.col(big_pk_auto("id"))
+                .col(string_len("account_login", 100))
+                // `User` ou `Organization`: muda o endereço das telas do GitHub.
+                .col(string_len("account_type", 16))
+                .col(big_integer("app_id"))
+                .col(string_len("app_slug", 100))
+                .col(string_len("client_id", 64))
+                .col(text("private_key_encrypted"))
+                // Nula até o app ser instalado na conta.
+                .col(big_integer_null("installation_id"))
+                .col(boolean("can_write").default(false));
+            m.create_table(with_timestamps(stmt.take())).await?;
+            m.create_index(unique(
+                "deploy_github_connections_app_unique",
+                "deploy_github_connections",
+                &["app_id"],
+            ))
+            .await?;
+        }
+
         if !m.has_table("deploy_applications").await? {
             let mut stmt = table("deploy_applications");
             stmt.col(big_pk_auto("id"))
@@ -46,7 +72,9 @@ impl MigrationTrait for Migration {
                 .col(string_len("slug", 63))
                 // `dono/repo` no GitHub: é o `repository` do token OIDC.
                 .col(string_len("repository", 200))
+                // O token do registry (e, sem conexão, também do repositório).
                 .col(big_integer_null("credential_id"))
+                .col(big_integer_null("github_connection_id"))
                 .col(json_binary("compose_files"))
                 .col(string_len("image_tag_variable", 64))
                 // Imagens que o CI compila: `[{name, dockerfile, context}]`.
@@ -56,6 +84,12 @@ impl MigrationTrait for Migration {
                     "deploy_applications",
                     "credential_id",
                     "deploy_credentials",
+                    ForeignKeyAction::SetNull,
+                ))
+                .foreign_key(&mut fk(
+                    "deploy_applications",
+                    "github_connection_id",
+                    "deploy_github_connections",
                     ForeignKeyAction::SetNull,
                 ));
             m.create_table(with_timestamps(stmt.take())).await?;
@@ -213,6 +247,7 @@ impl MigrationTrait for Migration {
         m.drop_table(drop("deploy_env_versions")).await?;
         m.drop_table(drop("deploy_targets")).await?;
         m.drop_table(drop("deploy_applications")).await?;
+        m.drop_table(drop("deploy_github_connections")).await?;
         m.drop_table(drop("deploy_credentials")).await
     }
 }

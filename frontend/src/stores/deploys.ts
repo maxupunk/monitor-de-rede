@@ -21,6 +21,14 @@ import type { DeployWorkflowView } from '@/bindings/DeployWorkflowView'
 import type { DeployEnvDiff } from '@/bindings/DeployEnvDiff'
 import type { DeploySetupInput } from '@/bindings/DeploySetupInput'
 import type { DeployTargetInput } from '@/bindings/DeployTargetInput'
+import type { DeployComposeDiscovery } from '@/bindings/DeployComposeDiscovery'
+import type { DeployGithubConnectionView } from '@/bindings/DeployGithubConnectionView'
+import type { DeployGithubManifestInput } from '@/bindings/DeployGithubManifestInput'
+import type { DeployGithubManifestView } from '@/bindings/DeployGithubManifestView'
+import type { DeployGithubStatusView } from '@/bindings/DeployGithubStatusView'
+import type { DeployPullRequestView } from '@/bindings/DeployPullRequestView'
+import type { DeployReferencesView } from '@/bindings/DeployReferencesView'
+import type { DeployRepositoryView } from '@/bindings/DeployRepositoryView'
 import { isFinished, isPending } from '@/utils/deployPresentation'
 
 /** O payload do SSE tem a forma de um deploy? */
@@ -40,6 +48,20 @@ export function isDeployLines(value: unknown): value is { runId: number; lines: 
   if (typeof value !== 'object' || value === null) return false
   const candidate = value as Record<string, unknown>
   return typeof candidate.runId === 'number' && Array.isArray(candidate.lines)
+}
+
+/** De onde ler o GitHub: a conexão (app) e/ou o token. */
+export interface GithubSource {
+  connectionId: number | null
+  credentialId: number | null
+}
+
+/** A query das rotas de descoberta. */
+export function githubQuery(source: GithubSource, extra: Record<string, string> = {}): string {
+  const query = new URLSearchParams(extra)
+  if (source.connectionId != null) query.set('connectionId', String(source.connectionId))
+  if (source.credentialId != null) query.set('credentialId', String(source.credentialId))
+  return query.toString()
 }
 
 /** Linhas do console guardadas por deploy — o fim, que é onde está o erro. */
@@ -64,6 +86,9 @@ export const useDeploysStore = defineStore('deploys', () => {
 
   const applications = computed(() => overview.value?.applications ?? [])
   const credentials = computed<DeployCredentialView[]>(() => overview.value?.credentials ?? [])
+  const githubConnections = computed<DeployGithubConnectionView[]>(
+    () => overview.value?.githubConnections ?? []
+  )
   const targets = computed<DeployTargetView[]>(() =>
     applications.value.flatMap((application) => application.targets)
   )
@@ -230,8 +255,81 @@ export const useDeploysStore = defineStore('deploys', () => {
     await fetchOverview()
   }
 
-  function workflow(applicationId: number) {
-    return apiService.get<DeployWorkflowView>(`/deploys/applications/${applicationId}/workflow`)
+  function workflow(applicationId: number, centralUrl: string) {
+    const query = new URLSearchParams({ centralUrl })
+    return apiService.get<DeployWorkflowView>(
+      `/deploys/applications/${applicationId}/workflow?${query.toString()}`
+    )
+  }
+
+  // ── GitHub ────────────────────────────────────────────────────────────
+
+  function githubManifest(input: DeployGithubManifestInput) {
+    return apiService.post<DeployGithubManifestView>('/deploys/github/manifest', input)
+  }
+
+  async function connectGithub(code: string, state: string) {
+    const connection = await apiService.post<DeployGithubConnectionView>(
+      '/deploys/github/connections',
+      { code, state }
+    )
+    await fetchOverview()
+    return connection
+  }
+
+  async function claimGithubInstallation(installationId: number) {
+    const connection = await apiService.post<DeployGithubConnectionView>(
+      '/deploys/github/installations',
+      { installationId }
+    )
+    await fetchOverview()
+    return connection
+  }
+
+  async function refreshGithub(id: number) {
+    const connection = await apiService.post<DeployGithubConnectionView>(
+      `/deploys/github/connections/${id}/refresh`,
+      {}
+    )
+    await fetchOverview()
+    return connection
+  }
+
+  async function removeGithub(id: number) {
+    await apiService.delete(`/deploys/github/connections/${id}`)
+    await fetchOverview()
+  }
+
+  function githubRepositories(source: GithubSource) {
+    return apiService.get<DeployRepositoryView[]>(
+      `/deploys/github/repositories?${githubQuery(source)}`
+    )
+  }
+
+  function githubReferences(source: GithubSource, repository: string) {
+    return apiService.get<DeployReferencesView>(
+      `/deploys/github/references?${githubQuery(source, { repository })}`
+    )
+  }
+
+  function githubCompose(source: GithubSource, repository: string) {
+    return apiService.get<DeployComposeDiscovery>(
+      `/deploys/github/compose?${githubQuery(source, { repository })}`
+    )
+  }
+
+  function githubStatus(applicationId: number, centralUrl: string) {
+    const query = new URLSearchParams({ centralUrl })
+    return apiService.get<DeployGithubStatusView>(
+      `/deploys/applications/${applicationId}/github?${query.toString()}`
+    )
+  }
+
+  function githubPullRequest(applicationId: number, centralUrl: string) {
+    return apiService.post<DeployPullRequestView>(
+      `/deploys/applications/${applicationId}/github/pull-request`,
+      { centralUrl }
+    )
   }
 
   // ── Prontidão e histórico ─────────────────────────────────────────────
@@ -322,6 +420,7 @@ export const useDeploysStore = defineStore('deploys', () => {
     agents,
     applications,
     credentials,
+    githubConnections,
     targets,
     recentRuns,
     awaitingApproval,
@@ -341,6 +440,16 @@ export const useDeploysStore = defineStore('deploys', () => {
     saveTarget,
     removeTarget,
     workflow,
+    githubManifest,
+    connectGithub,
+    claimGithubInstallation,
+    refreshGithub,
+    removeGithub,
+    githubRepositories,
+    githubReferences,
+    githubCompose,
+    githubStatus,
+    githubPullRequest,
     readinessFor,
     targetReadiness,
     history,

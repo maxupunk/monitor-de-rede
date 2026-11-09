@@ -29,8 +29,9 @@ use netmonitor_core::{
 };
 
 use super::{
+    access,
     applications::{self, compose_files_of, repository_url},
-    credentials, env_versions, events,
+    env_versions, events,
     notify::{self, Moment},
     runs::{self, Change, LogBuffer},
     short_sha, DeployStage, RunStatus,
@@ -151,17 +152,9 @@ async fn request_for(
 async fn plan(ctx: &AppContext, run: &deploy_runs::Model) -> AppResult<Plan> {
     let target = applications::find_target(&ctx.db, run.target_id).await?;
     let application = applications::find(&ctx.db, run.application_id).await?;
-    let credential = match application.credential_id {
-        Some(id) => Some(credentials::open(&ctx.db, id).await?),
-        None => None,
-    };
     Ok(Plan {
-        registry: credential.as_ref().map(|credential| RegistryAuth {
-            registry: credential.row.registry.clone(),
-            username: credential.row.username.clone(),
-            secret: Secret::new(credential.secret.clone()),
-        }),
-        git_token: credential.map(|credential| credential.secret),
+        registry: access::registry_auth(&ctx.db, &application).await?,
+        git_token: access::git_token(&ctx.db, &application).await?,
         application,
         target,
     })

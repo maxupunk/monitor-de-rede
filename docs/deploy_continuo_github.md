@@ -51,29 +51,49 @@ healthchecks, projeto em outro diretório).
 
 ### 3.2 Na central
 
-**Deploys → Credenciais**: um token **clássico** do GitHub com `read:packages`
-e, para repositório privado, `repo` — o ghcr.io não aceita token fine-grained. Fica
-cifrado; vai ao servidor só durante o deploy e nunca é gravado lá. Repositório
-e imagens públicos dispensam credencial.
+**Deploys → Conexões → Conectar GitHub** (recomendado): a central cria um
+**GitHub App** privado na sua conta ou organização. Você confirma no GitHub,
+escolhe os repositórios e volta — sem copiar token. Marque "deixar o NetMonitor
+abrir o PR do workflow" para a central colocar o workflow no repositório por
+você (por PR, nunca direto na branch padrão). A chave do app fica cifrada na
+central; o servidor recebe, a cada deploy, um token de **uma hora**, só de
+leitura e só daquele repositório.
+
+**Imagens privadas no ghcr.io** ainda pedem um token **clássico** com
+`read:packages` (Conexões → Novo token; o link já abre o GitHub com o escopo
+marcado): o ghcr.io não aceita token fine-grained nem o do GitHub App. Imagens
+públicas dispensam. Sem conexão, o mesmo token com `repo` também lê repositório
+privado.
 
 **Automatizar deploy** (ou o botão do mesmo nome em cada projeto da aba Docker →
 Compose), em três passos:
 
-1. **De onde vem** — repositório, credencial, arquivos compose e as imagens que
-   o GitHub compila (para gerar o workflow).
-2. **Onde roda** — servidor, projeto compose, branch/tag, aprovação, janela de
-   manutenção, backup do banco antes, rollback automático, e a checagem de
-   prontidão.
+1. **De onde vem** — com o GitHub conectado, escolha o repositório da lista: a
+   central lê o compose e **preenche sozinha** os arquivos, as imagens que o
+   GitHub compila e a variável da tag, e avisa o que falta no compose (serviço
+   com `build:` sem `image:` publicada, imagem fora do ghcr.io). Sem conexão,
+   digite `dono/repo` e use o botão de varinha para ler o compose de um
+   repositório público.
+2. **Onde roda** — servidor, projeto compose, branch/tag (escolhida da lista do
+   repositório; o padrão dele já vem marcado), aprovação, janela de manutenção,
+   backup do banco antes, rollback automático, e a checagem de prontidão.
 3. **Variáveis** — o `.env` de produção (opcional agora).
 
 No fim, a tela abre **Ligar o GitHub**.
 
-### 3.3 No GitHub
+### 3.3 Ligar o GitHub
 
-1. Variável do repositório (*Settings → Secrets and variables → Actions →
-   Variables*): `NETMONITOR_URL` = endereço público da central.
-2. O workflow gerado em `.github/workflows/deploy.yml` (botão "Criar no
-   GitHub" já preenche). Ele:
+A tela confere o repositório e mostra, em uma lista: se o workflow está lá (e
+igual ao gerado), se há PR do NetMonitor esperando merge e como foi o último
+build no Actions.
+
+1. **Endereço público da central**: vem preenchido com o endereço da aba; troque
+   se você acessa por IP interno (a tela avisa: o GitHub não alcança rede
+   local). Ele vai escrito no workflow — criar a variável `NETMONITOR_URL` no
+   repositório passou a ser opcional (ela tem precedência, para trocar sem
+   editar o arquivo).
+2. **Abrir o PR com o workflow** (com a conexão que pode escrever) — ou, sem
+   ela, "Copiar o YAML" / "Criar no GitHub". O workflow:
    - roda nas branches/tags dos alvos;
    - compila cada imagem com cache do GitHub e publica com a tag `${{ github.sha }}`;
    - pede o token OIDC (`id-token: write`, `audience` desta central) e avisa a
@@ -124,6 +144,7 @@ o workflow de uma versão que já está no ar (ou na fila) não cria outro deplo
 |---|---|
 | Ver deploys, console e histórico | qualquer papel com acesso à área Servidores |
 | Cadastrar, aprovar, publicar, restaurar, abrir/salvar `.env` | administrador da área Servidores (ADR 019) |
+| Conectar o GitHub, listar repositórios, ler o compose, abrir o PR | administrador da área Servidores |
 | A IA (`get_deploys`, `get_deploy_log`) | quem tem a área; `deploy_action` só administrador, **sempre** com confirmação |
 
 Toda mudança vai à auditoria (recurso "Deploy contínuo"), inclusive a abertura
@@ -145,7 +166,8 @@ do `.env`.
 | Contrato do fio (`StackDeployRequest`, `StackChunk`, validação) | `backend/crates/agent-protocol/src/docker/stacks.rs` |
 | Execução no agente (git, `.env`, registry, compose, limpeza, prontidão) | `backend/crates/servers/src/docker/stacks/` |
 | Domínio na central (fila, aprovação, OIDC, rollback, SSE, IA) | `backend/crates/servers/src/deploys/` |
-| Rotas | `backend/crates/servers/src/controllers/deploys.rs` (`/api/deploys`, `/api/deploy-hooks/github`) |
+| GitHub (app pelo manifest, descoberta, compose, PR) | `backend/crates/servers/src/deploys/github/`, `deploys/access.rs`, `deploys/connections.rs` |
+| Rotas | `backend/crates/servers/src/controllers/deploys.rs` (`/api/deploys`, `/api/deploy-hooks/github`) e `deploy_github.rs` (`/api/deploys/github/…`) |
 | Tabelas | `backend/crates/servers/src/migrations/m20261108_000001_deploys.rs` |
 | Tela | `frontend/src/pages/deploys/`, `frontend/src/components/deploys/`, `frontend/src/stores/deploys.ts` |
 

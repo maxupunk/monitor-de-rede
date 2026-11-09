@@ -16,8 +16,8 @@ use std::collections::HashSet;
 use loco_rs::Result;
 use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 
-/// As 52 tabelas do esquema, na ordem de criação da §6 (pais antes de filhos).
-pub const CREATION_ORDER: [&str; 52] = [
+/// As 53 tabelas do esquema, na ordem de criação da §6 (pais antes de filhos).
+pub const CREATION_ORDER: [&str; 53] = [
     "users",
     "sites",
     "probes",
@@ -76,6 +76,7 @@ pub const CREATION_ORDER: [&str; 52] = [
     // Deploy contínuo (ADR 021). Depois de `probes` e `database_connections`
     // pelas FKs dos alvos; cada filha depois do pai.
     "deploy_credentials",
+    "deploy_github_connections",
     "deploy_applications",
     "deploy_targets",
     "deploy_env_versions",
@@ -188,9 +189,9 @@ mod tests {
 
     #[test]
     fn cobre_as_27_tabelas_sem_repetir() {
-        assert_eq!(CREATION_ORDER.len(), 52);
+        assert_eq!(CREATION_ORDER.len(), 53);
         let unicas: HashSet<&&str> = CREATION_ORDER.iter().collect();
-        assert_eq!(unicas.len(), 52, "há nome de tabela repetido");
+        assert_eq!(unicas.len(), 53, "há nome de tabela repetido");
     }
 
     #[test]

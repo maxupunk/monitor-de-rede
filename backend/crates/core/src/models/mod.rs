@@ -9,6 +9,7 @@ pub mod database_connections;
 pub mod deploy_applications;
 pub mod deploy_credentials;
 pub mod deploy_env_versions;
+pub mod deploy_github_connections;
 pub mod deploy_runs;
 pub mod deploy_targets;
 pub mod device_credentials;

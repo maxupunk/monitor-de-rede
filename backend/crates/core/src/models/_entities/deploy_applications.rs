@@ -13,6 +13,7 @@ pub struct Model {
     pub slug: String,
     pub repository: String,
     pub credential_id: Option<i64>,
+    pub github_connection_id: Option<i64>,
     #[sea_orm(column_type = "JsonBinary")]
     pub compose_files: Json,
     pub image_tag_variable: String,

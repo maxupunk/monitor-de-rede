@@ -160,6 +160,139 @@ async fn leitor_da_area_ve_mas_nao_muda_nem_abre_o_env() {
             .json(&json!({ "when": "now" }))
             .await;
         assert_eq!(deploy.status_code(), 403, "{}", deploy.text());
+        // O GitHub é lido com a credencial da central: só o administrador.
+        for path in [
+            "/api/deploys/github/repositories?connectionId=1".to_string(),
+            format!("/api/deploys/applications/{}/github", application.id),
+        ] {
+            let response = request.get(&path).await;
+            assert_eq!(response.status_code(), 403, "{path}: {}", response.text());
+        }
+        let workflow = request
+            .get(&format!(
+                "/api/deploys/applications/{}/workflow",
+                application.id
+            ))
+            .await;
+        assert_eq!(workflow.status_code(), 200, "{}", workflow.text());
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn conectar_github_gera_o_formulario_e_recusa_retorno_forjado() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        session(&mut request, &ctx, "admin", json!({})).await;
+
+        let form = request
+            .post("/api/deploys/github/manifest")
+            .json(&json!({
+                "origin": "https://central.exemplo.com/",
+                "organization": "master-sistemas",
+                "allowWrite": true
+            }))
+            .await;
+        assert_eq!(form.status_code(), 200, "{}", form.text());
+        let form = body(&form.text());
+        assert!(form["actionUrl"].as_str().expect("action").starts_with(
+            "https://github.com/organizations/master-sistemas/settings/apps/new?state="
+        ));
+        let manifest: Value =
+            serde_json::from_str(form["manifest"].as_str().expect("manifest")).expect("json");
+        assert_eq!(
+            manifest["redirect_url"],
+            "https://central.exemplo.com/deploys/github"
+        );
+        assert_eq!(manifest["default_permissions"]["workflows"], "write");
+        assert_eq!(manifest["hook_attributes"]["active"], false);
+
+        let invalid = request
+            .post("/api/deploys/github/manifest")
+            .json(&json!({ "origin": "javascript:alert(1)" }))
+            .await;
+        assert!(
+            invalid.status_code().is_client_error(),
+            "{}",
+            invalid.text()
+        );
+
+        // Um `state` que esta central não emitiu nem chega ao GitHub.
+        let forged = request
+            .post("/api/deploys/github/connections")
+            .json(&json!({ "code": "abc123", "state": "forjado" }))
+            .await;
+        assert!(forged.status_code().is_client_error(), "{}", forged.text());
+        assert!(forged.text().contains("não foi pedido por esta central"));
+
+        let without_source = request.get("/api/deploys/github/repositories").await;
+        assert!(without_source.status_code().is_client_error());
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn aplicacao_ligada_a_conexao_mostra_a_conta_e_segura_a_remocao() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        session(&mut request, &ctx, "admin", json!({})).await;
+        let (agent, _) = enrolled_agent(&ctx, "debian-prod").await;
+        let connection = netmonitor_core::models::deploy_github_connections::ActiveModel {
+            account_login: Set("maxupunk".into()),
+            account_type: Set("User".into()),
+            app_id: Set(4242),
+            app_slug: Set("netmonitor-abc123".into()),
+            client_id: Set("Iv1.abc".into()),
+            private_key_encrypted: Set("cifrado".into()),
+            installation_id: Set(Some(77)),
+            can_write: Set(true),
+            ..Default::default()
+        }
+        .insert(&ctx.db)
+        .await
+        .expect("conexão");
+
+        let missing = request
+            .post("/api/deploys/applications")
+            .json(&json!({
+                "name": "SGCv4",
+                "slug": "sgc",
+                "repository": "maxupunk/SGCv4",
+                "credentialId": null,
+                "githubConnectionId": 999,
+                "composeFiles": ["docker-compose.yml"],
+                "imageTagVariable": "IMAGE_TAG",
+                "rollout": "sequential"
+            }))
+            .await;
+        assert_eq!(missing.status_code(), 404, "{}", missing.text());
+
+        let mut input = setup(agent.id, "sgc", true);
+        input["application"]["githubConnectionId"] = json!(connection.id);
+        let created = request.post("/api/deploys/setup").json(&input).await;
+        assert_eq!(created.status_code(), 201, "{}", created.text());
+        let application_id = body(&created.text())["applicationId"].as_i64().expect("id");
+
+        let overview = body(&request.get("/api/deploys").await.text());
+        assert_eq!(overview["githubConnections"][0]["account"], "maxupunk");
+        assert_eq!(overview["githubConnections"][0]["installed"], true);
+        assert_eq!(
+            overview["githubConnections"][0]["installUrl"],
+            "https://github.com/apps/netmonitor-abc123/installations/new"
+        );
+        assert_eq!(overview["applications"][0]["githubAccount"], "maxupunk");
+        assert!(!overview.to_string().contains("cifrado"), "a chave saiu");
+
+        let path = format!("/api/deploys/github/connections/{}", connection.id);
+        assert_eq!(request.delete(&path).await.status_code(), 409);
+        assert_eq!(
+            request
+                .delete(&format!("/api/deploys/applications/{application_id}"))
+                .await
+                .status_code(),
+            204
+        );
+        assert_eq!(request.delete(&path).await.status_code(), 204);
     })
     .await;
 }

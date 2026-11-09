@@ -253,12 +253,13 @@ pub fn checks(facts: &Facts<'_>) -> Vec<ReadinessCheck> {
         if !has_credential {
             out.push(check(
                 "credential",
-                "Credencial do GitHub",
+                "Acesso ao GitHub",
                 Warning,
-                "A aplicação não tem credencial".into(),
+                "A aplicação não tem conexão com o GitHub nem token".into(),
                 Some(
-                    "Só funciona com repositório e imagens públicos. Para privados, crie um \
-                     token com leitura do repositório e read:packages"
+                    "Só funciona com repositório e imagens públicos. Para privados, conecte o \
+                     GitHub (Deploys → Conexões) e, para imagens privadas, cadastre um token \
+                     clássico com read:packages"
                         .into(),
                 ),
             ));
@@ -327,7 +328,8 @@ pub async fn inspect(
         stack: stack.as_ref(),
         stack_error,
         project,
-        has_credential: application.map(|app| app.credential_id.is_some()),
+        has_credential: application
+            .map(|app| app.credential_id.is_some() || app.github_connection_id.is_some()),
         has_env,
     });
     Ok(DeployReadinessView {

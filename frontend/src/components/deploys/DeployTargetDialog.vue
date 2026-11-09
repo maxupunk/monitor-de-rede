@@ -14,7 +14,11 @@
       <v-card-text class="px-6">
         <v-alert v-if="error" type="error" variant="tonal" class="mb-4">{{ error }}</v-alert>
         <v-form ref="formRef" autocomplete="off" @submit.prevent="save">
-          <DeployTargetFields v-model="form" />
+          <DeployTargetFields
+            v-model="form"
+            :references="references"
+            :references-loading="referencesLoading"
+          />
         </v-form>
         <v-card border flat class="pa-4 mt-4">
           <DeployReadinessList
@@ -41,6 +45,7 @@ import DeployTargetFields from '@/components/deploys/DeployTargetFields.vue'
 import type { DeployApplicationView } from '@/bindings/DeployApplicationView'
 import type { DeployReadinessView } from '@/bindings/DeployReadinessView'
 import type { DeployTargetView } from '@/bindings/DeployTargetView'
+import { useRepositoryReferences } from '@/composables/useRepositoryReferences'
 import { useDeploysStore } from '@/stores/deploys'
 import { emptyTarget, targetFromView, toTargetInput, type TargetForm } from '@/utils/deployForms'
 
@@ -60,6 +65,7 @@ const error = ref<string | null>(null)
 const readiness = ref<DeployReadinessView | null>(null)
 const readinessLoading = ref(false)
 const readinessError = ref<string | null>(null)
+const { references, loading: referencesLoading, load: loadReferences } = useRepositoryReferences()
 
 async function checkReadiness() {
   readinessLoading.value = true
@@ -95,6 +101,12 @@ watch(
           position: application?.targets.length ?? 0,
         })
     if (props.target) void checkReadiness()
+    if (application) {
+      void loadReferences(application.repository, {
+        connectionId: application.githubConnectionId,
+        credentialId: application.credentialId,
+      })
+    }
   },
   { immediate: true }
 )

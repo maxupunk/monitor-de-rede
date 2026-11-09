@@ -2,13 +2,14 @@
 import type { DeployApplicationView } from "./DeployApplicationView";
 import type { DeployCounts } from "./DeployCounts";
 import type { DeployCredentialView } from "./DeployCredentialView";
+import type { DeployGithubConnectionView } from "./DeployGithubConnectionView";
 import type { DeployRunView } from "./DeployRunView";
 
 /**
  * A página inteira numa resposta: aplicações com alvos, deploys recentes e
  * os números.
  */
-export type DeployOverview = { applications: Array<DeployApplicationView>, recentRuns: Array<DeployRunView>, counts: DeployCounts, credentials: Array<DeployCredentialView>, 
+export type DeployOverview = { applications: Array<DeployApplicationView>, recentRuns: Array<DeployRunView>, counts: DeployCounts, credentials: Array<DeployCredentialView>, githubConnections: Array<DeployGithubConnectionView>, 
 /**
  * O endereço que o workflow chama (`…/api/deploy-hooks/github`).
  */

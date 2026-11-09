@@ -379,6 +379,18 @@ Cada item carrega severidade, esforço, responsável sugerido e critério de ace
     - Tela **Deploys** (menu Servidores) e atalho "Automatizar deploy" na aba Compose: assistente em 3 passos com checagem de prontidão, workflow do GitHub gerado sem segredo e sem interpolação em `run:`, editor de `.env` (lista ou texto, diff só de nomes, histórico), console ao vivo com etapas e commits na aprovação, publicar/restaurar versão, histórico.
     - Testes: validação do contrato, montagem de comandos, segredos fora do `Debug` e da linha de comando, limpeza de imagens, prontidão, janela, refs, `.env`, OIDC com chave de teste, idempotência do webhook, estado inicial da fila, avisos, workflow (snapshot) e o SSE da tela sem chamar a API.
 
+- [x] **Deploy contínuo: "Conectar GitHub" (GitHub App pelo manifest) e assistente que se preenche** 🟢 Concluído
+  - **Severidade:** 🟡 Média
+  - **Esforço:** Médio
+  - **Decisão:** [ADR 021 §7](adr/021-deploy-continuo-pelo-agente.md) · **Passo a passo:** [passo_a_passo_deploy_continuo.md](passo_a_passo_deploy_continuo.md)
+  - **Arquivos:** `backend/crates/servers/src/deploys/{github/,access.rs,connections.rs}`, `backend/crates/servers/src/controllers/deploy_github.rs`, tabela `deploy_github_connections`, `frontend/src/components/deploys/{DeployConnectionsDialog,DeployGithubConnections,DeployGithubConnectForm,DeployTokenCredentials,DeployRepositoryPicker}.vue`, `frontend/src/utils/githubConnect.ts`, `frontend/src/composables/useRepositoryReferences.ts`
+  - **Implementado:**
+    - "Conectar GitHub": a central cria um GitHub App privado na conta ou organização pelo manifest (`state` de uso único, sem webhook, escrita opcional), troca o `code` pela chave (cifrada) e descobre a instalação na volta; tokens de instalação de 1 hora com o mínimo (o agente recebe só `contents: read` do repositório). A escolha da credencial de cada uso mora só em `deploys::access`; o `pull` de imagem privada continua com token clássico.
+    - Assistente: repositório escolhido da lista; o compose do repositório preenche arquivos, imagens (`build:` → Dockerfile relativo à raiz) e a variável da tag, com avisos do que ajustar; o alvo escolhe a branch da lista (a padrão já marcada; `v*` quando há tags `vN`).
+    - "Ligar o GitHub": endereço público da central escrito no workflow (a variável `NETMONITOR_URL` virou opcional, com aviso de endereço de rede local), checklist do repositório (workflow igual/diferente/ausente, PR aberto, último build do Actions) e **Abrir o PR com o workflow** numa branch do NetMonitor.
+    - Token clássico com link que já abre o GitHub com `read:packages` marcado; prontidão e textos falam de "acesso ao GitHub".
+    - Testes: manifest, `state`, JWT do app (RS256 ≤ 10 min), escopo do token de clone, leitura do compose (SGC, `build:` sem `image:`, registry com porta, YAML inválido), comparação do workflow, erros do GitHub em palavras, papel (só o administrador lê o GitHub), retorno forjado, conexão em uso não sai; no frontend, a volta do GitHub, o formulário do manifest, o endereço da central e o preenchimento pelo compose.
+
 - [x] **Janelas de manutenção** 🟢 Concluído
   - **Severidade:** 🟡 Média
   - **Esforço:** Médio

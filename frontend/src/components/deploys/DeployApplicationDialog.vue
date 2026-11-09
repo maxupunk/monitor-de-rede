@@ -17,7 +17,8 @@
           <DeployApplicationFields
             v-model="form"
             editing
-            @manage-credentials="credentialsOpen = true"
+            @manage-connections="connectionsOpen = true"
+            @connect-github="connectionsOpen = true"
           />
         </v-form>
       </v-card-text>
@@ -27,14 +28,14 @@
         <v-btn color="primary" variant="flat" :loading="saving" @click="save">Salvar</v-btn>
       </v-card-actions>
     </v-card>
-    <DeployCredentialsDialog v-model="credentialsOpen" />
+    <DeployConnectionsDialog v-model="connectionsOpen" />
   </v-dialog>
 </template>
 
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import DeployApplicationFields from '@/components/deploys/DeployApplicationFields.vue'
-import DeployCredentialsDialog from '@/components/deploys/DeployCredentialsDialog.vue'
+import DeployConnectionsDialog from '@/components/deploys/DeployConnectionsDialog.vue'
 import type { DeployApplicationInput } from '@/bindings/DeployApplicationInput'
 import type { DeployApplicationView } from '@/bindings/DeployApplicationView'
 import { useDeploysStore } from '@/stores/deploys'
@@ -48,7 +49,7 @@ const form = ref<DeployApplicationInput>(emptyApplication())
 const formRef = ref<{ validate: () => Promise<{ valid: boolean }> } | null>(null)
 const saving = ref(false)
 const error = ref<string | null>(null)
-const credentialsOpen = ref(false)
+const connectionsOpen = ref(false)
 
 watch(
   () => props.modelValue,

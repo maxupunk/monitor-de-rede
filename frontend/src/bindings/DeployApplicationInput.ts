@@ -10,4 +10,12 @@ slug: string,
 /**
  * `dono/repo` no GitHub.
  */
-repository: string, credentialId: number | null, composeFiles: Array<string>, imageTagVariable: string, images: Array<DeployBuildImage>, rollout: DeployRollout, };
+repository: string, 
+/**
+ * O token: imagens privadas e, sem conexão, o repositório.
+ */
+credentialId: number | null, 
+/**
+ * A conexão com o GitHub (o app) que lê o repositório.
+ */
+githubConnectionId: number | null, composeFiles: Array<string>, imageTagVariable: string, images: Array<DeployBuildImage>, rollout: DeployRollout, };

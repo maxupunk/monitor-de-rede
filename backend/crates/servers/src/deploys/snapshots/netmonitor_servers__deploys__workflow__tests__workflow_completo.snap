@@ -6,8 +6,8 @@ expression: yaml
 # Compila as imagens, publica no ghcr.io com a tag do commit e avisa a central,
 # que decide quando e onde aplicar (aprovação, janela, backup, rollback).
 #
-# Configure no repositório: Settings → Secrets and variables → Actions →
-# Variables → NETMONITOR_URL = endereço público da central (https://…).
+# Para trocar o endereço da central sem editar este arquivo, crie a variável
+# NETMONITOR_URL em Settings → Secrets and variables → Actions → Variables.
 # Nenhum segredo é necessário: a central confere o token OIDC do próprio GitHub.
 #
 # Mantenha os testes do projeto: acrescente o job deles ao `needs` do build.
@@ -71,7 +71,7 @@ jobs:
     steps:
       - name: Avisar o NetMonitor
         env:
-          NETMONITOR_URL: ${{ vars.NETMONITOR_URL }}
+          NETMONITOR_URL: ${{ vars.NETMONITOR_URL || 'https://central.exemplo.com' }}
           COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           set -euo pipefail

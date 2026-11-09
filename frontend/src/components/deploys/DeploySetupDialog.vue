@@ -69,7 +69,8 @@
           <DeployApplicationFields
             v-if="applicationId === null"
             v-model="application"
-            @manage-credentials="credentialsOpen = true"
+            @manage-connections="openConnections(false)"
+            @connect-github="openConnections(true)"
           />
         </v-form>
 
@@ -79,6 +80,8 @@
             v-model="target"
             :lock-agent="Boolean(preset?.probeId)"
             :lock-project="Boolean(preset?.project)"
+            :references="references"
+            :references-loading="referencesLoading"
           />
           <v-card border flat class="pa-4 mt-4">
             <DeployReadinessList
@@ -134,7 +137,11 @@
       </v-card-actions>
     </v-card>
 
-    <DeployCredentialsDialog v-model="credentialsOpen" />
+    <DeployConnectionsDialog
+      v-model="connectionsOpen"
+      return-to="setup"
+      :start-connecting="connectNow"
+    />
   </v-dialog>
 </template>
 
@@ -143,11 +150,12 @@ import { ref, watch } from 'vue'
 import ChoiceCard from '@/components/ChoiceCard.vue'
 import CodeTextarea from '@/components/CodeTextarea.vue'
 import DeployApplicationFields from '@/components/deploys/DeployApplicationFields.vue'
-import DeployCredentialsDialog from '@/components/deploys/DeployCredentialsDialog.vue'
+import DeployConnectionsDialog from '@/components/deploys/DeployConnectionsDialog.vue'
 import DeployReadinessList from '@/components/deploys/DeployReadinessList.vue'
 import DeployTargetFields from '@/components/deploys/DeployTargetFields.vue'
 import type { DeployApplicationInput } from '@/bindings/DeployApplicationInput'
 import type { DeployReadinessView } from '@/bindings/DeployReadinessView'
+import { useRepositoryReferences } from '@/composables/useRepositoryReferences'
 import { useDeploysStore } from '@/stores/deploys'
 import {
   cleanApplication,
@@ -177,7 +185,9 @@ const target = ref<TargetForm>(emptyTarget())
 const env = ref('')
 const error = ref<string | null>(null)
 const saving = ref(false)
-const credentialsOpen = ref(false)
+const connectionsOpen = ref(false)
+const connectNow = ref(false)
+const { references, loading: referencesLoading, load: fetchReferences } = useRepositoryReferences()
 const applicationForm = ref<FormRef>(null)
 const targetForm = ref<FormRef>(null)
 
@@ -199,8 +209,34 @@ function reset() {
   }
   env.value = ''
   error.value = null
+  references.value = null
   readiness.value = null
   readinessError.value = null
+}
+
+function openConnections(connect: boolean) {
+  connectNow.value = connect
+  connectionsOpen.value = true
+}
+
+/** O repositório e o acesso da aplicação (nova ou escolhida). */
+function repositorySource() {
+  const existing = deploys.applications.find((item) => item.id === applicationId.value)
+  const chosen = existing ?? application.value
+  return {
+    repository: chosen.repository,
+    source: { connectionId: chosen.githubConnectionId, credentialId: chosen.credentialId },
+  }
+}
+
+/** As branches do repositório; sem `main`, o alvo começa pela padrão dele. */
+async function loadReferences() {
+  const { repository, source } = repositorySource()
+  await fetchReferences(repository, source)
+  const found = references.value
+  if (found && target.value.reference === 'main' && !found.branches.includes('main')) {
+    target.value.reference = found.defaultBranch
+  }
 }
 
 function chooseApplication(id: number) {
@@ -238,6 +274,7 @@ async function next() {
     }
     step.value = 2
     void checkReadiness()
+    void loadReferences()
     return
   }
   const result = await targetForm.value?.validate()

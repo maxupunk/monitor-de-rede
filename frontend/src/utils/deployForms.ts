@@ -4,6 +4,8 @@
  * usam as mesmas peças — uma regra só para "o que é um alvo novo".
  */
 import type { DeployApplicationInput } from '@/bindings/DeployApplicationInput'
+import type { DeployComposeDiscovery } from '@/bindings/DeployComposeDiscovery'
+import type { DeployReferencesView } from '@/bindings/DeployReferencesView'
 import type { DeployApplicationView } from '@/bindings/DeployApplicationView'
 import type { DeployTargetView } from '@/bindings/DeployTargetView'
 import type { DeployTargetInput } from '@/bindings/DeployTargetInput'
@@ -23,6 +25,7 @@ export function emptyApplication(): DeployApplicationInput {
     slug: '',
     repository: '',
     credentialId: null,
+    githubConnectionId: null,
     composeFiles: ['docker-compose.yml'],
     imageTagVariable: 'IMAGE_TAG',
     images: [],
@@ -36,6 +39,7 @@ export function applicationFromView(view: DeployApplicationView): DeployApplicat
     slug: view.slug,
     repository: view.repository,
     credentialId: view.credentialId,
+    githubConnectionId: view.githubConnectionId,
     composeFiles: [...view.composeFiles],
     imageTagVariable: view.imageTagVariable,
     images: view.images.map((image) => ({ ...image })),
@@ -98,4 +102,43 @@ export function cleanApplication(input: DeployApplicationInput): DeployApplicati
     ...input,
     images: input.images.filter((image) => image.name.trim() !== ''),
   }
+}
+
+/** O identificador de projeto a partir de um nome: `SGCv4` → `sgcv4`. */
+export function slugify(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^[-_]+|[-_]+$/g, '')
+    .slice(0, 63)
+}
+
+/**
+ * O que o compose do repositório preenche: arquivos, imagens e a variável
+ * da tag. Só troca o que o compose de fato disse.
+ */
+export function applyDiscovery(
+  input: DeployApplicationInput,
+  discovery: DeployComposeDiscovery
+): DeployApplicationInput {
+  return {
+    ...input,
+    composeFiles: discovery.suggestedFiles.length
+      ? [...discovery.suggestedFiles]
+      : input.composeFiles,
+    images: discovery.images.length
+      ? discovery.images.map((image) => ({ ...image }))
+      : input.images,
+    imageTagVariable: discovery.imageTagVariable ?? input.imageTagVariable,
+  }
+}
+
+/**
+ * O que um alvo pode acompanhar: as branches do repositório e padrões de
+ * tag (o `v*` quando há tags no formato `v1.2.3`).
+ */
+export function referenceChoices(references: DeployReferencesView | null): string[] {
+  if (!references) return []
+  const patterns = references.tags.some((tag) => /^v\d/.test(tag)) ? ['v*'] : []
+  return [...references.branches, ...patterns]
 }

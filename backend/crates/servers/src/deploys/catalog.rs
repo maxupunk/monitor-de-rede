@@ -17,14 +17,15 @@ use netmonitor_core::{
 };
 
 use super::{
-    applications, credentials, env_versions, events, oidc,
+    applications, connections as github_connections, credentials, env_versions, events, oidc,
     runs::{self, status_of},
     workflow::HOOK_PATH,
     RunStatus,
 };
 use crate::views::deploys::{
     DeployAgentView, DeployApplicationView, DeployCounts, DeployCredentialView,
-    DeployEnvVersionView, DeployOverview, DeployRunView, DeployTargetView, TargetParts,
+    DeployEnvVersionView, DeployGithubConnectionView, DeployOverview, DeployRunView,
+    DeployTargetView, TargetParts,
 };
 
 /// Deploys recentes na visão geral.
@@ -134,6 +135,11 @@ pub async fn overview(ctx: &AppContext) -> AppResult<DeployOverview> {
         .iter()
         .map(|row| (row.id, row.name.clone()))
         .collect();
+    let connection_rows = github_connections::list(&ctx.db).await?;
+    let accounts: HashMap<i64, String> = connection_rows
+        .iter()
+        .map(|row| (row.id, row.account_login.clone()))
+        .collect();
     let application_rows = applications::list(&ctx.db).await?;
     let target_rows = applications::all_targets(&ctx.db).await?;
     let lookup = Lookup {
@@ -164,6 +170,9 @@ pub async fn overview(ctx: &AppContext) -> AppResult<DeployOverview> {
             application
                 .credential_id
                 .and_then(|id| credential_names.get(&id).cloned()),
+            application
+                .github_connection_id
+                .and_then(|id| accounts.get(&id).cloned()),
             targets,
         ));
     }
@@ -201,6 +210,10 @@ pub async fn overview(ctx: &AppContext) -> AppResult<DeployOverview> {
         credentials: credential_rows
             .iter()
             .map(DeployCredentialView::from)
+            .collect(),
+        github_connections: connection_rows
+            .iter()
+            .map(DeployGithubConnectionView::from)
             .collect(),
         hook_path: HOOK_PATH.to_string(),
         oidc_audience: oidc::audience(),

@@ -23,97 +23,228 @@
         </v-card-subtitle>
       </v-card-item>
 
-      <v-card-text class="px-6">
+      <v-card-text v-if="application" class="px-6">
         <v-alert v-if="error" type="error" variant="tonal" class="mb-4">{{ error }}</v-alert>
-        <v-skeleton-loader v-if="loading" type="paragraph@3"></v-skeleton-loader>
-        <template v-else-if="workflow && application">
-          <div class="step">
-            <v-avatar color="primary" size="28" class="step-number">1</v-avatar>
-            <div class="flex-grow-1 min-w-0">
-              <div class="font-weight-bold mb-1">Diga ao repositório onde está a central</div>
-              <div class="text-body-2 text-high-emphasis mb-2">
-                Em <strong>Settings → Secrets and variables → Actions → Variables</strong>, crie a
-                variável abaixo com o endereço público desta central.
+
+        <!-- O endereço que o workflow chama -->
+        <v-text-field
+          v-model="centralUrl"
+          label="Endereço público desta central"
+          hint="É para onde o GitHub Actions manda o aviso de versão nova. Vai escrito no workflow."
+          persistent-hint
+          variant="outlined"
+          prepend-inner-icon="mdi-web"
+          :rules="[centralUrlRule]"
+          class="mb-2"
+          @change="applyCentralUrl"
+          @keyup.enter="applyCentralUrl"
+        ></v-text-field>
+        <v-alert
+          v-if="looksPrivate(centralUrl)"
+          type="warning"
+          variant="tonal"
+          density="compact"
+          class="mb-4"
+        >
+          O GitHub não alcança endereços da rede local. Use o endereço público da central (o do
+          domínio, túnel ou proxy).
+        </v-alert>
+
+        <!-- O repositório, conferido pela conexão -->
+        <v-card v-if="hasAccess" border flat class="pa-4 mb-4" data-test="github-status">
+          <div class="d-flex align-center ga-2 mb-3">
+            <span class="text-subtitle-1 font-weight-bold flex-grow-1">
+              Em {{ application.repository }}
+            </span>
+            <v-btn
+              color="primary"
+              variant="text"
+              size="small"
+              prepend-icon="mdi-refresh"
+              :loading="statusLoading"
+              @click="loadStatus"
+            >
+              Conferir de novo
+            </v-btn>
+          </div>
+          <v-skeleton-loader v-if="statusLoading && !status" type="list-item@2" />
+          <v-alert
+            v-else-if="status?.unavailableReason"
+            type="warning"
+            variant="tonal"
+            density="compact"
+          >
+            {{ status.unavailableReason }}
+          </v-alert>
+          <template v-else-if="status">
+            <div class="status-row">
+              <v-icon :color="workflowMeta.color">{{ workflowMeta.icon }}</v-icon>
+              <div class="flex-grow-1">
+                <div class="font-weight-bold">Workflow: {{ workflowMeta.label }}</div>
+                <div v-if="status.workflow === 'different'" class="text-body-2 text-high-emphasis">
+                  Foi editado à mão ou gerado antes de mudar as imagens ou os alvos.
+                </div>
               </div>
-              <CopyableCommand :label="workflow.urlVariable" :command="publicUrl" class="mb-2" />
               <v-btn
-                :href="`https://github.com/${application.repository}/settings/variables/actions`"
+                v-if="status.workflowUrl"
+                :href="status.workflowUrl"
                 target="_blank"
                 rel="noopener"
                 color="primary"
-                variant="tonal"
+                variant="text"
                 size="small"
-                prepend-icon="mdi-open-in-new"
+                append-icon="mdi-open-in-new"
               >
-                Abrir as variáveis do repositório
+                Ver
               </v-btn>
             </div>
-          </div>
-
-          <div class="step">
-            <v-avatar color="primary" size="28" class="step-number">2</v-avatar>
-            <div class="flex-grow-1 min-w-0">
-              <div class="font-weight-bold mb-1">Crie o workflow</div>
-              <div class="text-body-2 text-high-emphasis mb-2">
-                Salve em <code>{{ workflow.path }}</code
-                >. Ele roda a cada push nas branches dos alvos ({{ references }}) e só avisa a
-                central depois que todas as imagens foram publicadas.
+            <div v-if="status.pullRequest" class="status-row">
+              <v-icon color="info">mdi-source-pull</v-icon>
+              <div class="flex-grow-1 font-weight-bold">
+                PR #{{ status.pullRequest.number }} aguardando o merge
               </div>
-              <CodeTextarea
-                :model-value="workflow.yaml"
-                readonly
-                height="min(42vh, 420px)"
-                hide-details
-                class="mb-2"
-              />
-              <div class="d-flex flex-wrap ga-2">
+              <v-btn
+                :href="status.pullRequest.url"
+                target="_blank"
+                rel="noopener"
+                color="primary"
+                variant="flat"
+                size="small"
+                append-icon="mdi-open-in-new"
+              >
+                Revisar no GitHub
+              </v-btn>
+            </div>
+            <div v-if="status.lastBuild && buildStatus" class="status-row">
+              <v-icon :color="buildStatus.color">{{ buildStatus.icon }}</v-icon>
+              <div class="flex-grow-1">
+                <div class="font-weight-bold">Último build: {{ buildStatus.label }}</div>
+                <div class="text-body-2 text-high-emphasis">
+                  {{ status.lastBuild.branch }} · {{ status.lastBuild.shortSha }} ·
+                  {{ formatRelativeTime(status.lastBuild.createdAt) }}
+                </div>
+              </div>
+              <v-btn
+                :href="status.lastBuild.url"
+                target="_blank"
+                rel="noopener"
+                color="primary"
+                variant="text"
+                size="small"
+                append-icon="mdi-open-in-new"
+              >
+                Ver
+              </v-btn>
+            </div>
+
+            <div v-if="status.workflow !== 'current'" class="mt-3">
+              <template v-if="status.canWrite">
+                <!-- Um workflow próprio (com testes, build args) não deve ser trocado sem querer. -->
+                <div
+                  v-if="status.workflow === 'different'"
+                  class="text-body-2 text-high-emphasis mb-2"
+                >
+                  Se o workflow do repositório é próprio (com testes ou build args), mantenha-o: ele
+                  só precisa terminar avisando a central. O PR abaixo propõe trocar pelo gerado.
+                </div>
                 <v-btn
                   color="primary"
-                  variant="flat"
-                  :prepend-icon="copied ? 'mdi-check' : 'mdi-content-copy'"
-                  @click="copyYaml"
+                  :variant="status.workflow === 'different' ? 'tonal' : 'flat'"
+                  prepend-icon="mdi-source-pull"
+                  :loading="opening"
+                  :disabled="centralUrlRule(centralUrl) !== true"
+                  @click="openPullRequest"
                 >
-                  {{ copied ? 'Copiado' : 'Copiar o YAML' }}
+                  {{ pullRequestLabel }}
                 </v-btn>
-                <v-btn
-                  :href="createUrl"
-                  target="_blank"
-                  rel="noopener"
-                  color="primary"
-                  variant="tonal"
-                  prepend-icon="mdi-file-plus-outline"
-                >
-                  Criar no GitHub
-                </v-btn>
+              </template>
+              <div v-else class="text-body-2 text-high-emphasis">
+                A conexão não pode escrever no repositório: crie o arquivo à mão (abaixo) ou conecte
+                o GitHub de novo marcando "abrir o PR do workflow".
               </div>
             </div>
-          </div>
+          </template>
+        </v-card>
 
-          <div class="step">
-            <v-avatar color="primary" size="28" class="step-number">3</v-avatar>
-            <div class="flex-grow-1 min-w-0">
-              <div class="font-weight-bold mb-1">Aponte o compose para as imagens publicadas</div>
-              <div class="text-body-2 text-high-emphasis mb-2">
-                No servidor nada é compilado. Cada serviço com <code>build:</code> precisa de uma
-                <code>image:</code> com a tag em <code>{{ application.imageTagVariable }}</code> — o
-                <code>build:</code> pode ficar para o desenvolvimento local.
-              </div>
-              <template v-if="application.images.length">
-                <CopyableCommand
-                  v-for="image in application.images"
-                  :key="image.name"
-                  :label="image.name"
-                  :command="imageLine(image.name)"
+        <!-- À mão -->
+        <v-expansion-panels v-model="manualPanel" variant="accordion" class="mb-4">
+          <v-expansion-panel value="manual" elevation="0" class="border">
+            <v-expansion-panel-title class="font-weight-bold">
+              {{ status?.canWrite ? 'Fazer à mão' : 'Criar o workflow' }}
+            </v-expansion-panel-title>
+            <v-expansion-panel-text>
+              <v-skeleton-loader v-if="loading" type="paragraph@3"></v-skeleton-loader>
+              <template v-else-if="workflow">
+                <div class="text-body-2 text-high-emphasis mb-2">
+                  Salve em <code>{{ workflow.path }}</code
+                  >. Ele roda a cada push nas branches dos alvos ({{ references }}) e só avisa a
+                  central depois que todas as imagens foram publicadas.
+                </div>
+                <CodeTextarea
+                  :model-value="workflow.yaml"
+                  readonly
+                  height="min(42vh, 420px)"
+                  hide-details
                   class="mb-2"
                 />
+                <div class="d-flex flex-wrap ga-2">
+                  <v-btn
+                    color="primary"
+                    variant="flat"
+                    :prepend-icon="copied ? 'mdi-check' : 'mdi-content-copy'"
+                    @click="copyYaml"
+                  >
+                    {{ copied ? 'Copiado' : 'Copiar o YAML' }}
+                  </v-btn>
+                  <v-btn
+                    :href="createUrl"
+                    target="_blank"
+                    rel="noopener"
+                    color="primary"
+                    variant="tonal"
+                    prepend-icon="mdi-file-plus-outline"
+                  >
+                    Criar no GitHub
+                  </v-btn>
+                </div>
+                <div class="text-body-2 text-high-emphasis mt-3">
+                  Opcional: para trocar o endereço da central sem editar o arquivo, crie a variável
+                  <code>{{ workflow.urlVariable }}</code> em
+                  <a
+                    :href="`https://github.com/${application.repository}/settings/variables/actions`"
+                    target="_blank"
+                    rel="noopener"
+                    class="font-weight-bold"
+                    >Settings → Variables</a
+                  >.
+                </div>
               </template>
-              <v-alert v-else type="info" variant="tonal" density="compact">
-                Esta aplicação não lista imagens para compilar: o workflow só avisa a central.
-                Cadastre as imagens na aplicação para o GitHub compilá-las.
-              </v-alert>
-            </div>
-          </div>
+            </v-expansion-panel-text>
+          </v-expansion-panel>
+        </v-expansion-panels>
+
+        <!-- O compose -->
+        <div class="text-subtitle-1 font-weight-bold mb-1">
+          Confira o compose: as imagens publicadas
+        </div>
+        <div class="text-body-2 text-high-emphasis mb-2">
+          No servidor nada é compilado. Cada serviço com <code>build:</code> precisa de uma
+          <code>image:</code> com a tag em <code>{{ application.imageTagVariable }}</code> — o
+          <code>build:</code> pode ficar para o desenvolvimento local.
+        </div>
+        <template v-if="application.images.length">
+          <CopyableCommand
+            v-for="image in application.images"
+            :key="image.name"
+            :label="image.name"
+            :command="imageLine(image.name)"
+            class="mb-2"
+          />
         </template>
+        <v-alert v-else type="info" variant="tonal" density="compact">
+          Esta aplicação não lista imagens para compilar: o workflow só avisa a central. Cadastre as
+          imagens na aplicação para o GitHub compilá-las.
+        </v-alert>
       </v-card-text>
 
       <v-card-actions class="px-6 pb-4">
@@ -123,16 +254,32 @@
         </v-btn>
       </v-card-actions>
     </v-card>
+
+    <v-snackbar v-model="feedback.visible" :color="feedback.color" timeout="6000">
+      {{ feedback.message }}
+      <template v-if="feedback.url" #actions>
+        <v-btn :href="feedback.url" target="_blank" rel="noopener" variant="text">Abrir</v-btn>
+      </template>
+    </v-snackbar>
   </v-dialog>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import CodeTextarea from '@/components/CodeTextarea.vue'
 import CopyableCommand from '@/components/CopyableCommand.vue'
 import type { DeployApplicationView } from '@/bindings/DeployApplicationView'
+import type { DeployGithubStatusView } from '@/bindings/DeployGithubStatusView'
 import type { DeployWorkflowView } from '@/bindings/DeployWorkflowView'
 import { useDeploysStore } from '@/stores/deploys'
+import { buildMeta, WORKFLOW_STATE } from '@/utils/deployPresentation'
+import { formatRelativeTime } from '@/utils/formatters'
+import {
+  centralUrlRule,
+  looksPrivate,
+  storeCentralUrl,
+  storedCentralUrl,
+} from '@/utils/githubConnect'
 
 const props = defineProps<{ modelValue: boolean; application: DeployApplicationView | null }>()
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
@@ -142,9 +289,29 @@ const workflow = ref<DeployWorkflowView | null>(null)
 const loading = ref(false)
 const error = ref<string | null>(null)
 const copied = ref(false)
+const centralUrl = ref(storedCentralUrl())
+const status = ref<DeployGithubStatusView | null>(null)
+const statusLoading = ref(false)
+const opening = ref(false)
+const manualPanel = ref<string | undefined>(undefined)
+const feedback = reactive({ visible: false, message: '', color: 'success', url: '' })
 
-/** O endereço por onde o operador abriu a central — o público, na prática. */
-const publicUrl = computed(() => window.location.origin)
+/** Com conexão ou token, a central confere o repositório por você. */
+const hasAccess = computed(() =>
+  Boolean(props.application?.githubConnectionId || props.application?.credentialId)
+)
+
+const workflowMeta = computed(() => WORKFLOW_STATE[status.value?.workflow ?? 'unknown'])
+const buildStatus = computed(() =>
+  status.value?.lastBuild ? buildMeta(status.value.lastBuild) : null
+)
+
+const pullRequestLabel = computed(() => {
+  if (status.value?.pullRequest) return 'Atualizar o PR'
+  return status.value?.workflow === 'different'
+    ? 'Propor o workflow gerado num PR'
+    : 'Abrir o PR com o workflow'
+})
 
 const references = computed(() => {
   const list = props.application?.targets.map((target) => target.reference) ?? []
@@ -164,6 +331,11 @@ function imageLine(name: string): string {
   return `image: ghcr.io/${owner}/${name}:\${${variable}:-latest}`
 }
 
+function cleanCentralUrl(): string | null {
+  const value = centralUrl.value.trim().replace(/\/+$/, '')
+  return centralUrlRule(value) === true ? value : null
+}
+
 async function copyYaml() {
   if (!workflow.value) return
   try {
@@ -175,33 +347,88 @@ async function copyYaml() {
   }
 }
 
+async function loadWorkflow() {
+  const id = props.application?.id
+  const url = cleanCentralUrl()
+  if (id === undefined || !url) return
+  loading.value = true
+  error.value = null
+  try {
+    workflow.value = await deploys.workflow(id, url)
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Não foi possível gerar o workflow'
+  } finally {
+    loading.value = false
+  }
+}
+
+async function loadStatus() {
+  const id = props.application?.id
+  const url = cleanCentralUrl()
+  if (id === undefined || !url || !hasAccess.value) return
+  statusLoading.value = true
+  try {
+    status.value = await deploys.githubStatus(id, url)
+  } catch (err) {
+    status.value = null
+    error.value = err instanceof Error ? err.message : 'Não foi possível conferir o repositório'
+  } finally {
+    statusLoading.value = false
+    // Sem quem abra o PR, o caminho é o manual: já aberto.
+    manualPanel.value = status.value?.canWrite ? undefined : 'manual'
+  }
+}
+
+/** O endereço mudou: o YAML (e a comparação com o do repositório) também. */
+function applyCentralUrl() {
+  const url = cleanCentralUrl()
+  if (!url) return
+  storeCentralUrl(url)
+  void loadWorkflow()
+  void loadStatus()
+}
+
+async function openPullRequest() {
+  const id = props.application?.id
+  const url = cleanCentralUrl()
+  if (id === undefined || !url) return
+  opening.value = true
+  error.value = null
+  try {
+    const pull = await deploys.githubPullRequest(id, url)
+    storeCentralUrl(url)
+    feedback.message = `PR #${pull.number} aberto: revise e faça o merge para ligar o deploy.`
+    feedback.color = 'success'
+    feedback.url = pull.url
+    feedback.visible = true
+    await loadStatus()
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Não foi possível abrir o PR'
+  } finally {
+    opening.value = false
+  }
+}
+
 watch(
   () => [props.modelValue, props.application?.id] as const,
-  async ([visible, id]) => {
+  ([visible, id]) => {
     if (!visible || id === undefined) return
-    loading.value = true
+    centralUrl.value = storedCentralUrl()
+    status.value = null
     error.value = null
-    try {
-      workflow.value = await deploys.workflow(id)
-    } catch (err) {
-      error.value = err instanceof Error ? err.message : 'Não foi possível gerar o workflow'
-    } finally {
-      loading.value = false
-    }
+    manualPanel.value = hasAccess.value ? undefined : 'manual'
+    void loadWorkflow()
+    void loadStatus()
   },
   { immediate: true }
 )
 </script>
 
 <style scoped>
-.step {
+.status-row {
   display: flex;
-  gap: 16px;
-  margin-bottom: 24px;
-}
-
-.step-number {
-  flex: 0 0 auto;
-  font-weight: 700;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0;
 }
 </style>

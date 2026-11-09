@@ -5,15 +5,14 @@
 //! repositório que o token não lê, a tela mostra o link do "Compare" e o
 //! motivo — a aprovação continua possível.
 
-use std::time::Duration;
-
 use serde::Deserialize;
 
-use super::short_sha;
-use crate::views::deploys::{DeployChangesView, DeployCommitView};
+use super::{Client, GitHubError};
+use crate::{
+    deploys::short_sha,
+    views::deploys::{DeployChangesView, DeployCommitView},
+};
 
-const API: &str = "https://api.github.com";
-const TIMEOUT: Duration = Duration::from_secs(10);
 /// Commits mostrados; o resto vira "e mais N".
 const MAX_COMMITS: usize = 50;
 
@@ -92,67 +91,42 @@ pub async fn changes(
         output.unavailable_reason = Some("Esta versão já é a que está no ar".into());
         return output;
     }
-    let client = match reqwest::Client::builder()
-        .timeout(TIMEOUT)
-        .user_agent("netmonitor-deploy")
-        .build()
-    {
+    let client = match Client::new(token.map(ToString::to_string)) {
         Ok(client) => client,
         Err(error) => {
             output.unavailable_reason = Some(error.to_string());
             return output;
         }
     };
-    let url = match base {
-        Some(base) => format!("{API}/repos/{repository}/compare/{base}...{head}"),
-        None => format!("{API}/repos/{repository}/commits/{head}"),
-    };
-    let mut request = client
-        .get(url)
-        .header("Accept", "application/vnd.github+json")
-        .header("X-GitHub-Api-Version", "2022-11-28");
-    if let Some(token) = token {
-        request = request.bearer_auth(token);
-    }
-    let response = match request.send().await {
-        Ok(response) => response,
-        Err(error) => {
-            output.unavailable_reason = Some(format!("GitHub fora de alcance: {error}"));
-            return output;
-        }
-    };
-    let status = response.status();
-    if !status.is_success() {
-        output.unavailable_reason = Some(match status.as_u16() {
-            401 | 403 => "O token da aplicação não tem acesso a este repositório".into(),
-            404 if token.is_none() => {
-                "Repositório privado: escolha uma credencial na aplicação para ver os commits"
-                    .into()
-            }
-            404 => "Commit ou repositório não encontrado no GitHub".into(),
-            code => format!("O GitHub respondeu {code}"),
-        });
-        return output;
-    }
-    let parsed = if base.is_some() {
-        response.json::<Compare>().await.map(|compare| {
-            (
-                compare.total_commits,
-                compare.commits.into_iter().rev().collect::<Vec<_>>(),
-            )
-        })
-    } else {
-        response
-            .json::<Commit>()
+    let parsed = match base {
+        Some(base) => client
+            .get::<Compare>(&format!("/repos/{repository}/compare/{base}...{head}"))
             .await
-            .map(|commit| (1, vec![commit]))
+            .map(|compare| {
+                (
+                    compare.total_commits,
+                    compare.commits.into_iter().rev().collect::<Vec<_>>(),
+                )
+            }),
+        None => client
+            .get::<Commit>(&format!("/repos/{repository}/commits/{head}"))
+            .await
+            .map(|commit| (1, vec![commit])),
     };
+    let parsed = parsed.map_err(|error| match error {
+        GitHubError::NotFound(_) if token.is_none() => {
+            "Repositório privado: ligue a aplicação a uma conexão do GitHub para ver os commits"
+                .to_string()
+        }
+        GitHubError::NotFound(_) => "Commit ou repositório não encontrado no GitHub".into(),
+        other => other.to_string(),
+    });
     match parsed {
         Ok((total, commits)) => {
             output.total = total;
             output.commits = commits.into_iter().take(MAX_COMMITS).map(view).collect();
         }
-        Err(_) => output.unavailable_reason = Some("Resposta do GitHub ilegível".into()),
+        Err(reason) => output.unavailable_reason = Some(reason),
     }
     output
 }

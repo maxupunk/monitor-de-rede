@@ -3,4 +3,8 @@ import type { DeployBuildImage } from "./DeployBuildImage";
 import type { DeployRollout } from "./DeployRollout";
 import type { DeployTargetView } from "./DeployTargetView";
 
-export type DeployApplicationView = { id: number, name: string, slug: string, repository: string, repositoryUrl: string, credentialId: number | null, credentialName: string | null, composeFiles: Array<string>, imageTagVariable: string, images: Array<DeployBuildImage>, rollout: DeployRollout, targets: Array<DeployTargetView>, createdAt: string, };
+export type DeployApplicationView = { id: number, name: string, slug: string, repository: string, repositoryUrl: string, credentialId: number | null, credentialName: string | null, githubConnectionId: number | null, 
+/**
+ * A conta do GitHub da conexão (`maxupunk`).
+ */
+githubAccount: string | null, composeFiles: Array<string>, imageTagVariable: string, images: Array<DeployBuildImage>, rollout: DeployRollout, targets: Array<DeployTargetView>, createdAt: string, };

@@ -1,8 +1,58 @@
 <template>
   <div>
+    <v-alert
+      v-if="!deploys.githubConnections.length && !editing"
+      type="info"
+      variant="tonal"
+      class="mb-4"
+      icon="mdi-github"
+    >
+      <div class="font-weight-bold mb-1">Conecte o GitHub e o resto se preenche sozinho</div>
+      <div class="text-body-2 mb-2">
+        Você escolhe o repositório numa lista; o NetMonitor lê o compose e preenche as imagens e a
+        variável da tag. Depois ele mesmo abre o PR do workflow.
+      </div>
+      <v-btn
+        color="primary"
+        variant="flat"
+        size="small"
+        prepend-icon="mdi-github"
+        @click="emit('connect-github')"
+      >
+        Conectar GitHub
+      </v-btn>
+    </v-alert>
+
     <v-row dense>
-      <v-col cols="12" sm="6">
+      <v-col v-if="deploys.githubConnections.length" cols="12" sm="5">
+        <v-select
+          v-model="connectionChoice"
+          :items="connectionItems"
+          item-title="title"
+          item-value="value"
+          item-props="props"
+          label="Conexão com o GitHub"
+          variant="outlined"
+          prepend-inner-icon="mdi-github"
+        >
+          <template #append>
+            <IconAction
+              icon="mdi-cog"
+              label="Conexões e tokens"
+              @click="emit('manage-connections')"
+            />
+          </template>
+        </v-select>
+      </v-col>
+      <v-col cols="12" :sm="deploys.githubConnections.length ? 7 : 6">
+        <DeployRepositoryPicker
+          v-if="model.githubConnectionId !== null"
+          v-model="model.repository"
+          :source="source"
+          @chosen="onChosen"
+        />
         <v-text-field
+          v-else
           v-model="model.repository"
           label="Repositório no GitHub *"
           placeholder="dono/repositorio"
@@ -12,8 +62,39 @@
           prepend-inner-icon="mdi-github"
           :rules="[requiredRule('Informe o repositório'), repositoryRule]"
           @update:model-value="suggestFromRepository"
-        ></v-text-field>
+        >
+          <template #append>
+            <IconAction
+              icon="mdi-auto-fix"
+              label="Preencher pelo compose do repositório"
+              :loading="discovering"
+              :disabled="repositoryRule(model.repository) !== true"
+              @click="discover"
+            />
+          </template>
+        </v-text-field>
       </v-col>
+    </v-row>
+
+    <v-alert
+      v-if="discovering || discovery || discoveryError"
+      :type="discoveryError ? 'warning' : 'success'"
+      variant="tonal"
+      density="compact"
+      class="mt-2"
+      data-test="compose-discovery"
+    >
+      <template v-if="discovering">Lendo o compose do repositório…</template>
+      <template v-else-if="discoveryError">{{ discoveryError }}</template>
+      <template v-else-if="discovery">
+        <div>{{ discoverySummary }}</div>
+        <ul v-if="discovery.notes.length" class="mt-1 pl-4">
+          <li v-for="note in discovery.notes" :key="note">{{ note }}</li>
+        </ul>
+      </template>
+    </v-alert>
+
+    <v-row dense class="mt-2">
       <v-col cols="12" sm="6">
         <v-text-field
           v-model="model.name"
@@ -25,32 +106,9 @@
         ></v-text-field>
       </v-col>
       <v-col cols="12" sm="6">
-        <v-select
-          v-model="model.credentialId"
-          :items="credentialItems"
-          label="Credencial"
-          hint="Para repositório e imagens privados"
-          persistent-hint
-          variant="outlined"
-          clearable
-        >
-          <template #append>
-            <v-btn
-              icon="mdi-key-plus"
-              variant="text"
-              color="primary"
-              aria-label="Gerenciar credenciais"
-              @click="emit('manage-credentials')"
-            >
-              <v-icon>mdi-key-plus</v-icon>
-              <v-tooltip activator="parent" location="top">Gerenciar credenciais</v-tooltip>
-            </v-btn>
-          </template>
-        </v-select>
-      </v-col>
-      <v-col cols="12" sm="6">
         <v-combobox
           v-model="model.composeFiles"
+          :items="discovery?.files ?? []"
           label="Arquivos compose *"
           hint="Relativos à raiz do repositório"
           persistent-hint
@@ -60,6 +118,29 @@
           closable-chips
           :rules="[(value: string[]) => value.length > 0 || 'Informe ao menos um arquivo']"
         ></v-combobox>
+      </v-col>
+      <v-col cols="12" sm="6">
+        <v-select
+          v-model="model.credentialId"
+          :items="credentialItems"
+          :label="model.githubConnectionId !== null ? 'Token para imagens privadas' : 'Token'"
+          :hint="
+            model.githubConnectionId !== null
+              ? 'Só se as imagens no ghcr.io forem privadas'
+              : 'Para repositório e imagens privados'
+          "
+          persistent-hint
+          variant="outlined"
+          clearable
+        >
+          <template #append>
+            <IconAction
+              icon="mdi-key-plus"
+              label="Conexões e tokens"
+              @click="emit('manage-connections')"
+            />
+          </template>
+        </v-select>
       </v-col>
     </v-row>
 
@@ -151,18 +232,55 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import IconAction from '@/components/IconAction.vue'
+import DeployRepositoryPicker from '@/components/deploys/DeployRepositoryPicker.vue'
 import type { DeployApplicationInput } from '@/bindings/DeployApplicationInput'
-import { useDeploysStore } from '@/stores/deploys'
+import type { DeployComposeDiscovery } from '@/bindings/DeployComposeDiscovery'
+import type { DeployRepositoryView } from '@/bindings/DeployRepositoryView'
+import { useDeploysStore, type GithubSource } from '@/stores/deploys'
+import { applyDiscovery, slugify } from '@/utils/deployForms'
 import { requiredRule } from '@/utils/formRules'
 
 const model = defineModel<DeployApplicationInput>({ required: true })
 const props = defineProps<{ editing?: boolean }>()
-const emit = defineEmits<{ 'manage-credentials': [] }>()
+const emit = defineEmits<{ 'manage-connections': []; 'connect-github': [] }>()
 
 const deploys = useDeploysStore()
 const nameTouched = ref(Boolean(props.editing))
 const slugTouched = ref(Boolean(props.editing))
+const discovery = ref<DeployComposeDiscovery | null>(null)
+const discovering = ref(false)
+const discoveryError = ref<string | null>(null)
+
+/** O `v-select` não lida bem com `null` como valor: 0 é "digitar". */
+const MANUAL = 0
+
+const connectionChoice = computed({
+  get: () => model.value.githubConnectionId ?? MANUAL,
+  set: (value: number) => {
+    model.value.githubConnectionId = value === MANUAL ? null : value
+    discovery.value = null
+    discoveryError.value = null
+  },
+})
+
+const connectionItems = computed(() => [
+  ...deploys.githubConnections.map((connection) => ({
+    title: connection.account,
+    value: connection.id,
+    props: {
+      subtitle: connection.installed ? 'GitHub App' : 'Falta instalar o app',
+      disabled: !connection.installed,
+    },
+  })),
+  { title: 'Digitar o repositório', value: MANUAL, props: { subtitle: 'Público ou com token' } },
+])
+
+const source = computed<GithubSource>(() => ({
+  connectionId: model.value.githubConnectionId,
+  credentialId: model.value.credentialId,
+}))
 
 const credentialItems = computed(() =>
   deploys.credentials.map((credential) => ({
@@ -171,38 +289,75 @@ const credentialItems = computed(() =>
   }))
 )
 
+const discoverySummary = computed(() => {
+  const found = discovery.value
+  if (!found) return ''
+  if (!found.suggestedFiles.length) return 'Nenhum compose na raiz do repositório.'
+  const images = found.images.length
+    ? `${found.images.length} imagem(ns) para o GitHub compilar`
+    : 'nenhum serviço com build:'
+  const variable = found.imageTagVariable ? `, tag em ${found.imageTagVariable}` : ''
+  return `Preenchido a partir de ${found.suggestedFiles.join(', ')}: ${images}${variable}.`
+})
+
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
 
-function repositoryRule(value: string): true | string {
-  const clean = value
+function cleanRepository(value: string): string {
+  return value
     .trim()
     .replace(/\.git$/, '')
     .replace(/^https:\/\/github\.com\//, '')
-  return REPOSITORY.test(clean) || 'Use dono/repositorio'
+}
+
+function repositoryRule(value: string): true | string {
+  return REPOSITORY.test(cleanRepository(value)) || 'Use dono/repositorio'
 }
 
 /** O nome do repositório sugere o nome e o identificador da aplicação. */
 function suggestFromRepository(value: string) {
-  const clean = value
-    .trim()
-    .replace(/\.git$/, '')
-    .replace(/^https:\/\/github\.com\//, '')
+  const clean = cleanRepository(value)
   if (clean !== value) model.value.repository = clean
   const name = clean.split('/')[1] ?? ''
   if (!name) return
   if (!nameTouched.value) model.value.name = name
-  if (!slugTouched.value) {
-    model.value.slug = name
-      .toLowerCase()
-      .replace(/[^a-z0-9_-]+/g, '-')
-      .replace(/^[-_]+|[-_]+$/g, '')
-      .slice(0, 63)
+  if (!slugTouched.value) model.value.slug = slugify(name)
+}
+
+/** Lê o compose do repositório e preenche o que ele diz. */
+async function discover() {
+  const repository = cleanRepository(model.value.repository)
+  if (repositoryRule(repository) !== true) return
+  discovering.value = true
+  discoveryError.value = null
+  try {
+    const found = await deploys.githubCompose(source.value, repository)
+    discovery.value = found
+    model.value = applyDiscovery(model.value, found)
+  } catch (err) {
+    discovery.value = null
+    const reason = err instanceof Error ? `: ${err.message}` : ''
+    discoveryError.value = `Não deu para ler o compose${reason}. Preencha à mão.`
+  } finally {
+    discovering.value = false
   }
+}
+
+function onChosen(repository: DeployRepositoryView) {
+  suggestFromRepository(repository.fullName)
+  void discover()
 }
 
 function addImage() {
   model.value.images.push({ name: '', dockerfile: 'Dockerfile', context: '.' })
 }
+
+onMounted(() => {
+  // Aplicação nova com o GitHub conectado: já começa pela lista.
+  if (!props.editing && model.value.githubConnectionId === null && !model.value.repository) {
+    const installed = deploys.githubConnections.find((connection) => connection.installed)
+    if (installed) model.value.githubConnectionId = installed.id
+  }
+})
 </script>
 
 <style scoped>

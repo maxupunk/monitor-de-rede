@@ -98,7 +98,42 @@ escrito, e a tela oferece a cópia do banco feita antes (quando o alvo tem backu
 configurado) para restaurar — com confirmação, pelo fluxo de restauração que já
 existe (ADR 013).
 
-### 7. A decisão de quando
+### 7. O acesso ao GitHub é um GitHub App da central
+
+"Conectar GitHub" cria, pelo **manifest** do GitHub, um app **privado** na conta
+ou organização de quem clicou — um por central, nunca um app compartilhado entre
+instalações. O fluxo é todo pelo navegador (criar → instalar escolhendo os
+repositórios → voltar a `/deploys/github`), então a central não precisa estar na
+internet para isso; o `state` é de uso único e emitido por ela.
+
+- A **chave privada** do app fica cifrada na central (`deploy_github_connections`)
+  e nunca sai dela. O que sai são **tokens de instalação de uma hora**, pedidos na
+  hora e com o mínimo: para o agente clonar, só `contents: read` daquele
+  repositório; para o assistente ler, `contents` e `actions` de leitura.
+- Permissões pedidas: `metadata`, `contents` e `actions` de leitura. A escrita
+  (`contents`, `pull_requests`, `workflows`) é **opcional** e serve só para a
+  central abrir o PR do workflow — numa branch dela (`netmonitor/deploy-workflow`),
+  nunca direto na branch padrão; quem faz o merge é uma pessoa.
+- O webhook do app fica **desligado**: o aviso de versão continua sendo o OIDC
+  (§5). O app não amplia o que o aviso prova.
+- Com o app, o assistente lista os repositórios, lê o compose (arquivos, imagens
+  com `build:`, a variável da tag) e as branches — a pessoa escolhe em vez de
+  digitar. É tudo HTTP na central; o processo da API continua sem `git`.
+- **Imagem privada no ghcr.io continua pedindo token clássico** com
+  `read:packages`: o ghcr.io não documenta o token de GitHub App como credencial
+  de registry. A regra de qual credencial vai em cada uso mora num lugar só
+  (`deploys::access`): repositório pelo app (ou pelo token, sem app); `pull` só
+  pelo token.
+
+O endereço da central vai **escrito no workflow** (não é segredo), com a
+variável `NETMONITOR_URL` do repositório tendo precedência — criar a variável
+deixa de ser um passo obrigatório.
+
+Rejeitados: OAuth/device flow (o escopo `repo` dá escrita em **todos** os
+repositórios da pessoa e fica preso a ela) e um app público do NetMonitor (a
+chave dele teria de morar em toda central).
+
+### 8. A decisão de quando
 
 Estados: `awaiting_approval`, `scheduled`, `queued`, `running`, `succeeded`,
 `failed`, `rolled_back`, `superseded`, `cancelled`, `rejected`.
@@ -127,6 +162,8 @@ agentes). O andamento vai pelo SSE (`deploys:run` como snapshot, `deploys:log`,
 - Serviço sem healthcheck só é conferido como "de pé" — a prontidão avisa.
 - `container_name` fixo implica alguns segundos de indisponibilidade a cada
   troca; deploy sem parada (blue-green) fica fora do escopo.
-- Cinco tabelas novas na área Servidores (`deploy_credentials`,
-  `deploy_applications`, `deploy_targets`, `deploy_env_versions`,
-  `deploy_runs`).
+- Seis tabelas novas na área Servidores (`deploy_credentials`,
+  `deploy_github_connections`, `deploy_applications`, `deploy_targets`,
+  `deploy_env_versions`, `deploy_runs`).
+- Remover a conexão apaga a chave da central, mas o app continua no GitHub: a
+  tela leva às configurações dele para apagá-lo de vez.

@@ -16,7 +16,8 @@
           >{{ application.repository }}</a
         >
         · {{ application.rollout === 'sequential' ? 'um alvo de cada vez' : 'todos juntos' }}
-        <template v-if="!application.credentialId"> · sem credencial</template>
+        <template v-if="application.githubAccount"> · via GitHub App</template>
+        <template v-else-if="!application.credentialId"> · sem acesso a privados</template>
       </v-card-subtitle>
       <template v-if="canAdmin" #append>
         <v-btn
@@ -27,7 +28,7 @@
           class="mr-1"
           @click="emit('workflow', application)"
         >
-          Workflow
+          Ligar o GitHub
         </v-btn>
         <v-menu>
           <template #activator="{ props: menu }">

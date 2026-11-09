@@ -62,6 +62,8 @@ segredo vai para o GitHub.
       com deploy contínuo). O protocolo subiu para a versão 6 e o aperto de mão
       é estrito: agente antigo não conecta numa central nova.
 - [ ] Você é **administrador** da área Servidores.
+- [ ] Você é dono da conta (ou organização) do GitHub onde está o repositório —
+      é quem cria e instala o GitHub App.
 - [ ] O servidor da aplicação já tem o agente do NetMonitor conectado
       (Servidores remotos → "Conectado").
 - [ ] A central é alcançável pela internet num endereço `https://` (o GitHub
@@ -118,23 +120,38 @@ Em **Servidores remotos**, a linha do agente passa a mostrar o chip
 
 ---
 
-## 4. Cadastrar a credencial do GitHub
+## 4. Conectar o GitHub
 
-Necessária quando o repositório ou as imagens são privados.
+Uma vez por conta (ou organização) do GitHub. Faça neste navegador, logado no
+GitHub com quem é dono da conta.
 
-1. No GitHub: **Settings → Developer settings → Personal access tokens →
-   Tokens (classic) → Generate new token (classic)**.
-2. Marque **`read:packages`** e, se o repositório for privado, **`repo`**.
-   Use um token **clássico**: o ghcr.io não aceita o fine-grained.
-3. No NetMonitor: **Deploys → Credenciais → Nova credencial**:
-   - **Nome:** algo como "GitHub Master Sistemas";
-   - **Usuário do GitHub:** o login de quem gerou o token;
-   - **Token:** cole o token;
-   - **Registry:** deixe vazio (usa o ghcr.io).
+1. **Deploys → Conexões → Conectar GitHub**.
+2. Escolha **Minha conta** ou **Uma organização** (informe o login dela).
+3. Deixe marcado **Deixar o NetMonitor abrir o PR do workflow** — é o que
+   permite colocar o workflow no repositório sem copiar nada.
+4. **Continuar no GitHub** → o GitHub mostra o app que vai ser criado (um app
+   privado, só desta central; dá para trocar o nome ali) → **Create GitHub App**.
+5. O GitHub abre a instalação: escolha **Only select repositories** e marque o
+   repositório da aplicação (ou todos) → **Install**.
+6. Você volta para o NetMonitor com "GitHub conectado". Se estava no
+   assistente, ele reabre.
 
-O token fica cifrado. Ele vai ao servidor só durante o deploy e nunca é
-gravado lá. Depois de salvo, nem a tela o mostra de novo — para trocar, edite e
-cole o novo.
+A chave do app fica cifrada na central e nunca sai dela. A cada deploy o
+servidor recebe um token de **uma hora**, só de leitura e só daquele
+repositório. Para incluir outro repositório depois: Conexões → ícone de
+repositórios da conexão.
+
+### 4.1 Imagens privadas: um token clássico
+
+O ghcr.io só aceita token **clássico** para baixar imagem privada (nem o
+fine-grained nem o do GitHub App). Se as imagens forem públicas, pule.
+
+1. **Deploys → Conexões → Novo token** → o link **Criar o token no GitHub**
+   abre a tela do GitHub com `read:packages` já marcado. Gere e copie.
+2. Preencha **Nome**, **Usuário do GitHub** (o login de quem gerou) e
+   **Token**; deixe **Registry** vazio (ghcr.io).
+
+O token fica cifrado e só vai ao servidor durante o `pull`.
 
 ---
 
@@ -163,15 +180,28 @@ preenchidos).
 
 ### Passo 1 — De onde vem
 
+Com o GitHub conectado:
+
+1. **Conexão com o GitHub** já vem escolhida; em **Repositório**, digite parte
+   do nome e escolha da lista.
+2. A central lê o compose do repositório e **preenche sozinha** os arquivos
+   compose, as imagens que o GitHub compila (nome, Dockerfile, contexto) e a
+   variável da tag. O quadro verde diz o que foi preenchido; os avisos amarelos
+   dizem o que ajustar no compose (serviço com `build:` sem `image:` publicada,
+   imagem fora do ghcr.io).
+3. Confira e ajuste o que quiser:
+
 | Campo | O que pôr |
 |---|---|
-| **Repositório no GitHub** | `dono/repositorio` (ex.: `maxupunk/SGCv4`). O nome e o identificador são sugeridos a partir dele. |
-| **Nome** | Como a aplicação aparece na tela. |
-| **Credencial** | A do passo 4 (ou vazio, se tudo é público). O ícone de chave abre o cadastro. |
-| **Arquivos compose** | Normalmente `docker-compose.yml`. |
-| **Imagens que o GitHub compila** | Uma linha por imagem: nome, Dockerfile e contexto. Servem para gerar o workflow; se o projeto já tem workflow próprio, pode deixar vazio. |
-| **Avançado → Variável da tag** | `IMAGE_TAG` (a que o compose usa em `image: ...:${IMAGE_TAG}`). |
+| **Nome** | Sugerido pelo repositório. |
+| **Token para imagens privadas** | O do passo 4.1, se as imagens forem privadas. |
+| **Arquivos compose** | Preenchido; a lista mostra os outros compose do repositório. |
+| **Imagens que o GitHub compila** | Preenchidas. Servem para gerar o workflow; se o projeto já tem workflow próprio, pode deixar vazio. |
+| **Avançado → Variável da tag** | Preenchida (a que o compose usa em `image: ...:${IMAGE_TAG}`). |
 | **Avançado → Vários alvos no mesmo push** | **Um de cada vez** (recomendado): o servidor seguinte só recebe se o anterior subiu saudável. |
+
+Sem conexão: escolha **Digitar o repositório**, informe `dono/repositorio` e,
+se ele for público, use o botão de varinha ao lado para ler o compose.
 
 ### Passo 2 — Onde roda
 
@@ -180,7 +210,7 @@ preenchidos).
 | **Nome do alvo** | "Produção", "Homologação", "Cliente B"… |
 | **Servidor (agente)** | O servidor da aplicação. A lista diz quem está conectado e quem libera deploy. |
 | **Projeto compose** | O **mesmo** nome com que o projeto roda hoje (no servidor: `docker compose ls`). É isso que preserva containers e volumes. |
-| **Acompanha** | A branch (`stable`) ou um padrão de tag (`v*`). |
+| **Acompanha** | A branch (`stable`) ou um padrão de tag (`v*`). A lista traz as branches do repositório (a padrão já vem marcada) e o `v*` quando há tags `v1.2.3`. |
 | **Pedir aprovação** | **Ligado em produção.** Desligado em homologação. |
 | **Janela: início / fim** | Ex.: `23:00` a `05:00`. Vazio = qualquer hora. |
 | **Backup do banco antes** | A conexão do passo 5. |
@@ -203,7 +233,7 @@ vermelho; amarelo é aviso.
 | Projeto da instalação | O nome escolhido é o do próprio NetMonitor: escolha outro. |
 | Projeto em outro diretório | Normal na primeira vez: o projeto será **adotado**. Pastas montadas que não estão no Git (uploads, `./storage`) precisam ser copiadas antes. |
 | Healthchecks | Serviços sem healthcheck só são conferidos como "de pé". |
-| Credencial / Variáveis | Avisos do que ainda falta cadastrar. |
+| Acesso ao GitHub / Variáveis | Avisos do que ainda falta cadastrar. |
 
 **Checar de novo** refaz tudo depois que você corrigir o servidor.
 
@@ -219,20 +249,30 @@ dono. Pode deixar para depois.
 
 ## 7. Ligar o GitHub
 
-Logo depois de concluir, abre a janela **Ligar o GitHub** (depois, no botão
-**Workflow** do cartão da aplicação):
+Logo depois de concluir, abre a janela **Ligar o GitHub** (depois, no botão do
+mesmo nome no cartão da aplicação):
 
-1. **Variável do repositório** — **Abrir as variáveis do repositório** e crie
-   `NETMONITOR_URL` com o endereço público da central (a tela mostra o atual).
-2. **Workflow** — **Criar no GitHub** abre o editor do GitHub já com o arquivo
-   `.github/workflows/deploy.yml` preenchido; ou **Copiar o YAML**. O arquivo
-   não tem segredo nenhum: o GitHub prova quem é com um token OIDC.
-3. **Compose** — cada serviço compilado aponta para a imagem publicada
-   (`image: ghcr.io/<dono>/<nome>:${IMAGE_TAG:-latest}`). A tela mostra a linha
-   de cada imagem.
+1. **Endereço público desta central** — vem com o endereço da aba. Se você
+   acessa por IP interno, troque pelo público (a tela avisa quando o GitHub não
+   alcança). Ele fica lembrado neste navegador e vai escrito no workflow.
+2. **Abrir o PR com o workflow** — a central cria a branch
+   `netmonitor/deploy-workflow` com o `.github/workflows/deploy.yml` e abre o
+   PR. **Revisar no GitHub** e faça o merge. O arquivo não tem segredo nenhum:
+   o GitHub prova quem é com um token OIDC.
+3. A lista de cima mostra, depois do merge: **Workflow: no repositório e
+   atualizado** e, a cada push, **Último build: passou / falhou / compilando**
+   com o link para o Actions. **Conferir de novo** relê.
+4. **Compose** — embaixo, a linha `image:` de cada imagem, para conferir o
+   `docker-compose.yml`.
+
+Sem conexão que escreva: abra **Criar o workflow**, e use **Criar no GitHub**
+(abre o editor do GitHub já com o arquivo) ou **Copiar o YAML**. A variável
+`NETMONITOR_URL` no repositório é opcional: serve para trocar o endereço sem
+editar o arquivo.
 
 > O SGCv4 já tem o workflow e o compose prontos no branch
-> `feat/deploy-continuo-netmonitor`: não precisa colar nada lá.
+> `feat/deploy-continuo-netmonitor`: lá o status mostra "diferente do gerado",
+> o que é esperado (o dele tem as etapas de checagem e os build args).
 
 ---
 
@@ -306,7 +346,11 @@ está no ar em produção?". A IA também aprova, recusa, publica ou restaura �
 | O Actions passa, mas nenhum deploy aparece | Nenhum alvo acompanha aquela branch, ou ela já está no ar | Confira o campo **Acompanha** dos alvos. |
 | Deploy fica **Na fila** e falha após 10 min | Agente desconectado | Veja o agente em Servidores remotos. |
 | "A política do agente não libera deploy" | Falta `deploy` no `AGENT_ALLOW` | Passo 3.1. |
-| Falha em "Baixar imagens" | Imagem com essa tag não existe, ou token sem `read:packages` | Confira o build no Actions e a credencial (token clássico). |
+| Falha em "Baixar imagens" | Imagem com essa tag não existe, ou imagem privada sem token | Confira o build no Actions (Ligar o GitHub → Último build) e o token clássico com `read:packages` (passo 4.1). |
+| "Este retorno do GitHub não foi pedido por esta central" | A volta do GitHub demorou mais de uma hora, veio de outra aba ou a central reiniciou no meio | Clique em **Conectar GitHub** de novo. Se o app já tinha sido criado, apague-o nas configurações do GitHub antes. |
+| "O GitHub App não tem acesso ao repositório" | O repositório não foi marcado na instalação | Conexões → ícone de repositórios da conexão → marque o repositório. |
+| O assistente não lista o repositório | Mesmo motivo acima | Idem; depois, o botão de atualizar da lista. |
+| "Abrir o PR" não aparece | A conexão foi criada só de leitura | Crie o arquivo à mão (Criar no GitHub) ou conecte de novo marcando "abrir o PR do workflow". |
 | **Revertido** com "Não ficaram saudáveis: …" | A aplicação não passou no healthcheck | O console mostra as últimas linhas do serviço que caiu. Se for só demora, aumente a **espera dos healthchecks**. |
 | "O backup antes do deploy falhou e nada foi alterado" | Banco ou armazenamento inacessível | Corrija em Backup → O que está protegido e publique de novo. |
 | "A central reiniciou durante o deploy" | A central caiu no meio | Confira a stack no Docker e publique de novo. |
@@ -319,6 +363,7 @@ está no ar em produção?". A IA também aprova, recusa, publica ou restaura �
 |---|---|
 | Ver deploys, console e histórico | Quem tem acesso à área Servidores |
 | Cadastrar, aprovar, publicar, restaurar, abrir e salvar o `.env` | Administrador da área Servidores |
+| Conectar o GitHub, listar repositórios, abrir o PR do workflow | Administrador da área Servidores |
 
 Tudo fica na **Auditoria**, recurso "Deploy contínuo", inclusive quem abriu o
 `.env`.

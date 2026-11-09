@@ -6,7 +6,9 @@
 //!   `${{ }}` dentro de `run:` — entra por `env:` e o JSON sai do `jq`. Uma
 //!   mensagem com aspas não vira comando;
 //! * nenhum segredo: a central confere o token OIDC do próprio GitHub
-//!   (`id-token: write`), e o endereço dela é uma *variável* do repositório.
+//!   (`id-token: write`). O endereço dela vai escrito no arquivo (não é
+//!   segredo) e a *variável* `NETMONITOR_URL` do repositório, se existir,
+//!   tem precedência — dá para trocar sem editar o workflow.
 //!
 //! A tag das imagens é o SHA do commit — imutável. É ela que o agente baixa e
 //! é a ela que o rollback volta.
@@ -30,6 +32,9 @@ pub struct WorkflowSpec<'a> {
     /// Os filtros dos alvos: branches exatas e padrões de tag (`v*`).
     pub references: &'a [String],
     pub audience: &'a str,
+    /// Endereço público da central (`https://…`, já normalizado). Sem ele,
+    /// o workflow depende da variável do repositório.
+    pub central_url: Option<&'a str>,
 }
 
 fn quoted(value: &str) -> String {
@@ -62,13 +67,21 @@ pub fn render(spec: &WorkflowSpec<'_>) -> String {
     out.push_str(
         "# Compila as imagens, publica no ghcr.io com a tag do commit e avisa a central,\n\
          # que decide quando e onde aplicar (aprovação, janela, backup, rollback).\n\
-         #\n\
-         # Configure no repositório: Settings → Secrets and variables → Actions →\n",
+         #\n",
     );
-    let _ = writeln!(
-        out,
-        "# Variables → {URL_VARIABLE} = endereço público da central (https://…)."
-    );
+    if spec.central_url.is_some() {
+        let _ = writeln!(
+            out,
+            "# Para trocar o endereço da central sem editar este arquivo, crie a variável\n\
+             # {URL_VARIABLE} em Settings → Secrets and variables → Actions → Variables."
+        );
+    } else {
+        let _ = writeln!(
+            out,
+            "# Configure no repositório: Settings → Secrets and variables → Actions →\n\
+             # Variables → {URL_VARIABLE} = endereço público da central (https://…)."
+        );
+    }
     out.push_str(
         "# Nenhum segredo é necessário: a central confere o token OIDC do próprio GitHub.\n\
          #\n\
@@ -126,12 +139,16 @@ pub fn render(spec: &WorkflowSpec<'_>) -> String {
     if !spec.images.is_empty() {
         out.push_str("    needs: build\n");
     }
+    let url = match spec.central_url {
+        Some(central) => format!("${{{{ vars.{URL_VARIABLE} || {} }}}}", quoted(central)),
+        None => format!("${{{{ vars.{URL_VARIABLE} }}}}"),
+    };
     let _ = write!(
         out,
         "    runs-on: ubuntu-latest\n    steps:\n\
          \x20     - name: Avisar o NetMonitor\n\
          \x20       env:\n\
-         \x20         NETMONITOR_URL: ${{{{ vars.{URL_VARIABLE} }}}}\n\
+         \x20         NETMONITOR_URL: {url}\n\
          \x20         COMMIT_MESSAGE: ${{{{ github.event.head_commit.message }}}}\n\
          \x20       run: |\n\
          \x20         set -euo pipefail\n\
@@ -176,6 +193,7 @@ mod tests {
             images: &images,
             references: &references,
             audience: "netmonitor-deploy",
+            central_url: Some("https://central.exemplo.com"),
         });
         insta::assert_snapshot!(yaml);
     }
@@ -188,6 +206,7 @@ mod tests {
             images: &images,
             references: &["main".to_string()],
             audience: "netmonitor-deploy",
+            central_url: Some("https://central.exemplo.com"),
         });
         let run_blocks: Vec<&str> = yaml
             .split("run: |")
@@ -212,7 +231,9 @@ mod tests {
             images: &[],
             references: &[],
             audience: "x",
+            central_url: None,
         });
+        assert!(yaml.contains("NETMONITOR_URL: ${{ vars.NETMONITOR_URL }}"));
         assert!(!yaml.contains("build-push-action"));
         assert!(!yaml.contains("needs: build"));
         assert!(yaml.contains("branches: ['main']"));

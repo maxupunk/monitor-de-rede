@@ -3,10 +3,12 @@
  * cada estado e etapa, e o que cada estado permite fazer. Puro — testável
  * sem montar componente, e o mesmo em todas as telas.
  */
+import type { DeployBuildView } from '@/bindings/DeployBuildView'
 import type { DeployStage } from '@/bindings/DeployStage'
 import type { DeployReadinessLevel } from '@/bindings/DeployReadinessLevel'
 import type { DeployRunStatus } from '@/bindings/DeployRunStatus'
 import type { DeployRunTrigger } from '@/bindings/DeployRunTrigger'
+import type { DeployWorkflowState } from '@/bindings/DeployWorkflowState'
 
 export interface StatusMeta {
   label: string
@@ -137,4 +139,36 @@ export function commitTitle(message: string | null | undefined): string {
 /** "23:00–05:00" ou vazio quando não há janela. */
 export function windowLabel(start: string | null, end: string | null): string {
   return start && end ? `${start}–${end}` : ''
+}
+
+/** Como o `deploy.yml` do repositório está em relação ao gerado. */
+export const WORKFLOW_STATE: Record<DeployWorkflowState, Omit<StatusMeta, 'live'>> = {
+  current: { label: 'No repositório e atualizado', color: 'success', icon: 'mdi-check-circle' },
+  different: {
+    label: 'No repositório, diferente do gerado',
+    color: 'warning',
+    icon: 'mdi-file-compare',
+  },
+  missing: { label: 'Ainda não está no repositório', color: 'error', icon: 'mdi-file-hidden' },
+  unknown: { label: 'Não deu para conferir', color: 'warning', icon: 'mdi-help-circle' },
+}
+
+/** O último build no GitHub Actions, em palavras e cor. */
+export function buildMeta(build: Pick<DeployBuildView, 'status' | 'conclusion'>): StatusMeta {
+  if (build.status !== 'completed') {
+    return { label: 'Compilando', color: 'info', icon: 'mdi-progress-clock', live: true }
+  }
+  switch (build.conclusion) {
+    case 'success':
+      return { label: 'Passou', color: 'success', icon: 'mdi-check-circle', live: false }
+    case 'failure':
+    case 'timed_out':
+    case 'startup_failure':
+      return { label: 'Falhou', color: 'error', icon: 'mdi-alert-circle', live: false }
+    case 'cancelled':
+    case 'skipped':
+      return { label: 'Cancelado', color: 'secondary', icon: 'mdi-cancel', live: false }
+    default:
+      return { label: 'Terminou', color: 'info', icon: 'mdi-information', live: false }
+  }
 }

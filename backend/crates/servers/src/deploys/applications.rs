@@ -20,7 +20,12 @@ use netmonitor_core::{
     },
 };
 
-use super::{credentials, env_versions, refs, window::Window, Rollout};
+use super::{
+    connections, credentials, env_versions, oidc, refs,
+    window::Window,
+    workflow::{self, WorkflowSpec},
+    Rollout,
+};
 use crate::dtos::deploys::{ApplicationInput, BuildImage, SetupInput, TargetInput};
 
 /// O menor `--wait-timeout` que faz sentido: a API precisa subir.
@@ -177,14 +182,13 @@ pub async fn create<C: ConnectionTrait>(
 ) -> AppResult<deploy_applications::Model> {
     let input = checked(input)?;
     ensure_unique_slug(db, &input.slug, None).await?;
-    if let Some(id) = input.credential_id {
-        credentials::find(db, id).await?;
-    }
+    ensure_sources(db, &input).await?;
     Ok(deploy_applications::ActiveModel {
         name: Set(input.name),
         slug: Set(input.slug),
         repository: Set(input.repository),
         credential_id: Set(input.credential_id),
+        github_connection_id: Set(input.github_connection_id),
         compose_files: Set(json!(input.compose_files)),
         image_tag_variable: Set(input.image_tag_variable),
         images: Set(json!(input.images)),
@@ -206,19 +210,54 @@ pub async fn update<C: ConnectionTrait>(
     let row = find(db, id).await?;
     let input = checked(input)?;
     ensure_unique_slug(db, &input.slug, Some(id)).await?;
-    if let Some(credential) = input.credential_id {
-        credentials::find(db, credential).await?;
-    }
+    ensure_sources(db, &input).await?;
     let mut active: deploy_applications::ActiveModel = row.into();
     active.name = Set(input.name);
     active.slug = Set(input.slug);
     active.repository = Set(input.repository);
     active.credential_id = Set(input.credential_id);
+    active.github_connection_id = Set(input.github_connection_id);
     active.compose_files = Set(json!(input.compose_files));
     active.image_tag_variable = Set(input.image_tag_variable);
     active.images = Set(json!(input.images));
     active.rollout = Set(input.rollout.as_str().to_string());
     Ok(active.update(db).await?)
+}
+
+/// A conexão e o token escolhidos existem.
+async fn ensure_sources<C: ConnectionTrait>(db: &C, input: &ApplicationInput) -> AppResult<()> {
+    if let Some(id) = input.credential_id {
+        credentials::find(db, id).await?;
+    }
+    if let Some(id) = input.github_connection_id {
+        connections::find(db, id).await?;
+    }
+    Ok(())
+}
+
+/// O workflow sugerido para a aplicação, com os filtros dos alvos dela.
+///
+/// # Errors
+///
+/// Banco.
+pub async fn workflow_yaml<C: ConnectionTrait>(
+    db: &C,
+    application: &deploy_applications::Model,
+    central_url: Option<&str>,
+) -> AppResult<String> {
+    let references: Vec<String> = targets_of(db, application.id)
+        .await?
+        .into_iter()
+        .map(|target| target.reference)
+        .collect();
+    let images = images_of(application);
+    Ok(workflow::render(&WorkflowSpec {
+        application_name: &application.name,
+        images: &images,
+        references: &references,
+        audience: &oidc::audience(),
+        central_url,
+    }))
 }
 
 /// Apaga a aplicação, os alvos e o histórico. Os containers continuam no
@@ -485,6 +524,7 @@ mod tests {
             slug: "SGC".into(),
             repository: "master-sistemas/sgcv4.git".into(),
             credential_id: None,
+            github_connection_id: None,
             compose_files: vec!["docker-compose.yml".into(), " ".into()],
             image_tag_variable: "IMAGE_TAG".into(),
             images: vec![BuildImage {

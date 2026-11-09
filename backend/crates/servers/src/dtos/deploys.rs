@@ -54,8 +54,13 @@ pub struct ApplicationInput {
     pub slug: String,
     /// `dono/repo` no GitHub.
     pub repository: String,
+    /// O token: imagens privadas e, sem conexão, o repositório.
     #[ts(type = "number | null")]
     pub credential_id: Option<i64>,
+    /// A conexão com o GitHub (o app) que lê o repositório.
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub github_connection_id: Option<i64>,
     pub compose_files: Vec<String>,
     pub image_tag_variable: String,
     #[serde(default)]
@@ -206,4 +211,71 @@ pub struct HookInput {
     /// Tag das imagens publicadas; vazia é o SHA do commit.
     #[serde(default)]
     pub image_tag: Option<String>,
+}
+
+// ── GitHub ───────────────────────────────────────────────────────────────
+
+/// "Conectar GitHub": o formulário que a tela envia ao GitHub.
+#[derive(Debug, Clone, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DeployGithubManifestInput {
+    /// O endereço da central como o navegador a vê (`window.location.origin`).
+    pub origin: String,
+    /// Login da organização; vazio cria o app na conta de quem está logado.
+    #[serde(default)]
+    #[ts(optional)]
+    pub organization: Option<String>,
+    /// Pedir as permissões de escrita (abrir o PR do workflow).
+    #[serde(default)]
+    pub allow_write: bool,
+}
+
+/// O retorno do GitHub depois de criar o app.
+#[derive(Debug, Clone, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DeployGithubConnectInput {
+    pub code: String,
+    pub state: String,
+}
+
+/// O retorno do GitHub depois de instalar o app.
+#[derive(Debug, Clone, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DeployGithubInstallationInput {
+    #[ts(type = "number")]
+    pub installation_id: i64,
+}
+
+/// De onde ler o GitHub na descoberta (o assistente ainda não salvou a
+/// aplicação).
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GithubSourceQuery {
+    #[serde(default)]
+    pub connection_id: Option<i64>,
+    #[serde(default)]
+    pub credential_id: Option<i64>,
+    #[serde(default)]
+    pub repository: Option<String>,
+    /// Branch ou tag; vazio é a branch padrão.
+    #[serde(default)]
+    pub reference: Option<String>,
+}
+
+/// O endereço público da central, que o workflow chama.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CentralUrlQuery {
+    #[serde(default)]
+    pub central_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DeployPullRequestInput {
+    pub central_url: String,
 }
