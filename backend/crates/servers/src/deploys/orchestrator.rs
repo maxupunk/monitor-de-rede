@@ -68,6 +68,8 @@ pub struct Revision {
     pub commit_message: Option<String>,
     pub reference: Option<String>,
     pub image_tag: String,
+    /// A compilação no servidor que produziu a imagem (ADR 023).
+    pub build_id: Option<i64>,
 }
 
 /// Estado inicial de um deploy — puro.
@@ -159,6 +161,7 @@ async fn create(ctx: &AppContext, ask: Ask<'_>) -> AppResult<deploy_runs::Model>
             commit_sha: ask.revision.commit_sha.clone(),
             commit_message: ask.revision.commit_message.clone(),
             image_tag: ask.revision.image_tag.clone(),
+            build_id: ask.revision.build_id,
             env_version_id: ask.env_version_id,
             status,
             rollback_of_run_id: ask.rollback_of_run_id,
@@ -266,6 +269,7 @@ pub async fn request_manual(
                     .or_else(|| known.as_ref().map(|run| run.image_tag.clone()))
                     .unwrap_or_else(|| commit.clone()),
                 commit_message: known.as_ref().and_then(|run| run.commit_message.clone()),
+                build_id: known.as_ref().and_then(|run| run.build_id),
                 reference: known.and_then(|run| run.reference),
                 commit_sha: commit,
             }
@@ -281,6 +285,7 @@ pub async fn request_manual(
                 commit_message: live.commit_message,
                 reference: live.reference,
                 image_tag: live.image_tag,
+                build_id: live.build_id,
             }
         }
     };
@@ -329,6 +334,7 @@ pub async fn request_restore(
         commit_message: source.commit_message.clone(),
         reference: source.reference.clone(),
         image_tag: source.image_tag.clone(),
+        build_id: source.build_id,
     };
     create(
         ctx,
@@ -476,6 +482,9 @@ pub fn spawn(ctx: &AppContext) {
     tokio::spawn(async move {
         if let Err(error) = recover_interrupted(&ctx).await {
             tracing::warn!(%error, "não foi possível encerrar os deploys interrompidos");
+        }
+        if let Err(error) = super::builds::recover(&ctx).await {
+            tracing::warn!(%error, "não foi possível retomar as compilações interrompidas");
         }
         loop {
             if let Err(error) = dispatch(&ctx, Utc::now()).await {
@@ -700,6 +709,8 @@ mod tests {
             keep_images: 3,
             enabled: true,
             position: 0,
+            vulnerability_policy: "warn".into(),
+            require_provenance: false,
             created_at: now,
             updated_at: now,
         }

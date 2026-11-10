@@ -87,7 +87,7 @@ pub fn request_is_allowed(role: Role, method: &Method, path: &str) -> bool {
     if path == "/api/deploys" || path.starts_with("/api/deploys/") {
         // `/env`: o conteúdo do `.env`; `/github`: lê o GitHub com a
         // credencial da central.
-        if path.contains("/env") || path.contains("/github") {
+        if path.contains("/env") || path.contains("/github") || path.contains("/build-secrets") {
             return role.can_manage_docker();
         }
         return matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS)

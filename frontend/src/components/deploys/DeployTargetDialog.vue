@@ -18,6 +18,7 @@
             v-model="form"
             :references="references"
             :references-loading="referencesLoading"
+            :compiles="application?.builder === 'netmonitor'"
           />
         </v-form>
         <v-card border flat class="pa-4 mt-4">

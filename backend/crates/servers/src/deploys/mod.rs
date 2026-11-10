@@ -40,20 +40,24 @@
 pub mod access;
 pub mod ai_tools;
 pub mod applications;
+pub mod builds;
 pub mod catalog;
 pub mod connections;
+pub mod console;
 pub mod credentials;
 pub mod env;
 pub mod env_versions;
 pub mod events;
 pub mod executor;
 pub mod github;
+pub mod images;
 pub mod notify;
 pub mod oidc;
 pub mod orchestrator;
 pub mod readiness;
 pub mod refs;
 pub mod runs;
+pub mod usage;
 pub mod webhook;
 pub mod window;
 pub mod workflow;
@@ -238,6 +242,9 @@ impl Rollout {
 pub enum DeployStage {
     /// Backup do banco antes de atualizar (ADR 013).
     Backup,
+    /// Conferir a imagem (varredura, origem) e entregá-la ao host pelo canal
+    /// (compilação no servidor, ADR 022/023).
+    Image,
     Sync,
     Env,
     Pull,
@@ -248,8 +255,9 @@ pub enum DeployStage {
 }
 
 impl DeployStage {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::Backup,
+        Self::Image,
         Self::Sync,
         Self::Env,
         Self::Pull,
@@ -262,6 +270,7 @@ impl DeployStage {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Backup => "backup",
+            Self::Image => "image",
             Self::Sync => "sync",
             Self::Env => "env",
             Self::Pull => "pull",
@@ -293,6 +302,12 @@ impl From<StackStage> for DeployStage {
 #[must_use]
 pub fn short_sha(sha: &str) -> &str {
     &sha[..sha.len().min(7)]
+}
+
+/// O digest abreviado que a tela e o console mostram (`sha256:` + 12).
+#[must_use]
+pub fn short_digest(digest: &str) -> &str {
+    &digest[..digest.len().min(19)]
 }
 
 #[cfg(test)]

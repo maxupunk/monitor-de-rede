@@ -10,7 +10,7 @@ use ts_rs::TS;
 
 use agent_protocol::docker::stacks::{validate_commit, validate_image_tag};
 use netmonitor_core::{
-    models::{deploy_runs, deploy_targets},
+    models::{deploy_applications, deploy_runs, deploy_targets},
     shared::errors::{AppError, AppResult},
 };
 
@@ -92,45 +92,25 @@ pub async fn handle(
         )));
     }
     let revision = Revision {
-        commit_sha: commit.clone(),
+        commit_sha: commit,
         commit_message: input.commit_message.clone(),
         reference: Some(reference.name().to_string()),
-        image_tag: image_tag.clone(),
+        image_tag,
+        build_id: None,
     };
-
     let mut created = Vec::new();
     for application in &applications {
-        let mut targets = Vec::new();
-        for target in applications::targets_of(&ctx.db, application.id).await? {
-            if !wanted(&target, &reference) {
-                continue;
-            }
-            let history = runs::recent(&ctx.db, Some(target.id), 20).await?;
-            if !already_there(&history, &commit, &image_tag) {
-                targets.push(target);
-            }
-        }
-        for run in orchestrator::request_from_hook(
-            ctx,
-            application,
-            &targets,
-            &revision,
-            claims.actor.clone(),
-        )
-        .await?
-        {
-            let target = targets
-                .iter()
-                .find(|target| target.id == run.target_id)
-                .map_or_else(String::new, |target| target.name.clone());
-            created.push(HookRun {
-                id: run.id,
-                target: format!("{} / {target}", application.name),
-                status: status_of(&run),
-            });
-        }
+        created.extend(
+            request_revision(
+                ctx,
+                application,
+                &reference,
+                &revision,
+                claims.actor.clone(),
+            )
+            .await?,
+        );
     }
-
     let message = if created.is_empty() {
         format!(
             "Nenhum alvo ativo acompanha {} (ou todos já estão nesta versão)",
@@ -143,6 +123,45 @@ pub async fn handle(
         message,
         runs: created,
     })
+}
+
+/// Os deploys de uma revisão nova de uma aplicação: um por alvo ativo que
+/// acompanha o ref e ainda não está nela. Vale para o aviso do GitHub Actions
+/// (ADR 021) e para o fim de uma compilação no servidor (ADR 023).
+///
+/// # Errors
+///
+/// Banco.
+pub async fn request_revision(
+    ctx: &AppContext,
+    application: &deploy_applications::Model,
+    reference: &GitRef,
+    revision: &Revision,
+    actor: Option<String>,
+) -> AppResult<Vec<HookRun>> {
+    let mut targets = Vec::new();
+    for target in applications::targets_of(&ctx.db, application.id).await? {
+        if !wanted(&target, reference) {
+            continue;
+        }
+        let history = runs::recent(&ctx.db, Some(target.id), 20).await?;
+        if !already_there(&history, &revision.commit_sha, &revision.image_tag) {
+            targets.push(target);
+        }
+    }
+    let mut created = Vec::new();
+    for run in orchestrator::request_from_hook(ctx, application, &targets, revision, actor).await? {
+        let target = targets
+            .iter()
+            .find(|target| target.id == run.target_id)
+            .map_or_else(String::new, |target| target.name.clone());
+        created.push(HookRun {
+            id: run.id,
+            target: format!("{} / {target}", application.name),
+            status: status_of(&run),
+        });
+    }
+    Ok(created)
 }
 
 #[cfg(test)]
@@ -177,6 +196,7 @@ mod tests {
             started_at: None,
             finished_at: None,
             duration_ms: None,
+            build_id: None,
             created_at: now,
             updated_at: now,
         }

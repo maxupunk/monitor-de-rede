@@ -175,11 +175,15 @@ mod tests {
                 name: "sgc-api".into(),
                 dockerfile: "apps/api/Dockerfile".into(),
                 context: ".".into(),
+                target: None,
+                reference: None,
             },
             BuildImage {
                 name: "sgc-front-tenants".into(),
                 dockerfile: "docker/frontend/Dockerfile".into(),
                 context: ".".into(),
+                target: None,
+                reference: None,
             },
         ]
     }

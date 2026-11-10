@@ -19,6 +19,10 @@ use netmonitor_core::agents::{
 };
 
 use super::{
+    builds::{
+        BuildChunk, BuildEvents, BuilderReadiness, ImageBuildOutcome, ImageBuildRequest, ImageHost,
+        ImageImportRequest,
+    },
     engine::{ContainerAction, LogFilters},
     maintenance::{ComposeRequest, DockerMaintenance, Progress, VolumeArchive},
     metrics,
@@ -37,6 +41,8 @@ const QUERY_TIMEOUT: Duration = Duration::from_secs(25);
 const OPERATION_TIMEOUT: Duration = Duration::from_secs(35 * 60);
 /// Teto de um follow de logs; a central encerra antes (ver `log_stream`).
 const FOLLOW_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+/// Margem sobre o tempo limite da compilação (o agente corta antes).
+const BUILD_GRACE: Duration = Duration::from_secs(5 * 60);
 
 pub struct AgentEngine {
     session: Arc<AgentSession>,
@@ -358,5 +364,80 @@ impl StackHost for AgentEngine {
             project: project.into(),
         })
         .await
+    }
+}
+
+/// A compilação e o trânsito de imagens pelo canal (ADR 022/023). O pedido é
+/// validado aqui também: a central não manda ao fio o que o agente recusaria.
+#[async_trait]
+impl ImageHost for AgentEngine {
+    async fn build_images(
+        &self,
+        request: &ImageBuildRequest,
+        events: BuildEvents,
+        cancel: CancellationToken,
+    ) -> Result<ImageBuildOutcome, DockerError> {
+        request.validate()?;
+        let (chunks, mut received) = mpsc::unbounded_channel::<Value>();
+        let forward = tokio::spawn(async move {
+            while let Some(chunk) = received.recv().await {
+                if let Ok(chunk) = serde_json::from_value::<BuildChunk>(chunk) {
+                    if events.send(chunk).is_err() {
+                        break;
+                    }
+                }
+            }
+        });
+        let timeout = Duration::from_secs(u64::from(request.timeout_secs)) + BUILD_GRACE;
+        let call = Call::new(
+            Command::Docker {
+                call: DockerCall::ImageBuild {
+                    request: request.clone(),
+                },
+            },
+            timeout,
+        )
+        .with_chunks(chunks);
+        let request_id = call.id;
+        // Cancelada aqui, o agente recebe o `Cancel` e encerra o `buildx`.
+        let result = tokio::select! {
+            result = self.session.call(call) => result.map_err(DockerError::from),
+            () = cancel.cancelled() => {
+                self.session.cancel(request_id).await;
+                Err(DockerError::Validation("Compilação cancelada".into()))
+            }
+        };
+        let _ = forward.await;
+        decode(result?)
+    }
+
+    async fn builder_readiness(&self) -> Result<BuilderReadiness, DockerError> {
+        self.query(DockerCall::BuilderReadiness).await
+    }
+
+    async fn open_artifact(
+        &self,
+        artifact: uuid::Uuid,
+    ) -> Result<agent_protocol::tunnel::TunnelStream, DockerError> {
+        let stream = bridge::download(self.session.clone(), Command::ImageExport { artifact })
+            .await
+            .map_err(DockerError::from)?;
+        Ok(Box::new(stream))
+    }
+
+    async fn open_import(
+        &self,
+        request: &ImageImportRequest,
+    ) -> Result<agent_protocol::tunnel::TunnelStream, DockerError> {
+        request.validate()?;
+        let stream = bridge::open_stream(
+            self.session.clone(),
+            Command::ImageImport {
+                request: request.clone(),
+            },
+        )
+        .await
+        .map_err(DockerError::from)?;
+        Ok(Box::new(stream))
     }
 }

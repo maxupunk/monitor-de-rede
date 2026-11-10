@@ -391,6 +391,21 @@ Cada item carrega severidade, esforço, responsável sugerido e critério de ace
     - Token clássico com link que já abre o GitHub com `read:packages` marcado; prontidão e textos falam de "acesso ao GitHub".
     - Testes: manifest, `state`, JWT do app (RS256 ≤ 10 min), escopo do token de clone, leitura do compose (SGC, `build:` sem `image:`, registry com porta, YAML inválido), comparação do workflow, erros do GitHub em palavras, papel (só o administrador lê o GitHub), retorno forjado, conexão em uso não sai; no frontend, a volta do GitHub, o formulário do manifest, o endereço da central e o preenchimento pelo compose.
 
+- [x] **Compilação no servidor e registry próprio (estilo Dokploy/Coolify)** 🟢 Concluído
+  - **Severidade:** 🟡 Média
+  - **Esforço:** Grande
+  - **Decisão:** [ADR 023](adr/023-compilacao-no-servidor.md) e [ADR 022](adr/022-registry-proprio.md) · **Requisitos:** [compilacao_no_servidor.md](compilacao_no_servidor.md), [registry_proprio.md](registry_proprio.md)
+  - **Arquivos:** `backend/crates/core/src/shared/client_addr.rs`, `backend/crates/agent-protocol/src/docker/images.rs`, `backend/crates/servers/src/docker/builds/`, `backend/crates/servers/src/deploys/{builds/,images.rs,console.rs}`, `backend/crates/servers/src/controllers/deploy_builds.rs`, `backend/crates/servers-registry/`, `frontend/src/pages/registry/`, `frontend/src/components/registry/`, `frontend/src/components/deploys/DeployBuild*.vue`, `frontend/src/stores/{deployBuilds,registry}.ts`
+  - **Implementado:**
+    - Fase 0: um extrator só de origem (`shared::client_addr`) com `TRUSTED_PROXIES` (padrão: redes privadas), aplicado por uma camada no ponto de montagem; rate limit e auditoria deixaram de confiar no `X-Forwarded-For` de qualquer um.
+    - Protocolo 7: permissão `build`; `DockerCall::ImageBuild`/`BuilderReadiness`; `Command::ImageExport` (agente → central) e `Command::ImageImport` (central → `docker load`) pela ponte binária; `StackDeployRequest.pull`.
+    - Agente: builder BuildKit dedicado (`netmonitor-builder`, rede própria, `cpu-shares` baixo, `AGENT_BUILD_CPUS`/`AGENT_BUILD_MEMORY`), clone descartável, estágio de teste, segredos só como `--secret`, SBOM e proveniência anexados, artefatos entregues uma vez.
+    - Registry (`crates/servers-registry`): OCI Distribution em `/v2` (pull, push monolítico e em partes com retomada, mount, tags, referrers, delete), token do Docker com JWT de 5 min, tokens pessoais com escopo e validade só de origem interna/VPN, blobs por conteúdo com vínculo por repositório, tag de commit imutável, cota e retenção (N versões + o que os alvos usam + fixadas) com coleta a cada 6 h.
+    - Varredura: SBOM SPDX do BuildKit (e `dpkg`/`apk` das camadas sem ele) contra a cópia local do OSV.dev por ecossistema, comparadores `dpkg`/`apk`/semver, CVSS v3, política por alvo (avisar, bloquear crítica, bloquear alta), exceções com motivo e validade, reanálise diária.
+    - Deploy: "Quem compila?" na aplicação (NetMonitor por padrão no assistente), "Onde compilar?", estágio de teste e argumentos de build; aviso de push do GitHub App assinado (HMAC) vira compilação na fila, que ao terminar abre os deploys pela mesma fila do ADR 021; etapa "Conferir e enviar imagem" com a política do alvo e a entrega pelo canal.
+    - Tela: cartão da aplicação com "Compilar agora", última compilação e segredos de build; console ao vivo da compilação; página **Registry** (imagens, versões, quem usa, vulnerabilidades, tokens, exceções, espaço). Tudo por SSE (`deploys:build`, `deploys:build-log`, `registry:changed`).
+  - **Ficou para depois:** fases 6 e 7 (o GitHub Actions publicar no registry por OIDC e a attestation Sigstore) — são do modo Actions, opcional; a transferência só das camadas que faltam ao host; os spikes de campo BLD-02/03/04.
+
 - [x] **Janelas de manutenção** 🟢 Concluído
   - **Severidade:** 🟡 Média
   - **Esforço:** Médio

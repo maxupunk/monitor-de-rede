@@ -86,9 +86,18 @@ pub struct StackDeployRequest {
     pub wait_timeout_secs: u32,
     /// Quantas tags antigas de cada imagem manter em disco para o rollback.
     pub keep_images: u32,
+    /// Baixar as imagens antes de subir. Falso quando a central já as
+    /// entregou pelo canal (`Command::ImageImport`): o `up` não tenta o
+    /// registry (`--pull never`).
+    #[serde(default = "pull_by_default")]
+    pub pull: bool,
 }
 
 /// Teto do `--wait`: além disso, o deploy segura a fila sem motivo.
+const fn pull_by_default() -> bool {
+    true
+}
+
 pub const MAX_WAIT_TIMEOUT_SECS: u32 = 1800;
 /// Mais que isso só enche o disco.
 pub const MAX_KEEP_IMAGES: u32 = 20;
@@ -383,6 +392,7 @@ mod tests {
             }),
             wait_timeout_secs: 180,
             keep_images: 3,
+            pull: true,
         }
     }
 

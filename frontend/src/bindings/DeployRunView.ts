@@ -10,4 +10,8 @@ export type DeployRunView = { id: number, applicationId: number, applicationName
 /**
  * `dono/repo`, para os links do GitHub.
  */
-repository: string, targetId: number, targetName: string, trigger: DeployRunTrigger, triggeredBy: string | null, reference: string | null, commitSha: string, shortSha: string, commitMessage: string | null, imageTag: string, envVersionId: number | null, status: DeployRunStatus, stage: DeployStage | null, rollbackOfRunId: number | null, afterRunId: number | null, backupId: number | null, approvedBy: string | null, approvedAt: string | null, scheduledFor: string | null, error: string | null, createdAt: string, startedAt: string | null, finishedAt: string | null, durationMs: number | null, };
+repository: string, targetId: number, targetName: string, trigger: DeployRunTrigger, triggeredBy: string | null, reference: string | null, commitSha: string, shortSha: string, commitMessage: string | null, imageTag: string, envVersionId: number | null, status: DeployRunStatus, stage: DeployStage | null, rollbackOfRunId: number | null, afterRunId: number | null, backupId: number | null, approvedBy: string | null, approvedAt: string | null, scheduledFor: string | null, error: string | null, createdAt: string, startedAt: string | null, finishedAt: string | null, durationMs: number | null, 
+/**
+ * A compilação no servidor que produziu a imagem (ADR 023).
+ */
+buildId: number | null, };

@@ -30,6 +30,11 @@ export function emptyApplication(): DeployApplicationInput {
     imageTagVariable: 'IMAGE_TAG',
     images: [],
     rollout: 'sequential',
+    // O servidor compila (ADR 023): sem workflow, sem ghcr.io.
+    builder: 'netmonitor',
+    buildProbeId: null,
+    testTarget: undefined,
+    buildArgs: [],
   }
 }
 
@@ -44,6 +49,10 @@ export function applicationFromView(view: DeployApplicationView): DeployApplicat
     imageTagVariable: view.imageTagVariable,
     images: view.images.map((image) => ({ ...image })),
     rollout: view.rollout,
+    builder: view.builder,
+    buildProbeId: view.buildProbeId,
+    testTarget: view.testTarget ?? undefined,
+    buildArgs: view.buildArgs.map((arg) => ({ ...arg })),
   }
 }
 
@@ -63,6 +72,8 @@ export function emptyTarget(partial: Partial<TargetForm> = {}): TargetForm {
     keepImages: 3,
     enabled: true,
     position: 0,
+    vulnerabilityPolicy: 'block_critical',
+    requireProvenance: false,
     ...partial,
   }
 }
@@ -82,6 +93,8 @@ export function targetFromView(view: DeployTargetView): TargetForm {
     keepImages: view.keepImages,
     enabled: view.enabled,
     position: view.position,
+    vulnerabilityPolicy: view.vulnerabilityPolicy,
+    requireProvenance: view.requireProvenance,
   }
 }
 
@@ -101,6 +114,8 @@ export function cleanApplication(input: DeployApplicationInput): DeployApplicati
   return {
     ...input,
     images: input.images.filter((image) => image.name.trim() !== ''),
+    buildArgs: input.buildArgs.filter((arg) => arg.name.trim() !== ''),
+    testTarget: input.testTarget?.trim() || undefined,
   }
 }
 

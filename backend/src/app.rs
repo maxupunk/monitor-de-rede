@@ -42,6 +42,7 @@ const WORKSPACE_CRATES: &[&str] = &[
     "netmonitor_network_wifi",
     "netmonitor_network_link_tests",
     "netmonitor_servers",
+    "netmonitor_servers_registry",
     "netmonitor_vpn",
     "netmonitor_assistant",
     "agent_protocol",
@@ -187,6 +188,9 @@ impl Hooks for App {
             // O GitHub Actions não tem sessão: prova o repositório com o token
             // OIDC, conferido no handler (ADR 021). Fora do guarda JWT.
             .add_route(netmonitor_servers::controllers::deploys::hook_routes())
+            // O GitHub App avisa os pushes (ADR 023): sem sessão, a assinatura
+            // HMAC do app prova a origem. Fora do guarda JWT.
+            .add_route(netmonitor_servers::controllers::deploy_builds::hook_routes())
             .add_route(controllers::dashboard::routes().layer(business_auth.clone()))
             .add_route(controllers::backup::routes().layer(business_auth.clone()))
             .add_route(controllers::storages::routes().layer(business_auth.clone()))
@@ -219,6 +223,13 @@ impl Hooks for App {
             )
             .add_route(
                 netmonitor_servers::controllers::deploys::routes().layer(business_auth.clone()),
+            )
+            .add_route(
+                netmonitor_servers::controllers::deploy_builds::routes()
+                    .layer(business_auth.clone()),
+            )
+            .add_route(
+                netmonitor_servers_registry::controllers::routes().layer(business_auth.clone()),
             )
             .add_route(
                 netmonitor_servers::controllers::deploy_github::routes()
@@ -267,12 +278,20 @@ impl Hooks for App {
     /// O middleware de incidente entra por último, e por isso por **fora** dos
     /// do Loco: vê o 500 que o `CatchPanic` dele produz e o troca pelo nosso
     /// corpo, com o código que liga a tela ao log.
-    async fn after_routes(router: AxumRouter, _ctx: &AppContext) -> Result<AxumRouter> {
-        Ok(
-            spa::mount(router, &spa::web_root()).layer(axum::middleware::from_fn(
+    async fn after_routes(router: AxumRouter, ctx: &AppContext) -> Result<AxumRouter> {
+        // O registry OCI (ADR 022) fica na raiz do host: o Docker exige
+        // `/v2/`. Autentica pelo token do registry, não pela sessão.
+        let router =
+            router.merge(netmonitor_servers_registry::api::routes().with_state(ctx.clone()));
+        Ok(spa::mount(router, &spa::web_root())
+            .layer(axum::middleware::from_fn(
                 netmonitor_nucleo::services::shared::incident::track,
-            )),
-        )
+            ))
+            // De onde veio cada requisição, resolvido uma vez com o
+            // endereço real da conexão (só proxy confiável vale).
+            .layer(axum::middleware::from_fn(
+                netmonitor_core::shared::client_addr::stamp,
+            )))
     }
     /// Nenhum worker de fila registrado — o trabalho de background é o ciclo do
     /// `scheduler` e o agente do `probe`, ambos processos próprios.

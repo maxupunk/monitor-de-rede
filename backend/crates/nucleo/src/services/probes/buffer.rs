@@ -276,12 +276,8 @@ impl ProbeBuffer {
             return;
         }
 
-        if let Err(error) = tokio::fs::rename(&tmp_path, path).await {
-            // No Windows, rename falha se o destino já existir.
-            let _ = tokio::fs::remove_file(path).await;
-            if let Err(retry_err) = tokio::fs::rename(&tmp_path, path).await {
-                tracing::warn!(error = %retry_err, initial_error = %error, "não foi possível promover o {context}");
-            }
+        if let Err(error) = promote(&tmp_path, path).await {
+            tracing::warn!(%error, "não foi possível promover o {context}");
         }
     }
 
@@ -302,6 +298,30 @@ impl ProbeBuffer {
         if let Err(error) = tokio::fs::remove_file(path).await {
             if error.kind() != std::io::ErrorKind::NotFound {
                 tracing::warn!(%error, "não foi possível limpar o {context}");
+            }
+        }
+    }
+}
+
+/// Tentativas de [`promote`] antes de desistir.
+const PROMOTE_ATTEMPTS: u32 = 6;
+
+/// Troca o buffer pelo `tmp` num passo só. O `rename` já substitui o destino
+/// (no Windows também, por `MoveFileEx`); o que falha lá é transitório — o
+/// antivírus ou o indexador com o arquivo aberto —, então tenta de novo com
+/// espera crescente. Nunca apaga o destino antes: se a troca não sair, o
+/// buffer anterior continua inteiro.
+async fn promote(tmp: &Path, path: &Path) -> std::io::Result<()> {
+    let mut wait = std::time::Duration::from_millis(10);
+    let mut attempt = 1;
+    loop {
+        match tokio::fs::rename(tmp, path).await {
+            Ok(()) => return Ok(()),
+            Err(error) if attempt >= PROMOTE_ATTEMPTS => return Err(error),
+            Err(_) => {
+                tokio::time::sleep(wait).await;
+                wait *= 2;
+                attempt += 1;
             }
         }
     }
@@ -411,6 +431,19 @@ mod tests {
         assert_eq!(pending[0].task_id, "task-2");
         assert_eq!(pending[1].task_id, "task-3");
 
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn troca_que_falha_nao_apaga_o_buffer() {
+        let dir = std::env::temp_dir().join(format!("probe-buffer-promote-{}", std::process::id()));
+        tokio::fs::create_dir_all(&dir).await.expect("diretório");
+        let path = dir.join("probe_buffer.json");
+        tokio::fs::write(&path, b"[]").await.expect("buffer");
+        // Sem o `tmp`, a troca falha em todas as tentativas.
+        let missing = dir.join("nao-existe.tmp");
+        assert!(promote(&missing, &path).await.is_err());
+        assert_eq!(tokio::fs::read(&path).await.expect("buffer intacto"), b"[]");
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 

@@ -298,6 +298,7 @@ const PERMISSION_LABELS: Record<Permission, string> = {
   volume_export: 'Exportar volumes',
   throughput: 'Teste de vazão (enlace)',
   deploy: 'Deploy contínuo',
+  build: 'Compilar imagens',
 }
 
 function permissionLabel(permission: Permission): string {

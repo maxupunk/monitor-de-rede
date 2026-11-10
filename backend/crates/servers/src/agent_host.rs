@@ -21,13 +21,14 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::docker::{
+    builds::{BuildChunk, ImageHost, ImageImportRequest},
     compose,
     engine::ContainerAction,
     maintenance::{DockerMaintenance, Progress},
     protection::{is_current_container, is_protected_inspect},
     realtime::{inventory_snapshot, live_snapshot},
     source::{DockerEngine, LocalEngine, LogChunk},
-    stacks::{StackChunk, StackDeployRequest, StackHost},
+    stacks::{StackChunk, StackHost},
     DockerError,
 };
 
@@ -110,13 +111,18 @@ impl DockerCommands {
         docker(result)
     }
 
-    /// Deploy de stack: cada etapa e cada linha vão num chunk `StackChunk`.
-    async fn deploy(
-        engine: &LocalEngine,
-        request: &StackDeployRequest,
+    /// Operação com andamento tipado (`StackChunk`, `BuildChunk`): cada
+    /// evento vai num chunk em JSON até o fim.
+    async fn streamed<C, T, F>(
         chunks: mpsc::UnboundedSender<Value>,
-    ) -> Result<Value, RemoteError> {
-        let (events, mut received) = mpsc::unbounded_channel::<StackChunk>();
+        operation: impl FnOnce(mpsc::UnboundedSender<C>) -> F,
+    ) -> Result<Value, RemoteError>
+    where
+        C: Serialize + Send + 'static,
+        T: Serialize,
+        F: std::future::Future<Output = Result<T, DockerError>>,
+    {
+        let (events, mut received) = mpsc::unbounded_channel::<C>();
         let forward = tokio::spawn(async move {
             while let Some(chunk) = received.recv().await {
                 let Ok(value) = serde_json::to_value(chunk) else {
@@ -127,7 +133,7 @@ impl DockerCommands {
                 }
             }
         });
-        let result = engine.deploy_stack(request, events).await;
+        let result = operation(events).await;
         let _ = forward.await;
         docker(result)
     }
@@ -230,7 +236,19 @@ impl DockerCommands {
                 })
                 .await
             }
-            DockerCall::StackDeploy { request } => Self::deploy(engine, &request, chunks).await,
+            DockerCall::StackDeploy { request } => {
+                Self::streamed::<StackChunk, _, _>(chunks, |events| async move {
+                    engine.deploy_stack(&request, events).await
+                })
+                .await
+            }
+            DockerCall::ImageBuild { request } => {
+                Self::streamed::<BuildChunk, _, _>(chunks, |events| async move {
+                    engine.build_images(&request, events, cancel).await
+                })
+                .await
+            }
+            DockerCall::BuilderReadiness => docker(engine.builder_readiness().await),
             DockerCall::StackReadiness { project } => {
                 docker(engine.stack_readiness(&project).await)
             }
@@ -320,6 +338,20 @@ impl HostDocker for LocalHostDocker {
 
     async fn inventory(&self) -> Option<DockerInventorySnapshot> {
         inventory_snapshot(&LocalEngine).await.ok()
+    }
+
+    async fn open_artifact(&self, artifact: uuid::Uuid) -> Result<TunnelStream, RemoteError> {
+        LocalEngine
+            .open_artifact(artifact)
+            .await
+            .map_err(RemoteError::from)
+    }
+
+    async fn open_import(&self, request: &ImageImportRequest) -> Result<TunnelStream, RemoteError> {
+        LocalEngine
+            .open_import(request)
+            .await
+            .map_err(RemoteError::from)
     }
 
     async fn export_volume(&self, name: &str) -> Result<TunnelStream, RemoteError> {

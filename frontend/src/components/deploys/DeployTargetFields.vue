@@ -117,6 +117,29 @@
       label="Voltar a versão anterior se os healthchecks falharem"
     ></v-switch>
 
+    <template v-if="compiles">
+      <v-select
+        v-model="model.vulnerabilityPolicy"
+        :items="POLICY_OPTIONS"
+        item-title="title"
+        item-value="value"
+        label="Vulnerabilidades na imagem"
+        hint="A imagem é analisada ao chegar no registry; um administrador pode abrir exceção por CVE"
+        persistent-hint
+        variant="outlined"
+        prepend-inner-icon="mdi-shield-search"
+        class="mt-3"
+        data-test="vulnerability-policy"
+      ></v-select>
+      <v-switch
+        v-model="model.requireProvenance"
+        color="primary"
+        inset
+        hide-details
+        label="Só imagem compilada pela central a partir deste repositório"
+      ></v-switch>
+    </template>
+
     <v-expansion-panels variant="accordion" class="mt-2">
       <v-expansion-panel elevation="0" class="border">
         <v-expansion-panel-title class="font-weight-bold">Avançado</v-expansion-panel-title>
@@ -176,6 +199,7 @@ import { useDeploysStore } from '@/stores/deploys'
 import type { DeployReferencesView } from '@/bindings/DeployReferencesView'
 import { referenceChoices, type TargetForm } from '@/utils/deployForms'
 import { requiredRule } from '@/utils/formRules'
+import { POLICY_OPTIONS } from '@/utils/deployPresentation'
 
 const model = defineModel<TargetForm>({ required: true })
 const props = defineProps<{
@@ -184,6 +208,8 @@ const props = defineProps<{
   /** Branches e tags do repositório, quando o GitHub está conectado. */
   references?: DeployReferencesView | null
   referencesLoading?: boolean
+  /** A aplicação compila no NetMonitor: o alvo tem política de imagem. */
+  compiles?: boolean
 }>()
 
 const deploys = useDeploysStore()

@@ -1,8 +1,9 @@
 //! As ferramentas de deploy da IA (ADR 021).
 //!
-//! Duas de consulta — o estado de cada aplicação e o log de um deploy, para
-//! responder "por que o último deploy do SGC falhou?" — e uma de ação,
-//! `deploy_action`, que aprova, recusa, publica ou restaura. A de ação é
+//! Quatro de consulta — o estado de cada aplicação, o log de um deploy, as
+//! compilações no servidor e o log de uma delas (ADR 023), para responder
+//! "por que o último deploy do SGC falhou?" — e uma de ação, `deploy_action`,
+//! que aprova, recusa, publica, restaura ou compila. A de ação é
 //! **sempre** de risco alto: pede confirmação a cada chamada, qualquer que
 //! seja o modo de automação, porque troca a versão de uma aplicação em
 //! produção.
@@ -24,11 +25,19 @@ use netmonitor_core::{
     shared::errors::AppResult,
 };
 
-use super::{applications, catalog, events, orchestrator, runs, short_sha, RunStatus};
+use super::{
+    applications, builds, catalog, events, orchestrator, runs, short_digest, short_sha, RunStatus,
+};
 use crate::dtos::deploys::{DeployInput, DeployWhen};
 
 /// Linhas do fim do log que vão à IA.
 const LOG_TAIL_LINES: usize = 80;
+
+/// As últimas [`LOG_TAIL_LINES`] linhas de um console.
+fn log_tail(log: Option<&str>) -> String {
+    let lines: Vec<&str> = log.unwrap_or_default().lines().collect();
+    lines[lines.len().saturating_sub(LOG_TAIL_LINES)..].join("\n")
+}
 
 pub struct DeployStatus;
 
@@ -73,6 +82,7 @@ impl AiToolHandler for DeployStatus {
             .filter(|app| matches(&app.name))
             .map(|app| {
                 json!({
+                    "applicationId": app.id,
                     "name": app.name,
                     "repository": app.repository,
                     "targets": app.targets.iter().map(|target| json!({
@@ -163,9 +173,7 @@ impl AiToolHandler for DeployLog {
             )));
         };
         let view = events::view(&ctx.db, &run).await?;
-        let log = run.log.unwrap_or_default();
-        let lines: Vec<&str> = log.lines().collect();
-        let tail = lines[lines.len().saturating_sub(LOG_TAIL_LINES)..].join("\n");
+        let tail = log_tail(run.log.as_deref());
         Ok(ToolOutput::data(json!({
             "runId": view.id,
             "application": view.application_name,
@@ -180,6 +188,119 @@ impl AiToolHandler for DeployLog {
     }
 }
 
+pub struct BuildStatus;
+
+#[async_trait]
+impl AiToolHandler for BuildStatus {
+    fn area(&self) -> Area {
+        Area::Servers
+    }
+
+    fn name(&self) -> &'static str {
+        "get_builds"
+    }
+
+    fn group(&self) -> ToolGroup {
+        ToolGroup::Docker
+    }
+
+    fn description(&self) -> &'static str {
+        "Compilações de imagem no servidor (deploy contínuo sem GitHub Actions): aplicação, commit, branch, quem pediu, estado, etapa, imagens geradas e o erro. Use para 'a compilação do SGC falhou?' ou 'o que está compilando?'."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "applicationId": { "type": "integer", "description": "Só desta aplicação (get_deploys); vazio, todas" }
+            }
+        })
+    }
+
+    async fn execute(&self, ctx: &AppContext, args: &ToolArgs) -> AppResult<ToolOutput> {
+        let rows = builds::recent(&ctx.db, args.integer("applicationId"), 15).await?;
+        let mut items = Vec::with_capacity(rows.len());
+        for row in &rows {
+            let view = builds::view(&ctx.db, row).await?;
+            items.push(json!({
+                "buildId": view.id,
+                "application": view.application,
+                "applicationId": view.application_id,
+                "branch": builds::branch_of(row),
+                "commit": view.short_sha,
+                "message": view.commit_message.as_deref().and_then(|message| message.lines().next()),
+                "trigger": view.trigger,
+                "by": view.triggered_by,
+                "agent": view.agent,
+                "status": view.status,
+                "stage": view.stage,
+                "noCache": view.no_cache,
+                "images": view.images.iter().map(|image| json!({
+                    "name": image.name,
+                    "digest": short_digest(&image.digest),
+                })).collect::<Vec<_>>(),
+                "error": view.error,
+                "durationMs": view.duration_ms,
+                "at": view.finished_at.as_ref().unwrap_or(&view.created_at),
+            }));
+        }
+        Ok(ToolOutput::data(json!({ "builds": items })))
+    }
+}
+
+pub struct BuildLog;
+
+#[async_trait]
+impl AiToolHandler for BuildLog {
+    fn area(&self) -> Area {
+        Area::Servers
+    }
+
+    fn name(&self) -> &'static str {
+        "get_build_log"
+    }
+
+    fn group(&self) -> ToolGroup {
+        ToolGroup::Docker
+    }
+
+    fn description(&self) -> &'static str {
+        "O fim do console de uma compilação (clone, buildx, envio ao registry, análise de vulnerabilidades), com estado e erro. Informe 'buildId' (de get_builds) para explicar por que falhou."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "buildId": { "type": "integer", "description": "Id da compilação (get_builds)" }
+            },
+            "required": ["buildId"]
+        })
+    }
+
+    async fn execute(&self, ctx: &AppContext, args: &ToolArgs) -> AppResult<ToolOutput> {
+        let Some(id) = args.integer("buildId") else {
+            return Ok(ToolOutput::not_found("Informe 'buildId' (veja get_builds)"));
+        };
+        let Ok(build) = builds::find(&ctx.db, id).await else {
+            return Ok(ToolOutput::not_found(format!(
+                "Compilação #{id} não encontrada"
+            )));
+        };
+        let view = builds::view(&ctx.db, &build).await?;
+        Ok(ToolOutput::data(json!({
+            "buildId": view.id,
+            "application": view.application,
+            "branch": builds::branch_of(&build),
+            "commit": view.short_sha,
+            "status": view.status,
+            "stage": view.stage,
+            "error": view.error,
+            "logTail": log_tail(build.log.as_deref()),
+        })))
+    }
+}
+
 /// O que `deploy_action` faz.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Action {
@@ -187,10 +308,12 @@ enum Action {
     Reject,
     Deploy,
     Restore,
+    /// Compila no servidor (ADR 023) e, ao fim, publica nos alvos.
+    Build,
 }
 
 impl Action {
-    const NAMES: [&'static str; 4] = ["approve", "reject", "deploy", "restore"];
+    const NAMES: [&'static str; 5] = ["approve", "reject", "deploy", "restore", "build"];
 
     const fn as_str(self) -> &'static str {
         match self {
@@ -198,6 +321,7 @@ impl Action {
             Self::Reject => "reject",
             Self::Deploy => "deploy",
             Self::Restore => "restore",
+            Self::Build => "build",
         }
     }
 
@@ -207,6 +331,7 @@ impl Action {
             "reject" => Some(Self::Reject),
             "deploy" => Some(Self::Deploy),
             "restore" => Some(Self::Restore),
+            "build" => Some(Self::Build),
             _ => None,
         }
     }
@@ -262,7 +387,7 @@ impl AiToolHandler for DeployAction {
     }
 
     fn description(&self) -> &'static str {
-        "Age sobre o deploy contínuo, sempre com confirmação do usuário: 'approve'/'reject' um deploy aguardando aprovação (runId), 'deploy' publica uma versão num alvo (targetId e commitSha completo; sem commit republica a versão no ar), 'restore' volta um alvo à versão de um deploy que deu certo (runId). 'when': 'now' (padrão) ou 'window' (janela de manutenção do alvo)."
+        "Age sobre o deploy contínuo, sempre com confirmação do usuário: 'approve'/'reject' um deploy aguardando aprovação (runId), 'deploy' publica uma versão num alvo (targetId e commitSha completo; sem commit republica a versão no ar), 'restore' volta um alvo à versão de um deploy que deu certo (runId), 'build' compila no servidor uma aplicação que não usa GitHub Actions (applicationId; branch e commitSha opcionais: vazios, o mais novo da branch que os alvos acompanham) e os alvos recebem o deploy ao fim. 'when': 'now' (padrão) ou 'window' (janela de manutenção do alvo)."
     }
 
     fn parameters(&self) -> Value {
@@ -272,7 +397,9 @@ impl AiToolHandler for DeployAction {
                 "action": { "type": "string", "enum": Action::NAMES },
                 "runId": { "type": "integer", "description": "Deploy (approve, reject, restore)" },
                 "targetId": { "type": "integer", "description": "Alvo (deploy)" },
-                "commitSha": { "type": "string", "description": "SHA completo do commit (deploy)" },
+                "applicationId": { "type": "integer", "description": "Aplicação (build)" },
+                "branch": { "type": "string", "description": "Branch a compilar (build)" },
+                "commitSha": { "type": "string", "description": "SHA completo do commit (deploy, build)" },
                 "when": { "type": "string", "enum": ["now", "window"] },
                 "reason": { "type": "string", "description": "Motivo da recusa (reject)" }
             },
@@ -287,6 +414,24 @@ impl AiToolHandler for DeployAction {
             DeployWhen::Window => "na janela de manutenção",
         };
         Ok(match action {
+            Some(Action::Build) => {
+                let application = match args.integer("applicationId") {
+                    Some(id) => applications::find(&ctx.db, id)
+                        .await
+                        .map_or_else(|_| format!("aplicação #{id}"), |app| app.name),
+                    None => "aplicação não informada".to_string(),
+                };
+                let version = args.text("commitSha").map_or_else(
+                    || "o commit mais novo".to_string(),
+                    |sha| format!("o commit {}", short_sha(&sha)),
+                );
+                let branch = args
+                    .text("branch")
+                    .map_or_else(String::new, |branch| format!(" de {branch}"));
+                format!(
+                    "Compilar {version}{branch} de {application} no servidor e publicar nos alvos"
+                )
+            }
             Some(Action::Deploy) => {
                 let target = match args.integer("targetId") {
                     Some(id) => applications::find_target(&ctx.db, id)
@@ -332,6 +477,9 @@ impl AiToolHandler for DeployAction {
             )));
         };
         let user = actor_name(ctx, args).await;
+        if action == Action::Build {
+            return build(ctx, args, &user).await;
+        }
         let when = when_of(args);
         let result = match action {
             Action::Deploy => match args.integer("targetId") {
@@ -393,4 +541,58 @@ impl AiToolHandler for DeployAction {
             "running": view.status == RunStatus::Running || view.status == RunStatus::Queued,
         })))
     }
+}
+
+/// `deploy_action` com `build`: o mesmo caminho do "Compilar agora" da tela.
+async fn build(ctx: &AppContext, args: &ToolArgs, user: &str) -> AppResult<ToolOutput> {
+    let Some(application_id) = args.integer("applicationId") else {
+        return Ok(ToolOutput::not_found(
+            "Informe 'applicationId' (get_deploys)",
+        ));
+    };
+    let application = match applications::find(&ctx.db, application_id).await {
+        Ok(application) => application,
+        Err(error) => return Ok(ToolOutput::not_found(error.to_string())),
+    };
+    let branch = args.text("branch");
+    let commit = args.text("commitSha");
+    let requested = builds::request_manual(
+        ctx,
+        &application,
+        &builds::ManualBuild {
+            reference: branch.as_deref(),
+            commit: commit.as_deref(),
+            no_cache: false,
+        },
+        user,
+    )
+    .await;
+    let build = match requested {
+        Ok(build) => build,
+        Err(error) => return Ok(ToolOutput::not_found(error.to_string())),
+    };
+    audit(
+        ctx,
+        args,
+        AuditEntryInput {
+            action: AuditAction::Execute,
+            resource_type: ResourceType::Deploy,
+            resource_id: Some(application.id),
+            resource_label: Some(application.name.clone()),
+            description: Some(format!(
+                "Compilação #{} de {} ({}) ({VIA_AI})",
+                build.id,
+                short_sha(&build.commit_sha),
+                builds::branch_of(&build)
+            )),
+            changes: None,
+        },
+    )
+    .await;
+    Ok(ToolOutput::data(json!({
+        "ok": true,
+        "buildId": build.id,
+        "commit": short_sha(&build.commit_sha),
+        "status": build.status,
+    })))
 }

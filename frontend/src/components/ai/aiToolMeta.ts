@@ -155,6 +155,8 @@ const TOOL_META: Record<string, AiToolLook> = {
   get_deploys: { label: 'Deploys', icon: 'mdi-rocket-launch-outline', color: 'info' },
   get_deploy_log: { label: 'Log de Deploy', icon: 'mdi-console', color: 'info' },
   deploy_action: { label: 'Ação de Deploy', icon: 'mdi-rocket-launch', color: 'warning' },
+  get_builds: { label: 'Compilações', icon: 'mdi-hammer-wrench', color: 'info' },
+  get_build_log: { label: 'Log de Compilação', icon: 'mdi-console', color: 'info' },
   get_platform_status: {
     label: 'Estado da Plataforma',
     icon: 'mdi-view-dashboard-outline',

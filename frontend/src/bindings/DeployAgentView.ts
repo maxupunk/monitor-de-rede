@@ -8,4 +8,8 @@ export type DeployAgentView = { id: number, name: string, connected: boolean,
  * A política local libera `deploy` (desconectado conta como sim até
  * o próximo `Hello`).
  */
-allowsDeploy: boolean, };
+allowsDeploy: boolean, 
+/**
+ * A política local libera compilar (`build`, ADR 023).
+ */
+allowsBuild: boolean, };

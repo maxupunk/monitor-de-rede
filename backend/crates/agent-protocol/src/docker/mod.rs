@@ -5,6 +5,7 @@
 //! precisam do mesmo tipo dos dois lados do fio — e o contrato não pode
 //! depender de área nenhuma (ADR 017).
 
+pub mod images;
 pub mod stacks;
 pub mod views;
 

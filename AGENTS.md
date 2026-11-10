@@ -65,7 +65,7 @@
 
 4. **Práticas de Teste (Rust)**:
    - **Isolamento de Banco**: testes de requisição usam
-     `request_with_config::<App, _, _>`; o `Hooks::truncate` limpa as 53 tabelas
+     `request_with_config::<App, _, _>`; o `Hooks::truncate` limpa as 66 tabelas
      entre eles.
    - **`#[serial]`** em tudo que toca estado global de processo: `ScanSessionService`,
      o cofre de chaves da VPN, o rate limiter e qualquer teste que mexa em
@@ -160,6 +160,21 @@
      repositório; qual credencial vai em cada uso é decidido só em
      `deploys::access`. O PR do workflow sai de uma branch do NetMonitor,
      nunca direto na branch padrão.
+   - **Compilação no servidor e registry** (ADR 022/023): quem compila é
+     um **agente** com a permissão `build` (fora do padrão), só pela operação
+     fechada `DockerCall::ImageBuild` e só no builder BuildKit dedicado
+     (`netmonitor-builder`, rede própria, sem `docker.sock` nem disco do
+     host) — a API nunca compila. Segredo de build vai só como `--secret`
+     (ambiente do processo filho), nunca como `--build-arg`. A imagem viaja
+     pelo canal do agente (`ImageExport`/`ImageImport`, quadros binários):
+     o host nunca chama a central. O aviso de push do GitHub App é provado
+     pela assinatura HMAC (`X-Hub-Signature-256`) antes de ler o corpo; não
+     compile PR. O registry fica em `/v2` na raiz, autentica pelo token do
+     Docker (JWT de 5 min derivado da `ENCRYPTION_KEY`), e **token pessoal só
+     vale de origem interna/VPN** — pela borda pública ele é recusado. O IP
+     de origem vem só de `shared::client_addr` (`TRUSTED_PROXIES`): não leia
+     `X-Forwarded-For` direto. A varredura lê SBOM e bancos de pacotes, nunca
+     executa conteúdo da imagem; tag de commit é imutável.
    - **Plugins de dispositivo** (ADR 012): o script Rhai roda **só** no sandbox
      da central e **nunca** abre socket — toda E/S passa por
      `plugins::transport::DeviceTransport`, que só alcança o IP cadastrado. O

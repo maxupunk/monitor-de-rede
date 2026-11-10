@@ -17,10 +17,11 @@ use crate::{
     deploys::{
         applications::{compose_files_of, images_of, repository_url, rollout_of},
         env_versions::keys_of,
+        images::VulnerabilityPolicy,
         runs::status_of,
         short_sha, DeployStage, Rollout, RunStatus, RunTrigger,
     },
-    dtos::deploys::BuildImage,
+    dtos::deploys::{BuildArgInput, BuildImage, Builder},
 };
 
 fn timestamp(value: &sea_orm::prelude::DateTimeWithTimeZone) -> String {
@@ -94,6 +95,9 @@ pub struct DeployRunView {
     pub finished_at: Option<String>,
     #[ts(type = "number | null")]
     pub duration_ms: Option<i64>,
+    /// A compilação no servidor que produziu a imagem (ADR 023).
+    #[ts(type = "number | null")]
+    pub build_id: Option<i64>,
 }
 
 impl DeployRunView {
@@ -117,6 +121,7 @@ impl DeployRunView {
             short_sha: short_sha(&run.commit_sha).to_string(),
             commit_message: run.commit_message.clone(),
             image_tag: run.image_tag.clone(),
+            build_id: run.build_id,
             env_version_id: run.env_version_id,
             status: status_of(run),
             stage: run.stage.as_deref().and_then(DeployStage::parse),
@@ -197,6 +202,8 @@ pub struct DeployAgentView {
     /// A política local libera `deploy` (desconectado conta como sim até
     /// o próximo `Hello`).
     pub allows_deploy: bool,
+    /// A política local libera compilar (`build`, ADR 023).
+    pub allows_build: bool,
 }
 
 #[derive(Debug, Clone, Serialize, TS)]
@@ -223,6 +230,8 @@ pub struct DeployTargetView {
     pub keep_images: i32,
     pub enabled: bool,
     pub position: i32,
+    pub vulnerability_policy: VulnerabilityPolicy,
+    pub require_provenance: bool,
     /// A versão no ar.
     pub live: Option<DeployRunView>,
     /// O deploy pendente ou em andamento mais recente.
@@ -259,6 +268,8 @@ impl DeployTargetView {
             keep_images: row.keep_images,
             enabled: row.enabled,
             position: row.position,
+            vulnerability_policy: VulnerabilityPolicy::parse(&row.vulnerability_policy),
+            require_provenance: row.require_provenance,
             live: parts.live,
             pending: parts.pending,
             env: parts.env,
@@ -287,6 +298,11 @@ pub struct DeployApplicationView {
     pub image_tag_variable: String,
     pub images: Vec<BuildImage>,
     pub rollout: Rollout,
+    pub builder: Builder,
+    #[ts(type = "number | null")]
+    pub build_probe_id: Option<i64>,
+    pub test_target: Option<String>,
+    pub build_args: Vec<BuildArgInput>,
     pub targets: Vec<DeployTargetView>,
     pub created_at: String,
 }
@@ -313,6 +329,10 @@ impl DeployApplicationView {
             image_tag_variable: row.image_tag_variable.clone(),
             images: images_of(row),
             rollout: rollout_of(row),
+            builder: Builder::parse(&row.builder),
+            build_probe_id: row.build_probe_id,
+            test_target: row.test_target.clone(),
+            build_args: serde_json::from_value(row.build_args.clone()).unwrap_or_default(),
             targets,
             created_at: timestamp(&row.created_at),
         }

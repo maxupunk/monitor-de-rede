@@ -37,6 +37,35 @@ pub trait HostDocker: Send + Sync {
     ///
     /// Volume inexistente ou Engine inacessível.
     async fn export_volume(&self, name: &str) -> Result<TunnelStream, RemoteError>;
+
+    /// O arquivo OCI de uma imagem compilada aqui (`Command::ImageExport`,
+    /// ADR 023). A política local já foi conferida por quem chama.
+    ///
+    /// # Errors
+    ///
+    /// Artefato inexistente ou Docker indisponível.
+    async fn open_artifact(&self, _artifact: uuid::Uuid) -> Result<TunnelStream, RemoteError> {
+        Err(docker_missing())
+    }
+
+    /// O `docker load` deste host (`Command::ImageImport`, ADR 022).
+    ///
+    /// # Errors
+    ///
+    /// Referência inválida ou Docker indisponível.
+    async fn open_import(
+        &self,
+        _request: &agent_protocol::docker::images::ImageImportRequest,
+    ) -> Result<TunnelStream, RemoteError> {
+        Err(docker_missing())
+    }
+}
+
+fn docker_missing() -> RemoteError {
+    RemoteError::new(
+        ErrorCode::Unsupported,
+        "Docker não está disponível neste agente",
+    )
 }
 
 /// Agente montado sem a área Servidores: não anuncia Docker nem compose, não

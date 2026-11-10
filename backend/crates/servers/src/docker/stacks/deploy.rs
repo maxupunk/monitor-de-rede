@@ -96,16 +96,35 @@ pub fn compose_args(project: &str, dir: &Path, files: &[String], command: &[&str
 /// `up` que não compila, remove serviços que saíram do arquivo e espera os
 /// healthchecks.
 #[must_use]
-pub fn up_command(wait_timeout_secs: u32) -> Vec<String> {
-    vec![
+pub fn up_command(wait_timeout_secs: u32, pull: bool) -> Vec<String> {
+    let mut up: Vec<String> = vec![
         "up".into(),
         "--detach".into(),
         "--no-build".into(),
         "--remove-orphans".into(),
+    ];
+    if !pull {
+        // A central entregou as imagens: nada de registry no `up`.
+        up.extend(["--pull".into(), "never".into()]);
+    }
+    up.extend([
         "--wait".into(),
         "--wait-timeout".into(),
         wait_timeout_secs.to_string(),
-    ]
+    ]);
+    up
+}
+
+/// O `compose pull`. Com as imagens entregues pela central (`pull: false`),
+/// só baixa o que falta (o banco, um proxy): a imagem da aplicação já está
+/// no host e não existe em registry público nenhum.
+#[must_use]
+pub const fn pull_command(pull: bool) -> &'static [&'static str] {
+    if pull {
+        &["pull"]
+    } else {
+        &["pull", "--policy", "missing"]
+    }
 }
 
 /// Ambiente do compose: a tag da imagem, saída sem cor e, com login, o
@@ -268,7 +287,9 @@ pub async fn run(
     };
 
     stage(events, StackStage::Pull);
-    let pulled = compose.run(events, &["pull"], PULL_TIMEOUT).await?;
+    let pulled = compose
+        .run(events, pull_command(request.pull), PULL_TIMEOUT)
+        .await?;
     if !pulled.success {
         return Err(DockerError::Validation(format!(
             "Não foi possível baixar as imagens da tag {}: {}",
@@ -278,7 +299,7 @@ pub async fn run(
     }
 
     stage(events, StackStage::Start);
-    let up = up_command(request.wait_timeout_secs);
+    let up = up_command(request.wait_timeout_secs, request.pull);
     let up: Vec<&str> = up.iter().map(String::as_str).collect();
     let started = compose
         .run(
@@ -418,11 +439,24 @@ mod tests {
 
     #[test]
     fn up_nunca_compila_e_espera_os_healthchecks() {
-        let up = up_command(180);
+        let up = up_command(180, true);
         for flag in ["--no-build", "--wait", "--remove-orphans", "--detach"] {
             assert!(up.contains(&flag.to_string()), "{flag}");
         }
+        assert!(!up.contains(&"--pull".to_string()));
         assert_eq!(up.last().map(String::as_str), Some("180"));
+    }
+
+    #[test]
+    fn imagem_da_central_nao_vai_ao_registry() {
+        // Visto no e2e real: sem isso o `compose pull` procura a imagem da
+        // aplicação no Docker Hub e o deploy falha com ela já no host.
+        assert_eq!(pull_command(true), ["pull"]);
+        assert_eq!(pull_command(false), ["pull", "--policy", "missing"]);
+        let up = up_command(60, false);
+        let at = up.iter().position(|arg| arg == "--pull").expect("--pull");
+        assert_eq!(up[at + 1], "never");
+        assert_eq!(up.last().map(String::as_str), Some("60"));
     }
 
     #[test]
@@ -441,6 +475,7 @@ mod tests {
             registry: None,
             wait_timeout_secs: 60,
             keep_images: 2,
+            pull: true,
         };
         let envs = compose_env(&request, Some(Path::new("/tmp/cfg")));
         assert!(envs.contains(&("IMAGE_TAG".into(), "abcdef1".into())));

@@ -63,6 +63,7 @@ mod process_deps;
 mod push;
 mod quick_ping;
 mod reach_monitors;
+mod registry;
 mod root;
 mod saas_monitoring;
 mod scheduled_tasks;

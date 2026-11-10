@@ -23,6 +23,33 @@
       </v-btn>
     </v-alert>
 
+    <div class="text-subtitle-2 font-weight-bold mb-2">Quem compila as imagens?</div>
+    <v-row dense class="mb-3" role="radiogroup" aria-label="Quem compila as imagens">
+      <v-col v-for="option in BUILDER_OPTIONS" :key="option.value" cols="12" sm="6">
+        <ChoiceCard
+          :selected="model.builder === option.value"
+          class="pa-3 h-100"
+          :data-test="`builder-${option.value}`"
+          @click="model.builder = option.value"
+        >
+          <div class="d-flex align-center ga-2 mb-1">
+            <v-icon :icon="option.icon" color="primary"></v-icon>
+            <span class="font-weight-bold">{{ option.title }}</span>
+            <v-chip
+              v-if="option.value === 'netmonitor'"
+              size="x-small"
+              color="success"
+              variant="flat"
+              class="ml-auto"
+            >
+              Recomendado
+            </v-chip>
+          </div>
+          <div class="text-body-2">{{ option.subtitle }}</div>
+        </ChoiceCard>
+      </v-col>
+    </v-row>
+
     <v-row dense>
       <v-col v-if="deploys.githubConnections.length" cols="12" sm="5">
         <v-select
@@ -119,16 +146,27 @@
           :rules="[(value: string[]) => value.length > 0 || 'Informe ao menos um arquivo']"
         ></v-combobox>
       </v-col>
-      <v-col cols="12" sm="6">
+      <v-col v-if="compilesHere" cols="12" sm="6">
+        <v-select
+          v-model="buildAgentChoice"
+          :items="buildAgentItems"
+          item-title="title"
+          item-value="value"
+          item-props="props"
+          label="Onde compilar"
+          hint="No próprio servidor de destino a imagem já nasce onde vai rodar"
+          persistent-hint
+          variant="outlined"
+          prepend-inner-icon="mdi-hammer-wrench"
+          data-test="build-agent"
+        ></v-select>
+      </v-col>
+      <v-col v-if="!compilesHere || model.githubConnectionId === null" cols="12" sm="6">
         <v-select
           v-model="model.credentialId"
           :items="credentialItems"
-          :label="model.githubConnectionId !== null ? 'Token para imagens privadas' : 'Token'"
-          :hint="
-            model.githubConnectionId !== null
-              ? 'Só se as imagens no ghcr.io forem privadas'
-              : 'Para repositório e imagens privados'
-          "
+          :label="credentialLabel"
+          :hint="credentialHint"
           persistent-hint
           variant="outlined"
           clearable
@@ -144,10 +182,10 @@
       </v-col>
     </v-row>
 
-    <div class="text-subtitle-2 font-weight-bold mt-4 mb-1">Imagens que o GitHub compila</div>
-    <div class="text-body-2 text-high-emphasis mb-2">
-      Usadas para gerar o workflow. Deixe vazio se as imagens já são publicadas de outro jeito.
+    <div class="text-subtitle-2 font-weight-bold mt-4 mb-1">
+      {{ compilesHere ? 'Imagens que o NetMonitor compila' : 'Imagens que o GitHub compila' }}
     </div>
+    <div class="text-body-2 text-high-emphasis mb-2">{{ imagesHelp }}</div>
     <div v-for="(image, index) in model.images" :key="index" class="d-flex ga-2 align-start">
       <v-text-field
         v-model="image.name"
@@ -169,6 +207,15 @@
         density="compact"
         variant="outlined"
         class="image-context"
+      ></v-text-field>
+      <v-text-field
+        v-if="compilesHere"
+        v-model="image.reference"
+        label="image: no compose *"
+        placeholder="ghcr.io/acme/loja-api"
+        density="compact"
+        variant="outlined"
+        :rules="[referenceRule]"
       ></v-text-field>
       <v-btn
         icon="mdi-delete"
@@ -206,6 +253,72 @@
                 variant="outlined"
               ></v-text-field>
             </v-col>
+            <template v-if="compilesHere">
+              <v-col cols="12" sm="6">
+                <v-text-field
+                  v-model="model.testTarget"
+                  label="Estágio de teste (opcional)"
+                  placeholder="test"
+                  hint="Um target do Dockerfile que roda os testes antes das imagens; falhou, nada sobe"
+                  persistent-hint
+                  variant="outlined"
+                  prepend-inner-icon="mdi-test-tube"
+                ></v-text-field>
+              </v-col>
+              <v-col cols="12">
+                <div class="text-subtitle-2 font-weight-bold mb-1">Argumentos de build</div>
+                <div class="text-body-2 text-high-emphasis mb-2">
+                  Vão para o histórico da imagem: nada de senha aqui. Segredo (token do npm, por
+                  exemplo) vai em Segredos de build, no cartão da aplicação.
+                </div>
+                <div
+                  v-for="(arg, index) in model.buildArgs"
+                  :key="index"
+                  class="d-flex ga-2 align-start"
+                >
+                  <v-text-field
+                    v-model="arg.name"
+                    label="Nome"
+                    placeholder="NODE_ENV"
+                    density="compact"
+                    variant="outlined"
+                    :rules="[envVariableRule()]"
+                  ></v-text-field>
+                  <v-text-field
+                    v-model="arg.value"
+                    label="Valor"
+                    density="compact"
+                    variant="outlined"
+                  ></v-text-field>
+                  <v-btn
+                    icon="mdi-delete"
+                    color="error"
+                    variant="text"
+                    :aria-label="`Remover ${arg.name || 'argumento'}`"
+                    @click="model.buildArgs.splice(index, 1)"
+                  ></v-btn>
+                </div>
+                <v-alert
+                  v-if="secretLookingArg"
+                  type="warning"
+                  variant="tonal"
+                  density="compact"
+                  class="mb-2"
+                >
+                  {{ secretLookingArg }} parece um segredo: use Segredos de build, que não ficam na
+                  imagem.
+                </v-alert>
+                <v-btn
+                  color="primary"
+                  variant="tonal"
+                  size="small"
+                  prepend-icon="mdi-plus"
+                  @click="model.buildArgs.push({ name: '', value: '' })"
+                >
+                  Adicionar argumento
+                </v-btn>
+              </v-col>
+            </template>
             <v-col cols="12">
               <div class="text-subtitle-2 font-weight-bold mb-1">Vários alvos no mesmo push</div>
               <v-radio-group v-model="model.rollout" hide-details>
@@ -233,6 +346,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import ChoiceCard from '@/components/ChoiceCard.vue'
 import IconAction from '@/components/IconAction.vue'
 import DeployRepositoryPicker from '@/components/deploys/DeployRepositoryPicker.vue'
 import type { DeployApplicationInput } from '@/bindings/DeployApplicationInput'
@@ -240,7 +354,8 @@ import type { DeployComposeDiscovery } from '@/bindings/DeployComposeDiscovery'
 import type { DeployRepositoryView } from '@/bindings/DeployRepositoryView'
 import { useDeploysStore, type GithubSource } from '@/stores/deploys'
 import { applyDiscovery, slugify } from '@/utils/deployForms'
-import { requiredRule } from '@/utils/formRules'
+import { BUILDER_OPTIONS } from '@/utils/deployPresentation'
+import { envVariableRule, requiredRule } from '@/utils/formRules'
 
 const model = defineModel<DeployApplicationInput>({ required: true })
 const props = defineProps<{ editing?: boolean }>()
@@ -282,6 +397,73 @@ const source = computed<GithubSource>(() => ({
   credentialId: model.value.credentialId,
 }))
 
+/** O servidor compila (ADR 023). */
+const compilesHere = computed(() => model.value.builder === 'netmonitor')
+
+const imagesHelp = computed(() =>
+  compilesHere.value
+    ? 'Cada serviço com build: no compose. O nome do image: é o que o servidor usa para subir a imagem compilada.'
+    : 'Usadas para gerar o workflow. Deixe vazio se as imagens já são publicadas de outro jeito.'
+)
+
+/** O `v-select` não lida bem com `null` como valor: 0 é "o destino". */
+const DESTINATION = 0
+
+const buildAgentChoice = computed({
+  get: () => model.value.buildProbeId ?? DESTINATION,
+  set: (value: number) => {
+    model.value.buildProbeId = value === DESTINATION ? null : value
+  },
+})
+
+const buildAgentItems = computed(() => [
+  {
+    title: 'No servidor de destino',
+    value: DESTINATION,
+    props: { subtitle: 'O agente do primeiro alvo compila' },
+  },
+  ...deploys.agents.map((agent) => ({
+    title: agent.name,
+    value: agent.id,
+    props: {
+      subtitle: buildAgentHint(agent.allowsBuild, agent.connected),
+      disabled: !agent.allowsBuild,
+    },
+  })),
+])
+
+function buildAgentHint(allowsBuild: boolean, connected: boolean): string {
+  if (!allowsBuild) return 'Não libera compilar (falta build em AGENT_ALLOW)'
+  return connected ? 'Libera compilar' : 'Desconectado agora'
+}
+
+const credentialLabel = computed(() => {
+  if (compilesHere.value) return 'Token para ler o repositório'
+  return model.value.githubConnectionId !== null ? 'Token para imagens privadas' : 'Token'
+})
+
+const credentialHint = computed(() => {
+  if (compilesHere.value) return 'Só para repositório privado sem a conexão com o GitHub'
+  return model.value.githubConnectionId !== null
+    ? 'Só se as imagens no ghcr.io forem privadas'
+    : 'Para repositório e imagens privados'
+})
+
+function referenceRule(value: string | undefined): true | string {
+  const clean = (value ?? '').trim()
+  if (!clean) return 'Informe o image: do serviço no compose'
+  const last = clean.split('/').pop() ?? ''
+  if (last.includes(':')) return 'Sem a tag: o NetMonitor põe a do commit'
+  return /^[a-z0-9][a-z0-9._/:-]*$/.test(clean) || 'Só minúsculas, números, ".", "-", "_" e "/"'
+}
+
+/** Um argumento de build com cara de segredo. */
+const secretLookingArg = computed(
+  () =>
+    model.value.buildArgs.find((arg) => /TOKEN|SECRET|PASSWORD|_KEY$|PASS$/.test(arg.name))?.name ??
+    null
+)
+
 const credentialItems = computed(() =>
   deploys.credentials.map((credential) => ({
     title: `${credential.name} (${credential.username})`,
@@ -293,8 +475,9 @@ const discoverySummary = computed(() => {
   const found = discovery.value
   if (!found) return ''
   if (!found.suggestedFiles.length) return 'Nenhum compose na raiz do repositório.'
+  const who = compilesHere.value ? 'o NetMonitor' : 'o GitHub'
   const images = found.images.length
-    ? `${found.images.length} imagem(ns) para o GitHub compilar`
+    ? `${found.images.length} imagem(ns) para ${who} compilar`
     : 'nenhum serviço com build:'
   const variable = found.imageTagVariable ? `, tag em ${found.imageTagVariable}` : ''
   return `Preenchido a partir de ${found.suggestedFiles.join(', ')}: ${images}${variable}.`
@@ -352,6 +535,7 @@ function addImage() {
 }
 
 onMounted(() => {
+  if (!deploys.agents.length) void deploys.fetchAgents()
   // Aplicação nova com o GitHub conectado: já começa pela lista.
   if (!props.editing && model.value.githubConnectionId === null && !model.value.repository) {
     const installed = deploys.githubConnections.find((connection) => connection.installed)

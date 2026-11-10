@@ -46,10 +46,14 @@ pub enum Permission {
     /// o `.env` e subir o compose dentro de `AGENT_STACKS_DIR`. Fora do
     /// padrão: escreve no disco do host e troca a versão de uma aplicação.
     Deploy,
+    /// Compilar imagens no servidor (ADR 023): clonar o commit e rodar o
+    /// builder BuildKit dedicado. Fora do padrão: executa o código do
+    /// repositório (os `RUN` do Dockerfile) neste host.
+    Build,
 }
 
 impl Permission {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Read,
         Self::Lifecycle,
         Self::Update,
@@ -61,6 +65,7 @@ impl Permission {
         Self::VolumeExport,
         Self::Throughput,
         Self::Deploy,
+        Self::Build,
     ];
 
     #[must_use]
@@ -77,6 +82,7 @@ impl Permission {
             Self::VolumeExport => "volume_export",
             Self::Throughput => "throughput",
             Self::Deploy => "deploy",
+            Self::Build => "build",
         }
     }
 }

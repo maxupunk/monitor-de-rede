@@ -55,7 +55,10 @@ impl MigrationTrait for Migration {
                 .col(text("private_key_encrypted"))
                 // Nula até o app ser instalado na conta.
                 .col(big_integer_null("installation_id"))
-                .col(boolean("can_write").default(false));
+                .col(boolean("can_write").default(false))
+                // Segredo do webhook (o GitHub gera na criação do app): prova
+                // que o aviso de push veio do app desta central (ADR 023).
+                .col(text_null("webhook_secret_encrypted"));
             m.create_table(with_timestamps(stmt.take())).await?;
             m.create_index(unique(
                 "deploy_github_connections_app_unique",
@@ -80,6 +83,15 @@ impl MigrationTrait for Migration {
                 // Imagens que o CI compila: `[{name, dockerfile, context}]`.
                 .col(json_binary("images"))
                 .col(string_len("rollout", 16))
+                // Quem compila: `netmonitor` (o agente, ADR 023) ou
+                // `github_actions` (o workflow, ADR 021).
+                .col(string_len("builder", 16).default("github_actions"))
+                // O agente que compila; nulo = o do primeiro alvo da revisão.
+                .col(big_integer_null("build_probe_id"))
+                // Estágio do Dockerfile que roda os testes antes das imagens.
+                .col(string_len_null("test_target", 64))
+                // `[{name, value}]` — argumentos de build (segredo não entra).
+                .col(json_binary("build_args"))
                 .foreign_key(&mut fk(
                     "deploy_applications",
                     "credential_id",
@@ -90,6 +102,12 @@ impl MigrationTrait for Migration {
                     "deploy_applications",
                     "github_connection_id",
                     "deploy_github_connections",
+                    ForeignKeyAction::SetNull,
+                ))
+                .foreign_key(&mut fk(
+                    "deploy_applications",
+                    "build_probe_id",
+                    "probes",
                     ForeignKeyAction::SetNull,
                 ));
             m.create_table(with_timestamps(stmt.take())).await?;
@@ -127,6 +145,11 @@ impl MigrationTrait for Migration {
                 .col(integer("keep_images").default(3))
                 .col(boolean("enabled").default(true))
                 .col(integer("position").default(0))
+                // `warn`, `block_critical` ou `block_high` (ADR 022).
+                .col(string_len("vulnerability_policy", 16).default("warn"))
+                // Só imagem de origem conhecida: compilada pela central ou
+                // enviada pelo workflow do próprio repositório.
+                .col(boolean("require_provenance").default(false))
                 .foreign_key(&mut fk(
                     "deploy_targets",
                     "application_id",
@@ -178,6 +201,85 @@ impl MigrationTrait for Migration {
             .await?;
         }
 
+        if !m.has_table("deploy_build_secrets").await? {
+            let mut stmt = table("deploy_build_secrets");
+            stmt.col(big_pk_auto("id"))
+                .col(big_integer("application_id"))
+                .col(string_len("name", 64))
+                .col(text("value_encrypted"))
+                .foreign_key(&mut fk(
+                    "deploy_build_secrets",
+                    "application_id",
+                    "deploy_applications",
+                    ForeignKeyAction::Cascade,
+                ));
+            m.create_table(with_timestamps(stmt.take())).await?;
+            m.create_index(unique(
+                "deploy_build_secrets_application_name_unique",
+                "deploy_build_secrets",
+                &["application_id", "name"],
+            ))
+            .await?;
+        }
+
+        if !m.has_table("deploy_builds").await? {
+            let mut stmt = table("deploy_builds");
+            stmt.col(big_pk_auto("id"))
+                .col(big_integer("application_id"))
+                .col(string_len_null("reference", 120))
+                .col(string_len("commit_sha", 64))
+                .col(text_null("commit_message"))
+                // `push`, `manual` ou `rebuild`.
+                .col(string_len("trigger", 16))
+                .col(string_len_null("triggered_by", 120))
+                // O agente que compilou (ou vai compilar).
+                .col(big_integer_null("probe_id"))
+                .col(string_len("status", 20))
+                .col(string_len_null("stage", 16))
+                .col(string_len_null("current_image", 128))
+                .col(boolean("no_cache").default(false))
+                // `X-GitHub-Delivery`: o mesmo aviso não compila duas vezes.
+                .col(string_len_null("delivery_id", 64))
+                // `[{name, repository, tag, digest, bytes}]` ao terminar.
+                .col(json_binary("images"))
+                .col(text_null("error"))
+                .col(text_null("log"))
+                .col(timestamp_with_time_zone_null("started_at"))
+                .col(timestamp_with_time_zone_null("finished_at"))
+                .col(big_integer_null("duration_ms"))
+                .foreign_key(&mut fk(
+                    "deploy_builds",
+                    "application_id",
+                    "deploy_applications",
+                    ForeignKeyAction::Cascade,
+                ))
+                .foreign_key(&mut fk(
+                    "deploy_builds",
+                    "probe_id",
+                    "probes",
+                    ForeignKeyAction::SetNull,
+                ));
+            m.create_table(with_timestamps(stmt.take())).await?;
+            m.create_index(index(
+                "deploy_builds_application_index",
+                "deploy_builds",
+                &["application_id", "id"],
+            ))
+            .await?;
+            m.create_index(index(
+                "deploy_builds_status_index",
+                "deploy_builds",
+                &["status"],
+            ))
+            .await?;
+            m.create_index(index(
+                "deploy_builds_delivery_index",
+                "deploy_builds",
+                &["delivery_id"],
+            ))
+            .await?;
+        }
+
         if !m.has_table("deploy_runs").await? {
             let mut stmt = table("deploy_runs");
             stmt.col(big_pk_auto("id"))
@@ -205,6 +307,14 @@ impl MigrationTrait for Migration {
                 .col(timestamp_with_time_zone_null("started_at"))
                 .col(timestamp_with_time_zone_null("finished_at"))
                 .col(big_integer_null("duration_ms"))
+                // A compilação que produziu a imagem (ADR 023).
+                .col(big_integer_null("build_id"))
+                .foreign_key(&mut fk(
+                    "deploy_runs",
+                    "build_id",
+                    "deploy_builds",
+                    ForeignKeyAction::SetNull,
+                ))
                 .foreign_key(&mut fk(
                     "deploy_runs",
                     "application_id",
@@ -244,6 +354,8 @@ impl MigrationTrait for Migration {
 
     async fn down(&self, m: &SchemaManager) -> Result<(), DbErr> {
         m.drop_table(drop("deploy_runs")).await?;
+        m.drop_table(drop("deploy_builds")).await?;
+        m.drop_table(drop("deploy_build_secrets")).await?;
         m.drop_table(drop("deploy_env_versions")).await?;
         m.drop_table(drop("deploy_targets")).await?;
         m.drop_table(drop("deploy_applications")).await?;

@@ -29,6 +29,7 @@ use crate::{
     views::docker::{DockerInventorySnapshot, DockerLiveSnapshot},
 };
 
+use agent_protocol::docker::images::ImageImportRequest;
 use netmonitor_core::agents::host::HostDocker;
 
 use super::{executor::CommandExecutor, outbox::Outbox, tunnel::TunnelOpener};
@@ -460,8 +461,21 @@ fn route_tunnel_frame(routes: &mut HashMap<Uuid, mpsc::Sender<TunnelPayload>>, b
 
 /// A ponta local que a ponte liga ao canal.
 enum TunnelEnd {
-    Database { host: String, port: u16 },
-    Volume { name: String },
+    Database {
+        host: String,
+        port: u16,
+    },
+    Volume {
+        name: String,
+    },
+    /// A imagem compilada aqui, a caminho do registry da central (ADR 023).
+    Artifact {
+        artifact: Uuid,
+    },
+    /// Uma imagem do registry da central, a caminho do Docker daqui (ADR 022).
+    Import {
+        request: ImageImportRequest,
+    },
 }
 
 impl TunnelEnd {
@@ -473,6 +487,12 @@ impl TunnelEnd {
                 port: *port,
             }),
             Command::VolumeExport { name } => Some(Self::Volume { name: name.clone() }),
+            Command::ImageExport { artifact } => Some(Self::Artifact {
+                artifact: *artifact,
+            }),
+            Command::ImageImport { request } => Some(Self::Import {
+                request: request.clone(),
+            }),
             _ => None,
         }
     }
@@ -481,6 +501,8 @@ impl TunnelEnd {
         match self {
             Self::Database { host, port } => opener.open(host, *port).await,
             Self::Volume { name } => opener.open_volume(name).await,
+            Self::Artifact { artifact } => opener.open_artifact(*artifact).await,
+            Self::Import { request } => opener.open_import(request).await,
         }
     }
 }

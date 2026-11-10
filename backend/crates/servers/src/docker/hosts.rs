@@ -16,8 +16,8 @@ use netmonitor_core::{
 };
 
 use super::{
-    maintenance::DockerMaintenance, remote_engine::AgentEngine, source::DockerEngine,
-    stacks::StackHost,
+    builds::ImageHost, maintenance::DockerMaintenance, remote_engine::AgentEngine,
+    source::DockerEngine, stacks::StackHost,
 };
 use crate::views::docker::DockerHostView;
 
@@ -31,6 +31,8 @@ pub struct DockerHost {
     pub maintenance: Arc<dyn DockerMaintenance>,
     /// Deploy contínuo de stacks (ADR 021).
     pub stacks: Arc<dyn StackHost>,
+    /// Compilação e trânsito de imagens (ADR 022/023).
+    pub images: Arc<dyn ImageHost>,
 }
 
 /// Resolve a chave para as fontes. Agente desconectado é indisponibilidade,
@@ -50,7 +52,8 @@ pub fn resolve(ctx: &AppContext, key: HostKey) -> AppResult<DockerHost> {
         key,
         engine: engine.clone(),
         maintenance: engine.clone(),
-        stacks: engine,
+        stacks: engine.clone(),
+        images: engine,
     })
 }
 

@@ -20,6 +20,7 @@ use std::{
     time::Duration,
 };
 
+use agent_protocol::docker::images::ImageImportRequest;
 use async_trait::async_trait;
 use netmonitor_core::agents::host::{HostDocker, NoHostDocker};
 use tokio::net::TcpStream;
@@ -94,6 +95,24 @@ pub trait TunnelOpener: Send + Sync {
     async fn open(&self, host: &str, port: u16) -> Result<TunnelStream, RemoteError>;
     /// O tar do volume `name`. A escrita é descartada: a ponte é só de ida.
     async fn open_volume(&self, name: &str) -> Result<TunnelStream, RemoteError>;
+    /// O arquivo de uma imagem compilada aqui (ADR 023). Sem Docker: não há.
+    async fn open_artifact(&self, _artifact: uuid::Uuid) -> Result<TunnelStream, RemoteError> {
+        Err(RemoteError::new(
+            ErrorCode::Unsupported,
+            "este agente não compila imagens",
+        ))
+    }
+
+    /// O `docker load` daqui (ADR 022). Sem Docker: não há.
+    async fn open_import(
+        &self,
+        _request: &ImageImportRequest,
+    ) -> Result<TunnelStream, RemoteError> {
+        Err(RemoteError::new(
+            ErrorCode::Unsupported,
+            "este agente não recebe imagens",
+        ))
+    }
 }
 
 fn forbidden(permission: Permission) -> RemoteError {
@@ -195,6 +214,20 @@ impl TunnelOpener for LocalTunnelOpener {
             return Err(forbidden(Permission::VolumeExport));
         }
         self.docker.export_volume(name).await
+    }
+
+    async fn open_artifact(&self, artifact: uuid::Uuid) -> Result<TunnelStream, RemoteError> {
+        if !self.policy.allows(Permission::Build) {
+            return Err(forbidden(Permission::Build));
+        }
+        self.docker.open_artifact(artifact).await
+    }
+
+    async fn open_import(&self, request: &ImageImportRequest) -> Result<TunnelStream, RemoteError> {
+        if !self.policy.allows(Permission::Deploy) {
+            return Err(forbidden(Permission::Deploy));
+        }
+        self.docker.open_import(request).await
     }
 }
 

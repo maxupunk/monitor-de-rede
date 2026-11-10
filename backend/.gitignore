@@ -29,3 +29,5 @@ target/
 # Armazenamentos locais de desenvolvimento (STORAGE_LOCAL_ROOT padrão):
 # cópias do backup, que carregam community SNMP dos equipamentos.
 /storage/
+# Blobs do registry de imagens em desenvolvimento e testes (REGISTRY_DIR).
+/registry/

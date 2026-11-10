@@ -83,6 +83,8 @@ fn describe(command: &Command) -> String {
     match command {
         Command::DatabaseTunnel { host, port } => format!("{host}:{port}"),
         Command::VolumeExport { name } => format!("o volume {name}"),
+        Command::ImageExport { .. } => "a imagem compilada".to_string(),
+        Command::ImageImport { .. } => "o Docker do host".to_string(),
         _ => "a ponte".to_string(),
     }
 }
@@ -179,12 +181,44 @@ impl OpenTunnel {
     }
 }
 
-/// O tar do volume `name` do host do agente, como um leitor (ADR 014).
+/// Abre uma ponte de mão dupla e devolve a ponta daqui: o que se escreve vai
+/// ao agente, o que se lê veio dele. Fechar a escrita manda o fim ao agente.
 ///
-/// A central não manda nada pela ponte: fecha a escrita do seu lado na hora
-/// e lê até o agente fechar o dele. Soltar o leitor antes do fim (o download
-/// foi cancelado) derruba a bomba, e a queda cancela a ponte no agente — que
-/// então remove o container auxiliar da exportação.
+/// # Errors
+///
+/// Ver [`OpenTunnel::open`].
+pub async fn open_stream(
+    session: Arc<AgentSession>,
+    command: Command,
+) -> Result<DuplexStream, RemoteError> {
+    let tunnel = OpenTunnel::open(session, command).await?;
+    let (ours, pump_side) = tokio::io::duplex(TUNNEL_DATA_MAX * 2);
+    tokio::spawn(async move {
+        if let Err(error) = tunnel.run(pump_side).await {
+            tracing::debug!(%error, "ponte interrompida");
+        }
+    });
+    Ok(ours)
+}
+
+/// Só de ida: o que o agente manda, até o fim (volume, artefato).
+///
+/// # Errors
+///
+/// Ver [`OpenTunnel::open`].
+pub async fn download(
+    session: Arc<AgentSession>,
+    command: Command,
+) -> Result<DuplexStream, RemoteError> {
+    let mut reader = open_stream(session, command).await?;
+    reader
+        .shutdown()
+        .await
+        .map_err(|error| RemoteError::new(ErrorCode::Internal, error.to_string()))?;
+    Ok(reader)
+}
+
+/// O tar de um volume (ADR 014).
 ///
 /// # Errors
 ///
@@ -193,24 +227,13 @@ pub async fn download_volume(
     session: Arc<AgentSession>,
     name: &str,
 ) -> Result<DuplexStream, RemoteError> {
-    let tunnel = OpenTunnel::open(
+    download(
         session,
         Command::VolumeExport {
             name: name.to_string(),
         },
     )
-    .await?;
-    let (mut reader, pump_side) = tokio::io::duplex(TUNNEL_DATA_MAX * 2);
-    reader
-        .shutdown()
-        .await
-        .map_err(|error| RemoteError::new(ErrorCode::Internal, error.to_string()))?;
-    tokio::spawn(async move {
-        if let Err(error) = tunnel.run(pump_side).await {
-            tracing::debug!(%error, "download de volume interrompido");
-        }
-    });
-    Ok(reader)
+    .await
 }
 
 /// A ponte sai do agente quando sai daqui: fechar a rota e cancelar o pedido

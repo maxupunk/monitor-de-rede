@@ -24,7 +24,9 @@ use sea_orm::EntityTrait;
 
 use super::env_versions;
 use crate::{
+    docker::builds::BuilderReadiness,
     docker::{hosts, stacks::DEFAULT_STACKS_DIR},
+    dtos::deploys::Builder,
     views::deploys::{DeployReadinessView, ReadinessCheck, ReadinessLevel},
 };
 
@@ -43,6 +45,102 @@ pub struct Facts<'a> {
     pub project: &'a str,
     pub has_credential: Option<bool>,
     pub has_env: Option<bool>,
+    /// Este agente compila a aplicação (ADR 023).
+    pub build: Option<BuildFacts>,
+}
+
+/// O que se sabe do builder deste agente.
+pub struct BuildFacts {
+    pub allows_build: bool,
+    pub readiness: Option<BuilderReadiness>,
+    pub error: Option<String>,
+}
+
+fn build_checks(facts: &BuildFacts, allow_variable: &str, out: &mut Vec<ReadinessCheck>) {
+    use ReadinessLevel::{Error, Ok, Warning};
+    if !facts.allows_build {
+        out.push(check(
+            "build",
+            "Permissão de compilar",
+            Error,
+            format!("A política local ({allow_variable}) não libera compilar neste servidor"),
+            Some(format!(
+                "No servidor, acrescente `build` a {allow_variable} e recrie o agente — ou                  escolha outro servidor em \"Onde compilar\""
+            )),
+        ));
+        return;
+    }
+    out.push(check(
+        "build",
+        "Permissão de compilar",
+        Ok,
+        format!("A política local ({allow_variable}) libera compilar"),
+        None,
+    ));
+    if let Some(error) = &facts.error {
+        out.push(check(
+            "builder",
+            "Builder",
+            Error,
+            error.clone(),
+            Some("Atualize o agente para a mesma versão da central".into()),
+        ));
+        return;
+    }
+    let Some(readiness) = &facts.readiness else {
+        return;
+    };
+    out.push(match &readiness.buildx_version {
+        Some(version) => check(
+            "builder",
+            "Builder (buildx)",
+            Ok,
+            if readiness.builder_ready {
+                format!("{version} — builder dedicado pronto")
+            } else {
+                format!("{version} — o builder dedicado é criado na primeira compilação")
+            },
+            None,
+        ),
+        None => check(
+            "builder",
+            "Builder (buildx)",
+            Error,
+            "O plugin docker buildx não está instalado neste servidor".into(),
+            Some("Use a imagem do agente NetMonitor (já traz o buildx) ou instale docker-buildx-plugin".into()),
+        ),
+    });
+    if let Some(free) = readiness.free_bytes {
+        if free < LOW_DISK_BYTES {
+            out.push(check(
+                "build_disk",
+                "Espaço para compilar",
+                Warning,
+                format!("Só {} livres onde o agente compila", gib(free)),
+                Some(
+                    "Compilar usa o cache do BuildKit e os arquivos das imagens: libere espaço"
+                        .into(),
+                ),
+            ));
+        }
+    }
+    let limits = [readiness.cpu_limit.clone(), readiness.memory_limit.clone()]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    out.push(check(
+        "build_limits",
+        "Limites do builder",
+        Ok,
+        if limits.is_empty() {
+            "Sem teto de CPU e memória: o builder disputa o servidor com as aplicações".into()
+        } else {
+            format!("Teto: {}", limits.join(", "))
+        },
+        limits.is_empty().then(|| {
+            format!("Defina AGENT_BUILD_CPUS e AGENT_BUILD_MEMORY no agente ({allow_variable} fica igual)")
+        }),
+    ));
 }
 
 fn check(
@@ -114,6 +212,10 @@ pub fn checks(facts: &Facts<'_>) -> Vec<ReadinessCheck> {
                 )),
             )
         });
+    }
+
+    if let (true, Some(build)) = (facts.connected, &facts.build) {
+        build_checks(build, allow_variable, &mut out);
     }
 
     if let Some(error) = &facts.stack_error {
@@ -316,6 +418,33 @@ pub async fn inspect(
     } else {
         (None, None)
     };
+    let compiles_here = application.is_some_and(|app| {
+        Builder::parse(&app.builder) == Builder::Netmonitor
+            && app.build_probe_id.is_none_or(|id| id == probe_id)
+    });
+    let build = if compiles_here {
+        let allows_build = session
+            .as_ref()
+            .is_some_and(|session| session.allows(Permission::Build));
+        let (readiness, error) = if connected {
+            match hosts::resolve(ctx, HostKey::agent(probe_id)) {
+                Ok(host) => match host.images.builder_readiness().await {
+                    Ok(readiness) => (Some(readiness), None),
+                    Err(error) => (None, Some(error.to_string())),
+                },
+                Err(error) => (None, Some(error.to_string())),
+            }
+        } else {
+            (None, None)
+        };
+        Some(BuildFacts {
+            allows_build,
+            readiness,
+            error,
+        })
+    } else {
+        None
+    };
     let has_env = match target_id {
         Some(id) => Some(env_versions::current(&ctx.db, id).await?.is_some()),
         None => None,
@@ -331,6 +460,7 @@ pub async fn inspect(
         has_credential: application
             .map(|app| app.credential_id.is_some() || app.github_connection_id.is_some()),
         has_env,
+        build,
     });
     Ok(DeployReadinessView {
         ready: checks
@@ -370,7 +500,39 @@ mod tests {
             project: "sgc",
             has_credential: Some(true),
             has_env: Some(true),
+            build: None,
         }
+    }
+
+    #[test]
+    fn compilar_sem_permissao_ou_sem_buildx_e_erro() {
+        let stack = stack();
+        let mut without = facts(&stack);
+        without.build = Some(BuildFacts {
+            allows_build: false,
+            readiness: None,
+            error: None,
+        });
+        let found = checks(&without);
+        assert_eq!(level(&found, "build"), Some(ReadinessLevel::Error));
+        let fix = found
+            .iter()
+            .find(|check| check.id == "build")
+            .unwrap()
+            .fix
+            .clone()
+            .unwrap();
+        assert!(fix.contains("AGENT_ALLOW"));
+
+        let mut no_buildx = facts(&stack);
+        no_buildx.build = Some(BuildFacts {
+            allows_build: true,
+            readiness: Some(BuilderReadiness::default()),
+            error: None,
+        });
+        let found = checks(&no_buildx);
+        assert_eq!(level(&found, "build"), Some(ReadinessLevel::Ok));
+        assert_eq!(level(&found, "builder"), Some(ReadinessLevel::Error));
     }
 
     fn level(checks: &[ReadinessCheck], id: &str) -> Option<ReadinessLevel> {

@@ -30,6 +30,7 @@ use uuid::Uuid;
 use crate::{
     device_io::DeviceIoCall,
     docker::{
+        images::{ImageBuildRequest, ImageImportRequest},
         stacks::StackDeployRequest,
         views::{DockerInventorySnapshot, DockerLiveSnapshot},
         ComposeRequest, ContainerAction, DockerError, LogFilters,
@@ -54,8 +55,12 @@ use crate::{
 /// * **5** — `Login` do `DeviceIo` com chave privada e chave de host fixada
 ///   (ADR 016, acesso dedicado por chave);
 /// * **6** — `DockerCall::StackDeploy` e `DockerCall::StackReadiness`, sob a
-///   permissão `deploy` (ADR 021, deploy contínuo).
-pub const PROTOCOL_VERSION: u16 = 6;
+///   permissão `deploy` (ADR 021, deploy contínuo);
+/// * **7** — compilação no servidor e trânsito de imagens (ADR 022/023):
+///   `DockerCall::ImageBuild`/`BuilderReadiness` e `Command::ImageExport`
+///   sob a permissão `build`; `Command::ImageImport` sob `deploy`; o
+///   `StackDeployRequest` ganhou `pull`.
+pub const PROTOCOL_VERSION: u16 = 7;
 
 /// Teto de um quadro. Logs e inventários grandes são quebrados em chunks.
 pub const MAX_FRAME_BYTES: usize = 4 * 1024 * 1024;
@@ -351,6 +356,18 @@ pub enum Command {
     VolumeExport {
         name: String,
     },
+    /// O arquivo OCI de uma imagem que este agente compilou
+    /// (`DockerCall::ImageBuild`), só de ida, pela mesma ponte da exportação
+    /// de volume. O agente apaga o arquivo depois de entregue.
+    ImageExport {
+        artifact: Uuid,
+    },
+    /// Uma imagem do registry da central para o Docker deste host: a central
+    /// manda o tar (`docker load`) pela ponte e fecha; o agente responde com o
+    /// resultado do load antes de fechar o lado dele.
+    ImageImport {
+        request: ImageImportRequest,
+    },
     /// Teste de vazão dirigido pelo agente (cliente iperf3/btest) até
     /// `target:port`, um equipamento da rede dele (ADR 015 §6). Só rede
     /// privada e, quando houver, `AGENT_DEVICE_CIDRS`. Cada amostra de 1 s vai
@@ -464,6 +481,12 @@ pub enum DockerCall {
     StackReadiness {
         project: String,
     },
+    /// Compila as imagens de um commit no builder dedicado (ADR 023).
+    ImageBuild {
+        request: ImageBuildRequest,
+    },
+    /// Como está o builder deste host (buildx, espaço, limites).
+    BuilderReadiness,
 }
 
 impl Command {
@@ -478,6 +501,8 @@ impl Command {
             Self::DeviceIo { .. } => Permission::DeviceIo,
             Self::DatabaseTunnel { .. } => Permission::Database,
             Self::VolumeExport { .. } => Permission::VolumeExport,
+            Self::ImageExport { .. } => Permission::Build,
+            Self::ImageImport { .. } => Permission::Deploy,
             Self::Throughput { .. } => Permission::Throughput,
         }
     }
@@ -498,7 +523,8 @@ impl DockerCall {
             | Self::ListNetworks
             | Self::InspectNetwork { .. }
             | Self::ListImages
-            | Self::InspectImage { .. } => Permission::Read,
+            | Self::InspectImage { .. }
+            | Self::BuilderReadiness => Permission::Read,
             Self::ContainerAction { .. }
             | Self::ClearLogs { .. }
             | Self::RemoveVolume { .. }
@@ -513,6 +539,7 @@ impl DockerCall {
             // A prontidão só lê, mas só interessa a quem pode deployar — e diz
             // o caminho e o espaço do disco do host.
             Self::StackDeploy { .. } | Self::StackReadiness { .. } => Permission::Deploy,
+            Self::ImageBuild { .. } => Permission::Build,
         }
     }
 }

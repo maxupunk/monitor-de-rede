@@ -25,3 +25,5 @@ decisão cria.
 | [019](019-papel-por-area.md) | Papel por área: operator, viewer ou sem acesso em Rede, Servidores e VPN; admin global vale em tudo | — | aceito |
 | [020](020-postgresql-padrao-do-container.md) | PostgreSQL 18 como banco padrão do container (logs em banco separado); SQLite continua alternativa | — | aceito |
 | [021](021-deploy-continuo-pelo-agente.md) | Deploy contínuo: GitHub compila, central decide (OIDC, aprovação, janela, rollback), agente aplica numa raiz só | — | aceito |
+| [022](022-registry-proprio.md) | Registry próprio: OCI em Rust na central, entrada e entrega pelo canal do agente (envio por OIDC no modo Actions), varredura com OSV local | SPIKE-REG-01..05 | aceito e implementado (fases 0–5) |
+| [023](023-compilacao-no-servidor.md) | Compilação no servidor (estilo Dokploy/Coolify): push pelo GitHub App, agente compila em BuildKit dedicado, imagem no registry da central, deploy pela fila do 021 | SPIKE-BLD-01..04 | aceito e implementado |

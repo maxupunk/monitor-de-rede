@@ -7,9 +7,12 @@ use sea_orm::{
 };
 use serde_json::json;
 
-use agent_protocol::docker::stacks::{
-    validate_project, validate_relative_path, validate_variable, MAX_KEEP_IMAGES,
-    MAX_WAIT_TIMEOUT_SECS,
+use agent_protocol::docker::{
+    images::{validate_reference, validate_target},
+    stacks::{
+        validate_project, validate_relative_path, validate_variable, MAX_KEEP_IMAGES,
+        MAX_WAIT_TIMEOUT_SECS,
+    },
 };
 use netmonitor_core::{
     agents::identity,
@@ -26,7 +29,7 @@ use super::{
     workflow::{self, WorkflowSpec},
     Rollout,
 };
-use crate::dtos::deploys::{ApplicationInput, BuildImage, SetupInput, TargetInput};
+use crate::dtos::deploys::{ApplicationInput, BuildImage, Builder, SetupInput, TargetInput};
 
 /// O menor `--wait-timeout` que faz sentido: a API precisa subir.
 pub const MIN_WAIT_TIMEOUT_SECS: i32 = 10;
@@ -81,6 +84,22 @@ fn validate_image(image: &BuildImage) -> AppResult<()> {
             AppError::validation(format!("Contexto de build inválido: \"{}\"", image.context))
         })?;
     }
+    if let Some(target) = &image.target {
+        validate_target(target).map_err(|error| protocol(&error))?;
+    }
+    if let Some(reference) = &image.reference {
+        if reference.contains('@')
+            || reference
+                .rsplit('/')
+                .next()
+                .is_some_and(|last| last.contains(':'))
+        {
+            return Err(AppError::validation(format!(
+                "Informe o image: sem a tag (ex.: ghcr.io/acme/api, não ghcr.io/acme/api:latest): {reference}"
+            )));
+        }
+        validate_reference(reference).map_err(|error| protocol(&error))?;
+    }
     Ok(())
 }
 
@@ -117,8 +136,49 @@ fn checked(input: &ApplicationInput) -> AppResult<ApplicationInput> {
         validate_relative_path(file).map_err(|error| protocol(&error))?;
     }
     validate_variable(&input.image_tag_variable).map_err(|error| protocol(&error))?;
-    for image in &input.images {
+    for image in &mut input.images {
+        image.target = image
+            .target
+            .take()
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty());
+        image.reference = image
+            .reference
+            .take()
+            .map(|r| r.trim().to_string())
+            .filter(|r| !r.is_empty());
         validate_image(image)?;
+    }
+    input.test_target = input
+        .test_target
+        .take()
+        .map(|target| target.trim().to_string())
+        .filter(|target| !target.is_empty());
+    if let Some(target) = &input.test_target {
+        validate_target(target).map_err(|error| protocol(&error))?;
+    }
+    for arg in &mut input.build_args {
+        arg.name = arg.name.trim().to_string();
+        validate_variable(&arg.name).map_err(|error| protocol(&error))?;
+        if arg.value.len() > 4096 || arg.value.chars().any(char::is_control) {
+            return Err(AppError::validation(format!(
+                "Valor do argumento {} inválido (uma linha, até 4 KB)",
+                arg.name
+            )));
+        }
+    }
+    if input.builder == Builder::Netmonitor {
+        if input.images.is_empty() {
+            return Err(AppError::validation(
+                "Para o NetMonitor compilar, informe ao menos uma imagem com Dockerfile                  (um serviço com build: no compose)",
+            ));
+        }
+        if let Some(image) = input.images.iter().find(|image| image.reference.is_none()) {
+            return Err(AppError::validation(format!(
+                "A imagem {} precisa do nome do image: do compose (ex.: ghcr.io/acme/{}) para                  o host reconhecê-la",
+                image.name, image.name
+            )));
+        }
     }
     Ok(input)
 }
@@ -193,6 +253,10 @@ pub async fn create<C: ConnectionTrait>(
         image_tag_variable: Set(input.image_tag_variable),
         images: Set(json!(input.images)),
         rollout: Set(input.rollout.as_str().to_string()),
+        builder: Set(input.builder.as_str().to_string()),
+        build_probe_id: Set(input.build_probe_id),
+        test_target: Set(input.test_target),
+        build_args: Set(json!(input.build_args)),
         ..Default::default()
     }
     .insert(db)
@@ -221,6 +285,10 @@ pub async fn update<C: ConnectionTrait>(
     active.image_tag_variable = Set(input.image_tag_variable);
     active.images = Set(json!(input.images));
     active.rollout = Set(input.rollout.as_str().to_string());
+    active.builder = Set(input.builder.as_str().to_string());
+    active.build_probe_id = Set(input.build_probe_id);
+    active.test_target = Set(input.test_target);
+    active.build_args = Set(json!(input.build_args));
     Ok(active.update(db).await?)
 }
 
@@ -421,6 +489,8 @@ fn apply(active: &mut deploy_targets::ActiveModel, input: TargetInput) {
     active.keep_images = Set(input.keep_images);
     active.enabled = Set(input.enabled);
     active.position = Set(input.position);
+    active.vulnerability_policy = Set(input.vulnerability_policy.as_str().to_string());
+    active.require_provenance = Set(input.require_provenance);
 }
 
 /// # Errors
@@ -531,8 +601,14 @@ mod tests {
                 name: "sgc-api".into(),
                 dockerfile: "apps/api/Dockerfile".into(),
                 context: ".".into(),
+                target: None,
+                reference: Some("ghcr.io/master-sistemas/sgc-api".into()),
             }],
             rollout: Rollout::Sequential,
+            builder: Builder::Netmonitor,
+            build_probe_id: None,
+            test_target: None,
+            build_args: Vec::new(),
         }
     }
 

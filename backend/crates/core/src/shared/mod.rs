@@ -3,6 +3,7 @@
 pub mod backup_schedule;
 pub mod body;
 pub mod cidr;
+pub mod client_addr;
 pub mod crypto;
 pub mod errors;
 pub mod incident;

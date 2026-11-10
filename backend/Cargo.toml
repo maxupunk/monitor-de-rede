@@ -1,8 +1,8 @@
 [workspace]
-members = [".", "crates/core", "crates/nucleo", "crates/agent-protocol", "crates/servers", "crates/vpn", "crates/assistant", "crates/network", "crates/network-wifi", "crates/network-link-tests"]
+members = [".", "crates/core", "crates/nucleo", "crates/agent-protocol", "crates/servers", "crates/vpn", "crates/assistant", "crates/network", "crates/network-wifi", "crates/network-link-tests", "crates/servers-registry"]
 # Sem isto, `cargo test`/`cargo clippy` na raiz só cobririam o pacote raiz:
 # os testes que se mudam para um crate sairiam da suíte sem ninguém notar.
-default-members = [".", "crates/core", "crates/nucleo", "crates/agent-protocol", "crates/servers", "crates/vpn", "crates/assistant", "crates/network", "crates/network-wifi", "crates/network-link-tests"]
+default-members = [".", "crates/core", "crates/nucleo", "crates/agent-protocol", "crates/servers", "crates/vpn", "crates/assistant", "crates/network", "crates/network-wifi", "crates/network-link-tests", "crates/servers-registry"]
 
 [package]
 name = "backend"
@@ -93,6 +93,7 @@ netmonitor-vpn = { path = "crates/vpn" }
 netmonitor-assistant = { path = "crates/assistant" }
 netmonitor-network = { path = "crates/network" }
 netmonitor-network-wifi = { path = "crates/network-wifi" }
+netmonitor-servers-registry = { path = "crates/servers-registry" }
 netmonitor-network-link-tests = { path = "crates/network-link-tests" }
 
 [dependencies]
@@ -126,6 +127,7 @@ netmonitor-vpn = { workspace = true }
 netmonitor-assistant = { workspace = true }
 netmonitor-network = { workspace = true }
 netmonitor-network-wifi = { workspace = true }
+netmonitor-servers-registry = { workspace = true }
 netmonitor-network-link-tests = { workspace = true }
 sea-orm = { workspace = true }
 chrono = { workspace = true }

@@ -205,7 +205,13 @@ async fn conectar_github_gera_o_formulario_e_recusa_retorno_forjado() {
             "https://central.exemplo.com/deploys/github"
         );
         assert_eq!(manifest["default_permissions"]["workflows"], "write");
-        assert_eq!(manifest["hook_attributes"]["active"], false);
+        // O aviso de push compila no servidor (ADR 023).
+        assert_eq!(manifest["hook_attributes"]["active"], true);
+        assert_eq!(
+            manifest["hook_attributes"]["url"],
+            "https://central.exemplo.com/api/deploy-hooks/github-app"
+        );
+        assert_eq!(manifest["default_events"][0], "push");
 
         let invalid = request
             .post("/api/deploys/github/manifest")

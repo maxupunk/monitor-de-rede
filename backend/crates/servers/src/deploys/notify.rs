@@ -10,6 +10,7 @@ use serde_json::{json, Value};
 
 use netmonitor_core::notifications::{NotificationMessage, Severity};
 
+use super::builds::BuildView;
 use super::short_sha;
 use crate::{central::Central, views::deploys::DeployRunView};
 
@@ -125,6 +126,50 @@ pub async fn send(ctx: &AppContext, moment: Moment, run: &DeployRunView) {
     }
 }
 
+/// Uma compilação que falhou (ADR 023): sem aviso, o push que não compila
+/// só seria visto por quem abrisse a tela.
+#[must_use]
+pub fn build_failed(build: &BuildView) -> NotificationMessage {
+    let url = format!("/deploys?build={}", build.id);
+    NotificationMessage {
+        title: format!("Falha na compilação: {}", build.application),
+        body: format!(
+            "O commit {} não compilou: {}",
+            build.short_sha,
+            build.error.as_deref().unwrap_or("erro desconhecido")
+        ),
+        severity: Severity::Critical,
+        metadata: json!({
+            "kind": "deploy_build",
+            "buildId": build.id,
+            "applicationId": build.application_id,
+            "url": url,
+        }),
+    }
+}
+
+/// Avisa a falha de uma compilação pelos canais e pelo Web Push.
+pub async fn send_build_failed(ctx: &AppContext, build: &BuildView) {
+    let Ok(central) = Central::from_context(ctx) else {
+        return;
+    };
+    let message = build_failed(build);
+    central.notify(ctx, &message).await;
+    let url = format!("/deploys?build={}", build.id);
+    let payload = json!({
+        "title": message.title,
+        "body": message.body,
+        "icon": "/pwa-192x192.png",
+        "badge": "/pwa-192x192.png",
+        "tag": format!("deploy-build-{}", build.id),
+        "data": { "url": url, "buildId": build.id },
+        "actions": [{ "action": "open", "title": "Ver compilação", "url": url }],
+    });
+    if let Err(error) = central.push_to_servers(&ctx.db, &payload).await {
+        tracing::warn!(build = build.id, %error, "Web Push da compilação falhou");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -159,6 +204,7 @@ mod tests {
             started_at: None,
             finished_at: None,
             duration_ms: Some(28_000),
+            build_id: None,
         }
     }
 

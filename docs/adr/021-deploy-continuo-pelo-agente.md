@@ -6,6 +6,12 @@
 ADR 014 (Docker de todo host pelo agente). Especificação de uso em
 [deploy_continuo_github.md](../deploy_continuo_github.md).
 
+**A rever (proposto em 2026-11-09):** o [ADR 023](023-compilacao-no-servidor.md)
+põe o servidor para compilar, como no Dokploy e no Coolify: o push chega pelo
+GitHub App, o agente compila e o deploy segue esta mesma fila. Se ele for
+aceito, "GitHub compila" passa a ser um modo opcional da aplicação, e o resto
+deste ADR (aprovação, janela, backup, `.env`, rollback) continua valendo.
+
 ## Contexto
 
 Projetos em Docker Compose (o SGCv4 é o primeiro) são atualizados à mão: SSH no

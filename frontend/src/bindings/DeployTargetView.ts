@@ -2,12 +2,13 @@
 import type { DeployAgentView } from "./DeployAgentView";
 import type { DeployEnvVersionView } from "./DeployEnvVersionView";
 import type { DeployRunView } from "./DeployRunView";
+import type { DeployVulnerabilityPolicy } from "./DeployVulnerabilityPolicy";
 
 export type DeployTargetView = { id: number, applicationId: number, name: string, 
 /**
  * `None` quando o agente foi removido.
  */
-agent: DeployAgentView | null, project: string, reference: string, requiresApproval: boolean, windowStart: string | null, windowEnd: string | null, backupConnectionId: number | null, backupConnectionName: string | null, waitTimeoutSecs: number, autoRollback: boolean, keepImages: number, enabled: boolean, position: number, 
+agent: DeployAgentView | null, project: string, reference: string, requiresApproval: boolean, windowStart: string | null, windowEnd: string | null, backupConnectionId: number | null, backupConnectionName: string | null, waitTimeoutSecs: number, autoRollback: boolean, keepImages: number, enabled: boolean, position: number, vulnerabilityPolicy: DeployVulnerabilityPolicy, requireProvenance: boolean, 
 /**
  * A versão no ar.
  */

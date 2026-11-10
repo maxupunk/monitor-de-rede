@@ -88,3 +88,10 @@ export function passwordStrength(value: string): PasswordStrength {
   if (score === 3) return { score: 3, label: 'Boa', color: 'info' }
   return { score: 4, label: 'Forte', color: 'success' }
 }
+
+const ENV_VARIABLE = /^[A-Z_][A-Z0-9_]*$/
+
+/** Nome de variável de ambiente (`NPM_TOKEN`). Vazio passa: use com `requiredRule`. */
+export function envVariableRule(message = 'Use MAIÚSCULAS, números e _'): ValidationRule {
+  return (value) => !value || ENV_VARIABLE.test(String(value).trim()) || message
+}

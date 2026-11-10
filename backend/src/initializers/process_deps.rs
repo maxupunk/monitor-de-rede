@@ -66,6 +66,7 @@ pub fn install(ctx: &AppContext) {
     // O que as áreas fazem no ciclo do scheduler e na purga (registro de
     // rotinas) e os monitores que elas executam em grupo (o SNMP).
     ctx.shared_store.insert(crate::registries::area_routines());
+    ctx.shared_store.insert(crate::registries::image_stores());
     ctx.shared_store.insert(crate::registries::monitor_groups());
     // As políticas das áreas opcionais (o que desligar cada uma implica).
     ctx.shared_store

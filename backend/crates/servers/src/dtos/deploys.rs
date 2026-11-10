@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::deploys::Rollout;
+use crate::deploys::{images::VulnerabilityPolicy, Rollout};
 
 /// Credencial do cofre. Token vazio na edição é "manter o salvo": a tela
 /// nunca recebe o gravado para reenviar.
@@ -39,6 +39,67 @@ pub struct BuildImage {
     pub dockerfile: String,
     /// Contexto do build, relativo à raiz: `.`.
     pub context: String,
+    /// Estágio final do Dockerfile (`--target`), quando há vários.
+    #[serde(default)]
+    #[ts(optional)]
+    pub target: Option<String>,
+    /// O `image:` do compose sem a tag (`ghcr.io/acme/loja-api`): o nome que a
+    /// imagem ganha no host quando a central a entrega (compilação no
+    /// servidor, ADR 023).
+    #[serde(default)]
+    #[ts(optional)]
+    pub reference: Option<String>,
+}
+
+/// Quem compila as imagens da aplicação.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(
+    export,
+    export_to = "../../frontend/src/bindings/",
+    rename = "DeployBuilder"
+)]
+pub enum Builder {
+    /// O agente compila no servidor e a imagem fica no registry da central
+    /// (ADR 023). É o que o assistente propõe.
+    Netmonitor,
+    /// O workflow do GitHub Actions compila e publica (ADR 021). Padrão da
+    /// API: quem a chama sem dizer nada continua como antes.
+    #[default]
+    GithubActions,
+}
+
+impl Builder {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Netmonitor => "netmonitor",
+            Self::GithubActions => "github_actions",
+        }
+    }
+
+    #[must_use]
+    pub fn parse(raw: &str) -> Self {
+        if raw == "netmonitor" {
+            Self::Netmonitor
+        } else {
+            Self::GithubActions
+        }
+    }
+}
+
+/// Argumento de build (`--build-arg`): vai para o histórico da imagem — não
+/// é lugar de segredo.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(
+    export,
+    export_to = "../../frontend/src/bindings/",
+    rename = "DeployBuildArg"
+)]
+pub struct BuildArgInput {
+    pub name: String,
+    pub value: String,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
@@ -66,6 +127,18 @@ pub struct ApplicationInput {
     #[serde(default)]
     pub images: Vec<BuildImage>,
     pub rollout: Rollout,
+    #[serde(default)]
+    pub builder: Builder,
+    /// O agente que compila; nulo = o do primeiro alvo da revisão.
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub build_probe_id: Option<i64>,
+    /// Estágio do Dockerfile que roda os testes antes das imagens.
+    #[serde(default)]
+    #[ts(optional)]
+    pub test_target: Option<String>,
+    #[serde(default)]
+    pub build_args: Vec<BuildArgInput>,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
@@ -96,6 +169,16 @@ pub struct TargetInput {
     pub enabled: bool,
     #[serde(default)]
     pub position: i32,
+    #[serde(default = "default_policy")]
+    pub vulnerability_policy: VulnerabilityPolicy,
+    /// Só imagem de origem conhecida (compilada pela central ou enviada pelo
+    /// workflow do repositório).
+    #[serde(default)]
+    pub require_provenance: bool,
+}
+
+const fn default_policy() -> VulnerabilityPolicy {
+    VulnerabilityPolicy::Warn
 }
 
 /// O assistente: aplicação (nova ou existente), alvo e `.env` de uma vez —

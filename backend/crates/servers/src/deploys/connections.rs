@@ -74,6 +74,9 @@ pub async fn save<C: ConnectionTrait>(
     active.client_id = Set(conversion.client_id.clone());
     active.private_key_encrypted = Set(crypto::encrypt(&conversion.pem)?);
     active.can_write = Set(conversion.can_write());
+    if let Some(secret) = conversion.webhook_secret.as_deref() {
+        active.webhook_secret_encrypted = Set(Some(crypto::encrypt(secret)?));
+    }
     Ok(if is_new {
         active.insert(db).await?
     } else {
@@ -202,4 +205,24 @@ pub async fn delete<C: ConnectionTrait>(
         .exec(db)
         .await?;
     Ok(row)
+}
+
+/// As conexões com segredo de webhook, decifrado (para conferir a
+/// assinatura de um aviso de push).
+///
+/// # Errors
+///
+/// Banco.
+pub async fn webhook_secrets<C: ConnectionTrait>(
+    db: &C,
+) -> AppResult<Vec<(deploy_github_connections::Model, String)>> {
+    Ok(deploy_github_connections::Entity::find()
+        .all(db)
+        .await?
+        .into_iter()
+        .filter_map(|row| {
+            let secret = crypto::decrypt(row.webhook_secret_encrypted.as_deref()?).ok()?;
+            Some((row, secret))
+        })
+        .collect())
 }

@@ -1,6 +1,8 @@
 import type { SseHandler, SseRoutes } from '@/stores/events'
 import { useDockerStore } from '@/stores/docker'
 import { isDeployLines, isDeployRun, useDeploysStore } from '@/stores/deploys'
+import { isBuildLines, isServerBuild, useDeployBuildsStore } from '@/stores/deployBuilds'
+import { useRegistryStore } from '@/stores/registry'
 
 /** Cada evento `docker:*` vai para a ação da store Docker que o aplica. */
 const DOCKER_EVENTS: Record<string, SseHandler> = {
@@ -29,6 +31,25 @@ export const serversSse: SseRoutes = {
     handle: (data) => {
       if (isDeployLines(data)) useDeploysStore().applyLines(data.runId, data.lines)
     },
+  },
+  // Compilação no servidor (ADR 023): o estado e o console, ao vivo.
+  'deploys:build': {
+    ephemeral: true,
+    handle: (data) => {
+      if (isServerBuild(data)) useDeployBuildsStore().apply(data)
+    },
+  },
+  'deploys:build-log': {
+    ephemeral: true,
+    handle: (data) => {
+      if (isBuildLines(data)) useDeployBuildsStore().applyLines(data.buildId, data.lines)
+    },
+  },
+  // O catálogo do registry mudou (imagem nova, análise, limpeza).
+  'registry:changed': {
+    ephemeral: true,
+    handle: (_data, _payload, bus) =>
+      bus.scheduleRefresh('registry', () => useRegistryStore().refreshIfLoaded()),
   },
   'deploys:updated': {
     ephemeral: true,

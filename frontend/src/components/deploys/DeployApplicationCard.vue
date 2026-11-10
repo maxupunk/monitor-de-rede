@@ -16,11 +16,25 @@
           >{{ application.repository }}</a
         >
         · {{ application.rollout === 'sequential' ? 'um alvo de cada vez' : 'todos juntos' }}
+        <template v-if="compiles"> · compila no NetMonitor</template>
         <template v-if="application.githubAccount"> · via GitHub App</template>
         <template v-else-if="!application.credentialId"> · sem acesso a privados</template>
       </v-card-subtitle>
       <template v-if="canAdmin" #append>
         <v-btn
+          v-if="compiles"
+          color="primary"
+          variant="flat"
+          size="small"
+          prepend-icon="mdi-hammer-wrench"
+          class="mr-1"
+          data-test="build-now"
+          @click="emit('build', application)"
+        >
+          Compilar agora
+        </v-btn>
+        <v-btn
+          v-else
           color="primary"
           variant="tonal"
           size="small"
@@ -48,6 +62,19 @@
               @click="emit('edit', application)"
             ></v-list-item>
             <v-list-item
+              v-if="compiles"
+              prepend-icon="mdi-key-chain"
+              title="Segredos de build"
+              @click="emit('secrets', application)"
+            ></v-list-item>
+            <v-list-item
+              v-if="compiles"
+              prepend-icon="mdi-github"
+              title="Workflow do GitHub Actions"
+              subtitle="Só se for voltar a compilar no GitHub"
+              @click="emit('workflow', application)"
+            ></v-list-item>
+            <v-list-item
               prepend-icon="mdi-delete"
               title="Remover aplicação"
               base-color="error"
@@ -59,6 +86,32 @@
     </v-card-item>
 
     <v-card-text class="d-flex flex-column ga-2">
+      <ChoiceCard
+        v-if="compiles && latestBuild"
+        class="pa-2 d-flex align-center ga-2"
+        :aria-label="`Abrir a compilação #${latestBuild.id}`"
+        data-test="latest-build"
+        @click="emit('open-build', latestBuild.id)"
+      >
+        <StatusMetaChip :meta="BUILD_STATUS[latestBuild.status]" />
+        <span class="text-body-2">
+          Última compilação: <code>{{ latestBuild.shortSha }}</code>
+          <template v-if="latestBuild.reference"> em {{ refName(latestBuild.reference) }}</template>
+          · {{ formatRelativeTime(latestBuild.createdAt) }}
+        </span>
+        <v-spacer></v-spacer>
+        <v-icon color="primary">mdi-chevron-right</v-icon>
+      </ChoiceCard>
+      <v-alert
+        v-else-if="compiles"
+        type="info"
+        variant="tonal"
+        density="compact"
+        icon="mdi-hammer-wrench"
+      >
+        Nenhuma compilação ainda: o próximo push na branch do alvo compila e publica — ou use
+        Compilar agora.
+      </v-alert>
       <DeployTargetRow
         v-for="target in application.targets"
         :key="target.id"
@@ -91,11 +144,28 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
+import ChoiceCard from '@/components/ChoiceCard.vue'
 import DeployTargetRow from '@/components/deploys/DeployTargetRow.vue'
+import StatusMetaChip from '@/components/deploys/StatusMetaChip.vue'
 import type { DeployApplicationView } from '@/bindings/DeployApplicationView'
+import type { DeployServerBuildView } from '@/bindings/DeployServerBuildView'
 import type { DeployTargetView } from '@/bindings/DeployTargetView'
+import { BUILD_STATUS, refName } from '@/utils/deployPresentation'
+import { formatRelativeTime } from '@/utils/formatters'
 
-defineProps<{ application: DeployApplicationView; canAdmin: boolean }>()
+const props = withDefaults(
+  defineProps<{
+    application: DeployApplicationView
+    canAdmin: boolean
+    latestBuild?: DeployServerBuildView | null
+  }>(),
+  { latestBuild: null }
+)
+
+/** O servidor compila esta aplicação (ADR 023). */
+const compiles = computed(() => props.application.builder === 'netmonitor')
+
 const emit = defineEmits<{
   'open-run': [id: number]
   publish: [target: DeployTargetView]
@@ -105,6 +175,9 @@ const emit = defineEmits<{
   'remove-target': [target: DeployTargetView]
   'add-target': [application: DeployApplicationView]
   workflow: [application: DeployApplicationView]
+  build: [application: DeployApplicationView]
+  'open-build': [id: number]
+  secrets: [application: DeployApplicationView]
   edit: [application: DeployApplicationView]
   remove: [application: DeployApplicationView]
 }>()

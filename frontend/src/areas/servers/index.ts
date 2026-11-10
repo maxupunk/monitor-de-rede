@@ -55,6 +55,11 @@ export const serversArea = defineArea({
       component: () => import('@/pages/deploys/DeploysPage.vue'),
     },
     {
+      path: 'registry',
+      name: 'registry',
+      component: () => import('@/pages/registry/RegistryPage.vue'),
+    },
+    {
       // A volta do GitHub ao criar e ao instalar o app (o manifest aponta
       // para cá): a página de deploys conclui pela query.
       path: 'deploys/github',
@@ -71,6 +76,11 @@ export const serversArea = defineArea({
       section: 'servers',
       order: 15,
       item: { title: 'Deploys', icon: 'mdi-rocket-launch-outline', to: '/deploys' },
+    },
+    {
+      section: 'servers',
+      order: 16,
+      item: { title: 'Registry', icon: 'mdi-package-variant-closed', to: '/registry' },
     },
   ],
   widgets: {

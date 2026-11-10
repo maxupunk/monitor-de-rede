@@ -367,7 +367,9 @@ async fn exporta_o_contrato_do_chat() {
 /// dado: o system prompt e o núcleo de ferramentas. Medido em 2.970
 /// tokens (era 3.038, depois 2.795, 2.589, 2.675 e 2.727). Subir o teto é
 /// decisão, não acidente: cada token a mais aqui se paga em toda rodada de
-/// toda pergunta. Última subida (2.775 → 2.975): a ferramenta `web_search`
+/// toda pergunta. Última subida (2.975 → 2.985): `get_builds` e
+/// `get_build_log` na linha do grupo `docker` (compilação no servidor,
+/// ADR 023), ~9 tokens. Antes (2.775 → 2.975): a ferramenta `web_search`
 /// no núcleo (`ToolGroup::Core`), ~195 tokens. Antes (2.750 → 2.775): o
 /// grupo `dashboard` (layout do dashboard) no catálogo e no `enum` do
 /// `load_tools`, ~10 tokens. Antes (2.700 → 2.750): o grupo `schedules`
@@ -376,7 +378,7 @@ async fn exporta_o_contrato_do_chat() {
 /// (2.650 → 2.700): o grupo `audit` e a `list_plugin_apps`, ~25 tokens.
 #[test]
 fn custo_fixo_por_rodada_cabe_no_orcamento() {
-    const BUDGET: u64 = 2_975;
+    const BUDGET: u64 = 2_985;
     install_dashboard_widgets();
     install_ai_tools();
     let settings = AiSettings {

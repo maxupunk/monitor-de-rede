@@ -1,0 +1,53 @@
+[package]
+name = "netmonitor-servers-registry"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Registry de imagens OCI do NetMonitor (ADR 022), submódulo da área Servidores. Depende só do núcleo, do contrato de fio e da base da área."
+
+[lib]
+name = "netmonitor_servers_registry"
+
+[dependencies]
+netmonitor-servers = { workspace = true }
+netmonitor-core = { workspace = true }
+netmonitor-agent-protocol = { workspace = true }
+sea-orm-migration = { workspace = true }
+loco-rs = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+futures = { workspace = true }
+async-trait = { workspace = true }
+axum = { workspace = true }
+tracing = { workspace = true }
+sea-orm = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+ts-rs = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+async-compression = { version = "0.4", default-features = false, features = ["tokio", "gzip"] }
+hex = { workspace = true }
+sha2 = { workspace = true }
+base64 = { workspace = true }
+rand = { workspace = true }
+regex = { workspace = true }
+reqwest = { workspace = true }
+# O token do registry (Docker token auth): o mesmo backend do JWT da sessão.
+jsonwebtoken = { version = "10", default-features = false, features = ["rust_crypto"] }
+# Arquivos OCI (o que o buildx gera, o que o `docker load` lê) e as camadas
+# que a varredura abre: o mesmo `tar` que o `cargo` usa, em fluxo
+# (`SyncIoBridge` dentro de `spawn_blocking`).
+tar = { version = "0.4", default-features = false }
+flate2 = { version = "1" }
+# A base do OSV.dev vem em `all.zip` por ecossistema.
+zip = { version = "2", default-features = false, features = ["deflate"] }
+semver = { version = "1" }
+bytes = { version = "1" }
+
+[dev-dependencies]
+loco-rs = { workspace = true, features = ["testing"] }
+serial_test = { version = "3.1.1" }
+tempfile = { version = "3" }

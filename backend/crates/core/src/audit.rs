@@ -113,6 +113,9 @@ pub enum ResourceType {
     /// Deploy contínuo (ADR 021): aplicação, alvo, credencial, `.env` e cada
     /// deploy pedido ou aprovado.
     Deploy,
+    /// Registry de imagens (ADR 022): versões, tokens de acesso, exceções de
+    /// vulnerabilidade e configurações.
+    Registry,
 }
 
 impl ResourceType {
@@ -141,6 +144,7 @@ impl ResourceType {
             ResourceType::LinkTestSchedule => "link_test_schedule",
             ResourceType::ScheduledTask => "scheduled_task",
             ResourceType::Deploy => "deploy",
+            ResourceType::Registry => "registry",
         }
     }
 }
@@ -177,6 +181,8 @@ impl std::str::FromStr for ResourceType {
             "link_test" | "linktest" => Ok(ResourceType::LinkTest),
             "link_test_schedule" | "linktestschedule" => Ok(ResourceType::LinkTestSchedule),
             "scheduled_task" | "scheduledtask" => Ok(ResourceType::ScheduledTask),
+            "deploy" => Ok(ResourceType::Deploy),
+            "registry" => Ok(ResourceType::Registry),
             _ => Err(AppError::validation(format!(
                 "Tipo de recurso inválido: {s}"
             ))),
@@ -400,33 +406,7 @@ impl<'a, C: ConnectionTrait> AuditService<'a, C> {
 }
 
 fn extract_ip(headers: &HeaderMap) -> Option<String> {
-    let sanitize = |raw: &str| -> Option<String> {
-        let cleaned: String = raw
-            .chars()
-            .filter(|c| !c.is_control() && !c.is_whitespace())
-            .collect();
-        if cleaned.is_empty() || cleaned.len() > 64 {
-            None
-        } else {
-            Some(cleaned)
-        }
-    };
-
-    if let Some(forwarded) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
-        if let Some(first) = forwarded.split(',').next() {
-            if let Some(ip) = sanitize(first) {
-                return Some(ip);
-            }
-        }
-    }
-
-    if let Some(real_ip) = headers.get("x-real-ip").and_then(|v| v.to_str().ok()) {
-        if let Some(ip) = sanitize(real_ip) {
-            return Some(ip);
-        }
-    }
-
-    None
+    crate::shared::client_addr::client_ip(headers)
 }
 
 fn extract_user_agent(headers: &HeaderMap) -> Option<String> {

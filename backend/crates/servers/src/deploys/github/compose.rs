@@ -9,6 +9,7 @@
 //! * **o que falta**: serviço que compila sem apontar para uma imagem
 //!   publicada (no servidor nada é compilado), imagem fora do ghcr.io.
 
+use crate::deploys::images::component;
 use serde_yaml::Value;
 
 use crate::dtos::deploys::BuildImage;
@@ -84,7 +85,7 @@ fn join(base: &str, path: &str) -> String {
 
 /// `ghcr.io/dono/sgc-api:${IMAGE_TAG:-latest}` → (`ghcr.io`, `sgc-api`,
 /// `Some("IMAGE_TAG")`).
-fn parse_image(image: &str) -> (Option<String>, String, Option<String>) {
+fn parse_image(image: &str) -> (Option<String>, String, Option<String>, String) {
     // A tag começa no primeiro `:` depois da última barra — o `:` de
     // `host:porta` vem antes dela, e o de `${VAR:-x}` vem depois.
     let name_start = image.rfind('/').map_or(0, |index| index + 1);
@@ -106,18 +107,22 @@ fn parse_image(image: &str) -> (Option<String>, String, Option<String>) {
         let end = rest.find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))?;
         (end > 0).then(|| rest[..end].to_string())
     });
-    (registry, name, variable)
+    (registry, name, variable, path.to_string())
 }
 
-/// O `build:` de um serviço: (contexto, Dockerfile), relativos à raiz.
-fn parse_build(build: &Value, compose_dir: &str) -> Option<(String, String)> {
-    let (context, dockerfile) = match build {
-        Value::String(context) => (context.as_str(), "Dockerfile"),
+/// O `build:` de um serviço: (contexto, Dockerfile, estágio), relativos à
+/// raiz.
+fn parse_build(build: &Value, compose_dir: &str) -> Option<(String, String, Option<String>)> {
+    let (context, dockerfile, target) = match build {
+        Value::String(context) => (context.as_str(), "Dockerfile", None),
         Value::Mapping(map) => (
             map.get("context").and_then(Value::as_str).unwrap_or("."),
             map.get("dockerfile")
                 .and_then(Value::as_str)
                 .unwrap_or("Dockerfile"),
+            map.get("target")
+                .and_then(Value::as_str)
+                .map(ToString::to_string),
         ),
         _ => return None,
     };
@@ -127,17 +132,7 @@ fn parse_build(build: &Value, compose_dir: &str) -> Option<(String, String)> {
     }
     let context = join(compose_dir, context);
     let dockerfile = join(&context, dockerfile);
-    Some((context, dockerfile))
-}
-
-fn slug(value: &str) -> String {
-    value
-        .to_ascii_lowercase()
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect::<String>()
-        .trim_matches('-')
-        .to_string()
+    Some((context, dockerfile, target))
 }
 
 /// Analisa o compose. `path` é onde ele mora no repositório (os caminhos do
@@ -163,20 +158,20 @@ pub fn analyze(content: &str, path: &str, repository: &str) -> Result<ComposeAna
             continue;
         };
         out.services.push(service_name.to_string());
-        let Some((context, dockerfile)) = service
+        let Some((context, dockerfile, target)) = service
             .get("build")
             .and_then(|b| parse_build(b, compose_dir))
         else {
             continue;
         };
         let image = service.get("image").and_then(Value::as_str);
-        let name = match image {
+        let (name, reference) = match image {
             Some(image) => {
-                let (registry, name, variable) = parse_image(image);
+                let (registry, name, variable, path) = parse_image(image);
                 if registry.as_deref() != Some("ghcr.io") {
                     out.notes.push(format!(
                         "O serviço {service_name} usa a imagem {image}, fora do ghcr.io: o \
-                         workflow gerado publica no ghcr.io"
+                         workflow do GitHub Actions publica no ghcr.io (compilando no NetMonitor,                          o nome é só o que o host usa)"
                     ));
                 }
                 match variable {
@@ -191,16 +186,16 @@ pub fn analyze(content: &str, path: &str, repository: &str) -> Result<ComposeAna
                         image_base = image.split(':').next().unwrap_or(image)
                     )),
                 }
-                name
+                (name, Some(path))
             }
             None => {
-                let suggested = slug(&format!("{repo_name}-{service_name}"));
+                let suggested = component(&format!("{repo_name}-{service_name}"));
                 out.notes.push(format!(
                     "O serviço {service_name} compila (build:) mas não aponta para uma imagem \
                      publicada: acrescente image: ghcr.io/{owner}/{suggested}:${{IMAGE_TAG:-latest}}",
                     owner = repository.split('/').next().unwrap_or_default().to_ascii_lowercase()
                 ));
-                suggested
+                (suggested, None)
             }
         };
         if name.is_empty() || out.images.iter().any(|known| known.name == name) {
@@ -210,6 +205,8 @@ pub fn analyze(content: &str, path: &str, repository: &str) -> Result<ComposeAna
             name,
             dockerfile,
             context,
+            target,
+            reference,
         });
     }
     Ok(out)
@@ -251,11 +248,15 @@ services:
                     name: "sgc-api".into(),
                     dockerfile: "apps/api/Dockerfile".into(),
                     context: ".".into(),
+                    target: None,
+                    reference: Some("ghcr.io/maxupunk/sgc-api".into()),
                 },
                 BuildImage {
                     name: "sgc-front-tenants".into(),
                     dockerfile: "docker/frontend/Dockerfile".into(),
                     context: "docker/frontend".into(),
+                    target: None,
+                    reference: Some("ghcr.io/maxupunk/sgc-front-tenants".into()),
                 },
             ]
         );
@@ -283,15 +284,15 @@ services:
 
     #[test]
     fn imagem_com_porta_no_registry() {
-        let (registry, name, variable) = parse_image("localhost:5000/time/api:${TAG}");
+        let (registry, name, variable, _) = parse_image("localhost:5000/time/api:${TAG}");
         assert_eq!(registry.as_deref(), Some("localhost:5000"));
         assert_eq!(name, "api");
         assert_eq!(variable.as_deref(), Some("TAG"));
-        let (registry, name, variable) = parse_image("nginx");
+        let (registry, name, variable, _) = parse_image("nginx");
         assert!(registry.is_none());
         assert_eq!(name, "nginx");
         assert!(variable.is_none());
-        let (_, name, variable) = parse_image("ghcr.io/a/api:${IMAGE_TAG:-latest}");
+        let (_, name, variable, _) = parse_image("ghcr.io/a/api:${IMAGE_TAG:-latest}");
         assert_eq!(name, "api");
         assert_eq!(variable.as_deref(), Some("IMAGE_TAG"));
     }

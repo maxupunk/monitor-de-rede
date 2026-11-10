@@ -3,4 +3,4 @@
 /**
  * Etapa em curso de um deploy, para a barra de progresso.
  */
-export type DeployStage = "backup" | "sync" | "env" | "pull" | "start" | "prune" | "rollback";
+export type DeployStage = "backup" | "image" | "sync" | "env" | "pull" | "start" | "prune" | "rollback";

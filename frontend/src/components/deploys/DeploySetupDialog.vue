@@ -82,6 +82,7 @@
             :lock-project="Boolean(preset?.project)"
             :references="references"
             :references-loading="referencesLoading"
+            :compiles="compiles"
           />
           <v-card border flat class="pa-4 mt-4">
             <DeployReadinessList
@@ -106,6 +107,17 @@
             hint="Opcional agora: dá para editar depois em Variáveis."
             persistent-hint
           />
+          <v-alert
+            v-if="compiles"
+            type="info"
+            variant="tonal"
+            density="compact"
+            icon="mdi-hammer-wrench"
+            class="mt-4"
+          >
+            Ao concluir, cada push na branch <strong>{{ target.reference }}</strong> compila no
+            servidor, guarda a imagem no Registry e sobe — sem nada a configurar no GitHub.
+          </v-alert>
           <v-alert
             v-if="readiness && !readiness.ready"
             type="warning"
@@ -146,7 +158,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import ChoiceCard from '@/components/ChoiceCard.vue'
 import CodeTextarea from '@/components/CodeTextarea.vue'
 import DeployApplicationFields from '@/components/deploys/DeployApplicationFields.vue'
@@ -181,6 +193,12 @@ type FormRef = { validate: () => Promise<{ valid: boolean }> } | null
 const step = ref(1)
 const applicationId = ref<number | null>(null)
 const application = ref<DeployApplicationInput>(emptyApplication())
+
+/** A aplicação (nova ou escolhida) compila no NetMonitor. */
+const compiles = computed(() => {
+  const existing = deploys.applications.find((item) => item.id === applicationId.value)
+  return (existing?.builder ?? application.value.builder) === 'netmonitor'
+})
 const target = ref<TargetForm>(emptyTarget())
 const env = ref('')
 const error = ref<string | null>(null)

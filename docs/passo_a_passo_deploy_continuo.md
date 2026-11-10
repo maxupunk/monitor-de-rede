@@ -11,6 +11,15 @@
 
 ---
 
+> **Novo (2026-11-09): o servidor compila.** No assistente, "Quem compila?"
+> já vem em **O NetMonitor compila**: depois de conectar o GitHub (§4) e
+> cadastrar o alvo (§6), cada push na branch do alvo compila no servidor,
+> guarda a imagem na página **Registry**, confere as vulnerabilidades pela
+> política do alvo e sobe — o §7 (workflow e PR) só vale para quem escolher
+> **O GitHub Actions compila**. No agente, libere `build` além de `deploy`
+> (§3.1). O cartão da aplicação ganha **Compilar agora**, a última
+> compilação (com console ao vivo) e **Segredos de build**.
+
 ## 1. Como funciona, em 1 minuto
 
 Três peças, cada uma com um papel só:
@@ -75,7 +84,11 @@ segredo vai para o GitHub.
 
 ## 3. Preparar o servidor (o agente)
 
-### 3.1 Liberar o deploy na política do agente
+### 3.1 Liberar o deploy (e a compilação) na política do agente
+
+Para o servidor compilar (padrão), a lista precisa de `build` também:
+`AGENT_ALLOW=read,lifecycle,update,compose,volume_export,monitor,deploy,build`.
+
 
 A central **não** consegue ligar isso sozinha: quem decide é o servidor.
 

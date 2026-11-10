@@ -300,6 +300,15 @@ pub fn agent_host_docker() -> Arc<dyn HostDocker> {
     Arc::new(netmonitor_servers::agent_host::LocalHostDocker)
 }
 
+/// O registry de imagens da central (ADR 022), como o deploy o vê: o
+/// submódulo implementa o contrato que a base de Servidores declara.
+#[must_use]
+pub fn image_stores() -> netmonitor_servers::deploys::images::ImageStores {
+    netmonitor_servers::deploys::images::ImageStores(Arc::new(
+        netmonitor_servers_registry::Registry,
+    ))
+}
+
 /// As rotinas que as áreas contribuem ao ciclo do scheduler e à purga
 /// (ADR 017, registro de rotinas): a coleta SNMP sem monitor, a varredura, o
 /// vigia do Wi-Fi e os testes de enlace agendados, da Rede (base e
@@ -311,6 +320,7 @@ pub fn area_routines() -> AreaRoutines {
     routines.extend(netmonitor_network_wifi::routines::routines());
     routines.extend(netmonitor_network_link_tests::routines::routines());
     routines.extend(netmonitor_vpn::routines::routines());
+    routines.extend(netmonitor_servers_registry::retention::routines());
     AreaRoutines::new(
         routines,
         netmonitor_network_link_tests::routines::retention(),
@@ -385,6 +395,8 @@ pub fn ai_tool_catalog() -> Vec<Box<dyn AiToolHandler>> {
         Box::new(docker::DockerContainerAction),
         Box::new(netmonitor_servers::deploys::ai_tools::DeployStatus),
         Box::new(netmonitor_servers::deploys::ai_tools::DeployLog),
+        Box::new(netmonitor_servers::deploys::ai_tools::BuildStatus),
+        Box::new(netmonitor_servers::deploys::ai_tools::BuildLog),
         Box::new(netmonitor_servers::deploys::ai_tools::DeployAction),
         Box::new(platform::PlatformStatus::new(vec![
             Box::new(netmonitor_vpn::ai_tools::VpnStatus),

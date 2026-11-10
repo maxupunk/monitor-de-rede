@@ -2,7 +2,7 @@
   <div>
     <PageHeader
       title="Deploys"
-      subtitle="O GitHub compila e publica as imagens; aqui você decide quando e onde elas entram no ar — com aprovação, janela de manutenção, backup e rollback."
+      subtitle="Dê push e o servidor compila, guarda a imagem no registry e sobe — com aprovação, janela de manutenção, backup e rollback."
     >
       <template v-if="canAdmin" #actions>
         <v-btn
@@ -139,6 +139,10 @@
         <DeployApplicationCard
           :application="application"
           :can-admin="canAdmin"
+          :latest-build="builds.latestOf(application.id)"
+          @build="openBuildStart"
+          @open-build="openBuild"
+          @secrets="openSecrets"
           @open-run="openRun"
           @publish="(target) => openTargetDialog('publish', target)"
           @env="(target) => openTargetDialog('env', target)"
@@ -152,6 +156,31 @@
         />
       </v-col>
     </v-row>
+
+    <v-card v-if="builds.recent.length" elevation="2" class="mt-4" data-test="recent-builds">
+      <v-card-title class="font-weight-bold d-flex align-center ga-2">
+        <v-icon color="primary">mdi-hammer-wrench</v-icon> Compilações recentes
+      </v-card-title>
+      <v-card-text>
+        <v-list density="compact" class="bg-transparent pa-0">
+          <v-list-item
+            v-for="build in builds.recent.slice(0, 10)"
+            :key="build.id"
+            :title="`${build.application} · ${build.shortSha}`"
+            :subtitle="buildSubtitle(build)"
+            class="px-0"
+            @click="openBuild(build.id)"
+          >
+            <template #prepend>
+              <StatusMetaChip :meta="BUILD_STATUS[build.status]" class="mr-3" />
+            </template>
+            <template #append>
+              <v-icon color="primary">mdi-chevron-right</v-icon>
+            </template>
+          </v-list-item>
+        </v-list>
+      </v-card-text>
+    </v-card>
 
     <v-card v-if="deploys.recentRuns.length" elevation="2" class="mt-4">
       <v-card-title class="font-weight-bold d-flex align-center ga-2">
@@ -184,6 +213,18 @@
     />
     <DeployHistoryDialog v-model="historyOpen" :target="selectedTarget" @open-run="openRun" />
     <DeployRunDialog v-model="runOpen" :run-id="runId" @open-run="openRun" />
+    <DeployBuildStartDialog
+      v-model="buildStartOpen"
+      :application="selectedApplication"
+      @started="openBuild"
+    />
+    <DeployBuildDialog
+      v-model="buildOpen"
+      :build-id="buildId"
+      :can-admin="canAdmin"
+      @opened="openBuild"
+    />
+    <DeployBuildSecretsDialog v-model="secretsOpen" :application="selectedApplication" />
 
     <v-snackbar v-model="feedback.visible" :color="feedback.color" timeout="5000">
       {{ feedback.message }}
@@ -202,6 +243,14 @@ import DeployEnvDialog from '@/components/deploys/DeployEnvDialog.vue'
 import DeployHistoryDialog from '@/components/deploys/DeployHistoryDialog.vue'
 import DeployPublishDialog from '@/components/deploys/DeployPublishDialog.vue'
 import DeployRunDialog from '@/components/deploys/DeployRunDialog.vue'
+import DeployBuildDialog from '@/components/deploys/DeployBuildDialog.vue'
+import DeployBuildSecretsDialog from '@/components/deploys/DeployBuildSecretsDialog.vue'
+import DeployBuildStartDialog from '@/components/deploys/DeployBuildStartDialog.vue'
+import StatusMetaChip from '@/components/deploys/StatusMetaChip.vue'
+import type { DeployServerBuildView } from '@/bindings/DeployServerBuildView'
+import { useDeployBuildsStore } from '@/stores/deployBuilds'
+import { BUILD_STATUS, refName } from '@/utils/deployPresentation'
+import { formatRelativeTime } from '@/utils/formatters'
 import DeployRunsList from '@/components/deploys/DeployRunsList.vue'
 import DeploySetupDialog from '@/components/deploys/DeploySetupDialog.vue'
 import DeployTargetDialog from '@/components/deploys/DeployTargetDialog.vue'
@@ -227,6 +276,7 @@ const router = useRouter()
 const { confirm } = useConfirm()
 
 const canAdmin = computed(() => auth.roleIn('servers') === 'admin')
+const builds = useDeployBuildsStore()
 const counts = computed(() => deploys.overview?.counts ?? null)
 
 const ONBOARDING = [
@@ -239,8 +289,8 @@ const ONBOARDING = [
     text: 'Diga o repositório, o servidor e a política (aprovação, janela, backup). A checagem de prontidão aponta o que falta.',
   },
   {
-    title: 'Ligue o GitHub',
-    text: 'Com o GitHub conectado, a central abre o PR do workflow: ele compila, publica e avisa a central. Nenhum segredo vai para o GitHub.',
+    title: 'Dê push',
+    text: 'Com o GitHub conectado, cada push na branch do alvo chega à central: o servidor compila, guarda a imagem no registry, confere as vulnerabilidades e sobe. Sem workflow no repositório.',
   },
 ]
 
@@ -312,9 +362,43 @@ function openSetup(preset: SetupPreset | null) {
 }
 
 function onSetupDone(applicationId: number) {
-  notify('Deploy automático configurado. Falta ligar o GitHub.')
   const application = deploys.applications.find((item) => item.id === applicationId) ?? null
+  if (application?.builder === 'netmonitor') {
+    // O servidor compila (ADR 023): nada a ligar no GitHub — o próximo push já
+    // compila. "Compilar agora" mostra o caminho inteiro sem esperar um push.
+    notify('Pronto: o próximo push compila no servidor e sobe. Quer ver agora?')
+    openBuildStart(application)
+    return
+  }
+  notify('Deploy automático configurado. Falta ligar o GitHub.')
   if (application) openWorkflow(application)
+}
+
+const buildStartOpen = ref(false)
+const buildOpen = ref(false)
+const buildId = ref<number | null>(null)
+const secretsOpen = ref(false)
+
+function openBuildStart(application: DeployApplicationView) {
+  selectedApplication.value = application
+  buildStartOpen.value = true
+}
+
+function openBuild(id: number) {
+  buildId.value = id
+  buildOpen.value = true
+}
+
+function openSecrets(application: DeployApplicationView) {
+  selectedApplication.value = application
+  secretsOpen.value = true
+}
+
+function buildSubtitle(build: DeployServerBuildView): string {
+  const reference = refName(build.reference)
+  return [reference, build.agent && `em ${build.agent}`, formatRelativeTime(build.createdAt)]
+    .filter(Boolean)
+    .join(' · ')
 }
 
 function openRun(id: number) {
@@ -423,11 +507,13 @@ async function finishGithub(callback: GithubCallback) {
   }
 }
 
-// ── Links diretos: a notificação (`?run=`) e a aba Compose (`?setup=`) ─────
+// ── Links diretos: as notificações (`?run=`, `?build=`) e a aba Compose (`?setup=`) ─
 
 function applyQuery() {
   const run = Number(route.query.run)
   if (Number.isInteger(run) && run > 0) openRun(run)
+  const build = Number(route.query.build)
+  if (Number.isInteger(build) && build > 0) openBuild(build)
   if (route.query.setup && canAdmin.value) {
     const probe = Number(route.query.probe)
     openSetup({
@@ -438,7 +524,10 @@ function applyQuery() {
   const callback = parseGithubCallback(route.query)
   if (callback && canAdmin.value) void finishGithub(callback)
   const handled =
-    route.query.run || route.query.setup || GITHUB_CALLBACK_KEYS.some((key) => key in route.query)
+    route.query.run ||
+    route.query.build ||
+    route.query.setup ||
+    GITHUB_CALLBACK_KEYS.some((key) => key in route.query)
   if (handled) {
     void router.replace({ name: 'deploys', query: {} })
   }
@@ -447,7 +536,17 @@ function applyQuery() {
 watch(() => route.query, applyQuery)
 
 onMounted(async () => {
-  await deploys.fetchOverview()
+  await Promise.all([
+    deploys.fetchOverview(),
+    builds
+      .fetchRecent()
+      .catch((err) =>
+        notify(
+          err instanceof Error ? err.message : 'Não foi possível ler as compilações recentes',
+          'error'
+        )
+      ),
+  ])
   applyQuery()
 })
 </script>

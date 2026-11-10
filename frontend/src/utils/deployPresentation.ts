@@ -9,6 +9,10 @@ import type { DeployReadinessLevel } from '@/bindings/DeployReadinessLevel'
 import type { DeployRunStatus } from '@/bindings/DeployRunStatus'
 import type { DeployRunTrigger } from '@/bindings/DeployRunTrigger'
 import type { DeployWorkflowState } from '@/bindings/DeployWorkflowState'
+import type { BuildStage } from '@/bindings/BuildStage'
+import type { DeployBuildStatus } from '@/bindings/DeployBuildStatus'
+import type { DeployBuilder } from '@/bindings/DeployBuilder'
+import type { DeployVulnerabilityPolicy } from '@/bindings/DeployVulnerabilityPolicy'
 
 export interface StatusMeta {
   label: string
@@ -70,6 +74,7 @@ export interface StageMeta {
 /** As etapas na ordem em que acontecem (o rollback só aparece quando há). */
 export const DEPLOY_STAGES: StageMeta[] = [
   { value: 'backup', label: 'Backup do banco', icon: 'mdi-database-export' },
+  { value: 'image', label: 'Conferir e enviar imagem', icon: 'mdi-shield-check' },
   { value: 'sync', label: 'Repositório', icon: 'mdi-source-branch-sync' },
   { value: 'env', label: 'Variáveis', icon: 'mdi-file-key' },
   { value: 'pull', label: 'Baixar imagens', icon: 'mdi-download' },
@@ -171,4 +176,91 @@ export function buildMeta(build: Pick<DeployBuildView, 'status' | 'conclusion'>)
     default:
       return { label: 'Terminou', color: 'info', icon: 'mdi-information', live: false }
   }
+}
+
+// ── Compilação no servidor (ADR 023) ────────────────────────────────────
+
+export const BUILD_STATUS: Record<DeployBuildStatus, StatusMeta> = {
+  queued: { label: 'Na fila', color: 'info', icon: 'mdi-timer-sand', live: true },
+  running: { label: 'Compilando', color: 'primary', icon: 'mdi-hammer-wrench', live: true },
+  succeeded: { label: 'Compilada', color: 'success', icon: 'mdi-check-circle', live: false },
+  failed: { label: 'Falhou', color: 'error', icon: 'mdi-alert-circle', live: false },
+  cancelled: { label: 'Cancelada', color: 'secondary', icon: 'mdi-cancel', live: false },
+  superseded: {
+    label: 'Substituída',
+    color: 'secondary',
+    icon: 'mdi-skip-next-circle',
+    live: false,
+  },
+}
+
+export interface BuildStageMeta {
+  value: BuildStage
+  label: string
+  icon: string
+}
+
+/** As etapas da compilação, na ordem do console. */
+export const BUILD_STAGES: BuildStageMeta[] = [
+  { value: 'prepare', label: 'Preparar o builder', icon: 'mdi-cog-play' },
+  { value: 'clone', label: 'Buscar o commit', icon: 'mdi-source-branch' },
+  { value: 'test', label: 'Testes', icon: 'mdi-test-tube' },
+  { value: 'build', label: 'Compilar', icon: 'mdi-hammer-wrench' },
+  { value: 'store', label: 'Guardar no registry', icon: 'mdi-package-variant-closed' },
+  { value: 'scan', label: 'Vulnerabilidades', icon: 'mdi-shield-search' },
+]
+
+/** Estado de cada etapa da compilação (a de teste pula quando não há). */
+export function buildStageStates(
+  stage: BuildStage | null,
+  status: DeployBuildStatus
+): Record<BuildStage, StageState> {
+  const order = BUILD_STAGES.map((item) => item.value)
+  const result = Object.fromEntries(order.map((value) => [value, 'todo' as StageState])) as Record<
+    BuildStage,
+    StageState
+  >
+  if (status === 'succeeded') {
+    for (const value of order) result[value] = 'done'
+    return result
+  }
+  if (!stage) return result
+  const current = order.indexOf(stage)
+  order.forEach((value, index) => {
+    if (index < current) result[value] = 'done'
+    else if (index === current)
+      result[value] = status === 'failed' || status === 'cancelled' ? 'failed' : 'current'
+  })
+  return result
+}
+
+export const BUILDER_OPTIONS: {
+  value: DeployBuilder
+  title: string
+  subtitle: string
+  icon: string
+}[] = [
+  {
+    value: 'netmonitor',
+    title: 'O NetMonitor compila',
+    subtitle: 'O push chega, o servidor compila e sobe. Sem workflow e sem ghcr.io.',
+    icon: 'mdi-server',
+  },
+  {
+    value: 'github_actions',
+    title: 'O GitHub Actions compila',
+    subtitle: 'Um workflow no repositório publica no ghcr.io e avisa a central.',
+    icon: 'mdi-github',
+  },
+]
+
+export const POLICY_OPTIONS: { value: DeployVulnerabilityPolicy; title: string }[] = [
+  { value: 'block_critical', title: 'Bloquear com vulnerabilidade crítica' },
+  { value: 'block_high', title: 'Bloquear com vulnerabilidade alta ou crítica' },
+  { value: 'warn', title: 'Só avisar' },
+]
+
+/** `refs/heads/main` → `main`; `refs/tags/v1` → `v1`. */
+export function refName(reference: string | null | undefined): string {
+  return (reference ?? '').replace(/^refs\/(heads|tags)\//, '')
 }

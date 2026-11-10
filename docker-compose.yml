@@ -150,6 +150,9 @@ services:
       # e cadastre a subpasta `nas`. Sem interpolação, pelo mesmo motivo da
       # `DATABASE_URL`: é um caminho visto de dentro do container.
       STORAGE_LOCAL_ROOT: /data/storage
+      # Registry de imagens (ADR 022): os blobs ficam fora da raiz dos
+      # armazenamentos, que o explorador lista e apaga.
+      REGISTRY_DIR: /data/registry
       # --- servidor de syslog ---
       # Banco **separado** no mesmo servidor (`netmonitor_logs`, criado pelo
       # `docker/postgres/initdb/`): a ingestão e a retenção dos logs não
@@ -310,7 +313,10 @@ services:
       # monitores de container deste servidor (`monitor`) e o deploy contínuo
       # de stacks (`deploy`, ADR 021). Para um host só de leitura,
       # `read,monitor`.
-      AGENT_ALLOW: ${LOCAL_AGENT_ALLOW:-read,lifecycle,update,compose,volume_export,monitor,deploy}
+      # `build` (ADR 023) é a compilação no servidor: executa o Dockerfile dos
+      # repositórios cadastrados num builder BuildKit dedicado. Tire-a para
+      # não compilar neste host.
+      AGENT_ALLOW: ${LOCAL_AGENT_ALLOW:-read,lifecycle,update,compose,volume_export,monitor,deploy,build}
       # Desliga o acesso à Engine sem reconstruir a imagem.
       DOCKER_ENABLED: ${DOCKER_ENABLED:-true}
       AGENT_STACKS_DIR: ${AGENT_STACKS_DIR:-/srv/netmonitor/stacks}

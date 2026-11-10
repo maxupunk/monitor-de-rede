@@ -40,6 +40,8 @@ reqwest = { workspace = true }
 jsonwebtoken = { version = "10", default-features = false, features = ["rust_crypto", "use_pem"] }
 # Ler o compose do repositório no assistente (as imagens e a variável da tag).
 serde_yaml = { version = "0.9" }
+# A assinatura dos avisos do GitHub App (`X-Hub-Signature-256`, ADR 023).
+hmac = { version = "0.12" }
 # A Docker Engine do host — usada só no agente (ADR 014).
 bollard = { version = "0.18.1", default-features = false, features = ["http", "pipe"] }
 async-compression = { version = "0.4", default-features = false, features = ["tokio", "gzip"] }

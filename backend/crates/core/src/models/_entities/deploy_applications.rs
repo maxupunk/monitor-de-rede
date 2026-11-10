@@ -20,6 +20,11 @@ pub struct Model {
     #[sea_orm(column_type = "JsonBinary")]
     pub images: Json,
     pub rollout: String,
+    pub builder: String,
+    pub build_probe_id: Option<i64>,
+    pub test_target: Option<String>,
+    #[sea_orm(column_type = "JsonBinary")]
+    pub build_args: Json,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
 }

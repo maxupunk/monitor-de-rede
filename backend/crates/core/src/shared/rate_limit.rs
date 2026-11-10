@@ -137,35 +137,9 @@ pub fn auth_endpoint_limiter() -> &'static SlidingWindowRateLimiter {
     })
 }
 
-/// Extrai e sanitiza com segurança o IP de origem dos cabeçalhos HTTP.
+/// O IP de origem da requisição (`shared::client_addr`), ou `desconhecido`.
 pub fn extract_client_ip(headers: &axum::http::HeaderMap) -> String {
-    let sanitize = |raw: &str| -> Option<String> {
-        let cleaned: String = raw
-            .chars()
-            .filter(|c| !c.is_control() && !c.is_whitespace())
-            .collect();
-        if cleaned.is_empty() || cleaned.len() > 64 {
-            None
-        } else {
-            Some(cleaned)
-        }
-    };
-
-    if let Some(forwarded) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
-        if let Some(first) = forwarded.split(',').next() {
-            if let Some(ip) = sanitize(first) {
-                return ip;
-            }
-        }
-    }
-
-    if let Some(real_ip) = headers.get("x-real-ip").and_then(|v| v.to_str().ok()) {
-        if let Some(ip) = sanitize(real_ip) {
-            return ip;
-        }
-    }
-
-    "desconhecido".to_string()
+    super::client_addr::client_ip(headers).unwrap_or_else(|| "desconhecido".to_string())
 }
 
 #[cfg(test)]

@@ -15,4 +15,14 @@ dockerfile: string,
 /**
  * Contexto do build, relativo à raiz: `.`.
  */
-context: string, };
+context: string, 
+/**
+ * Estágio final do Dockerfile (`--target`), quando há vários.
+ */
+target?: string, 
+/**
+ * O `image:` do compose sem a tag (`ghcr.io/acme/loja-api`): o nome que a
+ * imagem ganha no host quando a central a entrega (compilação no
+ * servidor, ADR 023).
+ */
+reference?: string, };

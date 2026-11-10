@@ -52,6 +52,9 @@ pub async fn agents(ctx: &AppContext) -> AppResult<Vec<DeployAgentView>> {
                 allows_deploy: session
                     .as_ref()
                     .is_none_or(|session| session.allows(Permission::Deploy)),
+                allows_build: session
+                    .as_ref()
+                    .is_some_and(|session| session.allows(Permission::Build)),
             }
         })
         .collect())

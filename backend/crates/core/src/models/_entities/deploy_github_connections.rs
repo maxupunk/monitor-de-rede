@@ -18,6 +18,8 @@ pub struct Model {
     pub private_key_encrypted: String,
     pub installation_id: Option<i64>,
     pub can_write: bool,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub webhook_secret_encrypted: Option<String>,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
 }

@@ -33,6 +33,7 @@ const AREAS: &[&str] = &["network", "servers", "vpn", "assistant"];
 const SUBMODULOS: &[(&str, &str)] = &[
     ("network-wifi", "network"),
     ("network-link-tests", "network"),
+    ("servers-registry", "servers"),
 ];
 
 /// O que cada crate pode ter como dependência do workspace (sem o prefixo
@@ -47,6 +48,7 @@ const PERMITIDAS: &[(&str, &[&str])] = &[
     ("assistant", &["core", "agent-protocol"]),
     ("network-wifi", &["core", "agent-protocol", "network"]),
     ("network-link-tests", &["core", "agent-protocol", "network"]),
+    ("servers-registry", &["core", "agent-protocol", "servers"]),
 ];
 
 /// Arquivos do pacote raiz que montam as áreas.

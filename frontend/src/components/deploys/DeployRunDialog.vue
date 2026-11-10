@@ -167,36 +167,14 @@
         </v-alert>
 
         <!-- Console -->
-        <div class="d-flex align-center mb-2">
-          <div class="text-subtitle-1 font-weight-bold">Console</div>
-          <LiveIndicator v-if="isLive" class="ml-2" />
-          <v-spacer></v-spacer>
-          <v-btn
-            size="small"
-            variant="text"
-            color="primary"
-            :prepend-icon="copied ? 'mdi-check' : 'mdi-content-copy'"
-            :disabled="!lines.length"
-            @click="copyLog"
-          >
-            {{ copied ? 'Copiado' : 'Copiar log' }}
-          </v-btn>
-        </div>
-        <div ref="consoleRef" class="deploy-console" data-test="console">
-          <div v-if="consoleError" class="text-error">{{ consoleError }}</div>
-          <div v-else-if="!lines.length" class="console-empty">
-            {{
-              isPendingRun ? 'O console começa quando o deploy rodar.' : 'Nenhuma linha registrada.'
-            }}
-          </div>
-          <div
-            v-for="(line, index) in lines"
-            :key="index"
-            :class="{ 'console-error': isErrorLine(line), 'console-ok': isOkLine(line) }"
-          >
-            {{ line }}
-          </div>
-        </div>
+        <DeployConsole
+          :lines="lines"
+          :live="isLive"
+          :error="consoleError"
+          :empty-text="
+            isPendingRun ? 'O console começa quando o deploy rodar.' : 'Nenhuma linha registrada.'
+          "
+        />
       </v-card-text>
 
       <v-card-actions class="px-6 pb-4 flex-wrap ga-2">
@@ -265,9 +243,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import DeployConsole from '@/components/deploys/DeployConsole.vue'
+import { computed, ref, watch } from 'vue'
 import DatabaseRestoreDialog from '@/components/databases/DatabaseRestoreDialog.vue'
-import LiveIndicator from '@/components/LiveIndicator.vue'
 import DeployRunStatusChip from '@/components/deploys/DeployRunStatusChip.vue'
 import { useConfirm } from '@/composables/useConfirm'
 import type { DatabaseBackupResponse } from '@/bindings/DatabaseBackupResponse'
@@ -349,39 +327,7 @@ function stageIcon(stage: DeployStage, icon: string): string {
 }
 
 const lines = computed(() => (props.runId === null ? [] : (deploys.consoles[props.runId] ?? [])))
-const consoleRef = ref<HTMLElement | null>(null)
 const consoleError = ref<string | null>(null)
-const copied = ref(false)
-
-function isErrorLine(line: string): boolean {
-  return /^✖|error|erro|falh|unhealthy/i.test(line)
-}
-
-function isOkLine(line: string): boolean {
-  return line.startsWith('✔')
-}
-
-async function copyLog() {
-  try {
-    await navigator.clipboard.writeText(lines.value.join('\n'))
-    copied.value = true
-    setTimeout(() => (copied.value = false), 2000)
-  } catch {
-    copied.value = false
-  }
-}
-
-/** Acompanha o fim do console enquanto o deploy roda. */
-watch(
-  () => lines.value.length,
-  async () => {
-    const element = consoleRef.value
-    if (!element) return
-    const nearBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 80
-    await nextTick()
-    if (nearBottom || isLive.value) element.scrollTop = element.scrollHeight
-  }
-)
 
 // ── O que muda (aprovação) e as cópias do banco ─────────────────────────
 
@@ -547,32 +493,3 @@ async function openRestore(copy: DeployBackupView) {
   }
 }
 </script>
-
-<style scoped>
-.deploy-console {
-  background: #0f1419;
-  color: #e6edf3;
-  font-family:
-    'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.8rem;
-  line-height: 1.45;
-  border-radius: 8px;
-  padding: 12px 14px;
-  height: min(46vh, 460px);
-  overflow-y: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.console-empty {
-  color: #c9d1d9;
-}
-
-.console-error {
-  color: #ff8a80;
-}
-
-.console-ok {
-  color: #7ee787;
-}
-</style>

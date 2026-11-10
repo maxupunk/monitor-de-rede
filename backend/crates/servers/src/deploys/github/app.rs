@@ -34,7 +34,8 @@ use serde_json::{json, Map, Value};
 use netmonitor_core::shared::errors::{AppError, AppResult};
 
 use super::{Client, GitHubError};
-use crate::deploys::workflow::HOOK_PATH;
+/// Onde o GitHub App avisa os pushes (ADR 023).
+pub const APP_HOOK_PATH: &str = "/api/deploy-hooks/github-app";
 
 /// Para onde o GitHub devolve o navegador (a criação e a instalação): uma
 /// rota da tela, que conclui com a sessão de quem clicou.
@@ -112,13 +113,14 @@ pub fn manifest(origin: &str, name: &str, allow_write: bool) -> Value {
         "name": name,
         "url": origin,
         "description": "Deploy contínuo pelo NetMonitor: lê o compose, acompanha o build e abre o PR do workflow.",
-        "hook_attributes": { "url": format!("{origin}{HOOK_PATH}"), "active": false },
+        // O aviso de push que dispara a compilação no servidor (ADR 023).
+        "hook_attributes": { "url": format!("{origin}{APP_HOOK_PATH}"), "active": true },
         "redirect_url": callback,
         "setup_url": callback,
         "setup_on_update": true,
         "public": false,
         "default_permissions": permissions(allow_write),
-        "default_events": [],
+        "default_events": ["push"],
     })
 }
 
@@ -196,6 +198,9 @@ pub struct Conversion {
     pub owner: Account,
     #[serde(default)]
     pub permissions: HashMap<String, String>,
+    /// Gerado pelo GitHub para assinar os avisos (`X-Hub-Signature-256`).
+    #[serde(default)]
+    pub webhook_secret: Option<String>,
 }
 
 impl Conversion {
@@ -453,7 +458,8 @@ mod tests {
             "https://central.exemplo.com/deploys/github"
         );
         assert_eq!(value["setup_url"], value["redirect_url"]);
-        assert_eq!(value["hook_attributes"]["active"], false);
+        assert_eq!(value["hook_attributes"]["active"], true);
+        assert_eq!(value["default_events"][0], "push");
         assert_eq!(value["public"], false);
         let permissions = &value["default_permissions"];
         assert_eq!(permissions["contents"], "read");

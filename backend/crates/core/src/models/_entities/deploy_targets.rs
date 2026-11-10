@@ -22,6 +22,8 @@ pub struct Model {
     pub keep_images: i32,
     pub enabled: bool,
     pub position: i32,
+    pub vulnerability_policy: String,
+    pub require_provenance: bool,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
 }

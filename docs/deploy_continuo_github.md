@@ -10,7 +10,29 @@
 
 ## 1. Em uma frase
 
-O **GitHub** compila e publica as imagens no ghcr.io com a tag do commit; a
+> **Padrão desde 2026-11-09: o servidor compila** ([ADR 023](adr/023-compilacao-no-servidor.md)).
+> Você dá push; o GitHub App avisa a central (assinado); o **agente** compila
+> no builder BuildKit dedicado, a imagem vai para o **registry da central**
+> ([ADR 022](adr/022-registry-proprio.md)), é analisada contra
+> vulnerabilidades e o deploy segue a fila abaixo — sem workflow no
+> repositório, sem ghcr.io e sem minutos do Actions. Na aplicação, "Quem
+> compila?" escolhe entre **NetMonitor** e **GitHub Actions**; o resto deste
+> guia descreve o modo GitHub Actions, que continua valendo.
+>
+> ```text
+> git push ─▶ GitHub App (X-Hub-Signature-256) ─▶ POST /api/deploy-hooks/github-app
+> Central: compilação na fila ─▶ ImageBuild no agente (clone · teste · buildx --sbom)
+>        ─▶ ImageExport (ponte) ─▶ registry (/v2) ─▶ varredura OSV ─▶ deploys dos alvos
+> Deploy: política do alvo (CVE, origem) ─▶ ImageImport (docker load) ─▶ up --pull never
+> ```
+>
+> No agente: acrescente `build` ao `AGENT_ALLOW` (o agente local da central já
+> vem com ela). Limites do builder: `AGENT_BUILD_CPUS` (padrão: todos os
+> núcleos menos um) e `AGENT_BUILD_MEMORY` (ex.: `4g`). Segredos de build
+> (token do npm, por exemplo) ficam no menu do cartão da aplicação e chegam
+> ao Dockerfile por `RUN --mount=type=secret,id=NOME`.
+
+No modo **GitHub Actions**, o **GitHub** compila e publica as imagens no ghcr.io com a tag do commit; a
 **central** decide quando e onde elas entram no ar (aprovação, janela de
 manutenção, backup, fila, canário, rollback); o **agente** que já está no
 servidor aplica — sem SSH, sem porta aberta, sem compilar nada no servidor.
@@ -145,7 +167,7 @@ o workflow de uma versão que já está no ar (ou na fila) não cria outro deplo
 | Ver deploys, console e histórico | qualquer papel com acesso à área Servidores |
 | Cadastrar, aprovar, publicar, restaurar, abrir/salvar `.env` | administrador da área Servidores (ADR 019) |
 | Conectar o GitHub, listar repositórios, ler o compose, abrir o PR | administrador da área Servidores |
-| A IA (`get_deploys`, `get_deploy_log`) | quem tem a área; `deploy_action` só administrador, **sempre** com confirmação |
+| A IA (`get_deploys`, `get_deploy_log`, `get_builds`, `get_build_log`) | quem tem a área; `deploy_action` só administrador, **sempre** com confirmação |
 
 Toda mudança vai à auditoria (recurso "Deploy contínuo"), inclusive a abertura
 do `.env`.

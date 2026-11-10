@@ -33,6 +33,7 @@ pub struct NewRun {
     pub commit_sha: String,
     pub commit_message: Option<String>,
     pub image_tag: String,
+    pub build_id: Option<i64>,
     pub env_version_id: Option<i64>,
     pub status: RunStatus,
     pub rollback_of_run_id: Option<i64>,
@@ -59,6 +60,7 @@ pub async fn insert<C: ConnectionTrait>(db: &C, run: NewRun) -> AppResult<deploy
             .commit_message
             .map(|message| message.chars().take(2000).collect())),
         image_tag: Set(run.image_tag),
+        build_id: Set(run.build_id),
         env_version_id: Set(run.env_version_id),
         status: Set(run.status.as_str().to_string()),
         rollback_of_run_id: Set(run.rollback_of_run_id),

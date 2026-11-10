@@ -108,7 +108,10 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
 FROM docker:27-cli@sha256:851f91d241214e7c6db86513b270d58776379aacc5eb9c4a87e5b47115e3065c AS agent
 RUN apk add --no-cache tini ca-certificates git
 COPY --from=agent-builder /usr/local/bin/netmonitor-agent /usr/local/bin/netmonitor-agent
+# O registro do builder dedicado do buildx (ADR 023) mora no volume do
+# agente: recriar o container não esquece o builder nem o cache dele.
 ENV AGENT_STATE_DIR=/var/lib/netmonitor-agent \
+    BUILDX_CONFIG=/var/lib/netmonitor-agent/buildx \
     AGENT_STACKS_DIR=/srv/netmonitor/stacks \
     HOST_PROC=/host/proc \
     HOST_ROOT=/host
