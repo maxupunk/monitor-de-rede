@@ -176,7 +176,7 @@
             <v-icon end size="16">mdi-chevron-down</v-icon>
           </v-btn>
         </template>
-        <v-list width="220" rounded="lg" elevation="4">
+        <v-list width="260" rounded="lg" elevation="4">
           <v-list-item
             prepend-icon="mdi-account-circle-outline"
             title="Meu Perfil"
@@ -189,6 +189,8 @@
             subtitle="Configurações básicas"
             @click="onboardingStore.openWizard()"
           />
+          <v-divider class="my-1" />
+          <ThemeChoice />
           <v-divider class="my-1" />
           <v-list-item
             prepend-icon="mdi-logout"
@@ -281,6 +283,7 @@ import { useOnboardingStore } from '@/stores/onboarding'
 import { useNotifications } from '@/composables/useNotifications'
 import { usePwaInstall } from '@/composables/usePwaInstall'
 import InitialSetupDialog from '@/components/InitialSetupDialog.vue'
+import ThemeChoice from '@/components/ThemeChoice.vue'
 import TracerouteDialog from '@/components/TracerouteDialog.vue'
 import SpeedTestDialog from '@/components/SpeedTestDialog.vue'
 import DiagnosticPlaybookDialog from '@/components/DiagnosticPlaybookDialog.vue'

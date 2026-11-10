@@ -3,6 +3,7 @@ import '@mdi/font/css/materialdesignicons.css'
 import { createVuetify } from 'vuetify'
 import * as components from 'vuetify/components'
 import * as directives from 'vuetify/directives'
+import { initialThemeName } from '@/utils/themePreference'
 
 export default createVuetify({
   components,
@@ -21,7 +22,8 @@ export default createVuetify({
     VCard: { rounded: 'lg' },
   },
   theme: {
-    defaultTheme: 'dark',
+    // A preferência do usuário (menu → Tema), lida antes de montar.
+    defaultTheme: initialThemeName(),
     themes: {
       dark: {
         colors: {
@@ -53,6 +55,14 @@ export default createVuetify({
         colors: {
           caution: '#E65100',
           plugin: '#00796B',
+        },
+        /**
+         * O cinza "médio" do Vuetify (60% do preto) deixava subtítulo de
+         * lista e texto secundário desbotados sobre o branco — o §12 do
+         * AGENTS.md pede contraste alto. 75% fica nítido sem igualar ao título.
+         */
+        variables: {
+          'medium-emphasis-opacity': 0.75,
         },
       },
     },
