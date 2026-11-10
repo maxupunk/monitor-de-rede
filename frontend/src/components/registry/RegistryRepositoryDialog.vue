@@ -19,7 +19,7 @@
           <template v-if="detail.repository.application"
             >{{ detail.repository.application }} ·
           </template>
-          {{ detail.versions.length }} versão(ões) ·
+          {{ countNoun(detail.versions.length, 'versão', 'versões') }} ·
           {{ formatBinaryBytes(detail.repository.bytes) }}
         </v-card-subtitle>
       </v-card-item>
@@ -82,7 +82,10 @@
           <div class="text-body-2 mb-2">
             <code>{{ shortDigest(version.digest) }}</code>
             <template v-if="version.platforms.length">
-              · {{ version.platforms.join(', ') }}</template
+              ·
+              <span :title="version.platforms.join(', ')">{{
+                platformsLabel(version.platforms)
+              }}</span></template
             >
             · {{ formatRelativeTime(version.createdAt) }}
             <template v-if="origin(version)"> · {{ origin(version) }}</template>
@@ -163,10 +166,11 @@ import { useConfirm } from '@/composables/useConfirm'
 import type { RegistryRepositoryDetail } from '@/bindings/RegistryRepositoryDetail'
 import type { RegistryVersionView } from '@/bindings/RegistryVersionView'
 import { useRegistryStore } from '@/stores/registry'
-import { formatBinaryBytes, formatRelativeTime } from '@/utils/formatters'
+import { countNoun, formatBinaryBytes, formatRelativeTime } from '@/utils/formatters'
 import {
   ORIGIN_LABEL,
   isCommitTag,
+  platformsLabel,
   scanColor,
   scanSentence,
   shortDigest,

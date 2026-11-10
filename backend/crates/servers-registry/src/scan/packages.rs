@@ -57,7 +57,9 @@ fn distro_ecosystem(kind: &str, distro: Option<&str>) -> Option<String> {
     }
 }
 
-/// Um `purl` (`pkg:deb/debian/openssl@3.0.11?distro=debian-12`).
+/// Um `purl` (`pkg:deb/debian/openssl@3.0.11?distro=debian-12`). A versão
+/// da distribuição vem em `distro` (Syft, buildx) ou em `os_version` (o SBOM
+/// das imagens oficiais do Docker Hub).
 #[must_use]
 pub fn from_purl(purl: &str) -> Option<Package> {
     let rest = purl.strip_prefix("pkg:")?;
@@ -72,20 +74,15 @@ pub fn from_purl(purl: &str) -> Option<Package> {
             .find_map(|pair| pair.strip_prefix(key)?.strip_prefix('='))
             .map(percent_decode)
     };
+    let distro = || qualifier("distro").or_else(|| qualifier("os_version"));
     let segments: Vec<String> = path.split('/').map(percent_decode).collect();
     let last = segments.last()?.clone();
     let (ecosystem, name) = match kind {
         "deb" => {
             let vendor = segments.first().map(String::as_str).unwrap_or("debian");
-            (
-                distro_ecosystem(vendor, qualifier("distro").as_deref())?,
-                last,
-            )
+            (distro_ecosystem(vendor, distro().as_deref())?, last)
         }
-        "apk" => (
-            distro_ecosystem("alpine", qualifier("distro").as_deref())?,
-            last,
-        ),
+        "apk" => (distro_ecosystem("alpine", distro().as_deref())?, last),
         "npm" => ("npm".to_string(), segments.join("/")),
         "pypi" => (
             "PyPI".to_string(),
@@ -216,6 +213,15 @@ mod tests {
         assert_eq!(deb.version, "3.0.11-1~deb12u2");
         let apk = from_purl("pkg:apk/alpine/musl@1.2.4-r2?arch=x86_64&distro=3.19.1").unwrap();
         assert_eq!(apk.ecosystem, "Alpine:v3.19");
+        // O SBOM das imagens oficiais do Docker Hub (visto no `alpine:3.20`).
+        let hub = from_purl(
+            "pkg:apk/alpine/alpine-baselayout-data@3.6.5-r0?os_name=alpine&os_version=3.20",
+        )
+        .unwrap();
+        assert_eq!(hub.ecosystem, "Alpine:v3.20");
+        assert_eq!(hub.name, "alpine-baselayout-data");
+        let deb = from_purl("pkg:deb/debian/zlib1g@1.2.13?os_name=debian&os_version=12").unwrap();
+        assert_eq!(deb.ecosystem, "Debian:12");
         let npm = from_purl("pkg:npm/%40vue/reactivity@3.4.21").unwrap();
         assert_eq!(
             (npm.name.as_str(), npm.ecosystem.as_str()),

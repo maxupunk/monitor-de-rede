@@ -124,8 +124,11 @@ async fn packages_of(
                                 if let Some(data) = read_blob(store, &layer.digest, MAX_SBOM).await
                                 {
                                     if let Ok(document) = serde_json::from_slice::<Value>(&data) {
-                                        found.extend(packages::from_spdx(&document));
-                                        from_sbom = true;
+                                        let listed = packages::from_spdx(&document);
+                                        // Um SBOM que não rende pacote (formato que não
+                                        // lemos) não pode calar a leitura das camadas.
+                                        from_sbom |= !listed.is_empty();
+                                        found.extend(listed);
                                     }
                                 }
                             }

@@ -162,7 +162,7 @@ import { useDeploysStore } from '@/stores/deploys'
 import { ApiError } from '@/services/apiService'
 import { useRegistryStore } from '@/stores/registry'
 import { requiredRule } from '@/utils/formRules'
-import { formatDate, formatRelativeTime } from '@/utils/formatters'
+import { countNoun, formatDate, formatRelativeTime } from '@/utils/formatters'
 
 defineProps<{ canAdmin: boolean }>()
 
@@ -192,7 +192,7 @@ const applicationItems = computed(() => [
 function feedSubtitle(feed: RegistryFeedView): string {
   if (feed.error) return feed.error
   const synced = feed.syncedAt ? `atualizada ${formatRelativeTime(feed.syncedAt)}` : 'baixando…'
-  return `${feed.entries} aviso(s) · ${synced}`
+  return `${countNoun(feed.entries, 'aviso')} · ${synced}`
 }
 
 async function load() {

@@ -51,7 +51,7 @@
       data-test="approval-banner"
     >
       <div class="font-weight-bold mb-1">
-        {{ deploys.awaitingApproval.length }} versão(ões) esperando aprovação
+        {{ countNoun(deploys.awaitingApproval.length, 'versão', 'versões') }} esperando aprovação
       </div>
       <div class="d-flex flex-wrap ga-2">
         <v-btn
@@ -250,7 +250,7 @@ import StatusMetaChip from '@/components/deploys/StatusMetaChip.vue'
 import type { DeployServerBuildView } from '@/bindings/DeployServerBuildView'
 import { useDeployBuildsStore } from '@/stores/deployBuilds'
 import { BUILD_STATUS, refName } from '@/utils/deployPresentation'
-import { formatRelativeTime } from '@/utils/formatters'
+import { countNoun, formatRelativeTime } from '@/utils/formatters'
 import DeployRunsList from '@/components/deploys/DeployRunsList.vue'
 import DeploySetupDialog from '@/components/deploys/DeploySetupDialog.vue'
 import DeployTargetDialog from '@/components/deploys/DeployTargetDialog.vue'
@@ -299,19 +299,19 @@ const tiles = computed(() => {
   if (!value) return []
   return [
     {
-      label: `aplicação(ões) em ${value.targets} alvo(s)`,
+      label: `${value.applications === 1 ? 'aplicação' : 'aplicações'} em ${countNoun(value.targets, 'alvo')}`,
       value: value.applications,
       icon: 'mdi-github',
       color: 'primary',
     },
     {
-      label: 'publicados nas últimas 24 h',
+      label: 'publicados nas últimas 24\u00a0h',
       value: value.succeeded24h,
       icon: 'mdi-check-circle',
       color: 'success',
     },
     {
-      label: 'falhas ou rollbacks em 24 h',
+      label: 'falhas ou rollbacks em 24\u00a0h',
       value: value.failed24h,
       icon: 'mdi-alert-circle',
       color: value.failed24h > 0 ? 'error' : 'success',

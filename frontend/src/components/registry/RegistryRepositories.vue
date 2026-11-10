@@ -54,7 +54,7 @@
             <span class="font-weight-bold text-truncate">{{ repository.name }}</span>
             <v-spacer></v-spacer>
             <v-chip size="small" color="primary" variant="tonal" label>
-              {{ repository.versions }} versão(ões)
+              {{ countNoun(repository.versions, 'versão', 'versões') }}
             </v-chip>
           </div>
           <div class="text-body-2 mb-2">
@@ -90,7 +90,7 @@ import { computed, ref } from 'vue'
 import ChoiceCard from '@/components/ChoiceCard.vue'
 import RegistryRepositoryDialog from '@/components/registry/RegistryRepositoryDialog.vue'
 import { useRegistryStore } from '@/stores/registry'
-import { formatBinaryBytes, formatRelativeTime } from '@/utils/formatters'
+import { countNoun, formatBinaryBytes, formatRelativeTime } from '@/utils/formatters'
 import { scanColor, scanSentence } from '@/utils/registryPresentation'
 
 defineProps<{ canAdmin: boolean }>()

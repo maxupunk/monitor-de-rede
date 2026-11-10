@@ -60,7 +60,7 @@
                     <v-icon color="primary">mdi-github</v-icon> {{ existing.name }}
                   </div>
                   <div class="text-body-2 text-high-emphasis">
-                    {{ existing.repository }} · {{ existing.targets.length }} alvo(s)
+                    {{ existing.repository }} · {{ countNoun(existing.targets.length, 'alvo') }}
                   </div>
                 </ChoiceCard>
               </v-col>
@@ -169,6 +169,7 @@ import type { DeployApplicationInput } from '@/bindings/DeployApplicationInput'
 import type { DeployReadinessView } from '@/bindings/DeployReadinessView'
 import { useRepositoryReferences } from '@/composables/useRepositoryReferences'
 import { useDeploysStore } from '@/stores/deploys'
+import { countNoun } from '@/utils/formatters'
 import {
   cleanApplication,
   emptyApplication,

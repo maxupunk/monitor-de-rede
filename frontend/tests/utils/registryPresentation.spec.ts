@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
+import { countNoun } from '@/utils/formatters'
 import type { RegistryScanSummary } from '@/bindings/RegistryScanSummary'
 import {
   daemonJson,
   dockerCommands,
   isCommitTag,
+  platformsLabel,
   registryAccess,
   registryHost,
   scanColor,
@@ -68,11 +70,30 @@ describe('registryPresentation', () => {
   it('resume a análise em uma frase e uma cor', () => {
     expect(scanSentence(null)).toBe('Ainda não analisada')
     expect(scanSentence(scan({}))).toBe('Nenhuma vulnerabilidade conhecida')
-    expect(scanSentence(scan({ critical: 1, high: 2 }))).toBe('1 crítica(s) e 2 alta(s)')
+    expect(scanSentence(scan({ critical: 1, high: 2 }))).toBe('1 crítica e 2 altas')
+    expect(scanSentence(scan({ high: 1 }))).toBe('1 alta')
+    expect(scanSentence(scan({ medium: 1 }))).toBe('1 vulnerabilidade média ou baixa')
+    expect(scanSentence(scan({ medium: 2, low: 1 }))).toBe('3 vulnerabilidades médias ou baixas')
     expect(scanSentence(scan({ status: 'no_sbom' }))).toContain('Sem lista')
     expect(scanColor(scan({ critical: 1 }))).toBe('error')
     expect(scanColor(scan({ high: 1 }))).toBe('deep-orange')
     expect(scanColor(scan({}))).toBe('success')
     expect(scanColor(scan({ status: 'pending' }))).toBe('secondary')
+  })
+})
+
+describe('platformsLabel', () => {
+  it('mostra até duas e conta o resto', () => {
+    expect(platformsLabel(['linux/amd64'])).toBe('linux/amd64')
+    expect(platformsLabel(['linux/amd64', 'linux/arm64'])).toBe('linux/amd64, linux/arm64')
+    expect(platformsLabel(['a', 'b', 'c', 'd'])).toBe('a, b e mais 2')
+  })
+})
+
+describe('countNoun', () => {
+  it('concorda o substantivo com o número', () => {
+    expect(countNoun(1, 'versão', 'versões')).toBe('1 versão')
+    expect(countNoun(3, 'versão', 'versões')).toBe('3 versões')
+    expect(countNoun(0, 'alvo')).toBe('0 alvos')
   })
 })

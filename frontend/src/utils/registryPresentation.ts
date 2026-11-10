@@ -5,6 +5,7 @@
  */
 import type { DeployOriginKind } from '@/bindings/DeployOriginKind'
 import type { RegistryScanSummary } from '@/bindings/RegistryScanSummary'
+import { countNoun } from '@/utils/formatters'
 import { looksPrivate } from '@/utils/githubConnect'
 
 /** O endereço do registry pela rede interna (o host por onde a tela abriu). */
@@ -71,8 +72,17 @@ export function scanSentence(scan: RegistryScanSummary | null | undefined): stri
   }
   const serious = scan.critical + scan.high
   if (serious === 0 && scan.medium + scan.low === 0) return 'Nenhuma vulnerabilidade conhecida'
-  if (serious === 0) return `${scan.medium + scan.low} vulnerabilidade(s) média(s) ou baixa(s)`
-  return `${scan.critical} crítica(s) e ${scan.high} alta(s)`
+  if (serious === 0) {
+    const minor = scan.medium + scan.low
+    return `${countNoun(minor, 'vulnerabilidade')} ${minor === 1 ? 'média ou baixa' : 'médias ou baixas'}`
+  }
+  // Só o que existe: "1 alta", não "0 críticas e 1 alta".
+  return [
+    scan.critical ? countNoun(scan.critical, 'crítica') : '',
+    scan.high ? countNoun(scan.high, 'alta') : '',
+  ]
+    .filter(Boolean)
+    .join(' e ')
 }
 
 /** Cor de cada severidade de vulnerabilidade. */
@@ -106,6 +116,15 @@ export const ORIGIN_LABEL: Record<DeployOriginKind, string> = {
   build: 'compilada pela central',
   workflow: 'enviada pelo GitHub Actions',
   manual_push: 'push manual',
+}
+
+/**
+ * As plataformas de uma versão, curtas: até duas por extenso, o resto como
+ * contagem (a lista inteira fica no `title`). Uma imagem oficial traz oito.
+ */
+export function platformsLabel(platforms: string[]): string {
+  if (platforms.length <= 2) return platforms.join(', ')
+  return `${platforms.slice(0, 2).join(', ')} e mais ${platforms.length - 2}`
 }
 
 /** Tag de commit (40 hexadecimais): imutável. */

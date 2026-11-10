@@ -224,12 +224,13 @@ export function buildStageStates(
     for (const value of order) result[value] = 'done'
     return result
   }
-  if (!stage) return result
-  const current = order.indexOf(stage)
+  const stopped = status === 'failed' || status === 'cancelled'
+  // Falhou antes de começar (sem servidor, GitHub fora): a etapa que não
+  // saiu é a primeira — nenhuma etapa "por fazer" mente sobre o que houve.
+  const current = stage ? order.indexOf(stage) : stopped ? 0 : -1
   order.forEach((value, index) => {
     if (index < current) result[value] = 'done'
-    else if (index === current)
-      result[value] = status === 'failed' || status === 'cancelled' ? 'failed' : 'current'
+    else if (index === current) result[value] = stopped ? 'failed' : 'current'
   })
   return result
 }

@@ -53,8 +53,8 @@
               <th>Severidade</th>
               <th>Aviso</th>
               <th>Pacote</th>
-              <th>Instalado</th>
-              <th>Corrige em</th>
+              <th class="text-no-wrap">Instalado</th>
+              <th class="text-no-wrap">Corrige em</th>
               <th v-if="canAdmin" class="text-end">Ação</th>
             </tr>
           </thead>
@@ -88,10 +88,10 @@
               </td>
               <td>{{ finding.package }}</td>
               <td>
-                <code>{{ finding.installed }}</code>
+                <code class="text-no-wrap">{{ finding.installed }}</code>
               </td>
               <td>
-                <code v-if="finding.fixed">{{ finding.fixed }}</code>
+                <code v-if="finding.fixed" class="text-no-wrap">{{ finding.fixed }}</code>
                 <span v-else>sem correção ainda</span>
               </td>
               <td v-if="canAdmin" class="text-end">

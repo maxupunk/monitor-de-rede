@@ -21,18 +21,23 @@
         <template v-else-if="!application.credentialId"> · sem acesso a privados</template>
       </v-card-subtitle>
       <template v-if="canAdmin" #append>
-        <v-btn
-          v-if="compiles"
-          color="primary"
-          variant="flat"
-          size="small"
-          prepend-icon="mdi-hammer-wrench"
-          class="mr-1"
-          data-test="build-now"
-          @click="emit('build', application)"
-        >
-          Compilar agora
-        </v-btn>
+        <v-tooltip v-if="compiles" :text="noBuildHost ?? ''" :disabled="!noBuildHost">
+          <template #activator="{ props: tooltip }">
+            <span v-bind="tooltip" class="mr-1">
+              <v-btn
+                color="primary"
+                variant="flat"
+                size="small"
+                prepend-icon="mdi-hammer-wrench"
+                data-test="build-now"
+                :disabled="noBuildHost !== null"
+                @click="emit('build', application)"
+              >
+                Compilar agora
+              </v-btn>
+            </span>
+          </template>
+        </v-tooltip>
         <v-btn
           v-else
           color="primary"
@@ -161,6 +166,13 @@ const props = withDefaults(
     latestBuild?: DeployServerBuildView | null
   }>(),
   { latestBuild: null }
+)
+
+/** Por que não dá para compilar agora (sem alvo e sem servidor escolhido). */
+const noBuildHost = computed(() =>
+  props.application.targets.length === 0 && props.application.buildProbeId === null
+    ? 'Cadastre um alvo ou escolha onde compilar: não há servidor para compilar'
+    : null
 )
 
 /** O servidor compila esta aplicação (ADR 023). */

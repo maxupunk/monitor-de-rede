@@ -357,3 +357,11 @@ function toDate(value?: string | Date | null): Date | null {
   const date = value instanceof Date ? value : new Date(value)
   return Number.isNaN(date.getTime()) ? null : date
 }
+
+/**
+ * Número com o substantivo concordando: `1 versão`, `3 versões`, `0 alvos`.
+ * O plural regular (`+s`) vem de graça; o irregular vai no terceiro argumento.
+ */
+export function countNoun(count: number, singular: string, plural = `${singular}s`): string {
+  return `${count} ${count === 1 ? singular : plural}`
+}

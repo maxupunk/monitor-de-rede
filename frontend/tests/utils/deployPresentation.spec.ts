@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   RUN_STATUS,
+  buildStageStates,
   commitTitle,
   isFinished,
   isPending,
@@ -83,5 +84,26 @@ describe('formulário do alvo', () => {
     const input = toTargetInput({ ...form, probeId: 3, windowStart: '', windowEnd: '' })
     expect(input).toMatchObject({ probeId: 3, project: 'sgc' })
     expect(input?.windowStart).toBeUndefined()
+  })
+})
+
+describe('buildStageStates', () => {
+  it('marca a primeira etapa quando a compilação falhou antes de começar', () => {
+    const states = buildStageStates(null, 'failed')
+    expect(states.prepare).toBe('failed')
+    expect(states.clone).toBe('todo')
+  })
+
+  it('na fila, nenhuma etapa anda', () => {
+    expect(Object.values(buildStageStates(null, 'queued')).every((state) => state === 'todo')).toBe(
+      true
+    )
+  })
+
+  it('cancelada marca onde parou', () => {
+    const states = buildStageStates('build', 'cancelled')
+    expect(states.clone).toBe('done')
+    expect(states.build).toBe('failed')
+    expect(states.store).toBe('todo')
   })
 })
