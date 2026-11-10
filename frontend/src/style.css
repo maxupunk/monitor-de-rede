@@ -131,6 +131,14 @@ body,
 .v-card-subtitle {
   line-height: 1.4;
 }
+/*
+ * O Vuetify desbota o subtítulo com `opacity: .6`, que a classe de cor não
+ * desfaz: no tema claro o "1 versão · 27 MiB" saía cinza-claro sobre branco.
+ * Quem pede `text-high-emphasis` recebe o contraste inteiro.
+ */
+.v-card-subtitle.text-high-emphasis {
+  opacity: 1;
+}
 .v-select__selection-text {
   white-space: normal;
   overflow-wrap: break-word;

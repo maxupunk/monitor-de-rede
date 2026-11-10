@@ -70,3 +70,41 @@ describe('timeout individual da API', () => {
     await rejection
   })
 })
+
+describe('corpo da resposta', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  /** Visto na tela: "Aceitar risco" (201) e "Atualizar agora" (202) vêm sem corpo. */
+  it('aceita 201 e 202 sem corpo', async () => {
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn(() => null),
+      removeItem: vi.fn(),
+      setItem: vi.fn(),
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(null, { status: 201 }))
+    )
+    await expect(apiService.post('/registry/exceptions', {})).resolves.toEqual({})
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('', { status: 202 }))
+    )
+    await expect(apiService.post('/registry/advisories/sync', {})).resolves.toEqual({})
+  })
+
+  it('continua lendo o JSON quando há corpo', async () => {
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn(() => null),
+      removeItem: vi.fn(),
+      setItem: vi.fn(),
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('{"id":7}', { status: 201 }))
+    )
+    await expect(apiService.post('/coisa', {})).resolves.toEqual({ id: 7 })
+  })
+})

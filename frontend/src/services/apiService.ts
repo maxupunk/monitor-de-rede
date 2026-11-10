@@ -155,7 +155,10 @@ class ApiService {
       return {} as T
     }
 
-    return response.json() as Promise<T>
+    // `201 Created` e `202 Accepted` podem vir sem corpo (a ação foi aceita
+    // e o resultado chega pelo SSE): corpo vazio não é JSON inválido.
+    const text = await response.text()
+    return (text ? JSON.parse(text) : {}) as T
   }
 
   async get<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
