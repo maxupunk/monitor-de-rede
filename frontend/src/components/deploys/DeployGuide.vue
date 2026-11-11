@@ -1,25 +1,22 @@
 <template>
   <v-card elevation="2" class="mb-4" data-test="deploy-guide">
-    <v-card-item>
+    <v-card-item density="compact" class="py-2">
       <template #prepend>
-        <v-avatar :color="guide.done ? 'success' : 'primary'" variant="tonal" rounded="lg">
-          <v-icon>{{ guide.done ? 'mdi-check-decagram' : 'mdi-map-marker-path' }}</v-icon>
-        </v-avatar>
+        <v-icon :color="guide.done ? 'success' : 'primary'">
+          {{ guide.done ? 'mdi-check-decagram' : 'mdi-map-marker-path' }}
+        </v-icon>
       </template>
-      <v-card-title class="font-weight-bold">
-        {{
-          guide.done
-            ? 'Tudo pronto: cada push publica sozinho'
-            : 'Do push ao servidor, passo a passo'
-        }}
-      </v-card-title>
-      <v-card-subtitle class="text-high-emphasis">
-        {{ progress.done }} de {{ progress.total }} etapas · atualiza sozinho conforme você avança
-      </v-card-subtitle>
+      <div class="text-body-1 font-weight-bold">
+        {{ guide.done ? 'Tudo pronto: cada push publica sozinho' : 'Guia do deploy contínuo' }}
+      </div>
+      <div class="text-body-2 font-weight-medium" data-test="guide-summary">
+        {{ progress.done }} de {{ progress.total }} etapas
+        <template v-if="currentStep"> · próxima: {{ currentStep.title }}</template>
+      </div>
       <template #append>
         <div class="d-flex align-center ga-1">
           <v-btn
-            v-if="ai.available.value"
+            v-if="expanded && ai.available.value"
             color="primary"
             variant="tonal"
             size="small"
@@ -30,13 +27,17 @@
           >
             Perguntar à IA
           </v-btn>
-          <IconAction
-            :icon="expanded ? 'mdi-chevron-up' : 'mdi-chevron-down'"
-            :label="expanded ? 'Esconder o passo a passo' : 'Mostrar o passo a passo'"
+          <v-btn
             color="primary"
+            :variant="expanded ? 'text' : 'tonal'"
+            size="small"
+            :append-icon="expanded ? 'mdi-chevron-up' : 'mdi-chevron-down'"
             :aria-expanded="expanded"
-            @click="toggle"
-          />
+            data-test="guide-toggle"
+            @click="expanded = !expanded"
+          >
+            {{ expanded ? 'Esconder' : 'Ver passo a passo' }}
+          </v-btn>
         </div>
       </template>
     </v-card-item>
@@ -148,7 +149,6 @@
  */
 import { computed, ref, watch } from 'vue'
 import ChoiceCard from '@/components/ChoiceCard.vue'
-import IconAction from '@/components/IconAction.vue'
 import { useAiAssistant } from '@/composables/useAiAssistant'
 import type { DeployGuideAction } from '@/bindings/DeployGuideAction'
 import type { DeployGuideStep } from '@/bindings/DeployGuideStep'
@@ -166,27 +166,8 @@ const emit = defineEmits<{ action: [action: DeployGuideAction] }>()
 
 const ai = useAiAssistant()
 
-/** Escondido pelo usuário neste navegador (concluído, começa escondido). */
-const STORAGE_KEY = 'netmonitor.deployGuide.collapsed'
-function storedCollapsed(): boolean | null {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    return raw === null ? null : raw === 'true'
-  } catch {
-    return null
-  }
-}
-const userCollapsed = ref<boolean | null>(storedCollapsed())
-const expanded = computed(() => !(userCollapsed.value ?? props.guide.done))
-
-function toggle() {
-  userCollapsed.value = expanded.value
-  try {
-    localStorage.setItem(STORAGE_KEY, String(userCollapsed.value))
-  } catch {
-    // Sem armazenamento: vale só nesta visita.
-  }
-}
+/** Começa fechado: uma linha com a próxima etapa; o passo a passo abre no botão. */
+const expanded = ref(false)
 
 const progress = computed(() => guideProgress(props.guide.steps))
 const percent = computed(() =>
@@ -203,6 +184,9 @@ const selected = ref<DeployGuideStep['key'] | null>(
 watch(currentKey, (key) => {
   if (key) selected.value = key
 })
+const currentStep = computed(
+  () => props.guide.steps.find((step) => step.key === currentKey.value) ?? null
+)
 const selectedStep = computed(
   () => props.guide.steps.find((step) => step.key === selected.value) ?? null
 )

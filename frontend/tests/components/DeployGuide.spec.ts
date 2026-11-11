@@ -10,6 +10,13 @@ import { bodyText, button, mountWith, setupDom, teardownDom } from './domHarness
 
 let pinia: Pinia
 
+/** O guia começa fechado: abre pelo botão, como o usuário faz. */
+async function open() {
+  await flushPromises()
+  button('Ver passo a passo')?.click()
+  await flushPromises()
+}
+
 function step(partial: Partial<DeployGuideStep> & Pick<DeployGuideStep, 'key'>): DeployGuideStep {
   return {
     status: 'todo',
@@ -73,7 +80,7 @@ describe('DeployGuide', () => {
 
   it('abre na etapa atual, com o estado e o botão que a resolve', async () => {
     const wrapper = mountWith(DeployGuide, { guide: midway(), canAdmin: true }, pinia)
-    await flushPromises()
+    await open()
     expect(bodyText()).toContain('1 de 5 etapas')
     const panel = document.querySelector('[data-test="guide-panel"]')
     expect(panel?.textContent).toContain('Nenhum servidor com o agente ainda.')
@@ -88,7 +95,7 @@ describe('DeployGuide', () => {
 
   it('escolher outra etapa mostra como fazê-la', async () => {
     mountWith(DeployGuide, { guide: midway(), canAdmin: true }, pinia)
-    await flushPromises()
+    await open()
     ;(document.querySelector('[data-test="guide-step-application"]') as HTMLElement).click()
     await flushPromises()
     const panel = document.querySelector('[data-test="guide-panel"]')
@@ -101,7 +108,7 @@ describe('DeployGuide', () => {
     guide.steps[1] = { ...guide.steps[1]!, status: 'done' }
     guide.steps[2] = { ...guide.steps[2]!, status: 'current' }
     mountWith(DeployGuide, { guide, canAdmin: false }, pinia)
-    await flushPromises()
+    await open()
     expect(button('Automatizar deploy')).toBeUndefined()
     expect(bodyText()).toContain('Esta etapa é com um administrador de Servidores.')
   })
@@ -109,7 +116,7 @@ describe('DeployGuide', () => {
   it('"Perguntar à IA sobre esta etapa" abre o chat com a etapa', async () => {
     const ask = vi.spyOn(useAiStore(), 'askAbout').mockReturnValue(true)
     mountWith(DeployGuide, { guide: midway(), canAdmin: true }, pinia)
-    await flushPromises()
+    await open()
     button('Perguntar à IA sobre esta etapa')?.click()
     expect(ask).toHaveBeenCalledTimes(1)
     expect(ask.mock.calls[0]?.[0]).toContain('Ter um servidor com o agente')
@@ -117,7 +124,7 @@ describe('DeployGuide', () => {
 
   it('a etapa atual andou (SSE): o painel acompanha', async () => {
     const wrapper = mountWith(DeployGuide, { guide: midway(), canAdmin: true }, pinia)
-    await flushPromises()
+    await open()
     const next = midway()
     next.steps[1] = { ...next.steps[1]!, status: 'done', detail: 'srv-01 conectado.' }
     next.steps[2] = {
@@ -132,7 +139,19 @@ describe('DeployGuide', () => {
     )
   })
 
-  it('concluído, começa recolhido com o resumo', async () => {
+  it('começa fechado: uma linha com a próxima etapa, o passo a passo no botão', async () => {
+    mountWith(DeployGuide, { guide: midway(), canAdmin: true }, pinia)
+    await flushPromises()
+    expect(document.querySelector('[data-test="guide-summary"]')?.textContent).toContain(
+      'próxima: Ter um servidor com o agente'
+    )
+    expect(document.querySelector('[data-test="guide-panel"]')).toBeNull()
+    expect(button('Perguntar à IA')).toBeUndefined()
+    await open()
+    expect(document.querySelector('[data-test="guide-panel"]')).not.toBeNull()
+  })
+
+  it('concluído, o resumo diz que está tudo pronto', async () => {
     const guide = midway()
     guide.done = true
     guide.steps = guide.steps.map((item) => ({ ...item, status: 'done' as const }))
