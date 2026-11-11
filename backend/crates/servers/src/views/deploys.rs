@@ -367,6 +367,90 @@ pub struct DeployOverview {
     pub hook_path: String,
     /// O `audience` que o token OIDC precisa ter.
     pub oidc_audience: String,
+    /// O caminho até a primeira versão no ar, etapa por etapa.
+    pub guide: DeployGuideView,
+}
+
+/// Uma etapa do caminho até o primeiro deploy (`deploys::guide`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub enum DeployGuideStepKey {
+    Github,
+    Agent,
+    Application,
+    Target,
+    Env,
+    FirstDeploy,
+}
+
+/// Onde a etapa está.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub enum DeployGuideStatus {
+    Done,
+    /// A próxima a fazer (só uma por vez).
+    Current,
+    Todo,
+    /// Recomendada, mas não segura as outras (o `.env`).
+    Optional,
+}
+
+/// O que o botão da etapa faz na tela; a IA lê o mesmo.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub enum DeployGuideAction {
+    ConnectGithub,
+    InstallGithub {
+        url: String,
+    },
+    OpenAgents,
+    Setup,
+    AddTarget {
+        #[serde(rename = "applicationId")]
+        #[ts(rename = "applicationId", type = "number")]
+        application_id: i64,
+    },
+    EditEnv {
+        #[serde(rename = "targetId")]
+        #[ts(rename = "targetId", type = "number")]
+        target_id: i64,
+    },
+    BuildNow {
+        #[serde(rename = "applicationId")]
+        #[ts(rename = "applicationId", type = "number")]
+        application_id: i64,
+    },
+    OpenRun {
+        #[serde(rename = "runId")]
+        #[ts(rename = "runId", type = "number")]
+        run_id: i64,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DeployGuideStep {
+    pub key: DeployGuideStepKey,
+    pub status: DeployGuideStatus,
+    pub title: String,
+    /// Como fazer a etapa (vale sempre; é o que a IA explica).
+    pub how: String,
+    /// O que o sistema vê agora nesta etapa (o que falta ou o que já está pronto).
+    pub detail: String,
+    pub action: Option<DeployGuideAction>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DeployGuideView {
+    pub steps: Vec<DeployGuideStep>,
+    /// Todas as etapas obrigatórias feitas: cada push já publica sozinho.
+    pub done: bool,
 }
 
 /// Um item da checagem de prontidão.

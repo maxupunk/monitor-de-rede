@@ -13,6 +13,9 @@ import type { BuildStage } from '@/bindings/BuildStage'
 import type { DeployBuildStatus } from '@/bindings/DeployBuildStatus'
 import type { DeployBuilder } from '@/bindings/DeployBuilder'
 import type { DeployVulnerabilityPolicy } from '@/bindings/DeployVulnerabilityPolicy'
+import type { DeployGuideAction } from '@/bindings/DeployGuideAction'
+import type { DeployGuideStatus } from '@/bindings/DeployGuideStatus'
+import type { DeployGuideStep } from '@/bindings/DeployGuideStep'
 
 export interface StatusMeta {
   label: string
@@ -264,4 +267,54 @@ export const POLICY_OPTIONS: { value: DeployVulnerabilityPolicy; title: string }
 /** `refs/heads/main` → `main`; `refs/tags/v1` → `v1`. */
 export function refName(reference: string | null | undefined): string {
   return (reference ?? '').replace(/^refs\/(heads|tags)\//, '')
+}
+
+// ── Guia do primeiro deploy (`deploys::guide`) ────────────────────────────
+
+/** Cor e ícone de cada estado de etapa do guia. */
+export const GUIDE_STATUS: Record<DeployGuideStatus, Omit<StatusMeta, 'live'>> = {
+  done: { label: 'Pronta', color: 'success', icon: 'mdi-check-circle' },
+  current: { label: 'Agora', color: 'primary', icon: 'mdi-arrow-right-circle' },
+  todo: { label: 'Depois', color: 'secondary', icon: 'mdi-circle-outline' },
+  optional: { label: 'Recomendada', color: 'info', icon: 'mdi-star-circle-outline' },
+}
+
+/** O botão de cada ação do guia. */
+export const GUIDE_ACTION: Record<DeployGuideAction['kind'], { label: string; icon: string }> = {
+  connect_github: { label: 'Conectar GitHub', icon: 'mdi-github' },
+  install_github: { label: 'Instalar nos repositórios', icon: 'mdi-github' },
+  open_agents: { label: 'Abrir Servidores remotos', icon: 'mdi-server-network' },
+  setup: { label: 'Automatizar deploy', icon: 'mdi-rocket-launch' },
+  add_target: { label: 'Adicionar alvo', icon: 'mdi-server-plus' },
+  edit_env: { label: 'Gravar o .env', icon: 'mdi-file-key' },
+  build_now: { label: 'Compilar agora', icon: 'mdi-hammer-wrench' },
+  open_run: { label: 'Abrir o deploy', icon: 'mdi-console' },
+}
+
+/** Ações que só o administrador faz (abrir um deploy ou a página de agentes não altera nada). */
+export function guideActionNeedsAdmin(action: DeployGuideAction): boolean {
+  return action.kind !== 'open_run' && action.kind !== 'open_agents'
+}
+
+/** Etapas que não seguram as outras (o `.env`): fora da contagem do progresso. */
+const OPTIONAL_STEPS: ReadonlySet<DeployGuideStep['key']> = new Set(['env'])
+
+/** Quantas etapas obrigatórias já estão prontas, do total. */
+export function guideProgress(steps: DeployGuideStep[]): { done: number; total: number } {
+  const required = steps.filter((step) => !OPTIONAL_STEPS.has(step.key))
+  return {
+    done: required.filter((step) => step.status === 'done').length,
+    total: required.length,
+  }
+}
+
+/**
+ * A pergunta que o botão "Perguntar à IA" faz: a etapa, o que a tela mostra
+ * e o pedido para a IA ler o estado real (`get_deploy_guide`) em vez de supor.
+ */
+export function guideQuestion(step: DeployGuideStep | null): string {
+  if (!step) {
+    return 'Quero colocar uma aplicação no ar pelo deploy contínuo do NetMonitor. Use get_deploy_guide para ver onde estou e me guie etapa por etapa, com o nome dos botões da tela.'
+  }
+  return `Estou configurando o deploy contínuo do NetMonitor, na etapa "${step.title}". A tela diz: "${step.detail}" Use get_deploy_guide para ver o estado real e me guie só nesta etapa: o que fazer, onde clicar e o que preencher.`
 }

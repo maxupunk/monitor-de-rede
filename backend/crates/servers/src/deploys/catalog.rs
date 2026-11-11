@@ -17,15 +17,16 @@ use netmonitor_core::{
 };
 
 use super::{
-    applications, connections as github_connections, credentials, env_versions, events, oidc,
+    applications, builds, connections as github_connections, credentials, env_versions, events,
+    guide, oidc,
     runs::{self, status_of},
     workflow::HOOK_PATH,
     RunStatus,
 };
 use crate::views::deploys::{
     DeployAgentView, DeployApplicationView, DeployCounts, DeployCredentialView,
-    DeployEnvVersionView, DeployGithubConnectionView, DeployOverview, DeployRunView,
-    DeployTargetView, TargetParts,
+    DeployEnvVersionView, DeployGithubConnectionView, DeployGuideView, DeployOverview,
+    DeployRunView, DeployTargetView, TargetParts,
 };
 
 /// Deploys recentes na visão geral.
@@ -202,7 +203,7 @@ pub async fn overview(ctx: &AppContext) -> AppResult<DeployOverview> {
         )
         .unwrap_or(u32::MAX),
     };
-    Ok(DeployOverview {
+    let mut overview = DeployOverview {
         recent_runs: runs::recent(&ctx.db, None, RECENT_RUNS)
             .await?
             .iter()
@@ -220,7 +221,18 @@ pub async fn overview(ctx: &AppContext) -> AppResult<DeployOverview> {
             .collect(),
         hook_path: HOOK_PATH.to_string(),
         oidc_audience: oidc::audience(),
-    })
+        guide: DeployGuideView::default(),
+    };
+    let latest_build = builds::recent(&ctx.db, None, 1)
+        .await?
+        .into_iter()
+        .next()
+        .map(|build| guide::BuildFact {
+            status: builds::BuildStatus::parse(&build.status),
+            short_sha: super::short_sha(&build.commit_sha).to_string(),
+        });
+    overview.guide = guide::steps(&guide::facts_of(&overview, &agents, latest_build));
+    Ok(overview)
 }
 
 /// O histórico de um alvo, mais recentes primeiro.

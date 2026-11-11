@@ -3,6 +3,7 @@ import type { DeployApplicationView } from "./DeployApplicationView";
 import type { DeployCounts } from "./DeployCounts";
 import type { DeployCredentialView } from "./DeployCredentialView";
 import type { DeployGithubConnectionView } from "./DeployGithubConnectionView";
+import type { DeployGuideView } from "./DeployGuideView";
 import type { DeployRunView } from "./DeployRunView";
 
 /**
@@ -17,4 +18,8 @@ hookPath: string,
 /**
  * O `audience` que o token OIDC precisa ter.
  */
-oidcAudience: string, };
+oidcAudience: string, 
+/**
+ * O caminho até a primeira versão no ar, etapa por etapa.
+ */
+guide: DeployGuideView, };

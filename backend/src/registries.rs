@@ -394,6 +394,7 @@ pub fn ai_tool_catalog() -> Vec<Box<dyn AiToolHandler>> {
         Box::new(docker::DockerUsage),
         Box::new(docker::DockerContainerAction),
         Box::new(netmonitor_servers::deploys::ai_tools::DeployStatus),
+        Box::new(netmonitor_servers::deploys::ai_tools::DeployGuide),
         Box::new(netmonitor_servers::deploys::ai_tools::DeployLog),
         Box::new(netmonitor_servers::deploys::ai_tools::BuildStatus),
         Box::new(netmonitor_servers::deploys::ai_tools::BuildLog),

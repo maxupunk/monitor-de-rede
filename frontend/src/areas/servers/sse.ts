@@ -56,6 +56,10 @@ export const serversSse: SseRoutes = {
     handle: (_data, _payload, bus) =>
       bus.scheduleRefresh('deploys', () => useDeploysStore().refreshIfLoaded()),
   },
-  // O seletor de host Docker acompanha o estado dos agentes (ADR 011).
-  'probe:status': (data) => useDockerStore().applyAgentStatus(data),
+  // O seletor de host Docker acompanha o estado dos agentes (ADR 011); o
+  // guia do deploy também (a etapa "servidor com o agente" anda sozinha).
+  'probe:status': (data, _payload, bus) => {
+    useDockerStore().applyAgentStatus(data)
+    bus.scheduleRefresh('deploys', () => useDeploysStore().refreshIfLoaded())
+  },
 }

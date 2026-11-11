@@ -249,7 +249,7 @@ async fn aplicacao_ligada_a_conexao_mostra_a_conta_e_segura_a_remocao() {
             app_id: Set(4242),
             app_slug: Set("netmonitor-abc123".into()),
             client_id: Set("Iv1.abc".into()),
-            private_key_encrypted: Set("cifrado".into()),
+            private_key_encrypted: Set("chave-privada-cifrada-do-app".into()),
             installation_id: Set(Some(77)),
             can_write: Set(true),
             ..Default::default()
@@ -287,7 +287,12 @@ async fn aplicacao_ligada_a_conexao_mostra_a_conta_e_segura_a_remocao() {
             "https://github.com/apps/netmonitor-abc123/installations/new"
         );
         assert_eq!(overview["applications"][0]["githubAccount"], "maxupunk");
-        assert!(!overview.to_string().contains("cifrado"), "a chave saiu");
+        assert!(
+            !overview
+                .to_string()
+                .contains("chave-privada-cifrada-do-app"),
+            "a chave saiu"
+        );
 
         let path = format!("/api/deploys/github/connections/{}", connection.id);
         assert_eq!(request.delete(&path).await.status_code(), 409);
@@ -506,6 +511,67 @@ async fn env_guarda_versoes_e_mostra_so_os_nomes_que_mudam() {
             .json(&json!({ "when": "now" }))
             .await;
         assert_eq!(deploy.status_code(), 422, "{}", deploy.text());
+    })
+    .await;
+}
+
+/// O guia do primeiro deploy (tela e IA): do zero aponta o GitHub; com a
+/// aplicação e o alvo cadastrados, as etapas andam — e `get_deploy_guide`
+/// devolve o mesmo estado que a tela mostra.
+#[tokio::test]
+#[serial]
+async fn guia_do_deploy_anda_com_o_cadastro_e_a_ia_le_o_mesmo() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        session(&mut request, &ctx, "admin", json!({})).await;
+
+        let zero = body(&request.get("/api/deploys").await.text());
+        let steps = &zero["guide"]["steps"];
+        assert_eq!(steps[0]["key"], json!("github"));
+        assert_eq!(steps[0]["status"], json!("current"));
+        assert_eq!(steps[0]["action"]["kind"], json!("connect_github"));
+        assert_eq!(zero["guide"]["done"], json!(false));
+
+        let (agent, _) = enrolled_agent(&ctx, "debian-prod").await;
+        let created = request
+            .post("/api/deploys/setup")
+            .json(&setup(agent.id, "sgc", false))
+            .await;
+        assert_eq!(created.status_code(), 201, "{}", created.text());
+
+        let after = body(&request.get("/api/deploys").await.text());
+        let status = |key: &str| {
+            after["guide"]["steps"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|step| step["key"] == json!(key))
+                .map(|step| step["status"].clone())
+                .unwrap()
+        };
+        assert_eq!(status("application"), json!("done"));
+        assert_eq!(status("target"), json!("done"));
+        assert_eq!(status("env"), json!("done"), "o assistente gravou o .env");
+
+        let registry = netmonitor_assistant::harness::tools::ToolRegistry::new(
+            netmonitor_core::ai::tools::ToolPolicy::passive(),
+        );
+        let output = registry
+            .execute(&ctx, "get_deploy_guide", "{}")
+            .await
+            .expect("get_deploy_guide")
+            .data;
+        assert_eq!(output["done"], after["guide"]["done"]);
+        let ai_steps = output["steps"].as_array().expect("etapas");
+        assert_eq!(ai_steps.len(), 6);
+        for (ai, screen) in ai_steps
+            .iter()
+            .zip(after["guide"]["steps"].as_array().unwrap())
+        {
+            assert_eq!(ai["step"], screen["key"]);
+            assert_eq!(ai["status"], screen["status"]);
+            assert_eq!(ai["now"], screen["detail"]);
+            assert!(ai["how"].as_str().is_some_and(|how| !how.is_empty()));
+        }
     })
     .await;
 }

@@ -1,8 +1,9 @@
 //! As ferramentas de deploy da IA (ADR 021).
 //!
-//! Quatro de consulta — o estado de cada aplicação, o log de um deploy, as
-//! compilações no servidor e o log de uma delas (ADR 023), para responder
-//! "por que o último deploy do SGC falhou?" — e uma de ação, `deploy_action`,
+//! Cinco de consulta — o passo a passo até o primeiro deploy (o guia da
+//! tela), o estado de cada aplicação, o log de um deploy, as compilações no
+//! servidor e o log de uma delas (ADR 023), para responder "por onde começo?"
+//! e "por que o último deploy do SGC falhou?" — e uma de ação, `deploy_action`,
 //! que aprova, recusa, publica, restaura ou compila. A de ação é
 //! **sempre** de risco alto: pede confirmação a cada chamada, qualquer que
 //! seja o modo de automação, porque troca a versão de uma aplicação em
@@ -37,6 +38,55 @@ const LOG_TAIL_LINES: usize = 80;
 fn log_tail(log: Option<&str>) -> String {
     let lines: Vec<&str> = log.unwrap_or_default().lines().collect();
     lines[lines.len().saturating_sub(LOG_TAIL_LINES)..].join("\n")
+}
+
+/// O passo a passo do deploy contínuo e onde o usuário está — o mesmo guia
+/// do topo da tela de Deploys (`deploys::guide`), para a IA conduzir o
+/// cadastro com o estado real em vez de adivinhar.
+pub struct DeployGuide;
+
+#[async_trait]
+impl AiToolHandler for DeployGuide {
+    fn area(&self) -> Area {
+        Area::Servers
+    }
+
+    fn name(&self) -> &'static str {
+        "get_deploy_guide"
+    }
+
+    fn group(&self) -> ToolGroup {
+        ToolGroup::Docker
+    }
+
+    fn description(&self) -> &'static str {
+        "O passo a passo para colocar uma aplicação no ar pelo deploy contínuo (GitHub → agente → aplicação → alvo → .env → primeira versão) e em que etapa o usuário está agora: o que já está pronto, o que falta e como fazer cada etapa. Use quando perguntarem como configurar o deploy, por onde começar, o que falta ou o que significa uma etapa — e conduza uma etapa por vez, com o nome exato dos botões da tela."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({ "type": "object", "properties": {} })
+    }
+
+    async fn execute(&self, ctx: &AppContext, _args: &ToolArgs) -> AppResult<ToolOutput> {
+        let guide = catalog::overview(ctx).await?.guide;
+        let current = guide
+            .steps
+            .iter()
+            .find(|step| step.status == crate::views::deploys::DeployGuideStatus::Current)
+            .map(|step| step.title.clone());
+        Ok(ToolOutput::data(json!({
+            "done": guide.done,
+            "currentStep": current,
+            "steps": guide.steps.iter().map(|step| json!({
+                "step": step.key,
+                "title": step.title,
+                "status": step.status,
+                "now": step.detail,
+                "how": step.how,
+            })).collect::<Vec<_>>(),
+            "screen": "Deploys: o guia fica no topo; botões Conexões, Automatizar deploy, e em cada aplicação Compilar agora, Adicionar alvo e .env do alvo. Os agentes ficam em Servidores remotos.",
+        })))
+    }
 }
 
 pub struct DeployStatus;

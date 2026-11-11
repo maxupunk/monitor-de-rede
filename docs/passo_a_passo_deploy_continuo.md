@@ -11,6 +11,14 @@
 
 ---
 
+> **Novo (2026-11-10): o guia na própria tela.** O topo de **Deploys** mostra
+> este caminho etapa por etapa — GitHub, agente, aplicação, alvo, `.env` e a
+> primeira versão no ar — com o estado real de cada uma, o botão que resolve
+> a etapa e **Perguntar à IA**. Ele anda sozinho conforme você avança (o
+> agente conectou, a aplicação foi cadastrada, o deploy terminou) e recolhe
+> quando tudo está pronto. A IA lê o mesmo guia (`get_deploy_guide`) e conduz
+> uma etapa por vez.
+
 > **Novo (2026-11-09): o servidor compila.** No assistente, "Quem compila?"
 > já vem em **O NetMonitor compila**: depois de conectar o GitHub (§4) e
 > cadastrar o alvo (§6), cada push na branch do alvo compila no servidor,

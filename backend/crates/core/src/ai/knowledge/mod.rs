@@ -121,6 +121,14 @@ pub static SYSTEM_DOCS: &[DocTopic] = &[
 - Monitoramento de Docker Engine: monitora containers (CPU, memória, status de saúde, OOMKilled exit 137), imagens e volumes em tempo real. Todo host Docker é atendido por um agente NetMonitor: o desta central é o agente local (serviço netmonitor-agent, protegido pela label com.netmonitor.protected=true), os demais são agentes remotos.",
     },
     DocTopic {
+        id: "continuous_deploy",
+        title: "Deploy contínuo (push → compilação → servidor)",
+        keywords: &["deploy", "publicar", "publicação", "push", "github", "compilar", "compilação", "registry", "rollback", "alvo", "esteira", "ci", "cd"],
+        content: "Deploy contínuo: cada push na branch de um alvo chega à central pelo GitHub App dela; o agente do servidor roda os testes (estágio test do Dockerfile), compila num builder isolado, a imagem vai ao registry da central e passa pela análise de vulnerabilidades, e o agente sobe o compose esperando os healthchecks — com volta automática se não ficar saudável. Aprovação, janela de manutenção e backup do banco são opções do alvo.
+- Caminho até a primeira versão: conectar o GitHub, ter um servidor com o agente (deploy e build no AGENT_ALLOW), cadastrar a aplicação, dizer onde ela roda (alvo), gravar o .env (opcional) e dar push.
+- O estado real de cada etapa e como fazê-la vêm de get_deploy_guide (o mesmo guia do topo da tela Deploys); deploys e logs, de get_deploys/get_deploy_log; compilações, de get_builds/get_build_log.",
+    },
+    DocTopic {
         id: "backups_storage",
         title: "Sistema de Backup, Bancos de Dados e Destinos de Storage",
         keywords: &[

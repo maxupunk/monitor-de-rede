@@ -108,7 +108,7 @@
         <v-icon color="primary">mdi-chevron-right</v-icon>
       </ChoiceCard>
       <v-alert
-        v-else-if="compiles"
+        v-else-if="compiles && application.targets.length"
         type="info"
         variant="tonal"
         density="compact"

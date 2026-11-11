@@ -50,6 +50,7 @@ pub mod env_versions;
 pub mod events;
 pub mod executor;
 pub mod github;
+pub mod guide;
 pub mod images;
 pub mod notify;
 pub mod oidc;

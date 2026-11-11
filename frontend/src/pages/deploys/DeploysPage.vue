@@ -68,6 +68,13 @@
       </div>
     </v-alert>
 
+    <DeployGuide
+      v-if="deploys.overview"
+      :guide="deploys.overview.guide"
+      :can-admin="canAdmin"
+      @action="onGuideAction"
+    />
+
     <v-row v-if="counts" dense class="mb-2">
       <v-col v-for="tile in tiles" :key="tile.label" cols="6" md="3">
         <v-card elevation="2" class="pa-4 h-100">
@@ -89,52 +96,7 @@
       type="card@2"
     ></v-skeleton-loader>
 
-    <v-card
-      v-else-if="deploys.overview && !deploys.applications.length"
-      elevation="2"
-      class="pa-6 mb-4"
-      data-test="empty-state"
-    >
-      <div class="text-h6 font-weight-bold mb-1">Publique sem abrir SSH no servidor</div>
-      <div class="text-body-1 text-high-emphasis mb-4">
-        O servidor não compila nada: o agente que já está lá baixa as imagens prontas do ghcr.io,
-        sobe o compose esperando os healthchecks e volta a versão anterior se algo falhar.
-      </div>
-      <v-row dense class="mb-4">
-        <v-col v-for="(item, index) in ONBOARDING" :key="item.title" cols="12" md="4">
-          <v-card border flat class="pa-4 h-100">
-            <div class="d-flex align-center ga-2 mb-1">
-              <v-avatar color="primary" size="26" class="font-weight-bold">{{
-                index + 1
-              }}</v-avatar>
-              <span class="font-weight-bold">{{ item.title }}</span>
-            </div>
-            <div class="text-body-2 text-high-emphasis">{{ item.text }}</div>
-          </v-card>
-        </v-col>
-      </v-row>
-      <div class="d-flex flex-wrap ga-2">
-        <v-btn
-          v-if="canAdmin"
-          color="primary"
-          variant="flat"
-          prepend-icon="mdi-rocket-launch"
-          @click="openSetup(null)"
-        >
-          Automatizar o primeiro deploy
-        </v-btn>
-        <v-btn
-          color="primary"
-          variant="tonal"
-          prepend-icon="mdi-docker"
-          :to="{ name: 'docker-compose' }"
-        >
-          Ver os projetos compose dos servidores
-        </v-btn>
-      </div>
-    </v-card>
-
-    <v-row v-else dense>
+    <v-row v-else-if="deploys.applications.length" dense>
       <v-col v-for="application in deploys.applications" :key="application.id" cols="12" xl="6">
         <DeployApplicationCard
           :application="application"
@@ -236,6 +198,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
+import DeployGuide from '@/components/deploys/DeployGuide.vue'
 import DeployApplicationCard from '@/components/deploys/DeployApplicationCard.vue'
 import DeployApplicationDialog from '@/components/deploys/DeployApplicationDialog.vue'
 import DeployConnectionsDialog from '@/components/deploys/DeployConnectionsDialog.vue'
@@ -257,6 +220,7 @@ import DeployTargetDialog from '@/components/deploys/DeployTargetDialog.vue'
 import DeployWorkflowDialog from '@/components/deploys/DeployWorkflowDialog.vue'
 import { useConfirm } from '@/composables/useConfirm'
 import type { DeployApplicationView } from '@/bindings/DeployApplicationView'
+import type { DeployGuideAction } from '@/bindings/DeployGuideAction'
 import type { DeployRunView } from '@/bindings/DeployRunView'
 import type { DeployTargetView } from '@/bindings/DeployTargetView'
 import { useAuthStore } from '@/stores/auth'
@@ -278,21 +242,6 @@ const { confirm } = useConfirm()
 const canAdmin = computed(() => auth.roleIn('servers') === 'admin')
 const builds = useDeployBuildsStore()
 const counts = computed(() => deploys.overview?.counts ?? null)
-
-const ONBOARDING = [
-  {
-    title: 'Libere o deploy no agente',
-    text: 'No servidor, acrescente deploy ao AGENT_ALLOW. A raiz das stacks já vem montada nas instalações novas.',
-  },
-  {
-    title: 'Automatize o projeto',
-    text: 'Diga o repositório, o servidor e a política (aprovação, janela, backup). A checagem de prontidão aponta o que falta.',
-  },
-  {
-    title: 'Dê push',
-    text: 'Com o GitHub conectado, cada push na branch do alvo chega à central: o servidor compila, guarda a imagem no registry, confere as vulnerabilidades e sobe. Sem workflow no repositório.',
-  },
-]
 
 const tiles = computed(() => {
   const value = counts.value
@@ -416,6 +365,45 @@ function openTargetDialog(kind: 'publish' | 'env' | 'history', target: DeployTar
 function onEnvSaved(message: string, run: DeployRunView | null) {
   notify(message)
   if (run) openRun(run.id)
+}
+
+/** O botão da etapa do guia aciona o mesmo caminho do botão da página. */
+function onGuideAction(action: DeployGuideAction) {
+  const application = (id: number) => deploys.applications.find((item) => item.id === id)
+  switch (action.kind) {
+    case 'connect_github':
+      openConnections(true)
+      break
+    case 'install_github':
+      window.open(action.url, '_blank', 'noopener')
+      break
+    case 'open_agents':
+      void router.push({ name: 'remote-servers' })
+      break
+    case 'setup':
+      openSetup(null)
+      break
+    case 'add_target': {
+      const found = application(action.applicationId)
+      if (found) addTarget(found)
+      break
+    }
+    case 'edit_env': {
+      const found = deploys.applications
+        .flatMap((item) => item.targets)
+        .find((target) => target.id === action.targetId)
+      if (found) openTargetDialog('env', found)
+      break
+    }
+    case 'build_now': {
+      const found = application(action.applicationId)
+      if (found) openBuildStart(found)
+      break
+    }
+    case 'open_run':
+      openRun(action.runId)
+      break
+  }
 }
 
 function openWorkflow(application: DeployApplicationView) {
