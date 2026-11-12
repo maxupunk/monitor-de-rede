@@ -93,6 +93,9 @@ pub struct TagsResponse {
 #[derive(Debug, Deserialize)]
 pub struct TagItem {
     pub name: String,
+    /// SHA-256 do manifesto instalado (vazio em Ollaya que não o informa).
+    #[serde(default)]
+    pub digest: String,
 }
 
 #[cfg(test)]

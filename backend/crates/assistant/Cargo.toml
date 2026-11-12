@@ -35,3 +35,4 @@ reqwest = { workspace = true }
 [dev-dependencies]
 loco-rs = { workspace = true, features = ["testing"] }
 serial_test = { version = "3.1.1" }
+tempfile = { version = "3" }

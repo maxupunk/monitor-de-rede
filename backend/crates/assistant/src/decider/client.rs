@@ -22,7 +22,7 @@ use super::{
     config::AiDeciderSettings,
     locate::{self, Located},
     protocols::{self, wire_for},
-    schema::{DecideResponse, Question, TagsResponse},
+    schema::{DecideResponse, Question, TagItem, TagsResponse},
 };
 use crate::{
     dtos::ModelPullProgress,
@@ -237,7 +237,7 @@ impl<'a> DeciderClient<'a> {
         let tags = res.json::<TagsResponse>().await.map_err(|e| {
             AppError::service_unavailable(format!("Resposta inválida de {}: {e}", self.service()))
         })?;
-        Ok(tags.models.into_iter().map(|tag| tag.name).collect())
+        Ok(current_names(tags.models))
     }
 
     /// Baixa o modelo configurado (para modelos do NetMonitor, baixa da release do GitHub).
@@ -290,10 +290,49 @@ fn failure_message(
     format!("{who} respondeu {status} {action}: {detail}{hint}")
 }
 
+/// Os nomes instalados, sem os pacotes do NetMonitor desatualizados: com o
+/// mesmo nome e outro manifesto (o de uma release antiga), eles contam como
+/// não baixados, e a tela oferece baixar de novo.
+fn current_names(models: Vec<TagItem>) -> Vec<String> {
+    models
+        .into_iter()
+        .filter(|tag| {
+            catalog::bundled_store_model(&tag.name)
+                .is_none_or(|bundled| bundled.is_current(&tag.digest))
+        })
+        .map(|tag| tag.name)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
+    use sha2::{Digest, Sha256};
+
     use super::*;
     use crate::decider::providers::DeciderProvider;
+
+    fn tag(name: &str, digest: &str) -> TagItem {
+        TagItem {
+            name: name.into(),
+            digest: digest.into(),
+        }
+    }
+
+    #[test]
+    fn pacote_do_netmonitor_com_outro_manifesto_conta_como_nao_baixado() {
+        let bundled = &catalog::BUNDLED_STORE_MODELS[0];
+        let current = hex::encode(Sha256::digest(bundled.manifest_json));
+        let names = |digest: &str| {
+            current_names(vec![
+                tag(bundled.canonical_name, digest),
+                tag("laya:en", "abc"),
+            ])
+        };
+        assert_eq!(names(&current), [bundled.canonical_name, "laya:en"]);
+        assert_eq!(names(&format!("sha256:{current}")).len(), 2);
+        assert_eq!(names(""), [bundled.canonical_name, "laya:en"]);
+        assert_eq!(names(&"0".repeat(64)), ["laya:en"]);
+    }
 
     #[tokio::test]
     async fn o_erro_diz_a_causa_e_nao_so_error_sending_request() {

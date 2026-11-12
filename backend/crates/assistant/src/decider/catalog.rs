@@ -191,7 +191,7 @@ pub static BUNDLED_STORE_MODELS: &[BundledStoreModel] = &[BundledStoreModel {
   "layers": [
     {
       "mediaType": "application/vnd.ollaya.graph.onnx",
-      "digest": "sha256:36e44593143ef754e22ccd0e9ba58feb74b67fb43509c5cf3481d46f50455fef",
+      "digest": "sha256:3106052b2d478cc82deef9c9fe9994fb8e87e5a8c9cbdc656aeecbdba0a25b74",
       "size": 3340536,
       "annotations": {
         "org.ollaya.precision": "fp32"
@@ -254,7 +254,7 @@ pub static BUNDLED_STORE_MODELS: &[BundledStoreModel] = &[BundledStoreModel {
             explicit_url: Some("https://ollaya.dev/blobs/sha256-6a42ffd329be28d2cb5e330c9c46124d6598c81c95c57c20e5227f5fae65f588"),
         },
         BundledStoreLayer {
-            digest: "sha256:36e44593143ef754e22ccd0e9ba58feb74b67fb43509c5cf3481d46f50455fef",
+            digest: "sha256:3106052b2d478cc82deef9c9fe9994fb8e87e5a8c9cbdc656aeecbdba0a25b74",
             size: 3_340_536,
             explicit_url: None,
         },

@@ -12,6 +12,7 @@
 //!   (`OLLAYA_MODELS_DIR`).
 
 use std::{
+    collections::BTreeSet,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::Duration,
@@ -147,6 +148,18 @@ impl BundledStoreModel {
             .map(|val| val.trim().to_string())
             .filter(|val| !val.is_empty())
             .map_or_else(|| PathBuf::from(self.default_store_dir), PathBuf::from)
+    }
+
+    /// A cópia instalada com este nome é este pacote? O `digest` do
+    /// `/api/tags` do Ollaya é o SHA-256 do manifesto: um pacote antigo com o
+    /// mesmo nome (um grafo trocado na release) aparece com outro digest e
+    /// precisa ser baixado de novo. Vazio (Ollaya que não informa) é aceito.
+    #[must_use]
+    pub fn is_current(&self, installed_digest: &str) -> bool {
+        let digest = installed_digest.trim();
+        let digest = digest.strip_prefix("sha256:").unwrap_or(digest);
+        digest.is_empty()
+            || digest.eq_ignore_ascii_case(&hex::encode(Sha256::digest(self.manifest_json)))
     }
 
     #[must_use]
@@ -554,6 +567,67 @@ async fn blob_exists_with_size(path: &Path, expected_size: u64) -> bool {
         .is_ok_and(|meta| meta.is_file() && meta.len() == expected_size)
 }
 
+/// Os blobs que um grafo ONNX lê como dado externo: o `location` de cada peso
+/// é o nome do blob (`sha256-<hex>`), não um caminho do pacote.
+fn external_blobs(graph: &[u8]) -> BTreeSet<String> {
+    const PREFIX: &[u8] = b"sha256-";
+    const HEX_LEN: usize = 64;
+    graph
+        .windows(PREFIX.len() + HEX_LEN)
+        .filter(|window| {
+            window.starts_with(PREFIX) && window[PREFIX.len()..].iter().all(u8::is_ascii_hexdigit)
+        })
+        .map(|window| {
+            format!(
+                "sha256:{}",
+                String::from_utf8_lossy(&window[PREFIX.len()..])
+            )
+        })
+        .collect()
+}
+
+/// Digests das camadas de grafo do manifesto (`application/vnd.ollaya.graph.*`).
+fn graph_digests(manifest_json: &str) -> Vec<String> {
+    let manifest: Value = serde_json::from_str(manifest_json).unwrap_or(Value::Null);
+    manifest["layers"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|layer| {
+            layer["mediaType"]
+                .as_str()
+                .is_some_and(|media| media.starts_with("application/vnd.ollaya.graph"))
+        })
+        .filter_map(|layer| layer["digest"].as_str().map(str::to_owned))
+        .collect()
+}
+
+/// O pacote se sustenta sozinho? Cada peso que um grafo lê precisa ser uma
+/// camada do próprio pacote: um grafo de outra versão apontaria para um blob
+/// que não foi baixado, e o Ollaya só reclamaria ao carregar o modelo.
+async fn check_graph_references(spec: &BundledStoreModel, blobs_dir: &Path) -> Result<(), String> {
+    let layers: BTreeSet<&str> = spec.layers.iter().map(|layer| layer.digest).collect();
+    for digest in graph_digests(spec.manifest_json) {
+        let hex = digest.strip_prefix("sha256:").unwrap_or(&digest);
+        let path = blobs_dir.join(format!("sha256-{hex}"));
+        let graph = tokio::fs::read(&path)
+            .await
+            .map_err(|e| format!("Não foi possível ler o grafo '{}': {e}", path.display()))?;
+        if let Some(missing) = external_blobs(&graph)
+            .into_iter()
+            .find(|blob| !layers.contains(blob.as_str()))
+        {
+            return Err(format!(
+                "O grafo {digest} de {} lê os pesos de {missing}, que não fazem parte do pacote. \
+                 A release dos modelos está inconsistente: publique o grafo religado aos pesos \
+                 desta versão.",
+                spec.canonical_name
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Baixa e instala sob demanda um modelo OCI do Ollaya (`BundledStoreModel`)
 /// diretamente da release do NetMonitor (`DECIDER_MODELS_URL`) para o volume
 /// compartilhado (`OLLAYA_MODELS_DIR`), conferindo o SHA-256 de cada camada
@@ -753,6 +827,16 @@ pub async fn stream_bundled_store_install(
             }
         }
 
+        if let Err(reason) = check_graph_references(spec, &blobs_dir).await {
+            let _ = tx
+                .send(ModelPullProgress::failed(
+                    "Pacote do modelo inconsistente",
+                    reason,
+                ))
+                .await;
+            return;
+        }
+
         if let Err(e) = tokio::fs::write(&manifest_path, spec.manifest_json).await {
             let _ = tx
                 .send(ModelPullProgress::failed(
@@ -858,5 +942,49 @@ mod tests {
             .error
             .as_deref()
             .is_some_and(|e| e.contains("docker compose pull")));
+    }
+
+    const HEAD: &str = "7a5cee4658291e2647d7516c82b3d3abe26e15d8d96532be8bf147000f4760f8";
+
+    #[test]
+    fn le_os_blobs_externos_do_grafo() {
+        let graph = [
+            b"locationG".as_slice(),
+            format!("sha256-{HEAD}").as_bytes(),
+            b"offset128 sha256-curto location sha256-".as_slice(),
+            HEAD.as_bytes(),
+        ]
+        .concat();
+        assert_eq!(
+            external_blobs(&graph).into_iter().collect::<Vec<_>>(),
+            [format!("sha256:{HEAD}")]
+        );
+        assert!(external_blobs(b"sem pesos externos").is_empty());
+    }
+
+    #[test]
+    fn so_as_camadas_de_grafo_contam() {
+        let manifest = r#"{"layers": [
+            {"mediaType": "application/vnd.ollaya.graph.onnx", "digest": "sha256:aa"},
+            {"mediaType": "application/vnd.ollaya.weights", "digest": "sha256:bb"}
+        ]}"#;
+        assert_eq!(graph_digests(manifest), ["sha256:aa"]);
+        assert!(graph_digests("não é json").is_empty());
+    }
+
+    #[tokio::test]
+    async fn grafo_que_le_peso_de_fora_do_pacote_e_recusado() {
+        let spec = &crate::decider::catalog::BUNDLED_STORE_MODELS[0];
+        let dir = tempfile::tempdir().expect("tmp");
+        let graph = graph_digests(spec.manifest_json).remove(0);
+        let path = dir.path().join(graph.replace(':', "-"));
+        let weights = spec.layers[2].digest.replace(':', "-");
+
+        std::fs::write(&path, format!("location {weights} offset")).expect("grafo");
+        assert!(check_graph_references(spec, dir.path()).await.is_ok());
+
+        std::fs::write(&path, format!("location sha256-{HEAD} offset")).expect("grafo");
+        let error = check_graph_references(spec, dir.path()).await.unwrap_err();
+        assert!(error.contains(HEAD), "{error}");
     }
 }
