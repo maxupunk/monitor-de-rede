@@ -894,3 +894,31 @@ pub struct AiConversationDetail {
     #[ts(type = "unknown[]")]
     pub messages: serde_json::Value,
 }
+
+/// Período da exportação dos dados do assistente: os últimos `days` dias, ou
+/// tudo quando ausente.
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiDataExportQuery {
+    pub days: Option<u32>,
+}
+
+/// O que a exportação levaria no período — mostrado antes do download.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct AiDataExportSummary {
+    #[ts(type = "number")]
+    pub conversations: u64,
+    #[ts(type = "number")]
+    pub messages: u64,
+    /// Quantas pessoas conversaram no período.
+    #[ts(type = "number")]
+    pub users: u64,
+    /// Comandos que a IA mandou a equipamentos.
+    #[ts(type = "number")]
+    pub device_runs: u64,
+    /// Conversa atualizada há mais tempo, no período (RFC 3339).
+    pub oldest: Option<String>,
+    pub newest: Option<String>,
+}

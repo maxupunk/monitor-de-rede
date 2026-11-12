@@ -259,6 +259,10 @@ impl Hooks for App {
                     .layer(business_auth.clone()),
             )
             .add_route(
+                netmonitor_assistant::controllers::ai_data_export::routes()
+                    .layer(business_auth.clone()),
+            )
+            .add_route(
                 netmonitor_network::controllers::plugins::routes().layer(business_auth.clone()),
             )
             .add_route(

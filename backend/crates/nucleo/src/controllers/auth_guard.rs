@@ -116,27 +116,6 @@ pub async fn require_jwt(
     next.run(request).await
 }
 
-/// Usuário que passou pelo guarda — mora no núcleo, ao lado do cabeçalho.
-pub use netmonitor_core::audit::authenticated_user;
-
-/// Usuário autenticado **e** administrador.
-///
-/// `forbidden` é a frase da recusa — ela diz o que a pessoa tentou fazer
-/// ("Apenas administradores podem …").
-///
-/// # Errors
-///
-/// `401` sem sessão; `403` com `forbidden` quando o papel não é admin.
-pub async fn require_admin(
-    ctx: &AppContext,
-    headers: &axum::http::HeaderMap,
-    forbidden: &str,
-) -> crate::services::shared::errors::AppResult<crate::models::users::Model> {
-    use crate::services::shared::errors::AppError;
-
-    let user = authenticated_user(ctx, headers).await?;
-    if !Role::from_str(&user.role)?.can_manage_users() {
-        return Err(AppError::forbidden(forbidden));
-    }
-    Ok(user)
-}
+/// Usuário que passou pelo guarda, e o administrador — moram no núcleo, ao
+/// lado do cabeçalho, para o assistente e as áreas também os usarem.
+pub use netmonitor_core::audit::{authenticated_user, require_admin};

@@ -267,6 +267,11 @@ export const coreArea = defineArea({
       component: lazyComponent(() => import('@/components/settings/DeciderSettingsCard.vue')),
     },
     {
+      tab: 'ia',
+      order: 30,
+      component: lazyComponent(() => import('@/components/settings/AiDataExportCard.vue')),
+    },
+    {
       tab: 'sistema',
       order: 10,
       component: lazyComponent(() => import('@/components/settings/BackupShortcutCard.vue')),

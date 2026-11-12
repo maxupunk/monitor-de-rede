@@ -3,3 +3,4 @@
 
 pub mod ai;
 pub mod ai_conversations;
+pub mod ai_data_export;

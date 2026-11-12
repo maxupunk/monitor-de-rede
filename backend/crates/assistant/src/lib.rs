@@ -2,7 +2,7 @@
 //! (`harness`), os provedores de LLM (`drivers`, `ollama`, `openrouter`,
 //! `opencode`, `local_server`, `local_models`), o Decisor (`decider`), as
 //! rotinas automáticas (`proactive`), as marcações do `@` (`mentions`), as
-//! conversas salvas (`conversations`), a pesquisa na web (`web_search`) e as
+//! conversas salvas (`conversations`) e a exportação delas (`data_export`), a pesquisa na web (`web_search`) e as
 //! rotas `/api/ai`.
 //!
 //! Depende **só** do núcleo (`netmonitor-core`) — nunca de uma área nem do
@@ -20,6 +20,7 @@ pub mod classifier;
 pub mod context_window;
 pub mod controllers;
 pub mod conversations;
+pub mod data_export;
 pub mod decider;
 pub mod drivers;
 pub mod dtos;

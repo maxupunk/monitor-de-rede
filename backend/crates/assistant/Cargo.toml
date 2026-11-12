@@ -29,6 +29,8 @@ regex = { workspace = true }
 anyhow = { workspace = true }
 hex = { workspace = true }
 sha2 = { workspace = true }
+# O pacote da exportação dos dados do assistente.
+zip = { version = "2", default-features = false, features = ["deflate"] }
 # Provedores de LLM, Decisor e pesquisa na web.
 reqwest = { workspace = true }
 
