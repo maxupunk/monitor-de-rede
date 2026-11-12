@@ -106,8 +106,8 @@ A central **não** consegue ligar isso sozinha: quem decide é o servidor.
 environment:
   AGENT_ALLOW: read,lifecycle,monitor,discovery,update,compose,deploy
 volumes:
-  # Mesmo caminho dos dois lados — obrigatório.
-  - /srv/netmonitor/stacks:/srv/netmonitor/stacks
+  # Volume criado pelo Docker; o agente descobre o caminho dele no host.
+  - stacks:/stacks
 ```
 
 Depois recrie o agente:
@@ -116,8 +116,8 @@ Depois recrie o agente:
 docker compose -f docker/agent/docker-compose.yml up -d
 ```
 
-**Agente instalado por `docker run`:** as instalações novas já montam
-`/srv/netmonitor/stacks`. Num agente antigo, remova e rode de novo o comando
+**Agente instalado por `docker run`:** as instalações novas já montam o volume
+`netmonitor-stacks` em `/stacks`. Num agente antigo, remova e rode de novo o comando
 de instalação da tela **Servidores remotos**, acrescentando `deploy` em
 `AGENT_ALLOW`.
 
@@ -247,7 +247,7 @@ vermelho; amarelo é aviso.
 |---|---|
 | Agente conectado | O container do agente parou ou perdeu a rede. |
 | Permissão de deploy | Faltou `deploy` no `AGENT_ALLOW` (passo 3.1). |
-| Diretório das stacks | Faltou montar `/srv/netmonitor/stacks` no mesmo caminho. |
+| Diretório das stacks | Faltou montar um volume em `/stacks` no agente (`-v netmonitor-stacks:/stacks`). |
 | Git no agente | Agente antigo: atualize a imagem. Systemd: instale o `git`. |
 | Docker Compose | Agente antigo: atualize a imagem. |
 | Espaço em disco | Menos de 5 GiB livres: libere espaço ou guarde menos versões. |

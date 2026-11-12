@@ -145,7 +145,8 @@
      não entenderia sobe `PROTOCOL_VERSION` (o handshake é estrito); não
      crie campo de "recursos opcionais" para conviver com versão antiga.
    - **Deploy contínuo** (ADR 021): o agente só escreve dentro de
-     `AGENT_STACKS_DIR` (montado no **mesmo caminho** do host), só com a
+     `AGENT_STACKS_DIR` (no container, um volume em `/stacks` cujo caminho no
+     host o agente descobre — `docker/stacks/host_path.rs`), só com a
      permissão `deploy` (fora do padrão) e só pela operação fechada
      `DockerCall::StackDeploy` — nunca um shell nem um caminho vindo da
      central. Token do Git e senha do registry vão no ambiente do processo

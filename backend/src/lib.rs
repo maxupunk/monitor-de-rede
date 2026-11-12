@@ -8,5 +8,6 @@ pub mod app;
 pub mod initializers;
 pub mod migrator;
 pub mod registries;
+pub mod secret_files;
 pub mod spa;
 pub mod tasks;

@@ -25,7 +25,10 @@ use sea_orm::EntityTrait;
 use super::env_versions;
 use crate::{
     docker::builds::BuilderReadiness,
-    docker::{hosts, stacks::DEFAULT_STACKS_DIR},
+    docker::{
+        hosts,
+        stacks::{CONTAINER_STACKS_DIR, STACKS_VOLUME},
+    },
     dtos::deploys::Builder,
     views::deploys::{DeployReadinessView, ReadinessCheck, ReadinessLevel},
 };
@@ -244,8 +247,8 @@ pub fn checks(facts: &Facts<'_>) -> Vec<ReadinessCheck> {
                     .clone()
                     .unwrap_or_else(|| "Diretório indisponível".into()),
                 Some(format!(
-                    "No compose do agente, monte o diretório no mesmo caminho: \
-                     `- {DEFAULT_STACKS_DIR}:{DEFAULT_STACKS_DIR}`"
+                    "Monte um volume na raiz das stacks do agente: \
+                     `-v {STACKS_VOLUME}:{CONTAINER_STACKS_DIR}`"
                 )),
             ),
         });
@@ -589,7 +592,7 @@ mod tests {
             .fix
             .as_deref()
             .unwrap_or_default()
-            .contains(DEFAULT_STACKS_DIR));
+            .contains(CONTAINER_STACKS_DIR));
     }
 
     #[test]

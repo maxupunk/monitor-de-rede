@@ -48,12 +48,21 @@ de backend em npm: o backend é `cargo`, rodado de dentro de `backend/`.
 ## Subir a stack
 
 ```powershell
-cp .env.example .env   # ajuste os segredos
 docker compose up -d --build
 ```
 
+Não há `.env` a preencher: a senha do banco, o `JWT_SECRET` e a
+`ENCRYPTION_KEY` são sorteados no primeiro boot pelo serviço `netmonitor-init`
+e ficam no volume `netmonitor-secrets`. O `.env` (a partir do `.env.example`)
+só é preciso para mudar algum padrão — portas, modo host, fuso.
+
 Interface e API na mesma porta: <http://localhost:3333>. A UDP 51820 é do
 WireGuard e só importa a quem usa a VPN.
+
+> ⚠ **Guarde a `encryption_key`** junto do backup do banco: ela cifra as senhas
+> de equipamentos, as chaves da VPN e os destinos de backup. Para vê-la:
+> `docker compose run --rm netmonitor-init show`. Um `docker compose down -v`
+> apaga os volumes — banco, segredos e stacks juntos.
 
 ### Gerenciamento Docker
 
@@ -101,8 +110,8 @@ dos equipamentos que enviam Syslog.
 
 #### 1. Ative o override no `.env`
 
-Copie `.env.example` para `.env`, configure `JWT_SECRET` e `ENCRYPTION_KEY` e
-descomente/ajuste estas variáveis:
+Crie o `.env` (pode partir do `.env.example`) com estas variáveis — os segredos
+não precisam estar nele:
 
 ```dotenv
 COMPOSE_PATH_SEPARATOR=:
@@ -294,8 +303,8 @@ o `.env` apenas preenche os `get_env(...)` desses arquivos e as substituições 
 compose. O banco é apontado por **`DATABASE_URL`** (uma URL só, não campos
 separados). No compose ela aponta para o serviço `postgres` (PostgreSQL 18,
 [ADR 020](docs/adr/020-postgresql-padrao-do-container.md)), e os logs de syslog
-vão para o banco `netmonitor_logs` do mesmo servidor. **`POSTGRES_PASSWORD` é
-obrigatória no `.env`**: sem ela o compose não sobe. Use só letras e números
-(`openssl rand -hex 24`), porque ela entra numa URL. O SQLite continua
+vão para o banco `netmonitor_logs` do mesmo servidor. A senha do banco é
+sorteada no primeiro boot (ou vem da `POSTGRES_PASSWORD` do `.env`) e chega à
+API pelo `PGPASSFILE`, fora da URL. O SQLite continua
 suportado (`sqlite:///data/netmonitor.sqlite?mode=rwc`) para quem roda a imagem
 sem compose. O código atende aos dois dialetos.

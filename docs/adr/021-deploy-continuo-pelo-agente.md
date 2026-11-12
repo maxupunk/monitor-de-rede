@@ -55,13 +55,24 @@ O `ComposeRequest` que já existia continua para as ações manuais da aba Compo
 o deploy reaproveita o mesmo executor de CLI (`docker/cli.rs`) e a mesma guarda
 de projeto protegido (o da própria instalação é recusado).
 
-### 3. Uma raiz só, no mesmo caminho
+### 3. Uma raiz só, vista pelo caminho do host
 
-O agente escreve **só** dentro de `AGENT_STACKS_DIR` (padrão
-`/srv/netmonitor/stacks`), uma pasta por projeto. Ela é montada no container do
-agente **no mesmo caminho do host**: o CLI compose roda no agente, mas quem
-resolve os bind mounts relativos da stack (`./docker/nginx`) é a Engine do
-host — caminhos diferentes montariam diretórios vazios.
+O agente escreve **só** dentro de `AGENT_STACKS_DIR`, uma pasta por projeto. O
+CLI compose roda no agente, mas quem resolve os bind mounts relativos da stack
+(`./docker/nginx`) é a Engine do host: o caminho que o compose manda precisa
+existir lá.
+
+No container a raiz é `/stacks`, com um **volume nomeado** montado — o Docker o
+cria, e o host não precisa de pasta nenhuma. O agente lê na Engine a origem do
+que está montado ali (`Mounts[].Source` do próprio container, achado pelo
+`mountinfo`) e cria, dentro do container, um link com esse caminho do host
+apontando para a raiz (`docker/stacks/host_path.rs`); o compose trabalha por
+ele. Uma pasta do host montada em `/stacks` funciona do mesmo jeito. Nativo
+(systemd), a raiz é `/srv/netmonitor/stacks` e o caminho já é o do host.
+
+> Até 2026-11 a raiz era uma pasta do host montada **no mesmo caminho** dos
+> dois lados. Funcionava, mas a pasta precisava existir antes do
+> `docker compose up` — em hosts que não a criam sozinhos, o agente nem subia.
 
 Um projeto que hoje roda de outro lugar (`/opt/sgc`) é **adotado**: o primeiro
 deploy o sobe a partir da raiz com o mesmo nome de projeto compose, então os

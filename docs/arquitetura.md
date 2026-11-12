@@ -640,6 +640,12 @@ exatamente esse o bug corrigido pela [ADR 007](adr/007-scheduler-processo-unico.
 - Tokens de probe guardados como `sha256`, revogáveis.
 - Credenciais e chaves privadas cifradas em repouso com `ENCRYPTION_KEY`. Sem
   ela em produção o serviço **não sobe** — é intencional.
+- No compose, a senha do banco, o `JWT_SECRET` e a `ENCRYPTION_KEY` são
+  sorteados no primeiro boot pelo `netmonitor-init` (`docker/init-secrets.sh`)
+  no volume `netmonitor-secrets`, ou gravados do `.env` quando definidos lá. A
+  API os recebe por arquivo (`JWT_SECRET_FILE`, `ENCRYPTION_KEY_FILE`, lidos
+  por `src/secret_files.rs` antes do boot; a senha pelo `PGPASSFILE`): nenhum
+  segredo no ambiente do container.
 - Validação em toda entrada; rate limit; timeout por operação; limite de
   concorrência.
 - Isolamento por site: um probe só enxerga o site e as redes autorizadas.

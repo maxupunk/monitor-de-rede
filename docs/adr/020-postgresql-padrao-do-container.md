@@ -54,9 +54,11 @@ out`, que chega à tela como 500. É o teto que motivou esta decisão.
    no primeiro boot), pela `SYSLOG_DB_URL`. Assim a ingestão e a retenção dos
    logs não incham o banco principal nem o backup dele, como já acontecia com o
    `logs.sqlite`.
-4. **A senha é obrigatória**: `POSTGRES_PASSWORD` no `.env`. Sem ela o
-   `docker compose` nem sobe (`${POSTGRES_PASSWORD:?…}`), a mesma regra de
-   `JWT_SECRET` e `ENCRYPTION_KEY`. Autenticação `scram-sha-256`.
+4. **A senha nunca é padrão nem fica em branco**: o serviço `netmonitor-init`
+   a sorteia no primeiro boot no volume `netmonitor-secrets` (ou grava a
+   `POSTGRES_PASSWORD` do `.env`), com o `JWT_SECRET` e a `ENCRYPTION_KEY`. O
+   `postgres` a lê por `POSTGRES_PASSWORD_FILE`; a API, pelo `PGPASSFILE` — as
+   URLs vão sem senha. Autenticação `scram-sha-256`.
 5. No modo host (`docker-compose.host.yml`) o Postgres também vai para a rede do
    host, mas **só no loopback** e na porta `POSTGRES_HOST_PORT` (padrão 15432,
    e não a 5432, que um Postgres do host costuma ocupar).

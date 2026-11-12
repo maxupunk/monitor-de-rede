@@ -724,9 +724,17 @@ Cada item carrega severidade, esforço, responsável sugerido e critério de ace
   - **Implementado:**
     - Serviço `postgres` (`postgres:18-alpine`) com volume próprio, `scram-sha-256`, healthcheck por TCP e sem porta publicada; a API só sobe com ele saudável. No modo host ele vai ao loopback, na porta `POSTGRES_HOST_PORT` (15432).
     - Banco do sistema `netmonitor` e banco dos logs de syslog `netmonitor_logs` (separado, no mesmo servidor, criado no primeiro boot); `DB_MAX_CONNECTIONS` do container em 10.
-    - `POSTGRES_PASSWORD` obrigatória no `.env`: sem ela o compose não sobe.
+    - Senha do banco sorteada no primeiro boot (item abaixo), ou a `POSTGRES_PASSWORD` do `.env`.
     - Comparativo com MySQL/MariaDB, SQLite, TimescaleDB e ClickHouse no ADR; o SQLite continua suportado (desenvolvimento, testes, imagem sem compose) e o job `test-postgres` do CI passou para o 18.
     - Validado com a stack de pé: migrations nos dois bancos (índice GIN da busca nos logs), cadastro do primeiro usuário, login e `GET /api/settings/database-size` respondendo `postgres`.
+
+- [x] **Subir sem `.env` e sem pasta no host** 🟢 Concluído
+  - **Arquivos:** `docker-compose.yml`, `docker-compose.host.yml`, `docker/init-secrets.sh`, `backend/src/secret_files.rs`, `backend/src/bin/main.rs`, `backend/crates/servers/src/docker/stacks/host_path.rs`, `docker/agent/docker-compose.yml`, `.env.example`, `Dockerfile`
+  - **Implementado:**
+    - Serviço `netmonitor-init`: sorteia no primeiro boot a senha do banco, o `JWT_SECRET` e a `ENCRYPTION_KEY` no volume `netmonitor-secrets` (o valor do `.env`, quando definido, vence); `docker compose run --rm netmonitor-init show` mostra os valores.
+    - Segredos por arquivo: o `postgres` lê `POSTGRES_PASSWORD_FILE`; a API, `JWT_SECRET_FILE`/`ENCRYPTION_KEY_FILE` (carregados no começo do `main`, valendo também para `docker compose exec`) e a senha pelo `PGPASSFILE` — URLs sem senha, nenhum segredo no ambiente do container.
+    - Raiz das stacks do deploy contínuo num volume nomeado (`/stacks`): o agente descobre o caminho dele no host pela Engine e cria o link no próprio container, sem pasta a preparar no servidor ([ADR 021](adr/021-deploy-continuo-pelo-agente.md) §3).
+    - Compose sem repetição (âncoras `x-service`, `x-logging`, `x-netmonitor-image`) e `.env.example` sem nenhuma linha ativa que só repetisse o padrão (o `FRONTEND_ORIGIN` de dev vazava para a produção).
 
 ---
 

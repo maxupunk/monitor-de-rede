@@ -62,9 +62,9 @@ Central ── aprovação? janela? fila? canário? ── backup do banco ─�
 
 1. Libere o deploy na política local: acrescente `deploy` ao `AGENT_ALLOW`
    (no agente local da central, `LOCAL_AGENT_ALLOW` — já vem ligado).
-2. A raiz das stacks precisa estar montada **no mesmo caminho** do host:
-   `- /srv/netmonitor/stacks:/srv/netmonitor/stacks`. As instalações novas já
-   montam; em agentes antigos, recrie com o compose atualizado.
+2. A raiz das stacks é um volume montado em `/stacks` (`- netmonitor-stacks:/stacks`).
+   As instalações novas já montam, e o agente descobre sozinho o caminho dele
+   no host; em agentes antigos, recrie com o compose atualizado.
 3. Agente instalado por systemd precisa do `git` no host.
 
 A tela **Deploys → Automatizar deploy** checa tudo isso antes de salvar e diz o
@@ -193,6 +193,6 @@ do `.env`.
 | Tabelas | `backend/crates/servers/src/migrations/m20261108_000001_deploys.rs` |
 | Tela | `frontend/src/pages/deploys/`, `frontend/src/components/deploys/`, `frontend/src/stores/deploys.ts` |
 
-Variáveis de ambiente: `AGENT_STACKS_DIR` (agente, padrão
-`/srv/netmonitor/stacks`) e `DEPLOY_OIDC_AUDIENCE` (central, padrão
+Variáveis de ambiente: `AGENT_STACKS_DIR` (agente; `/stacks` na imagem,
+`/srv/netmonitor/stacks` nativo) e `DEPLOY_OIDC_AUDIENCE` (central, padrão
 `netmonitor-deploy`).

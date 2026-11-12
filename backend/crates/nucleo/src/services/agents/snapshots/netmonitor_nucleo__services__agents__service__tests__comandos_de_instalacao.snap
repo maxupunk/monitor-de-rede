@@ -7,7 +7,7 @@ docker run -d --name netmonitor-agent --restart unless-stopped \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v /proc:/host/proc:ro -v /:/host:ro \
   -v netmonitor-agent:/var/lib/netmonitor-agent \
-  -v /srv/netmonitor/stacks:/srv/netmonitor/stacks \
+  -v netmonitor-stacks:/stacks \
   -e AGENT_SERVER_URL=http://10.8.0.1:3333 \
   -e AGENT_ENROLL_CODE=nma_abc \
   -e AGENT_ALLOW=read,lifecycle,monitor,discovery \

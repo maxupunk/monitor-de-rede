@@ -2,16 +2,55 @@
 # serviço, e o agente local ao lado, dono do Docker deste host (ADR 014). Para
 # compartilhar diretamente a rede do host, use o override
 # `docker-compose.host.yml`, selecionável pelo `.env`.
+#
+# Sobe sem `.env` nenhum: as senhas e chaves são sorteadas no primeiro boot
+# pelo serviço `netmonitor-init` (ver `docker/init-secrets.sh`).
+
+# Blocos repetidos entre os serviços, escritos uma vez só.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: '3'
+
+x-service: &service
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  logging: *logging
+
+# A imagem da central, usada também pelo `netmonitor-init`: os dois declaram o
+# build para o compose nunca tentar baixar `netmonitor:latest` de um registry.
+x-netmonitor-image: &netmonitor-image
+  build:
+    context: .
+    target: runtime
+    # Compilações em paralelo no build (memória): ver o `.env.example`.
+    args:
+      CARGO_BUILD_JOBS: ${CARGO_BUILD_JOBS:-4}
+  image: netmonitor:latest
 
 services:
+  # Segredos da instalação (senha do banco, `JWT_SECRET`, `ENCRYPTION_KEY`):
+  # grava os do `.env`, mantém os que já existem no volume ou sorteia, e sai.
+  # Para ver os valores (guarde a `encryption_key` com o backup do banco):
+  #   docker compose run --rm netmonitor-init show
+  netmonitor-init:
+    <<: *netmonitor-image
+    entrypoint: ["/usr/local/bin/init-secrets.sh"]
+    network_mode: none
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+      JWT_SECRET: ${JWT_SECRET:-}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
+    volumes:
+      - netmonitor-secrets:/secrets
+    healthcheck:
+      disable: true
+    logging: *logging
+
   netmonitor:
-    build:
-      context: .
-      target: runtime
-      # Compilações em paralelo no build (memória): ver o `.env.example`.
-      args:
-        CARGO_BUILD_JOBS: ${CARGO_BUILD_JOBS:-4}
-    image: netmonitor:latest
+    <<: [*netmonitor-image, *service]
     # A interface não para, remove nem recria este container: o agente local
     # recusa ação sobre quem tem esta label (derrubaria a própria tela).
     labels:
@@ -98,23 +137,20 @@ services:
       # remoto que chega pela rede local ou pela internet (pelo túnel VPN ele
       # fala direto com a `APP_PORT`).
       APP_EXTERNAL_PORT: ${APP_EXTERNAL_PORT:-3333}
-      # Cifra em repouso dos segredos da VPN. Trocar o valor torna ilegível tudo
-      # que já foi cifrado com o anterior.
-      # Em produção a variável é obrigatória: o boot falha se não estiver definida.
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
-      # Assinatura do JWT. Trocar em produção — e o valor **precisa ser base64
-      # válido**: o Loco assina com `EncodingKey::from_base64_secret` (HS512).
-      # Um segredo não-base64 não derruba o servidor; ele faz `generate_jwt`
-      # falhar e todo login responder 401 com a mensagem de senha inválida.
-      # Em produção a variável é obrigatória: o boot falha se não estiver definida.
-      JWT_SECRET: ${JWT_SECRET:-}
+      # Segredos por arquivo, do volume do `netmonitor-init` (convenção
+      # `<VAR>_FILE`, lida pelo binário antes do boot — `secret_files.rs`).
+      # Nenhum segredo fica no ambiente do container nem no `docker inspect`.
+      JWT_SECRET_FILE: /secrets/jwt_secret
+      ENCRYPTION_KEY_FILE: /secrets/encryption_key
+      # As URLs vão sem senha: o `sqlx` a lê do `PGPASSFILE`.
+      PGPASSFILE: /secrets/pgpass
       # PostgreSQL do serviço `postgres`, logo abaixo (ADR 020). A URL é
       # montada aqui, e não lida do `.env`: a `DATABASE_URL` de lá descreve o
       # banco visto **da máquina**, e ela não vale aqui dentro. Para um Postgres
       # externo, edite esta linha (e a `SYSLOG_DB_URL`) e remova o serviço.
       # Container único sem Postgres? `sqlite:///data/netmonitor.sqlite?mode=rwc`
       # continua suportado.
-      DATABASE_URL: postgres://netmonitor:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@postgres:5432/netmonitor
+      DATABASE_URL: postgres://netmonitor@postgres:5432/netmonitor
       # Pool de conexões, em milissegundos. Repassados aqui porque o
       # `config/*.yaml` vai assado dentro da imagem: sem estas linhas, ajustar
       # os tempos exigiria `--build`.
@@ -160,7 +196,7 @@ services:
       # pelo mesmo motivo da `DATABASE_URL`. Vazia, a variável põe os logs no
       # banco principal (Postgres) ou em /data/logs.sqlite (SQLite).
       SYSLOG_ENABLED: ${SYSLOG_ENABLED:-true}
-      SYSLOG_DB_URL: postgres://netmonitor:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@postgres:5432/netmonitor_logs
+      SYSLOG_DB_URL: postgres://netmonitor@postgres:5432/netmonitor_logs
       # Porta real dos listeners sem privilégio dentro do container. O override
       # de rede host anuncia esta mesma porta aos equipamentos.
       SYSLOG_UDP_PORT: ${SYSLOG_LISTEN_PORT:-5514}
@@ -196,6 +232,8 @@ services:
     # A API só sobe com o banco aceitando conexões: sem isso o primeiro boot
     # (o `initdb` leva alguns segundos) derrubava as migrations.
     depends_on:
+      netmonitor-init:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
     volumes:
@@ -203,22 +241,15 @@ services:
       # no arranjo SQLite, o próprio banco. O banco PostgreSQL mora no volume
       # do serviço `postgres`.
       - netmonitor-data:/data
+      - netmonitor-secrets:/secrets:ro
       # Só o token do agente local: a API escreve, o agente lê.
       - netmonitor-local-agent:/local-agent
       # Volume do Ollaya: permite instalar o modelo de decisão sob demanda pela tela.
       - ollaya-models:/ollaya-models
-    restart: unless-stopped
     read_only: true
     tmpfs:
       - /tmp:noexec,nosuid,size=100m
       - /run:noexec,nosuid,size=10m
-    security_opt:
-      - no-new-privileges:true
-    logging:
-      driver: json-file
-      options:
-        max-size: 10m
-        max-file: '3'
     healthcheck:
       test: ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
       interval: 30s
@@ -228,19 +259,22 @@ services:
 
   # PostgreSQL 18 (ADR 020): o banco do sistema e, em outro banco do mesmo
   # servidor, os logs de syslog. Sem porta publicada — só a rede interna do
-  # compose o alcança. A senha é obrigatória (`POSTGRES_PASSWORD` no `.env`):
-  # sem ela o `docker compose` nem sobe. Ela entra numa URL, então use só
-  # letras e números (`openssl rand -hex 24`).
+  # compose o alcança. A senha é a do `netmonitor-init` (sorteada, ou a
+  # `POSTGRES_PASSWORD` do `.env`).
   #
-  # ⚠ Trocar a senha no `.env` depois do primeiro boot **não** troca a do
-  # banco: o `initdb` só roda com o volume vazio. Mude as duas
+  # ⚠ Trocar a senha depois do primeiro boot **não** troca a do banco: o
+  # `initdb` só roda com o volume vazio. Mude as duas
   # (`ALTER USER netmonitor PASSWORD '...'`) ou recrie o volume.
   postgres:
+    <<: *service
     image: postgres:18-alpine
+    depends_on:
+      netmonitor-init:
+        condition: service_completed_successfully
     environment:
       POSTGRES_USER: netmonitor
       POSTGRES_DB: netmonitor
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
+      POSTGRES_PASSWORD_FILE: /secrets/postgres_password
       # `scram-sha-256` também nas conexões da rede do compose.
       POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
       TZ: ${TZ:-America/Fortaleza}
@@ -261,16 +295,10 @@ services:
       - netmonitor-postgres:/var/lib/postgresql
       # Cria o banco dos logs no primeiro boot (volume vazio).
       - ./docker/postgres/initdb:/docker-entrypoint-initdb.d:ro
+      # Só a `postgres_password` é legível pelo usuário do banco (uid 70).
+      - netmonitor-secrets:/secrets:ro
     # O `/dev/shm` de 64 MB do Docker estoura em consultas paralelas grandes.
     shm_size: 256mb
-    restart: unless-stopped
-    security_opt:
-      - no-new-privileges:true
-    logging:
-      driver: json-file
-      options:
-        max-size: 10m
-        max-file: '3'
     # Por TCP, e não pelo socket: no primeiro boot a imagem roda o `initdb`
     # num servidor temporário só no socket, e um teste por lá liberaria a API
     # antes de o servidor de verdade (e o banco dos logs) existir.
@@ -288,6 +316,7 @@ services:
   # API, portanto, não vira root no host. Sem Docker para gerenciar? Remova
   # este serviço; a tela de Docker fica só com os servidores remotos.
   netmonitor-agent:
+    <<: *service
     build:
       context: .
       target: agent
@@ -319,7 +348,6 @@ services:
       AGENT_ALLOW: ${LOCAL_AGENT_ALLOW:-read,lifecycle,update,compose,volume_export,monitor,deploy,build}
       # Desliga o acesso à Engine sem reconstruir a imagem.
       DOCKER_ENABLED: ${DOCKER_ENABLED:-true}
-      AGENT_STACKS_DIR: ${AGENT_STACKS_DIR:-/srv/netmonitor/stacks}
       TZ: ${TZ:-America/Fortaleza}
     volumes:
       # API nativa da Engine. Só este container a monta.
@@ -330,22 +358,16 @@ services:
       - netmonitor-local-agent:/local-agent:ro
       # Resultados que esperam a central voltar (buffer offline).
       - netmonitor-agent-state:/var/lib/netmonitor-agent
-      # Deploy contínuo (ADR 021): o único diretório do host que o agente
-      # escreve. **Mesmo caminho** dos dois lados: o compose roda aqui, mas
-      # quem resolve os bind mounts relativos da stack é a Engine do host.
-      - ${AGENT_STACKS_DIR:-/srv/netmonitor/stacks}:${AGENT_STACKS_DIR:-/srv/netmonitor/stacks}
+      # Deploy contínuo (ADR 021): o único lugar que o agente escreve, num
+      # volume que o Docker cria — nenhuma pasta a preparar no host. O agente
+      # descobre o caminho do volume no host e o compose das stacks trabalha
+      # por ele (`docker/stacks/host_path.rs`). Prefere os arquivos à vista
+      # numa pasta? Troque por `- /srv/stacks:/stacks`.
+      - netmonitor-stacks:/stacks
       # Compose: os projetos precisam aparecer no mesmo caminho do host.
       # Descomente e ajuste para as pastas dos seus projetos.
       # - /srv:/srv:ro
       # - /opt:/opt:ro
-    restart: unless-stopped
-    security_opt:
-      - no-new-privileges:true
-    logging:
-      driver: json-file
-      options:
-        max-size: 10m
-        max-file: '3'
 
   # Ollaya: serve os modelos de decisão do Decisor (escolhas rápidas da IA,
   # sem tokens). Sobe junto e vazio — parado, sem modelo carregado, ocupa
@@ -365,6 +387,7 @@ services:
   # host.docker.internal:11435 (`decider/locate.rs`). GPU NVIDIA? Troque a imagem por `ghcr.io/ollaya-dev/ollaya:cuda`
   # e acrescente `gpus: all`.
   ollaya:
+    <<: *service
     image: ghcr.io/ollaya-dev/ollaya:latest
     environment:
       OLLAYA_HOST: 0.0.0.0:11435
@@ -379,14 +402,6 @@ services:
       # `models=/home/ollaya/.ollaya/models`). Montar em outro lugar deixa o
       # download num volume anônimo, perdido a cada recriação do container.
       - ollaya-models:/home/ollaya/.ollaya
-    restart: unless-stopped
-    security_opt:
-      - no-new-privileges:true
-    logging:
-      driver: json-file
-      options:
-        max-size: 10m
-        max-file: '3'
 
   # Ollama: o LLM do chat da IA rodando nesta máquina, para usar o assistente
   # sem internet. Sobe junto e vazio — parado, sem modelo carregado, ocupa
@@ -401,6 +416,7 @@ services:
   # 127.0.0.1:11434 e host.docker.internal:11434 (`ai/local_server.rs`).
   # GPU NVIDIA? Acrescente `gpus: all` (a imagem já traz o CUDA).
   ollama:
+    <<: *service
     image: ollama/ollama:latest
     environment:
       OLLAMA_HOST: 0.0.0.0:11434
@@ -414,19 +430,13 @@ services:
       OLLAMA_CONTEXT_LENGTH: ${OLLAMA_CONTEXT_LENGTH:-16384}
     volumes:
       - ollama-models:/root/.ollama
-    restart: unless-stopped
-    security_opt:
-      - no-new-privileges:true
-    logging:
-      driver: json-file
-      options:
-        max-size: 10m
-        max-file: '3'
 
 volumes:
   netmonitor-data:
+  netmonitor-secrets:
   netmonitor-postgres:
   netmonitor-local-agent:
   netmonitor-agent-state:
+  netmonitor-stacks:
   ollaya-models:
   ollama-models:

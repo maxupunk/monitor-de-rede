@@ -112,7 +112,7 @@ COPY --from=agent-builder /usr/local/bin/netmonitor-agent /usr/local/bin/netmoni
 # agente: recriar o container não esquece o builder nem o cache dele.
 ENV AGENT_STATE_DIR=/var/lib/netmonitor-agent \
     BUILDX_CONFIG=/var/lib/netmonitor-agent/buildx \
-    AGENT_STACKS_DIR=/srv/netmonitor/stacks \
+    AGENT_STACKS_DIR=/stacks \
     HOST_PROC=/host/proc \
     HOST_ROOT=/host
 VOLUME ["/var/lib/netmonitor-agent"]
@@ -170,9 +170,10 @@ COPY --from=agent-builder /usr/local/bin/netmonitor-agent /app/agent-dist/netmon
 RUN mv /app/agent-dist/netmonitor-agent "/app/agent-dist/netmonitor-agent-$(uname -m)"
 COPY --from=builder /usr/src/app/config /app/config
 COPY --from=web /web/dist /app/web
-COPY docker/entrypoint.sh docker/wireguard-watcher.sh docker/healthcheck.sh docker/ping-group-range.sh /usr/local/bin/
+COPY docker/entrypoint.sh docker/wireguard-watcher.sh docker/healthcheck.sh docker/ping-group-range.sh \
+     docker/init-secrets.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/wireguard-watcher.sh /usr/local/bin/healthcheck.sh \
-    /usr/local/bin/ping-group-range.sh
+    /usr/local/bin/ping-group-range.sh /usr/local/bin/init-secrets.sh
 
 # Configuração do túnel e, no arranjo sem compose, o banco SQLite (o compose usa
 # o PostgreSQL do serviço `postgres`, ADR 020), no mesmo volume. O entrypoint

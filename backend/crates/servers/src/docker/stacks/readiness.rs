@@ -41,13 +41,17 @@ pub fn has_healthcheck(inspected: &Value) -> bool {
 /// resposta: a tela precisa ver tudo o que falta de uma vez.
 pub async fn inspect(
     engine: &dyn DockerEngine,
-    root: &StacksRoot,
+    root: Result<StacksRoot, String>,
     project: &str,
 ) -> Result<StackReadiness, DockerError> {
     validate_project(project)?;
-    let (stacks_dir, stacks_dir_issue) = match root.check().await {
-        Ok(()) => (Some(root.path().display().to_string()), None),
-        Err(reason) => (None, Some(reason)),
+    let checked = match root {
+        Ok(root) => root.check().await.map(|()| root),
+        Err(reason) => Err(reason),
+    };
+    let (stacks_dir, stacks_dir_issue) = match &checked {
+        Ok(root) => (Some(root.path().display().to_string()), None),
+        Err(reason) => (None, Some(reason.clone())),
     };
     let git_version = cli::capture("git", &["--version"], None, CHECK_TIMEOUT)
         .await
@@ -55,16 +59,17 @@ pub async fn inspect(
         .filter(|(ok, _)| *ok)
         .map(|(_, version)| version);
     let compose_version = compose::availability().await.ok();
-    let free_bytes = if stacks_dir.is_some() {
-        let path = root.path().display().to_string();
-        cli::capture("df", &["-Pk", &path], None, CHECK_TIMEOUT)
+    let free_bytes = if let Some(path) = &stacks_dir {
+        cli::capture("df", &["-Pk", path], None, CHECK_TIMEOUT)
             .await
             .ok()
             .and_then(|(_, output)| parse_df(&output))
     } else {
         None
     };
-    let project_dir_exists = root.project_dir(project).join(".git").exists();
+    let project_dir_exists = checked
+        .as_ref()
+        .is_ok_and(|root| root.project_dir(project).join(".git").exists());
 
     let containers = engine::list_containers(engine).await.unwrap_or_default();
     let known = compose::projects(&containers);
