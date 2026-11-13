@@ -178,6 +178,8 @@ struct Provedor {
     janela: u64,
     resumo: Option<String>,
     chamadas: Arc<Mutex<Vec<Chamada>>>,
+    /// O que o modelo diz em cada rodada; depois delas, "ok".
+    falas: Vec<String>,
 }
 
 #[async_trait]
@@ -215,6 +217,7 @@ impl AiDriver for Provedor {
             };
             return Ok(Box::pin(futures::stream::iter(vec![Ok(pedaco)])));
         }
+        let rodada = self.chamadas.lock().unwrap().len();
         self.chamadas.lock().unwrap().push(Chamada {
             prompt,
             mensagens: messages.len(),
@@ -229,7 +232,12 @@ impl AiDriver for Provedor {
         });
         let pedacos = vec![
             Ok(AiChatChunk {
-                text_delta: Some("ok".into()),
+                text_delta: Some(
+                    self.falas
+                        .get(rodada)
+                        .cloned()
+                        .unwrap_or_else(|| "ok".into()),
+                ),
                 ..AiChatChunk::default()
             }),
             Ok(AiChatChunk {
@@ -300,11 +308,25 @@ async fn conversar_com(
     memoria: ConversationMemory,
     contexto: ChatContext,
 ) -> (Vec<Chamada>, Vec<HarnessEvent>) {
+    conversar_dizendo(ctx, janela, resumo, mensagens, memoria, contexto, &[]).await
+}
+
+/// Como [`conversar_com`], com o que o modelo diz em cada rodada.
+async fn conversar_dizendo(
+    ctx: &AppContext,
+    janela: u64,
+    resumo: Option<&str>,
+    mensagens: Vec<ChatMessageInput>,
+    memoria: ConversationMemory,
+    contexto: ChatContext,
+    falas: &[&str],
+) -> (Vec<Chamada>, Vec<HarnessEvent>) {
     let chamadas = Arc::new(Mutex::new(Vec::new()));
     let provedor = Provedor {
         janela,
         resumo: resumo.map(ToString::to_string),
         chamadas: chamadas.clone(),
+        falas: falas.iter().map(ToString::to_string).collect(),
     };
     let settings = AiSettings::default();
     let eventos = run_agent_loop(
@@ -635,6 +657,78 @@ async fn pergunta_na_tela_de_logs_chega_ao_modelo_com_a_tela() {
             "a tela não pode mexer no system prompt (cache de prefixo)"
         );
         assert!(!sem_tela[0].ultima.contains("TELA ABERTA"));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn resposta_que_inventa_recurso_e_conferida_uma_vez() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
+        let pergunta = || {
+            vec![ChatMessageInput {
+                role: "user".into(),
+                content: "o container postgres parado é grave?".into(),
+            }]
+        };
+        let (chamadas, eventos) = conversar_dizendo(
+            &ctx,
+            128_000,
+            None,
+            pergunta(),
+            ConversationMemory::default(),
+            ChatContext::default(),
+            &["Hosts: `central`, `agente-west-01`."],
+        )
+        .await;
+
+        assert_eq!(chamadas.len(), 2, "uma rodada de conferência, e só uma");
+        assert!(
+            chamadas[1].ultima.contains("<conferencia>")
+                && chamadas[1].ultima.contains("agente-west-01"),
+            "{}",
+            chamadas[1].ultima
+        );
+        assert!(
+            eventos.iter().any(|evento| matches!(
+                evento,
+                HarnessEvent::Notice { message } if message.contains("agente-west-01")
+            )),
+            "{eventos:?}"
+        );
+
+        // Resposta que só cita o que o pedido trouxe não é conferida.
+        let (direto, _) = conversar_dizendo(
+            &ctx,
+            128_000,
+            None,
+            pergunta(),
+            ConversationMemory::default(),
+            ChatContext::default(),
+            &["O `postgres` parado derruba quem usa o banco."],
+        )
+        .await;
+        assert_eq!(direto.len(), 1);
+
+        // O modelo insiste: fica o aviso claro, sem terceira rodada.
+        let (insiste, eventos) = conversar_dizendo(
+            &ctx,
+            128_000,
+            None,
+            pergunta(),
+            ConversationMemory::default(),
+            ChatContext::default(),
+            &["No `agente-west-01`.", "Sim, no `agente-west-01`."],
+        )
+        .await;
+        assert_eq!(insiste.len(), 2);
+        assert!(
+            eventos.iter().any(|evento| matches!(
+                evento,
+                HarnessEvent::Notice { message } if message.starts_with("Atenção: agente-west-01")
+            )),
+            "{eventos:?}"
+        );
     })
     .await;
 }

@@ -107,6 +107,8 @@ fn grounded_in_conversation(conversation: &[AiMessage], target: &str) -> bool {
         .iter()
         .filter(|message| message.role != "assistant")
         .filter_map(|message| message.content.as_deref())
+        // A conferência repete o que a IA inventou: não é origem.
+        .filter(|content| !content.starts_with(ANSWER_CHECK_TAG))
         .any(|content| mentions(content, target))
 }
 
@@ -595,6 +597,79 @@ pub async fn sanitize_ask_user_arguments(
     updated
 }
 
+/// Abre a mensagem com que o harness devolve à IA o que ela inventou.
+pub const ANSWER_CHECK_TAG: &str = "<conferencia>";
+
+/// Até quantos identificadores sem origem a conferência da resposta aponta.
+const MAX_UNSUPPORTED: usize = 5;
+
+/// O que a resposta final cita como recurso sem que nada nesta sessão o tenha
+/// mostrado: entre crases (`agente-west-01`, `wlan-sala`) ou um IP interno
+/// solto. "Mostrado" é o pedido, o `<contexto>`, o system prompt ou um
+/// resultado de consulta — nunca o que a própria IA escreveu. `is_tool`
+/// separa os nomes de ferramenta, que a IA conhece por definição.
+#[must_use]
+pub fn unsupported_identifiers(
+    answer: &str,
+    conversation: &[AiMessage],
+    is_tool: impl Fn(&str) -> bool,
+) -> Vec<String> {
+    let quoted = answer
+        .split('`')
+        .skip(1)
+        .step_by(2)
+        .map(str::trim)
+        .filter(|span| !span.is_empty() && !span.contains(char::is_whitespace))
+        .filter(|span| looks_like_resource_identifier(span) && !is_constant_or_quantity(span));
+    let loose = answer
+        .split(|c: char| c.is_whitespace() || matches!(c, ',' | ';' | '(' | ')' | '`' | '*'))
+        .map(|token| token.trim_end_matches(['.', ':']))
+        .filter(|token| {
+            token.contains('.') && token.parse::<IpAddr>().is_ok() && is_internal(token)
+        });
+    let mut found: Vec<String> = Vec::new();
+    for candidate in quoted.chain(loose) {
+        if found.len() >= MAX_UNSUPPORTED {
+            break;
+        }
+        if !is_tool(candidate) && !grounded_in_conversation(conversation, candidate) {
+            push_unique(&mut found, candidate);
+        }
+    }
+    found
+}
+
+/// Constante (`OLLAMA_CONTEXT_LENGTH`) ou grandeza (`24h`, `5GHz`, `2.4GHz`):
+/// tem cara de identificador, mas não é recurso da rede.
+fn is_constant_or_quantity(span: &str) -> bool {
+    let constant = span.chars().any(char::is_alphabetic)
+        && span
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_');
+    let unit = span.trim_start_matches(|c: char| c.is_ascii_digit() || c == '.' || c == ',');
+    let quantity = unit.len() < span.len()
+        && (1..=4).contains(&unit.len())
+        && unit.chars().all(|c| c.is_ascii_alphabetic());
+    constant || quantity
+}
+
+/// [`unsupported_identifiers`] menos o que está cadastrado no inventário (o
+/// resultado que o mostrou pode ter sido podado da conversa).
+pub async fn invented_in_answer<C: ConnectionTrait>(
+    db: &C,
+    answer: &str,
+    conversation: &[AiMessage],
+    is_tool: impl Fn(&str) -> bool,
+) -> Vec<String> {
+    let mut invented = Vec::new();
+    for candidate in unsupported_identifiers(answer, conversation, is_tool) {
+        if !registered(db, &candidate).await.unwrap_or(false) {
+            invented.push(candidate);
+        }
+    }
+    invented
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -735,5 +810,56 @@ mod tests {
             containers_from_conversation(&conversa),
             vec!["postgres", "redis", "grafana", "netmonitor-api"]
         );
+    }
+
+    fn conversa(textos: &[(&str, &str)]) -> Vec<AiMessage> {
+        textos
+            .iter()
+            .map(|(role, content)| AiMessage {
+                role: (*role).to_string(),
+                content: Some((*content).to_string()),
+                tool_calls: None,
+                tool_call_id: None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn resposta_que_cita_recurso_sem_origem_e_apontada() {
+        let sessao = conversa(&[
+            ("system", "Você é o assistente."),
+            ("user", "o container postgres parado é grave?"),
+        ]);
+        let resposta = "Hosts conectados (`get_docker_hosts`): `central`, `agente-west-01`,                         `agente-east-01`. O gateway 10.0.0.77 também.";
+        let ferramenta = |nome: &str| nome == "get_docker_hosts";
+        assert_eq!(
+            unsupported_identifiers(resposta, &sessao, ferramenta),
+            vec!["agente-west-01", "agente-east-01", "10.0.0.77"]
+        );
+    }
+
+    #[test]
+    fn o_que_veio_de_consulta_ou_do_pedido_nao_e_apontado() {
+        let sessao = conversa(&[
+            ("user", "e o ap-sala?"),
+            (
+                "tool",
+                r#"{"rows":[["agente-west-01","online"],["10.0.0.77"]]}"#,
+            ),
+            ("assistant", "`inventado-pela-ia-01`"),
+        ]);
+        let resposta =
+            "O `ap-sala` está no `agente-west-01` (10.0.0.77). Ver `OLLAMA_CONTEXT_LENGTH`?";
+        assert!(
+            unsupported_identifiers(resposta, &sessao, |_| false).is_empty(),
+            "o que veio do pedido ou de consulta, constante e grandeza não são apontados"
+        );
+        // O que só a própria IA escreveu antes não ancora nada.
+        assert_eq!(
+            unsupported_identifiers("De novo: `inventado-pela-ia-01`.", &sessao, |_| false),
+            vec!["inventado-pela-ia-01"]
+        );
+        let livre = "Em `24h`, `5GHz` e `2.4GHz` sem erros; agente-west-02 sem crase e IPv4.";
+        assert!(unsupported_identifiers(livre, &sessao, |_| false).is_empty());
     }
 }

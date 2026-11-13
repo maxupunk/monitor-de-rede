@@ -23,7 +23,9 @@ use super::{
         prune_tool_results, small_window_notice, summarize, supersede_repeated_results,
         worth_folding, ContextBudget,
     },
-    grounding::{invented_target, sanitize_ask_user_arguments},
+    grounding::{
+        invented_in_answer, invented_target, sanitize_ask_user_arguments, ANSWER_CHECK_TAG,
+    },
     prompt::{build_small_talk_prompt, build_system_prompt, build_turn_context, ChatContext},
     tools::{
         invalid_action_reason, target_device_id, AiToolRisk, RiskAssessment, ToolArgs, ToolGroup,
@@ -960,6 +962,8 @@ pub async fn run_agent_loop(
 
         // Início da rodada mais recente: os resultados dela a IA ainda não leu.
         let mut round_start = conversation.len();
+        // A conferência da resposta final ganha uma rodada só por pergunta.
+        let mut answer_retried = false;
         for _ in 0..MAX_ITERATIONS {
             // Recalculado a cada rodada: um `load_tools` vale já na seguinte.
             let tools = if small_talk {
@@ -1029,7 +1033,56 @@ pub async fn run_agent_loop(
             }
 
             if pending_tools.is_empty() {
-                return sink.finish(&mut metrics, driver.as_ref()).await;
+                // Resposta que cita recurso que nada mostrou (`agente-west-01`
+                // sem consulta): avisa e dá uma rodada para a IA conferir com
+                // os dados. Se ela insistir, fica o aviso claro — sem laço.
+                let invented = if small_talk {
+                    Vec::new()
+                } else {
+                    invented_in_answer(&ctx.db, &assistant_text, &conversation, |name| {
+                        registry.kind_of(name).is_some()
+                    })
+                    .await
+                };
+                if invented.is_empty() {
+                    return sink.finish(&mut metrics, driver.as_ref()).await;
+                }
+                let list = invented.join(", ");
+                if answer_retried {
+                    let notice = format!(
+                        "Atenção: {list} não existe em nenhum dado consultado. Desconsidere esses nomes nesta resposta."
+                    );
+                    let _ = sink.send(HarnessEvent::Notice { message: notice }).await;
+                    return sink.finish(&mut metrics, driver.as_ref()).await;
+                }
+                answer_retried = true;
+                let notice = format!(
+                    "Conferindo a resposta: {list} não apareceu em nenhuma consulta. A IA vai verificar nos dados."
+                );
+                let separator = HarnessEvent::TextDelta {
+                    content: "\n\n".into(),
+                };
+                if !sink.send(HarnessEvent::Notice { message: notice }).await
+                    || !sink.send(separator).await
+                {
+                    return;
+                }
+                round_start = conversation.len();
+                conversation.push(AiMessage {
+                    role: "assistant".to_string(),
+                    content: Some(assistant_text),
+                    tool_calls: None,
+                    tool_call_id: None,
+                });
+                conversation.push(AiMessage {
+                    role: "user".to_string(),
+                    content: Some(format!(
+                        "{ANSWER_CHECK_TAG}Sua resposta cita {list}, que não veio de nenhuma consulta nem do pedido. Não invente recursos: consulte com as ferramentas e responda de novo, curto, ou diga que não encontrou.</conferencia>"
+                    )),
+                    tool_calls: None,
+                    tool_call_id: None,
+                });
+                continue;
             }
 
             round_start = conversation.len();
