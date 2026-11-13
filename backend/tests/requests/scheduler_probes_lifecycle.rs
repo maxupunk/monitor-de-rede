@@ -75,8 +75,8 @@ async fn o_catalogo_e_idempotente_e_traz_os_templates_dos_dois_roadmaps() {
         // 3 de saúde de equipamento (Fase 3 do roadmap do servidor como
         // dispositivo — são de dispositivo, não do servidor) + 3 de baseline
         // móvel + 3 de anomalias estatísticas (§2.3.3) + 2 dos aparelhos Wi-Fi
-        // vigiados.
-        assert_eq!(templates.len(), 37);
+        // vigiados + 1 do ping-pong de roaming Wi-Fi.
+        assert_eq!(templates.len(), 38);
         assert_eq!(catalogo["categories"]["disponibilidade"], "Disponibilidade");
         // Campos que a tela lê em cada template.
         assert!(templates[0]["applied"].is_boolean());
