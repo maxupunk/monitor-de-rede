@@ -166,6 +166,10 @@ async fn provedor_fora_do_ar_nao_quebra_a_consulta() {
 struct Chamada {
     prompt: String,
     mensagens: usize,
+    /// A última mensagem enviada (a pergunta, com o `<contexto>` da vez).
+    ultima: String,
+    /// As ferramentas oferecidas ao modelo nesta rodada.
+    ferramentas: Vec<String>,
 }
 
 /// Provedor com janela fixa. Responde ao pedido de resumo (reconhecido pelo
@@ -197,7 +201,7 @@ impl AiDriver for Provedor {
     async fn chat_stream(
         &self,
         messages: &[AiMessage],
-        _tools: &[AiTool],
+        tools: &[AiTool],
         _options: AiChatOptions,
     ) -> AppResult<AiChunkStream> {
         let prompt = messages[0].content.clone().unwrap_or_default();
@@ -214,6 +218,14 @@ impl AiDriver for Provedor {
         self.chamadas.lock().unwrap().push(Chamada {
             prompt,
             mensagens: messages.len(),
+            ultima: messages
+                .last()
+                .and_then(|message| message.content.clone())
+                .unwrap_or_default(),
+            ferramentas: tools
+                .iter()
+                .map(|tool| tool.function.name.clone())
+                .collect(),
         });
         let pedacos = vec![
             Ok(AiChatChunk {
@@ -268,6 +280,26 @@ async fn conversar(
     mensagens: Vec<ChatMessageInput>,
     memoria: ConversationMemory,
 ) -> (Vec<Chamada>, Vec<HarnessEvent>) {
+    conversar_com(
+        ctx,
+        janela,
+        resumo,
+        mensagens,
+        memoria,
+        ChatContext::default(),
+    )
+    .await
+}
+
+/// Como [`conversar`], com o contexto da tela e das marcações.
+async fn conversar_com(
+    ctx: &AppContext,
+    janela: u64,
+    resumo: Option<&str>,
+    mensagens: Vec<ChatMessageInput>,
+    memoria: ConversationMemory,
+    contexto: ChatContext,
+) -> (Vec<Chamada>, Vec<HarnessEvent>) {
     let chamadas = Arc::new(Mutex::new(Vec::new()));
     let provedor = Provedor {
         janela,
@@ -281,7 +313,7 @@ async fn conversar(
         Box::new(provedor),
         AgentRequest {
             messages: mensagens,
-            context: ChatContext::default(),
+            context: contexto,
             policy: ToolPolicy::from_settings(&settings),
             tool_loading: ToolLoading::OnDemand,
             memory: memoria,
@@ -527,6 +559,80 @@ async fn tela_aberta_vai_no_contexto_da_pergunta() {
 
         let sem_tela = build_turn_context(&ctx.db, &ChatContext::default()).await;
         assert!(!sem_tela.contains("TELA ABERTA"), "{sem_tela}");
+    })
+    .await;
+}
+
+/// De ponta a ponta: a pergunta feita na tela de Logs chega ao modelo com a
+/// tela e o filtro no `<contexto>` da própria pergunta (o system prompt não
+/// muda, e o cache de prefixo continua valendo), com as ferramentas de logs.
+#[tokio::test]
+#[serial]
+async fn pergunta_na_tela_de_logs_chega_ao_modelo_com_a_tela() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
+        let pergunta = || {
+            vec![ChatMessageInput {
+                role: "user".into(),
+                content: "o que são esses erros?".into(),
+            }]
+        };
+        let tela = ChatContext {
+            screen: screens::sanitize(Some(AiScreenContext {
+                id: "logs".into(),
+                detail: Some("erro e acima, dispositivo ap-sala".into()),
+            })),
+            ..ChatContext::default()
+        };
+        let (com_tela, _) = conversar_com(
+            &ctx,
+            128_000,
+            None,
+            pergunta(),
+            ConversationMemory::default(),
+            tela,
+        )
+        .await;
+        let (sem_tela, _) = conversar(
+            &ctx,
+            128_000,
+            None,
+            pergunta(),
+            ConversationMemory::default(),
+        )
+        .await;
+
+        let chamada = &com_tela[0];
+        assert!(
+            chamada.ultima.contains("TELA ABERTA AGORA"),
+            "{}",
+            chamada.ultima
+        );
+        assert!(
+            chamada
+                .ultima
+                .contains("Na tela agora: erro e acima, dispositivo ap-sala."),
+            "{}",
+            chamada.ultima
+        );
+        assert!(
+            chamada.ultima.ends_with("o que são esses erros?"),
+            "{}",
+            chamada.ultima
+        );
+        assert!(
+            chamada
+                .ferramentas
+                .iter()
+                .any(|nome| nome == "get_logs_overview"),
+            "{:?}",
+            chamada.ferramentas
+        );
+        assert!(!chamada.prompt.contains("TELA ABERTA"));
+        assert_eq!(
+            chamada.prompt, sem_tela[0].prompt,
+            "a tela não pode mexer no system prompt (cache de prefixo)"
+        );
+        assert!(!sem_tela[0].ultima.contains("TELA ABERTA"));
     })
     .await;
 }
