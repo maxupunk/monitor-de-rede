@@ -10,7 +10,7 @@ errou e onde acertou.
 | --- | --- | --- |
 | `manifesto.json` | Período, data da geração e contagens do pacote. | JSON |
 | `conversas.jsonl` | Revisão: cada conversa completa, como a tela mostrou, com os sinais de erro e acerto. | Uma conversa por linha |
-| `treino/sem-falhas.jsonl` | Treino: conversas em que nenhuma resposta deu erro e nenhuma ferramenta falhou. | `{"messages": [...]}` por linha |
+| `treino/sem-falhas.jsonl` | Treino: conversas em que nenhuma resposta deu erro, nenhuma ferramenta falhou e nenhuma resposta foi avaliada como ruim. | `{"messages": [...]}` por linha |
 | `treino/com-falhas.jsonl` | Revisão antes de treinar: conversas com ao menos uma falha. | `{"messages": [...]}` por linha |
 | `execucoes-em-equipamentos.jsonl` | Comandos que a IA mandou aos equipamentos, com a transcrição de cada acesso. | Uma execução por linha |
 
@@ -21,13 +21,17 @@ Cada linha traz `id`, `title`, `user` (id e nome de quem perguntou),
 `signals` e `messages`.
 
 - `signals` conta perguntas, respostas, ferramentas (sucesso, falha, recusadas
-  pelo usuário, esperando confirmação), respostas com erro, tokens e modelos.
+  pelo usuário, esperando confirmação), respostas com erro, avaliações do
+  usuário (`ratedGood`/`ratedBad`), tokens e modelos.
 - `signals.failures` aponta cada falha: `messageIndex` (a posição em
-  `messages`), `kind` (`response` ou `tool`), a ferramenta e o erro.
+  `messages`), `kind` (`response`, `tool` ou `rating`), a ferramenta e o erro
+  ou o motivo da avaliação.
+- No `manifesto.json`, `totals.toolFailures` diz quantas vezes cada ferramenta
+  falhou no período — por onde começar a corrigir.
 - `messages` é a conversa como foi guardada: `role`, `content`, `toolCalls`
-  (nome, argumentos, resultado, status), `usage`, `error`, `notice` e, nas
-  perguntas, `mentions` (o que foi marcado com `@`) e `screen` (a tela em que
-  a pessoa estava).
+  (nome, argumentos, resultado, status), `usage`, `error`, `notice`,
+  `rating` (👍/👎 do usuário, com o motivo) e, nas perguntas, `mentions` (o
+  que foi marcado com `@`) e `screen` (a tela em que a pessoa estava).
 
 ## `treino/*.jsonl`
 
@@ -39,11 +43,11 @@ tokens. Ação recusada pelo usuário aparece ao modelo como
 
 ## Como a classificação é feita
 
-É automática: **com falhas** é a conversa em que alguma resposta terminou em
-erro ou alguma ferramenta falhou. Ação recusada pelo usuário **não** conta como
-falha — pode ser sugestão errada ou só mudança de ideia —, mas aparece em
-`signals.actionsDeclined` para a revisão. Ainda não há avaliação humana das
-respostas.
+**Com falhas** é a conversa em que alguma resposta terminou em erro, alguma
+ferramenta falhou ou o usuário avaliou alguma resposta como ruim (👎). Ação
+recusada pelo usuário **não** conta como falha — pode ser sugestão errada ou só
+mudança de ideia —, mas aparece em `signals.actionsDeclined` para a revisão.
+Respostas com 👍 são os acertos confirmados (`signals.ratedGood`).
 
 ## Cuidados
 

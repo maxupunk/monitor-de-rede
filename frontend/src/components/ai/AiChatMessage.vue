@@ -140,6 +140,7 @@
                 <div v-for="line in metrics.details" :key="line">{{ line }}</div>
               </v-tooltip>
             </div>
+            <AiResponseRating v-if="message.role === 'assistant'" :message-id="message.id" />
             <v-btn
               v-if="message.role === 'user'"
               icon
@@ -214,6 +215,7 @@ import { useRouter } from 'vue-router'
 import { useAiStore, type AiDisplayMessage } from '@/stores/ai'
 import AiToolActivity from './AiToolActivity.vue'
 import AiQuestionCard from './AiQuestionCard.vue'
+import AiResponseRating from './AiResponseRating.vue'
 import { summarizeUsage } from './aiUsageSummary'
 import { formatCompactCount } from '@/utils/formatters'
 import { toolQuestion } from '@/utils/aiChatStream'

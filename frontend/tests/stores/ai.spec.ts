@@ -89,7 +89,27 @@ describe('chat da IA', () => {
     const body = vi.mocked(apiService.postStream).mock.calls.at(-1)?.[1] as Record<string, unknown>
     expect(body.screen).toEqual({ id: 'device-detail', detail: 'aba Logs' })
     expect(body.deviceId).toBe(7)
-    expect(store.messages[0].screen).toEqual({ label: 'Equipamento', icon: 'mdi-router-network' })
+    expect(store.messages[0].screen).toEqual({
+      id: 'device-detail',
+      label: 'Equipamento',
+      icon: 'mdi-router-network',
+    })
+  })
+
+  it('avaliar uma resposta guarda na mensagem e salva a conversa', async () => {
+    vi.mocked(apiService.postStream).mockResolvedValueOnce(
+      sseResponse([{ type: 'textDelta', content: 'ok' }, { type: 'done' }])
+    )
+    const store = useAiStore()
+    await store.sendMessage('e o gateway?')
+    const resposta = store.messages[1]
+
+    store.rate(resposta.id, 'down', 'Resposta errada')
+    expect(resposta.rating).toEqual({ value: 'down', reason: 'Resposta errada' })
+    store.rate(resposta.id, 'up')
+    expect(resposta.rating).toEqual({ value: 'up' })
+    store.rate(store.messages[0].id, 'up')
+    expect(store.messages[0].rating).toBeUndefined()
   })
 
   it('ferramenta sem gráfico fica com chart nulo', async () => {

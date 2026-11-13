@@ -13,7 +13,7 @@ pub mod repository;
 pub mod signals;
 pub mod training;
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use chrono::{DateTime, Duration, Utc};
 use sea_orm::ConnectionTrait;
@@ -159,9 +159,13 @@ struct Totals {
     tools_failed: usize,
     actions_declined: usize,
     answers_with_error: usize,
+    rated_good: usize,
+    rated_bad: usize,
     prompt_tokens: u64,
     completion_tokens: u64,
     device_runs: usize,
+    /// Quantas vezes cada ferramenta falhou — por onde começar a corrigir.
+    tool_failures: BTreeMap<String, usize>,
 }
 
 impl Totals {
@@ -177,6 +181,13 @@ impl Totals {
         self.tools_failed += signals.tools_failed;
         self.actions_declined += signals.actions_declined;
         self.answers_with_error += signals.answers_with_error;
+        self.rated_good += signals.rated_good;
+        self.rated_bad += signals.rated_bad;
+        for failure in &signals.failures {
+            if let Some(tool) = &failure.tool {
+                *self.tool_failures.entry(tool.clone()).or_default() += 1;
+            }
+        }
         self.prompt_tokens += signals.prompt_tokens;
         self.completion_tokens += signals.completion_tokens;
     }

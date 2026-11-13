@@ -215,6 +215,8 @@ pub struct ScreenContext {
     pub screen: &'static Screen,
     /// O que está filtrado ou selecionado, numa linha.
     pub detail: Option<String>,
+    /// A tela da pergunta anterior, se era outra.
+    pub previous: Option<&'static Screen>,
 }
 
 impl ScreenContext {
@@ -226,7 +228,19 @@ impl ScreenContext {
             .as_deref()
             .map(|detail| format!(" Na tela agora: {detail}."))
             .unwrap_or_default();
-        format!("- {}: {}.{detail}", self.screen.label, self.screen.about)
+        let previous = self
+            .previous
+            .map(|previous| {
+                format!(
+                    " A pergunta anterior foi feita na tela {}: referência vaga pode ser de qualquer uma das duas.",
+                    previous.label
+                )
+            })
+            .unwrap_or_default();
+        format!(
+            "- {}: {}.{detail}{previous}",
+            self.screen.label, self.screen.about
+        )
     }
 
     /// Os grupos que a tela pré-carrega.
@@ -254,9 +268,15 @@ fn one_line(text: &str) -> Option<String> {
 #[must_use]
 pub fn sanitize(input: Option<AiScreenContext>) -> Option<ScreenContext> {
     let input = input?;
+    let current = screen(&input.id)?;
     Some(ScreenContext {
-        screen: screen(&input.id)?,
+        screen: current,
         detail: input.detail.as_deref().and_then(one_line),
+        previous: input
+            .previous
+            .as_deref()
+            .and_then(screen)
+            .filter(|previous| previous.id != current.id),
     })
 }
 
@@ -270,7 +290,36 @@ mod tests {
         Some(AiScreenContext {
             id: id.into(),
             detail: detail.map(Into::into),
+            previous: None,
         })
+    }
+
+    #[test]
+    fn tela_anterior_diferente_entra_na_linha() {
+        let mudou = sanitize(Some(AiScreenContext {
+            id: "docker".into(),
+            detail: None,
+            previous: Some("logs".into()),
+        }))
+        .unwrap();
+        assert!(mudou
+            .line()
+            .contains("pergunta anterior foi feita na tela Logs"));
+
+        let mesma = sanitize(Some(AiScreenContext {
+            id: "docker".into(),
+            detail: None,
+            previous: Some("docker".into()),
+        }))
+        .unwrap();
+        assert_eq!(mesma.previous, None);
+        let inventada = sanitize(Some(AiScreenContext {
+            id: "docker".into(),
+            detail: None,
+            previous: Some("nao-existe".into()),
+        }))
+        .unwrap();
+        assert_eq!(inventada.previous, None);
     }
 
     #[test]

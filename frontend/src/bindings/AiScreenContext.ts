@@ -4,4 +4,9 @@
  * A tela em que o usuário está: o id do catálogo (`screens::SCREENS`) e, se
  * a tela tiver, o que está filtrado ou selecionado nela, numa linha.
  */
-export type AiScreenContext = { id: string, detail: string | null, };
+export type AiScreenContext = { id: string, detail: string | null, 
+/**
+ * A tela da pergunta anterior, quando a pessoa mudou de tela no meio da
+ * conversa: "isso" pode ser de uma ou de outra.
+ */
+previous?: string, };

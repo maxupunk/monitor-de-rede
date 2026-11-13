@@ -2,6 +2,7 @@
  * Regras puras do chat da IA: como cada evento do stream muda a mensagem em
  * construção e como as mensagens viram o histórico enviado ao backend.
  */
+import type { AiRating } from '@/utils/aiRating'
 import type { AiChart } from '@/bindings/AiChart'
 import type { ContextHint } from '@/bindings/ContextHint'
 import { describeMention, type AiMention } from './aiMentions'
@@ -69,7 +70,9 @@ export interface AiDisplayMessage {
   /** O que o usuário marcou com `@` nesta pergunta. */
   mentions?: AiMention[]
   /** A tela em que o usuário estava ao perguntar. */
-  screen?: { label: string; icon: string } | null
+  screen?: { id: string; label: string; icon: string } | null
+  /** A avaliação de quem conversou (só nas respostas). */
+  rating?: AiRating | null
   usage?: AiUsageInfo | null
   isStreaming?: boolean
   error?: string | null

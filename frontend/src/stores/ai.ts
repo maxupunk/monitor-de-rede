@@ -29,7 +29,8 @@ import type { ModelPullProgress } from '@/bindings/ModelPullProgress'
 import type { AutoAcceptState } from '@/bindings/AutoAcceptState'
 import { usePluginsStore } from './plugins'
 import { accessSavedFollowUp, type MissingAccess } from '@/utils/deviceCredentials'
-import type { ScreenAttachment } from '@/utils/aiScreen'
+import { withPreviousScreen, type ScreenAttachment } from '@/utils/aiScreen'
+import { toggleRating, type AiRating } from '@/utils/aiRating'
 
 /**
  * Identificador desta conversa para o backend. Aleatório de propósito: o modo
@@ -280,6 +281,8 @@ export const useAiStore = defineStore('ai', () => {
 
     if (Object.values(context).some((id) => id != null)) screenContext.value = { ...context }
     const screen = screenContext.value
+    // A tela da pergunta anterior, lida antes de a nova entrar na conversa.
+    const attached = screenOpen ? withPreviousScreen(screenOpen, messages.value) : null
     if (context.deviceId && context.deviceId !== deviceContextId.value) {
       deviceContextId.value = context.deviceId
       void refreshAutoAccept()
@@ -292,7 +295,15 @@ export const useAiStore = defineStore('ai', () => {
       role: 'user',
       content: content.trim(),
       ...(mentions.length > 0 ? { mentions } : {}),
-      ...(screenOpen ? { screen: { label: screenOpen.label, icon: screenOpen.icon } } : {}),
+      ...(attached
+        ? {
+            screen: {
+              id: attached.request.screen.id,
+              label: attached.label,
+              icon: attached.icon,
+            },
+          }
+        : {}),
     })
     const history = buildChatHistory(messages.value)
     const compact = compactNext.value
@@ -317,12 +328,12 @@ export const useAiStore = defineStore('ai', () => {
         {
           messages: history.messages,
           // O recurso de onde o chat foi aberto vale mais que o da tela atual.
-          deviceId: screen.deviceId ?? screenOpen?.request.deviceId ?? undefined,
-          monitorId: screen.monitorId ?? screenOpen?.request.monitorId ?? undefined,
+          deviceId: screen.deviceId ?? attached?.request.deviceId ?? undefined,
+          monitorId: screen.monitorId ?? attached?.request.monitorId ?? undefined,
           alertId: screen.alertId ?? undefined,
           ruleId: screen.ruleId ?? undefined,
           mentions,
-          screen: screenOpen?.request.screen,
+          screen: attached?.request.screen,
           summary: history.summary,
           contextHint: history.contextHint,
           compact,
@@ -389,6 +400,17 @@ export const useAiStore = defineStore('ai', () => {
       .catch(() => null)
     if (key !== conversationKey.value) return null
     return sendFollowUp(accessSavedFollowUp(missing.transport, name))
+  }
+
+  /**
+   * 👍/👎 numa resposta. Clicar no mesmo desfaz. Fica na conversa salva e vai
+   * na exportação dos dados do Assistente.
+   */
+  function rate(messageId: string, value: AiRating['value'], reason: string | null = null) {
+    const message = messages.value.find((item) => item.id === messageId)
+    if (!message || message.role !== 'assistant' || message.isStreaming) return
+    message.rating = toggleRating(message.rating, value, reason)
+    void conversations.persist(messages.value)
   }
 
   /** Compactar o contexto junto da próxima pergunta (pedido do usuário). */
@@ -785,6 +807,7 @@ export const useAiStore = defineStore('ai', () => {
     loadChatBenchmark,
     messages,
     compactNext,
+    rate,
     requestCompaction,
     isStreaming,
     isDrawerOpen,

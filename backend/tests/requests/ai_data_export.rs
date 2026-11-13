@@ -183,6 +183,7 @@ async fn pacote_separa_falhas_e_leva_so_as_execucoes_da_ia() {
         assert_eq!(manifesto["periodDays"], 30);
         assert_eq!(manifesto["totals"]["conversationsWithFailures"], 1);
         assert_eq!(manifesto["totals"]["deviceRuns"], 1);
+        assert_eq!(manifesto["totals"]["toolFailures"], json!({ "reboot": 1 }));
     })
     .await;
 }

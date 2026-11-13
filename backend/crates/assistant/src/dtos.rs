@@ -201,6 +201,11 @@ pub struct AiScreenContext {
     pub id: String,
     #[serde(default)]
     pub detail: Option<String>,
+    /// A tela da pergunta anterior, quando a pessoa mudou de tela no meio da
+    /// conversa: "isso" pode ser de uma ou de outra.
+    #[serde(default)]
+    #[ts(optional)]
+    pub previous: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

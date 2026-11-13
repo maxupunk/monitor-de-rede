@@ -96,3 +96,20 @@ export function mergeSuggestions(
   const all = [...own, ...general.filter((item) => !seen.has(item.prompt))]
   return limit === undefined ? all : all.slice(0, limit)
 }
+
+/**
+ * O anexo com a tela da pergunta anterior, quando a pessoa mudou de tela no
+ * meio da conversa ("isso" pode ser de uma ou de outra).
+ */
+export function withPreviousScreen(
+  attached: ScreenAttachment,
+  messages: { role: string; screen?: { id: string } | null }[]
+): ScreenAttachment {
+  const last = [...messages].reverse().find((message) => message.role === 'user')
+  const previous = last?.screen?.id
+  if (!previous || previous === attached.request.screen.id) return attached
+  return {
+    ...attached,
+    request: { ...attached.request, screen: { ...attached.request.screen, previous } },
+  }
+}

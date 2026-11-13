@@ -527,6 +527,7 @@ mod tests {
             screen: crate::screens::sanitize(Some(crate::dtos::AiScreenContext {
                 id: "logs".into(),
                 detail: None,
+                previous: None,
             })),
             ..ChatContext::default()
         };

@@ -5,6 +5,7 @@ import {
   screenAttachment,
   screenRequest,
   type ScreenRoute,
+  withPreviousScreen,
 } from '@/utils/aiScreen'
 import { AREA_ROUTES } from '@/areas'
 import type { RouteRecordRaw } from 'vue-router'
@@ -82,5 +83,27 @@ describe('sugestões do chat vazio', () => {
     ])
     expect(mergeSuggestions(tela, gerais, 3)).toHaveLength(3)
     expect(mergeSuggestions([], gerais)).toEqual(gerais)
+  })
+})
+
+describe('troca de tela no meio da conversa', () => {
+  const docker = {
+    label: 'Docker',
+    icon: 'mdi-docker',
+    request: { screen: { id: 'docker', detail: null } },
+  }
+
+  it('leva a tela da pergunta anterior quando era outra', () => {
+    const conversa = [
+      { role: 'user', screen: { id: 'logs' } },
+      { role: 'assistant', screen: null },
+    ]
+    expect(withPreviousScreen(docker, conversa).request.screen.previous).toBe('logs')
+  })
+
+  it('mesma tela, pergunta sem tela ou conversa nova: nada muda', () => {
+    expect(withPreviousScreen(docker, [{ role: 'user', screen: { id: 'docker' } }])).toBe(docker)
+    expect(withPreviousScreen(docker, [{ role: 'user', screen: null }])).toBe(docker)
+    expect(withPreviousScreen(docker, [])).toBe(docker)
   })
 })

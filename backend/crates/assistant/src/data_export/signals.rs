@@ -1,10 +1,11 @@
 //! Sinais de uma conversa: o que deu certo e o que falhou, lido das mensagens
 //! como a tela as guardou.
 //!
-//! Não há avaliação humana ainda — a classificação é automática e só olha o
-//! que é inequívoco: resposta que terminou em erro e ferramenta que falhou.
-//! Ação recusada pelo usuário é contada à parte: pode ser sugestão errada da
-//! IA ou só mudança de ideia, e quem revisa decide.
+//! A classificação junta o que é inequívoco — resposta que terminou em erro,
+//! ferramenta que falhou — com a avaliação de quem conversou (👎 numa
+//! resposta, com o motivo). Ação recusada pelo usuário é contada à parte:
+//! pode ser sugestão errada da IA ou só mudança de ideia, e quem revisa
+//! decide.
 
 use std::collections::BTreeSet;
 
@@ -17,7 +18,8 @@ use serde_json::Value;
 pub enum Outcome {
     /// Nenhuma resposta com erro e nenhuma ferramenta falhou.
     NoFailures,
-    /// Ao menos uma resposta com erro ou uma ferramenta que falhou.
+    /// Ao menos uma resposta com erro, uma ferramenta que falhou ou uma
+    /// resposta avaliada como ruim.
     WithFailures,
 }
 
@@ -27,7 +29,8 @@ pub enum Outcome {
 pub struct Failure {
     /// Posição da mensagem na conversa (a partir de 0).
     pub message_index: usize,
-    /// `response` (a resposta toda) ou `tool` (uma ferramenta).
+    /// `response` (a resposta deu erro), `tool` (uma ferramenta falhou) ou
+    /// `rating` (o usuário avaliou a resposta como ruim).
     pub kind: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool: Option<String>,
@@ -49,6 +52,9 @@ pub struct Signals {
     pub actions_pending: usize,
     pub answers_with_error: usize,
     pub notices: usize,
+    /// Respostas avaliadas pelo usuário (👍 / 👎).
+    pub rated_good: usize,
+    pub rated_bad: usize,
     pub prompt_tokens: u64,
     pub completion_tokens: u64,
     /// Modelos que responderam, em ordem alfabética.
@@ -82,6 +88,28 @@ pub(super) fn list<'a>(value: &'a Value, key: &str) -> &'a [Value] {
         .get(key)
         .and_then(Value::as_array)
         .map_or(&[], Vec::as_slice)
+}
+
+/// A avaliação do usuário na resposta (`rating: { value, reason }`).
+fn count_rating(signals: &mut Signals, index: usize, message: &Value) {
+    let Some(rating) = message.get("rating").filter(|rating| rating.is_object()) else {
+        return;
+    };
+    match text(rating, "value") {
+        Some("up") => signals.rated_good += 1,
+        Some("down") => {
+            signals.rated_bad += 1;
+            signals.failures.push(Failure {
+                message_index: index,
+                kind: "rating",
+                tool: None,
+                detail: text(rating, "reason")
+                    .unwrap_or("Avaliada como ruim, sem motivo")
+                    .to_owned(),
+            });
+        }
+        _ => {}
+    }
 }
 
 fn tokens(usage: &Value, key: &str) -> u64 {
@@ -138,6 +166,7 @@ pub fn analyze(messages: &[Value]) -> Signals {
         if text(message, "notice").is_some() {
             signals.notices += 1;
         }
+        count_rating(&mut signals, index, message);
         if let Some(usage) = message.get("usage").filter(|usage| usage.is_object()) {
             signals.prompt_tokens += tokens(usage, "promptTokens");
             signals.completion_tokens += tokens(usage, "completionTokens");
@@ -213,6 +242,33 @@ mod tests {
                     detail: "Provedor fora do ar".into(),
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn avaliacao_ruim_vira_falha_com_o_motivo_e_a_boa_so_conta() {
+        let messages = [
+            json!({ "role": "user", "content": "e o gateway?" }),
+            json!({ "role": "assistant", "content": "ok", "rating": { "value": "up" } }),
+            json!({ "role": "user", "content": "e o AP?" }),
+            json!({
+                "role": "assistant",
+                "content": "não sei",
+                "rating": { "value": "down", "reason": "Não usou os dados da rede" },
+            }),
+        ];
+        let signals = analyze(&messages);
+        assert_eq!(signals.rated_good, 1);
+        assert_eq!(signals.rated_bad, 1);
+        assert_eq!(signals.outcome(), Outcome::WithFailures);
+        assert_eq!(
+            signals.failures,
+            vec![Failure {
+                message_index: 3,
+                kind: "rating",
+                tool: None,
+                detail: "Não usou os dados da rede".into(),
+            }]
         );
     }
 

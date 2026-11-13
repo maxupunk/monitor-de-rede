@@ -546,6 +546,7 @@ async fn tela_aberta_vai_no_contexto_da_pergunta() {
             screen: screens::sanitize(Some(AiScreenContext {
                 id: "logs".into(),
                 detail: Some("erro e acima, dispositivo ap-sala".into()),
+                previous: None,
             })),
             ..ChatContext::default()
         };
@@ -580,6 +581,7 @@ async fn pergunta_na_tela_de_logs_chega_ao_modelo_com_a_tela() {
             screen: screens::sanitize(Some(AiScreenContext {
                 id: "logs".into(),
                 detail: Some("erro e acima, dispositivo ap-sala".into()),
+                previous: None,
             })),
             ..ChatContext::default()
         };
