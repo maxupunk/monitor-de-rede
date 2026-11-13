@@ -41,7 +41,7 @@ pub const SCREENS: [Screen; 24] = [
         area: Area::Core,
         about: "visão geral: status dos equipamentos, alertas abertos e latência — get_system_summary; os cards: get_dashboard_layout",
         groups: &[],
-        prefetch: None,
+        prefetch: Some(("get_system_summary", "{}")),
     },
     Screen {
         id: "devices",
@@ -81,7 +81,7 @@ pub const SCREENS: [Screen; 24] = [
         area: Area::Core,
         about: "alertas abertos e resolvidos — get_alerts; por que disparou: explain_alert",
         groups: &[ToolGroup::AlertRules, ToolGroup::Analysis],
-        prefetch: None,
+        prefetch: Some(("get_alerts", "{}")),
     },
     Screen {
         id: "events",
@@ -105,7 +105,7 @@ pub const SCREENS: [Screen; 24] = [
         area: Area::Core,
         about: "janelas de manutenção ativas e futuras — get_platform_status area='maintenance'",
         groups: &[ToolGroup::Platform, ToolGroup::Actions],
-        prefetch: None,
+        prefetch: Some(("get_platform_status", r#"{"area":"maintenance"}"#)),
     },
     Screen {
         id: "scheduled-tasks",
@@ -121,7 +121,7 @@ pub const SCREENS: [Screen; 24] = [
         area: Area::Core,
         about: "agentes remotos: conexão, versão e host — get_platform_status area='agents'",
         groups: &[ToolGroup::Platform],
-        prefetch: None,
+        prefetch: Some(("get_platform_status", r#"{"area":"agents"}"#)),
     },
     Screen {
         id: "audit",
@@ -145,7 +145,7 @@ pub const SCREENS: [Screen; 24] = [
         area: Area::Network,
         about: "locais físicos e o que há em cada um — get_platform_status area='networks'",
         groups: &[ToolGroup::Platform],
-        prefetch: None,
+        prefetch: Some(("get_platform_status", r#"{"area":"networks"}"#)),
     },
     Screen {
         id: "networks",
@@ -153,7 +153,7 @@ pub const SCREENS: [Screen; 24] = [
         area: Area::Network,
         about: "redes IP (CIDR), sites e servidores DNS — get_platform_status area='networks'",
         groups: &[ToolGroup::Platform],
-        prefetch: None,
+        prefetch: Some(("get_platform_status", r#"{"area":"networks"}"#)),
     },
     Screen {
         id: "topology",
@@ -177,7 +177,7 @@ pub const SCREENS: [Screen; 24] = [
         area: Area::Network,
         about: "varreduras de rede recentes e em andamento — get_platform_status area='discovery'",
         groups: &[ToolGroup::Platform],
-        prefetch: None,
+        prefetch: Some(("get_platform_status", r#"{"area":"discovery"}"#)),
     },
     Screen {
         id: "plugins",
@@ -225,7 +225,7 @@ pub const SCREENS: [Screen; 24] = [
         area: Area::Vpn,
         about: "servidor WireGuard e peers: handshake e tráfego — get_platform_status area='vpn'",
         groups: &[ToolGroup::Platform],
-        prefetch: None,
+        prefetch: Some(("get_platform_status", r#"{"area":"vpn"}"#)),
     },
 ];
 
