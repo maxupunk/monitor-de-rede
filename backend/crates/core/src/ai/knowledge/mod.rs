@@ -151,10 +151,12 @@ pub static SYSTEM_DOCS: &[DocTopic] = &[
         keywords: &[
             "wifi", "wi-fi", "wireless", "802.11", "802.11n", "802.11ac", "802.11ax", "802.11be",
             "rssi", "snr", "ruido", "retransmissao", "retries", "openwrt-wifi", "power_save",
-            "ofdma", "mu-mimo", "canal", "dfs",
+            "ofdma", "mu-mimo", "canal", "dfs", "roaming", "ping-pong", "mapa wifi", "distancia",
         ],
         content: "Monitoramento de Sinais Wi-Fi (docs/monitoramento_wifi_sinais.md) e Padrões IEEE 802.11:
-- Coleta passiva a cada 60s via plugin 'openwrt-wifi' (papéis 'clients' com iwinfo/ubus/ARP e 'ping' sob demanda) ou SNMP/SSH.
+- Leitura pelo plugin 'openwrt-wifi' (papel 'clients' com iw/iwinfo/leases/ARP; 'ping' sob demanda): a cada 15 s com o Mapa Wi-Fi aberto e a cada 2 min em segundo plano (ajustável nas Configurações de Wi-Fi).
+- Mapa Wi-Fi (/wifi, aba Mapa): cada AP com os aparelhos em volta; a linha vai do verde ao vermelho pela qualidade combinada (sinal, SNR, retransmissão). A distância é uma faixa aproximada pelo modelo log-distância (potência e frequência do rádio, ambiente aberto/escritório/paredes), nunca uma medida.
+- Roaming: cada troca de AP vira histórico (30 dias) e a regra 'wifi_roaming_ping_pong' alerta o ping-pong (padrão: 4 trocas em 10 min).
 - Classificação de Sinal (RSSI em dBm): Excelente (>= -60 dBm), Bom (-61 a -70 dBm), Atenção (-71 a -78 dBm), Ruim (-79 a -84 dBm) e Crítico (<= -85 dBm).
 - Relação Sinal-Ruído (SNR = signal_dbm - noise_dbm): Excelente (>= 30 dB), Bom (25 a 29 dB), Atenção (15 a 24 dB), Ruim (10 a 14 dB) e Crítico (< 10 dB).
 - Taxa de Retransmissão (tx_retries / (tx_packets + tx_retries) * 100): Excelente (< 10%), Aceitável (10% a 25%), Degradado (> 25%). Quando o sinal é bom (>= -70 dBm) mas a retransmissão passa de 25%, o diagnóstico é 'high_retries' (interferência co-canal, canal 2.4 GHz congestionado fora do 1/6/11 ou colisão de pacotes).

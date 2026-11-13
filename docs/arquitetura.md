@@ -177,7 +177,7 @@ backend/                 workspace Cargo; o pacote raiz (`backend`) é o ponto d
 │   │                    redes, plugins de dispositivo (ADR 012) e o acesso ao equipamento,
 │   │                    espelho de pacotes, motores de vazão (ADR 015), as rotinas da
 │   │                    base, os comandos da Rede no agente e as rotas — a base da área
-│   ├── network-wifi/    submódulo da Rede: clientes Wi-Fi, vigia e dataset `wifi_client`
+│   ├── network-wifi/    submódulo da Rede: clientes Wi-Fi, mapa (distância, roaming), vigia e datasets `wifi_client`/`wifi_roaming`
 │   ├── network-link-tests/ submódulo da Rede: testes de enlace (ADR 015), agendamentos
 │   │                    e retenção — os dois dependem só do core e da base da área
 │   ├── servers/         área Servidores: docker (+ comandos e Docker do host no agente),
@@ -974,7 +974,7 @@ Decididas no [ADR 017](adr/017-arquitetura-modular.md). Quatro áreas: Núcleo
 | O que cada área sabe de si (evidência, consequências, bloqueio) | `AreaPolicy` no crate da área (`netmonitor_network::NetworkPolicy`, `netmonitor_servers::ServersPolicy`, `netmonitor_vpn::VpnPolicy`); registro em `src/registries.rs` | VPN com servidor ativo não desliga (409) |
 | API | `controllers/areas.rs`, `POST /api/settings/onboarding/intent` | só admin muda; auditado |
 | Ferramentas da IA | `AiToolHandler` (`netmonitor_core::ai::tools`) com `area()`; cada área contribui as suas (`netmonitor_servers::ai_tools`, `netmonitor_vpn::ai_tools`, `netmonitor_network::{plugins,topology,discovery}::ai_tools`) e o catálogo, na ordem da IA, é montado em `src/registries.rs`; `ToolPolicy::with_areas` filtra | saem do chat, das rotinas e das tarefas; tarefa agendada vira `skipped` |
-| Rotinas | `discovery::queue`, `maintenance_runner`, `agents::background` | varredura, enlaces agendados e vigia de Wi-Fi pausados; snapshot Docker só com Servidores ligada **e** alguma aba com `?interest=docker` |
+| Rotinas | `discovery::queue`, `maintenance_runner`, `agents::background`, `network_wifi::live` | varredura, enlaces agendados e leitura do Wi-Fi em segundo plano pausados; snapshot Docker só com Servidores ligada **e** alguma aba com `?interest=docker`; leitura contínua do Mapa Wi-Fi só com Rede ligada **e** alguma aba com `?interest=wifi` |
 | Datasets de alerta | `AlertDataset` (`netmonitor_core::alerts::contracts`: `eventType`, fatos, mensagem, recuperação), implementado pelo cliente Wi-Fi vigiado (`netmonitor_network::wifi::wifi_client`) e pelo túnel (`netmonitor_vpn::alerts::vpn_peer`); `AlertEvaluationContext::of` monta o contexto e o `CentralServices` da área (`evaluate_alert`) o entrega ao motor do Núcleo | seguem a rotina que os observa: o vigia do Wi-Fi pausa com a Rede desligada; a VPN com servidor ativo não desliga |
 | Monitores e alertas | `MonitorChecker` (`netmonitor_core::monitoring`): o monitor `snmp` é da Rede (`SnmpMonitor`) e o `container`, de Servidores; entram pelo registro, na central e no agente | **continuam** (monitor nunca para pela área); modelos de regra da área somem do catálogo |
 | SPA | `frontend/src/areas/`, `router/areaGuard.ts`, `AreaOffPage.vue` | menu, rotas, cards e handlers SSE da área saem; link profundo mostra "Área desligada" |

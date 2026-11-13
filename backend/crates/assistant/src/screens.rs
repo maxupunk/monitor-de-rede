@@ -135,7 +135,7 @@ pub const SCREENS: [Screen; 24] = [
         id: "wifi",
         label: "Clientes Wi-Fi",
         area: Area::Network,
-        about: "aparelhos conectados a cada roteador/AP: sinal, SNR, retransmissões, saúde e os vigiados — get_platform_status area='wifi'",
+        about: "aparelhos conectados a cada roteador/AP: sinal, SNR, retransmissões, saúde e os vigiados; aba Mapa com os APs, a distância aproximada de cada aparelho e as trocas de AP (roaming) ao vivo — get_platform_status area='wifi'",
         groups: &[ToolGroup::Platform],
         prefetch: Some(("get_platform_status", r#"{"area":"wifi"}"#)),
     },
