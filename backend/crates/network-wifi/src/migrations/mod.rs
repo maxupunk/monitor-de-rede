@@ -4,11 +4,15 @@
 pub use netmonitor_core::migrations::{MigrationTrait, MigratorTrait};
 
 mod m20261027_000001_wifi_watched_clients;
+mod m20261113_000001_wifi_roaming_events;
 
 /// As migrations deste submódulo.
 #[must_use]
 pub fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-    vec![Box::new(m20261027_000001_wifi_watched_clients::Migration)]
+    vec![
+        Box::new(m20261027_000001_wifi_watched_clients::Migration),
+        Box::new(m20261113_000001_wifi_roaming_events::Migration),
+    ]
 }
 
 #[cfg(test)]

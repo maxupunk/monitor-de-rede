@@ -53,6 +53,10 @@ pub trait CentralServices: Send + Sync {
     /// vigiados (quando o primeiro aparelho é vigiado).
     async fn ensure_wifi_watch_rules(&self, db: &DatabaseConnection) -> AppResult<()>;
 
+    /// Aplica, uma vez na vida da instalação, a regra do ping-pong de
+    /// roaming (quando o primeiro roaming é visto).
+    async fn ensure_wifi_roaming_rules(&self, db: &DatabaseConnection) -> AppResult<()>;
+
     /// O endereço da central que um equipamento alcança (a sugestão dos
     /// endereços do servidor). `None` quando não há como saber.
     async fn address_toward(

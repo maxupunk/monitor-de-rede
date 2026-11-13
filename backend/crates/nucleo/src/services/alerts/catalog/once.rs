@@ -19,6 +19,7 @@ use crate::{
 };
 
 const WIFI_WATCH_MARKER: &str = "alerts.wifi_watch_defaults_applied";
+const WIFI_ROAMING_MARKER: &str = "alerts.wifi_roaming_defaults_applied";
 
 /// Aplica os templates no escopo se o marcador ainda não existe.
 ///
@@ -56,6 +57,23 @@ pub async fn ensure_wifi_watch<C: ConnectionTrait>(db: &C) -> AppResult<CatalogA
         db,
         WIFI_WATCH_MARKER,
         &templates::WIFI_WATCH_KEYS,
+        TemplateScope::global(),
+    )
+    .await
+}
+
+/// A regra do ping-pong de roaming, quando o primeiro roaming é visto.
+///
+/// # Errors
+///
+/// Propaga erro do banco.
+pub async fn ensure_wifi_roaming<C: ConnectionTrait>(
+    db: &C,
+) -> AppResult<CatalogApplicationResult> {
+    apply_once(
+        db,
+        WIFI_ROAMING_MARKER,
+        &templates::WIFI_ROAMING_KEYS,
         TemplateScope::global(),
     )
     .await

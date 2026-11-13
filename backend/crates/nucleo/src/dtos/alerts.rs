@@ -65,6 +65,9 @@ pub enum AlertField {
     WifiClientOfflineSeconds,
     WifiClientSignalDbm,
     WifiClientHealth,
+    // Roaming Wi-Fi
+    WifiRoamStatus,
+    WifiRoamCount,
     // Padrões no log
     LogPatternKey,
     LogMatchCount,
@@ -156,7 +159,7 @@ mod tests {
     /// Escrita à mão de propósito: é ela que obriga quem acrescenta uma
     /// variante a olhar para a lista do Rust — e o teste abaixo obriga as duas
     /// a coincidirem com a do frontend.
-    const TODAS: [AlertField; 58] = [
+    const TODAS: [AlertField; 60] = [
         AlertField::Status,
         AlertField::ReachabilityCause,
         AlertField::LatencyMs,
@@ -189,6 +192,8 @@ mod tests {
         AlertField::WifiClientOfflineSeconds,
         AlertField::WifiClientSignalDbm,
         AlertField::WifiClientHealth,
+        AlertField::WifiRoamStatus,
+        AlertField::WifiRoamCount,
         AlertField::LogPatternKey,
         AlertField::LogMatchCount,
         AlertField::LogWindowSeconds,

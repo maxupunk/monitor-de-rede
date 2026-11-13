@@ -135,6 +135,15 @@ pub const WIFI_CLIENT_SIGNAL_DBM: &str = "wifiClientSignalDbm";
 /// `critical` | `power_save` (só quando conectado).
 pub const WIFI_CLIENT_HEALTH: &str = "wifiClientHealth";
 
+// --- Roaming Wi-Fi (qualquer aparelho) ---------------------------------------
+
+/// Se o aparelho está trocando de AP demais: `ping_pong` | `stable` (ver
+/// [`wifi_roam_status`]). Quantas trocas e em quanto tempo é ajuste das
+/// Configurações de Wi-Fi; a regra só olha o veredito.
+pub const WIFI_ROAM_STATUS: &str = "wifiRoamStatus";
+/// Quantas trocas de AP o aparelho fez dentro da janela configurada.
+pub const WIFI_ROAM_COUNT: &str = "wifiRoamCount";
+
 // --- Padrões no log recebido por syslog -------------------------------------
 
 /// Chave do padrão que casou, igual à do template (`log_login_failure`).
@@ -152,7 +161,7 @@ pub const VPN_PREVIOUS_STATUS: &str = "vpnPreviousStatus";
 
 /// Vocabulário completo oferecido na tela de regras. A **ordem importa**: é a
 /// ordem em que os campos aparecem no seletor da interface.
-pub const ALERT_FIELDS: [&str; 58] = [
+pub const ALERT_FIELDS: [&str; 60] = [
     STATUS,
     REACHABILITY_CAUSE,
     LATENCY_MS,
@@ -185,6 +194,8 @@ pub const ALERT_FIELDS: [&str; 58] = [
     WIFI_CLIENT_OFFLINE_SECONDS,
     WIFI_CLIENT_SIGNAL_DBM,
     WIFI_CLIENT_HEALTH,
+    WIFI_ROAM_STATUS,
+    WIFI_ROAM_COUNT,
     LOG_PATTERN_KEY,
     LOG_MATCH_COUNT,
     LOG_WINDOW_SECONDS,
@@ -240,4 +251,11 @@ pub mod vpn_status_transition {
 pub mod wifi_client_status {
     pub const CONNECTED: &str = "connected";
     pub const OFFLINE: &str = "offline";
+}
+
+/// Valores de [`WIFI_ROAM_STATUS`].
+pub mod wifi_roam_status {
+    /// Trocas de AP demais na janela: o aparelho fica pulando entre dois APs.
+    pub const PING_PONG: &str = "ping_pong";
+    pub const STABLE: &str = "stable";
 }

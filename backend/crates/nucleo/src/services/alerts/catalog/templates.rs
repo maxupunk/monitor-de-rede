@@ -12,6 +12,7 @@ use serde_json::{json, Value};
 use crate::services::{
     alerts::fields::{
         self, interface_speed_transition, interface_status_transition, vpn_status_transition,
+        wifi_roam_status,
     },
     syslog::matcher::RULE_TYPE as LOG_PATTERN_TYPE,
 };
@@ -718,6 +719,32 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             inhibit_when_parent_down: false,
             recommended: false,
         },
+        // --- Roaming Wi-Fi ---------------------------------------------------
+        //
+        // Fora do conjunto básico: entra quando o primeiro roaming é visto
+        // (`catalog::once::ensure_wifi_roaming`) — sem dois APs não há troca.
+        // Quantas trocas e em quanto tempo é ajuste das Configurações de
+        // Wi-Fi; a regra só olha o veredito.
+        AlertRuleTemplate {
+            key: "wifi_roaming_ping_pong",
+            name: "Aparelho em ping-pong entre APs",
+            description: "Um aparelho trocou de AP várias vezes em poucos minutos (padrão: 4 trocas em 10 min). Costuma ser cobertura sobreposta com potências parecidas: a conexão cai a cada troca.",
+            category: AlertCategory::Wifi,
+            rule_type: "custom",
+            condition: json!({
+                "field": fields::WIFI_ROAM_STATUS,
+                "operator": "eq",
+                "value": wifi_roam_status::PING_PONG,
+            }),
+            severity: "warning",
+            duration_seconds: 0,
+            recovery_window_seconds: 600,
+            flap_threshold: 5,
+            flap_window_seconds: 900,
+            notification_cooldown_seconds: 900,
+            inhibit_when_parent_down: false,
+            recommended: false,
+        },
         // --- Padrões no log (Fase 6 do roadmap de syslog) -------------------
         log_pattern(LogPatternSpec {
             key: "log_login_failure",
@@ -862,6 +889,9 @@ pub const HEALTH_KEYS: [&str; 3] = ["cpu_usage_high", "memory_usage_high", "stor
 /// passa a ser vigiado.
 pub const WIFI_WATCH_KEYS: [&str; 2] = ["wifi_watched_offline", "wifi_watched_poor_signal"];
 
+/// A regra do ping-pong de roaming, aplicada quando o primeiro roaming é visto.
+pub const WIFI_ROAMING_KEYS: [&str; 1] = ["wifi_roaming_ping_pong"];
+
 /// Um template pela chave.
 #[must_use]
 pub fn find(key: &str) -> Option<AlertRuleTemplate> {
@@ -882,8 +912,9 @@ mod tests {
     /// 18 do roadmap de alertas + ICMP filtrado + 7 padrões de log (Fase 6 do
     /// roadmap de syslog) + 3 de saúde de equipamento (Fase 3 do roadmap do
     /// servidor como dispositivo) + 3 de baseline móvel + 3 de anomalias
-    /// estatísticas (§2.3.3) + 2 dos aparelhos Wi-Fi vigiados.
-    const TOTAL_TEMPLATES: usize = 37;
+    /// estatísticas (§2.3.3) + 2 dos aparelhos Wi-Fi vigiados + 1 do
+    /// ping-pong de roaming.
+    const TOTAL_TEMPLATES: usize = 38;
 
     #[test]
     fn o_catalogo_tem_os_templates_dos_dois_roadmaps() {

@@ -66,4 +66,5 @@ pub mod tables;
 pub mod users;
 pub mod vpn_peers;
 pub mod vpn_servers;
+pub mod wifi_roaming_events;
 pub mod wifi_watched_clients;

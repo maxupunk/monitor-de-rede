@@ -180,6 +180,12 @@ impl network::CentralServices for NetworkCentral {
         alert_catalog::once::ensure_wifi_watch(db).await.map(|_| ())
     }
 
+    async fn ensure_wifi_roaming_rules(&self, db: &DatabaseConnection) -> AppResult<()> {
+        alert_catalog::once::ensure_wifi_roaming(db)
+            .await
+            .map(|_| ())
+    }
+
     async fn address_toward(
         &self,
         ctx: &AppContext,
@@ -313,7 +319,7 @@ pub fn image_stores() -> netmonitor_servers::deploys::images::ImageStores {
 /// (ADR 017, registro de rotinas): a coleta SNMP sem monitor, a varredura, o
 /// vigia do Wi-Fi e os testes de enlace agendados, da Rede (base e
 /// submódulos); a telemetria dos túneis, da VPN; a retenção do histórico de
-/// enlace.
+/// enlace e do roaming Wi-Fi.
 #[must_use]
 pub fn area_routines() -> AreaRoutines {
     let mut routines = netmonitor_network::routines::routines();
@@ -321,10 +327,9 @@ pub fn area_routines() -> AreaRoutines {
     routines.extend(netmonitor_network_link_tests::routines::routines());
     routines.extend(netmonitor_vpn::routines::routines());
     routines.extend(netmonitor_servers_registry::retention::routines());
-    AreaRoutines::new(
-        routines,
-        netmonitor_network_link_tests::routines::retention(),
-    )
+    let mut retention = netmonitor_network_link_tests::routines::retention();
+    retention.extend(netmonitor_network_wifi::routines::retention());
+    AreaRoutines::new(routines, retention)
 }
 
 /// Os monitores que uma área executa em grupo (os SNMP locais de um mesmo

@@ -312,6 +312,30 @@ export const ALERT_METRICS: AlertMetricOption[] = [
     defaultOperator: 'contains',
     defaultValue: '',
   },
+  // --- Roaming Wi-Fi (qualquer aparelho) -------------------------------------
+  //
+  // Quantas trocas e em quanto tempo caracterizam o ping-pong é ajuste das
+  // Configurações de Wi-Fi; a regra só olha o veredito.
+  {
+    field: 'wifiRoamStatus',
+    title: 'Roaming do aparelho',
+    hint: 'Ping-pong: o aparelho trocou de AP mais vezes que o limite das Configurações de Wi-Fi (padrão: 4 trocas em 10 min).',
+    kind: 'enum',
+    options: [
+      { value: 'ping_pong', title: 'Ping-pong entre APs' },
+      { value: 'stable', title: 'Estável' },
+    ],
+    defaultOperator: 'eq',
+    defaultValue: 'ping_pong',
+  },
+  {
+    field: 'wifiRoamCount',
+    title: 'Trocas de AP na janela',
+    hint: 'Quantas vezes o aparelho trocou de AP dentro da janela das Configurações de Wi-Fi.',
+    kind: 'number',
+    defaultOperator: 'gte',
+    defaultValue: 4,
+  },
   // --- Padrões no log recebido por syslog (Fase 6 do roadmap de syslog) ---
   //
   // Só `logMatchCount` e `logSeverity` aparecem na tela. O `pattern` (a regex)
@@ -711,6 +735,7 @@ export type AlertProblemKind =
   | 'vpn_instability'
   | 'wifi_offline'
   | 'wifi_signal'
+  | 'wifi_roaming'
   | 'statistical_anomaly'
   | (string & {})
 
@@ -724,6 +749,7 @@ const PROBLEM_KIND_LABELS: Record<string, string> = {
   vpn_instability: 'Instabilidade VPN',
   wifi_offline: 'Fora do Wi-Fi',
   wifi_signal: 'Sinal Wi-Fi ruim',
+  wifi_roaming: 'Ping-pong entre APs',
   statistical_anomaly: 'Anomalia estatística',
 }
 

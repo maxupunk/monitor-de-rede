@@ -38,6 +38,8 @@ pub enum ProblemKind {
     WifiOffline,
     /// Aparelho vigiado conectado, mas com sinal ou interferência ruins.
     WifiSignal,
+    /// Aparelho trocando de AP demais (ping-pong entre roteadores).
+    WifiRoaming,
     /// Anomalia estatística (Z-Score ou desvio relevante em relação à baseline).
     StatisticalAnomaly,
 }
@@ -56,6 +58,7 @@ impl ProblemKind {
             Self::VpnInstability => "vpn_instability",
             Self::WifiOffline => "wifi_offline",
             Self::WifiSignal => "wifi_signal",
+            Self::WifiRoaming => "wifi_roaming",
             Self::StatisticalAnomaly => "statistical_anomaly",
         }
     }
@@ -74,6 +77,7 @@ impl ProblemKind {
             "vpn_instability" => Some(Self::VpnInstability),
             "wifi_offline" => Some(Self::WifiOffline),
             "wifi_signal" => Some(Self::WifiSignal),
+            "wifi_roaming" => Some(Self::WifiRoaming),
             "statistical_anomaly" | "anomaly" => Some(Self::StatisticalAnomaly),
             _ => None,
         }
@@ -92,6 +96,7 @@ impl ProblemKind {
             Self::VpnInstability => "instabilidade VPN",
             Self::WifiOffline => "fora do Wi-Fi",
             Self::WifiSignal => "sinal Wi-Fi ruim",
+            Self::WifiRoaming => "ping-pong entre APs",
             Self::StatisticalAnomaly => "anomalia estatística",
         }
     }
@@ -129,6 +134,9 @@ pub fn observed_value(kind: ProblemKind, dataset: &AlertFacts) -> Option<String>
             .map(|seconds| format!("fora há {:.0} min", seconds / 60.0)),
         ProblemKind::WifiSignal => {
             number(fields::WIFI_CLIENT_SIGNAL_DBM).map(|dbm| format!("{dbm:.0} dBm"))
+        }
+        ProblemKind::WifiRoaming => {
+            number(fields::WIFI_ROAM_COUNT).map(|count| format!("{count:.0} trocas de AP"))
         }
         ProblemKind::StatisticalAnomaly => number(fields::LATENCY_Z_SCORE)
             .map(|z| format!("{z:+.1}σ latência"))
@@ -210,6 +218,7 @@ fn kind_of_field(field: &str) -> Option<ProblemKind> {
         fields::WIFI_CLIENT_SIGNAL_DBM | fields::WIFI_CLIENT_HEALTH => {
             Some(ProblemKind::WifiSignal)
         }
+        fields::WIFI_ROAM_STATUS | fields::WIFI_ROAM_COUNT => Some(ProblemKind::WifiRoaming),
         // `status`, `statusCode`, `snmpUptime`, tráfego e campos desconhecidos
         // não dizem nada por si: a decisão passa para o dataset.
         _ => None,
@@ -239,6 +248,9 @@ fn classify_by_dataset(dataset: &AlertFacts) -> ProblemKind {
     }
     if dataset.contains_key(fields::WIFI_CLIENT_HEALTH) {
         return ProblemKind::WifiSignal;
+    }
+    if dataset.contains_key(fields::WIFI_ROAM_STATUS) {
+        return ProblemKind::WifiRoaming;
     }
     if dataset.get("type").and_then(Value::as_str) == Some("dns") {
         return ProblemKind::DnsFailure;
@@ -347,6 +359,19 @@ mod tests {
         );
         let fraco = dataset(&[(fields::WIFI_CLIENT_HEALTH, json!("critical"))]);
         assert_eq!(classify(None, &fraco), ProblemKind::WifiSignal);
+        let pingue = dataset(&[
+            (fields::WIFI_ROAM_STATUS, json!("ping_pong")),
+            (fields::WIFI_ROAM_COUNT, json!(5)),
+        ]);
+        assert_eq!(classify(None, &pingue), ProblemKind::WifiRoaming);
+        assert_eq!(
+            observed_value(ProblemKind::WifiRoaming, &pingue).as_deref(),
+            Some("5 trocas de AP")
+        );
+        assert_eq!(
+            ProblemKind::parse("wifi_roaming"),
+            Some(ProblemKind::WifiRoaming)
+        );
     }
 
     #[test]

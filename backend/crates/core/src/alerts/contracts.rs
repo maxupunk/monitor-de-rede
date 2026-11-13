@@ -230,6 +230,12 @@ impl AlertScopeKey {
         format!("wifi_client:{watched_id}")
     }
 
+    /// O roaming de um aparelho qualquer, pelo MAC (`aa:bb:cc:dd:ee:ff`).
+    #[must_use]
+    pub fn wifi_roaming(mac: &str) -> String {
+        format!("wifi_roaming:{mac}")
+    }
+
     /// Extrai o id quando a chave é de monitor.
     ///
     /// Existe por causa da recuperação: alertas antigos foram gravados só com
@@ -251,6 +257,10 @@ mod tests {
         assert_eq!(AlertScopeKey::interface(34), "interface:34");
         assert_eq!(AlertScopeKey::vpn_peer(7), "vpn_peer:7");
         assert_eq!(AlertScopeKey::wifi_client(3), "wifi_client:3");
+        assert_eq!(
+            AlertScopeKey::wifi_roaming("aa:bb:cc:dd:ee:01"),
+            "wifi_roaming:aa:bb:cc:dd:ee:01"
+        );
     }
 
     /// Um dataset qualquer: o motor não sabe de qual área ele vem.
