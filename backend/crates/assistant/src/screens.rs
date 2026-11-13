@@ -232,7 +232,7 @@ impl ScreenContext {
             .previous
             .map(|previous| {
                 format!(
-                    " A pergunta anterior foi feita na tela {}: referência vaga pode ser de qualquer uma das duas.",
+                    " A pergunta anterior foi feita na tela {}: referência vaga ('isso', 'esse erro') pode ser de qualquer uma das duas; se não der para saber, ask_user com as duas telas como opções.",
                     previous.label
                 )
             })
@@ -302,9 +302,10 @@ mod tests {
             previous: Some("logs".into()),
         }))
         .unwrap();
-        assert!(mudou
-            .line()
-            .contains("pergunta anterior foi feita na tela Logs"));
+        let linha = mudou.line();
+        assert!(linha.contains("pergunta anterior foi feita na tela Logs"));
+        // Na dúvida entre as duas telas, a IA pergunta em vez de chutar.
+        assert!(linha.contains("ask_user com as duas telas"));
 
         let mesma = sanitize(Some(AiScreenContext {
             id: "docker".into(),
