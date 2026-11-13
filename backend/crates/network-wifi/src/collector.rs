@@ -21,8 +21,10 @@ use loco_rs::app::AppContext;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde_json::json;
 
-use super::{contract, station};
-use crate::dtos::{WifiDeviceSnapshot, WifiReadStatus, WifiRefreshStarted, WifiStation};
+use super::{contract, roaming, settings, station};
+use crate::dtos::{
+    WifiDeviceSnapshot, WifiEnvironment, WifiReadStatus, WifiRefreshStarted, WifiStation,
+};
 use netmonitor_core::{
     events::EventBus,
     models::devices,
@@ -149,20 +151,33 @@ async fn read_all(
 ) -> Vec<WifiDeviceSnapshot> {
     // O fabricante de cada MAC sai da memória do processo.
     vendors::service::ensure_loaded(&ctx.db).await;
-    futures::stream::iter(targets)
+    let settings = settings::load(&ctx.db).await.unwrap_or_default();
+    let settings = &settings;
+    let snapshots = futures::stream::iter(targets)
         .map(|(target, guard)| async move {
-            let snapshot = read(ctx, &target, requester).await;
+            let environment = settings.environment_for(target.device.id);
+            let snapshot = read(ctx, &target, requester, environment).await;
             publish(ctx, &snapshot);
             drop(guard);
             snapshot
         })
         .buffer_unordered(fleet::CONCURRENCY)
-        .collect()
-        .await
+        .collect::<Vec<_>>()
+        .await;
+    // Quem trocou de AP desde a rodada anterior: histórico, mapa e ping-pong.
+    if let Err(error) = roaming::track(ctx, &snapshots).await {
+        tracing::warn!(%error, "falha ao registrar o roaming Wi-Fi");
+    }
+    snapshots
 }
 
-async fn read(ctx: &AppContext, target: &Target, requester: Requester) -> WifiDeviceSnapshot {
-    let (status, error, stations) = match stations(ctx, target, requester).await {
+async fn read(
+    ctx: &AppContext,
+    target: &Target,
+    requester: Requester,
+    environment: WifiEnvironment,
+) -> WifiDeviceSnapshot {
+    let (status, error, stations) = match stations(ctx, target, requester, environment).await {
         Ok(stations) => (WifiReadStatus::Ok, None, stations),
         Err(error) => {
             tracing::warn!(%error, device_id = target.device.id, "falha ao ler os clientes Wi-Fi");
@@ -182,6 +197,7 @@ async fn stations(
     ctx: &AppContext,
     target: &Target,
     requester: Requester,
+    environment: WifiEnvironment,
 ) -> AppResult<Vec<WifiStation>> {
     let Target { device, source } = target;
     let output = source
@@ -197,7 +213,10 @@ async fn stations(
     let readings = contract::parse_clients(output).map_err(|error| {
         AppError::service_unavailable(format!("O plugin `{}`: {error}.", source.slug))
     })?;
-    let mut stations: Vec<_> = readings.into_iter().filter_map(station::build).collect();
+    let mut stations: Vec<_> = readings
+        .into_iter()
+        .filter_map(|reading| station::build(reading, environment))
+        .collect();
     station::sort_worst_first(&mut stations);
     Ok(stations)
 }

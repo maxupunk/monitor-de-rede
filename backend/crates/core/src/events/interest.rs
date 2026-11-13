@@ -15,9 +15,13 @@ use super::counter::{ConnectionCounter, CounterGuard};
 /// O estado ao vivo do Docker (inventário e consumo dos hosts).
 pub const DOCKER: &str = "docker";
 
+/// O mapa Wi-Fi aberto: os APs são lidos no intervalo curto das
+/// Configurações de Wi-Fi enquanto alguém olha.
+pub const WIFI: &str = "wifi";
+
 /// Os interesses que uma conexão pode declarar. O resto é ignorado: o nome
 /// vem da URL e não pode criar chave arbitrária no registro.
-pub const KNOWN: [&str; 1] = [DOCKER];
+pub const KNOWN: [&str; 2] = [DOCKER, WIFI];
 
 #[derive(Clone, Default)]
 pub struct Interests {

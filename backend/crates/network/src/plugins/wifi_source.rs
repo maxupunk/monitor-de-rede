@@ -42,6 +42,15 @@ impl Requester {
         }
     }
 
+    /// O mapa Wi-Fi aberto: a leitura contínua enquanto alguém olha.
+    #[must_use]
+    pub const fn live() -> Self {
+        Self {
+            user_id: None,
+            origin: Origin::WifiMap,
+        }
+    }
+
     /// A IA pediu o estado do Wi-Fi (`get_platform_status area='wifi'`).
     #[must_use]
     pub const fn ai(user_id: Option<i64>) -> Self {

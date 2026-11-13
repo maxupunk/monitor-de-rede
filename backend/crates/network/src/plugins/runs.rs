@@ -75,6 +75,8 @@ pub enum Origin {
     LinkTest,
     /// A leitura periódica dos clientes Wi-Fi vigiados.
     WifiWatch,
+    /// A leitura do mapa Wi-Fi aberto (tempo real, só com alguém olhando).
+    WifiMap,
 }
 
 impl Origin {
@@ -87,6 +89,7 @@ impl Origin {
             Self::Fleet => "fleet",
             Self::LinkTest => "link_test",
             Self::WifiWatch => "wifi_watch",
+            Self::WifiMap => "wifi_map",
         }
     }
 
@@ -99,6 +102,7 @@ impl Origin {
             Self::Fleet => "A frota",
             Self::LinkTest => "O teste de enlace",
             Self::WifiWatch => "O vigia de Wi-Fi",
+            Self::WifiMap => "O mapa Wi-Fi",
         }
     }
 }
@@ -123,6 +127,7 @@ pub fn approval_for(plugin: &plugins::Model, origin: Origin, ai_auto_accept: boo
         | Origin::Fleet
         | Origin::LinkTest
         | Origin::WifiWatch
+        | Origin::WifiMap
         | Origin::Ai
             if active =>
         {

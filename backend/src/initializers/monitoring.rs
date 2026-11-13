@@ -60,6 +60,9 @@ impl Initializer for MonitoringInitializer {
         // Tarefas agendadas (cron): ferramentas do catálogo da IA nos horários
         // marcados, em nome de quem as salvou.
         netmonitor_nucleo::services::scheduled_tasks::runner::spawn(ctx);
+        // O mapa Wi-Fi aberto: um coletor só, que lê a frota no intervalo
+        // curto enquanto alguma conexão SSE declara o interesse `wifi`.
+        netmonitor_network_wifi::live::spawn(ctx.clone());
 
         // Cadastro é uma conveniência de boot: banco indisponível não impede o
         // processo HTTP de subir, e a operação é idempotente em banco vazio.

@@ -81,6 +81,7 @@ const ORIGIN: Record<string, string> = {
   fleet: 'Frota',
   link_test: 'Teste de velocidade',
   wifi_watch: 'Vigia de Wi-Fi',
+  wifi_map: 'Mapa Wi-Fi',
 }
 
 const FALLBACK: Presentation = { label: '—', color: 'secondary', icon: 'mdi-help' }

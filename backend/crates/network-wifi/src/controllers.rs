@@ -1,9 +1,11 @@
 //! Telemetria Wi-Fi: ler as estações e medir a latência até uma delas.
 //!
-//! Extrai, valida, delega (`services::wifi`) e serializa. As estações e os
-//! aparelhos vigiados não têm rota de consulta: chegam pelo stream global
-//! (`wifi:snapshot`, `wifi:watched`). Toda rota daqui escreve ou roda ação no
-//! equipamento — `operator`/`admin` pela regra padrão de
+//! Extrai, valida, delega (`services::wifi`) e serializa. As estações, os
+//! aparelhos vigiados e as trocas de AP ao vivo não têm rota de consulta:
+//! chegam pelo stream global (`wifi:snapshot`, `wifi:watched`,
+//! `wifi:roamed`). As consultas daqui são sob demanda — o histórico de roaming
+//! de um aparelho ao abrir o painel dele e as Configurações de Wi-Fi. Escrever
+//! ou rodar ação no equipamento é de `operator`/`admin` pela regra padrão de
 //! `users::request_is_allowed`.
 
 use axum::{
@@ -14,7 +16,10 @@ use loco_rs::prelude::*;
 
 use crate::{
     self as wifi,
-    dtos::{WifiPingInput, WifiRefreshInput, WifiWatchCreate, WifiWatchUpdate},
+    dtos::{
+        WifiPingInput, WifiRefreshInput, WifiRoamingQuery, WifiSettings, WifiWatchCreate,
+        WifiWatchUpdate,
+    },
 };
 use netmonitor_core::{
     audit::authenticated_user,
@@ -81,6 +86,32 @@ async fn unwatch(
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
+/// `GET /api/wifi/roaming?mac=…` — as trocas de AP de um aparelho, da mais
+/// recente para a mais antiga (o painel dele no mapa).
+async fn roaming(
+    State(ctx): State<AppContext>,
+    Query(query): Query<WifiRoamingQuery>,
+) -> AppResult<Response> {
+    Ok(format::json(
+        wifi::roaming::history(&ctx.db, &query.mac, query.limit).await?,
+    )?)
+}
+
+/// `GET /api/wifi/settings` — as Configurações de Wi-Fi em vigor.
+async fn get_settings(State(ctx): State<AppContext>) -> AppResult<Response> {
+    Ok(format::json(wifi::settings::load(&ctx.db).await?)?)
+}
+
+/// `PUT /api/wifi/settings` — grava as Configurações de Wi-Fi.
+async fn put_settings(
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Json(input): Json<WifiSettings>,
+) -> AppResult<Response> {
+    authenticated_user(&ctx, &headers).await?;
+    Ok(format::json(wifi::settings::save(&ctx.db, input).await?)?)
+}
+
 pub fn routes() -> Routes {
     Routes::new()
         .prefix("/wifi")
@@ -88,4 +119,6 @@ pub fn routes() -> Routes {
         .add("/ping", post(ping))
         .add("/watched", post(watch))
         .add("/watched/{id}", patch(rename).delete(unwatch))
+        .add("/roaming", get(roaming))
+        .add("/settings", get(get_settings).put(put_settings))
 }

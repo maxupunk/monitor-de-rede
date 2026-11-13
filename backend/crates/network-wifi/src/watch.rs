@@ -1,8 +1,8 @@
 //! O vigia dos aparelhos que deveriam estar sempre conectados.
 //!
-//! A cada ciclo (`WIFI_WATCH_INTERVAL_SECONDS`, só se houver vigiado) lê a
-//! frota inteira — a mesma leitura da tela, que também sai pelo SSE — e
-//! procura cada vigiado em todos os roteadores: trocar de AP (roaming) é estar
+//! A cada rodada da frota ([`rounds`]: a do mapa aberto ou a da rotina em
+//! segundo plano — a mesma leitura da tela, que também sai pelo SSE) procura
+//! cada vigiado em todos os roteadores: trocar de AP (roaming) é estar
 //! conectado. O que se viu vira fato para o motor de alertas; quanto tempo fora
 //! é grave, quem decide é a regra.
 //!
@@ -10,17 +10,12 @@
 //! estar com o aparelho: nesse ciclo ele fica sem fato, e a queda do roteador
 //! já é alerta do monitor dele.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-
 use chrono::{DateTime, Utc};
 use loco_rs::app::AppContext;
 use sea_orm::EntityTrait;
 use serde_json::{json, Map};
 
-use super::{
-    collector::{self, FleetReading},
-    watchlist,
-};
+use super::{collector::FleetReading, rounds, watchlist};
 use crate::{
     dtos::{WifiDeviceSnapshot, WifiReadStatus, WifiStation},
     wifi_client::{WifiClientFacts, WifiClientPresence},
@@ -40,32 +35,41 @@ struct Observation {
     presence: WifiClientPresence,
 }
 
-/// Um ciclo do vigia; devolve quantos vigiados tiveram fato. Dois ciclos não
-/// se sobrepõem: o segundo desiste enquanto o primeiro lê.
+/// Um ciclo só do vigia (sem vigiado, não lê nada); devolve quantos
+/// vigiados tiveram fato. É uma rodada da frota ([`rounds::run`]): não se
+/// sobrepõe a outra rodada — quem chega depois desiste.
 ///
 /// # Errors
 ///
 /// Erro do banco.
 pub async fn run(ctx: &AppContext) -> AppResult<usize> {
-    static RUNNING: AtomicBool = AtomicBool::new(false);
-    if RUNNING.swap(true, Ordering::AcqRel) {
+    if wifi_watched_clients::Entity::find()
+        .one(&ctx.db)
+        .await?
+        .is_none()
+    {
         return Ok(0);
     }
-    let outcome = cycle(ctx).await;
-    RUNNING.store(false, Ordering::Release);
-    outcome
+    Ok(rounds::run(ctx, Requester::watch())
+        .await?
+        .map_or(0, |round| round.watched_observed))
 }
 
-async fn cycle(ctx: &AppContext) -> AppResult<usize> {
+/// Procura cada vigiado na leitura da frota e entrega o que se viu ao motor
+/// de alertas; devolve quantos tiveram fato.
+///
+/// # Errors
+///
+/// Erro do banco.
+pub async fn observe_fleet(ctx: &AppContext, reading: &FleetReading) -> AppResult<usize> {
     let watched = wifi_watched_clients::Entity::find().all(&ctx.db).await?;
     if watched.is_empty() {
         return Ok(0);
     }
-    let reading = collector::read_fleet(ctx, Requester::watch()).await?;
     let now = Utc::now();
     let mut observed = 0;
     for client in &watched {
-        let Some(observation) = observe(client, &reading, now) else {
+        let Some(observation) = observe(client, reading, now) else {
             continue;
         };
         let connected_on = matches!(observation.presence, WifiClientPresence::Connected { .. })
@@ -181,6 +185,8 @@ mod tests {
             band: None,
             channel: None,
             channel_width_mhz: None,
+            frequency_mhz: None,
+            tx_power_dbm: None,
             signal_dbm,
             signal_avg_dbm: None,
             noise_dbm: None,
@@ -196,6 +202,8 @@ mod tests {
             retries_grade: None,
             health: WifiHealth::Healthy,
             health_reason: None,
+            link_score: 1.0,
+            distance: None,
         }
     }
 
