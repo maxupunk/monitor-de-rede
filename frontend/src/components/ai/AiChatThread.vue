@@ -41,6 +41,11 @@
             <p class="text-body-medium mb-4 ai-thread__intro">
               Pergunte sobre a rede, peça um diagnóstico ou tire dúvidas sobre o NetMonitor. Use
               <strong>@</strong> para marcar um equipamento.
+              <template v-if="screenActive && screen">
+                <br />
+                Você está em <strong>{{ screen.meta.label }}</strong
+                >: a IA considera o que está nesta tela.
+              </template>
             </p>
 
             <div v-if="compact" class="d-flex flex-column ga-2">
@@ -131,6 +136,8 @@ import AiChatComposer from './AiChatComposer.vue'
 import AiChatStatusChips from './AiChatStatusChips.vue'
 import AutoAcceptBanner from '@/components/plugins/AutoAcceptBanner.vue'
 import { AI_SUGGESTIONS } from './aiSuggestions'
+import { useAiScreen } from '@/composables/useAiScreen'
+import { mergeSuggestions } from '@/utils/aiScreen'
 
 /**
  * A conversa com a IA: aviso do modo automático, mensagens, estado vazio com
@@ -156,8 +163,12 @@ const aiStore = useAiStore()
 const scroller = ref<HTMLElement | null>(null)
 const composer = ref<InstanceType<typeof AiChatComposer> | null>(null)
 
+const openScreen = useAiScreen()
+const { screen, active: screenActive } = openScreen
+
+/** As perguntas desta tela primeiro; depois as gerais, sem repetir. */
 const visibleSuggestions = computed(() =>
-  props.compact ? AI_SUGGESTIONS.slice(0, 4) : AI_SUGGESTIONS
+  mergeSuggestions(openScreen.suggestions.value, AI_SUGGESTIONS, props.compact ? 4 : undefined)
 )
 const canSend = computed(() => !aiStore.isStreaming && aiStore.settings?.enabled === true)
 
@@ -172,7 +183,7 @@ const { onScroll, scrollToBottom, showJump } = useChatAutoScroll(
 
 function send(prompt: string) {
   if (!canSend.value) return
-  void aiStore.sendMessage(prompt)
+  void aiStore.sendMessage(prompt, {}, [], openScreen.attachment())
 }
 
 function handleRewind(messageId: string) {

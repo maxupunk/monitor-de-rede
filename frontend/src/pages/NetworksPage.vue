@@ -330,7 +330,8 @@ import { useRouter } from 'vue-router'
 import { useNetworksStore, type Network } from '@/stores/networks'
 import { useSitesStore, type Site } from '@/stores/sites'
 import { useDevicesStore, type Device } from '@/stores/devices'
-import { formatDateTime } from '@/utils/formatters'
+import { countNoun, formatDateTime } from '@/utils/formatters'
+import { useAiScreenDetail } from '@/composables/useAiScreenDetail'
 import PageHeader from '@/components/PageHeader.vue'
 import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
 import SiteDialog from '@/components/SiteDialog.vue'
@@ -412,6 +413,15 @@ const headers = [
   { title: 'Última varredura', key: 'lastScanAt', width: '170px' },
   { title: 'Ações', key: 'actions', sortable: false, width: '220px' },
 ]
+
+/** O chat sabe quantas redes há e o que está buscado. */
+useAiScreenDetail(() => {
+  const parts = [
+    countNoun(networksStore.networks.length, 'rede', 'redes'),
+    search.value.trim() ? `busca "${search.value.trim()}"` : null,
+  ]
+  return parts.filter(Boolean).join(', ')
+})
 
 onMounted(async () => {
   await Promise.all([

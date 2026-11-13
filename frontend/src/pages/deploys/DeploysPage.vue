@@ -219,6 +219,7 @@ import DeploySetupDialog from '@/components/deploys/DeploySetupDialog.vue'
 import DeployTargetDialog from '@/components/deploys/DeployTargetDialog.vue'
 import DeployWorkflowDialog from '@/components/deploys/DeployWorkflowDialog.vue'
 import { useConfirm } from '@/composables/useConfirm'
+import { useAiScreenDetail } from '@/composables/useAiScreenDetail'
 import type { DeployApplicationView } from '@/bindings/DeployApplicationView'
 import type { DeployGuideAction } from '@/bindings/DeployGuideAction'
 import type { DeployRunView } from '@/bindings/DeployRunView'
@@ -272,6 +273,19 @@ const tiles = computed(() => {
       color: value.awaitingApproval > 0 ? 'warning' : 'info',
     },
   ]
+})
+
+/** O chat sabe o resumo do painel de deploy: aplicações, alvos e o que pede atenção. */
+useAiScreenDetail(() => {
+  const value = counts.value
+  if (!value) return null
+  const parts = [
+    `${countNoun(value.applications, 'aplicação', 'aplicações')} em ${countNoun(value.targets, 'alvo')}`,
+    value.running ? `${value.running} em andamento` : null,
+    `${value.succeeded24h} publicados e ${value.failed24h} falhas em 24 h`,
+    value.awaitingApproval ? `${value.awaitingApproval} aguardando aprovação` : null,
+  ]
+  return parts.filter(Boolean).join(', ')
 })
 
 const feedback = reactive({ visible: false, message: '', color: 'success' })

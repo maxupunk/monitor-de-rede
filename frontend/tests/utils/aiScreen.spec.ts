@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { currentScreen, screenAttachment, screenRequest, type ScreenRoute } from '@/utils/aiScreen'
+import {
+  currentScreen,
+  mergeSuggestions,
+  screenAttachment,
+  screenRequest,
+  type ScreenRoute,
+} from '@/utils/aiScreen'
 import { AREA_ROUTES } from '@/areas'
 import type { RouteRecordRaw } from 'vue-router'
 
@@ -59,5 +65,22 @@ describe('tela aberta no chat', () => {
     for (const id of ['logs', 'docker', 'wifi', 'alerts', 'device-detail', 'vpn']) {
       expect(ids.has(id), id).toBe(true)
     }
+  })
+})
+
+describe('sugestões do chat vazio', () => {
+  const sugestao = (prompt: string) => ({ title: prompt, prompt, icon: 'x', color: 'primary' })
+
+  it('as da tela vêm primeiro, sem repetir as gerais, e o painel corta', () => {
+    const tela = [sugestao('logs'), sugestao('geral-1')]
+    const gerais = [sugestao('geral-1'), sugestao('geral-2'), sugestao('geral-3')]
+    expect(mergeSuggestions(tela, gerais).map((item) => item.prompt)).toEqual([
+      'logs',
+      'geral-1',
+      'geral-2',
+      'geral-3',
+    ])
+    expect(mergeSuggestions(tela, gerais, 3)).toHaveLength(3)
+    expect(mergeSuggestions([], gerais)).toEqual(gerais)
   })
 })

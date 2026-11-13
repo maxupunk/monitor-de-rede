@@ -264,7 +264,8 @@ import AgentEnrollmentDialog from '@/components/agents/AgentEnrollmentDialog.vue
 import PageHeader from '@/components/PageHeader.vue'
 import { useAgentsStore } from '@/stores/agents'
 import { useAuthStore } from '@/stores/auth'
-import { formatRelativeTime } from '@/utils/formatters'
+import { countNoun, formatRelativeTime } from '@/utils/formatters'
+import { useAiScreenDetail } from '@/composables/useAiScreenDetail'
 import type { AgentEnrollmentView } from '@/bindings/AgentEnrollmentView'
 import type { AgentView } from '@/bindings/AgentView'
 import type { Permission } from '@/bindings/Permission'
@@ -369,6 +370,26 @@ async function runConfirmed() {
       : await agentsStore.removeAgent(confirm.id)
   if (ok) confirm.open = false
 }
+
+/** O chat sabe quantos agentes há e quais estão fora do ar. */
+useAiScreenDetail(() => {
+  const agents = agentsStore.agents
+  const byLabel = (label: string) => agents.filter((agent) => statusMeta(agent).label === label)
+  const offline = byLabel('Desconectado')
+  const parts = [
+    `${countNoun(agents.length, 'agente')}: ${byLabel('Conectado').length} conectados`,
+    offline.length
+      ? `${offline.length} desconectados (${offline
+          .slice(0, 3)
+          .map((agent) => agent.name)
+          .join(', ')})`
+      : null,
+    byLabel('Aguardando instalação').length
+      ? `${byLabel('Aguardando instalação').length} aguardando instalação`
+      : null,
+  ]
+  return parts.filter(Boolean).join(', ')
+})
 
 onMounted(() => {
   agentsStore.fetchAgents()

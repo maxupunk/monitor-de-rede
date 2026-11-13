@@ -282,7 +282,8 @@ import ScheduledTaskStatusChip from '@/components/scheduledTasks/ScheduledTaskSt
 import { confirm } from '@/composables/useConfirm'
 import { useAuthStore } from '@/stores/auth'
 import { useScheduledTasksStore } from '@/stores/scheduledTasks'
-import { formatRelativeTime, formatTimeUntil } from '@/utils/formatters'
+import { countNoun, formatRelativeTime, formatTimeUntil } from '@/utils/formatters'
+import { useAiScreenDetail } from '@/composables/useAiScreenDetail'
 import {
   TASK_TEMPLATES,
   TOOL_KIND,
@@ -402,6 +403,23 @@ async function remove(item: ScheduledTask) {
     notify(describe(err, 'Não foi possível excluir a tarefa.'), 'error')
   }
 }
+
+/** O chat sabe quantas tarefas há, quantas ativas e quais falharam na última vez. */
+useAiScreenDetail(() => {
+  const tasks = store.tasks
+  const failed = tasks.filter((task) => task.lastStatus === 'failed')
+  const parts = [
+    `${countNoun(tasks.length, 'tarefa', 'tarefas')}, ${tasks.filter((task) => task.enabled).length} ativas`,
+    tasks.some((task) => task.running) ? 'alguma rodando agora' : null,
+    failed.length
+      ? `falharam na última execução: ${failed
+          .slice(0, 3)
+          .map((task) => task.name)
+          .join(', ')}`
+      : null,
+  ]
+  return parts.filter(Boolean).join(', ')
+})
 
 onMounted(() => {
   // Abrir a página é a ação que carrega; mudanças chegam pelo SSE.

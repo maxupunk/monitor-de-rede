@@ -101,6 +101,8 @@ import SiteDialog from '@/components/SiteDialog.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
 import { confirm } from '@/composables/useConfirm'
+import { useAiScreenDetail } from '@/composables/useAiScreenDetail'
+import { countNoun } from '@/utils/formatters'
 
 const sitesStore = useSitesStore()
 const search = ref('')
@@ -114,6 +116,15 @@ const headers = [
   { title: 'Descrição', key: 'description' },
   { title: 'Ações', key: 'actions', sortable: false, width: '120px' },
 ]
+
+/** O chat sabe quantos sites há e o que está buscado. */
+useAiScreenDetail(() => {
+  const parts = [
+    countNoun(sitesStore.sites.length, 'site'),
+    search.value.trim() ? `busca "${search.value.trim()}"` : null,
+  ]
+  return parts.filter(Boolean).join(', ')
+})
 
 onMounted(() => {
   sitesStore.fetchSites()

@@ -1,5 +1,13 @@
 import type { AiScreenContext } from '@/bindings/AiScreenContext'
 
+/** Pergunta pronta oferecida quando a conversa está vazia. */
+export interface AiSuggestion {
+  title: string
+  prompt: string
+  icon: string
+  color: string
+}
+
 /**
  * Como uma rota se apresenta ao chat (`meta.aiScreen`, declarado pela área
  * dona da rota). O `id` é o do catálogo do backend
@@ -12,6 +20,8 @@ export interface AiScreenMeta {
   icon: string
   /** O `:id` da rota é um equipamento ou um monitor: vai junto como contexto. */
   entity?: 'device' | 'monitor'
+  /** Perguntas sobre esta tela, oferecidas primeiro no chat vazio. */
+  suggestions?: AiSuggestion[]
 }
 
 /** O pedaço da rota que importa (o `useRoute()` serve). */
@@ -74,4 +84,15 @@ export function screenAttachment(screen: CurrentScreen, detail: string | null): 
     icon: screen.meta.icon,
     request: screenRequest(screen, detail),
   }
+}
+
+/** As sugestões da tela primeiro, depois as gerais sem repetir, até `limit`. */
+export function mergeSuggestions(
+  own: AiSuggestion[],
+  general: AiSuggestion[],
+  limit?: number
+): AiSuggestion[] {
+  const seen = new Set(own.map((item) => item.prompt))
+  const all = [...own, ...general.filter((item) => !seen.has(item.prompt))]
+  return limit === undefined ? all : all.slice(0, limit)
 }

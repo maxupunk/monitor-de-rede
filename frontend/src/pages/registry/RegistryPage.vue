@@ -52,6 +52,8 @@ import RegistryVulnerabilities from '@/components/registry/RegistryVulnerabiliti
 import { useAuthStore } from '@/stores/auth'
 import { useRegistryStore } from '@/stores/registry'
 import { registryAccess } from '@/utils/registryPresentation'
+import { useAiScreenDetail } from '@/composables/useAiScreenDetail'
+import { countNoun, formatBinaryBytes } from '@/utils/formatters'
 
 const registry = useRegistryStore()
 const auth = useAuthStore()
@@ -60,6 +62,26 @@ const helpOpen = ref(false)
 
 const canAdmin = computed(() => auth.roleIn('servers') === 'admin')
 const access = registryAccess(window.location)
+
+const TAB_LABEL: Record<string, string> = {
+  images: 'Imagens',
+  tokens: 'Tokens de acesso',
+  vulnerabilities: 'Vulnerabilidades',
+  settings: 'Configurações',
+}
+
+/** O chat sabe a aba aberta e o tamanho do registry. */
+useAiScreenDetail(() => {
+  const overview = registry.overview
+  const parts = [
+    `aba ${TAB_LABEL[tab.value] ?? tab.value}`,
+    overview ? countNoun(overview.repositories.length, 'repositório', 'repositórios') : null,
+    overview
+      ? `${formatBinaryBytes(overview.usedBytes)} usados de ${formatBinaryBytes(overview.quotaBytes)}`
+      : null,
+  ]
+  return parts.filter(Boolean).join(', ')
+})
 
 onMounted(() => {
   void registry.fetchOverview()

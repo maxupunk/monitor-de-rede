@@ -407,6 +407,8 @@ import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
 import { getStatusColor } from '@/utils/monitorPresentation'
 import { confirm } from '@/composables/useConfirm'
 import { INFRA_DEVICE_TYPES, deviceTypeMeta } from '@/utils/deviceTypes'
+import { useAiScreenDetail } from '@/composables/useAiScreenDetail'
+import { countNoun } from '@/utils/formatters'
 
 const router = useRouter()
 const devicesStore = useDevicesStore()
@@ -497,6 +499,18 @@ const headers = [
   { title: 'Status', key: 'status', width: '120px' },
   { title: 'Ações', key: 'actions', sortable: false, width: '140px' },
 ]
+
+/** O chat sabe a saúde da lista, a busca e o que está selecionado. */
+useAiScreenDetail(() => {
+  const parts = [
+    `${countNoun(devicesStore.devices.length, 'dispositivo')}: ${devicesStore.onlineCount} online, ${devicesStore.offlineCount} offline, ${devicesStore.warningCount} em alerta`,
+    search.value.trim() ? `busca "${search.value.trim()}"` : null,
+    selectedDeviceIds.value.length
+      ? countNoun(selectedDeviceIds.value.length, 'selecionado', 'selecionados')
+      : null,
+  ]
+  return parts.filter(Boolean).join(', ')
+})
 
 onMounted(async () => {
   await devicesStore.fetchDevices()

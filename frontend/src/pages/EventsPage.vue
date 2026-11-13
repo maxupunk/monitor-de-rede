@@ -103,6 +103,8 @@ import { useInfiniteList } from '@/composables/useInfiniteList'
 import { formatEventDetails } from '@/utils/eventPresentation'
 import EventDetailDialog from '@/components/EventDetailDialog.vue'
 import PageHeader from '@/components/PageHeader.vue'
+import { useAiScreenDetail } from '@/composables/useAiScreenDetail'
+import { countNoun } from '@/utils/formatters'
 
 interface HistoricalEventRecord {
   id: number
@@ -206,6 +208,17 @@ const allFilteredEvents = computed(() => {
       jsonStr.includes(query)
     )
   })
+})
+
+/** O chat sabe o que o feed mostra e como está filtrado. */
+useAiScreenDetail(() => {
+  const type = typeOptions.find((option) => option.value === typeFilter.value)
+  const parts = [
+    countNoun(allFilteredEvents.value.length, 'evento exibido', 'eventos exibidos'),
+    typeFilter.value !== 'all' && type ? `tipo ${type.title}` : null,
+    searchQuery.value.trim() ? `busca "${searchQuery.value.trim()}"` : null,
+  ]
+  return parts.filter(Boolean).join(', ')
 })
 
 function openEventDetail(evt: RealtimeEventPayload) {

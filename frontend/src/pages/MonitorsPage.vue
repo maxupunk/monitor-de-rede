@@ -128,6 +128,7 @@ import MonitorFormDialog from '@/components/MonitorFormDialog.vue'
 import SaasPresetsDialog from '@/components/monitors/SaasPresetsDialog.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import { monitorHealthBucket, monitorHealthCounts } from '@/utils/monitorPresentation'
+import { useAiScreenDetail } from '@/composables/useAiScreenDetail'
 
 const route = useRoute()
 const router = useRouter()
@@ -165,6 +166,27 @@ const filteredMonitors = computed(() => {
   const f = statusFilter.value
   if (f === 'all') return monitorsStore.monitors
   return monitorsStore.monitors.filter((m) => monitorHealthBucket(m) === f)
+})
+
+const STATUS_FILTER_LABEL: Record<string, string> = {
+  up: 'up',
+  warning: 'warning',
+  down: 'down',
+  unknown: 'desconhecido',
+  disabled: 'desativados',
+}
+
+/** O chat sabe a saúde dos monitores e o que está filtrado. */
+useAiScreenDetail(() => {
+  const c = counts.value
+  const parts = [
+    `${c.all} monitores: ${c.up} up, ${c.warning} warning, ${c.down} down, ${c.unknown} desconhecidos, ${c.disabled} desativados`,
+    statusFilter.value !== 'all'
+      ? `filtro status ${STATUS_FILTER_LABEL[statusFilter.value]}`
+      : null,
+    search.value.trim() ? `busca "${search.value.trim()}"` : null,
+  ]
+  return parts.filter(Boolean).join(', ')
 })
 
 onMounted(async () => {

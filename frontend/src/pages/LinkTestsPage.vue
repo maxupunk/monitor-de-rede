@@ -116,6 +116,8 @@ import { flowPairLabel, legTitle, testTitle } from '@/utils/linkTests/presentati
 import { currentLeg, legsDone } from '@/utils/linkTests/progress'
 import { READ_ONLY_REASON } from '@/utils/topology/inspectorRegistry'
 import PageHeader from '@/components/PageHeader.vue'
+import { useAiScreenDetail } from '@/composables/useAiScreenDetail'
+import { countNoun } from '@/utils/formatters'
 import LinkTestHistoryPanel from '@/components/linkTests/LinkTestHistoryPanel.vue'
 import LinkTestRunDialog from '@/components/linkTests/LinkTestRunDialog.vue'
 import LinkTestSchedulesPanel from '@/components/linkTests/LinkTestSchedulesPanel.vue'
@@ -179,6 +181,21 @@ function activeLive(test: LinkTest): string {
     ) ?? ''
   )
 }
+
+/** O chat sabe a aba, os testes em andamento e o teste aberto. */
+useAiScreenDetail(() => {
+  const test = detail.value
+  const parts = [
+    `aba ${tab.value === 'schedules' ? 'Agendamentos' : 'Histórico'}`,
+    store.active.length
+      ? countNoun(store.active.length, 'teste em andamento', 'testes em andamento')
+      : null,
+    tab.value === 'schedules' ? countNoun(store.schedules.length, 'agendamento') : null,
+    test ? `teste aberto ${testTitle(test)} (${test.status})` : null,
+    queryDeviceId.value != null ? `filtro dispositivo #${queryDeviceId.value}` : null,
+  ]
+  return parts.filter(Boolean).join(', ')
+})
 
 /** Abrir o detalhe (clique ou link direto) busca o teste com as amostras gravadas. */
 watch(

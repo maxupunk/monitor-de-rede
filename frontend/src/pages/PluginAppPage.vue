@@ -270,7 +270,8 @@ import type { Device } from '@/stores/devices'
 import { usePluginAppsStore } from '@/stores/pluginApps'
 import { outputsByDevice, toolsOf, type FlowRequest } from '@/utils/fleetContext'
 import { fleetRows, isReadyAction, paramsFromItem, type ItemRow } from '@/utils/itemList'
-import { formatDateTime, formatRelativeTime } from '@/utils/formatters'
+import { countNoun, formatDateTime, formatRelativeTime } from '@/utils/formatters'
+import { useAiScreenDetail } from '@/composables/useAiScreenDetail'
 import {
   batchStatusPresentation,
   devicePrefillFor,
@@ -647,4 +648,26 @@ function notify(text: string, color = 'success') {
 function describe(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback
 }
+
+const TAB_LABEL: Record<string, string> = {
+  members: 'Equipamentos',
+  tools: 'Avançado',
+  settings: 'Configuração',
+  runs: 'Histórico',
+  about: 'Como usar',
+}
+
+/** O chat sabe qual aplicativo está aberto, a aba e o que a leitura trouxe. */
+useAiScreenDetail(() => {
+  if (!view.value) return null
+  const tabLabel = tab.value === 'items' ? (list.value?.title ?? 'Itens') : TAB_LABEL[tab.value]
+  const parts = [
+    `aplicativo ${title.value}`,
+    tabLabel ? `aba ${tabLabel}` : null,
+    countNoun(view.value.members.length, 'equipamento'),
+    list.value && rows.value.length ? countNoun(rows.value.length, itemName.value) : null,
+    reading.value ? 'leitura em andamento' : null,
+  ]
+  return parts.filter(Boolean).join(', ')
+})
 </script>

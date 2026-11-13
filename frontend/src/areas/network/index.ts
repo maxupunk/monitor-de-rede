@@ -1,4 +1,5 @@
 import { defineArea, lazyComponent, withWidgetConfig } from '../defineArea'
+import { networkScreens } from './aiScreens'
 import type { NavApp, NavItemSpec } from '@/navigation'
 import { networkSse } from './sse'
 
@@ -20,19 +21,19 @@ export const networkArea = defineArea({
       path: 'sites',
       name: 'sites',
       component: () => import('@/pages/SitesPage.vue'),
-      meta: { aiScreen: { id: 'sites', label: 'Sites', icon: 'mdi-map-marker-multiple-outline' } },
+      meta: { aiScreen: networkScreens.sites },
     },
     {
       path: 'networks',
       name: 'networks',
       component: () => import('@/pages/NetworksPage.vue'),
-      meta: { aiScreen: { id: 'networks', label: 'Redes', icon: 'mdi-ip-network-outline' } },
+      meta: { aiScreen: networkScreens.networks },
     },
     {
       path: 'wifi',
       name: 'wifi-clients',
       component: () => import('@/pages/WifiClientsPage.vue'),
-      meta: { aiScreen: { id: 'wifi', label: 'Clientes Wi-Fi', icon: 'mdi-wifi' } },
+      meta: { aiScreen: networkScreens.wifi },
     },
     {
       path: 'topology',
@@ -40,7 +41,7 @@ export const networkArea = defineArea({
       component: () => import('@/pages/TopologyPage.vue'),
       meta: {
         fullBleed: true,
-        aiScreen: { id: 'topology', label: 'Topologia', icon: 'mdi-sitemap' },
+        aiScreen: networkScreens.topology,
       },
     },
     {
@@ -48,21 +49,21 @@ export const networkArea = defineArea({
       name: 'link-tests',
       component: () => import('@/pages/LinkTestsPage.vue'),
       meta: {
-        aiScreen: { id: 'link-tests', label: 'Testes de velocidade', icon: 'mdi-speedometer' },
+        aiScreen: networkScreens['link-tests'],
       },
     },
     {
       path: 'discovery',
       name: 'discovery',
       component: () => import('@/pages/DiscoveryPage.vue'),
-      meta: { aiScreen: { id: 'discovery', label: 'Descoberta', icon: 'mdi-radar' } },
+      meta: { aiScreen: networkScreens.discovery },
     },
     { path: 'probes', name: 'probes', component: () => import('@/pages/ProbesPage.vue') },
     {
       path: 'apps/:id',
       name: 'plugin-app',
       component: () => import('@/pages/PluginAppPage.vue'),
-      meta: { aiScreen: { id: 'plugin-app', label: 'App de plugin', icon: 'mdi-apps' } },
+      meta: { aiScreen: networkScreens['plugin-app'] },
     },
     {
       path: 'plugins',
@@ -70,7 +71,7 @@ export const networkArea = defineArea({
       component: () => import('@/pages/PluginsPage.vue'),
       meta: {
         requiresAdmin: true,
-        aiScreen: { id: 'plugins', label: 'Plugins', icon: 'mdi-puzzle-outline' },
+        aiScreen: networkScreens.plugins,
       },
     },
   ],

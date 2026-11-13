@@ -163,6 +163,8 @@ import DiscoveryRunsTab from '@/components/discovery/DiscoveryRunsTab.vue'
 import DiscoveryConflictsTab from '@/components/discovery/DiscoveryConflictsTab.vue'
 import DiscoveryHostDialog from '@/components/discovery/DiscoveryHostDialog.vue'
 import { confirm } from '@/composables/useConfirm'
+import { useAiScreenDetail } from '@/composables/useAiScreenDetail'
+import { countNoun } from '@/utils/formatters'
 import { useDiscoveryStore, type StreamedDiscoveryHost } from '@/stores/discovery'
 import { useNetworksStore } from '@/stores/networks'
 import { useDevicesStore, type Device } from '@/stores/devices'
@@ -279,6 +281,29 @@ const prefill = computed<Partial<Device> | null>(() => {
     isMonitored: true,
     snmpEnabled: discoveryHasSnmp(host),
   }
+})
+
+const TAB_LABEL: Record<string, string> = {
+  results: 'Equipamentos',
+  runs: 'Histórico',
+  conflicts: 'Conflitos',
+}
+
+/** O chat sabe qual rede está em varredura, o que já apareceu e a aba aberta. */
+useAiScreenDetail(() => {
+  const network = scanNetwork.value
+  const parts = [
+    `aba ${TAB_LABEL[tab.value] ?? tab.value}`,
+    network ? `rede ${network.name} (${network.cidr})` : null,
+    discoveryStore.scanning ? 'varredura em andamento' : null,
+    hosts.value.length
+      ? countNoun(hosts.value.length, 'equipamento encontrado', 'equipamentos encontrados')
+      : null,
+    discoveryStore.conflicts.length
+      ? countNoun(discoveryStore.conflicts.length, 'conflito', 'conflitos')
+      : null,
+  ]
+  return parts.filter(Boolean).join(', ')
 })
 
 onMounted(async () => {

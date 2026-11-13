@@ -255,6 +255,8 @@ import { useVpnStore } from '@/stores/vpn'
 import { useAreasStore } from '@/stores/areas'
 import { useLogsStore } from '@/stores/logs'
 import { confirm } from '@/composables/useConfirm'
+import { useAiScreenDetail } from '@/composables/useAiScreenDetail'
+import { countNoun } from '@/utils/formatters'
 
 const route = useRoute()
 const router = useRouter()
@@ -402,6 +404,35 @@ const aiDevicePrompt = computed(
     `Faça um diagnóstico do dispositivo ${detailStore.device?.name || `#${deviceId.value}`}: estado atual, alertas, interfaces com problema e erros recentes nos logs.`
 )
 const aiDeviceContext = computed(() => ({ deviceId: deviceId.value }))
+
+const TAB_LABEL: Record<string, string> = {
+  overview: 'Visão Geral',
+  monitors: 'Monitores',
+  rules: 'Regras',
+  interfaces: 'Interfaces SNMP',
+  events: 'Histórico de Eventos',
+  logs: 'Logs',
+  vpn: 'VPN',
+  wifi: 'Clientes Wi-Fi',
+  plugins: 'Plugins',
+}
+
+/** O chat sabe qual equipamento está aberto, em que estado e em que aba. */
+useAiScreenDetail(() => {
+  const device = detailStore.device
+  if (!device || device.id !== deviceId.value) return `dispositivo #${deviceId.value}`
+  const parts = [
+    `dispositivo ${device.name} (#${device.id})`,
+    device.ipAddress ? `IP ${device.ipAddress}` : null,
+    `status ${device.status}`,
+    `aba ${TAB_LABEL[activeTab.value] ?? activeTab.value}`,
+    countNoun(detailStore.monitors.length, 'monitor', 'monitores'),
+    activeTab.value === 'interfaces'
+      ? countNoun(detailStore.interfaces.length, 'interface', 'interfaces')
+      : null,
+  ]
+  return parts.filter(Boolean).join(', ')
+})
 
 onMounted(() => {
   if (deviceId.value) {

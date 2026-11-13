@@ -298,6 +298,37 @@ mod tests {
         assert_eq!(sem_detalhe.detail, None);
     }
 
+    /// As telas que a SPA declara (`frontend/src/areas/*/aiScreens.ts`)
+    /// existem aqui: id desconhecido seria ignorado em silêncio, e a IA
+    /// ficaria sem saber o que a tela mostra.
+    #[test]
+    fn telas_declaradas_pela_spa_existem_no_catalogo() {
+        let areas =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../frontend/src/areas");
+        let id = regex::Regex::new(r"(?m)^\s*id: '([^']+)',").unwrap();
+        let mut vistas = 0;
+        for area in std::fs::read_dir(&areas).expect("frontend/src/areas") {
+            let arquivo = area.unwrap().path().join("aiScreens.ts");
+            let Ok(texto) = std::fs::read_to_string(&arquivo) else {
+                continue;
+            };
+            for captura in id.captures_iter(&texto) {
+                vistas += 1;
+                assert!(
+                    screen(&captura[1]).is_some(),
+                    "{} declara a tela '{}', que não está em SCREENS",
+                    arquivo.display(),
+                    &captura[1]
+                );
+            }
+        }
+        assert_eq!(
+            vistas,
+            SCREENS.len(),
+            "toda tela do catálogo tem rota na SPA"
+        );
+    }
+
     #[test]
     fn detalhe_longo_e_cortado() {
         let longo = "x".repeat(MAX_DETAIL_CHARS * 2);

@@ -184,6 +184,8 @@ import AlertHistoryTab from '@/components/alerts/AlertHistoryTab.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import AiAskButton from '@/components/ai/AiAskButton.vue'
 import { confirm } from '@/composables/useConfirm'
+import { useAiScreenDetail } from '@/composables/useAiScreenDetail'
+import { countNoun } from '@/utils/formatters'
 
 const alertsStore = useAlertsStore()
 const eventsStore = useEventsStore()
@@ -269,6 +271,37 @@ watch(
 const verifyingId = ref<number | null>(null)
 const verifyingAll = ref(false)
 const activeSubFilter = ref<'all' | 'unacknowledged' | 'acknowledged'>('all')
+
+const TAB_LABEL: Record<string, string> = {
+  active: 'Pendentes',
+  resolved: 'Resolvidos',
+  rules: 'Regras',
+  history: 'Histórico',
+}
+
+/** O chat sabe quantos alertas estão abertos e o que está filtrado. */
+useAiScreenDetail(() => {
+  const parts = [
+    `${countNoun(alertsStore.activeAlerts.length, 'alerta aberto', 'alertas abertos')}, ${alertsStore.criticalCount} críticos`,
+    correlatedClusters.value.length
+      ? countNoun(
+          correlatedClusters.value.length,
+          'incidente correlacionado',
+          'incidentes correlacionados'
+        )
+      : null,
+    `aba ${TAB_LABEL[tab.value] ?? tab.value}`,
+    tab.value === 'active' && activeSubFilter.value === 'unacknowledged'
+      ? 'só os não reconhecidos'
+      : null,
+    tab.value === 'active' && activeSubFilter.value === 'acknowledged'
+      ? 'só os reconhecidos'
+      : null,
+    tab.value === 'rules' ? countNoun(regrasVisiveis.value.length, 'regra', 'regras') : null,
+    filtroDeDispositivo.value != null ? `filtro dispositivo #${filtroDeDispositivo.value}` : null,
+  ]
+  return parts.filter(Boolean).join(', ')
+})
 const correlationDialog = ref(false)
 const correlationTargetId = ref<number | null>(null)
 

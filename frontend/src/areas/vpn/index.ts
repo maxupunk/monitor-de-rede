@@ -1,4 +1,5 @@
 import { defineArea } from '../defineArea'
+import { vpnScreens } from './aiScreens'
 import { useVpnStore } from '@/stores/vpn'
 
 /** VPN WireGuard: o servidor e os dispositivos que entram por ela. */
@@ -8,7 +9,7 @@ export const vpnArea = defineArea({
     {
       path: 'vpn',
       component: () => import('@/pages/vpn/VpnLayout.vue'),
-      meta: { aiScreen: { id: 'vpn', label: 'VPN', icon: 'mdi-shield-lock-outline' } },
+      meta: { aiScreen: vpnScreens.vpn },
       children: [
         {
           path: '',

@@ -239,7 +239,8 @@ import {
   type AuditFilters,
 } from '@/stores/audit'
 import { useUsersStore } from '@/stores/users'
-import { formatDateTime } from '@/utils/formatters'
+import { countNoun, formatDateTime } from '@/utils/formatters'
+import { useAiScreenDetail } from '@/composables/useAiScreenDetail'
 
 const auditStore = useAuditStore()
 const usersStore = useUsersStore()
@@ -333,6 +334,22 @@ function nextPage(): void {
   if (!auditStore.meta) return
   auditStore.goToPage(auditStore.meta.currentPage + 1)
 }
+
+/** O chat sabe quantos registros a busca trouxe e o que está filtrado. */
+useAiScreenDetail(() => {
+  const filters = auditStore.filters
+  const user = userOptions.value.find((option) => option.value === filters.userId)
+  const parts = [
+    countNoun(auditStore.total, 'registro', 'registros'),
+    user ? `usuário ${user.title}` : null,
+    filters.action ? `ação ${actionLabel(filters.action).toLowerCase()}` : null,
+    filters.resourceType ? `recurso ${resourceLabel(filters.resourceType).toLowerCase()}` : null,
+    filters.resourceId != null ? `id ${filters.resourceId}` : null,
+    filters.from || filters.to ? 'período filtrado' : null,
+    filters.search.trim() ? `busca "${filters.search.trim()}"` : null,
+  ]
+  return parts.filter(Boolean).join(', ')
+})
 
 onMounted(() => {
   void usersStore.fetchUsers()

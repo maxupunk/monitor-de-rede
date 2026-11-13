@@ -144,6 +144,8 @@ import {
   readPackageFile,
   type LibraryFilter,
 } from '@/utils/pluginPresentation'
+import { useAiScreenDetail } from '@/composables/useAiScreenDetail'
+import { countNoun } from '@/utils/formatters'
 
 const store = usePluginsStore()
 const appsStore = usePluginAppsStore()
@@ -178,6 +180,20 @@ function resetFilters() {
   filter.value = 'all'
   search.value = ''
 }
+
+/** O chat sabe o tamanho da biblioteca, o que pede revisão e o que está filtrado. */
+useAiScreenDetail(() => {
+  const c = counts.value
+  const option = LIBRARY_FILTERS.find((item) => item.value === filter.value)
+  const term = (search.value ?? '').trim()
+  const parts = [
+    `${countNoun(c.all, 'plugin')}: ${c.active} ativos, ${c.pending} em preparo, ${c.disabled} desligados`,
+    attention.value.length ? `${attention.value.length} pedem revisão` : null,
+    filter.value !== 'all' && option ? `filtro ${option.label.toLowerCase()}` : null,
+    term ? `busca "${term}"` : null,
+  ]
+  return parts.filter(Boolean).join(', ')
+})
 
 onMounted(() => {
   void store.fetchLibrary()

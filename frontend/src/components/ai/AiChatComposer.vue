@@ -38,7 +38,7 @@
             :title="screenHint"
             :aria-label="screenHint"
             close-label="Perguntar sem esta tela"
-            @click:close="screenStore.dismiss(screen.key)"
+            @click:close="openScreen.dismiss()"
           >
             Tela: {{ screen.meta.label }}
           </v-chip>
@@ -49,7 +49,7 @@
             color="info"
             prepend-icon="mdi-plus"
             :title="`A IA volta a considerar a tela ${screen.meta.label}`"
-            @click="screenStore.restore()"
+            @click="openScreen.restore()"
           >
             Tela: {{ screen.meta.label }}
           </v-btn>
@@ -219,12 +219,10 @@
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
 import { useDisplay } from 'vuetify'
 import { useAiStore, type AiDraft, type AiMention } from '@/stores/ai'
 import { useMentionPicker } from '@/composables/useMentionPicker'
-import { useAiScreenStore } from '@/stores/aiScreen'
-import { currentScreen, screenAttachment } from '@/utils/aiScreen'
+import { useAiScreen } from '@/composables/useAiScreen'
 import { addMention, insertMention, mentionKindMeta, mentionsInText } from '@/utils/aiMentions'
 import { AUTO_COMPACT_RATIO, contextUsage } from '@/utils/aiChatStream'
 import { formatCompactCount, formatPercent } from '@/utils/formatters'
@@ -284,16 +282,8 @@ const picker = useMentionPicker((query) => aiStore.searchMentions(query))
  * A tela aberta vai junto da pergunta ("esses erros" = os da tela de Logs).
  * O chip mostra isso; fechar pergunta sem ela até a tela mudar.
  */
-const route = useRoute()
-const screenStore = useAiScreenStore()
-const screen = computed(() => currentScreen(route))
-const screenActive = computed(
-  () => screen.value !== null && !screenStore.isDismissed(screen.value.key)
-)
-const screenHint = computed(() => {
-  const detail = screenStore.detail ? ` (${screenStore.detail})` : ''
-  return `A IA considera o que está na tela ${screen.value?.meta.label ?? ''}${detail}. Feche para perguntar sem ela.`
-})
+const openScreen = useAiScreen()
+const { screen, active: screenActive, hint: screenHint } = openScreen
 
 const content = ref('')
 const mentions = ref<AiMention[]>([])
@@ -363,8 +353,7 @@ function send() {
   const text = content.value.trim()
   if (!text || aiStore.isStreaming || !aiStore.settings?.enabled) return
   const marked = mentionsInText(text, mentions.value)
-  const attached =
-    screen.value && screenActive.value ? screenAttachment(screen.value, screenStore.detail) : null
+  const attached = openScreen.attachment()
   clear()
   void aiStore.sendMessage(text, {}, marked, attached)
 }

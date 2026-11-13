@@ -173,6 +173,8 @@ import { useSitesStore } from '@/stores/sites'
 import { useTopologyStore } from '@/stores/topology'
 import { useTopologyOverlayStore } from '@/stores/topologyOverlay'
 import { activeFilterCount } from '@/utils/topology/filters'
+import { useAiScreenDetail } from '@/composables/useAiScreenDetail'
+import { countNoun } from '@/utils/formatters'
 import {
   edgeLinkTestRequest,
   registerBuiltinTopologyActions,
@@ -384,6 +386,26 @@ const anyDialogOpen = computed(
     dialogs.device.open ||
     Boolean(linkTestLayer.value?.dialogOpen)
 )
+
+/** O chat sabe o site, a saúde do mapa, o filtro e o que está selecionado. */
+useAiScreenDetail(() => {
+  const summary = view.summary.value
+  const site = sites.sites.find((item) => item.id === prefs.siteId)
+  const target = view.selectedTarget.value
+  const filters = activeFilterCount(prefs.filters)
+  const parts = [
+    site ? `site ${site.name}` : 'todos os sites',
+    `${countNoun(summary.nodes, 'nó', 'nós')}, ${summary.offline} offline, ${summary.warning} em alerta`,
+    summary.linksDown ? countNoun(summary.linksDown, 'link caído', 'links caídos') : null,
+    prefs.filters.problemsOnly ? 'só problemas' : null,
+    filters ? countNoun(filters, 'filtro ativo', 'filtros ativos') : null,
+    target?.kind === 'node' ? `selecionado ${target.node.name} (${target.node.status})` : null,
+    target?.kind === 'edge'
+      ? `link selecionado ${target.edge.sourceDeviceName} ↔ ${target.edge.targetDeviceName}`
+      : null,
+  ]
+  return parts.filter(Boolean).join(', ')
+})
 
 function toggleProblems() {
   prefs.filters = { ...prefs.filters, problemsOnly: !prefs.filters.problemsOnly }

@@ -14,11 +14,30 @@
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import MonitorDetailDialog from '@/components/monitors/MonitorDetailDialog.vue'
+import { useMonitorsStore } from '@/stores/monitors'
+import { useAiScreenDetail } from '@/composables/useAiScreenDetail'
 
 const route = useRoute()
 const router = useRouter()
 
 const monitorId = computed(() => Number(route.params.id))
+
+const monitorsStore = useMonitorsStore()
+
+/** O chat sabe qual monitor está aberto, de que tipo e em que estado. */
+useAiScreenDetail(() => {
+  const monitor = monitorsStore.currentMonitor
+  if (!monitor || monitor.id !== monitorId.value) return `monitor #${monitorId.value}`
+  const target = monitor.port ? `${monitor.target}:${monitor.port}` : monitor.target
+  const parts = [
+    `monitor ${monitor.name} (#${monitor.id})`,
+    `tipo ${monitor.type}`,
+    target ? `alvo ${target}` : null,
+    monitor.isEnabled === false ? 'desativado' : `status ${monitor.status}`,
+    monitor.device?.name ? `dispositivo ${monitor.device.name}` : null,
+  ]
+  return parts.filter(Boolean).join(', ')
+})
 
 /**
  * Fechar o diálogo tem de sair da rota — senão ele reabriria no próximo

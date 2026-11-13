@@ -151,7 +151,8 @@ import MaintenanceWindowDialog from '@/components/MaintenanceWindowDialog.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
 import { confirm } from '@/composables/useConfirm'
-import { formatDateTime } from '@/utils/formatters'
+import { countNoun, formatDateTime } from '@/utils/formatters'
+import { useAiScreenDetail } from '@/composables/useAiScreenDetail'
 
 const windowsStore = useMaintenanceWindowsStore()
 const sitesStore = useSitesStore()
@@ -205,6 +206,17 @@ function isActive(item: MaintenanceWindow): boolean {
   const end = new Date(item.endsAt)
   return start <= now.value && now.value <= end
 }
+
+/** O chat sabe quantas janelas existem, quantas estão em vigor e a busca. */
+useAiScreenDetail(() => {
+  const active = windowsStore.windows.filter(isActive)
+  const parts = [
+    countNoun(windowsStore.windows.length, 'janela', 'janelas'),
+    `${active.length} em vigor agora`,
+    search.value.trim() ? `busca "${search.value.trim()}"` : null,
+  ]
+  return parts.filter(Boolean).join(', ')
+})
 
 function openDialog(windowToEdit?: MaintenanceWindow) {
   selectedWindow.value = windowToEdit ?? null

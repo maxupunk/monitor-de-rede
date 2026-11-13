@@ -1,10 +1,6 @@
-/** Pergunta pronta oferecida quando a conversa está vazia. */
-export interface AiSuggestion {
-  title: string
-  prompt: string
-  icon: string
-  color: string
-}
+import type { AiSuggestion } from '@/utils/aiScreen'
+
+export type { AiSuggestion }
 
 /**
  * Sugestões do chat, em ordem de utilidade: o painel lateral mostra as
