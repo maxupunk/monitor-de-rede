@@ -76,6 +76,22 @@ describe('chat da IA', () => {
     expect(resposta.toolCalls?.[0].chart).toEqual(chart)
   })
 
+  it('a tela aberta vai na pergunta e o recurso dela vira o contexto', async () => {
+    vi.mocked(apiService.postStream).mockResolvedValueOnce(sseResponse([{ type: 'done' }]))
+
+    const store = useAiStore()
+    await store.sendMessage('o que são esses erros?', {}, [], {
+      label: 'Equipamento',
+      icon: 'mdi-router-network',
+      request: { screen: { id: 'device-detail', detail: 'aba Logs' }, deviceId: 7 },
+    })
+
+    const body = vi.mocked(apiService.postStream).mock.calls.at(-1)?.[1] as Record<string, unknown>
+    expect(body.screen).toEqual({ id: 'device-detail', detail: 'aba Logs' })
+    expect(body.deviceId).toBe(7)
+    expect(store.messages[0].screen).toEqual({ label: 'Equipamento', icon: 'mdi-router-network' })
+  })
+
   it('ferramenta sem gráfico fica com chart nulo', async () => {
     vi.mocked(apiService.postStream).mockResolvedValueOnce(
       sseResponse([

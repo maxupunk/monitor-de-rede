@@ -22,8 +22,38 @@
         </v-list>
       </v-card>
 
-      <!-- Marcações da pergunta -->
-      <div v-if="mentions.length > 0" class="d-flex flex-wrap ga-1 px-3 pt-2">
+      <!-- Tela aberta e marcações da pergunta -->
+      <div
+        v-if="screen || mentions.length > 0"
+        class="d-flex flex-wrap align-center ga-1 px-3 pt-2"
+      >
+        <template v-if="screen">
+          <v-chip
+            v-if="screenActive"
+            size="small"
+            variant="tonal"
+            color="info"
+            :prepend-icon="screen.meta.icon"
+            closable
+            :title="screenHint"
+            :aria-label="screenHint"
+            close-label="Perguntar sem esta tela"
+            @click:close="screenStore.dismiss(screen.key)"
+          >
+            Tela: {{ screen.meta.label }}
+          </v-chip>
+          <v-btn
+            v-else
+            size="x-small"
+            variant="text"
+            color="info"
+            prepend-icon="mdi-plus"
+            :title="`A IA volta a considerar a tela ${screen.meta.label}`"
+            @click="screenStore.restore()"
+          >
+            Tela: {{ screen.meta.label }}
+          </v-btn>
+        </template>
         <v-chip
           v-for="mention in mentions"
           :key="mention.kind + mention.id"
@@ -189,9 +219,12 @@
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { useDisplay } from 'vuetify'
 import { useAiStore, type AiDraft, type AiMention } from '@/stores/ai'
 import { useMentionPicker } from '@/composables/useMentionPicker'
+import { useAiScreenStore } from '@/stores/aiScreen'
+import { currentScreen, screenAttachment } from '@/utils/aiScreen'
 import { addMention, insertMention, mentionKindMeta, mentionsInText } from '@/utils/aiMentions'
 import { AUTO_COMPACT_RATIO, contextUsage } from '@/utils/aiChatStream'
 import { formatCompactCount, formatPercent } from '@/utils/formatters'
@@ -246,6 +279,21 @@ const context = computed(() => {
 })
 
 const picker = useMentionPicker((query) => aiStore.searchMentions(query))
+
+/**
+ * A tela aberta vai junto da pergunta ("esses erros" = os da tela de Logs).
+ * O chip mostra isso; fechar pergunta sem ela até a tela mudar.
+ */
+const route = useRoute()
+const screenStore = useAiScreenStore()
+const screen = computed(() => currentScreen(route))
+const screenActive = computed(
+  () => screen.value !== null && !screenStore.isDismissed(screen.value.key)
+)
+const screenHint = computed(() => {
+  const detail = screenStore.detail ? ` (${screenStore.detail})` : ''
+  return `A IA considera o que está na tela ${screen.value?.meta.label ?? ''}${detail}. Feche para perguntar sem ela.`
+})
 
 const content = ref('')
 const mentions = ref<AiMention[]>([])
@@ -315,8 +363,10 @@ function send() {
   const text = content.value.trim()
   if (!text || aiStore.isStreaming || !aiStore.settings?.enabled) return
   const marked = mentionsInText(text, mentions.value)
+  const attached =
+    screen.value && screenActive.value ? screenAttachment(screen.value, screenStore.detail) : null
   clear()
-  void aiStore.sendMessage(text, {}, marked)
+  void aiStore.sendMessage(text, {}, marked, attached)
 }
 
 function clear() {

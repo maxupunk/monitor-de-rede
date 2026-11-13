@@ -1,4 +1,5 @@
 import type { Area } from '@/bindings/Area'
+import type { AiScreenMeta } from '@/utils/aiScreen'
 
 declare module 'vue-router' {
   interface RouteMeta {
@@ -9,6 +10,8 @@ declare module 'vue-router' {
     requiresAdmin?: boolean
     /** A página ocupa a tela inteira, sem o contêiner do layout. */
     fullBleed?: boolean
+    /** Como a tela se apresenta ao chat da IA (o chip "Tela" do composer). */
+    aiScreen?: AiScreenMeta
   }
 }
 

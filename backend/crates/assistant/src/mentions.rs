@@ -1,5 +1,5 @@
 //! O que se marca com `@` no chat: dispositivos, monitores, containers e
-//! fontes de dados inteiras (logs, alertas, checagens, Docker).
+//! fontes de dados inteiras (logs, alertas, checagens, Docker, Wi-Fi).
 //!
 //! A tela pede sugestões conforme o usuário digita ([`search`]); a pergunta
 //! volta com as marcações e o prompt diz à IA de qual recurso se trata
@@ -60,7 +60,7 @@ pub struct MentionSource {
     pub area: Area,
 }
 
-pub const SOURCES: [MentionSource; 4] = [
+pub const SOURCES: [MentionSource; 5] = [
     MentionSource {
         id: "logs",
         label: "Logs",
@@ -88,6 +88,13 @@ pub const SOURCES: [MentionSource; 4] = [
         hint: "containers da Docker Engine — get_docker_containers; logs de um container com grep source='docker' container=<nome>",
         keywords: "docker containers",
         area: Area::Servers,
+    },
+    MentionSource {
+        id: "wifi",
+        label: "Wi-Fi",
+        hint: "aparelhos conectados aos roteadores/APs: sinal, SNR, retransmissões e os vigiados — get_platform_status area='wifi'",
+        keywords: "wifi wi-fi wireless clientes sinal",
+        area: Area::Network,
     },
 ];
 
@@ -247,6 +254,7 @@ mod tests {
         };
         assert_eq!(ids("syslog"), vec!["logs"]);
         assert_eq!(ids("doc"), vec!["docker"]);
+        assert_eq!(ids("wireless"), vec!["wifi"]);
         assert_eq!(ids("").len(), SOURCES.len());
     }
 

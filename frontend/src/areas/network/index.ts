@@ -16,40 +16,62 @@ function appsGroup(apps: NavApp[]): NavItemSpec | null {
 export const networkArea = defineArea({
   id: 'network',
   routes: [
-    { path: 'sites', name: 'sites', component: () => import('@/pages/SitesPage.vue') },
-    { path: 'networks', name: 'networks', component: () => import('@/pages/NetworksPage.vue') },
+    {
+      path: 'sites',
+      name: 'sites',
+      component: () => import('@/pages/SitesPage.vue'),
+      meta: { aiScreen: { id: 'sites', label: 'Sites', icon: 'mdi-map-marker-multiple-outline' } },
+    },
+    {
+      path: 'networks',
+      name: 'networks',
+      component: () => import('@/pages/NetworksPage.vue'),
+      meta: { aiScreen: { id: 'networks', label: 'Redes', icon: 'mdi-ip-network-outline' } },
+    },
     {
       path: 'wifi',
       name: 'wifi-clients',
       component: () => import('@/pages/WifiClientsPage.vue'),
+      meta: { aiScreen: { id: 'wifi', label: 'Clientes Wi-Fi', icon: 'mdi-wifi' } },
     },
     {
       path: 'topology',
       name: 'topology',
       component: () => import('@/pages/TopologyPage.vue'),
-      meta: { fullBleed: true },
+      meta: {
+        fullBleed: true,
+        aiScreen: { id: 'topology', label: 'Topologia', icon: 'mdi-sitemap' },
+      },
     },
     {
       path: 'link-tests',
       name: 'link-tests',
       component: () => import('@/pages/LinkTestsPage.vue'),
+      meta: {
+        aiScreen: { id: 'link-tests', label: 'Testes de velocidade', icon: 'mdi-speedometer' },
+      },
     },
     {
       path: 'discovery',
       name: 'discovery',
       component: () => import('@/pages/DiscoveryPage.vue'),
+      meta: { aiScreen: { id: 'discovery', label: 'Descoberta', icon: 'mdi-radar' } },
     },
     { path: 'probes', name: 'probes', component: () => import('@/pages/ProbesPage.vue') },
     {
       path: 'apps/:id',
       name: 'plugin-app',
       component: () => import('@/pages/PluginAppPage.vue'),
+      meta: { aiScreen: { id: 'plugin-app', label: 'App de plugin', icon: 'mdi-apps' } },
     },
     {
       path: 'plugins',
       name: 'plugins',
       component: () => import('@/pages/PluginsPage.vue'),
-      meta: { requiresAdmin: true },
+      meta: {
+        requiresAdmin: true,
+        aiScreen: { id: 'plugins', label: 'Plugins', icon: 'mdi-puzzle-outline' },
+      },
     },
   ],
   nav: [

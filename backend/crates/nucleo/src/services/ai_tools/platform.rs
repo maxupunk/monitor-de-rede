@@ -36,16 +36,17 @@ use crate::{
     },
 };
 
-const AREAS: [&str; 6] = [
+const AREAS: [&str; 7] = [
     "agents",
     "vpn",
+    "wifi",
     "discovery",
     "networks",
     "maintenance",
     "notifications",
 ];
 const DEFAULT_LIMIT: i64 = 20;
-/// O estado do próprio NetMonitor. As seções `vpn` e `discovery` são
+/// O estado do próprio NetMonitor. As seções `vpn`, `wifi` e `discovery` são
 /// contribuídas pelas áreas ([`PlatformSection`]), no ponto de montagem.
 pub struct PlatformStatus {
     sections: Vec<Box<dyn PlatformSection>>,
@@ -81,6 +82,7 @@ impl AiToolHandler for PlatformStatus {
 
     fn description(&self) -> &'static str {
         "Estado do próprio NetMonitor por área: 'agents' (agentes remotos: conexão, versão, host), 'vpn' (servidor WireGuard e peers: handshake, tráfego), \
+'wifi' (roteadores/APs e os aparelhos conectados: sinal, SNR, retransmissões, saúde e vigiados; os com problema primeiro), \
 'discovery' (varreduras recentes e em andamento), 'networks' (redes/CIDR, sites e servidores DNS), 'maintenance' (janelas ativas e futuras), \
 e 'notifications' (envios recentes, pendentes e suprimidos, com hours)."
     }

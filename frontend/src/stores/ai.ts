@@ -29,6 +29,7 @@ import type { ModelPullProgress } from '@/bindings/ModelPullProgress'
 import type { AutoAcceptState } from '@/bindings/AutoAcceptState'
 import { usePluginsStore } from './plugins'
 import { accessSavedFollowUp, type MissingAccess } from '@/utils/deviceCredentials'
+import type { ScreenAttachment } from '@/utils/aiScreen'
 
 /**
  * Identificador desta conversa para o backend. Aleatório de propósito: o modo
@@ -271,7 +272,9 @@ export const useAiStore = defineStore('ai', () => {
   async function sendMessage(
     content: string,
     context: AiChatContext = {},
-    mentions: AiMention[] = []
+    mentions: AiMention[] = [],
+    /** A tela aberta (o chip "Tela" do campo), quando o usuário não a dispensou. */
+    screenOpen: ScreenAttachment | null = null
   ) {
     if (!content.trim() || isStreaming.value) return
 
@@ -289,6 +292,7 @@ export const useAiStore = defineStore('ai', () => {
       role: 'user',
       content: content.trim(),
       ...(mentions.length > 0 ? { mentions } : {}),
+      ...(screenOpen ? { screen: { label: screenOpen.label, icon: screenOpen.icon } } : {}),
     })
     const history = buildChatHistory(messages.value)
     const compact = compactNext.value
@@ -312,11 +316,13 @@ export const useAiStore = defineStore('ai', () => {
         '/ai/chat/stream',
         {
           messages: history.messages,
-          deviceId: screen.deviceId ?? undefined,
-          monitorId: screen.monitorId ?? undefined,
+          // O recurso de onde o chat foi aberto vale mais que o da tela atual.
+          deviceId: screen.deviceId ?? screenOpen?.request.deviceId ?? undefined,
+          monitorId: screen.monitorId ?? screenOpen?.request.monitorId ?? undefined,
           alertId: screen.alertId ?? undefined,
           ruleId: screen.ruleId ?? undefined,
           mentions,
+          screen: screenOpen?.request.screen,
           summary: history.summary,
           contextHint: history.contextHint,
           compact,

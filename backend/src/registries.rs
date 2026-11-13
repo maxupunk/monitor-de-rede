@@ -401,6 +401,7 @@ pub fn ai_tool_catalog() -> Vec<Box<dyn AiToolHandler>> {
         Box::new(netmonitor_servers::deploys::ai_tools::DeployAction),
         Box::new(platform::PlatformStatus::new(vec![
             Box::new(netmonitor_vpn::ai_tools::VpnStatus),
+            Box::new(netmonitor_network_wifi::ai_tools::WifiStatus),
             Box::new(netmonitor_network::discovery::ai_tools::DiscoveryStatus),
         ])),
         Box::new(netmonitor_network::topology::ai_tools::Topology),

@@ -11,6 +11,7 @@ export const serversArea = defineArea({
     {
       path: 'docker',
       component: () => import('@/pages/docker/DockerLayout.vue'),
+      meta: { aiScreen: { id: 'docker', label: 'Docker', icon: 'mdi-docker' } },
       children: [
         {
           path: '',
@@ -53,11 +54,15 @@ export const serversArea = defineArea({
       path: 'deploys',
       name: 'deploys',
       component: () => import('@/pages/deploys/DeploysPage.vue'),
+      meta: {
+        aiScreen: { id: 'deploys', label: 'Deploy contínuo', icon: 'mdi-rocket-launch-outline' },
+      },
     },
     {
       path: 'registry',
       name: 'registry',
       component: () => import('@/pages/registry/RegistryPage.vue'),
+      meta: { aiScreen: { id: 'registry', label: 'Registry', icon: 'mdi-package-variant-closed' } },
     },
     {
       // A volta do GitHub ao criar e ao instalar o app (o manifest aponta

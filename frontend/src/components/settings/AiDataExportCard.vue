@@ -24,6 +24,7 @@
           :key="option.label"
           :value="periodKey(option.days)"
           color="primary"
+          base-color="primary"
           variant="outlined"
           filter
         >

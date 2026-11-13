@@ -41,6 +41,15 @@ impl Requester {
             origin: Origin::WifiWatch,
         }
     }
+
+    /// A IA pediu o estado do Wi-Fi (`get_platform_status area='wifi'`).
+    #[must_use]
+    pub const fn ai(user_id: Option<i64>) -> Self {
+        Self {
+            user_id,
+            origin: Origin::Ai,
+        }
+    }
 }
 
 /// O plugin Wi-Fi de um equipamento.

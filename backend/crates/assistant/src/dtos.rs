@@ -41,6 +41,10 @@ pub struct ChatStreamRequest {
     /// O que o usuário marcou com `@` na última pergunta.
     #[serde(default)]
     pub mentions: Vec<AiMention>,
+    /// A tela aberta enquanto a pessoa pergunta (o chip "Tela" do chat).
+    #[serde(default)]
+    #[ts(optional)]
+    pub screen: Option<AiScreenContext>,
     /// Resumo das mensagens já compactadas — elas não vêm mais em `messages`.
     #[serde(default)]
     pub summary: Option<String>,
@@ -98,6 +102,8 @@ enum ChatStreamRequestHelper {
         #[serde(default)]
         mentions: Vec<AiMention>,
         #[serde(default)]
+        screen: Option<AiScreenContext>,
+        #[serde(default)]
         summary: Option<String>,
         #[serde(default)]
         context_hint: Option<ContextHint>,
@@ -123,6 +129,7 @@ impl<'de> Deserialize<'de> for ChatStreamRequest {
                 alert_id,
                 rule_id,
                 mentions,
+                screen,
                 summary,
                 context_hint,
                 compact,
@@ -134,6 +141,7 @@ impl<'de> Deserialize<'de> for ChatStreamRequest {
                 alert_id,
                 rule_id,
                 mentions,
+                screen,
                 summary,
                 context_hint,
                 compact,
@@ -146,6 +154,7 @@ impl<'de> Deserialize<'de> for ChatStreamRequest {
                 alert_id: None,
                 rule_id: None,
                 mentions: Vec::new(),
+                screen: None,
                 summary: None,
                 context_hint: None,
                 compact: false,
@@ -180,6 +189,17 @@ pub struct AiMention {
     /// Linha curta para a lista de sugestões (IP, tipo, estado).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
+    pub detail: Option<String>,
+}
+
+/// A tela em que o usuário está: o id do catálogo (`screens::SCREENS`) e, se
+/// a tela tiver, o que está filtrado ou selecionado nela, numa linha.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct AiScreenContext {
+    pub id: String,
+    #[serde(default)]
     pub detail: Option<String>,
 }
 

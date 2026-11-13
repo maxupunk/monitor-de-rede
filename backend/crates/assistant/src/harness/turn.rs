@@ -15,8 +15,11 @@ use std::collections::HashSet;
 
 use serde_json::Value;
 
-use super::tools::{ToolGroup, ToolGroups};
-use crate::dtos::{AiMention, AiMentionKind, ChatMessageInput};
+use super::{
+    prompt::ChatContext,
+    tools::{ToolGroup, ToolGroups},
+};
+use crate::dtos::{AiMentionKind, ChatMessageInput};
 
 /// Palavras que, sozinhas, não pedem dado nenhum.
 const SMALL_TALK_WORDS: &[&str] = &[
@@ -86,13 +89,13 @@ pub fn is_small_talk(messages: &[ChatMessageInput]) -> bool {
 }
 
 /// Grupos que o contexto **marcado** pela pessoa pede: o container, o
-/// monitor ou a fonte citada com `@`, e o alerta ou a regra da tela de onde o
-/// chat foi aberto. Não é palpite sobre o texto — quem escolhe pelo texto é o
-/// Decisor ([`tool_routing`](crate::decider::tool_routing)).
+/// monitor ou a fonte citada com `@`, o alerta ou a regra de onde o chat foi
+/// aberto e a tela em que ela está. Não é palpite sobre o texto — quem
+/// escolhe pelo texto é o Decisor ([`tool_routing`](crate::decider::tool_routing)).
 #[must_use]
-pub fn context_groups(mentions: &[AiMention], alert_or_rule: bool) -> ToolGroups {
+pub fn context_groups(context: &ChatContext) -> ToolGroups {
     let mut groups = ToolGroups::new();
-    for mention in mentions {
+    for mention in &context.mentions {
         match (mention.kind, mention.id.as_str()) {
             (AiMentionKind::Container, _) | (AiMentionKind::Source, "docker") => {
                 groups.insert(ToolGroup::Docker);
@@ -103,12 +106,18 @@ pub fn context_groups(mentions: &[AiMention], alert_or_rule: bool) -> ToolGroups
             (AiMentionKind::Source, "logs") => {
                 groups.insert(ToolGroup::Logs);
             }
+            (AiMentionKind::Source, "wifi") => {
+                groups.insert(ToolGroup::Platform);
+            }
             _ => {}
         }
     }
-    if alert_or_rule {
+    if context.alert_id.is_some() || context.rule_id.is_some() {
         groups.insert(ToolGroup::AlertRules);
         groups.insert(ToolGroup::Analysis);
+    }
+    if let Some(screen) = &context.screen {
+        groups.extend(screen.groups().iter());
     }
     groups
 }
@@ -439,6 +448,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::dtos::AiMention;
 
     fn msg(role: &str, content: &str) -> ChatMessageInput {
         ChatMessageInput {
@@ -492,15 +502,35 @@ mod tests {
             label: "api".into(),
             detail: None,
         };
+        let marcado = ChatContext {
+            mentions: vec![container],
+            ..ChatContext::default()
+        };
         assert_eq!(
-            context_groups(&[container], false),
+            context_groups(&marcado),
             ToolGroups::from([ToolGroup::Docker])
         );
+        let alerta = ChatContext {
+            alert_id: Some(1),
+            ..ChatContext::default()
+        };
         assert_eq!(
-            context_groups(&[], true),
+            context_groups(&alerta),
             ToolGroups::from([ToolGroup::AlertRules, ToolGroup::Analysis])
         );
-        assert!(context_groups(&[], false).is_empty());
+        assert!(context_groups(&ChatContext::default()).is_empty());
+    }
+
+    #[test]
+    fn tela_aberta_carrega_os_grupos_dela() {
+        let logs = ChatContext {
+            screen: crate::screens::sanitize(Some(crate::dtos::AiScreenContext {
+                id: "logs".into(),
+                detail: None,
+            })),
+            ..ChatContext::default()
+        };
+        assert_eq!(context_groups(&logs), ToolGroups::from([ToolGroup::Logs]));
     }
 
     #[test]

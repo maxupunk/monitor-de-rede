@@ -8,6 +8,7 @@ export const vpnArea = defineArea({
     {
       path: 'vpn',
       component: () => import('@/pages/vpn/VpnLayout.vue'),
+      meta: { aiScreen: { id: 'vpn', label: 'VPN', icon: 'mdi-shield-lock-outline' } },
       children: [
         {
           path: '',

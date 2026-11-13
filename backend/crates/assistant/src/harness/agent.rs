@@ -38,7 +38,7 @@ use crate::{
     decider::{runtime::DeciderRuntime, tool_routing},
     drivers::traits::{AiChatOptions, AiDriver, AiMessage, AiToolCall, AiUsage},
     dtos::{AiChart, ChatMessageInput, ChatStreamRequest},
-    mentions,
+    mentions, screens,
     settings::AiSettings,
 };
 use netmonitor_core::{
@@ -239,6 +239,7 @@ impl AgentRequest {
                 alert_id: request.alert_id,
                 rule_id: request.rule_id,
                 mentions: mentions::sanitize(request.mentions),
+                screen: screens::sanitize(request.screen),
             },
             policy: ToolPolicy::from_settings(settings),
             tool_loading: ToolLoading::OnDemand,
@@ -779,13 +780,8 @@ pub async fn run_agent_loop(
             context_window::resolve(driver.as_ref(), &configured_model)
         );
         let everything = || available.iter().copied().collect::<ToolGroups>();
-        // O que a pessoa marcou (`@container`, o alerta da tela) vai sempre.
-        let marked = || {
-            context_groups(
-                &request.context.mentions,
-                request.context.alert_id.is_some() || request.context.rule_id.is_some(),
-            )
-        };
+        // O que a pessoa marcou (`@container`, o alerta, a tela aberta) vai sempre.
+        let marked = || context_groups(&request.context);
         let preselected: ToolGroups = match (request.tool_loading, routed) {
             (ToolLoading::Everything, _) => everything(),
             (ToolLoading::OnDemand, _) if small_talk => ToolGroups::new(),

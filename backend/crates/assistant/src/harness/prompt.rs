@@ -1,5 +1,6 @@
 //! System prompt da sessão: papel, método de trabalho, formato da resposta,
-//! o que o usuário marcou com `@` e o contexto da tela de onde o chat foi aberto.
+//! o que o usuário marcou com `@`, a tela em que ele está e o recurso de onde
+//! o chat foi aberto.
 
 use chrono::Utc;
 use sea_orm::{ConnectionTrait, EntityTrait};
@@ -8,6 +9,7 @@ use super::tools::{fill_device_ip, monitor_target, ToolPolicy, ToolRegistry};
 use crate::{
     dtos::{AiMention, AiMentionKind},
     mentions,
+    screens::ScreenContext,
     settings::{AiAutomationMode, AiSettings},
 };
 use netmonitor_core::models::{alert_events, alert_rules, devices, monitors};
@@ -21,6 +23,8 @@ pub struct ChatContext {
     pub rule_id: Option<i64>,
     /// Marcados com `@` na última pergunta — o alvo explícito dela.
     pub mentions: Vec<AiMention>,
+    /// A tela aberta enquanto a pessoa pergunta: pista do assunto, não ordem.
+    pub screen: Option<ScreenContext>,
 }
 
 // Cada caractere daqui vai em toda rodada de toda pergunta: regra nova entra
@@ -296,6 +300,14 @@ pub async fn build_turn_context<C: ConnectionTrait>(db: &C, context: &ChatContex
             block.push_str(&mention_section(db, mention).await);
             block.push('\n');
         }
+    }
+
+    if let Some(screen) = &context.screen {
+        block.push_str(
+            "TELA ABERTA AGORA (sem @, é o assunto: 'esses erros' = os da tela; pergunta sobre outra coisa a ignora):\n",
+        );
+        block.push_str(&screen.line());
+        block.push('\n');
     }
 
     let sections = context_sections(db, context).await;

@@ -169,6 +169,7 @@ import { useLogsStore, SEVERITY_OPTIONS, WINDOW_OPTIONS, type LogFilters } from 
 import { useDevicesStore } from '@/stores/devices'
 import type { LogTemplateInfo } from '@/bindings/LogTemplateInfo'
 import { LOG_CATEGORY_OPTIONS, logCategoryInfo } from '@/utils/logCategories'
+import { useAiScreenDetail } from '@/composables/useAiScreenDetail'
 
 const logsStore = useLogsStore()
 const devicesStore = useDevicesStore()
@@ -206,6 +207,27 @@ const windowLabel = computed(() => {
  * mesmos filtros, e mantê-lo com os antigos empilharia no topo linhas que a
  * tabela abaixo não mostraria.
  */
+/** O chat sabe o que está filtrado: "esses erros" são os desta tela. */
+useAiScreenDetail(() => {
+  const filters = logsStore.filters
+  const device = devicesStore.devices.find((item) => item.id === filters.deviceId)
+  const parts = [
+    device
+      ? `dispositivo ${device.name}`
+      : filters.deviceId
+        ? `dispositivo #${filters.deviceId}`
+        : null,
+    SEVERITY_OPTIONS.find((option) => option.value === filters.severity)?.label.toLowerCase(),
+    WINDOW_OPTIONS.find((option) => option.value === filters.hours)?.label.toLowerCase(),
+    filters.category
+      ? `categoria ${logCategoryInfo(filters.category)?.title ?? filters.category}`
+      : null,
+    filters.search.trim() ? `busca "${filters.search.trim()}"` : null,
+    logsStore.tailing ? 'ao vivo' : null,
+  ]
+  return parts.filter(Boolean).join(', ')
+})
+
 function onFilterChange(next: Partial<LogFilters>): void {
   const estavaAoVivo = logsStore.tailing
   if (estavaAoVivo) logsStore.stopTail()

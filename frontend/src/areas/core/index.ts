@@ -8,36 +8,93 @@ import { coreSse } from './sse'
 export const coreArea = defineArea({
   id: 'core',
   routes: [
-    { path: '', name: 'dashboard', component: () => import('@/pages/DashboardPage.vue') },
-    { path: 'devices', name: 'devices', component: () => import('@/pages/DevicesPage.vue') },
+    {
+      path: '',
+      name: 'dashboard',
+      component: () => import('@/pages/DashboardPage.vue'),
+      meta: {
+        aiScreen: { id: 'dashboard', label: 'Dashboard', icon: 'mdi-view-dashboard-outline' },
+      },
+    },
+    {
+      path: 'devices',
+      name: 'devices',
+      component: () => import('@/pages/DevicesPage.vue'),
+      meta: { aiScreen: { id: 'devices', label: 'Equipamentos', icon: 'mdi-devices' } },
+    },
     {
       path: 'devices/:id',
       name: 'device-detail',
       component: () => import('@/pages/DeviceDetailPage.vue'),
+      meta: {
+        aiScreen: {
+          id: 'device-detail',
+          label: 'Equipamento',
+          icon: 'mdi-router-network',
+          entity: 'device',
+        },
+      },
     },
     {
       path: 'scheduled-tasks',
       name: 'scheduled-tasks',
       component: () => import('@/pages/ScheduledTasksPage.vue'),
+      meta: {
+        aiScreen: { id: 'scheduled-tasks', label: 'Tarefas agendadas', icon: 'mdi-calendar-clock' },
+      },
     },
-    { path: 'monitors', name: 'monitors', component: () => import('@/pages/MonitorsPage.vue') },
+    {
+      path: 'monitors',
+      name: 'monitors',
+      component: () => import('@/pages/MonitorsPage.vue'),
+      meta: { aiScreen: { id: 'monitors', label: 'Monitores', icon: 'mdi-monitor-eye' } },
+    },
     {
       path: 'monitors/:id',
       name: 'monitor-detail',
       component: () => import('@/pages/MonitorDetailPage.vue'),
+      meta: {
+        aiScreen: {
+          id: 'monitor-detail',
+          label: 'Monitor',
+          icon: 'mdi-monitor-eye',
+          entity: 'monitor',
+        },
+      },
     },
-    { path: 'alerts', name: 'alerts', component: () => import('@/pages/AlertsPage.vue') },
+    {
+      path: 'alerts',
+      name: 'alerts',
+      component: () => import('@/pages/AlertsPage.vue'),
+      meta: { aiScreen: { id: 'alerts', label: 'Alertas', icon: 'mdi-bell-alert-outline' } },
+    },
     {
       path: 'maintenance-windows',
       name: 'maintenance-windows',
       component: () => import('@/pages/MaintenanceWindowsPage.vue'),
+      meta: {
+        aiScreen: { id: 'maintenance-windows', label: 'Manutenção', icon: 'mdi-wrench-clock' },
+      },
     },
-    { path: 'events', name: 'events', component: () => import('@/pages/EventsPage.vue') },
-    { path: 'logs', name: 'logs', component: () => import('@/pages/LogsPage.vue') },
+    {
+      path: 'events',
+      name: 'events',
+      component: () => import('@/pages/EventsPage.vue'),
+      meta: { aiScreen: { id: 'events', label: 'Eventos', icon: 'mdi-timeline-clock-outline' } },
+    },
+    {
+      path: 'logs',
+      name: 'logs',
+      component: () => import('@/pages/LogsPage.vue'),
+      meta: { aiScreen: { id: 'logs', label: 'Logs', icon: 'mdi-text-box-search-outline' } },
+    },
     {
       path: 'remote-servers',
       name: 'remote-servers',
       component: () => import('@/pages/remote-servers/RemoteServersPage.vue'),
+      meta: {
+        aiScreen: { id: 'remote-servers', label: 'Servidores remotos', icon: 'mdi-server-network' },
+      },
     },
     { path: 'agents', redirect: '/remote-servers' },
     {
@@ -62,7 +119,10 @@ export const coreArea = defineArea({
       path: 'audit',
       name: 'audit',
       component: () => import('@/pages/AuditPage.vue'),
-      meta: { requiresAdmin: true },
+      meta: {
+        requiresAdmin: true,
+        aiScreen: { id: 'audit', label: 'Auditoria', icon: 'mdi-clipboard-text-clock-outline' },
+      },
     },
     {
       path: 'backup',

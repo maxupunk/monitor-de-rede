@@ -111,6 +111,7 @@ import DockerUnavailableAlert from '@/components/docker/DockerUnavailableAlert.v
 import LiveIndicator from '@/components/LiveIndicator.vue'
 import { useDockerStore } from '@/stores/docker'
 import { useLiveInterest } from '@/composables/useLiveInterest'
+import { useAiScreenDetail } from '@/composables/useAiScreenDetail'
 
 const docker = useDockerStore()
 const route = useRoute()
@@ -149,6 +150,20 @@ const tabs = computed(() => [
   },
   { title: 'Histórico', icon: 'mdi-chart-timeline-variant', to: '/docker/history', count: null },
 ])
+
+/** O chat sabe qual host e qual aba estão abertos. */
+useAiScreenDetail(() => {
+  const host = docker.selectedHost
+  const tab = tabs.value.find((item) => item.to === route.path)
+  const parts = [
+    host ? `host ${host.name}${host.online ? '' : ' (agente desconectado)'}` : null,
+    tab ? `aba ${tab.title}` : null,
+    docker.status
+      ? `${docker.runningContainers} containers rodando, ${docker.stoppedContainers} parados`
+      : null,
+  ]
+  return parts.filter(Boolean).join(', ')
+})
 
 /** O estado do host num relance: conexão, Engine e containers. */
 const statusChips = computed(() => {

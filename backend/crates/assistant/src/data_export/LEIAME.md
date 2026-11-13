@@ -25,7 +25,9 @@ Cada linha traz `id`, `title`, `user` (id e nome de quem perguntou),
 - `signals.failures` aponta cada falha: `messageIndex` (a posição em
   `messages`), `kind` (`response` ou `tool`), a ferramenta e o erro.
 - `messages` é a conversa como foi guardada: `role`, `content`, `toolCalls`
-  (nome, argumentos, resultado, status), `usage`, `error`, `notice`.
+  (nome, argumentos, resultado, status), `usage`, `error`, `notice` e, nas
+  perguntas, `mentions` (o que foi marcado com `@`) e `screen` (a tela em que
+  a pessoa estava).
 
 ## `treino/*.jsonl`
 

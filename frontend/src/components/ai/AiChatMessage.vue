@@ -84,8 +84,18 @@
             v-html="renderedContent"
           />
 
-          <!-- Marcados com @ -->
-          <div v-if="message.mentions?.length" class="d-flex flex-wrap ga-1 mt-2">
+          <!-- Tela aberta e marcados com @ -->
+          <div v-if="message.screen || message.mentions?.length" class="d-flex flex-wrap ga-1 mt-2">
+            <v-chip
+              v-if="message.screen"
+              size="x-small"
+              variant="outlined"
+              color="white"
+              :prepend-icon="message.screen.icon"
+              title="Tela em que a pergunta foi feita"
+            >
+              Tela: {{ message.screen.label }}
+            </v-chip>
             <v-chip
               v-for="mention in message.mentions"
               :key="mention.kind + mention.id"

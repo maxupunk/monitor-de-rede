@@ -18,7 +18,7 @@ use backend::app::App;
 use futures::StreamExt;
 use loco_rs::{prelude::AppContext, testing::prelude::*};
 use netmonitor_assistant::{
-    dtos::{ChatMessageInput, TestConnectionResponse},
+    dtos::{AiScreenContext, ChatMessageInput, TestConnectionResponse},
     {
         context_window::{
             self,
@@ -29,9 +29,10 @@ use netmonitor_assistant::{
         },
         harness::{
             agent::{run_agent_loop, AgentRequest, ConversationMemory, HarnessEvent, ToolLoading},
-            prompt::ChatContext,
+            prompt::{build_turn_context, ChatContext},
             tools::ToolPolicy,
         },
+        screens,
         settings::AiSettings,
     },
 };
@@ -501,6 +502,31 @@ async fn oi_numa_janela_pequena_nao_compacta_e_avisa() {
             aviso.is_some_and(|aviso| aviso.contains("4096")),
             "a tela explica que a janela é pequena"
         );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn tela_aberta_vai_no_contexto_da_pergunta() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
+        let contexto = ChatContext {
+            screen: screens::sanitize(Some(AiScreenContext {
+                id: "logs".into(),
+                detail: Some("erro e acima, dispositivo ap-sala".into()),
+            })),
+            ..ChatContext::default()
+        };
+        let bloco = build_turn_context(&ctx.db, &contexto).await;
+        assert!(bloco.contains("TELA ABERTA AGORA"), "{bloco}");
+        assert!(bloco.contains("- Logs: syslog"), "{bloco}");
+        assert!(
+            bloco.contains("Na tela agora: erro e acima, dispositivo ap-sala."),
+            "{bloco}"
+        );
+
+        let sem_tela = build_turn_context(&ctx.db, &ChatContext::default()).await;
+        assert!(!sem_tela.contains("TELA ABERTA"), "{sem_tela}");
     })
     .await;
 }

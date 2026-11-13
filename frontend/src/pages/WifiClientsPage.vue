@@ -95,7 +95,8 @@ import type { WifiReadStatus } from '@/bindings/WifiReadStatus'
 import { useAuthStore } from '@/stores/auth'
 import { useWifiClientsStore } from '@/stores/wifiClients'
 import { formatRelativeTime } from '@/utils/formatters'
-import { countStations, emptyFilter, filterStations } from '@/utils/wifiPresentation'
+import { BAND_LABEL, countStations, emptyFilter, filterStations } from '@/utils/wifiPresentation'
+import { useAiScreenDetail } from '@/composables/useAiScreenDetail'
 
 const store = useWifiClientsStore()
 const auth = useAuthStore()
@@ -139,6 +140,21 @@ const tiles = computed(() => {
       icon: 'mdi-sleep',
     },
   ]
+})
+
+/** O chat sabe o que a tela mostra: quantos clientes, quantos com problema e o filtro. */
+useAiScreenDetail(() => {
+  const current = filter.value
+  const device = store.devices.find((item) => item.deviceId === current.deviceId)
+  const parts = [
+    `${counts.value.all} clientes em ${store.devices.length} roteadores, ${counts.value.attention} precisam de atenção`,
+    device ? `roteador ${device.deviceName}` : null,
+    current.health === 'attention' ? 'só os que precisam de atenção' : null,
+    current.health === 'power_save' ? 'só os em repouso' : null,
+    current.band ? `banda ${BAND_LABEL[current.band]}` : null,
+    current.search.trim() ? `busca "${current.search.trim()}"` : null,
+  ]
+  return parts.filter(Boolean).join(', ')
 })
 
 const deviceOptions = computed(() => [

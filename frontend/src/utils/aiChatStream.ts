@@ -68,6 +68,8 @@ export interface AiDisplayMessage {
   toolCalls?: AiToolCallState[]
   /** O que o usuário marcou com `@` nesta pergunta. */
   mentions?: AiMention[]
+  /** A tela em que o usuário estava ao perguntar. */
+  screen?: { label: string; icon: string } | null
   usage?: AiUsageInfo | null
   isStreaming?: boolean
   error?: string | null

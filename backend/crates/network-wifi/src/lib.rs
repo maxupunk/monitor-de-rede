@@ -9,8 +9,10 @@
 //! * [`collector`] — a leitura em segundo plano, publicada pelo SSE;
 //! * [`ping`] — a latência do AP até uma estação;
 //! * [`watchlist`] e [`watch`] — os aparelhos vigiados e o vigia que os
-//!   procura a cada ciclo e alimenta os alertas.
+//!   procura a cada ciclo e alimenta os alertas;
+//! * [`ai_tools`] — a seção `wifi` do `get_platform_status` da IA.
 
+pub mod ai_tools;
 pub mod collector;
 pub mod contract;
 pub mod controllers;
