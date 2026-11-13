@@ -159,12 +159,20 @@ export const networkArea = defineArea({
     },
   },
   sse: networkSse,
-  settingsTabs: [{ value: 'rede', title: 'Rede', icon: 'mdi-lan', order: 30 }],
+  settingsTabs: [
+    { value: 'rede', title: 'Rede', icon: 'mdi-lan', order: 30 },
+    { value: 'wifi', title: 'Wi-Fi', icon: 'mdi-wifi', order: 35 },
+  ],
   settingsCards: [
     {
       tab: 'rede',
       order: 10,
       component: lazyComponent(() => import('@/components/settings/VendorRegistryCard.vue')),
+    },
+    {
+      tab: 'wifi',
+      order: 10,
+      component: lazyComponent(() => import('@/components/settings/WifiSettingsCard.vue')),
     },
   ],
 })

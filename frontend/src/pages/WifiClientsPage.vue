@@ -69,14 +69,27 @@
       <WifiWatchedPanel class="mb-4" />
 
       <v-card elevation="2" rounded="lg">
+        <v-tabs v-model="tab" color="primary" aria-label="Como ver os clientes">
+          <v-tab value="list" prepend-icon="mdi-format-list-bulleted">Lista</v-tab>
+          <v-tab value="map" prepend-icon="mdi-map-marker-radius-outline">Mapa</v-tab>
+        </v-tabs>
+        <v-divider></v-divider>
         <v-card-text class="d-flex flex-column ga-4">
-          <WifiStationFilters v-model="filter" :counts="counts" :devices="deviceOptions" />
+          <WifiStationFilters
+            v-model="filter"
+            :counts="counts"
+            :devices="deviceOptions"
+            :ssids="ssids"
+            :watched-count="watchedConnected"
+          />
           <WifiStationsTable
+            v-if="tab === 'list'"
             :rows="filtered"
             show-device
             :loading="store.devices.length === 0 && store.requesting"
             :no-data-text="emptyText"
           />
+          <WifiMap v-else v-model:selected="selectedMac" :rows="filtered" :devices="mapDevices" />
         </v-card-text>
       </v-card>
     </template>
@@ -84,8 +97,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
+import WifiMap from '@/components/wifi/WifiMap.vue'
 import WifiRefreshButton from '@/components/wifi/WifiRefreshButton.vue'
 import WifiStationFilters from '@/components/wifi/WifiStationFilters.vue'
 import WifiStationsTable from '@/components/wifi/WifiStationsTable.vue'
@@ -95,12 +110,31 @@ import type { WifiReadStatus } from '@/bindings/WifiReadStatus'
 import { useAuthStore } from '@/stores/auth'
 import { useWifiClientsStore } from '@/stores/wifiClients'
 import { formatRelativeTime } from '@/utils/formatters'
-import { BAND_LABEL, countStations, emptyFilter, filterStations } from '@/utils/wifiPresentation'
+import {
+  BAND_LABEL,
+  countStations,
+  distanceText,
+  emptyFilter,
+  filterStations,
+  ssidsOf,
+  stationName,
+} from '@/utils/wifiPresentation'
 import { useAiScreenDetail } from '@/composables/useAiScreenDetail'
 
 const store = useWifiClientsStore()
 const auth = useAuthStore()
+const route = useRoute()
+const router = useRouter()
 const filter = ref(emptyFilter())
+
+type WifiTab = 'list' | 'map'
+/** A aba fica na URL (`?tab=map`): o link leva direto ao mapa. */
+const tab = ref<WifiTab>(route.query.tab === 'map' ? 'map' : 'list')
+watch(tab, (value) => {
+  void router.replace({ query: { ...route.query, tab: value === 'map' ? 'map' : undefined } })
+})
+/** O aparelho aberto no painel do mapa. */
+const selectedMac = ref<string | null>(null)
 
 const DEVICE_STATUS: Record<WifiReadStatus, { color: string; icon: string }> = {
   reading: { color: 'primary', icon: 'mdi-progress-clock' },
@@ -109,7 +143,18 @@ const DEVICE_STATUS: Record<WifiReadStatus, { color: string; icon: string }> = {
 }
 
 const counts = computed(() => countStations(store.rows))
-const filtered = computed(() => filterStations(store.rows, filter.value))
+const filtered = computed(() => filterStations(store.rows, filter.value, store.watchedByMac))
+const ssids = computed(() => ssidsOf(store.rows))
+const watchedConnected = computed(
+  () =>
+    new Set(store.rows.filter((row) => store.watchedByMac.has(row.mac)).map((row) => row.mac)).size
+)
+/** No mapa, o filtro de roteador mostra só aquele AP. */
+const mapDevices = computed(() =>
+  filter.value.deviceId === null
+    ? store.devices
+    : store.devices.filter((device) => device.deviceId === filter.value.deviceId)
+)
 
 const noWifiDevices = computed(
   () => store.devices.length === 0 && store.lastFleetRefresh?.deviceIds.length === 0
@@ -142,17 +187,30 @@ const tiles = computed(() => {
   ]
 })
 
-/** O chat sabe o que a tela mostra: quantos clientes, quantos com problema e o filtro. */
+/**
+ * O chat sabe o que a tela mostra: quantos clientes, quantos com problema, o
+ * filtro e, na aba Mapa, o aparelho aberto no painel.
+ */
 useAiScreenDetail(() => {
   const current = filter.value
   const device = store.devices.find((item) => item.deviceId === current.deviceId)
+  const selected =
+    tab.value === 'map' && selectedMac.value
+      ? store.rows.find((row) => row.mac === selectedMac.value)
+      : null
   const parts = [
+    tab.value === 'map' ? 'aba Mapa (APs com os aparelhos em volta, ao vivo)' : 'aba Lista',
     `${counts.value.all} clientes em ${store.devices.length} roteadores, ${counts.value.attention} precisam de atenção`,
     device ? `roteador ${device.deviceName}` : null,
     current.health === 'attention' ? 'só os que precisam de atenção' : null,
     current.health === 'power_save' ? 'só os em repouso' : null,
     current.band ? `banda ${BAND_LABEL[current.band]}` : null,
+    current.ssid ? `rede "${current.ssid}"` : null,
+    current.watchedOnly ? 'só os vigiados' : null,
     current.search.trim() ? `busca "${current.search.trim()}"` : null,
+    selected
+      ? `aparelho selecionado: ${store.watchedByMac.get(selected.mac)?.name ?? stationName(selected)} (${selected.mac}) em ${selected.deviceName}, sinal ${selected.signalDbm} dBm, distância ${distanceText(selected)}, saúde ${selected.health}`
+      : null,
   ]
   return parts.filter(Boolean).join(', ')
 })

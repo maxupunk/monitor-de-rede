@@ -6,7 +6,11 @@ import { usePluginsStore } from '@/stores/plugins'
 import { usePluginAppsStore } from '@/stores/pluginApps'
 import { useLinkTestsStore } from '@/stores/linkTests'
 import { useWifiClientsStore } from '@/stores/wifiClients'
-import { isWifiDeviceSnapshot, isWifiWatchedSnapshot } from '@/utils/wifiPresentation'
+import {
+  isWifiDeviceSnapshot,
+  isWifiRoamEvent,
+  isWifiWatchedSnapshot,
+} from '@/utils/wifiPresentation'
 
 /** Estado ao vivo (snapshot por etapa, amostra por segundo): fora do feed. */
 const live = (handle: SseHandler): SseRoute => ({ ephemeral: true, handle })
@@ -83,5 +87,9 @@ export const networkSse: SseRoutes = {
   }),
   'wifi:watched': live((data) => {
     if (isWifiWatchedSnapshot(data)) useWifiClientsStore().applyWatched(data)
+  }),
+  // Troca de AP: o mapa anima e o histórico aberto ganha a linha.
+  'wifi:roamed': live((data) => {
+    if (isWifiRoamEvent(data)) useWifiClientsStore().applyRoamed(data)
   }),
 }

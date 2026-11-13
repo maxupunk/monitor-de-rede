@@ -16,12 +16,21 @@ describe('buildSettingsTabs', () => {
   it('com a Rede desligada, Configurações não mostra nada só da Rede', () => {
     const values = buildSettingsTabs(AREAS, only()).map((tab) => tab.value)
     expect(values).not.toContain('rede')
+    expect(values).not.toContain('wifi')
     expect(values).toEqual(['geral', 'conectividade', 'notificacoes', 'ia', 'sistema'])
   })
 
   it('com a Rede ligada, a aba dela entra na ordem declarada', () => {
     const values = buildSettingsTabs(AREAS, all).map((tab) => tab.value)
-    expect(values).toEqual(['geral', 'conectividade', 'rede', 'notificacoes', 'ia', 'sistema'])
+    expect(values).toEqual([
+      'geral',
+      'conectividade',
+      'rede',
+      'wifi',
+      'notificacoes',
+      'ia',
+      'sistema',
+    ])
   })
 
   it('cartão de outra área entra na aba declarada e some com a área', () => {

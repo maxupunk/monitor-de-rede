@@ -5,13 +5,15 @@
  */
 import type { WifiBand } from '@/bindings/WifiBand'
 import type { WifiDeviceSnapshot } from '@/bindings/WifiDeviceSnapshot'
+import type { WifiEnvironment } from '@/bindings/WifiEnvironment'
 import type { WifiGrade } from '@/bindings/WifiGrade'
 import type { WifiHealth } from '@/bindings/WifiHealth'
 import type { WifiReadStatus } from '@/bindings/WifiReadStatus'
+import type { WifiRoamEvent } from '@/bindings/WifiRoamEvent'
 import type { WifiStation } from '@/bindings/WifiStation'
 import type { WifiWatchState } from '@/bindings/WifiWatchState'
 import type { WifiWatchedSnapshot } from '@/bindings/WifiWatchedSnapshot'
-import { formatPercent } from '@/utils/formatters'
+import { formatDistanceRange, formatPercent } from '@/utils/formatters'
 import { formatOutputValue } from '@/utils/pluginPresentation'
 
 /** Uma estação com o equipamento onde está conectada. */
@@ -147,16 +149,25 @@ export interface WifiStationFilter {
   health: WifiHealthFilter
   band: WifiBand | null
   deviceId: number | null
+  /** Só os clientes desta rede (SSID). */
+  ssid: string | null
+  /** Só os aparelhos vigiados. */
+  watchedOnly: boolean
   search: string
 }
 
 export function emptyFilter(): WifiStationFilter {
-  return { health: 'all', band: null, deviceId: null, search: '' }
+  return { health: 'all', band: null, deviceId: null, ssid: null, watchedOnly: false, search: '' }
 }
 
+/**
+ * As linhas que passam no filtro. `watched` são os MACs vigiados (só pesa
+ * com `watchedOnly`); o nome dado ao vigiado também entra na busca.
+ */
 export function filterStations(
   rows: WifiStationRow[],
-  filter: WifiStationFilter
+  filter: WifiStationFilter,
+  watched: ReadonlyMap<string, { name: string }> = new Map()
 ): WifiStationRow[] {
   const search = filter.search.trim().toLowerCase()
   return rows.filter((row) => {
@@ -164,8 +175,18 @@ export function filterStations(
     if (filter.health === 'power_save' && row.health !== 'power_save') return false
     if (filter.band !== null && row.band !== filter.band) return false
     if (filter.deviceId !== null && row.deviceId !== filter.deviceId) return false
-    return !search || searchText(row).includes(search)
+    if (filter.ssid !== null && row.ssid !== filter.ssid) return false
+    if (filter.watchedOnly && !watched.has(row.mac)) return false
+    if (!search) return true
+    const name = watched.get(row.mac)?.name.toLowerCase() ?? ''
+    return searchText(row).includes(search) || name.includes(search)
   })
+}
+
+/** As redes (SSID) vistas, em ordem alfabética, para o filtro. */
+export function ssidsOf(rows: WifiStationRow[]): string[] {
+  const names = new Set(rows.map((row) => row.ssid).filter((ssid): ssid is string => !!ssid))
+  return [...names].sort((a, b) => a.localeCompare(b))
 }
 
 export interface WifiStationCounts {
@@ -228,5 +249,47 @@ export function isWifiWatchedSnapshot(value: unknown): value is WifiWatchedSnaps
       (client) =>
         isRecord(client) && typeof client.id === 'number' && typeof client.mac === 'string'
     )
+  )
+}
+
+/** O nome do ambiente da estimativa de distância (Configurações de Wi-Fi). */
+export const ENVIRONMENT_LABEL: Record<WifiEnvironment, string> = {
+  open: 'Aberto (galpão, área externa)',
+  office: 'Escritório ou casa',
+  walls: 'Muitas paredes (alvenaria, lajes)',
+}
+
+/**
+ * A distância aproximada como o operador lê: a faixa ("~3–6 m") e, quando o
+ * rádio não informou a potência, o aviso de que é menos confiável.
+ */
+export function distanceText(station: WifiStation): string {
+  const distance = station.distance
+  if (!distance) return 'Sem estimativa (o roteador não informou a banda)'
+  const range = formatDistanceRange(distance.minM, distance.maxM)
+  return distance.calibrated ? range : `${range} (estimativa sem a potência do rádio)`
+}
+
+/** Nome curto para o mapa: o do vigiado, o do DHCP ou o fim do MAC. */
+export function shortStationName(station: WifiStation, watchedName?: string | null): string {
+  if (watchedName) return watchedName
+  if (station.hostname) return station.hostname
+  return `…${station.mac.slice(-5)}`
+}
+
+/** Uma troca de AP numa frase: "AP Sala → AP Cozinha". */
+export function roamRoute(event: WifiRoamEvent): string {
+  return `${event.fromDeviceName} → ${event.toDeviceName}`
+}
+
+/** O payload de `wifi:roamed` tem o formato esperado? */
+export function isWifiRoamEvent(value: unknown): value is WifiRoamEvent {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'number' &&
+    typeof value.mac === 'string' &&
+    typeof value.fromDeviceName === 'string' &&
+    typeof value.toDeviceName === 'string' &&
+    typeof value.occurredAt === 'string'
   )
 }

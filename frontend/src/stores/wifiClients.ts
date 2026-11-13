@@ -6,6 +6,7 @@ import type { WifiPingInput } from '@/bindings/WifiPingInput'
 import type { WifiPingResult } from '@/bindings/WifiPingResult'
 import type { WifiRefreshInput } from '@/bindings/WifiRefreshInput'
 import type { WifiRefreshStarted } from '@/bindings/WifiRefreshStarted'
+import type { WifiRoamEvent } from '@/bindings/WifiRoamEvent'
 import type { WifiWatchCreate } from '@/bindings/WifiWatchCreate'
 import type { WifiWatchUpdate } from '@/bindings/WifiWatchUpdate'
 import type { WifiWatchedClient } from '@/bindings/WifiWatchedClient'
@@ -27,14 +28,25 @@ function pingKey(deviceId: number, mac: string): string {
   return `${deviceId}:${mac}`
 }
 
+/** Quantas trocas ao vivo ficam guardadas para o mapa animar. */
+const RECENT_ROAMS = 50
+
+/** O histórico de roaming de um aparelho, aberto no painel dele. */
+export interface WifiRoamHistory {
+  loading: boolean
+  events: WifiRoamEvent[]
+  error: string | null
+}
+
 /**
  * Clientes Wi-Fi de todos os equipamentos.
  *
  * As estações chegam só pelo SSE (`wifi:snapshot`, um snapshot por
- * equipamento — o último de cada um vem ao conectar), e a lista dos aparelhos
- * vigiados também (`wifi:watched`). HTTP é só para pedir uma leitura, medir
- * latência e vigiar ou deixar de vigiar, sempre por ação de quem usa
- * (AGENTS §9).
+ * equipamento — o último de cada um vem ao conectar), a lista dos aparelhos
+ * vigiados também (`wifi:watched`) e cada troca de AP (`wifi:roamed`, que o
+ * mapa anima). HTTP é só para pedir uma leitura, medir latência, vigiar ou
+ * deixar de vigiar e abrir o histórico de roaming de um aparelho, sempre por
+ * ação de quem usa (AGENTS §9).
  */
 export const useWifiClientsStore = defineStore('wifiClients', () => {
   const snapshots = ref<Record<number, WifiDeviceSnapshot>>({})
@@ -45,6 +57,10 @@ export const useWifiClientsStore = defineStore('wifiClients', () => {
   const lastFleetRefresh = ref<WifiRefreshStarted | null>(null)
   /** Os aparelhos que deveriam estar sempre conectados (alertam se sumirem). */
   const watched = ref<WifiWatchedClient[]>([])
+  /** As trocas de AP ao vivo, da mais recente para a mais antiga. */
+  const roams = ref<WifiRoamEvent[]>([])
+  /** O histórico de roaming de cada aparelho aberto no painel, pelo MAC. */
+  const roamHistory = ref<Record<string, WifiRoamHistory>>({})
 
   const devices = computed(() =>
     Object.values(snapshots.value).sort((a, b) => a.deviceName.localeCompare(b.deviceName))
@@ -65,6 +81,46 @@ export const useWifiClientsStore = defineStore('wifiClients', () => {
 
   function applyWatched(snapshot: WifiWatchedSnapshot) {
     watched.value = snapshot.clients
+  }
+
+  /** Uma troca de AP ao vivo: o mapa anima e o histórico aberto ganha a linha. */
+  function applyRoamed(event: WifiRoamEvent) {
+    if (roams.value.some((item) => item.id === event.id)) return
+    roams.value = [event, ...roams.value].slice(0, RECENT_ROAMS)
+    const history = roamHistory.value[event.mac]
+    if (history && !history.events.some((item) => item.id === event.id)) {
+      roamHistory.value = {
+        ...roamHistory.value,
+        [event.mac]: { ...history, events: [event, ...history.events] },
+      }
+    }
+  }
+
+  function roamHistoryOf(mac: string): WifiRoamHistory | null {
+    return roamHistory.value[mac] ?? null
+  }
+
+  /** Abre o histórico de roaming de um aparelho (ação de quem clicou nele). */
+  async function fetchRoaming(mac: string) {
+    const current = roamHistory.value[mac]
+    roamHistory.value = {
+      ...roamHistory.value,
+      [mac]: { loading: true, events: current?.events ?? [], error: null },
+    }
+    try {
+      const query = new URLSearchParams({ mac })
+      const events = await apiService.get<WifiRoamEvent[]>(`/wifi/roaming?${query}`)
+      roamHistory.value = { ...roamHistory.value, [mac]: { loading: false, events, error: null } }
+    } catch (err: unknown) {
+      roamHistory.value = {
+        ...roamHistory.value,
+        [mac]: {
+          loading: false,
+          events: current?.events ?? [],
+          error: messageOf(err, 'Não foi possível abrir o histórico de roaming.'),
+        },
+      }
+    }
   }
 
   /** A resposta já traz o aparelho; o SSE confirma para as outras abas. */
@@ -166,6 +222,8 @@ export const useWifiClientsStore = defineStore('wifiClients', () => {
     error,
     lastFleetRefresh,
     watched,
+    roams,
+    roamHistory,
     devices,
     rows,
     reading,
@@ -173,6 +231,9 @@ export const useWifiClientsStore = defineStore('wifiClients', () => {
     snapshotFor,
     applySnapshot,
     applyWatched,
+    applyRoamed,
+    roamHistoryOf,
+    fetchRoaming,
     watch,
     renameWatched,
     unwatch,

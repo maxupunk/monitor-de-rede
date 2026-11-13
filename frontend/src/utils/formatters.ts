@@ -173,6 +173,21 @@ export function formatLatency(value?: number | null, fallback = 'N/A'): string {
 }
 
 /**
+ * Distância aproximada como faixa, nunca número exato: `~3–6 m`. O backend já
+ * arredonda os extremos para fora (1 m, 5 m, 10 m de passo).
+ */
+export function formatDistanceRange(
+  minM?: number | null,
+  maxM?: number | null,
+  fallback = '—'
+): string {
+  if (minM === null || minM === undefined || maxM === null || maxM === undefined) return fallback
+  if (!Number.isFinite(minM) || !Number.isFinite(maxM)) return fallback
+  const round = (value: number) => Math.round(value).toLocaleString('pt-BR')
+  return `~${round(minM)}–${round(maxM)} m`
+}
+
+/**
  * Formata um valor conforme a unidade que veio junto dele na métrica/evento.
  * Unidades desconhecidas são apenas concatenadas.
  */

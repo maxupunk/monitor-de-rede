@@ -1,11 +1,19 @@
 /**
- * Aplica os elementos (`buildElements`) num Cytoscape por diferença: dado e
- * classe que mudaram, elemento novo, elemento que saiu — sem recriar o grafo
- * (o desenho não pisca e a posição arrastada fica). Usado pelo mapa
- * (`TopologyCanvas`) e pelo mini mapa do teste (`LinkTestPathMap`).
+ * Aplica os elementos num Cytoscape por diferença: dado e classe que mudaram,
+ * elemento novo, elemento que saiu — sem recriar o grafo (o desenho não pisca
+ * e a posição arrastada fica). Usado pelo mapa (`TopologyCanvas`), pelo mini
+ * mapa do teste (`LinkTestPathMap`) e pelo mapa Wi-Fi (`useWifiMap`): todos
+ * descrevem o grafo como uma lista de {@link GraphElement}.
  */
 import type { CollectionReturnValue, Core, NodeSingular } from 'cytoscape'
-import type { TopologyElement } from './elements'
+
+/** Um nó ou aresta descrito por dados e classes — o formato que o Cytoscape aceita. */
+export interface GraphElement {
+  group: 'nodes' | 'edges'
+  data: Record<string, string | number | boolean | null> & { id: string }
+  classes: string
+  position?: { x: number; y: number }
+}
 
 /** Onde o elemento guarda as classes que vieram do estado (as outras são do canvas). */
 const BASE_CLASSES = 'baseClasses'
@@ -17,12 +25,12 @@ const BASE_CLASSES = 'baseClasses'
  */
 export function syncElements(
   core: Core,
-  elements: ReadonlyArray<TopologyElement>,
+  elements: ReadonlyArray<GraphElement>,
   onAdded?: (added: CollectionReturnValue) => void
 ): void {
   core.batch(() => {
     const nextIds = new Set(elements.map((el) => el.data.id))
-    const toAdd: TopologyElement[] = []
+    const toAdd: GraphElement[] = []
 
     for (const el of elements) {
       const existing = core.getElementById(el.data.id)

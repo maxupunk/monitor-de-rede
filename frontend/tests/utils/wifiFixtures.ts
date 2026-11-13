@@ -20,6 +20,8 @@ export function station(
     band: '5g',
     channel: 36,
     channelWidthMhz: 80,
+    frequencyMhz: 5180,
+    txPowerDbm: 23,
     signalDbm,
     signalAvgDbm: null,
     noiseDbm: null,
@@ -35,6 +37,14 @@ export function station(
     retriesGrade: null,
     health,
     healthReason: null,
+    linkScore: 1,
+    distance: {
+      meters: 6,
+      minM: 4,
+      maxM: 9,
+      calibrated: true,
+      environment: 'office',
+    },
     ...extra,
   }
 }

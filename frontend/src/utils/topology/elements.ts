@@ -7,6 +7,7 @@
  * negócio — e esta função é testável sem DOM.
  */
 import type { TopologyEdge, TopologyNode, TopologyPosition } from '@/stores/topology'
+import type { GraphElement } from './elementSync'
 import type { FilterResult } from './filters'
 import {
   edgeEndpoints,
@@ -33,10 +34,8 @@ import {
 
 export type ElementData = Record<string, string | number | boolean | null>
 
-export interface TopologyElement {
-  group: 'nodes' | 'edges'
-  data: ElementData & { id: string }
-  classes: string
+/** Um elemento do mapa de topologia: o formato comum de grafo, com a posição do mapa. */
+export interface TopologyElement extends GraphElement {
   position?: TopologyPosition
 }
 

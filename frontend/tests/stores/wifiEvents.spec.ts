@@ -5,7 +5,11 @@ import { apiService } from '@/services/apiService'
 import { useEventsStore } from '@/stores/events'
 import { useWifiClientsStore } from '@/stores/wifiClients'
 import type { WifiDeviceSnapshot } from '@/bindings/WifiDeviceSnapshot'
+import type { WifiRoamEvent } from '@/bindings/WifiRoamEvent'
 import type { WifiWatchedClient } from '@/bindings/WifiWatchedClient'
+import { paletteFromTheme } from '@/utils/topology/style'
+import { buildWifiMapElements, linkEdgeId, stationNodeId } from '@/utils/wifiMap/elements'
+import { dedupeByMac, layoutWifiMap } from '@/utils/wifiMap/layout'
 import { snapshot, station } from '../utils/wifiFixtures'
 
 class FakeEventSource {
@@ -154,5 +158,78 @@ describe('SSE dos clientes Wi-Fi', () => {
     vi.spyOn(apiService, 'post').mockRejectedValueOnce(new Error('Este aparelho já é vigiado'))
     expect(await store.watch(camera.mac, 'Outra')).toBe(false)
     expect(store.error).toBe('Este aparelho já é vigiado')
+  })
+
+  it('o snapshot SSE redesenha o mapa sem consultar a API', () => {
+    const get = vi.spyOn(apiService, 'get')
+    const post = vi.spyOn(apiService, 'post')
+    const events = useEventsStore()
+    const store = useWifiClientsStore()
+    events.connect()
+    const palette = paletteFromTheme({ dark: true, colors: {} })
+    // O mesmo caminho do `WifiMap.vue`: store → desenho → elementos.
+    const mapIds = () =>
+      buildWifiMapElements({
+        layout: layoutWifiMap(
+          store.devices.map((device) => ({
+            deviceId: device.deviceId,
+            deviceName: device.deviceName,
+            status: device.status,
+            error: device.error,
+          })),
+          dedupeByMac(store.rows)
+        ),
+        palette,
+        watched: store.watchedByMac,
+        selectedMac: null,
+      }).map((element) => element.data.id)
+
+    const celular = 'aa:bb:cc:dd:ee:77'
+    emit('wifi:snapshot', snapshot(1, 'AP Sala', [station(celular, -60)]))
+    emit('wifi:snapshot', snapshot(2, 'AP Cozinha', []))
+    expect(mapIds()).toContain(stationNodeId(celular))
+    expect(mapIds()).toContain(linkEdgeId(1, celular))
+
+    // O celular foi para a cozinha: a linha agora sai do outro AP.
+    emit('wifi:snapshot', snapshot(1, 'AP Sala', []))
+    emit('wifi:snapshot', snapshot(2, 'AP Cozinha', [station(celular, -55)]))
+    expect(mapIds()).toContain(linkEdgeId(2, celular))
+    expect(mapIds()).not.toContain(linkEdgeId(1, celular))
+
+    expect(get).not.toHaveBeenCalled()
+    expect(post).not.toHaveBeenCalled()
+  })
+
+  it('a troca de AP chega pelo SSE, fora do feed, e entra no histórico aberto', async () => {
+    const roam = (id: number): WifiRoamEvent => ({
+      id,
+      mac: 'aa:bb:cc:dd:ee:77',
+      fromDeviceId: 1,
+      fromDeviceName: 'AP Sala',
+      toDeviceId: 2,
+      toDeviceName: 'AP Cozinha',
+      signalBeforeDbm: -78,
+      signalAfterDbm: -55,
+      occurredAt: '2026-11-13T12:00:00Z',
+      pingPong: false,
+    })
+    const store = useWifiClientsStore()
+    // O painel do aparelho abriu o histórico (ação de quem clicou).
+    const get = vi.spyOn(apiService, 'get').mockResolvedValueOnce([roam(1)])
+    await store.fetchRoaming('aa:bb:cc:dd:ee:77')
+    expect(get).toHaveBeenCalledWith('/wifi/roaming?mac=aa%3Abb%3Acc%3Add%3Aee%3A77')
+
+    const events = useEventsStore()
+    events.connect()
+    emit('wifi:roamed', roam(2))
+    emit('wifi:roamed', roam(2))
+    emit('wifi:roamed', { id: 'x' })
+
+    expect(store.roams.map((event) => event.id)).toEqual([2])
+    expect(store.roamHistoryOf('aa:bb:cc:dd:ee:77')?.events.map((event) => event.id)).toEqual([
+      2, 1,
+    ])
+    expect(get).toHaveBeenCalledTimes(1)
+    expect(events.recentEvents).toHaveLength(0)
   })
 })
