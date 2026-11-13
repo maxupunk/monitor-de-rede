@@ -22,6 +22,30 @@
         </v-list>
       </v-card>
 
+      <!-- A pessoa mudou de tela e a pergunta é vaga: de qual tela ela fala? -->
+      <div v-if="asking" class="px-3 pt-3" role="group" aria-label="Sobre qual tela é a pergunta?">
+        <div class="text-body-medium font-weight-bold">Sobre qual tela é a pergunta?</div>
+        <div class="text-body-small text-truncate mb-2" :title="asking.text">
+          “{{ asking.text }}”
+        </div>
+        <div class="d-flex flex-wrap ga-2">
+          <v-btn
+            v-for="option in asking.options"
+            :key="option.id"
+            size="small"
+            variant="tonal"
+            color="info"
+            :prepend-icon="option.icon"
+            @click="answer(option)"
+          >
+            {{ option.label }}
+          </v-btn>
+          <v-btn size="small" variant="text" color="primary" @click="editHeld">
+            Editar pergunta
+          </v-btn>
+        </div>
+      </div>
+
       <!-- Tela aberta e marcações da pergunta -->
       <div
         v-if="screen || mentions.length > 0"
@@ -223,6 +247,12 @@ import { useDisplay } from 'vuetify'
 import { useAiStore, type AiDraft, type AiMention } from '@/stores/ai'
 import { useMentionPicker } from '@/composables/useMentionPicker'
 import { useAiScreen } from '@/composables/useAiScreen'
+import {
+  chooseScreen,
+  screenToConfirm,
+  type AskedScreen,
+  type ScreenAttachment,
+} from '@/utils/aiScreen'
 import { addMention, insertMention, mentionKindMeta, mentionsInText } from '@/utils/aiMentions'
 import { AUTO_COMPACT_RATIO, contextUsage } from '@/utils/aiChatStream'
 import { formatCompactCount, formatPercent } from '@/utils/formatters'
@@ -349,13 +379,44 @@ function startMention() {
   picker.update(content.value, next)
 }
 
+/** Pergunta segurada até a pessoa dizer de qual tela fala. */
+const asking = ref<{
+  text: string
+  marked: AiMention[]
+  attached: ScreenAttachment
+  options: AskedScreen[]
+} | null>(null)
+
 function send() {
   const text = content.value.trim()
-  if (!text || aiStore.isStreaming || !aiStore.settings?.enabled) return
+  if (!text || asking.value || aiStore.isStreaming || !aiStore.settings?.enabled) return
   const marked = mentionsInText(text, mentions.value)
   const attached = openScreen.attachment()
+  const options = attached
+    ? screenToConfirm(attached, aiStore.messages, text, marked.length > 0)
+    : null
   clear()
+  if (attached && options) {
+    asking.value = { text, marked, attached, options }
+    return
+  }
   void aiStore.sendMessage(text, {}, marked, attached)
+}
+
+function answer(choice: AskedScreen) {
+  const held = asking.value
+  if (!held) return
+  asking.value = null
+  void aiStore.sendMessage(held.text, {}, held.marked, chooseScreen(held.attached, choice))
+}
+
+/** Volta a pergunta para o campo, para reescrever. */
+function editHeld() {
+  if (!asking.value) return
+  content.value = asking.value.text
+  mentions.value = asking.value.marked
+  asking.value = null
+  placeCaret(content.value.length)
 }
 
 function clear() {

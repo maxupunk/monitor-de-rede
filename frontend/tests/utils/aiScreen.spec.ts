@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
+  chooseScreen,
   currentScreen,
   mergeSuggestions,
   screenAttachment,
   screenRequest,
+  screenToConfirm,
   type ScreenRoute,
   withPreviousScreen,
 } from '@/utils/aiScreen'
@@ -105,5 +107,56 @@ describe('troca de tela no meio da conversa', () => {
     expect(withPreviousScreen(docker, [{ role: 'user', screen: { id: 'docker' } }])).toBe(docker)
     expect(withPreviousScreen(docker, [{ role: 'user', screen: null }])).toBe(docker)
     expect(withPreviousScreen(docker, [])).toBe(docker)
+  })
+})
+
+describe('pergunta vaga depois de trocar de tela', () => {
+  const docker = {
+    label: 'Docker',
+    icon: 'mdi-docker',
+    request: { screen: { id: 'docker', detail: 'postgres parado' } },
+  }
+  const logs = { id: 'logs', label: 'Logs', icon: 'mdi-text' }
+  const conversa = [
+    { role: 'user', screen: logs },
+    { role: 'assistant', screen: null },
+  ]
+
+  it('pergunta de qual tela fala, a aberta primeiro', () => {
+    expect(screenToConfirm(docker, conversa, 'e isso, é grave?', false)).toEqual([
+      { id: 'docker', label: 'Docker', icon: 'mdi-docker' },
+      logs,
+    ])
+    expect(screenToConfirm(docker, conversa, 'Esses erros continuam?', false)).not.toBeNull()
+  })
+
+  it('não pergunta quando a pergunta já diz do que fala', () => {
+    // "aqui" é a tela aberta; @ é o alvo; sem demonstrativo não há "isso".
+    expect(screenToConfirm(docker, conversa, 'e isso aqui, é grave?', false)).toBeNull()
+    expect(screenToConfirm(docker, conversa, 'e isso, é grave?', true)).toBeNull()
+    expect(screenToConfirm(docker, conversa, 'o postgres parado é grave?', false)).toBeNull()
+    // "processo" contém "esso", mas não é "esso" sozinho.
+    expect(screenToConfirm(docker, conversa, 'o processo travou?', false)).toBeNull()
+  })
+
+  it('não pergunta sem troca de tela', () => {
+    const mesma = [{ role: 'user', screen: { ...logs, id: 'docker' } }]
+    expect(screenToConfirm(docker, mesma, 'e isso?', false)).toBeNull()
+    expect(screenToConfirm(docker, [], 'e isso?', false)).toBeNull()
+  })
+
+  it('a escolha decide a tela, sem a anterior junto', () => {
+    const aberta = chooseScreen(docker, { id: 'docker', label: 'Docker', icon: 'mdi-docker' })
+    expect(aberta.request.screen).toEqual({ id: 'docker', detail: 'postgres parado' })
+    expect(withPreviousScreen(aberta, conversa).request.screen.previous).toBeUndefined()
+
+    const anterior = chooseScreen(docker, logs)
+    expect(anterior).toEqual({
+      label: 'Logs',
+      icon: 'mdi-text',
+      request: { screen: { id: 'logs', detail: null } },
+      chosen: true,
+    })
+    expect(withPreviousScreen(anterior, conversa)).toBe(anterior)
   })
 })

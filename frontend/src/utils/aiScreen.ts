@@ -76,6 +76,8 @@ export interface ScreenAttachment {
   label: string
   icon: string
   request: ScreenRequest
+  /** A pessoa já disse de qual tela fala: não vai a tela anterior junto. */
+  chosen?: boolean
 }
 
 export function screenAttachment(screen: CurrentScreen, detail: string | null): ScreenAttachment {
@@ -105,11 +107,62 @@ export function withPreviousScreen(
   attached: ScreenAttachment,
   messages: { role: string; screen?: { id: string } | null }[]
 ): ScreenAttachment {
-  const last = [...messages].reverse().find((message) => message.role === 'user')
-  const previous = last?.screen?.id
+  if (attached.chosen) return attached
+  const previous = lastAskedScreen(messages)?.id
   if (!previous || previous === attached.request.screen.id) return attached
   return {
     ...attached,
     request: { ...attached.request, screen: { ...attached.request.screen, previous } },
+  }
+}
+
+/** A tela de uma pergunta já feita, como ficou na conversa. */
+export interface AskedScreen {
+  id: string
+  label: string
+  icon: string
+}
+
+function lastAskedScreen<T extends { id: string }>(
+  messages: { role: string; screen?: T | null }[]
+): T | null {
+  const last = [...messages].reverse().find((message) => message.role === 'user')
+  return last?.screen ?? null
+}
+
+// "isso", "esse erro", "aquela VLAN": aponta para algo sem dizer o quê.
+const VAGUE = /(?<!\p{L})(isso|isto|aquilo|ess[ea]s?|aquel[ea]s?)(?!\p{L})/iu
+// "aqui", "nesta tela": aponta para a tela aberta, sem dúvida.
+const HERE = /(?<!\p{L})(aqui|nesta tela|desta tela|dessa tela|nessa tela)(?!\p{L})/iu
+
+/**
+ * Quando perguntar antes de enviar "sobre qual tela?": a pessoa mudou de tela
+ * desde a pergunta anterior e a nova aponta para algo vago ("e isso, é
+ * grave?") sem marcar nada com `@` nem dizer "aqui". Decidir isso no campo, e
+ * não deixar para o modelo, é o que garante a pergunta — modelo pequeno
+ * escolhe uma das telas sozinho.
+ */
+export function screenToConfirm(
+  attached: ScreenAttachment,
+  messages: { role: string; screen?: AskedScreen | null }[],
+  text: string,
+  marked: boolean
+): AskedScreen[] | null {
+  if (marked || !VAGUE.test(text) || HERE.test(text)) return null
+  const previous = lastAskedScreen(messages)
+  if (!previous || previous.id === attached.request.screen.id) return null
+  const current = { id: attached.request.screen.id, label: attached.label, icon: attached.icon }
+  return [current, previous]
+}
+
+/** O anexo da tela escolhida na pergunta "sobre qual tela?". */
+export function chooseScreen(attached: ScreenAttachment, choice: AskedScreen): ScreenAttachment {
+  if (choice.id === attached.request.screen.id) return { ...attached, chosen: true }
+  // A tela anterior já não está aberta: vai o que ela é, sem o filtro de agora.
+  return {
+    label: choice.label,
+    icon: choice.icon,
+    request: { screen: { id: choice.id, detail: null } },
+    chosen: true,
   }
 }
