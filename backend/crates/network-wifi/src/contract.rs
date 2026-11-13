@@ -28,6 +28,13 @@ pub struct StationReading {
     pub band: Option<String>,
     pub channel: Option<u16>,
     pub channel_width_mhz: Option<u16>,
+    /// Frequência central do rádio (`5180`). Opcional: plugin antigo não
+    /// informa, e a distância usa o centro da banda.
+    pub frequency_mhz: Option<u32>,
+    /// Potência de transmissão configurada no rádio, em dBm. Opcional: sem
+    /// ela a distância usa o padrão da banda e sai marcada como menos
+    /// confiável.
+    pub tx_power_dbm: Option<i32>,
     pub signal_dbm: Option<i32>,
     pub signal_avg_dbm: Option<i32>,
     /// Ruído do rádio onde a estação está.
@@ -89,6 +96,25 @@ mod tests {
         assert_eq!(estacoes[0].signal_dbm, Some(-45));
         assert_eq!(estacoes[0].noise_dbm, None);
         assert_eq!(estacoes[0].tx_packets, Some(100));
+    }
+
+    #[test]
+    fn potencia_e_frequencia_sao_opcionais_para_plugin_antigo() {
+        let estacoes = parse_clients(json!({
+            "clients": [
+                { "mac": "aa:bb:cc:dd:ee:01", "signal_dbm": -58, "frequency_mhz": 5180,
+                  "tx_power_dbm": 23 },
+                { "mac": "aa:bb:cc:dd:ee:02", "signal_dbm": -70 }
+            ]
+        }))
+        .unwrap();
+        assert_eq!(estacoes[0].frequency_mhz, Some(5180));
+        assert_eq!(estacoes[0].tx_power_dbm, Some(23));
+        assert_eq!(
+            estacoes[1].frequency_mhz, None,
+            "plugin antigo continua valendo"
+        );
+        assert_eq!(estacoes[1].tx_power_dbm, None);
     }
 
     #[test]
