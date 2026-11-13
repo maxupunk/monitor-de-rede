@@ -134,6 +134,73 @@ pub fn assess(reading: Reading) -> (WifiHealth, Option<String>) {
     (WifiHealth::Healthy, None)
 }
 
+/// Interpola `value` nos pontos `(medida, nota)` em ordem crescente de
+/// medida; fora deles, a nota da ponta.
+fn piecewise(value: f64, points: &[(f64, f64)]) -> f64 {
+    let (Some(first), Some(last)) = (points.first(), points.last()) else {
+        return 0.0;
+    };
+    if value <= first.0 {
+        return first.1;
+    }
+    if value >= last.0 {
+        return last.1;
+    }
+    points
+        .windows(2)
+        .find(|pair| value <= pair[1].0)
+        .map_or(last.1, |pair| {
+            let ((x0, y0), (x1, y1)) = (pair[0], pair[1]);
+            y0 + (value - x0) / (x1 - x0) * (y1 - y0)
+        })
+}
+
+/// As fronteiras das faixas viram notas: excelente 1, bom 0,75, atenção
+/// 0,5, ruim 0,25 e crítico 0 — a nota contínua respeita a mesma tabela.
+const SIGNAL_SCORE: [(f64, f64); 5] = [
+    (-90.0, 0.0),
+    (-84.0, 0.25),
+    (-78.0, 0.5),
+    (-70.0, 0.75),
+    (-60.0, 1.0),
+];
+const SNR_SCORE: [(f64, f64); 5] = [
+    (5.0, 0.0),
+    (10.0, 0.25),
+    (15.0, 0.5),
+    (25.0, 0.75),
+    (30.0, 1.0),
+];
+const RETRIES_SCORE: [(f64, f64); 5] = [
+    (10.0, 1.0),
+    (15.0, 0.75),
+    (25.0, 0.5),
+    (40.0, 0.25),
+    (60.0, 0.0),
+];
+
+/// A qualidade do enlace de 0 (pior) a 1 (melhor), contínua — a cor da linha
+/// AP↔aparelho no mapa. Usa a mesma tabela da classificação e o mesmo
+/// critério da saúde: o pior sintoma decide. Em repouso, a retransmissão
+/// acumulada não conta (como em [`assess`]).
+#[must_use]
+pub fn link_score(reading: Reading) -> f64 {
+    let resting = assess(reading).0 == WifiHealth::PowerSave;
+    let signal = piecewise(f64::from(reading.signal_dbm), &SIGNAL_SCORE);
+    let snr = reading
+        .snr_db
+        .map(|db| piecewise(f64::from(db), &SNR_SCORE));
+    let retries = reading
+        .retries_pct
+        .filter(|_| !resting)
+        .map(|pct| piecewise(pct, &RETRIES_SCORE));
+    let worst = [Some(signal), snr, retries]
+        .into_iter()
+        .flatten()
+        .fold(1.0_f64, f64::min);
+    (worst * 100.0).round() / 100.0
+}
+
 /// O que está na faixa de atenção, na ordem da tabela.
 fn fair_reason(signal_dbm: i32, snr_db: Option<i32>, retries_pct: Option<f64>) -> String {
     let mut parts = Vec::new();
@@ -250,6 +317,52 @@ mod tests {
                 Some("Atenção: sinal de -74 dBm, SNR de 20 dB".into())
             )
         );
+    }
+
+    #[test]
+    fn nota_do_enlace_e_continua_e_segue_as_faixas() {
+        let nota = |signal_dbm| {
+            link_score(Reading {
+                snr_db: None,
+                retries_pct: None,
+                ..reading(signal_dbm)
+            })
+        };
+        assert_eq!(nota(-50), 1.0);
+        assert_eq!(nota(-60), 1.0);
+        assert_eq!(nota(-65), 0.88, "entre excelente e bom");
+        assert_eq!(nota(-70), 0.75);
+        assert_eq!(nota(-78), 0.5);
+        assert_eq!(nota(-84), 0.25);
+        assert_eq!(nota(-95), 0.0);
+        assert!(nota(-71) < nota(-70), "contínua: cada dB conta");
+    }
+
+    #[test]
+    fn nota_do_enlace_e_a_do_pior_sintoma() {
+        // Sinal excelente, mas SNR de atenção: a nota é a do ruído.
+        let ruidoso = Reading {
+            snr_db: Some(15),
+            ..reading(-50)
+        };
+        assert_eq!(link_score(ruidoso), 0.5);
+        // Interferência: retransmissão de 40% puxa para 0,25.
+        let interferencia = Reading {
+            retries_pct: Some(40.0),
+            ..reading(-50)
+        };
+        assert_eq!(link_score(interferencia), 0.25);
+        // Em repouso a retransmissão acumulada não pesa.
+        let parada = Reading {
+            inactive_ms: Some(12_000),
+            retries_pct: Some(60.0),
+            ..reading(-55)
+        };
+        assert_eq!(link_score(parada), 1.0);
+        // A nota concorda com a saúde: crítico fica abaixo de 0,25.
+        let (saude, _) = assess(reading(-86));
+        assert_eq!(saude, WifiHealth::Critical);
+        assert!(link_score(reading(-86)) < 0.25);
     }
 
     #[test]

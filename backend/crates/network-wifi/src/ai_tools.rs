@@ -69,6 +69,11 @@ fn station_row(device: &str, station: &WifiStation) -> Value {
         "health": station.health,
         "reason": station.health_reason,
         "connected_min": station.connected_s.map(|seconds| seconds / 60),
+        // Faixa aproximada pelo sinal (o mapa); nunca uma medida.
+        "distance_m": station.distance.map(|distance| format!(
+            "~{:.0}–{:.0}",
+            distance.min_m, distance.max_m
+        )),
     })
 }
 
@@ -196,6 +201,8 @@ mod tests {
             band: Some(WifiBand::Band5g),
             channel: None,
             channel_width_mhz: None,
+            frequency_mhz: None,
+            tx_power_dbm: None,
             signal_dbm: signal,
             signal_avg_dbm: None,
             noise_dbm: None,
@@ -211,6 +218,8 @@ mod tests {
             retries_grade: None,
             health,
             health_reason: None,
+            link_score: 1.0,
+            distance: None,
         }
     }
 

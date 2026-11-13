@@ -66,6 +66,10 @@ pub struct WifiStation {
     pub band: Option<WifiBand>,
     pub channel: Option<u16>,
     pub channel_width_mhz: Option<u16>,
+    /// Frequência do rádio (MHz), quando o plugin informa.
+    pub frequency_mhz: Option<u32>,
+    /// Potência do rádio (dBm), quando o plugin informa.
+    pub tx_power_dbm: Option<i32>,
     pub signal_dbm: i32,
     pub signal_avg_dbm: Option<i32>,
     pub noise_dbm: Option<i32>,
@@ -88,6 +92,112 @@ pub struct WifiStation {
     pub health: WifiHealth,
     /// Por que a estação não está saudável, em português.
     pub health_reason: Option<String>,
+    /// Qualidade combinada do enlace, de 0 (pior) a 1 (melhor) — a cor da
+    /// linha no mapa (`quality::link_score`).
+    pub link_score: f64,
+    /// Distância aproximada até o AP, como faixa. Sem banda nem frequência,
+    /// não há como estimar.
+    pub distance: Option<WifiDistance>,
+}
+
+/// O ambiente onde o AP está: decide quanto o sinal cai com a distância
+/// (`distance::Environment`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub enum WifiEnvironment {
+    /// Galpão, área externa, salão sem divisória.
+    Open,
+    /// Escritório ou casa com divisórias leves.
+    #[default]
+    Office,
+    /// Alvenaria, lajes, muitas paredes entre o AP e o aparelho.
+    Walls,
+}
+
+/// Distância aproximada pelo sinal: uma faixa, nunca um número exato.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct WifiDistance {
+    /// O ponto central da estimativa (o desenho usa; a tela mostra a faixa).
+    pub meters: f64,
+    pub min_m: f64,
+    pub max_m: f64,
+    /// Calculada com a potência e a frequência do rádio. Sem elas, com o
+    /// padrão da banda — menos confiável.
+    pub calibrated: bool,
+    pub environment: WifiEnvironment,
+}
+
+/// O ambiente de um AP específico, quando difere do padrão.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct WifiApEnvironment {
+    #[ts(type = "number")]
+    pub device_id: i64,
+    pub environment: WifiEnvironment,
+}
+
+/// As Configurações de Wi-Fi: atualização do mapa, ambiente da distância e
+/// histórico de roaming.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct WifiSettings {
+    /// Com o mapa aberto: de quanto em quanto tempo os APs são lidos.
+    pub live_interval_s: u32,
+    /// Sem ninguém olhando: a leitura leve que mantém o histórico de roaming
+    /// e os alertas.
+    pub background_interval_s: u32,
+    /// O ambiente padrão de todos os APs.
+    pub environment: WifiEnvironment,
+    /// Os APs com ambiente diferente do padrão.
+    pub ap_environments: Vec<WifiApEnvironment>,
+    /// Por quantos dias o histórico de roaming fica guardado.
+    pub roaming_retention_days: u32,
+    /// Trocas de AP que caracterizam o ping-pong…
+    pub ping_pong_count: u32,
+    /// …dentro desta janela, em minutos.
+    pub ping_pong_window_min: u32,
+}
+
+/// Um aparelho trocou de AP (roaming). Vai para o histórico e, ao vivo,
+/// pelo SSE (`wifi:roamed`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct WifiRoamEvent {
+    #[ts(type = "number")]
+    pub id: i64,
+    /// `aa:bb:cc:dd:ee:ff`.
+    pub mac: String,
+    #[ts(type = "number | null")]
+    pub from_device_id: Option<i64>,
+    pub from_device_name: String,
+    #[ts(type = "number | null")]
+    pub to_device_id: Option<i64>,
+    pub to_device_name: String,
+    /// O sinal no AP antigo, na última leitura em que estava lá.
+    pub signal_before_dbm: Option<i32>,
+    /// O sinal no AP novo.
+    pub signal_after_dbm: Option<i32>,
+    /// RFC 3339.
+    pub occurred_at: String,
+    /// Esta troca fechou o ping-pong (trocas demais na janela).
+    pub ping_pong: bool,
+}
+
+/// O histórico de roaming de um aparelho.
+#[derive(Debug, Clone, Default, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct WifiRoamingQuery {
+    pub mac: String,
+    #[serde(default)]
+    #[ts(optional)]
+    pub limit: Option<u32>,
 }
 
 /// Estado da leitura de um equipamento.

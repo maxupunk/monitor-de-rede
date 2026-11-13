@@ -1,29 +1,46 @@
 //! Da medida crua do plugin à estação que a tela mostra: MAC normalizado,
-//! fabricante, SNR, retransmissão e a classificação de [`super::quality`].
+//! fabricante, SNR, retransmissão, a classificação de [`super::quality`] e a
+//! distância aproximada de [`super::distance`].
 
 use super::{
     contract::StationReading,
+    distance::{self, RadioSignal},
     quality::{self, Reading},
 };
-use crate::dtos::{WifiBand, WifiHealth, WifiStation};
+use crate::dtos::{WifiBand, WifiEnvironment, WifiHealth, WifiStation};
 use netmonitor_core::network_tools::neighbor_cache::normalize_mac;
 use netmonitor_network::vendors;
 
 /// A estação pronta, ou `None` quando falta o que a identifica (MAC válido)
-/// ou o que a classifica (sinal).
+/// ou o que a classifica (sinal). O ambiente é o do AP onde ela está.
 #[must_use]
-pub fn build(reading: StationReading) -> Option<WifiStation> {
+pub fn build(reading: StationReading, environment: WifiEnvironment) -> Option<WifiStation> {
     let mac = normalize_mac(&reading.mac)?;
     let signal_dbm = reading.signal_dbm?;
     let vendor = vendors::lookup(&mac);
     let snr_db = reading.noise_dbm.map(|noise| signal_dbm - noise);
     let tx_retries_pct = retries_pct(reading.tx_packets, reading.tx_retries);
-    let (health, health_reason) = quality::assess(Reading {
+    let measures = Reading {
         signal_dbm,
         snr_db,
         retries_pct: tx_retries_pct,
         inactive_ms: reading.inactive_ms,
-    });
+    };
+    let (health, health_reason) = quality::assess(measures);
+    let band = reading.band.as_deref().and_then(band);
+    let channel = reading.channel.filter(|channel| *channel > 0);
+    let frequency_mhz = reading.frequency_mhz.filter(|mhz| *mhz > 0);
+    let distance = distance::estimate(
+        &RadioSignal {
+            // A média oscila menos que a última amostra.
+            signal_dbm: reading.signal_avg_dbm.unwrap_or(signal_dbm),
+            band,
+            channel,
+            frequency_mhz,
+            tx_power_dbm: reading.tx_power_dbm,
+        },
+        environment,
+    );
     Some(WifiStation {
         mac,
         randomized_mac: vendor.locally_administered,
@@ -33,9 +50,11 @@ pub fn build(reading: StationReading) -> Option<WifiStation> {
         ssid: non_empty(reading.ssid),
         bssid: non_empty(reading.bssid).and_then(|bssid| normalize_mac(&bssid)),
         radio: non_empty(reading.radio),
-        band: reading.band.as_deref().and_then(band),
-        channel: reading.channel.filter(|channel| *channel > 0),
+        band,
+        channel,
         channel_width_mhz: reading.channel_width_mhz.filter(|width| *width > 0),
+        frequency_mhz,
+        tx_power_dbm: reading.tx_power_dbm,
         signal_dbm,
         signal_avg_dbm: reading.signal_avg_dbm,
         noise_dbm: reading.noise_dbm,
@@ -51,7 +70,22 @@ pub fn build(reading: StationReading) -> Option<WifiStation> {
         retries_grade: tx_retries_pct.map(quality::retries),
         health,
         health_reason,
+        link_score: quality::link_score(measures),
+        distance,
     })
+}
+
+/// Como chamar a estação num texto (alerta, histórico): o nome do DHCP, o
+/// fabricante ou o MAC — o mesmo critério do `stationName` da tela.
+#[must_use]
+pub fn label(station: &WifiStation) -> String {
+    if let Some(hostname) = &station.hostname {
+        return hostname.clone();
+    }
+    match &station.vendor {
+        Some(vendor) => format!("Aparelho {vendor} ({})", station.mac),
+        None => format!("Aparelho {}", station.mac),
+    }
 }
 
 /// Da pior para a melhor: saúde mais grave primeiro, depois o sinal mais fraco.
@@ -122,7 +156,7 @@ mod tests {
 
     #[test]
     fn calcula_snr_retransmissao_e_classifica() {
-        let estacao = build(leitura()).unwrap();
+        let estacao = build(leitura(), WifiEnvironment::Office).unwrap();
         assert_eq!(estacao.mac, "aa:bb:cc:dd:ee:01");
         assert_eq!(estacao.hostname, None, "`*` do lease é sem nome");
         assert_eq!(estacao.band, Some(WifiBand::Band5g));
@@ -134,16 +168,47 @@ mod tests {
     }
 
     #[test]
+    fn traz_nota_do_enlace_e_distancia_no_ambiente_do_ap() {
+        let escritorio = build(leitura(), WifiEnvironment::Office).unwrap();
+        assert_eq!(escritorio.link_score, 1.0);
+        let distancia = escritorio.distance.expect("5 GHz canal 36");
+        assert!(!distancia.calibrated, "o plugin não informou a potência");
+        let calibrada = build(
+            StationReading {
+                frequency_mhz: Some(5180),
+                tx_power_dbm: Some(23),
+                ..leitura()
+            },
+            WifiEnvironment::Walls,
+        )
+        .unwrap();
+        let paredes = calibrada.distance.unwrap();
+        assert!(paredes.calibrated);
+        assert_eq!(paredes.environment, WifiEnvironment::Walls);
+        assert!(
+            paredes.meters < distancia.meters,
+            "paredes encurtam o alcance"
+        );
+        assert_eq!(calibrada.tx_power_dbm, Some(23));
+    }
+
+    #[test]
     fn sem_mac_valido_ou_sinal_nao_vira_estacao() {
-        assert!(build(StationReading {
-            mac: "lixo".into(),
-            ..leitura()
-        })
+        assert!(build(
+            StationReading {
+                mac: "lixo".into(),
+                ..leitura()
+            },
+            WifiEnvironment::Office
+        )
         .is_none());
-        assert!(build(StationReading {
-            signal_dbm: None,
-            ..leitura()
-        })
+        assert!(build(
+            StationReading {
+                signal_dbm: None,
+                ..leitura()
+            },
+            WifiEnvironment::Office
+        )
         .is_none());
     }
 
@@ -151,11 +216,14 @@ mod tests {
     fn sem_contadores_nao_inventa_taxa() {
         assert_eq!(retries_pct(None, Some(3)), None);
         assert_eq!(retries_pct(Some(0), Some(0)), None);
-        let sem_ruido = build(StationReading {
-            noise_dbm: None,
-            tx_packets: None,
-            ..leitura()
-        })
+        let sem_ruido = build(
+            StationReading {
+                noise_dbm: None,
+                tx_packets: None,
+                ..leitura()
+            },
+            WifiEnvironment::Office,
+        )
         .unwrap();
         assert_eq!(sem_ruido.snr_db, None);
         assert_eq!(sem_ruido.snr_grade, None);
@@ -168,11 +236,14 @@ mod tests {
             .into_iter()
             .enumerate()
             .map(|(i, signal)| {
-                build(StationReading {
-                    mac: format!("aa:bb:cc:dd:ee:0{i}"),
-                    signal_dbm: Some(signal),
-                    ..leitura()
-                })
+                build(
+                    StationReading {
+                        mac: format!("aa:bb:cc:dd:ee:0{i}"),
+                        signal_dbm: Some(signal),
+                        ..leitura()
+                    },
+                    WifiEnvironment::Office,
+                )
                 .unwrap()
             })
             .collect();
