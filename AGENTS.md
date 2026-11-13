@@ -308,6 +308,27 @@
       e inverte dependências; mudança de comportamento vai em PR separado. A
       ordem das fases está no roadmap da arquitetura modular.
 
+## Pós-treinamento da IA — mora em outro repositório
+
+O pós-treinamento dos modelos do NetMonitor (fine-tune, calibração, critérios,
+benchmark e seleção de modelo, datasets de treino e de avaliação, receitas,
+notebooks e resultados) acontece no **Laya-tuning**, em
+`D:\Projetos\Master sistemas\opensource
+et-monitor-ia-decisao-tuning`
+(o `README.md` e o `AGENTS.md` de lá explicam como rodar).
+
+- **Pedido de conteúdo para o pós-treinamento** — dataset, exemplo de treino,
+  receita, rodada de benchmark, comparação de modelos, resultado de um ajuste —
+  é atendido **lá**: leia e escreva naquele repositório, não neste.
+- **Daqui saem só os insumos:** a exportação dos dados do Assistente
+  (`crates/assistant/src/data_export/`, Configurações → Inteligência artificial
+  → Dados do Assistente), o contrato do chat (`backend/contracts/ai_chat.json`)
+  e o das decisões. O Laya-tuning trata este repositório como **somente
+  leitura** e copia os contratos (o `sync-check` de lá avisa quando ficam
+  desatualizados).
+- Não crie pipeline de treino, dataset nem script de fine-tune neste
+  repositório.
+
 ## Limpeza (CLEAN UP) — não deixe lixo para trás
 
 Builds de Rust, imagens Docker e worktrees acumulam rápido e já encheram o disco. Todo agente limpa o que ele mesmo criou, sem acumular.

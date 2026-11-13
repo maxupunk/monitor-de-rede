@@ -49,6 +49,15 @@ recusada pelo usuário **não** conta como falha — pode ser sugestão errada o
 mudança de ideia —, mas aparece em `signals.actionsDeclined` para a revisão.
 Respostas com 👍 são os acertos confirmados (`signals.ratedGood`).
 
+## Onde o pós-treinamento acontece
+
+O ajuste dos modelos com estes dados é feito no **Laya-tuning**
+(`D:\Projetos\Master sistemas\opensource
+et-monitor-ia-decisao-tuning`):
+lá ficam os datasets, as receitas de fine-tune, o benchmark e os resultados.
+Leve `treino/sem-falhas.jsonl` (exemplos a manter) e `treino/com-falhas.jsonl`
+(erros a corrigir, depois de revisados) para aquele repositório.
+
 ## Cuidados
 
 O pacote contém perguntas, nomes de usuários e de equipamentos, endereços e
