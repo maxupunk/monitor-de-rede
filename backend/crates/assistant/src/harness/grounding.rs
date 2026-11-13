@@ -612,6 +612,7 @@ const MAX_UNSUPPORTED: usize = 5;
 pub fn unsupported_identifiers(
     answer: &str,
     conversation: &[AiMessage],
+    earlier: usize,
     is_tool: impl Fn(&str) -> bool,
 ) -> Vec<String> {
     let quoted = answer
@@ -620,9 +621,12 @@ pub fn unsupported_identifiers(
         .step_by(2)
         .map(str::trim)
         .filter(|span| !span.is_empty() && !span.contains(char::is_whitespace))
+        // `get_docker_containers(host=x)` é a ferramenta; `host=x` é o `x`.
+        .map(|span| span.split('(').next().unwrap_or(span))
+        .map(|span| span.rsplit('=').next().unwrap_or(span))
         .filter(|span| looks_like_resource_identifier(span) && !is_constant_or_quantity(span));
     let loose = answer
-        .split(|c: char| c.is_whitespace() || matches!(c, ',' | ';' | '(' | ')' | '`' | '*'))
+        .split(|c: char| c.is_whitespace() || matches!(c, ',' | ';' | '(' | ')' | '`' | '*' | '='))
         .map(|token| token.trim_end_matches(['.', ':']))
         .filter(|token| {
             token.contains('.') && token.parse::<IpAddr>().is_ok() && is_internal(token)
@@ -632,11 +636,24 @@ pub fn unsupported_identifiers(
         if found.len() >= MAX_UNSUPPORTED {
             break;
         }
-        if !is_tool(candidate) && !grounded_in_conversation(conversation, candidate) {
+        if !is_tool(candidate) && !grounded(conversation, earlier, candidate) {
             push_unique(&mut found, candidate);
         }
     }
     found
+}
+
+/// O nome tem origem: qualquer mensagem antes da pergunta atual (as respostas
+/// anteriores já foram conferidas na vez delas, e os resultados de consulta
+/// daquelas rodadas não voltam no histórico) ou, desta vez, algo que não foi
+/// a IA que escreveu.
+fn grounded(conversation: &[AiMessage], earlier: usize, target: &str) -> bool {
+    let (before, now) = conversation.split_at(earlier.min(conversation.len()));
+    before
+        .iter()
+        .filter_map(|message| message.content.as_deref())
+        .any(|content| mentions(content, target))
+        || grounded_in_conversation(now, target)
 }
 
 /// Constante (`OLLAMA_CONTEXT_LENGTH`) ou grandeza (`24h`, `5GHz`, `2.4GHz`):
@@ -659,10 +676,11 @@ pub async fn invented_in_answer<C: ConnectionTrait>(
     db: &C,
     answer: &str,
     conversation: &[AiMessage],
+    earlier: usize,
     is_tool: impl Fn(&str) -> bool,
 ) -> Vec<String> {
     let mut invented = Vec::new();
-    for candidate in unsupported_identifiers(answer, conversation, is_tool) {
+    for candidate in unsupported_identifiers(answer, conversation, earlier, is_tool) {
         if !registered(db, &candidate).await.unwrap_or(false) {
             invented.push(candidate);
         }
@@ -833,7 +851,7 @@ mod tests {
         let resposta = "Hosts conectados (`get_docker_hosts`): `central`, `agente-west-01`,                         `agente-east-01`. O gateway 10.0.0.77 também.";
         let ferramenta = |nome: &str| nome == "get_docker_hosts";
         assert_eq!(
-            unsupported_identifiers(resposta, &sessao, ferramenta),
+            unsupported_identifiers(resposta, &sessao, 0, ferramenta),
             vec!["agente-west-01", "agente-east-01", "10.0.0.77"]
         );
     }
@@ -851,15 +869,36 @@ mod tests {
         let resposta =
             "O `ap-sala` está no `agente-west-01` (10.0.0.77). Ver `OLLAMA_CONTEXT_LENGTH`?";
         assert!(
-            unsupported_identifiers(resposta, &sessao, |_| false).is_empty(),
+            unsupported_identifiers(resposta, &sessao, 0, |_| false).is_empty(),
             "o que veio do pedido ou de consulta, constante e grandeza não são apontados"
         );
         // O que só a própria IA escreveu antes não ancora nada.
         assert_eq!(
-            unsupported_identifiers("De novo: `inventado-pela-ia-01`.", &sessao, |_| false),
+            unsupported_identifiers("De novo: `inventado-pela-ia-01`.", &sessao, 0, |_| false),
             vec!["inventado-pela-ia-01"]
         );
         let livre = "Em `24h`, `5GHz` e `2.4GHz` sem erros; agente-west-02 sem crase e IPv4.";
-        assert!(unsupported_identifiers(livre, &sessao, |_| false).is_empty());
+        assert!(unsupported_identifiers(livre, &sessao, 0, |_| false).is_empty());
+    }
+
+    #[test]
+    fn resposta_de_pergunta_anterior_e_chamada_de_ferramenta_tem_origem() {
+        let sessao = conversa(&[
+            ("system", "Você é o assistente."),
+            ("user", "quais hosts docker?"),
+            ("assistant", "O `agente-norte-01` (10.0.0.9) está online."),
+            ("user", "e ele está bem?"),
+        ]);
+        let ferramenta = |nome: &str| nome == "get_docker_containers";
+        let resposta = "Sim: `get_docker_containers(host=agente-norte-01)` mostra o                         `agente-norte-01` em 10.0.0.9; o `agente-sul-02` não.";
+        assert_eq!(
+            unsupported_identifiers(resposta, &sessao, 3, ferramenta),
+            vec!["agente-sul-02"],
+            "a resposta anterior vale como origem; a desta vez, não"
+        );
+        assert_eq!(
+            unsupported_identifiers(resposta, &sessao, 0, ferramenta),
+            vec!["agente-norte-01", "agente-sul-02", "10.0.0.9"]
+        );
     }
 }

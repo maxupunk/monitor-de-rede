@@ -166,8 +166,10 @@ async fn provedor_fora_do_ar_nao_quebra_a_consulta() {
 struct Chamada {
     prompt: String,
     mensagens: usize,
-    /// A última mensagem enviada (a pergunta, com o `<contexto>` da vez).
+    /// A última mensagem enviada (a pergunta, ou o que a tela consultou).
     ultima: String,
+    /// A última pergunta, com o `<contexto>` da vez.
+    pergunta: String,
     /// As ferramentas oferecidas ao modelo nesta rodada.
     ferramentas: Vec<String>,
 }
@@ -223,6 +225,12 @@ impl AiDriver for Provedor {
             mensagens: messages.len(),
             ultima: messages
                 .last()
+                .and_then(|message| message.content.clone())
+                .unwrap_or_default(),
+            pergunta: messages
+                .iter()
+                .rev()
+                .find(|message| message.role == "user")
                 .and_then(|message| message.content.clone())
                 .unwrap_or_default(),
             ferramentas: tools
@@ -627,21 +635,21 @@ async fn pergunta_na_tela_de_logs_chega_ao_modelo_com_a_tela() {
 
         let chamada = &com_tela[0];
         assert!(
-            chamada.ultima.contains("TELA ABERTA AGORA"),
+            chamada.pergunta.contains("TELA ABERTA AGORA"),
             "{}",
-            chamada.ultima
+            chamada.pergunta
         );
         assert!(
             chamada
-                .ultima
+                .pergunta
                 .contains("Na tela agora: erro e acima, dispositivo ap-sala."),
             "{}",
-            chamada.ultima
+            chamada.pergunta
         );
         assert!(
-            chamada.ultima.ends_with("o que são esses erros?"),
+            chamada.pergunta.ends_with("o que são esses erros?"),
             "{}",
-            chamada.ultima
+            chamada.pergunta
         );
         assert!(
             chamada
@@ -656,7 +664,11 @@ async fn pergunta_na_tela_de_logs_chega_ao_modelo_com_a_tela() {
             chamada.prompt, sem_tela[0].prompt,
             "a tela não pode mexer no system prompt (cache de prefixo)"
         );
-        assert!(!sem_tela[0].ultima.contains("TELA ABERTA"));
+        assert!(!sem_tela[0].pergunta.contains("TELA ABERTA"));
+        // A tela de Logs consulta o panorama antes da primeira rodada: o
+        // modelo começa com o resultado, e sem tela nada é consultado.
+        assert!(chamada.ultima.contains("\"total\""), "{}", chamada.ultima);
+        assert_eq!(chamada.mensagens, sem_tela[0].mensagens + 2);
     })
     .await;
 }

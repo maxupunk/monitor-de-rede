@@ -499,6 +499,21 @@ fn infer_group_from_unknown_tool(name: &str) -> Option<ToolGroup> {
     }
 }
 
+/// A consulta que a tela aberta pede antes da primeira rodada — só de leitura,
+/// e só quando a pergunta não marcou outro alvo com `@`.
+fn screen_prefetch(context: &ChatContext, registry: &ToolRegistry) -> Option<AiToolCall> {
+    let screen = context.screen.as_ref()?;
+    if !context.mentions.is_empty() {
+        return None;
+    }
+    let (name, arguments) = screen.screen.prefetch?;
+    (registry.kind_of(name) == Some(ToolKind::Passive)).then(|| AiToolCall {
+        id: format!("tela-{}", screen.screen.id),
+        name: name.to_string(),
+        arguments: arguments.to_string(),
+    })
+}
+
 /// Resolve uma chamada de ferramenta: executa, ou devolve o pedido de
 /// confirmação.
 async fn handle_tool_call(
@@ -959,9 +974,35 @@ pub async fn run_agent_loop(
             tool_calls: None,
             tool_call_id: None,
         }));
+        // Daqui em diante é a pergunta atual: o que vem antes já foi conferido.
+        let question_at = conversation.len().saturating_sub(1);
 
         // Início da rodada mais recente: os resultados dela a IA ainda não leu.
         let mut round_start = conversation.len();
+        // O estado da tela aberta entra antes da primeira rodada.
+        if !small_talk {
+            if let Some(call) = screen_prefetch(&request.context, &registry) {
+                conversation.push(AiMessage {
+                    role: "assistant".to_string(),
+                    content: None,
+                    tool_calls: Some(vec![call.clone()]),
+                    tool_call_id: None,
+                });
+                let flow = handle_tool_call(
+                    &ctx,
+                    &registry,
+                    &sink,
+                    &mut conversation,
+                    &mut loaded,
+                    &mut device_session,
+                    call,
+                )
+                .await;
+                if matches!(flow, ToolFlow::Disconnected) {
+                    return;
+                }
+            }
+        }
         // A conferência da resposta final ganha uma rodada só por pergunta.
         let mut answer_retried = false;
         for _ in 0..MAX_ITERATIONS {
@@ -1039,9 +1080,13 @@ pub async fn run_agent_loop(
                 let invented = if small_talk {
                     Vec::new()
                 } else {
-                    invented_in_answer(&ctx.db, &assistant_text, &conversation, |name| {
-                        registry.kind_of(name).is_some()
-                    })
+                    invented_in_answer(
+                        &ctx.db,
+                        &assistant_text,
+                        &conversation,
+                        question_at,
+                        |name| registry.kind_of(name).is_some(),
+                    )
                     .await
                 };
                 if invented.is_empty() {

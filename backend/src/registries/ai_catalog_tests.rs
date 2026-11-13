@@ -400,3 +400,34 @@ fn custo_fixo_por_rodada_cabe_no_orcamento() {
         "prompt + núcleo = ~{fixed} tokens, acima do orçamento de {BUDGET}"
     );
 }
+
+/// A consulta que uma tela faz antes da primeira rodada existe, é só de
+/// leitura, recebe argumentos válidos e está num grupo que a tela carrega (ou
+/// no núcleo, sempre presente).
+#[test]
+fn consulta_de_cada_tela_e_uma_ferramenta_de_leitura_da_propria_tela() {
+    install_dashboard_widgets();
+    install_ai_tools();
+    let handlers = ai_tool_catalog();
+    for screen in &netmonitor_assistant::screens::SCREENS {
+        let Some((name, arguments)) = screen.prefetch else {
+            continue;
+        };
+        let handler = handlers
+            .iter()
+            .find(|handler| handler.name() == name)
+            .unwrap_or_else(|| panic!("tela {}: ferramenta {name} não existe", screen.id));
+        assert_eq!(handler.kind(), ToolKind::Passive, "tela {}", screen.id);
+        assert!(
+            serde_json::from_str::<serde_json::Value>(arguments).is_ok_and(|v| v.is_object()),
+            "tela {}: argumentos {arguments}",
+            screen.id
+        );
+        let group = handler.group();
+        assert!(
+            group == ToolGroup::Core || screen.groups.contains(&group),
+            "tela {}: {name} é do grupo {group:?}, que a tela não carrega",
+            screen.id
+        );
+    }
+}

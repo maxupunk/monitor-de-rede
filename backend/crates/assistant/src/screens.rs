@@ -28,6 +28,10 @@ pub struct Screen {
     pub about: &'static str,
     /// Grupos que entram carregados enquanto o usuário está nela.
     pub groups: &'static [ToolGroup],
+    /// Consulta só de leitura que o harness faz antes da primeira rodada
+    /// (ferramenta, argumentos JSON): o modelo começa com o estado da tela em
+    /// mãos em vez de responder de memória — e inventar.
+    pub prefetch: Option<(&'static str, &'static str)>,
 }
 
 pub const SCREENS: [Screen; 24] = [
@@ -37,6 +41,7 @@ pub const SCREENS: [Screen; 24] = [
         area: Area::Core,
         about: "visão geral: status dos equipamentos, alertas abertos e latência — get_system_summary; os cards: get_dashboard_layout",
         groups: &[],
+        prefetch: None,
     },
     Screen {
         id: "devices",
@@ -44,6 +49,7 @@ pub const SCREENS: [Screen; 24] = [
         area: Area::Core,
         about: "lista de equipamentos com status e IP — list_devices; um deles: get_device_detail",
         groups: &[],
+        prefetch: None,
     },
     Screen {
         id: "device-detail",
@@ -51,6 +57,7 @@ pub const SCREENS: [Screen; 24] = [
         area: Area::Core,
         about: "um equipamento: interfaces, métricas, monitores e plugins (o equipamento vem no contexto)",
         groups: &[ToolGroup::History],
+        prefetch: None,
     },
     Screen {
         id: "monitors",
@@ -58,6 +65,7 @@ pub const SCREENS: [Screen; 24] = [
         area: Area::Core,
         about: "checagens (ping, HTTP, porta, SNMP) e o status de cada uma — list_monitors; histórico: get_monitor_history",
         groups: &[ToolGroup::History],
+        prefetch: None,
     },
     Screen {
         id: "monitor-detail",
@@ -65,6 +73,7 @@ pub const SCREENS: [Screen; 24] = [
         area: Area::Core,
         about: "um monitor: latência, disponibilidade e falhas recentes (o monitor vem no contexto)",
         groups: &[ToolGroup::History, ToolGroup::Charts],
+        prefetch: None,
     },
     Screen {
         id: "alerts",
@@ -72,6 +81,7 @@ pub const SCREENS: [Screen; 24] = [
         area: Area::Core,
         about: "alertas abertos e resolvidos — get_alerts; por que disparou: explain_alert",
         groups: &[ToolGroup::AlertRules, ToolGroup::Analysis],
+        prefetch: None,
     },
     Screen {
         id: "events",
@@ -79,6 +89,7 @@ pub const SCREENS: [Screen; 24] = [
         area: Area::Core,
         about: "linha do tempo de quedas, voltas e alertas — get_incident_timeline; procura: grep source='alerts'",
         groups: &[ToolGroup::Analysis],
+        prefetch: None,
     },
     Screen {
         id: "logs",
@@ -86,6 +97,7 @@ pub const SCREENS: [Screen; 24] = [
         area: Area::Core,
         about: "syslog dos equipamentos e da aplicação — get_logs_overview para o panorama, grep source='logs' para procurar",
         groups: &[ToolGroup::Logs],
+        prefetch: Some(("get_logs_overview", "{}")),
     },
     Screen {
         id: "maintenance-windows",
@@ -93,6 +105,7 @@ pub const SCREENS: [Screen; 24] = [
         area: Area::Core,
         about: "janelas de manutenção ativas e futuras — get_platform_status area='maintenance'",
         groups: &[ToolGroup::Platform, ToolGroup::Actions],
+        prefetch: None,
     },
     Screen {
         id: "scheduled-tasks",
@@ -100,6 +113,7 @@ pub const SCREENS: [Screen; 24] = [
         area: Area::Core,
         about: "tarefas que rodam sozinhas (cron) — list_scheduled_tasks",
         groups: &[ToolGroup::Schedules],
+        prefetch: None,
     },
     Screen {
         id: "remote-servers",
@@ -107,6 +121,7 @@ pub const SCREENS: [Screen; 24] = [
         area: Area::Core,
         about: "agentes remotos: conexão, versão e host — get_platform_status area='agents'",
         groups: &[ToolGroup::Platform],
+        prefetch: None,
     },
     Screen {
         id: "audit",
@@ -114,6 +129,7 @@ pub const SCREENS: [Screen; 24] = [
         area: Area::Core,
         about: "quem mudou o quê e quando — get_audit_log",
         groups: &[ToolGroup::Audit],
+        prefetch: None,
     },
     Screen {
         id: "wifi",
@@ -121,6 +137,7 @@ pub const SCREENS: [Screen; 24] = [
         area: Area::Network,
         about: "aparelhos conectados a cada roteador/AP: sinal, SNR, retransmissões, saúde e os vigiados — get_platform_status area='wifi'",
         groups: &[ToolGroup::Platform],
+        prefetch: Some(("get_platform_status", r#"{"area":"wifi"}"#)),
     },
     Screen {
         id: "sites",
@@ -128,6 +145,7 @@ pub const SCREENS: [Screen; 24] = [
         area: Area::Network,
         about: "locais físicos e o que há em cada um — get_platform_status area='networks'",
         groups: &[ToolGroup::Platform],
+        prefetch: None,
     },
     Screen {
         id: "networks",
@@ -135,6 +153,7 @@ pub const SCREENS: [Screen; 24] = [
         area: Area::Network,
         about: "redes IP (CIDR), sites e servidores DNS — get_platform_status area='networks'",
         groups: &[ToolGroup::Platform],
+        prefetch: None,
     },
     Screen {
         id: "topology",
@@ -142,6 +161,7 @@ pub const SCREENS: [Screen; 24] = [
         area: Area::Network,
         about: "mapa de enlaces entre equipamentos — get_topology",
         groups: &[ToolGroup::Platform],
+        prefetch: None,
     },
     Screen {
         id: "link-tests",
@@ -149,6 +169,7 @@ pub const SCREENS: [Screen; 24] = [
         area: Area::Network,
         about: "testes de velocidade de enlace e os agendamentos deles",
         groups: &[ToolGroup::Platform],
+        prefetch: None,
     },
     Screen {
         id: "discovery",
@@ -156,6 +177,7 @@ pub const SCREENS: [Screen; 24] = [
         area: Area::Network,
         about: "varreduras de rede recentes e em andamento — get_platform_status area='discovery'",
         groups: &[ToolGroup::Platform],
+        prefetch: None,
     },
     Screen {
         id: "plugins",
@@ -163,6 +185,7 @@ pub const SCREENS: [Screen; 24] = [
         area: Area::Network,
         about: "plugins de equipamento e as ações deles — list_device_plugins, get_plugin",
         groups: &[ToolGroup::Devices],
+        prefetch: None,
     },
     Screen {
         id: "plugin-app",
@@ -170,6 +193,7 @@ pub const SCREENS: [Screen; 24] = [
         area: Area::Network,
         about: "a tela de um app de plugin — list_plugin_apps",
         groups: &[ToolGroup::Devices],
+        prefetch: None,
     },
     Screen {
         id: "docker",
@@ -177,6 +201,7 @@ pub const SCREENS: [Screen; 24] = [
         area: Area::Servers,
         about: "containers, imagens, volumes e redes dos hosts Docker — get_docker_containers, get_docker_usage; logs: grep source='docker' container=<nome>",
         groups: &[ToolGroup::Docker],
+        prefetch: Some(("get_docker_hosts", "{}")),
     },
     Screen {
         id: "deploys",
@@ -184,6 +209,7 @@ pub const SCREENS: [Screen; 24] = [
         area: Area::Servers,
         about: "aplicações, deploys e compilações — get_deploys, get_builds; o log: get_deploy_log, get_build_log",
         groups: &[ToolGroup::Docker],
+        prefetch: None,
     },
     Screen {
         id: "registry",
@@ -191,6 +217,7 @@ pub const SCREENS: [Screen; 24] = [
         area: Area::Servers,
         about: "imagens do registry próprio e as vulnerabilidades achadas nelas",
         groups: &[ToolGroup::Docker],
+        prefetch: None,
     },
     Screen {
         id: "vpn",
@@ -198,6 +225,7 @@ pub const SCREENS: [Screen; 24] = [
         area: Area::Vpn,
         about: "servidor WireGuard e peers: handshake e tráfego — get_platform_status area='vpn'",
         groups: &[ToolGroup::Platform],
+        prefetch: None,
     },
 ];
 
