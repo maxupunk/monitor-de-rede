@@ -74,6 +74,16 @@ describe('eventos do chat', () => {
     return { id: 'a', role: 'assistant', content: '', toolCalls: [], isStreaming: true }
   }
 
+  it('resposta retirada pela conferência some e a conferida toma o lugar', () => {
+    const msg = resposta()
+    applyChatEvent(msg, { type: 'textDelta', content: 'No `agente-west-01`.' })
+    applyChatEvent(msg, { type: 'notice', message: 'Conferindo a resposta: agente-west-01' })
+    applyChatEvent(msg, { type: 'retract' })
+    applyChatEvent(msg, { type: 'textDelta', content: 'Não há host com esse nome.' })
+    expect(msg.content).toBe('Não há host com esse nome.')
+    expect(msg.notice).toContain('Conferindo')
+  })
+
   it('resultado com erro marca a ferramenta como falha', () => {
     const msg = resposta()
     applyChatEvent(msg, { type: 'toolCall', id: 't', name: 'ping_host', arguments: {} })

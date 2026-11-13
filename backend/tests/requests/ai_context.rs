@@ -722,7 +722,8 @@ async fn resposta_que_inventa_recurso_e_conferida_uma_vez() {
         .await;
         assert_eq!(direto.len(), 1);
 
-        // O modelo insiste: fica o aviso claro, sem terceira rodada.
+        // O modelo insiste: a primeira versão é retirada da tela e, na conferida,
+        // o nome inventado sai como [não confirmado] — sem terceira rodada.
         let (insiste, eventos) = conversar_dizendo(
             &ctx,
             128_000,
@@ -734,13 +735,18 @@ async fn resposta_que_inventa_recurso_e_conferida_uma_vez() {
         )
         .await;
         assert_eq!(insiste.len(), 2);
-        assert!(
-            eventos.iter().any(|evento| matches!(
-                evento,
-                HarnessEvent::Notice { message } if message.starts_with("Atenção: agente-west-01")
-            )),
-            "{eventos:?}"
-        );
+        let retirada = eventos
+            .iter()
+            .position(|evento| matches!(evento, HarnessEvent::Retract))
+            .expect("a resposta inventada é retirada");
+        let depois: String = eventos[retirada..]
+            .iter()
+            .filter_map(|evento| match evento {
+                HarnessEvent::TextDelta { content } => Some(content.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(depois, "Sim, no `[não confirmado]`.");
     })
     .await;
 }

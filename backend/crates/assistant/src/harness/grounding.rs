@@ -619,12 +619,17 @@ pub fn unsupported_identifiers(
         .split('`')
         .skip(1)
         .step_by(2)
-        .map(str::trim)
-        .filter(|span| !span.is_empty() && !span.contains(char::is_whitespace))
+        // Bloco de código (```) e trecho com espaço: cada palavra é candidata.
+        .flat_map(str::split_whitespace)
         // `get_docker_containers(host=x)` é a ferramenta; `host=x` é o `x`.
         .map(|span| span.split('(').next().unwrap_or(span))
         .map(|span| span.rsplit('=').next().unwrap_or(span))
-        .filter(|span| looks_like_resource_identifier(span) && !is_constant_or_quantity(span));
+        .map(|span| span.trim_matches(|c: char| !c.is_alphanumeric()))
+        .filter(|span| {
+            !span.is_empty()
+                && looks_like_resource_identifier(span)
+                && !is_constant_or_quantity(span)
+        });
     let loose = answer
         .split(|c: char| c.is_whitespace() || matches!(c, ',' | ';' | '(' | ')' | '`' | '*' | '='))
         .map(|token| token.trim_end_matches(['.', ':']))
@@ -668,6 +673,34 @@ fn is_constant_or_quantity(span: &str) -> bool {
         && (1..=4).contains(&unit.len())
         && unit.chars().all(|c| c.is_ascii_alphabetic());
     constant || quantity
+}
+
+/// O que fica no lugar de um nome inventado que a IA insistiu em citar.
+pub const UNCONFIRMED: &str = "[não confirmado]";
+
+/// Troca cada nome inventado por [`UNCONFIRMED`], só onde ele aparece
+/// inteiro (`10.0.0.1` não mexe em `10.0.0.10`).
+#[must_use]
+pub fn redact(answer: &str, names: &[String]) -> String {
+    let mut text = answer.to_string();
+    for name in names.iter().filter(|name| !name.is_empty()) {
+        let mut out = String::with_capacity(text.len());
+        let mut last = 0;
+        for (start, found) in text.match_indices(name.as_str()) {
+            let before = text[..start].chars().next_back();
+            let after = text[start + found.len()..].chars().next();
+            let whole = before.is_none_or(|c| !continues_host(c))
+                && after.is_none_or(|c| !continues_host(c));
+            if whole && start >= last {
+                out.push_str(&text[last..start]);
+                out.push_str(UNCONFIRMED);
+                last = start + found.len();
+            }
+        }
+        out.push_str(&text[last..]);
+        text = out;
+    }
+    text
 }
 
 /// [`unsupported_identifiers`] menos o que está cadastrado no inventário (o
@@ -899,6 +932,33 @@ mod tests {
         assert_eq!(
             unsupported_identifiers(resposta, &sessao, 0, ferramenta),
             vec!["agente-norte-01", "agente-sul-02", "10.0.0.9"]
+        );
+    }
+
+    #[test]
+    fn nome_inventado_some_da_resposta_so_onde_aparece_inteiro() {
+        let nomes = vec!["agente-west-01".to_string(), "10.0.0.1".to_string()];
+        assert_eq!(
+            redact(
+                "No `agente-west-01` (10.0.0.1); o 10.0.0.10 e o agente-west-012 ficam.",
+                &nomes
+            ),
+            "No `[não confirmado]` ([não confirmado]); o 10.0.0.10 e o agente-west-012 ficam."
+        );
+    }
+
+    #[test]
+    fn nome_em_bloco_de_codigo_tambem_e_conferido() {
+        let sessao = conversa(&[("user", "o postgres parado é grave?")]);
+        let resposta = "Containers:
+```
+- nginx-proxy: parado (exited)
+- postgres: parado
+```
+                        Veja `get_docker_hosts result`.";
+        assert_eq!(
+            unsupported_identifiers(resposta, &sessao, 0, |nome| nome == "get_docker_hosts"),
+            vec!["nginx-proxy"]
         );
     }
 }

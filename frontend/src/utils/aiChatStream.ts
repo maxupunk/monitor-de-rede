@@ -184,6 +184,11 @@ export function applyChatEvent(message: AiDisplayMessage, event: unknown): void 
     case 'notice':
       if (typeof event.message === 'string') message.notice = event.message
       break
+    case 'retract':
+      // A conferência do harness descartou o texto (citava o que nenhuma
+      // consulta mostrou): a versão conferida vem em seguida.
+      message.content = ''
+      break
     case 'done':
       message.isStreaming = false
       break

@@ -24,7 +24,8 @@ use super::{
         worth_folding, ContextBudget,
     },
     grounding::{
-        invented_in_answer, invented_target, sanitize_ask_user_arguments, ANSWER_CHECK_TAG,
+        invented_in_answer, invented_target, redact, sanitize_ask_user_arguments, ANSWER_CHECK_TAG,
+        UNCONFIRMED,
     },
     prompt::{build_small_talk_prompt, build_system_prompt, build_turn_context, ChatContext},
     tools::{
@@ -139,6 +140,9 @@ pub enum HarnessEvent {
     Notice {
         message: String,
     },
+    /// O texto desta resposta citou recurso que nada mostrou e foi
+    /// descartado: a tela apaga o que escreveu e espera a versão conferida.
+    Retract,
     /// As mensagens antigas viraram resumo para caber na janela. A tela
     /// guarda o resumo e passa a mandar só o que veio depois.
     #[serde(rename_all = "camelCase")]
@@ -1063,7 +1067,10 @@ pub async fn run_agent_loop(
                 }
                 if let Some(delta) = chunk.text_delta {
                     assistant_text.push_str(&delta);
-                    if !sink.send(HarnessEvent::TextDelta { content: delta }).await {
+                    // Depois de uma conferência o texto só sai conferido.
+                    if !answer_retried
+                        && !sink.send(HarnessEvent::TextDelta { content: delta }).await
+                    {
                         return;
                     }
                 }
@@ -1089,26 +1096,32 @@ pub async fn run_agent_loop(
                     )
                     .await
                 };
+                if answer_retried {
+                    // A versão conferida sai inteira; o que ela ainda inventa
+                    // vira [não confirmado] — o nome não chega à tela.
+                    let mut shown = assistant_text.clone();
+                    if !invented.is_empty() {
+                        shown = redact(&shown, &invented);
+                        let notice = format!(
+                            "A IA citou nomes que não existem em nenhum dado consultado; eles aparecem como {UNCONFIRMED}."
+                        );
+                        if !sink.send(HarnessEvent::Notice { message: notice }).await {
+                            return;
+                        }
+                    }
+                    let _ = sink.send(HarnessEvent::TextDelta { content: shown }).await;
+                    return sink.finish(&mut metrics, driver.as_ref()).await;
+                }
                 if invented.is_empty() {
                     return sink.finish(&mut metrics, driver.as_ref()).await;
                 }
                 let list = invented.join(", ");
-                if answer_retried {
-                    let notice = format!(
-                        "Atenção: {list} não existe em nenhum dado consultado. Desconsidere esses nomes nesta resposta."
-                    );
-                    let _ = sink.send(HarnessEvent::Notice { message: notice }).await;
-                    return sink.finish(&mut metrics, driver.as_ref()).await;
-                }
                 answer_retried = true;
                 let notice = format!(
-                    "Conferindo a resposta: {list} não apareceu em nenhuma consulta. A IA vai verificar nos dados."
+                    "Conferindo a resposta: {list} não apareceu em nenhuma consulta. A IA verificou nos dados e respondeu de novo."
                 );
-                let separator = HarnessEvent::TextDelta {
-                    content: "\n\n".into(),
-                };
                 if !sink.send(HarnessEvent::Notice { message: notice }).await
-                    || !sink.send(separator).await
+                    || !sink.send(HarnessEvent::Retract).await
                 {
                     return;
                 }
@@ -1130,6 +1143,14 @@ pub async fn run_agent_loop(
                 continue;
             }
 
+            if answer_retried && !assistant_text.is_empty() {
+                let flushed = HarnessEvent::TextDelta {
+                    content: assistant_text.clone(),
+                };
+                if !sink.send(flushed).await {
+                    return;
+                }
+            }
             round_start = conversation.len();
             conversation.push(AiMessage {
                 role: "assistant".to_string(),
