@@ -255,7 +255,7 @@ impl AiToolHandler for BuildStatus {
     }
 
     fn description(&self) -> &'static str {
-        "Compilações de imagem no servidor (deploy contínuo sem GitHub Actions): aplicação, commit, branch, quem pediu, estado, etapa, imagens geradas e o erro. Use para 'a compilação do SGC falhou?' ou 'o que está compilando?'."
+        "Compilações de imagem no servidor (deploy contínuo sem GitHub Actions): aplicação, commit, branch, quem pediu, estado, etapa, imagens geradas e o erro. Use para 'a última compilação falhou?' ou 'o que está compilando?'."
     }
 
     fn parameters(&self) -> Value {

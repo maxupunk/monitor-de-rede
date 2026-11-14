@@ -769,7 +769,7 @@
           "type": "function",
           "function": {
             "name": "get_builds",
-            "description": "Compilações de imagem no servidor (deploy contínuo sem GitHub Actions): aplicação, commit, branch, quem pediu, estado, etapa, imagens geradas e o erro. Use para 'a compilação do SGC falhou?' ou 'o que está compilando?'.",
+            "description": "Compilações de imagem no servidor (deploy contínuo sem GitHub Actions): aplicação, commit, branch, quem pediu, estado, etapa, imagens geradas e o erro. Use para 'a última compilação falhou?' ou 'o que está compilando?'.",
             "parameters": {
               "properties": {
                 "applicationId": {

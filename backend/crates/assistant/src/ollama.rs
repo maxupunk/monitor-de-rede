@@ -55,7 +55,7 @@ pub static BUNDLED_MODELS: &[BundledOllamaModel] = &[
         release_url_env: "CHAT_MODELS_URL",
         default_release_url: CHAT_MODELS_RELEASE_URL,
         gguf_filename: "lfm3-netmonitor-q8_0.gguf",
-        gguf_digest: "sha256:20e645e2f86ecc5700a2607ab76d29baa6ecab05663e88250e21da65c4890f19",
+        gguf_digest: "sha256:5c1fa051a965afff8f349811cfa5f6c3ff3817ab7c252e63785af02f0a3d73b4",
         gguf_size: 1_846_237_728,
         template: "{{ .Prompt }}",
         renderer: "lfm3",
@@ -68,7 +68,7 @@ pub static BUNDLED_MODELS: &[BundledOllamaModel] = &[
         release_url_env: "CHAT_MODELS_URL",
         default_release_url: CHAT_MODELS_RELEASE_URL,
         gguf_filename: "lfm3-netmonitor-q5_k_m.gguf",
-        gguf_digest: "sha256:4bec8818dd9df245bb1d895687b53ebf3073d949d5e7f4fc4c5057dd869057ce",
+        gguf_digest: "sha256:99a0a2fb1ad3823bb9df4574a9744917c3e84cd880ef86a96e267dab393e6bae",
         gguf_size: 1_258_662_432,
         template: "{{ .Prompt }}",
         renderer: "lfm3",
@@ -81,7 +81,7 @@ pub static BUNDLED_MODELS: &[BundledOllamaModel] = &[
         release_url_env: "CHAT_MODELS_URL",
         default_release_url: CHAT_MODELS_RELEASE_URL,
         gguf_filename: "lfm3-netmonitor-q4_k_m.gguf",
-        gguf_digest: "sha256:740f3b27087f76b84aebba9bb6c40ff2e9cdfcd90458355cdf079065d00b606b",
+        gguf_digest: "sha256:6de95b0c82ce1ebf84f86db4f366898a7591001356bbf42996d2923c389f5228",
         gguf_size: 1_099_627_040,
         template: "{{ .Prompt }}",
         renderer: "lfm3",
@@ -115,7 +115,7 @@ pub struct RecommendedModel {
 pub static RECOMMENDED_MODELS: &[RecommendedModel] = &[
     RecommendedModel {
         name: "lfm3-netmonitor:latest",
-        description: "LFM3 NetMonitor 1.7B v5 (Q8_0 / Q8_K — Máxima precisão, padrão) — Especialista nas 61 ferramentas do NetMonitor com jargão técnico NOC/ISP brasileiro (redes, Wi-Fi IEEE 802.11, fibra óptica GPON/SFP+, roteadores, Docker, backups, dashboard e web_search): 1,85 GB, 98,9% em ferramentas e 100% em segurança (nota 98,5 blind / 96,1 bench)",
+        description: "LFM3 NetMonitor 1.7B v6 (Q8_0 / Q8_K — Máxima precisão, padrão) — Especialista nas ferramentas do NetMonitor com jargão técnico NOC/ISP brasileiro (redes, Wi-Fi IEEE 802.11, fibra óptica GPON/SFP+, roteadores, Docker, backups, dashboard e web_search), treinado para responder só com o que as consultas mostraram: 1,85 GB, nenhum recurso inventado em 128 cenários reais e 100% em segurança (nota 99,0 blind / 97,6 bench)",
         parameter_size: "1.7B · Q8_0",
         context_length: 262_144,
         tool_calling_optimized: true,
@@ -123,7 +123,7 @@ pub static RECOMMENDED_MODELS: &[RecommendedModel] = &[
     },
     RecommendedModel {
         name: "lfm3-netmonitor:q5_k_m",
-        description: "LFM3 NetMonitor 1.7B v5 (Q5_K_M — Equilibrado) — Mesma especialização NOC/ISP e nas 61 ferramentas do NetMonitor com 32% menos memória: 1,26 GB, 98,9% em ferramentas no blind e 100% em segurança (nota 97,7 blind / 96,1 bench)",
+        description: "LFM3 NetMonitor 1.7B v6 (Q5_K_M — Equilibrado) — Mesma especialização NOC/ISP e nas ferramentas do NetMonitor com 32% menos memória: 1,26 GB, nenhum recurso inventado em 128 cenários reais e 100% em segurança (nota 98,2 blind / 97,6 bench)",
         parameter_size: "1.7B · Q5_K_M",
         context_length: 262_144,
         tool_calling_optimized: true,
@@ -131,7 +131,7 @@ pub static RECOMMENDED_MODELS: &[RecommendedModel] = &[
     },
     RecommendedModel {
         name: "lfm3-netmonitor:q4_k_m",
-        description: "LFM3 NetMonitor 1.7B v5 (Q4_K_M — Ultraleve / Rápido) — Versão compacta de 4 bits para servidores com pouca RAM/CPU: 1,10 GB, 96,2% em ferramentas no bench e 100% em segurança no blind (nota 96,0 blind / 96,2 bench)",
+        description: "LFM3 NetMonitor 1.7B v6 (Q4_K_M — Ultraleve / Rápido) — Versão compacta de 4 bits para servidores com pouca RAM/CPU: 1,10 GB, 1 recurso inventado em 128 cenários reais e 100% em segurança no blind (nota 97,5 blind / 96,9 bench)",
         parameter_size: "1.7B · Q4_K_M",
         context_length: 262_144,
         tool_calling_optimized: true,

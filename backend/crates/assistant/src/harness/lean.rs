@@ -5,8 +5,10 @@
 //! se multiplica pelo número de rodadas. Quatro cortes, nenhum perde
 //! informação que a IA use:
 //!
-//! 1. **Vazio sai**: `null`, `""`, `[]` e `{}` não dizem nada. `false` e `0`
-//!    ficam — são resposta.
+//! 1. **Vazio sai**: `null`, `""` e `{}` não dizem nada. `false`, `0` e a
+//!    lista vazia `[]` ficam — são resposta ("nenhum host" não é o mesmo que
+//!    um campo que não veio, e sem a lista o modelo concluía que a consulta
+//!    falhou).
 //! 2. **Lista de objetos vira tabela**: `[{"id":1,"nome":"a"},{"id":2,…}]`
 //!    repete as chaves em cada item; `{"columns":["id","nome"],"rows":[[1,"a"],
 //!    [2,…]]}` as diz uma vez. É o corte que mais rende (listas de
@@ -51,7 +53,6 @@ fn is_empty(value: &Value) -> bool {
     match value {
         Value::Null => true,
         Value::String(text) => text.is_empty(),
-        Value::Array(items) => items.is_empty(),
         Value::Object(map) => map.is_empty(),
         _ => false,
     }
@@ -153,8 +154,13 @@ mod tests {
             lean(
                 &json!({ "a": null, "b": "", "c": [], "d": {}, "e": false, "f": 0, "g": { "h": null } })
             ),
-            json!({ "e": false, "f": 0 })
+            json!({ "c": [], "e": false, "f": 0 })
         );
+    }
+
+    #[test]
+    fn lista_vazia_continua_dizendo_que_nao_ha_nada() {
+        assert_eq!(lean(&json!({ "hosts": [] })), json!({ "hosts": [] }));
     }
 
     #[test]
