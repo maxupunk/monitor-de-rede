@@ -138,6 +138,22 @@ pub static RECOMMENDED_MODELS: &[RecommendedModel] = &[
         netmonitor_trained: true,
     },
     RecommendedModel {
+        name: "hf.co/openbmb/MiniCPM5-2B-GGUF:Q8_0",
+        description: "MiniCPM5 2B (OpenBMB, Q8_0) — Modelo base pequeno mais forte em ferramentas entre os de até 4B: BFCL v4 66,6 e τ²-Bench Telecom 97,1 publicados pelo fabricante (não medido no benchmark do NetMonitor nem ajustado com as ferramentas dele). Denso, 2,6 GB, mais lento em CPU que o LFM3; desligue o raciocínio para respostas diretas",
+        parameter_size: "2.5B · Q8_0",
+        context_length: 131_072,
+        tool_calling_optimized: true,
+        netmonitor_trained: false,
+    },
+    RecommendedModel {
+        name: "hf.co/openbmb/MiniCPM5-2B-GGUF:Q4_K_M",
+        description: "MiniCPM5 2B (OpenBMB, Q4_K_M) — A mesma base em 4 bits para servidores com pouca RAM: 1,56 GB, mais rápido em CPU que a Q8_0 com alguma perda de precisão (não medido no benchmark do NetMonitor)",
+        parameter_size: "2.5B · Q4_K_M",
+        context_length: 131_072,
+        tool_calling_optimized: true,
+        netmonitor_trained: false,
+    },
+    RecommendedModel {
         name: "ornith-1.5:9b",
         description: "Ornith 1.5 9B — Modelo recomendado de grande porte: autoaperfeiçoamento, raciocínio avançado, ferramentas de rede e janela nativa de 256k",
         parameter_size: "9B",
