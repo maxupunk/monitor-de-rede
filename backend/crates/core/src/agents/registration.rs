@@ -14,6 +14,7 @@ use serde_json::json;
 use super::{
     enrollment,
     identity::{is_agent, is_local, ROLE_AGENT},
+    install_policy::InstallPolicy,
 };
 use crate::{
     models::{devices, probes},
@@ -97,7 +98,8 @@ pub async fn create(
 }
 
 /// Agente criado junto com o peer da VPN: já nasce vinculado ao
-/// dispositivo e exigindo o túnel. O código sai na geração do script.
+/// dispositivo e exigindo o túnel. O código sai na geração do script, com a
+/// política escolhida (gravada para o script regerado sair igual).
 ///
 /// # Errors
 ///
@@ -107,12 +109,17 @@ pub async fn create_for_device(
     name: &str,
     site_id: Option<i64>,
     device_id: i64,
+    policy: &InstallPolicy,
 ) -> AppResult<probes::Model> {
     if let Some(existing) = for_device(db, device_id).await? {
         return Ok(existing);
     }
     let (probe, _code) = create(db, name, site_id, Some(device_id), Some(true)).await?;
-    Ok(probe)
+    let mut configuration = probe.configuration.clone().unwrap_or_else(|| json!({}));
+    policy.store(&mut configuration);
+    let mut active: probes::ActiveModel = probe.into();
+    active.configuration = Set(Some(configuration));
+    Ok(active.update(db).await?)
 }
 
 /// Agente já cadastrado que pode passar a falar pelo túnel de um peer novo:
@@ -157,9 +164,11 @@ pub async fn attach_to_device(
     db: &DatabaseConnection,
     agent: probes::Model,
     device_id: i64,
+    policy: &InstallPolicy,
 ) -> AppResult<probes::Model> {
     let mut configuration = agent.configuration.clone().unwrap_or_else(|| json!({}));
     configuration["enforceTunnelIp"] = serde_json::Value::Bool(true);
+    policy.store(&mut configuration);
     let mut active: probes::ActiveModel = agent.into();
     active.device_id = Set(Some(device_id));
     active.configuration = Set(Some(configuration));

@@ -52,6 +52,10 @@ pub struct PeerConfigContext {
 pub struct AgentInstall {
     pub server_url: String,
     pub enroll_code: String,
+    /// `AGENT_ALLOW` escolhido na tela.
+    pub allow: String,
+    /// `AGENT_DATABASE_TARGETS`; vazio sem a ponte de banco.
+    pub database_targets: String,
 }
 
 impl PeerConfigContext {

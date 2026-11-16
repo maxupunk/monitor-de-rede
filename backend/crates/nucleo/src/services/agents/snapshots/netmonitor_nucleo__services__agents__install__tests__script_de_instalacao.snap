@@ -39,6 +39,7 @@ umask 077
   echo "AGENT_SERVER_URL=$AGENT_SERVER_URL"
   echo "AGENT_ALLOW=$AGENT_ALLOW"
   if [ -n "${AGENT_ENROLL_CODE:-}" ]; then echo "AGENT_ENROLL_CODE=$AGENT_ENROLL_CODE"; fi
+  if [ -n "${AGENT_DATABASE_TARGETS:-}" ]; then echo "AGENT_DATABASE_TARGETS=$AGENT_DATABASE_TARGETS"; fi
 } > /etc/netmonitor-agent/agent.env
 
 cat > /etc/systemd/system/netmonitor-agent.service <<'UNIT'

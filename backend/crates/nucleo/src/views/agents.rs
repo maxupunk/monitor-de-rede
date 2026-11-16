@@ -3,7 +3,10 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-pub use netmonitor_core::agents::views::{AgentCapabilityView, AgentHostInfo};
+pub use netmonitor_core::agents::{
+    install_policy::InstallPolicyView,
+    views::{AgentCapabilityView, AgentHostInfo},
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -45,6 +48,8 @@ pub struct AgentInstallCommands {
     pub server_url: String,
     pub docker_command: String,
     pub systemd_command: String,
+    /// O que os comandos liberam no host.
+    pub policy: InstallPolicyView,
 }
 
 /// Instruções entregues uma única vez, junto com o código de enrollment.

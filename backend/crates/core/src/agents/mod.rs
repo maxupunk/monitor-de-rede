@@ -6,6 +6,8 @@
 //! * [`session`] / [`hub`] — conexões vivas e correlação de pedidos;
 //! * [`bridge`] — pontes de bytes pelo canal (banco, volume);
 //! * [`identity`] — quem é agente e quem é o local;
+//! * [`install_policy`] / [`database_targets`] — o que o comando de
+//!   instalação libera no host (`AGENT_ALLOW`, `AGENT_DATABASE_TARGETS`);
 //! * [`registration`] / [`enrollment`] — cadastro e código de uso único;
 //! * [`routes`] — agentes que servem de rota para um recurso;
 //! * [`HostKey`] — a chave de um host Docker (`agent-<id>`);
@@ -14,12 +16,14 @@
 
 pub mod bridge;
 pub mod command;
+pub mod database_targets;
 pub mod enrollment;
 mod errors;
 pub mod host;
 mod host_key;
 pub mod hub;
 pub mod identity;
+pub mod install_policy;
 pub mod registration;
 pub mod routes;
 pub mod session;

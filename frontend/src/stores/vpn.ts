@@ -1,3 +1,4 @@
+import type { InstallPolicyView } from '@/bindings/InstallPolicyView'
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { apiService } from '@/services/apiService'
@@ -52,6 +53,8 @@ export interface CreateVpnPeerPayload {
   installAgent?: boolean
   /** Servidor remoto já cadastrado que passa a usar este túnel. */
   agentId?: number | null
+  /** O que o agente instalado pelo script libera no host. */
+  agentPolicy?: InstallPolicyView | null
 }
 
 export const VPN_STATUS_LABELS: Record<VpnConnectionStatus, string> = {

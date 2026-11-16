@@ -10,6 +10,7 @@ use qrcode::{render::svg, QrCode};
 use serde::Deserialize;
 use serde_json::json;
 
+use netmonitor_core::agents::install_policy::InstallPolicyView;
 use netmonitor_core::{
     audit::{
         AuditAction, AuditActor, AuditChanges, AuditEntryInput, AuditService, ResourceType,
@@ -52,6 +53,8 @@ struct CreatePeerInput {
     install_agent: Option<bool>,
     /// Servidor remoto já cadastrado que passa a usar este túnel.
     agent_id: Option<i64>,
+    /// O que o agente vai liberar no host.
+    agent_policy: Option<InstallPolicyView>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -222,6 +225,7 @@ async fn store(
             snmp_version: input.snmp_version,
             description: input.description,
             agent: PeerAgent::from_input(input.install_agent.unwrap_or(false), input.agent_id),
+            agent_policy: input.agent_policy,
         },
     )
     .await?;

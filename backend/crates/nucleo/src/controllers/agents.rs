@@ -18,6 +18,7 @@ use axum::{
 };
 use futures::{SinkExt, StreamExt};
 use loco_rs::prelude::*;
+use netmonitor_core::agents::install_policy::InstallPolicy;
 use tokio::sync::mpsc;
 
 use crate::{
@@ -204,16 +205,24 @@ async fn install_commands(
     headers: HeaderMap,
     Json(input): Json<AgentInstallCommandsInput>,
 ) -> AppResult<Response> {
+    let policy = InstallPolicy::chosen_or_suggested(input.policy.as_ref())?;
     Ok(format::json(
         install_address::commands(
             &ctx,
             &input.code,
-            Some(input.address_id.as_str()),
+            input.address_id.as_deref(),
             None,
             &request_origin(&headers),
+            &policy,
         )
         .await?,
     )?)
+}
+
+/// `GET /api/agents/install-policy` — o que a tela marca por padrão ao
+/// instalar um agente (também no script da VPN).
+async fn install_policy() -> AppResult<Response> {
+    Ok(format::json(InstallPolicy::suggested().view())?)
 }
 
 /// Código recém-emitido com os comandos do endereço padrão.
@@ -223,7 +232,15 @@ async fn enrollment_of(
     device: Option<&crate::models::devices::Model>,
     origin: &str,
 ) -> AppResult<AgentEnrollmentView> {
-    let commands = install_address::commands(ctx, &code, None, device, origin).await?;
+    let commands = install_address::commands(
+        ctx,
+        &code,
+        None,
+        device,
+        origin,
+        &InstallPolicy::suggested(),
+    )
+    .await?;
     Ok(AgentEnrollmentView {
         code,
         expires_in_seconds: ENROLLMENT_TTL_SECONDS,
@@ -382,6 +399,7 @@ pub fn routes() -> Routes {
         .prefix("/agents")
         .add("/", get(index).post(store))
         .add("/install-commands", post(install_commands))
+        .add("/install-policy", get(install_policy))
         .add("/{id}", get(show).put(update).delete(destroy))
         .add("/{id}/enrollment", post(enrollment))
         .add("/{id}/revoke", post(revoke))

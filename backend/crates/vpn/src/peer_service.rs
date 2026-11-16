@@ -10,6 +10,7 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set,
 };
 
+use netmonitor_core::agents::install_policy::{InstallPolicy, InstallPolicyView};
 use netmonitor_core::shared::transaction::begin_write;
 use netmonitor_core::{
     agents::{
@@ -50,6 +51,8 @@ pub struct CreatePeerPayload {
     /// O agente NetMonitor que o script instala (perfis com script Linux,
     /// ADR 011).
     pub agent: PeerAgent,
+    /// O que o agente vai liberar no host; sem ela, a sugestão.
+    pub agent_policy: Option<InstallPolicyView>,
 }
 
 /// Qual agente acompanha o peer: nenhum, um novo, ou um servidor já conectado
@@ -125,9 +128,14 @@ fn build_context(
         .agent
         .as_ref()
         .filter(|_| client_private_key.is_some())
-        .map(|agent| AgentInstall {
-            server_url: tunnel_server_url(&server_vpn_address),
-            enroll_code: enrollment::issue(agent.id),
+        .map(|agent| {
+            let policy = InstallPolicy::of(agent);
+            AgentInstall {
+                server_url: tunnel_server_url(&server_vpn_address),
+                enroll_code: enrollment::issue(agent.id),
+                allow: policy.allow_env(),
+                database_targets: policy.database_targets_env(),
+            }
         });
     Ok(PeerConfigContext {
         peer_name: device.map_or_else(
@@ -248,6 +256,7 @@ pub async fn create(
     let network = server_service::network_of(db, &server).await?;
     // Antes de criar qualquer coisa: um agente que não pode ser movido não
     // deixa um peer órfão para trás.
+    let agent_policy = InstallPolicy::chosen_or_suggested(payload.agent_policy.as_ref())?;
     let existing_agent = match payload.agent {
         PeerAgent::Existing(agent_id) => Some(registration::attachable(db, agent_id).await?),
         PeerAgent::None | PeerAgent::New => None,
@@ -352,9 +361,16 @@ pub async fn create(
     server_service::apply_configuration(db, &server, &network).await?;
 
     if let Some(agent) = existing_agent {
-        registration::attach_to_device(db, agent, peer.device_id).await?;
+        registration::attach_to_device(db, agent, peer.device_id, &agent_policy).await?;
     } else if payload.agent == PeerAgent::New {
-        registration::create_for_device(db, &payload.name, payload.site_id, peer.device_id).await?;
+        registration::create_for_device(
+            db,
+            &payload.name,
+            payload.site_id,
+            peer.device_id,
+            &agent_policy,
+        )
+        .await?;
     }
 
     client_key_store().put(secret_key(peer.id), key_pair.private_key.clone());

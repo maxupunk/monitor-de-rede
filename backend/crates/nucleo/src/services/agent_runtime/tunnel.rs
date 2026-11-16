@@ -13,15 +13,11 @@
 //! O volume só exige `volume_export` na política: o nome vai à Engine deste
 //! host, que valida a existência, e o tar sai só de ida.
 
-use std::{
-    net::{IpAddr, SocketAddr},
-    str::FromStr,
-    sync::Arc,
-    time::Duration,
-};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use agent_protocol::docker::images::ImageImportRequest;
 use async_trait::async_trait;
+pub use netmonitor_core::agents::database_targets::{parse_targets, TunnelTarget};
 use netmonitor_core::agents::host::{HostDocker, NoHostDocker};
 use tokio::net::TcpStream;
 
@@ -35,57 +31,6 @@ use crate::services::{
 };
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-
-/// Um destino liberado: um IP ou uma faixa, numa porta.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TunnelTarget {
-    pub net: ipnet::IpNet,
-    pub port: u16,
-}
-
-impl TunnelTarget {
-    #[must_use]
-    pub fn matches(&self, addr: SocketAddr) -> bool {
-        self.port == addr.port() && self.net.contains(&addr.ip())
-    }
-}
-
-impl FromStr for TunnelTarget {
-    type Err = String;
-
-    /// `10.0.0.20:5432`, `10.0.0.0/24:3306` ou `[fd00::5]:5432`.
-    fn from_str(raw: &str) -> Result<Self, Self::Err> {
-        let raw = raw.trim();
-        let invalid =
-            || format!("destino de ponte inválido: '{raw}' (use IP:porta ou faixa/prefixo:porta)");
-        let (host, port) = raw.rsplit_once(':').ok_or_else(invalid)?;
-        let port: u16 = port.parse().map_err(|_| invalid())?;
-        let host = host.trim_start_matches('[').trim_end_matches(']');
-        let net = if host.contains('/') {
-            host.parse().map_err(|_| invalid())?
-        } else {
-            ipnet::IpNet::from(host.parse::<IpAddr>().map_err(|_| invalid())?)
-        };
-        if port == 0 {
-            return Err(invalid());
-        }
-        Ok(Self { net, port })
-    }
-}
-
-/// Lê `AGENT_DATABASE_TARGETS` (separada por vírgula).
-///
-/// # Errors
-///
-/// Qualquer entrada inválida — um erro de digitação não pode virar "nenhum
-/// destino" em silêncio, nem liberar outro.
-pub fn parse_targets(raw: &str) -> Result<Vec<TunnelTarget>, String> {
-    raw.split(',')
-        .map(str::trim)
-        .filter(|item| !item.is_empty())
-        .map(TunnelTarget::from_str)
-        .collect()
-}
 
 /// Quem abre a ponta local de uma ponte. Trait para os testes trocarem a
 /// rede e a Engine.

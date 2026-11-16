@@ -116,6 +116,18 @@ Um servidor já conectado entra no túnel sem virar outro cadastro:
 local, revogado ou já vinculado a um dispositivo é recusado antes de o peer
 ser criado.
 
+## Adendo (2026-11-16) — a tela escolhe as permissões da instalação
+
+O comando de instalação (e o script da VPN) passa a levar `AGENT_ALLOW` e
+`AGENT_DATABASE_TARGETS` escolhidos na tela. A sugestão marca **tudo**, com a
+ponte de banco apontando para as redes do Docker, porque o uso comum é
+gerenciar e fazer backup dos containers do próprio host; o operador desmarca o
+que não quer antes de colar o comando. A política continua do host: o padrão
+do binário sem `AGENT_ALLOW` segue conservador, e a central não a amplia
+depois de instalada — o que mudou é só o texto que o operador vê e cola. A
+escolha do agente da VPN fica em `probes.configuration.installPolicy`, para o
+script regerado na rotação de chaves sair igual (`core::agents::install_policy`).
+
 ## Adendo (2026-09-30) — `Command::DeviceIo`
 
 Os plugins de dispositivo ([ADR 012](012-plugins-de-dispositivo.md)) alcançam

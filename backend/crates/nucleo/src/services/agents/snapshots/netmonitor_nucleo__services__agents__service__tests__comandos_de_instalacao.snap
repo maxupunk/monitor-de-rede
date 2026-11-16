@@ -10,8 +10,10 @@ docker run -d --name netmonitor-agent --restart unless-stopped \
   -v netmonitor-stacks:/stacks \
   -e AGENT_SERVER_URL=http://10.8.0.1:3333 \
   -e AGENT_ENROLL_CODE=nma_abc \
-  -e AGENT_ALLOW=read,lifecycle,monitor,discovery \
+  -e AGENT_ALLOW=read,lifecycle,update,compose,monitor,discovery,device_io,database,volume_export,throughput,deploy,build \
+  -e AGENT_DATABASE_TARGETS=172.16.0.0/12:5432,172.16.0.0/12:3306,192.168.0.0/16:5432,192.168.0.0/16:3306 \
   ghcr.io/maxupunk/netmonitor-agent:latest
 
 curl -fsSL http://10.8.0.1:3333/api/agents/install.sh | \
-  sudo AGENT_SERVER_URL=http://10.8.0.1:3333 AGENT_ENROLL_CODE=nma_abc sh
+  sudo AGENT_SERVER_URL=http://10.8.0.1:3333 AGENT_ENROLL_CODE=nma_abc \
+  AGENT_ALLOW=read,lifecycle,update,compose,monitor,discovery,device_io,database,volume_export,throughput,deploy,build AGENT_DATABASE_TARGETS=172.16.0.0/12:5432,172.16.0.0/12:3306,192.168.0.0/16:5432,192.168.0.0/16:3306 sh

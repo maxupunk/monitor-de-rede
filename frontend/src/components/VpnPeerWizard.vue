@@ -113,6 +113,9 @@
                   gerado ele só reconecta pelo túnel — rode o script no servidor em seguida.
                 </v-alert>
               </v-col>
+              <v-col v-if="supportsAgent && form.installAgent && agentPolicy" cols="12">
+                <AgentPolicyPicker v-model="agentPolicy"></AgentPolicyPicker>
+              </v-col>
               <v-col v-else-if="supportsAgent" cols="12">
                 <v-switch
                   v-model="form.installAgent"
@@ -176,7 +179,10 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
+import AgentPolicyPicker from '@/components/agents/AgentPolicyPicker.vue'
 import ChoiceCard from '@/components/ChoiceCard.vue'
+import type { InstallPolicyView } from '@/bindings/InstallPolicyView'
+import { useAgentsStore } from '@/stores/agents'
 import { useVpnStore, type VpnArtifact } from '@/stores/vpn'
 import { useSitesStore } from '@/stores/sites'
 
@@ -200,6 +206,17 @@ const emit = defineEmits<{
 
 const vpnStore = useVpnStore()
 const sitesStore = useSitesStore()
+const agentsStore = useAgentsStore()
+
+/** O que o agente instalado pelo script vai liberar; vem marcado com a sugestão. */
+const agentPolicy = ref<InstallPolicyView | null>(null)
+
+watch(
+  () => form.installAgent,
+  async (install) => {
+    if (install && !agentPolicy.value) agentPolicy.value = await agentsStore.suggestedPolicy()
+  }
+)
 
 const step = ref(1)
 const stepLabels = ['Equipamento', 'Identificação']
@@ -244,6 +261,7 @@ watch(
     form.snmpEnabled = false
     form.snmpCommunity = 'public'
     form.installAgent = false
+    agentPolicy.value = null
 
     if (props.preset) {
       form.profile = AGENT_PROFILE
@@ -287,6 +305,7 @@ async function submit() {
     snmpCommunity: form.snmpEnabled ? form.snmpCommunity : null,
     installAgent: supportsAgent.value && form.installAgent,
     agentId: props.preset?.agentId ?? null,
+    agentPolicy: supportsAgent.value && form.installAgent ? agentPolicy.value : null,
   })
 
   if (artifact) {

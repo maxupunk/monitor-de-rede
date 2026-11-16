@@ -37,6 +37,7 @@ use crate::{
 use netmonitor_core::{
     agents::{
         identity,
+        install_policy::InstallPolicy,
         registration::{self, validate_name},
         HostKey,
     },
@@ -119,8 +120,23 @@ fn agent_image() -> String {
 /// contínuo (ADR 021) já vai montada, num volume que o próprio Docker cria —
 /// nenhuma pasta a preparar no host: liberar `deploy` no `AGENT_ALLOW`
 /// depois não pede outra montagem.
+/// A política vai junto (`AGENT_ALLOW` e, com a ponte de banco liberada,
+/// `AGENT_DATABASE_TARGETS`): é o operador que a escolhe na tela, e ela fica
+/// gravada no host.
 #[must_use]
-pub fn install_commands(server_url: &str, code: &str) -> (String, String) {
+pub fn install_commands(server_url: &str, code: &str, policy: &InstallPolicy) -> (String, String) {
+    let allow = policy.allow_env();
+    let targets = policy.database_targets_env();
+    let docker_targets = if targets.is_empty() {
+        String::new()
+    } else {
+        format!("-e AGENT_DATABASE_TARGETS={targets} \\\n  ")
+    };
+    let systemd_targets = if targets.is_empty() {
+        String::new()
+    } else {
+        format!(" AGENT_DATABASE_TARGETS={targets}")
+    };
     let common = format!(
         "docker run -d --name netmonitor-agent --restart unless-stopped \\\n  \
          --network host --pid host \\\n  \
@@ -130,12 +146,14 @@ pub fn install_commands(server_url: &str, code: &str) -> (String, String) {
          -v netmonitor-stacks:/stacks \\\n  \
          -e AGENT_SERVER_URL={server_url} \\\n  \
          -e AGENT_ENROLL_CODE={code} \\\n  \
-         -e AGENT_ALLOW=read,lifecycle,monitor,discovery \\\n  "
+         -e AGENT_ALLOW={allow} \\\n  \
+         {docker_targets}"
     );
     let docker = format!("{common}{image}", image = agent_image());
     let systemd = format!(
         "curl -fsSL {server_url}/api/agents/install.sh | \\\n  \
-         sudo AGENT_SERVER_URL={server_url} AGENT_ENROLL_CODE={code} sh"
+         sudo AGENT_SERVER_URL={server_url} AGENT_ENROLL_CODE={code} \\\n  \
+         AGENT_ALLOW={allow}{systemd_targets} sh"
     );
     (docker, systemd)
 }
@@ -230,7 +248,14 @@ impl<'a> AgentService<'a> {
         site_id: Option<i64>,
         device_id: i64,
     ) -> AppResult<probes::Model> {
-        registration::create_for_device(self.db, name, site_id, device_id).await
+        registration::create_for_device(
+            self.db,
+            name,
+            site_id,
+            device_id,
+            &InstallPolicy::suggested(),
+        )
+        .await
     }
 
     /// Agente ativo vinculado ao dispositivo.
@@ -504,7 +529,11 @@ mod tests {
     #[serial_test::serial]
     fn comandos_de_instalacao() {
         std::env::remove_var("AGENT_IMAGE");
-        let (docker, systemd) = install_commands("http://10.8.0.1:3333", "nma_abc");
+        let (docker, systemd) = install_commands(
+            "http://10.8.0.1:3333",
+            "nma_abc",
+            &InstallPolicy::suggested(),
+        );
         insta::assert_snapshot!(format!("{docker}\n\n{systemd}"));
     }
 
@@ -512,10 +541,18 @@ mod tests {
     #[serial_test::serial]
     fn imagem_propria_substitui_a_padrao() {
         std::env::set_var("AGENT_IMAGE", "registry.exemplo/netmonitor-agent:1.0");
-        let (docker, _) = install_commands("http://10.8.0.1:3333", "nma_abc");
+        let (docker, _) = install_commands(
+            "http://10.8.0.1:3333",
+            "nma_abc",
+            &InstallPolicy::suggested(),
+        );
         std::env::remove_var("AGENT_IMAGE");
         assert!(docker.ends_with("registry.exemplo/netmonitor-agent:1.0"));
-        let (padrao, _) = install_commands("http://10.8.0.1:3333", "nma_abc");
+        let (padrao, _) = install_commands(
+            "http://10.8.0.1:3333",
+            "nma_abc",
+            &InstallPolicy::suggested(),
+        );
         assert!(padrao.ends_with(DEFAULT_AGENT_IMAGE));
     }
 }

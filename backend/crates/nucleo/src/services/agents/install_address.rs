@@ -11,6 +11,7 @@
 //! (`APP_EXTERNAL_PORT`, que no modo host é a própria `APP_PORT`).
 
 use loco_rs::app::AppContext;
+use netmonitor_core::agents::install_policy::InstallPolicy;
 
 use crate::{
     models::devices,
@@ -154,12 +155,14 @@ pub async fn commands(
     address_id: Option<&str>,
     device: Option<&devices::Model>,
     request_origin: &str,
+    policy: &InstallPolicy,
 ) -> AppResult<AgentInstallCommands> {
     let code = validate_code(code)?;
+    let render = |address_id, server_url| render(address_id, server_url, code, policy);
     if let Ok(forced) = std::env::var("AGENT_SERVER_URL") {
         let forced = forced.trim().trim_end_matches('/').to_string();
         if !forced.is_empty() {
-            return Ok(render(None, forced, code));
+            return Ok(render(None, forced));
         }
     }
     let addresses = server_addresses::list(&ctx.db, &server_addresses::nat_detector(ctx)).await?;
@@ -178,22 +181,27 @@ pub async fn commands(
         return Ok(render(
             None,
             request_origin.trim_end_matches('/').to_string(),
-            code,
         ));
     };
     let url = server_url_for(chosen, ports(ctx)).ok_or_else(|| {
         AppError::validation("O endereço escolhido não é um host ou URL válido para o agente")
     })?;
-    Ok(render(Some(chosen.id.clone()), url, code))
+    Ok(render(Some(chosen.id.clone()), url))
 }
 
-fn render(address_id: Option<String>, server_url: String, code: &str) -> AgentInstallCommands {
-    let (docker_command, systemd_command) = install_commands(&server_url, code);
+fn render(
+    address_id: Option<String>,
+    server_url: String,
+    code: &str,
+    policy: &InstallPolicy,
+) -> AgentInstallCommands {
+    let (docker_command, systemd_command) = install_commands(&server_url, code, policy);
     AgentInstallCommands {
         address_id,
         server_url,
         docker_command,
         systemd_command,
+        policy: policy.view(),
     }
 }
 

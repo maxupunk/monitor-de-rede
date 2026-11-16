@@ -137,6 +137,15 @@ fn linux_agent_section(
     };
     let url = escape_uci(&agent.server_url);
     let code = escape_uci(&agent.enroll_code);
+    let allow = escape_uci(&agent.allow);
+    let targets = if agent.database_targets.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " AGENT_DATABASE_TARGETS='{}'",
+            escape_uci(&agent.database_targets)
+        )
+    };
     vec![
         String::new(),
         step("Instala o agente NetMonitor (Docker, métricas e monitores deste servidor)"),
@@ -146,7 +155,7 @@ fn linux_agent_section(
         "  sleep 3".to_string(),
         "done".to_string(),
         format!(
-            "curl -fsSL '{url}/api/agents/install.sh' | AGENT_SERVER_URL='{url}' AGENT_ENROLL_CODE='{code}' sh"
+            "curl -fsSL '{url}/api/agents/install.sh' | AGENT_SERVER_URL='{url}' AGENT_ENROLL_CODE='{code}' AGENT_ALLOW='{allow}'{targets} sh"
         ),
     ]
 }
@@ -424,6 +433,8 @@ mod tests {
         context.agent = Some(super::super::contract::AgentInstall {
             server_url: "http://10.8.0.1:3333".into(),
             enroll_code: "nma_codigo".into(),
+            allow: "read,lifecycle,database".into(),
+            database_targets: "172.16.0.0/12:5432".into(),
         });
         let content = linux_bash_variant(&context, CONF).content;
         assert!(content.contains("# 5/5 · Instala o agente NetMonitor"));

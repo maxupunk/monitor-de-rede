@@ -285,11 +285,15 @@ Um servidor já conectado por outro caminho passa para o túnel com **Mover para
 a VPN**, no card dele: o peer novo recebe o mesmo cadastro (monitores e
 histórico ficam) e, gerado o script, ele só reconecta pelo túnel.
 
-A política é **local**: `AGENT_ALLOW` no servidor remoto define o que ele aceita
-(`read,lifecycle,monitor,discovery` por padrão; `update`, `compose`,
-`device_io`, `database`, `volume_export` e `throughput` — teste de vazão do
-enlace a partir do site — só quando explicitamente liberados). A central não
-consegue ampliá-la. `AGENT_DEVICE_CIDRS` restringe ainda mais os alvos de
+A política é **local**: `AGENT_ALLOW` no servidor remoto define o que ele aceita.
+Ao conectar, a tela mostra as permissões **todas marcadas** — inclusive a ponte
+de banco, com `AGENT_DATABASE_TARGETS` cobrindo as redes do Docker
+(`172.16.0.0/12` e `192.168.0.0/16`, portas 5432 e 3306), o que já permite o
+backup dos bancos dos containers daquele host — e o operador desmarca o que não
+quer; o comando de instalação (ou o script da VPN) sai com a escolha. O binário
+sem `AGENT_ALLOW` continua no padrão conservador
+(`read,lifecycle,monitor,discovery`). Depois de instalada, a política só muda
+no `agent.env` do host: a central não consegue ampliá-la. `AGENT_DEVICE_CIDRS` restringe ainda mais os alvos de
 `device_io` e `throughput`; IP público nunca é alvo.
 
 **Imagem do agente.** O `docker run` exibido usa

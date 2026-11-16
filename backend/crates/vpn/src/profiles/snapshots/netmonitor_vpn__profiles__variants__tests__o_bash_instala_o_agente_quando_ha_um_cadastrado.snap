@@ -1,6 +1,5 @@
 ---
 source: crates/vpn/src/profiles/variants.rs
-assertion_line: 430
 expression: content
 ---
 #!/usr/bin/env bash
@@ -71,6 +70,6 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
   curl -fsS --max-time 3 'http://10.8.0.1:3333/api/agents/install.sh' >/dev/null 2>&1 && break
   sleep 3
 done
-curl -fsSL 'http://10.8.0.1:3333/api/agents/install.sh' | AGENT_SERVER_URL='http://10.8.0.1:3333' AGENT_ENROLL_CODE='nma_codigo' sh
+curl -fsSL 'http://10.8.0.1:3333/api/agents/install.sh' | AGENT_SERVER_URL='http://10.8.0.1:3333' AGENT_ENROLL_CODE='nma_codigo' AGENT_ALLOW='read,lifecycle,database' AGENT_DATABASE_TARGETS='172.16.0.0/12:5432' sh
 
 echo 'Túnel netmonitor ativo. O dispositivo aparece como conectado no NetMonitor.'

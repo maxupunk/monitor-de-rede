@@ -58,6 +58,13 @@
           {{ transport.text }}
         </v-alert>
 
+        <AgentPolicyPicker
+          v-if="commands"
+          :model-value="commands.policy"
+          class="mb-4"
+          @update:model-value="changePolicy"
+        ></AgentPolicyPicker>
+
         <CopyableCommand
           label="Serviço systemd (recomendado)"
           :command="commands.systemdCommand"
@@ -69,9 +76,8 @@
         ></CopyableCommand>
         <p class="text-caption text-high-emphasis mt-4 mb-0">
           Rode <strong>um</strong> dos comandos no servidor. Ele instala o agente NetMonitor, que só
-          disca para esta central e não abre nenhuma porta. A política local
-          <code>AGENT_ALLOW</code> decide o que o servidor aceita: acrescente <code>update</code> e
-          <code>compose</code> só onde pull, recriação e ações de compose devem ser permitidos.
+          disca para esta central e não abre nenhuma porta. As permissões marcadas acima vão no
+          comando e ficam gravadas no servidor.
         </p>
       </v-card-text>
       <v-card-actions>
@@ -96,6 +102,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import AgentPolicyPicker from '@/components/agents/AgentPolicyPicker.vue'
 import CopyableCommand from '@/components/CopyableCommand.vue'
 import ServerAddressesButton from '@/components/ServerAddressesButton.vue'
 import { useAgentsStore } from '@/stores/agents'
@@ -103,6 +110,7 @@ import { useServerAddressesStore } from '@/stores/serverAddresses'
 import { transportNotice } from '@/utils/agentTransport'
 import type { AgentEnrollmentView } from '@/bindings/AgentEnrollmentView'
 import type { AgentInstallCommands } from '@/bindings/AgentInstallCommands'
+import type { InstallPolicyView } from '@/bindings/InstallPolicyView'
 
 interface AddressOption {
   value: string
@@ -203,12 +211,23 @@ async function applyPreferredKinds(): Promise<void> {
   if (target) await changeAddress(target.id)
 }
 
-async function changeAddress(addressId: string | null): Promise<void> {
-  if (!props.enrollment || !addressId || addressId === commands.value?.addressId) return
+/** Regera os comandos com outro endereço e/ou outra política. */
+async function render(addressId: string | null, policy: InstallPolicyView): Promise<void> {
+  if (!props.enrollment) return
   switching.value = true
-  const rendered = await agentsStore.installCommands(props.enrollment.code, addressId)
+  const rendered = await agentsStore.installCommands(props.enrollment.code, addressId, policy)
   switching.value = false
   if (rendered) commands.value = rendered
+}
+
+async function changeAddress(addressId: string | null): Promise<void> {
+  if (!commands.value || !addressId || addressId === commands.value.addressId) return
+  await render(addressId, commands.value.policy)
+}
+
+async function changePolicy(policy: InstallPolicyView): Promise<void> {
+  if (!commands.value) return
+  await render(commands.value.addressId, policy)
 }
 
 /** Depois de corrigir a lista, os comandos seguem o endereço escolhido. */
@@ -217,12 +236,7 @@ async function reloadAddresses(): Promise<void> {
   const current = commands.value?.addressId
   const stillThere = addressesStore.usable.some((entry) => entry.id === current)
   const target = stillThere ? current : addressesStore.usable[0]?.id
-  if (target && props.enrollment) {
-    switching.value = true
-    const rendered = await agentsStore.installCommands(props.enrollment.code, target)
-    switching.value = false
-    if (rendered) commands.value = rendered
-  }
+  if (target && commands.value) await render(target, commands.value.policy)
 }
 
 watch(

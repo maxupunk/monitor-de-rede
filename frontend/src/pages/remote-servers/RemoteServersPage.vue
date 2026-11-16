@@ -314,7 +314,7 @@ import { countNoun, formatRelativeTime } from '@/utils/formatters'
 import { useAiScreenDetail } from '@/composables/useAiScreenDetail'
 import type { AgentEnrollmentView } from '@/bindings/AgentEnrollmentView'
 import type { AgentView } from '@/bindings/AgentView'
-import type { Permission } from '@/bindings/Permission'
+import { permissionColor, permissionLabel } from '@/utils/agentPermissions'
 
 const agentsStore = useAgentsStore()
 const auth = useAuthStore()
@@ -347,31 +347,6 @@ const confirm = reactive({
   id: 0,
   name: '',
 })
-
-const PERMISSION_LABELS: Record<Permission, string> = {
-  read: 'Leitura',
-  lifecycle: 'Ciclo de vida',
-  update: 'Pull / recriar',
-  compose: 'Compose',
-  monitor: 'Monitores',
-  discovery: 'Descoberta',
-  device_io: 'Acesso a equipamentos (plugins)',
-  database: 'Ponte de banco (backup)',
-  volume_export: 'Exportar volumes',
-  throughput: 'Teste de vazão (enlace)',
-  deploy: 'Deploy contínuo',
-  build: 'Compilar imagens',
-}
-
-function permissionLabel(permission: Permission): string {
-  return PERMISSION_LABELS[permission]
-}
-
-function permissionColor(permission: Permission): string {
-  return ['update', 'compose', 'volume_export', 'throughput', 'deploy'].includes(permission)
-    ? 'warning'
-    : 'primary'
-}
 
 function statusMeta(agent: AgentView): { label: string; color: string } {
   if (agent.status === 'revoked') return { label: 'Revogado', color: 'grey' }

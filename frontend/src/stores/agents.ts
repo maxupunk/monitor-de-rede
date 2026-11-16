@@ -6,6 +6,7 @@ import type { AgentEnrollmentView } from '@/bindings/AgentEnrollmentView'
 import type { AgentInstallCommands } from '@/bindings/AgentInstallCommands'
 import type { AgentUpdateInput } from '@/bindings/AgentUpdateInput'
 import type { AgentView } from '@/bindings/AgentView'
+import type { InstallPolicyView } from '@/bindings/InstallPolicyView'
 import type { AgentWithEnrollment } from '@/bindings/AgentWithEnrollment'
 
 /** O `probe:status` de um servidor remoto traz o host anunciado na conexão. */
@@ -100,19 +101,31 @@ export const useAgentsStore = defineStore('agents', () => {
     }
   }
 
-  /** Os mesmos comandos de instalação, para outro endereço desta central. */
+  /** Os mesmos comandos de instalação, para outro endereço ou outra política. */
   async function installCommands(
     code: string,
-    addressId: string
+    addressId: string | null,
+    policy: InstallPolicyView
   ): Promise<AgentInstallCommands | null> {
     error.value = null
     try {
       return await apiService.post<AgentInstallCommands>('/agents/install-commands', {
         code,
         addressId,
+        policy,
       })
     } catch (reason: unknown) {
       fail(reason, 'Erro ao gerar os comandos para este endereço')
+      return null
+    }
+  }
+
+  /** O que a tela marca por padrão ao instalar um agente (pedido sob demanda). */
+  async function suggestedPolicy(): Promise<InstallPolicyView | null> {
+    try {
+      return await apiService.get<InstallPolicyView>('/agents/install-policy')
+    } catch (reason: unknown) {
+      fail(reason, 'Erro ao carregar as permissões sugeridas')
       return null
     }
   }
@@ -171,6 +184,7 @@ export const useAgentsStore = defineStore('agents', () => {
     updateAgent,
     reissueEnrollment,
     installCommands,
+    suggestedPolicy,
     revokeAgent,
     removeAgent,
     applyRealtimeStatus,
