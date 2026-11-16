@@ -257,16 +257,33 @@ executados a partir daquele site. Ele **só disca para fora** — por WebSocket,
 de preferência pelo túnel da VPN — e não abre porta nenhuma no servidor
 ([ADR 011](docs/adr/011-agente-remoto.md)).
 
-1. **Pela VPN (recomendado):** em VPN → Novo peer, perfil Linux, marque
-   "Conectar este servidor à central". O script do túnel termina instalando o
-   agente com um código de uso único, e ele já nasce vinculado ao dispositivo.
-2. **Manual:** Coleta remota → Servidores remotos → Conectar servidor. Escolha
-   por qual dos "Endereços deste servidor" (túnel, rede local, internet ou um
-   personalizado) ele alcança a central; a tela mostra o comando systemd
-   (`curl …/api/agents/install.sh | sudo … sh`) e o `docker run` com esse
-   endereço e o código embutidos. Há também `docker/agent/docker-compose.yml`.
-   Pelo túnel vale a `APP_PORT`; pela rede local e pela internet, a
-   `APP_EXTERNAL_PORT` publicada.
+Em Coleta remota → Servidores remotos → **Conectar servidor**, a tela pergunta
+por onde o servidor alcança a central. Todo o tráfego do agente (comandos,
+Docker, deploy, backup de banco) passa pelo caminho escolhido — ele não troca
+de caminho sozinho.
+
+1. **Pela VPN (mais seguro, para servidor em outra rede):** abre o assistente
+   de peer já no perfil Linux. Um script só sobe o túnel WireGuard até o IP
+   público da central e instala o agente com um código de uso único; ele nasce
+   vinculado ao dispositivo do túnel e a credencial dele **só vale vinda do IP
+   daquele peer**. É o mesmo resultado de VPN → Novo peer com "Conectar este
+   servidor à central". O domínio da central não entra nesse caminho: serve
+   quando ele só atende HTTPS por um proxy (Cloudflare Tunnel, por exemplo) e
+   a VPN chega pelo IP público.
+2. **Na mesma rede:** conexão direta pelo IP da rede local, sem VPN.
+3. **Pela internet (HTTPS):** o agente disca para o domínio da central. Use só
+   com HTTPS; a tela avisa quando o endereço escolhido é HTTP fora de rede
+   privada.
+
+Nos caminhos diretos a tela mostra o comando systemd
+(`curl …/api/agents/install.sh | sudo … sh`) e o `docker run` com o endereço e
+o código embutidos, e o seletor de "Endereços deste servidor" já vem no tipo
+do caminho. Há também `docker/agent/docker-compose.yml`. Pelo túnel vale a
+`APP_PORT`; pela rede local e pela internet, a `APP_EXTERNAL_PORT` publicada.
+
+Um servidor já conectado por outro caminho passa para o túnel com **Mover para
+a VPN**, no card dele: o peer novo recebe o mesmo cadastro (monitores e
+histórico ficam) e, gerado o script, ele só reconecta pelo túnel.
 
 A política é **local**: `AGENT_ALLOW` no servidor remoto define o que ele aceita
 (`read,lifecycle,monitor,discovery` por padrão; `update`, `compose`,

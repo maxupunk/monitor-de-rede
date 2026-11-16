@@ -48,6 +48,15 @@
         <v-alert v-if="addressHint" type="info" variant="tonal" density="compact" class="mb-4">
           {{ addressHint }}
         </v-alert>
+        <v-alert
+          v-if="transport"
+          :type="transport.type"
+          variant="tonal"
+          density="compact"
+          class="mb-4"
+        >
+          {{ transport.text }}
+        </v-alert>
 
         <CopyableCommand
           label="Serviço systemd (recomendado)"
@@ -91,6 +100,7 @@ import CopyableCommand from '@/components/CopyableCommand.vue'
 import ServerAddressesButton from '@/components/ServerAddressesButton.vue'
 import { useAgentsStore } from '@/stores/agents'
 import { useServerAddressesStore } from '@/stores/serverAddresses'
+import { transportNotice } from '@/utils/agentTransport'
 import type { AgentEnrollmentView } from '@/bindings/AgentEnrollmentView'
 import type { AgentInstallCommands } from '@/bindings/AgentInstallCommands'
 
@@ -106,6 +116,11 @@ const props = defineProps<{
   agentName: string
   /** Para acompanhar pelo SSE (`probe:status`) o momento em que ele conecta. */
   agentId?: number | null
+  /**
+   * Tipos de endereço do caminho escolhido ao conectar (rede local, internet),
+   * em ordem de preferência: o comando já sai com o primeiro que existir.
+   */
+  preferredKinds?: string[]
 }>()
 
 const emit = defineEmits<{
@@ -168,6 +183,26 @@ const addressHint = computed(() => {
     : 'O endereço está fixado na configuração da central (AGENT_SERVER_URL).'
 })
 
+/** Aviso de segurança do endereço em uso (HTTP pela internet, túnel sem VPN). */
+const transport = computed(() => {
+  if (!commands.value) return null
+  const entry = addressesStore.usable.find((item) => item.id === commands.value?.addressId)
+  return transportNotice(commands.value.serverUrl, entry?.kind ?? null)
+})
+
+/** Troca para o endereço do caminho escolhido, se o padrão for de outro tipo. */
+async function applyPreferredKinds(): Promise<void> {
+  const kinds = props.preferredKinds ?? []
+  const current = addressesStore.usable.find((item) => item.id === commands.value?.addressId)
+  if (kinds.length === 0 || !commands.value?.addressId || kinds.includes(current?.kind ?? '')) {
+    return
+  }
+  const target = kinds
+    .map((kind) => addressesStore.usable.find((item) => item.kind === kind))
+    .find(Boolean)
+  if (target) await changeAddress(target.id)
+}
+
 async function changeAddress(addressId: string | null): Promise<void> {
   if (!props.enrollment || !addressId || addressId === commands.value?.addressId) return
   switching.value = true
@@ -195,7 +230,7 @@ watch(
   (enrollment) => {
     commands.value = enrollment?.commands ?? null
     connected.value = false
-    if (enrollment) void addressesStore.fetchAll()
+    if (enrollment) void addressesStore.fetchAll().then(applyPreferredKinds)
   },
   { immediate: true }
 )

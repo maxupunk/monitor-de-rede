@@ -47,9 +47,32 @@ pub struct CreatePeerPayload {
     pub snmp_community: Option<String>,
     pub snmp_version: Option<String>,
     pub description: Option<String>,
-    /// Cadastra um agente NetMonitor para este servidor e inclui a instalação
-    /// dele no script (perfis com script Linux, ADR 011).
-    pub install_agent: bool,
+    /// O agente NetMonitor que o script instala (perfis com script Linux,
+    /// ADR 011).
+    pub agent: PeerAgent,
+}
+
+/// Qual agente acompanha o peer: nenhum, um novo, ou um servidor já conectado
+/// por outro caminho que passa a falar só pelo túnel.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PeerAgent {
+    #[default]
+    None,
+    New,
+    Existing(i64),
+}
+
+impl PeerAgent {
+    /// Um agente existente informado vence o pedido de um novo: mover um
+    /// servidor para a VPN nunca cria um segundo cadastro dele.
+    #[must_use]
+    pub const fn from_input(install_agent: bool, agent_id: Option<i64>) -> Self {
+        match (agent_id, install_agent) {
+            (Some(id), _) => Self::Existing(id),
+            (None, true) => Self::New,
+            (None, false) => Self::None,
+        }
+    }
 }
 
 pub struct PeerListItem {
@@ -223,6 +246,12 @@ pub async fn create(
     })?;
     let server = server_service::find_or_fail(db).await?;
     let network = server_service::network_of(db, &server).await?;
+    // Antes de criar qualquer coisa: um agente que não pode ser movido não
+    // deixa um peer órfão para trás.
+    let existing_agent = match payload.agent {
+        PeerAgent::Existing(agent_id) => Some(registration::attachable(db, agent_id).await?),
+        PeerAgent::None | PeerAgent::New => None,
+    };
 
     let requested_ip = match payload.ip_address.as_deref().filter(|v| !v.is_empty()) {
         Some(raw) => {
@@ -322,7 +351,9 @@ pub async fn create(
 
     server_service::apply_configuration(db, &server, &network).await?;
 
-    if payload.install_agent {
+    if let Some(agent) = existing_agent {
+        registration::attach_to_device(db, agent, peer.device_id).await?;
+    } else if payload.agent == PeerAgent::New {
         registration::create_for_device(db, &payload.name, payload.site_id, peer.device_id).await?;
     }
 

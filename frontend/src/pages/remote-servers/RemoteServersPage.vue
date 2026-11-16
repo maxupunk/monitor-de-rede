@@ -50,8 +50,8 @@
       <v-icon size="48" color="primary">mdi-server</v-icon>
       <div class="text-h6 mt-3">Nenhum servidor remoto conectado</div>
       <p class="text-body-2 text-high-emphasis mt-2 mb-0">
-        Conecte um servidor aqui ou marque "Conectar este servidor à central" ao criar um peer Linux
-        na VPN: o script do túnel já faz a instalação.
+        Clique em "Conectar servidor" e escolha por onde ele alcança esta central: a rede local, a
+        VPN ou a internet.
       </p>
     </v-card>
 
@@ -146,6 +146,20 @@
             </v-btn>
             <template v-if="auth.isAdmin && !agent.local">
               <v-btn
+                v-for="path in movePathsFor(agent)"
+                :key="path.id"
+                color="success"
+                variant="tonal"
+                size="small"
+                :prepend-icon="path.moveExisting?.icon"
+                @click="openFlow(path, agent.name, agent.id)"
+              >
+                {{ path.moveExisting?.label }}
+                <v-tooltip activator="parent" location="top" max-width="320">
+                  {{ path.description }} O cadastro, os monitores e o histórico são mantidos.
+                </v-tooltip>
+              </v-btn>
+              <v-btn
                 v-if="agent.status !== 'revoked'"
                 color="info"
                 variant="tonal"
@@ -181,7 +195,7 @@
       </v-col>
     </v-row>
 
-    <v-dialog v-model="createOpen" max-width="480">
+    <v-dialog v-model="createOpen" max-width="640">
       <v-card rounded="lg">
         <v-card-title>Conectar servidor</v-card-title>
         <v-card-text>
@@ -192,16 +206,33 @@
             :rules="[(value: string) => Boolean(value?.trim()) || 'Informe um nome']"
             autofocus
           ></v-text-field>
-          <v-switch
-            v-model="form.enforceTunnelIp"
-            color="primary"
-            label="Exigir conexão pelo túnel VPN do dispositivo vinculado"
-            hide-details
-          ></v-switch>
-          <p class="text-caption text-high-emphasis mt-2 mb-0">
-            Servidores criados pela VPN já nascem vinculados ao dispositivo do túnel. No próximo
-            passo você escolhe por qual endereço desta central ele vai se conectar.
+          <div class="text-subtitle-2 font-weight-medium mb-1">
+            Por onde este servidor alcança a central?
+          </div>
+          <p class="text-caption text-high-emphasis mb-3">
+            O agente só disca para fora e não abre porta no servidor. Todo o tráfego — comandos,
+            Docker, deploy e backup de banco — passa pelo caminho escolhido.
           </p>
+          <ChoiceCard
+            v-for="path in connectPaths"
+            :key="path.id"
+            :selected="form.pathId === path.id"
+            class="pa-3 mb-2"
+            @click="form.pathId = path.id"
+          >
+            <div class="d-flex align-start ga-3">
+              <v-icon color="primary" size="28">{{ path.icon }}</v-icon>
+              <div class="min-width-0">
+                <div class="d-flex align-center flex-wrap ga-2">
+                  <span class="text-body-1 font-weight-medium">{{ path.title }}</span>
+                  <v-chip v-if="path.recommended" size="x-small" color="success" variant="flat">
+                    Mais seguro
+                  </v-chip>
+                </div>
+                <div class="text-body-2 text-high-emphasis">{{ path.description }}</div>
+              </div>
+            </div>
+          </ChoiceCard>
         </v-card-text>
         <v-card-actions>
           <v-spacer></v-spacer>
@@ -210,10 +241,10 @@
             color="primary"
             variant="flat"
             :loading="agentsStore.saving"
-            :disabled="!form.name.trim()"
+            :disabled="!form.name.trim() || !selectedPath"
             @click="create"
           >
-            Cadastrar
+            Continuar
           </v-btn>
         </v-card-actions>
       </v-card>
@@ -254,15 +285,30 @@
       :enrollment="enrollment"
       :agent-name="enrollmentAgent"
       :agent-id="enrollmentAgentId"
+      :preferred-kinds="enrollmentKinds"
     ></AgentEnrollmentDialog>
+
+    <component
+      :is="flow.path.component"
+      v-if="flow.path?.component"
+      v-model="flow.open"
+      :server-name="flow.serverName"
+      :agent-id="flow.agentId"
+      @done="agentsStore.fetchAgents()"
+    ></component>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { AREAS } from '@/areas'
+import type { ServerConnectPathSpec } from '@/areas/defineArea'
+import { buildServerConnectPaths, defaultServerConnectPath } from '@/areas/serverConnect'
 import AgentEnrollmentDialog from '@/components/agents/AgentEnrollmentDialog.vue'
+import ChoiceCard from '@/components/ChoiceCard.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import { useAgentsStore } from '@/stores/agents'
+import { useAreasStore } from '@/stores/areas'
 import { useAuthStore } from '@/stores/auth'
 import { countNoun, formatRelativeTime } from '@/utils/formatters'
 import { useAiScreenDetail } from '@/composables/useAiScreenDetail'
@@ -272,9 +318,24 @@ import type { Permission } from '@/bindings/Permission'
 
 const agentsStore = useAgentsStore()
 const auth = useAuthStore()
+const areasStore = useAreasStore()
+
+/** Caminhos declarados pelas áreas visíveis (ADR 017): rede local, VPN, internet. */
+const connectPaths = computed(() => buildServerConnectPaths(AREAS, areasStore.isVisible))
 
 const createOpen = ref(false)
-const form = reactive({ name: '', enforceTunnelIp: true })
+const form = reactive<{ name: string; pathId: string | null }>({ name: '', pathId: null })
+const selectedPath = computed(
+  () => connectPaths.value.find((path) => path.id === form.pathId) ?? null
+)
+/** Fluxo próprio de um caminho (o da VPN), para um servidor novo ou já cadastrado. */
+const flow = reactive<{
+  open: boolean
+  path: ServerConnectPathSpec | null
+  serverName: string
+  agentId: number | null
+}>({ open: false, path: null, serverName: '', agentId: null })
+const enrollmentKinds = ref<string[]>([])
 const enrollmentOpen = ref(false)
 const enrollment = ref<AgentEnrollmentView | null>(null)
 const enrollmentAgent = ref('')
@@ -326,19 +387,41 @@ function deviceSubtitle(agent: AgentView): string {
 
 function openCreate() {
   form.name = ''
-  form.enforceTunnelIp = true
+  form.pathId = defaultServerConnectPath(connectPaths.value)?.id ?? null
   createOpen.value = true
 }
 
+function openFlow(path: ServerConnectPathSpec, serverName: string, agentId: number | null) {
+  flow.path = path
+  flow.serverName = serverName
+  flow.agentId = agentId
+  flow.open = true
+}
+
+/** Caminhos para os quais este servidor ainda pode ser movido. */
+function movePathsFor(agent: AgentView): ServerConnectPathSpec[] {
+  if (agent.status === 'revoked' || agent.deviceId !== null) return []
+  return connectPaths.value.filter((path) => path.moveExisting && path.component)
+}
+
 async function create() {
+  const path = selectedPath.value
+  if (!path) return
+  // Caminho com fluxo próprio cadastra o servidor por conta dele.
+  if (path.component) {
+    createOpen.value = false
+    openFlow(path, form.name.trim(), null)
+    return
+  }
   const created = await agentsStore.createAgent({
     name: form.name.trim(),
     siteId: null,
     deviceId: null,
-    enforceTunnelIp: form.enforceTunnelIp,
+    enforceTunnelIp: null,
   })
   if (!created) return
   createOpen.value = false
+  enrollmentKinds.value = path.addressKinds ?? []
   enrollment.value = created.enrollment
   enrollmentAgent.value = created.agent.name
   enrollmentAgentId.value = created.agent.id
@@ -350,6 +433,7 @@ async function reissue(agent: AgentView) {
   const issued = await agentsStore.reissueEnrollment(agent.id)
   pendingId.value = null
   if (!issued) return
+  enrollmentKinds.value = []
   enrollment.value = issued
   enrollmentAgent.value = agent.name
   enrollmentAgentId.value = agent.id

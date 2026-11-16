@@ -13,7 +13,7 @@ use serde_json::json;
 
 use super::{
     enrollment,
-    identity::{is_agent, ROLE_AGENT},
+    identity::{is_agent, is_local, ROLE_AGENT},
 };
 use crate::{
     models::{devices, probes},
@@ -113,6 +113,57 @@ pub async fn create_for_device(
     }
     let (probe, _code) = create(db, name, site_id, Some(device_id), Some(true)).await?;
     Ok(probe)
+}
+
+/// Agente já cadastrado que pode passar a falar pelo túnel de um peer novo:
+/// o servidor que se conectou por outro caminho (domínio, rede local) e agora
+/// entra na VPN sem perder o cadastro nem o histórico.
+///
+/// # Errors
+///
+/// `not_found` para um id que não é de agente; `business_rule` para o agente
+/// local, um revogado ou um que já tem dispositivo.
+pub async fn attachable(db: &DatabaseConnection, agent_id: i64) -> AppResult<probes::Model> {
+    let agent = probes::Entity::find_by_id(agent_id)
+        .one(db)
+        .await?
+        .filter(is_agent)
+        .ok_or_else(|| AppError::not_found("Servidor remoto não encontrado"))?;
+    if is_local(&agent) {
+        return Err(AppError::business_rule(
+            "O agente local fica ao lado da central e não usa a VPN",
+        ));
+    }
+    if agent.status == probes::STATUS_REVOKED {
+        return Err(AppError::business_rule(
+            "Este servidor foi revogado: cadastre-o de novo para conectá-lo",
+        ));
+    }
+    if agent.device_id.is_some() {
+        return Err(AppError::business_rule(
+            "Este servidor já está vinculado a um dispositivo",
+        ));
+    }
+    Ok(agent)
+}
+
+/// Vincula o agente ao dispositivo do peer e passa a exigir o túnel: daqui em
+/// diante a credencial dele só vale vinda do IP daquele peer.
+///
+/// # Errors
+///
+/// Propaga erro do banco.
+pub async fn attach_to_device(
+    db: &DatabaseConnection,
+    agent: probes::Model,
+    device_id: i64,
+) -> AppResult<probes::Model> {
+    let mut configuration = agent.configuration.clone().unwrap_or_else(|| json!({}));
+    configuration["enforceTunnelIp"] = serde_json::Value::Bool(true);
+    let mut active: probes::ActiveModel = agent.into();
+    active.device_id = Set(Some(device_id));
+    active.configuration = Set(Some(configuration));
+    Ok(active.update(db).await?)
 }
 
 /// Agente ativo vinculado ao dispositivo.

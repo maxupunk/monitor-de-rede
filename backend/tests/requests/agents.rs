@@ -721,6 +721,62 @@ async fn peer_da_vpn_com_agente_leva_a_instalacao_no_script_linux() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// O servidor que se conectou pelo domínio entra na VPN com o mesmo cadastro:
+/// o peer novo recebe o agente que já existia, que passa a exigir o túnel.
+#[tokio::test]
+#[serial]
+async fn servidor_ja_cadastrado_passa_para_a_vpn_sem_virar_outro() {
+    let dir = std::env::temp_dir().join(format!("wg-mover-{}", std::process::id()));
+    std::env::set_var("WG_CONFIG_DIR", &dir);
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        session_with_role(&mut request, &ctx, Role::Admin).await;
+        request
+            .put("/api/vpn/server")
+            .json(&json!({ "cidr": "10.8.0.0/24", "publicEndpoint": "200.1.2.3" }))
+            .await;
+        let created = request
+            .post("/api/agents")
+            .json(&json!({ "name": "srv-producao", "siteId": null, "deviceId": null }))
+            .await;
+        assert_eq!(created.status_code(), 201, "{}", created.text());
+        let agent_id = json_of(&created.text())["agent"]["id"]
+            .as_i64()
+            .expect("agente");
+
+        let peer = request
+            .post("/api/vpn/peers")
+            .json(&json!({ "name": "srv-producao", "profile": "linux", "agentId": agent_id }))
+            .await;
+        assert_eq!(peer.status_code(), 201, "{}", peer.text());
+        let body = json_of(&peer.text());
+        let device_id = body["device"]["id"].as_i64().expect("dispositivo");
+        let script = serde_json::to_string(&body["artifact"]).expect("artefato");
+        assert!(
+            script.contains("AGENT_ENROLL_CODE='nma_") && script.contains("http://10.8.0.1:"),
+            "o script reinstala o agente pela central dentro do túnel"
+        );
+
+        let agents = json_of(&request.get("/api/agents").await.text());
+        let agents = agents.as_array().expect("lista");
+        assert_eq!(agents.len(), 1, "nenhum segundo cadastro");
+        assert_eq!(agents[0]["id"], agent_id);
+        assert_eq!(agents[0]["deviceId"], device_id);
+        assert_eq!(agents[0]["enforceTunnelIp"], true);
+
+        // Já na VPN: um segundo túnel para o mesmo servidor é recusado, e o
+        // peer não é criado.
+        let again = request
+            .post("/api/vpn/peers")
+            .json(&json!({ "name": "srv-outro", "profile": "linux", "agentId": agent_id }))
+            .await;
+        assert_eq!(again.status_code(), 400, "{}", again.text());
+        let peers = json_of(&request.get("/api/vpn/peers").await.text());
+        assert_eq!(peers.as_array().expect("peers").len(), 1);
+    })
+    .await;
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 #[tokio::test]
 #[serial]
 async fn compose_e_aceito_e_o_resultado_segue_pelo_sse() {

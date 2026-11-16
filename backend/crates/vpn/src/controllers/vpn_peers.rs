@@ -23,7 +23,7 @@ use crate::{
     access_control::{audit, sensitive_endpoint_limiter, VpnAuditAction, VpnAuditEntry},
     central::Central,
     ip_allocator, peer_name,
-    peer_service::{self, CreatePeerPayload},
+    peer_service::{self, CreatePeerPayload, PeerAgent},
     server_service,
     views::{
         SerializedVpnArtifact, VpnFirewallHintsResponse, VpnKeyRotationResponse, VpnNextIpResponse,
@@ -50,6 +50,8 @@ struct CreatePeerInput {
     snmp_version: Option<String>,
     description: Option<String>,
     install_agent: Option<bool>,
+    /// Servidor remoto já cadastrado que passa a usar este túnel.
+    agent_id: Option<i64>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -219,7 +221,7 @@ async fn store(
             snmp_community: input.snmp_community,
             snmp_version: input.snmp_version,
             description: input.description,
-            install_agent: input.install_agent.unwrap_or(false),
+            agent: PeerAgent::from_input(input.install_agent.unwrap_or(false), input.agent_id),
         },
     )
     .await?;

@@ -39,6 +39,34 @@ export interface SettingsCardSpec {
 }
 
 /**
+ * Um caminho pelo qual um servidor remoto alcança esta central: rede local,
+ * VPN, internet. Quem conecta um servidor escolhe um deles.
+ */
+export interface ServerConnectPathSpec {
+  id: string
+  order: number
+  title: string
+  /** Quando escolher este caminho — a frase que orienta a decisão. */
+  description: string
+  icon: string
+  /** O caminho indicado para um servidor fora da rede da central. */
+  recommended?: boolean
+  /**
+   * Tipos de "Endereços deste servidor" que servem ao caminho, em ordem de
+   * preferência: o comando de instalação já sai com o primeiro que existir.
+   */
+  addressKinds?: string[]
+  /**
+   * Fluxo próprio do caminho — um diálogo autossuficiente que recebe
+   * `v-model`, `serverName` e `agentId` e avisa com `done`. Sem ele, vale o
+   * comando de instalação com o endereço escolhido.
+   */
+  component?: Component
+  /** O fluxo também leva para este caminho um servidor já conectado. */
+  moveExisting?: { label: string; icon: string }
+}
+
+/**
  * O que uma área do produto (ADR 017) traz para a SPA. Ligar, desligar,
  * acrescentar ou retirar uma área é mexer no módulo dela — o centro (router,
  * menu, barramento SSE, dashboard) só compõe o que os módulos declaram.
@@ -56,6 +84,8 @@ export interface AreaDefinition {
   /** Abas e cartões de Configurações; somem com a área desligada. */
   settingsTabs?: SettingsTabSpec[]
   settingsCards?: SettingsCardSpec[]
+  /** Caminhos para conectar um servidor remoto; somem com a área desligada. */
+  serverConnectPaths?: ServerConnectPathSpec[]
 }
 
 export interface AreaModule {
@@ -66,6 +96,7 @@ export interface AreaModule {
   sse: SseRoutes
   settingsTabs: SettingsTabSpec[]
   settingsCards: SettingsCardSpec[]
+  serverConnectPaths: ServerConnectPathSpec[]
 }
 
 function withArea(route: RouteRecordRaw, area: Area): RouteRecordRaw {
@@ -88,5 +119,6 @@ export function defineArea(definition: AreaDefinition): AreaModule {
     sse: definition.sse ?? {},
     settingsTabs: definition.settingsTabs ?? [],
     settingsCards: definition.settingsCards ?? [],
+    serverConnectPaths: definition.serverConnectPaths ?? [],
   }
 }

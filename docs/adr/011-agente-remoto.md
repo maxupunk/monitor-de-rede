@@ -94,6 +94,28 @@ servidor remoto.
   `probe_run`, o registrador e o fallback local do agendador **permanecem**
   (AGENTS §6).
 
+## Adendo (2026-11-16) — o caminho é escolhido ao conectar
+
+O agente continua com **um** endereço da central (`AGENT_SERVER_URL`) e não
+troca de caminho sozinho. Uma lista de endereços com retorno automático ao
+domínio foi descartada: com o vínculo ao IP do túnel a central recusaria a
+conexão de fora, e sem o vínculo um token vazado voltaria a valer pela
+internet — exatamente o que o túnel fecha.
+
+O que mudou é a tela: "Conectar servidor" pergunta por onde o servidor alcança
+a central, e cada área declara os seus caminhos (`serverConnectPaths`, ADR
+017). O núcleo traz os diretos (rede local e internet/HTTPS, que só escolhem o
+tipo de endereço do comando de instalação); a VPN traz o dela, com fluxo
+próprio — o assistente de peer no perfil Linux e o script que sobe o túnel e
+instala o agente. O WireGuard chega pelo IP público da central, então o
+caminho serve também quando o domínio só atende HTTPS por um proxy.
+
+Um servidor já conectado entra no túnel sem virar outro cadastro:
+`POST /api/vpn/peers` aceita `agentId`, o peer novo recebe aquele agente
+(`registration::attach_to_device`) e ele passa a exigir o IP do túnel. Agente
+local, revogado ou já vinculado a um dispositivo é recusado antes de o peer
+ser criado.
+
 ## Adendo (2026-09-30) — `Command::DeviceIo`
 
 Os plugins de dispositivo ([ADR 012](012-plugins-de-dispositivo.md)) alcançam

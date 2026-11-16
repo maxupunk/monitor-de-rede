@@ -131,6 +131,28 @@ export const coreArea = defineArea({
       component: () => import('@/pages/AreaOffPage.vue'),
     },
   ],
+  // Os dois caminhos diretos: o agente recebe o endereço no comando de
+  // instalação. O da VPN vem da área dela.
+  serverConnectPaths: [
+    {
+      id: 'lan',
+      order: 10,
+      title: 'Na mesma rede',
+      description:
+        'O servidor está na rede local desta central. Conexão direta, sem VPN e sem passar pela internet.',
+      icon: 'mdi-lan',
+      addressKinds: ['lan'],
+    },
+    {
+      id: 'internet',
+      order: 30,
+      title: 'Pela internet (HTTPS)',
+      description:
+        'Sem VPN: o servidor disca para o domínio desta central. Use só com HTTPS — é ele que cifra o canal.',
+      icon: 'mdi-web',
+      addressKinds: ['domain', 'public', 'custom'],
+    },
+  ],
   nav: [
     {
       section: 'monitoring',

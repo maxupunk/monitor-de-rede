@@ -50,6 +50,8 @@ export interface CreateVpnPeerPayload {
   description?: string | null
   /** Instala o agente NetMonitor ao fim do script Linux (ADR 011). */
   installAgent?: boolean
+  /** Servidor remoto já cadastrado que passa a usar este túnel. */
+  agentId?: number | null
 }
 
 export const VPN_STATUS_LABELS: Record<VpnConnectionStatus, string> = {

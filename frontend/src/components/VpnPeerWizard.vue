@@ -8,7 +8,7 @@
     <v-card class="rounded-lg">
       <v-card-title class="font-weight-bold d-flex align-center">
         <v-icon start color="primary">mdi-shield-plus-outline</v-icon>
-        Adicionar Dispositivo VPN
+        {{ preset ? 'Conectar servidor pela VPN' : 'Adicionar Dispositivo VPN' }}
       </v-card-title>
 
       <v-card-text>
@@ -96,7 +96,24 @@
                 ></v-text-field>
               </v-col>
 
-              <v-col v-if="supportsAgent" cols="12">
+              <v-col v-if="preset" cols="12">
+                <v-alert type="info" variant="tonal" density="comfortable">
+                  O script sobe o túnel WireGuard e instala o agente NetMonitor neste servidor. Daí
+                  em diante ele fala com a central só por dentro do túnel: a credencial dele não
+                  vale vinda de outro lugar.
+                </v-alert>
+                <v-alert
+                  v-if="preset.agentId"
+                  type="warning"
+                  variant="tonal"
+                  density="comfortable"
+                  class="mt-3"
+                >
+                  O servidor mantém o cadastro, os monitores e o histórico. Assim que o script for
+                  gerado ele só reconecta pelo túnel — rode o script no servidor em seguida.
+                </v-alert>
+              </v-col>
+              <v-col v-else-if="supportsAgent" cols="12">
                 <v-switch
                   v-model="form.installAgent"
                   color="primary"
@@ -132,7 +149,7 @@
       <v-card-actions class="px-4 pb-4">
         <v-btn variant="text" @click="close">Cancelar</v-btn>
         <v-spacer></v-spacer>
-        <v-btn v-if="step > 1" variant="text" @click="step--">Voltar</v-btn>
+        <v-btn v-if="step > 1 && !preset" variant="text" @click="step--">Voltar</v-btn>
         <v-btn
           v-if="step === 1"
           color="primary"
@@ -165,7 +182,16 @@ import { useSitesStore } from '@/stores/sites'
 
 const props = defineProps<{
   modelValue: boolean
+  /**
+   * Servidor remoto que entra pela VPN: o assistente abre direto na
+   * identificação, no perfil Linux e com o agente incluído. Com `agentId`, o
+   * servidor já cadastrado é que passa a usar o túnel.
+   */
+  preset?: { name: string; agentId?: number | null } | null
 }>()
+
+/** Perfil cujo script instala o agente (ADR 011). */
+const AGENT_PROFILE = 'linux'
 
 const emit = defineEmits<{
   (e: 'update:modelValue', value: boolean): void
@@ -199,7 +225,7 @@ const form = reactive<{
 })
 
 /** Só o script Linux instala o agente (ADR 011). */
-const supportsAgent = computed(() => form.profile === 'linux')
+const supportsAgent = computed(() => form.profile === AGENT_PROFILE)
 
 const profiles = computed(() => vpnStore.profiles)
 const cidr = computed(() => vpnStore.state?.cidr ?? null)
@@ -219,10 +245,18 @@ watch(
     form.snmpCommunity = 'public'
     form.installAgent = false
 
+    if (props.preset) {
+      form.profile = AGENT_PROFILE
+      form.name = props.preset.name
+      form.installAgent = true
+      void goToIdentification()
+    }
+
     if (sitesStore.sites.length === 0) {
       await sitesStore.fetchSites()
     }
-  }
+  },
+  { immediate: true }
 )
 
 async function suggestIp() {
@@ -252,6 +286,7 @@ async function submit() {
     snmpEnabled: form.snmpEnabled,
     snmpCommunity: form.snmpEnabled ? form.snmpCommunity : null,
     installAgent: supportsAgent.value && form.installAgent,
+    agentId: props.preset?.agentId ?? null,
   })
 
   if (artifact) {
