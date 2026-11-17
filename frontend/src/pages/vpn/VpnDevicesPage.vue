@@ -349,7 +349,12 @@
 
     <VpnPeerWizard v-model="wizardOpen" @created="onPeerCreated" />
 
-    <VpnScriptViewer v-model="viewerOpen" :artifact="vpnStore.lastArtifact" />
+    <VpnScriptViewer
+      v-model="viewerOpen"
+      :artifact="vpnStore.lastArtifact"
+      :peer-id="selectedPeer?.id ?? null"
+      :peer-name="selectedPeer?.device?.name ?? null"
+    />
 
     <VpnFirewallHintsDialog v-model="firewallOpen" :content="firewallContent" />
 
@@ -358,7 +363,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import VpnPeerWizard from '@/components/VpnPeerWizard.vue'
 import VpnScriptViewer from '@/components/VpnScriptViewer.vue'
 import VpnFirewallHintsDialog from '@/components/VpnFirewallHintsDialog.vue'
@@ -383,6 +388,7 @@ const { detalheAberto, monitorEmDetalhe, abrirDetalhe } = useMonitorDetail()
 
 const wizardOpen = ref(false)
 const viewerOpen = ref(false)
+const selectedPeer = ref<VpnPeer | null>(null)
 const firewallOpen = ref(false)
 const firewallContent = ref('')
 const renameOpen = ref(false)
@@ -414,7 +420,12 @@ function supportsQrCode(peer: VpnPeer): boolean {
   return vpnProfileSupportsQrCode(peer.deviceProfile, vpnStore.profiles)
 }
 
+watch(viewerOpen, (isOpen) => {
+  if (!isOpen) selectedPeer.value = null
+})
+
 function onPeerCreated() {
+  selectedPeer.value = null
   viewerOpen.value = true
 }
 
@@ -443,7 +454,10 @@ async function submitRename() {
 /** O artefato já traz o QR Code dos perfis móveis — não há segunda requisição. */
 async function openConfig(peer: VpnPeer) {
   const artifact = await vpnStore.fetchConfig(peer.id)
-  if (artifact) viewerOpen.value = true
+  if (artifact) {
+    selectedPeer.value = peer
+    viewerOpen.value = true
+  }
 }
 
 async function rotate(peer: VpnPeer) {
@@ -460,7 +474,10 @@ async function rotate(peer: VpnPeer) {
   }
 
   const artifact = await vpnStore.rotateKeys(peer.id)
-  if (artifact) viewerOpen.value = true
+  if (artifact) {
+    selectedPeer.value = peer
+    viewerOpen.value = true
+  }
 }
 
 async function revoke(peer: VpnPeer) {

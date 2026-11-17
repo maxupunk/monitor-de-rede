@@ -149,14 +149,15 @@ CMD ["spike_icmp_dgram", "1.1.1.1"]
 FROM debian:bookworm-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241 AS runtime
 
 # `wireguard-tools` traz `wg` e `wg-quick`; `iproute2` e `iptables` são o que o
-# `wg-quick` chama para criar a interface e aplicar as regras de `PostUp`. Não
-# há módulo de kernel aqui: o WireGuard vem do kernel do host (Linux ≥ 5.6,
-# incluindo o do WSL2).
+# `wg-quick` chama para criar a interface e aplicar as regras de `PostUp`.
+# Quando o kernel do host traz o WireGuard nativo (Linux ≥ 5.6), ele é usado
+# direto; quando não traz (Synology DSM, QNAP, LXC), o `wg-quick` cai sozinho
+# para o `wireguard-go` em userspace via `/dev/net/tun`.
 # `tini` mantém o init mínimo para repassar sinais e fazer o entrypoint
 # supervisionar tanto o watcher quanto a aplicação.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-       ca-certificates curl wireguard-tools iproute2 iptables tini tzdata \
+       ca-certificates curl wireguard-tools wireguard-go iproute2 iptables tini tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd --create-home --shell /usr/sbin/nologin app
@@ -174,6 +175,19 @@ COPY docker/entrypoint.sh docker/wireguard-watcher.sh docker/healthcheck.sh dock
      docker/init-secrets.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/wireguard-watcher.sh /usr/local/bin/healthcheck.sh \
     /usr/local/bin/ping-group-range.sh /usr/local/bin/init-secrets.sh
+
+# Diretórios imutáveis por backend (`nft` / `legacy`) fora de `/run`: o watcher
+# escolhe uma vez no boot e põe o diretório certo na frente do `PATH`, sem
+# wrapper global nem escrita no tmpfs compartilhado com o usuário `app` (§7).
+RUN for mode in nft legacy; do \
+        dir="/usr/lib/netmonitor/iptables-${mode}"; \
+        mkdir -p "${dir}"; \
+        for p in iptables ip6tables; do \
+            ln -s "/usr/sbin/${p}-${mode}" "${dir}/${p}"; \
+            ln -s "/usr/sbin/${p}-${mode}-save" "${dir}/${p}-save"; \
+            ln -s "/usr/sbin/${p}-${mode}-restore" "${dir}/${p}-restore"; \
+        done; \
+    done
 
 # Configuração do túnel e, no arranjo sem compose, o banco SQLite (o compose usa
 # o PostgreSQL do serviço `postgres`, ADR 020), no mesmo volume. O entrypoint
@@ -197,5 +211,5 @@ EXPOSE 51820/udp
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD ["/usr/local/bin/healthcheck.sh"]
 
-ENTRYPOINT ["/usr/bin/tini", "--"]
+ENTRYPOINT ["/usr/bin/tini", "-g", "--"]
 CMD ["/usr/local/bin/entrypoint.sh", "backend-cli", "start"]

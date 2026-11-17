@@ -5,6 +5,7 @@ expression: "linux_bash_variant(&contexto(), CONF).content"
 #!/usr/bin/env bash
 # === NetMonitor - WireGuard - filial-01 ===
 # Salve como netmonitor-vpn.sh e execute:  sudo bash netmonitor-vpn.sh
+(
 set -euo pipefail
 
 IFACE='netmonitor'
@@ -56,12 +57,16 @@ fi
 
 # 3/4 · Sobe o túnel agora e a cada reinício
 if command -v systemctl >/dev/null 2>&1; then
-  systemctl enable --now "wg-quick@${IFACE}"
+  systemctl enable "wg-quick@${IFACE}"
+  systemctl restart "wg-quick@${IFACE}"
 else
+  wg-quick down "$IFACE" 2>/dev/null || true
   wg-quick up "$IFACE"   # sem systemd (OpenRC): rc-update add wg-quick.${IFACE}
 fi
 
 # 4/4 · Conferência — "latest handshake" deve aparecer em poucos segundos
+ping -c 1 -W 2 '10.8.0.1' >/dev/null 2>&1 || true
 wg show "$IFACE"
 
 echo 'Túnel netmonitor ativo. O dispositivo aparece como conectado no NetMonitor.'
+)

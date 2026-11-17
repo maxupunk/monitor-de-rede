@@ -5,6 +5,7 @@ expression: content
 #!/usr/bin/env bash
 # === NetMonitor - WireGuard - filial-01 ===
 # Salve como netmonitor-vpn.sh e execute:  sudo bash netmonitor-vpn.sh
+(
 set -euo pipefail
 
 IFACE='netmonitor'
@@ -56,20 +57,31 @@ fi
 
 # 3/5 · Sobe o túnel agora e a cada reinício
 if command -v systemctl >/dev/null 2>&1; then
-  systemctl enable --now "wg-quick@${IFACE}"
+  systemctl enable "wg-quick@${IFACE}"
+  systemctl restart "wg-quick@${IFACE}"
 else
+  wg-quick down "$IFACE" 2>/dev/null || true
   wg-quick up "$IFACE"   # sem systemd (OpenRC): rc-update add wg-quick.${IFACE}
 fi
 
 # 4/5 · Conferência — "latest handshake" deve aparecer em poucos segundos
+ping -c 1 -W 2 '10.8.0.1' >/dev/null 2>&1 || true
 wg show "$IFACE"
 
 # 5/5 · Instala o agente NetMonitor (Docker, métricas e monitores deste servidor)
 # O túnel acabou de subir: dá alguns segundos para o handshake.
+AGENT_READY=0
 for _ in 1 2 3 4 5 6 7 8 9 10; do
-  curl -fsS --max-time 3 'http://10.8.0.1:3333/api/agents/install.sh' >/dev/null 2>&1 && break
+  if curl -fsS --max-time 3 'http://10.8.0.1:3333/api/agents/install.sh' >/dev/null 2>&1; then AGENT_READY=1; break; fi
   sleep 3
 done
-curl -fsSL 'http://10.8.0.1:3333/api/agents/install.sh' | AGENT_SERVER_URL='http://10.8.0.1:3333' AGENT_ENROLL_CODE='nma_codigo' AGENT_ALLOW='read,lifecycle,database' AGENT_DATABASE_TARGETS='172.16.0.0/12:5432' sh
+if [ "$AGENT_READY" -ne 1 ]; then
+  echo 'O túnel WireGuard foi configurado localmente, mas a central não respondeu em http://10.8.0.1:3333.' >&2
+  echo 'Verifique o encaminhamento da porta UDP 51820 no roteador/firewall da central.' >&2
+  echo 'Depois que o túnel conectar, rotacione as chaves no NetMonitor ou instale o agente após a conexão.' >&2
+  exit 1
+fi
+curl -fsSL --connect-timeout 5 --max-time 60 'http://10.8.0.1:3333/api/agents/install.sh' | AGENT_SERVER_URL='http://10.8.0.1:3333' AGENT_ENROLL_CODE='nma_codigo' AGENT_ALLOW='read,lifecycle,database' AGENT_DATABASE_TARGETS='172.16.0.0/12:5432' sh
 
 echo 'Túnel netmonitor ativo. O dispositivo aparece como conectado no NetMonitor.'
+)

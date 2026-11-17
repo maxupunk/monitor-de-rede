@@ -138,6 +138,7 @@ fn linux_agent_section(
     let url = escape_uci(&agent.server_url);
     let code = escape_uci(&agent.enroll_code);
     let allow = escape_uci(&agent.allow);
+    let endpoint_port = context.endpoint_port;
     let targets = if agent.database_targets.is_empty() {
         String::new()
     } else {
@@ -150,12 +151,26 @@ fn linux_agent_section(
         String::new(),
         step("Instala o agente NetMonitor (Docker, métricas e monitores deste servidor)"),
         "# O túnel acabou de subir: dá alguns segundos para o handshake.".to_string(),
+        "AGENT_READY=0".to_string(),
         "for _ in 1 2 3 4 5 6 7 8 9 10; do".to_string(),
-        format!("  curl -fsS --max-time 3 '{url}/api/agents/install.sh' >/dev/null 2>&1 && break"),
+        format!(
+            "  if curl -fsS --max-time 3 '{url}/api/agents/install.sh' >/dev/null 2>&1; then AGENT_READY=1; break; fi"
+        ),
         "  sleep 3".to_string(),
         "done".to_string(),
+        "if [ \"$AGENT_READY\" -ne 1 ]; then".to_string(),
         format!(
-            "curl -fsSL '{url}/api/agents/install.sh' | AGENT_SERVER_URL='{url}' AGENT_ENROLL_CODE='{code}' AGENT_ALLOW='{allow}'{targets} sh"
+            "  echo 'O túnel WireGuard foi configurado localmente, mas a central não respondeu em {url}.' >&2"
+        ),
+        format!(
+            "  echo 'Verifique o encaminhamento da porta UDP {endpoint_port} no roteador/firewall da central.' >&2"
+        ),
+        "  echo 'Depois que o túnel conectar, rotacione as chaves no NetMonitor ou instale o agente após a conexão.' >&2"
+            .to_string(),
+        "  exit 1".to_string(),
+        "fi".to_string(),
+        format!(
+            "curl -fsSL --connect-timeout 5 --max-time 60 '{url}/api/agents/install.sh' | AGENT_SERVER_URL='{url}' AGENT_ENROLL_CODE='{code}' AGENT_ALLOW='{allow}'{targets} sh"
         ),
     ]
 }
@@ -166,6 +181,7 @@ fn linux_agent_section(
 #[must_use]
 pub fn linux_bash_variant(context: &PeerConfigContext, conf_content: &str) -> ArtifactVariant {
     let iface = WG_TUNNEL_NAME;
+    let server_vpn_ip = escape_uci(&context.server_vpn_address);
     // SNMP e agente são opcionais, então a numeração dos passos acompanha o total.
     let total_steps = 4 + usize::from(context.snmp_enabled) + usize::from(context.agent.is_some());
     let mut current_step = 0;
@@ -178,6 +194,7 @@ pub fn linux_bash_variant(context: &PeerConfigContext, conf_content: &str) -> Ar
     lines.extend(artifact_header(context));
     lines.extend([
         "# Salve como netmonitor-vpn.sh e execute:  sudo bash netmonitor-vpn.sh".to_string(),
+        "(".to_string(),
         "set -euo pipefail".to_string(),
         String::new(),
         format!("IFACE='{iface}'"),
@@ -227,13 +244,16 @@ pub fn linux_bash_variant(context: &PeerConfigContext, conf_content: &str) -> Ar
         String::new(),
         step("Sobe o túnel agora e a cada reinício"),
         "if command -v systemctl >/dev/null 2>&1; then".to_string(),
-        "  systemctl enable --now \"wg-quick@${IFACE}\"".to_string(),
+        "  systemctl enable \"wg-quick@${IFACE}\"".to_string(),
+        "  systemctl restart \"wg-quick@${IFACE}\"".to_string(),
         "else".to_string(),
+        "  wg-quick down \"$IFACE\" 2>/dev/null || true".to_string(),
         "  wg-quick up \"$IFACE\"   # sem systemd (OpenRC): rc-update add wg-quick.${IFACE}"
             .to_string(),
         "fi".to_string(),
         String::new(),
         step("Conferência — \"latest handshake\" deve aparecer em poucos segundos"),
+        format!("ping -c 1 -W 2 '{server_vpn_ip}' >/dev/null 2>&1 || true"),
         "wg show \"$IFACE\"".to_string(),
     ]);
     lines.extend(linux_snmp_section(context, &mut step));
@@ -241,6 +261,7 @@ pub fn linux_bash_variant(context: &PeerConfigContext, conf_content: &str) -> Ar
     lines.extend([
         String::new(),
         format!("echo 'Túnel {iface} ativo. O dispositivo aparece como conectado no NetMonitor.'"),
+        ")".to_string(),
     ]);
 
     ArtifactVariant {
@@ -298,7 +319,7 @@ pub fn windows_winget_variant(context: &PeerConfigContext, conf_content: &str) -
         conf_content.trim_end().to_string(),
         "'@".to_string(),
         String::new(),
-        "  # 1/5 - Confere o terreno antes de mexer em qualquer coisa".to_string(),
+        "  # 1/4 - Confere o terreno antes de mexer em qualquer coisa".to_string(),
         "  $identity = [Security.Principal.WindowsIdentity]::GetCurrent()".to_string(),
         "  $isAdmin = ([Security.Principal.WindowsPrincipal]$identity).IsInRole(".to_string(),
         "    [Security.Principal.WindowsBuiltInRole]::Administrator)".to_string(),
@@ -314,7 +335,7 @@ pub fn windows_winget_variant(context: &PeerConfigContext, conf_content: &str) -
             .to_string(),
         "  }".to_string(),
         String::new(),
-        "  # 2/5 - Instala o cliente oficial WireGuard".to_string(),
+        "  # 2/4 - Instala o cliente oficial WireGuard".to_string(),
         "  winget install --exact --id WireGuard.WireGuard --silent `".to_string(),
         "    --accept-source-agreements --accept-package-agreements".to_string(),
         "  # winget termina em erro quando o pacote ja esta instalado: o que importa e o executavel existir."
@@ -327,9 +348,19 @@ pub fn windows_winget_variant(context: &PeerConfigContext, conf_content: &str) -
         "  # 3/4 - Desfaz instalacoes anteriores feitas por este script".to_string(),
         "  # Um servico proprio (/installtunnelservice) e o tunel gerenciado pela".to_string(),
         "  # janela do WireGuard disputam o mesmo adaptador: os dois nao coexistem.".to_string(),
+        "  # Espera o servico sumir de verdade: o adaptador so e liberado depois.".to_string(),
+        "  $WasActive = $false".to_string(),
         "  if (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue) {".to_string(),
+        "    $WasActive = $true".to_string(),
         "    & $WgExe /uninstalltunnelservice $Tunnel".to_string(),
-        "    Start-Sleep -Seconds 3".to_string(),
+        "    for ($i = 0; $i -lt 30 -and (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue); $i++) {"
+            .to_string(),
+        "      Start-Sleep -Milliseconds 500".to_string(),
+        "    }".to_string(),
+        "    if (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue) {".to_string(),
+        "      throw \"O servico $ServiceName nao saiu em 15 s. Feche a janela do WireGuard e cole o bloco de novo.\""
+            .to_string(),
+        "    }".to_string(),
         "  }".to_string(),
         "  # 4/4 - Grava o perfil no cofre do proprio WireGuard".to_string(),
         "  # O gerenciador monitora essa pasta e lista o tunel na hora, sem reiniciar.".to_string(),
@@ -344,22 +375,42 @@ pub fn windows_winget_variant(context: &PeerConfigContext, conf_content: &str) -
         String::new(),
         "  # O nome do arquivo vira o nome do tunel: precisa ser <tunel>.conf".to_string(),
         "  $File = Join-Path $Store \"$Tunnel.conf\"".to_string(),
+        "  # O perfil nasce num nome que o gerenciador ignora, ja com a permissao".to_string(),
+        "  # restrita (so SYSTEM e Administradores; SIDs para valer em qualquer idioma),".to_string(),
+        "  # e so vira <tunel>.conf pronto: o gerenciador nunca le um arquivo pela".to_string(),
+        "  # metade nem com a chave privada aberta a outros usuarios.".to_string(),
+        "  $Tmp = Join-Path $Store \"$Tunnel.netmonitor-tmp\"".to_string(),
+        "  Remove-Item -Path $Tmp -Force -ErrorAction SilentlyContinue".to_string(),
+        "  New-Item -ItemType File -Path $Tmp -Force | Out-Null".to_string(),
+        "  icacls $Tmp /inheritance:r /grant:r \"*S-1-5-18:(F)\" \"*S-1-5-32-544:(F)\" | Out-Null"
+            .to_string(),
+        "  if ($LASTEXITCODE -ne 0) {".to_string(),
+        "    Remove-Item -Path $Tmp -Force -ErrorAction SilentlyContinue".to_string(),
+        "    throw 'Nao foi possivel restringir a permissao do perfil. Nada foi alterado.'".to_string(),
+        "  }".to_string(),
+        "  Set-Content -Path $Tmp -Value $Conf -Encoding ascii".to_string(),
         "  # Um .conf.dpapi de importacao anterior tem prioridade sobre o .conf e".to_string(),
         "  # manteria o perfil velho no lugar do novo.".to_string(),
         "  Remove-Item -Path \"$File.dpapi\" -Force -ErrorAction SilentlyContinue".to_string(),
         "  Remove-Item -Path $File -Force -ErrorAction SilentlyContinue".to_string(),
-        "  $Conf | Set-Content -Path $File -Encoding ascii".to_string(),
-        "  # A chave privada fica em texto puro ate o WireGuard cifrar o perfil: so".to_string(),
-        "  # SYSTEM (que roda o gerenciador) e Administradores enxergam nesse meio tempo."
-            .to_string(),
-        "  # (SIDs no lugar dos nomes, para funcionar em Windows de qualquer idioma.)".to_string(),
-        "  icacls $File /inheritance:r /grant:r \"*S-1-5-18:(F)\" \"*S-1-5-32-544:(F)\" | Out-Null"
-            .to_string(),
+        "  Move-Item -Path $Tmp -Destination $File -Force".to_string(),
         String::new(),
         "  # Abre a janela do WireGuard com o tunel ja na lista".to_string(),
         "  Start-Process -FilePath $WgExe".to_string(),
         "  Write-Host ''".to_string(),
         format!("  Write-Host 'Perfil \"{tunnel}\" instalado no WireGuard.'"),
+        "  # Tunel que estava ativo volta ativo: o gerenciador cifra o perfil em".to_string(),
+        "  # .conf.dpapi e o servico sobe a partir dele, como na ativacao pela janela.".to_string(),
+        "  if ($WasActive) {".to_string(),
+        "    for ($i = 0; $i -lt 20 -and -not (Test-Path \"$File.dpapi\"); $i++) {".to_string(),
+        "      Start-Sleep -Milliseconds 500".to_string(),
+        "    }".to_string(),
+        "    if (Test-Path \"$File.dpapi\") {".to_string(),
+        "      & $WgExe /installtunnelservice \"$File.dpapi\"".to_string(),
+        format!("      Write-Host 'Tunel \"{tunnel}\" reativado com a configuracao nova.'"),
+        "      return".to_string(),
+        "    }".to_string(),
+        "  }".to_string(),
         format!("  Write-Host 'Na janela que abriu, selecione \"{tunnel}\" e clique em Ativar.'"),
         "  Write-Host 'Dai em diante o WireGuard gerencia o tunel e ele volta sozinho a cada boot.'"
             .to_string(),
@@ -463,6 +514,66 @@ mod tests {
         // mensagens de erro, que é justamente quando o texto precisa ser lido.
         let content = windows_winget_variant(&contexto(), CONF).content;
         assert!(content.is_ascii(), "o script do Windows precisa ser ASCII");
+    }
+
+    #[test]
+    fn o_bash_roda_dentro_de_um_subshell() {
+        // Colado direto no SSH, `set -euo pipefail` e `exit 1` no nível
+        // superior encerravam a sessão interativa e fechavam o terminal.
+        let content = linux_bash_variant(&contexto(), CONF).content;
+        assert!(content.contains("\n(\nset -euo pipefail\n"));
+        assert!(content.ends_with("\n)\n"));
+    }
+
+    #[test]
+    fn o_bash_recarrega_o_tunel_ao_reexecutar_e_dispara_handshake() {
+        let mut context = contexto();
+        context.server_vpn_address = "10.8.0.1".into();
+        let content = linux_bash_variant(&context, CONF).content;
+        assert!(!content.contains("systemctl enable --now"));
+        assert!(content.contains("systemctl enable \"wg-quick@${IFACE}\""));
+        assert!(content.contains("systemctl restart \"wg-quick@${IFACE}\""));
+        assert!(content
+            .contains("wg-quick down \"$IFACE\" 2>/dev/null || true\n  wg-quick up \"$IFACE\""));
+        assert!(content
+            .contains("ping -c 1 -W 2 '10.8.0.1' >/dev/null 2>&1 || true\nwg show \"$IFACE\""));
+    }
+
+    #[test]
+    fn o_bash_valida_alcance_da_central_antes_de_instalar_o_agente() {
+        let mut context = contexto();
+        context.endpoint_port = 51_821;
+        context.agent = Some(super::super::contract::AgentInstall {
+            server_url: "http://10.8.0.1:3333".into(),
+            enroll_code: "nma_codigo".into(),
+            allow: "read".into(),
+            database_targets: String::new(),
+        });
+        let content = linux_bash_variant(&context, CONF).content;
+        assert!(content.contains("AGENT_READY=0"));
+        assert!(content.contains("then AGENT_READY=1; break; fi"));
+        assert!(content.contains("if [ \"$AGENT_READY\" -ne 1 ]; then"));
+        assert!(content.contains("http://10.8.0.1:3333"));
+        assert!(content.contains("UDP 51821"));
+        assert!(content.contains(">&2\n  exit 1\nfi"));
+        assert!(content.contains("curl -fsSL --connect-timeout 5 --max-time 60 'http://10.8.0.1:3333/api/agents/install.sh'"));
+    }
+
+    #[test]
+    fn o_powershell_e_repetivel_sem_espera_fixa_nem_perfil_aberto() {
+        let content = windows_winget_variant(&contexto(), CONF).content;
+        // Espera o serviço sair de verdade, em vez de dormir 3 s e torcer.
+        assert!(!content.contains("Start-Sleep -Seconds 3"));
+        assert!(content.contains("nao saiu em 15 s"));
+        // O perfil só vira <tunel>.conf depois de restrito e completo.
+        let restringe = content.find("icacls $Tmp").expect("icacls no temporário");
+        let grava = content.find("Set-Content -Path $Tmp").expect("gravação");
+        let publica = content.find("Move-Item -Path $Tmp").expect("publicação");
+        assert!(restringe < grava && grava < publica);
+        assert!(!content.contains("Set-Content -Path $File"));
+        // Túnel que estava ativo volta ativo.
+        assert!(content.contains("if ($WasActive)"));
+        assert!(content.contains("/installtunnelservice \"$File.dpapi\""));
     }
 
     #[test]

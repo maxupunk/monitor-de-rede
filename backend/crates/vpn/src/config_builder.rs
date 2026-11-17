@@ -38,19 +38,22 @@ pub struct PeerEntryInput {
 /// peers — o firewall é montado quando a interface sobe.
 fn build_isolation_rules(input: &ServerInterfaceInput) -> Vec<String> {
     let iface = strip_controls(&input.interface_name);
-    if input.allow_peer_to_peer {
-        return vec![
-            format!("PostUp = iptables -A FORWARD -i {iface} -o {iface} -j ACCEPT"),
-            format!("PostDown = iptables -D FORWARD -i {iface} -o {iface} -j ACCEPT"),
-        ];
-    }
-    let address = strip_controls(&input.address);
-    vec![
-        format!("PostUp = iptables -A FORWARD -i {iface} -d {address} -j ACCEPT"),
-        format!("PostUp = iptables -A FORWARD -i {iface} -o {iface} -j DROP"),
-        format!("PostDown = iptables -D FORWARD -i {iface} -d {address} -j ACCEPT"),
-        format!("PostDown = iptables -D FORWARD -i {iface} -o {iface} -j DROP"),
-    ]
+    let rules = if input.allow_peer_to_peer {
+        vec![format!("FORWARD -i {iface} -o {iface} -j ACCEPT")]
+    } else {
+        let address = strip_controls(&input.address);
+        vec![
+            format!("FORWARD -i {iface} -d {address} -j ACCEPT"),
+            format!("FORWARD -i {iface} -o {iface} -j DROP"),
+        ]
+    };
+    let post_up = rules
+        .iter()
+        .map(|rule| format!("PostUp = iptables -C {rule} 2>/dev/null || iptables -A {rule}"));
+    let post_down = rules
+        .iter()
+        .map(|rule| format!("PostDown = iptables -D {rule} 2>/dev/null || true"));
+    post_up.chain(post_down).collect()
 }
 
 /// # Errors
@@ -137,15 +140,28 @@ mod tests {
     #[test]
     fn isolamento_e_o_padrao_e_usa_drop_entre_peers() {
         let conf = build(&servidor(false), &[]).unwrap();
-        assert!(conf.contains("PostUp = iptables -A FORWARD -i wg0 -d 10.8.0.1 -j ACCEPT"));
-        assert!(conf.contains("PostUp = iptables -A FORWARD -i wg0 -o wg0 -j DROP"));
-        assert!(conf.contains("PostDown = iptables -D FORWARD -i wg0 -o wg0 -j DROP"));
+        assert!(conf.contains(
+            "PostUp = iptables -C FORWARD -i wg0 -d 10.8.0.1 -j ACCEPT 2>/dev/null || iptables -A FORWARD -i wg0 -d 10.8.0.1 -j ACCEPT"
+        ));
+        assert!(conf.contains(
+            "PostUp = iptables -C FORWARD -i wg0 -o wg0 -j DROP 2>/dev/null || iptables -A FORWARD -i wg0 -o wg0 -j DROP"
+        ));
+        assert!(conf.contains(
+            "PostDown = iptables -D FORWARD -i wg0 -d 10.8.0.1 -j ACCEPT 2>/dev/null || true"
+        ));
+        assert!(conf
+            .contains("PostDown = iptables -D FORWARD -i wg0 -o wg0 -j DROP 2>/dev/null || true"));
     }
 
     #[test]
     fn com_peer_to_peer_liberado_nao_ha_drop() {
         let conf = build(&servidor(true), &[]).unwrap();
-        assert!(conf.contains("PostUp = iptables -A FORWARD -i wg0 -o wg0 -j ACCEPT"));
+        assert!(conf.contains(
+            "PostUp = iptables -C FORWARD -i wg0 -o wg0 -j ACCEPT 2>/dev/null || iptables -A FORWARD -i wg0 -o wg0 -j ACCEPT"
+        ));
+        assert!(conf.contains(
+            "PostDown = iptables -D FORWARD -i wg0 -o wg0 -j ACCEPT 2>/dev/null || true"
+        ));
         assert!(!conf.contains("DROP"));
     }
 

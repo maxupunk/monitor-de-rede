@@ -15,6 +15,9 @@ use crate::shell_escape::{escape_uci, sanitize_file_name};
 
 pub const INTERFACE_NAME: &str = "wg_nm";
 pub const FIREWALL_ZONE: &str = "vpn_netmonitor";
+/// Seção do peer (o servidor NetMonitor), com nome fixo para o script ser
+/// repetível: `uci add` criaria uma seção anônima nova a cada execução.
+pub const PEER_SECTION: &str = "wg_nm_server";
 const PACKAGES: &str = "wireguard-tools luci-proto-wireguard";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -80,11 +83,28 @@ impl OpenWrtProfileGenerator {
     }
 
     /// Corpo do script — idêntico entre as variantes, exceto a instalação.
+    ///
+    /// Repetível: tudo que o NetMonitor cria tem nome fixo e é apagado antes
+    /// de ser recriado. Sem a chave privada o script não mexe em nada — antes
+    /// ele gravava a configuração inválida e reiniciava a rede, derrubando um
+    /// túnel que funcionava.
     fn build_script(&self, context: &PeerConfigContext, manager: PackageManager) -> String {
         let iface = INTERFACE_NAME;
+        let peer = PEER_SECTION;
         let mut lines = artifact_header(context);
+        if context.private_key_consumed() {
+            lines.push(
+                "echo 'Nada foi alterado: a chave privada ja foi entregue. No NetMonitor, use \"Rotacionar chaves\" e copie o script novo.' >&2"
+                    .to_string(),
+            );
+            return format!("{}\n", lines.join("\n"));
+        }
         lines.extend(manager.install(PACKAGES));
         lines.extend([
+            String::new(),
+            "# Limpa uma instalacao anterior (repetir o script nao duplica nada)".to_string(),
+            format!("uci -q delete network.{iface}"),
+            format!("while uci -q delete 'network.@wireguard_{iface}[0]'; do :; done"),
             String::new(),
             format!("uci set network.{iface}=interface"),
             format!("uci set network.{iface}.proto='wireguard'"),
@@ -99,33 +119,35 @@ impl OpenWrtProfileGenerator {
                 context.prefix_length()
             ),
             String::new(),
-            format!("uci add network wireguard_{iface}"),
+            format!("uci set network.{peer}=wireguard_{iface}"),
             format!(
-                "uci set network.@wireguard_{iface}[-1].public_key='{}'",
+                "uci set network.{peer}.public_key='{}'",
                 escape_uci(&context.server_public_key)
             ),
         ]);
-        if let Some(preshared_key) = context.preshared_key.as_deref() {
+        if let Some(preshared_key) = context
+            .preshared_key
+            .as_deref()
+            .filter(|key| !key.is_empty())
+        {
             lines.push(format!(
-                "uci set network.@wireguard_{iface}[-1].preshared_key='{}'",
+                "uci set network.{peer}.preshared_key='{}'",
                 escape_uci(preshared_key)
             ));
         }
         lines.extend([
             format!(
-                "uci set network.@wireguard_{iface}[-1].endpoint_host='{}'",
+                "uci set network.{peer}.endpoint_host='{}'",
                 escape_uci(&context.endpoint_host)
             ),
             format!(
-                "uci set network.@wireguard_{iface}[-1].endpoint_port='{}'",
+                "uci set network.{peer}.endpoint_port='{}'",
                 context.endpoint_port
             ),
+            format!("uci set network.{peer}.persistent_keepalive='{PERSISTENT_KEEPALIVE_SECONDS}'"),
+            format!("uci set network.{peer}.route_allowed_ips='1'"),
             format!(
-                "uci set network.@wireguard_{iface}[-1].persistent_keepalive='{PERSISTENT_KEEPALIVE_SECONDS}'"
-            ),
-            format!("uci set network.@wireguard_{iface}[-1].route_allowed_ips='1'"),
-            format!(
-                "uci add_list network.@wireguard_{iface}[-1].allowed_ips='{}'",
+                "uci add_list network.{peer}.allowed_ips='{}'",
                 escape_uci(&context.vpn_cidr)
             ),
             String::new(),
@@ -182,14 +204,20 @@ impl VpnProfileGenerator for OpenWrtProfileGenerator {
     }
 
     fn firewall_hints(&self, _context: &PeerConfigContext) -> String {
+        let zone = FIREWALL_ZONE;
         [
             "# Zona de firewall permitindo o monitoramento do NetMonitor".to_string(),
-            "uci add firewall zone".to_string(),
-            format!("uci set firewall.@zone[-1].name='{FIREWALL_ZONE}'"),
-            "uci set firewall.@zone[-1].input='ACCEPT'".to_string(),
-            "uci set firewall.@zone[-1].output='ACCEPT'".to_string(),
-            "uci set firewall.@zone[-1].forward='REJECT'".to_string(),
-            format!("uci add_list firewall.@zone[-1].network='{INTERFACE_NAME}'"),
+            // Apaga também as zonas anônimas de versões antigas do script, que
+            // criavam uma `vpn_netmonitor` nova a cada execução.
+            format!(
+                r#"for s in $(uci -q -X show firewall | sed -n "s/^firewall\.\([^.=]*\)\.name='{zone}'$/\1/p"); do uci -q delete "firewall.$s"; done"#
+            ),
+            format!("uci set firewall.{zone}=zone"),
+            format!("uci set firewall.{zone}.name='{zone}'"),
+            format!("uci set firewall.{zone}.input='ACCEPT'"),
+            format!("uci set firewall.{zone}.output='ACCEPT'"),
+            format!("uci set firewall.{zone}.forward='REJECT'"),
+            format!("uci add_list firewall.{zone}.network='{INTERFACE_NAME}'"),
         ]
         .join("\n")
     }
@@ -212,7 +240,7 @@ impl VpnProfileGenerator for OpenWrtProfileGenerator {
 
 #[cfg(test)]
 mod tests {
-    use super::super::contract::tests::contexto;
+    use super::super::contract::{tests::contexto, PRIVATE_KEY_UNAVAILABLE};
     use super::*;
 
     #[test]
@@ -261,5 +289,45 @@ mod tests {
         let hints = OpenWrtProfileGenerator.firewall_hints(&contexto());
         assert!(hints.contains(&format!("network='{INTERFACE_NAME}'")));
         assert!(hints.contains(FIREWALL_ZONE));
+    }
+
+    #[test]
+    fn repetir_o_script_nao_duplica_secoes() {
+        let content = OpenWrtProfileGenerator.generate(&contexto()).content;
+        // Nada anônimo: `uci add` criaria uma seção nova a cada execução.
+        assert!(!content.contains("uci add "));
+        assert!(!content.contains("[-1]"));
+        // A limpeza vem antes de qualquer criação.
+        let limpa = content
+            .find("uci -q delete network.wg_nm")
+            .expect("limpeza");
+        let cria = content
+            .find("uci set network.wg_nm=interface")
+            .expect("criação");
+        assert!(limpa < cria);
+        assert!(content.contains("uci set network.wg_nm_server=wireguard_wg_nm"));
+        assert!(content.contains("uci set firewall.vpn_netmonitor=zone"));
+    }
+
+    #[test]
+    fn sem_a_chave_privada_o_script_nao_mexe_em_nada() {
+        let mut context = contexto();
+        context.client_private_key = PRIVATE_KEY_UNAVAILABLE.into();
+        let artifact = OpenWrtProfileGenerator.generate(&context);
+        for content in std::iter::once(&artifact.content)
+            .chain(artifact.variants.iter().map(|variant| &variant.content))
+        {
+            assert!(!content.contains("uci "));
+            assert!(!content.contains("/etc/init.d/network restart"));
+            assert!(content.contains("Rotacionar chaves"));
+        }
+    }
+
+    #[test]
+    fn preshared_key_vazia_nao_vira_linha() {
+        let mut context = contexto();
+        context.preshared_key = Some(String::new());
+        let content = OpenWrtProfileGenerator.generate(&context).content;
+        assert!(!content.contains("preshared_key"));
     }
 }

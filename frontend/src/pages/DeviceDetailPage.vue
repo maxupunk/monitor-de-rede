@@ -167,7 +167,13 @@
     />
 
     <!-- Modais da aba VPN -->
-    <VpnScriptViewer v-model="vpnViewerOpen" :artifact="vpnStore.lastArtifact" :qr-svg="null" />
+    <VpnScriptViewer
+      v-model="vpnViewerOpen"
+      :artifact="vpnStore.lastArtifact"
+      :peer-id="detailStore.device?.vpnPeer?.id ?? null"
+      :peer-name="detailStore.device?.name ?? null"
+      @rotated="detailStore.loadDeviceDetails(deviceId)"
+    />
     <VpnFirewallHintsDialog v-model="vpnFirewallOpen" :content="vpnFirewallContent" />
 
     <!-- Modal de Scanner de Portas TCP/UDP -->

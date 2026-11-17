@@ -226,6 +226,10 @@ pub fn artifact_header(context: &PeerConfigContext) -> Vec<String> {
         "# ATENCAO: a chave privada deste dispositivo ja foi entregue e nao pode ser".to_string(),
         "# exibida outra vez. Este script NAO vai funcionar como esta.".to_string(),
         "# Use \"Rotacionar chaves\" no NetMonitor e copie o script novo.".to_string(),
+        // Marcador lido pela tela e pela API para saber que a chave já foi
+        // entregue — os scripts de MikroTik e OpenWrt sem chave não trazem
+        // mais o placeholder no corpo, então ele precisa estar aqui.
+        format!("# {PRIVATE_KEY_UNAVAILABLE}"),
     ]
 }
 
@@ -328,9 +332,10 @@ pub(super) mod tests {
 
         context.client_private_key = PRIVATE_KEY_UNAVAILABLE.to_string();
         let header = artifact_header(&context);
-        assert_eq!(header.len(), 4);
+        assert_eq!(header.len(), 5);
         assert!(header[1].contains("ja foi entregue"));
         assert!(header[3].contains("Rotacionar chaves"));
+        assert!(header[4].contains("CHAVE-PRIVADA-INDISPONIVEL"));
     }
 
     #[test]

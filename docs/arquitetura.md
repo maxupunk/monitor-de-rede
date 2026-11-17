@@ -36,7 +36,7 @@ produto** que usa (Rede, Servidores, VPN; o Núcleo sempre) — ver
 | Autenticação | JWT (`loco_rs::auth`), HS512 |
 | Tempo real | SSE |
 | Frontend | Vue 3 + TypeScript + Vite + Vuetify + Pinia + PWA, servido pela própria API |
-| Túnel | WireGuard (`wireguard-tools` no mesmo container) |
+| Túnel | WireGuard (`wireguard-tools` no mesmo container, com fallback em userspace via `wireguard-go` quando o kernel não traz o módulo) |
 | Implantação | Docker Compose — a aplicação e o agente local do Docker ([ADR 014](adr/014-docker-local-pelo-agente.md)) |
 
 Não há Redis, nem fila externa, nem broker. Ver [§12](#12-o-que-não-existe).
@@ -48,7 +48,7 @@ Não há Redis, nem fila externa, nem broker. Ver [§12](#12-o-que-não-existe).
 | Processo | Usuário | Papel |
 | :--- | :--- | :--- |
 | `backend-cli start` | `app` | API HTTP na 3333, SPA na mesma porta, barramento SSE e o ciclo de monitores. Sem capability alguma. |
-| `wireguard-watcher.sh` | `root` | Aplica `wg0.conf` com `wg syncconf` e publica `wg0.status`. É quem usa o `NET_ADMIN`. |
+| `wireguard-watcher.sh` | `root` | Aplica `wg0.conf` com `wg syncconf` (só peers mudaram) ou recria a `wg0` (mudou a seção `[Interface]`), escolhe no boot o backend do `iptables` (`nft` ou `legacy`) e publica `wg0.status`. Derruba a `wg0` no `SIGTERM`. É quem usa o `NET_ADMIN`. |
 
 ```text
 ┌──────────────────────────── container netmonitor ────────────────────────────┐

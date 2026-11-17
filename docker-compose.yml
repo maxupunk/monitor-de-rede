@@ -68,6 +68,12 @@ services:
     # Sem VPN? `WG_ENABLED=false` no `.env` e esta linha pode sair.
     cap_add:
       - NET_ADMIN
+    # Quando o kernel do host não traz o módulo `wireguard` (ex.: Synology DSM),
+    # o watcher sobe a interface em userspace (`wireguard-go`) via `/dev/net/tun`.
+    # Liberar pelo cgroup em vez de `devices:` evita travar o boot caso o nó
+    # ainda não exista no host; o watcher o cria dentro do `/dev` do container.
+    device_cgroup_rules:
+      - "c 10:200 rwm"
     # O batch do port scanner deriva do limite de descritores.
     ulimits:
       nofile:

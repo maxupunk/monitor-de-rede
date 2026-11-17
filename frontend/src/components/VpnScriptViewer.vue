@@ -8,12 +8,19 @@
   >
     <v-card v-if="artifact" class="rounded-lg">
       <v-card-title class="d-flex align-center font-weight-bold">
-        <v-icon start color="primary">mdi-check-decagram-outline</v-icon>
-        Pronto para conectar — {{ artifact.label }}
+        <v-icon start :color="hasPrivateKey ? 'primary' : 'warning'">
+          {{ hasPrivateKey ? 'mdi-check-decagram-outline' : 'mdi-key-alert-outline' }}
+        </v-icon>
+        {{ hasPrivateKey ? 'Pronto para conectar' : 'Chave privada já entregue' }} —
+        {{ artifact.label }}
       </v-card-title>
 
       <v-card-subtitle class="pb-2">
-        Confira os dados, escolha como instalar e aplique no dispositivo.
+        {{
+          hasPrivateKey
+            ? 'Confira os dados, escolha como instalar e aplique no dispositivo.'
+            : 'Consulte os parâmetros do túnel abaixo ou gere novas chaves para reinstalar o dispositivo.'
+        }}
       </v-card-subtitle>
 
       <v-card-text>
@@ -76,45 +83,62 @@
           </v-expansion-panel>
         </v-expansion-panels>
 
-        <v-tabs v-model="activeTab" density="comfortable" color="primary" class="mb-2">
-          <v-tab v-for="doc in documents" :key="doc.id" :value="doc.id">
-            <v-icon size="18" start>{{ doc.icon }}</v-icon>
-            {{ doc.label }}
-            <v-chip
-              v-if="doc.id === defaultTab && documents.length > 1"
-              size="x-small"
-              class="ml-2"
-            >
-              Recomendado
-            </v-chip>
-          </v-tab>
-        </v-tabs>
+        <template v-if="hasPrivateKey">
+          <v-tabs v-model="activeTab" density="comfortable" color="primary" class="mb-2">
+            <v-tab v-for="doc in documents" :key="doc.id" :value="doc.id">
+              <v-icon size="18" start>{{ doc.icon }}</v-icon>
+              {{ doc.label }}
+              <v-chip
+                v-if="doc.id === defaultTab && documents.length > 1"
+                size="x-small"
+                color="primary"
+                variant="tonal"
+                class="ml-2"
+              >
+                Recomendado
+              </v-chip>
+            </v-tab>
+          </v-tabs>
 
-        <div v-if="activeDocument" class="pt-2">
-          <div class="text-caption text-high-emphasis mb-2">
-            {{ activeDocument.hint }} · <code>{{ activeDocument.fileName }}</code>
+          <div v-if="activeDocument" class="pt-2">
+            <div class="text-caption text-high-emphasis mb-2">
+              {{ activeDocument.hint }} · <code>{{ activeDocument.fileName }}</code>
+            </div>
+
+            <v-list density="compact" class="bg-transparent mb-2">
+              <v-list-item
+                v-for="(step, index) in activeDocument.instructions"
+                :key="index"
+                :title="step"
+                :prepend-icon="stepIcons[index] || 'mdi-numeric'"
+              ></v-list-item>
+            </v-list>
+
+            <v-sheet class="script-box rounded-lg pa-4" color="grey-darken-4">
+              <pre class="script-content">{{ activeDocument.content }}</pre>
+            </v-sheet>
           </div>
+        </template>
 
-          <v-list density="compact" class="bg-transparent mb-2">
-            <v-list-item
-              v-for="(step, index) in activeDocument.instructions"
-              :key="index"
-              :title="step"
-              :prepend-icon="stepIcons[index] || 'mdi-numeric'"
-            ></v-list-item>
-          </v-list>
-
-          <v-sheet class="script-box rounded-lg pa-4" color="grey-darken-4">
-            <pre class="script-content">{{ activeDocument.content }}</pre>
-          </v-sheet>
-        </div>
+        <v-alert
+          v-if="vpnStore.error"
+          type="error"
+          variant="tonal"
+          density="comfortable"
+          class="mt-4"
+        >
+          {{ vpnStore.error }}
+        </v-alert>
       </v-card-text>
 
       <v-card-actions class="px-4 pb-4">
-        <v-btn variant="text" prepend-icon="mdi-download" @click="download">Baixar arquivo</v-btn>
+        <v-btn v-if="hasPrivateKey" variant="text" prepend-icon="mdi-download" @click="download">
+          Baixar arquivo
+        </v-btn>
         <v-spacer></v-spacer>
         <v-btn variant="text" @click="close">Fechar</v-btn>
         <v-btn
+          v-if="hasPrivateKey"
           color="primary"
           variant="flat"
           size="large"
@@ -122,6 +146,17 @@
           @click="copyAll"
         >
           {{ copied ? 'Copiado!' : copyLabel }}
+        </v-btn>
+        <v-btn
+          v-else-if="peerId"
+          color="warning"
+          variant="flat"
+          size="large"
+          prepend-icon="mdi-key-change"
+          :loading="vpnStore.saving"
+          @click="rotateKeys"
+        >
+          Gerar novas chaves
         </v-btn>
       </v-card-actions>
     </v-card>
@@ -132,6 +167,7 @@
 import { computed, ref, watch } from 'vue'
 import DOMPurify from 'dompurify'
 import { useVpnStore, type VpnArtifact } from '@/stores/vpn'
+import { confirm } from '@/composables/useConfirm'
 
 /** Uma aba do visualizador: o artefato principal ou uma das variantes de instalação. */
 interface ArtifactDocument {
@@ -147,10 +183,13 @@ interface ArtifactDocument {
 const props = defineProps<{
   modelValue: boolean
   artifact?: VpnArtifact | null
+  peerId?: number | null
+  peerName?: string | null
 }>()
 
 const emit = defineEmits<{
   (e: 'update:modelValue', value: boolean): void
+  (e: 'rotated'): void
 }>()
 
 const vpnStore = useVpnStore()
@@ -245,15 +284,22 @@ const copyLabel = computed(() =>
 )
 
 watch(
-  () => props.modelValue,
-  (isOpen) => {
+  () => [props.modelValue, hasPrivateKey.value] as const,
+  ([isOpen, hasKey], oldVal) => {
     if (!isOpen) return
+    const wasOpen = oldVal?.[0] ?? false
+    const hadKey = oldVal?.[1] ?? false
 
-    copied.value = false
-    activeTab.value = defaultTab.value
-    // No celular o QR resolve sozinho; nos demais, os dados vêm abertos.
-    summaryOpen.value = props.artifact?.supportsQrCode ? undefined : 'summary'
-  }
+    if (!wasOpen || (!hadKey && hasKey)) {
+      copied.value = false
+      activeTab.value = defaultTab.value
+      // Sem chave privada ou sem QR Code, os dados do túnel ficam abertos.
+      summaryOpen.value = !hasKey || !props.artifact?.supportsQrCode ? 'summary' : undefined
+    } else if (!hasKey) {
+      summaryOpen.value = 'summary'
+    }
+  },
+  { immediate: true }
 )
 
 // Trocar de aba invalida o "Copiado!" — ele se refere ao conteúdo anterior.
@@ -267,6 +313,25 @@ function emitOpen(value: boolean) {
 
 function close() {
   emit('update:modelValue', false)
+}
+
+async function rotateKeys() {
+  if (!props.peerId) return
+
+  const target = props.peerName?.trim() ? `"${props.peerName.trim()}"` : 'este dispositivo'
+  const ok = await confirm({
+    title: 'Gerar novas chaves VPN',
+    message: `Gerar novas chaves para ${target}? A configuração atual deixará de funcionar.`,
+    confirmText: 'Gerar novas chaves',
+    confirmColor: 'warning',
+    icon: 'mdi-key-change',
+  })
+  if (!ok) return
+
+  const artifact = await vpnStore.rotateKeys(props.peerId)
+  if (artifact) {
+    emit('rotated')
+  }
 }
 
 async function copyAll() {

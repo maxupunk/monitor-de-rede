@@ -167,6 +167,12 @@ sistema:
   atende o equipamento para o qual a central armou uma sessão; `BTEST_LISTEN=`
   vazio o desliga.
 
+> **NAS / Synology DSM (kernels sem módulo `wireguard`):** o container usa
+> automaticamente o `wireguard-go` em userspace via `/dev/net/tun`. Caso o DSM
+> reinicie sem carregar o driver TUN (por não haver outro pacote VPN ativo),
+> agende uma tarefa disparada na inicialização como `root` em **Painel de
+> Controle → Agendador de Tarefas** executando `insmod /lib/modules/tun.ko`.
+
 #### Voltar ao modo bridge
 
 Comente `COMPOSE_FILE`, ajuste as portas publicadas e recrie o serviço:
@@ -328,4 +334,6 @@ vão para o banco `netmonitor_logs` do mesmo servidor. A senha do banco é
 sorteada no primeiro boot (ou vem da `POSTGRES_PASSWORD` do `.env`) e chega à
 API pelo `PGPASSFILE`, fora da URL. O SQLite continua
 suportado (`sqlite:///data/netmonitor.sqlite?mode=rwc`) para quem roda a imagem
-sem compose. O código atende aos dois dialetos.
+sem compose. Ao subir via `docker run` sem compose com a VPN habilitada,
+inclua `--cap-add=NET_ADMIN` e, em hosts sem módulo `wireguard` no kernel,
+`--device-cgroup-rule='c 10:200 rwm'` para o túnel em userspace. O código atende aos dois dialetos.

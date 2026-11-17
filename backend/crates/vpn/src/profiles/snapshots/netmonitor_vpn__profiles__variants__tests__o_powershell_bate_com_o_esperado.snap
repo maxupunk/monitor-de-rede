@@ -20,7 +20,7 @@ PrivateKey = CHAVE
 Address = 10.8.0.11/24
 '@
 
-  # 1/5 - Confere o terreno antes de mexer em qualquer coisa
+  # 1/4 - Confere o terreno antes de mexer em qualquer coisa
   $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
   $isAdmin = ([Security.Principal.WindowsPrincipal]$identity).IsInRole(
     [Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -34,7 +34,7 @@ Address = 10.8.0.11/24
     throw 'winget nao encontrado. Instale o "Instalador de Aplicativo" pela Microsoft Store ou baixe o cliente em https://www.wireguard.com/install/'
   }
 
-  # 2/5 - Instala o cliente oficial WireGuard
+  # 2/4 - Instala o cliente oficial WireGuard
   winget install --exact --id WireGuard.WireGuard --silent `
     --accept-source-agreements --accept-package-agreements
   # winget termina em erro quando o pacote ja esta instalado: o que importa e o executavel existir.
@@ -45,9 +45,17 @@ Address = 10.8.0.11/24
   # 3/4 - Desfaz instalacoes anteriores feitas por este script
   # Um servico proprio (/installtunnelservice) e o tunel gerenciado pela
   # janela do WireGuard disputam o mesmo adaptador: os dois nao coexistem.
+  # Espera o servico sumir de verdade: o adaptador so e liberado depois.
+  $WasActive = $false
   if (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue) {
+    $WasActive = $true
     & $WgExe /uninstalltunnelservice $Tunnel
-    Start-Sleep -Seconds 3
+    for ($i = 0; $i -lt 30 -and (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue); $i++) {
+      Start-Sleep -Milliseconds 500
+    }
+    if (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue) {
+      throw "O servico $ServiceName nao saiu em 15 s. Feche a janela do WireGuard e cole o bloco de novo."
+    }
   }
   # 4/4 - Grava o perfil no cofre do proprio WireGuard
   # O gerenciador monitora essa pasta e lista o tunel na hora, sem reiniciar.
@@ -61,20 +69,41 @@ Address = 10.8.0.11/24
 
   # O nome do arquivo vira o nome do tunel: precisa ser <tunel>.conf
   $File = Join-Path $Store "$Tunnel.conf"
+  # O perfil nasce num nome que o gerenciador ignora, ja com a permissao
+  # restrita (so SYSTEM e Administradores; SIDs para valer em qualquer idioma),
+  # e so vira <tunel>.conf pronto: o gerenciador nunca le um arquivo pela
+  # metade nem com a chave privada aberta a outros usuarios.
+  $Tmp = Join-Path $Store "$Tunnel.netmonitor-tmp"
+  Remove-Item -Path $Tmp -Force -ErrorAction SilentlyContinue
+  New-Item -ItemType File -Path $Tmp -Force | Out-Null
+  icacls $Tmp /inheritance:r /grant:r "*S-1-5-18:(F)" "*S-1-5-32-544:(F)" | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    Remove-Item -Path $Tmp -Force -ErrorAction SilentlyContinue
+    throw 'Nao foi possivel restringir a permissao do perfil. Nada foi alterado.'
+  }
+  Set-Content -Path $Tmp -Value $Conf -Encoding ascii
   # Um .conf.dpapi de importacao anterior tem prioridade sobre o .conf e
   # manteria o perfil velho no lugar do novo.
   Remove-Item -Path "$File.dpapi" -Force -ErrorAction SilentlyContinue
   Remove-Item -Path $File -Force -ErrorAction SilentlyContinue
-  $Conf | Set-Content -Path $File -Encoding ascii
-  # A chave privada fica em texto puro ate o WireGuard cifrar o perfil: so
-  # SYSTEM (que roda o gerenciador) e Administradores enxergam nesse meio tempo.
-  # (SIDs no lugar dos nomes, para funcionar em Windows de qualquer idioma.)
-  icacls $File /inheritance:r /grant:r "*S-1-5-18:(F)" "*S-1-5-32-544:(F)" | Out-Null
+  Move-Item -Path $Tmp -Destination $File -Force
 
   # Abre a janela do WireGuard com o tunel ja na lista
   Start-Process -FilePath $WgExe
   Write-Host ''
   Write-Host 'Perfil "netmonitor" instalado no WireGuard.'
+  # Tunel que estava ativo volta ativo: o gerenciador cifra o perfil em
+  # .conf.dpapi e o servico sobe a partir dele, como na ativacao pela janela.
+  if ($WasActive) {
+    for ($i = 0; $i -lt 20 -and -not (Test-Path "$File.dpapi"); $i++) {
+      Start-Sleep -Milliseconds 500
+    }
+    if (Test-Path "$File.dpapi") {
+      & $WgExe /installtunnelservice "$File.dpapi"
+      Write-Host 'Tunel "netmonitor" reativado com a configuracao nova.'
+      return
+    }
+  }
   Write-Host 'Na janela que abriu, selecione "netmonitor" e clique em Ativar.'
   Write-Host 'Dai em diante o WireGuard gerencia o tunel e ele volta sozinho a cada boot.'
 }

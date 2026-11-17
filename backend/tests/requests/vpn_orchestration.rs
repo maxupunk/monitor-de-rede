@@ -553,10 +553,11 @@ async fn as_dicas_de_firewall_saem_no_dialeto_do_equipamento() {
         );
         assert_eq!(hints["profile"], "openwrt");
         assert_eq!(hints["label"], "OpenWrt");
+        // Zona com nome fixo: repetir as regras não duplica a zona.
         assert!(hints["content"]
             .as_str()
             .unwrap()
-            .contains("uci add firewall zone"));
+            .contains("uci set firewall.vpn_netmonitor=zone"));
 
         // O OpenWrt entrega as duas variantes de gerenciador de pacotes.
         let variantes = criado["artifact"]["variants"].as_array().unwrap();

@@ -16,8 +16,9 @@
 # watcher, e o canal entre os dois é arquivo — `wg0.conf` de ida, `wg0.status`
 # de volta —, exatamente como era quando o WireGuard morava em outro container.
 #
-# `tini` é o PID 1 e repassa SIGTERM para este script. O trap garante que o
-# watcher seja encerrado junto com a aplicação, evitando processos órfãos.
+# `tini -g` é o PID 1 e repassa SIGTERM para todo o grupo de processos. O trap
+# dentro de `start_watcher` encerra o watcher junto com a aplicação sem
+# registrar reinício espúrio, evitando processos órfãos.
 # ---------------------------------------------------------------------------
 set -eu
 
@@ -60,21 +61,17 @@ has_net_admin() {
 WATCHER_PID=""
 
 start_watcher() {
+  trap 'if [ -n "${WATCHER_PID}" ]; then kill -TERM "${WATCHER_PID}" 2>/dev/null || true; wait "${WATCHER_PID}" 2>/dev/null || true; fi; exit 0' TERM INT
   while true; do
     log "iniciando watcher do WireGuard (${WG_CONFIG_DIR})"
     WG_CONFIG_DIR="${WG_CONFIG_DIR}" /usr/local/bin/wireguard-watcher.sh &
     WATCHER_PID=$!
     wait "${WATCHER_PID}" 2>/dev/null || true
+    WATCHER_PID=""
     log "watcher do WireGuard saiu — reiniciando em 2s"
-    sleep 2
+    sleep 2 &
+    wait $! 2>/dev/null || true
   done
-}
-
-stop_watcher() {
-  if [ -n "${WATCHER_PID}" ] && kill -0 "${WATCHER_PID}" 2>/dev/null; then
-    kill -TERM "${WATCHER_PID}" 2>/dev/null || true
-    wait "${WATCHER_PID}" 2>/dev/null || true
-  fi
 }
 
 case "${WG_ENABLED:-auto}" in
@@ -89,13 +86,6 @@ case "${WG_ENABLED:-auto}" in
     fi
     ;;
 esac
-
-# Garante limpeza ordenada ao receber SIGTERM/INT.
-cleanup() {
-  log "sinal de término recebido — encerrando watcher"
-  stop_watcher
-}
-trap cleanup TERM INT
 
 # --- 2.1. socket ICMP sem privilégio (ADR 003) ------------------------------
 # Confere o sysctl e, se der, o libera como root antes de largar os privilégios.

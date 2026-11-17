@@ -103,6 +103,16 @@ impl VpnProfileGenerator for MikrotikProfileGenerator {
         let vpn_cidr = escape_routeros(&context.vpn_cidr);
         let mut lines = artifact_header(context);
         lines.push(String::new());
+        if context.private_key_consumed() {
+            // A limpeza abaixo removeria o túnel que está funcionando antes de
+            // o `/interface/wireguard/add` recusar a chave inválida: colado no
+            // terminal, cada linha roda sozinha e nada interrompe o resto.
+            lines.push(
+                ":put \"Nada foi alterado: a chave privada ja foi entregue. No NetMonitor, use 'Rotacionar chaves' e copie o script novo.\""
+                    .to_string(),
+            );
+            return self.artifact(context, lines);
+        }
         lines.extend(Self::cleanup_section(context));
         lines.extend([
             String::new(),
@@ -120,7 +130,11 @@ impl VpnProfileGenerator for MikrotikProfileGenerator {
             format!("/interface/wireguard/peers/add interface={INTERFACE_NAME} \\"),
             format!("    public-key=\"{server_public_key}\" \\"),
         ]);
-        if let Some(preshared_key) = context.preshared_key.as_deref() {
+        if let Some(preshared_key) = context
+            .preshared_key
+            .as_deref()
+            .filter(|key| !key.is_empty())
+        {
             lines.push(format!(
                 "    preshared-key=\"{}\" \\",
                 escape_routeros(preshared_key)
@@ -143,6 +157,12 @@ impl VpnProfileGenerator for MikrotikProfileGenerator {
             format!("/interface/wireguard/peers/print where interface={INTERFACE_NAME}"),
         ]);
 
+        self.artifact(context, lines)
+    }
+}
+
+impl MikrotikProfileGenerator {
+    fn artifact(&self, context: &PeerConfigContext, lines: Vec<String>) -> GeneratedArtifact {
         GeneratedArtifact {
             profile: self.profile().to_string(),
             label: self.label().to_string(),
@@ -164,7 +184,7 @@ impl VpnProfileGenerator for MikrotikProfileGenerator {
 
 #[cfg(test)]
 mod tests {
-    use super::super::contract::tests::contexto;
+    use super::super::contract::{tests::contexto, PRIVATE_KEY_UNAVAILABLE};
     use super::*;
 
     #[test]
@@ -189,6 +209,19 @@ mod tests {
         context.preshared_key = None;
         let content = MikrotikProfileGenerator.generate(&context).content;
         assert!(!content.contains("preshared-key"));
+        context.preshared_key = Some(String::new());
+        let content = MikrotikProfileGenerator.generate(&context).content;
+        assert!(!content.contains("preshared-key"));
+    }
+
+    #[test]
+    fn sem_a_chave_privada_o_tunel_atual_nao_e_removido() {
+        let mut context = contexto();
+        context.client_private_key = PRIVATE_KEY_UNAVAILABLE.into();
+        let content = MikrotikProfileGenerator.generate(&context).content;
+        assert!(!content.contains("/remove"));
+        assert!(!content.contains("/add"));
+        assert!(content.contains(":put \"Nada foi alterado"));
     }
 
     #[test]

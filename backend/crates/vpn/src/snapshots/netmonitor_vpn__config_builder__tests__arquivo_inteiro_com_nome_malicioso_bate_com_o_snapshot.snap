@@ -10,10 +10,10 @@ Address = 10.8.0.1/24
 ListenPort = 51820
 PrivateKey = CHAVE-PRIVADA-DO-SERVIDOR
 MTU = 1420
-PostUp = iptables -A FORWARD -i wg0 -d 10.8.0.1 -j ACCEPT
-PostUp = iptables -A FORWARD -i wg0 -o wg0 -j DROP
-PostDown = iptables -D FORWARD -i wg0 -d 10.8.0.1 -j ACCEPT
-PostDown = iptables -D FORWARD -i wg0 -o wg0 -j DROP
+PostUp = iptables -C FORWARD -i wg0 -d 10.8.0.1 -j ACCEPT 2>/dev/null || iptables -A FORWARD -i wg0 -d 10.8.0.1 -j ACCEPT
+PostUp = iptables -C FORWARD -i wg0 -o wg0 -j DROP 2>/dev/null || iptables -A FORWARD -i wg0 -o wg0 -j DROP
+PostDown = iptables -D FORWARD -i wg0 -d 10.8.0.1 -j ACCEPT 2>/dev/null || true
+PostDown = iptables -D FORWARD -i wg0 -o wg0 -j DROP 2>/dev/null || true
 
 # filial_01__[Peer]
 [Peer]
