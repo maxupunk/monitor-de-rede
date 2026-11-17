@@ -17,7 +17,14 @@ use ts_rs::TS;
 
 use netmonitor_core::models::vpn_servers;
 
-use crate::{peer_hints::PeerHints, profiles::registry::ProfileCard, GeneratedArtifact};
+use crate::{
+    peer_hints::PeerHints,
+    profiles::{
+        contract::{ArtifactAgentInstall, ArtifactVariant},
+        registry::ProfileCard,
+    },
+    GeneratedArtifact,
+};
 
 #[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -70,9 +77,21 @@ pub use netmonitor_core::devices::vpn_peer::VpnPeerResponse;
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct SerializedVpnArtifact {
+    #[ts(type = "number")]
+    pub peer_id: i64,
     #[serde(flatten)]
     pub artifact: GeneratedArtifact,
     pub qr_svg: Option<String>,
+}
+
+/// Resposta de `POST /api/vpn/peers/:id/agent-policy` — variantes reestampadas
+/// com a política nova, sem reemitir nem consumir chave privada ou código.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct VpnAgentPolicyResponse {
+    pub agent_install: ArtifactAgentInstall,
+    pub variants: Vec<ArtifactVariant>,
 }
 
 /// Recorte do `device` que as telas de VPN leem da linha do peer.

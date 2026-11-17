@@ -28,8 +28,10 @@ use crate::{
     monitor_provisioner::{self, MonitorProvisioningOptions},
     peer_hints::{compute_peer_hints, PeerHints},
     profiles::{
-        contract::{AgentInstall, PeerConfigContext},
-        registry, GeneratedArtifact, PERSISTENT_KEEPALIVE_SECONDS, PRIVATE_KEY_UNAVAILABLE,
+        contract::{AgentInstall, ArtifactAgentInstall, ArtifactVariant, PeerConfigContext},
+        registry,
+        variants::linux_bash_variant,
+        GeneratedArtifact, PERSISTENT_KEEPALIVE_SECONDS, PRIVATE_KEY_UNAVAILABLE,
     },
     secret_store::{client_key_store, secret_key},
     server_service,
@@ -115,12 +117,14 @@ async fn load_peer(db: &DatabaseConnection, peer_id: i64) -> AppResult<PeerBundl
     })
 }
 
+/// Teto defensivo do `.conf` reembutido ao reestampar a política do agente.
+const MAX_CONF_BYTES: usize = 8_192;
+
 /// Monta o contexto consumido pelos geradores por perfil.
 fn build_context(
     bundle: &PeerBundle,
     client_private_key: Option<&str>,
 ) -> AppResult<PeerConfigContext> {
-    let device = bundle.device.as_ref();
     let server_vpn_address = server_service::server_address(&bundle.network)?.to_string();
     // O código só vale junto com a chave privada: artefato sem chave não sobe
     // o túnel, e um código emitido ali seria um segredo desperdiçado.
@@ -135,8 +139,19 @@ fn build_context(
                 enroll_code: enrollment::issue(agent.id),
                 allow: policy.allow_env(),
                 database_targets: policy.database_targets_env(),
+                policy: policy.view(),
             }
         });
+    build_context_with_agent(bundle, server_vpn_address, client_private_key, agent)
+}
+
+fn build_context_with_agent(
+    bundle: &PeerBundle,
+    server_vpn_address: String,
+    client_private_key: Option<&str>,
+    agent: Option<AgentInstall>,
+) -> AppResult<PeerConfigContext> {
+    let device = bundle.device.as_ref();
     Ok(PeerConfigContext {
         peer_name: device.map_or_else(
             || format!("peer-{}", bundle.peer.id),
@@ -440,14 +455,22 @@ pub async fn rename(
 
 /// Gera novo par de chaves e PSK, invalidando imediatamente os anteriores.
 ///
+/// Quando uma `agent_policy` é informada, atualiza antes a política gravada no
+/// agente vinculado para que o novo script já saia com ela.
+///
 /// # Errors
 ///
-/// Propaga erro de cifra e de banco.
+/// Propaga erro de cifra, validação de política e de banco.
 pub async fn rotate_keys(
     db: &DatabaseConnection,
     peer_id: i64,
+    agent_policy: Option<&InstallPolicyView>,
 ) -> AppResult<(vpn_peers::Model, GeneratedArtifact)> {
     let bundle = load_peer(db, peer_id).await?;
+    if let (Some(view), Some(agent)) = (agent_policy, bundle.agent.as_ref()) {
+        let policy = InstallPolicy::from_view(view)?;
+        registration::save_policy(db, agent.id, &policy).await?;
+    }
     let key_pair = generate_key_pair();
 
     let mut active: vpn_peers::ActiveModel = bundle.peer.clone().into();
@@ -462,6 +485,70 @@ pub async fn rotate_keys(
     let artifact = generate_artifact(&bundle, Some(&key_pair.private_key))?;
 
     Ok((bundle.peer, artifact))
+}
+
+/// Atualiza a política de `AGENT_ALLOW` gravada no agente do peer e reestampa
+/// o script Bash usando o mesmo código e o `.conf` já entregues à tela — sem
+/// tocar no cofre de chaves privadas nem emitir código novo.
+///
+/// # Errors
+///
+/// Propaga validação do código/política/configuração, conflito de chave já
+/// consumida ou ausência de agente no peer.
+pub async fn restamp_agent_policy(
+    db: &DatabaseConnection,
+    peer_id: i64,
+    enroll_code: &str,
+    policy_view: &InstallPolicyView,
+    conf_content: &str,
+) -> AppResult<(ArtifactAgentInstall, Vec<ArtifactVariant>)> {
+    let enroll_code = enrollment::validate_code(enroll_code)?.to_string();
+    let trimmed_conf = conf_content.trim();
+    if trimmed_conf.is_empty() || conf_content.len() > MAX_CONF_BYTES {
+        return Err(AppError::validation("Configuração WireGuard inválida"));
+    }
+    if conf_content.contains(PRIVATE_KEY_UNAVAILABLE) {
+        return Err(AppError::conflict(
+            "A chave privada deste dispositivo já foi entregue. Rotacione as chaves para gerar um novo script.",
+        ));
+    }
+    let policy = InstallPolicy::from_view(policy_view)?;
+    let bundle = load_peer(db, peer_id).await?;
+    if bundle.peer.device_profile != "linux" {
+        return Err(AppError::business_rule(
+            "Apenas o perfil Linux possui instalação automática do agente",
+        ));
+    }
+    let Some(agent) = bundle.agent.as_ref() else {
+        return Err(AppError::business_rule(
+            "Este dispositivo VPN não possui agente remoto vinculado",
+        ));
+    };
+    registration::save_policy(db, agent.id, &policy).await?;
+
+    let server_vpn_address = server_service::server_address(&bundle.network)?.to_string();
+    let policy_out = policy.view();
+    let agent_install = AgentInstall {
+        server_url: tunnel_server_url(&server_vpn_address),
+        enroll_code: enroll_code.clone(),
+        allow: policy.allow_env(),
+        database_targets: policy.database_targets_env(),
+        policy: policy_out.clone(),
+    };
+    let context = build_context_with_agent(
+        &bundle,
+        server_vpn_address,
+        Some("PRESENT_IN_CONF"),
+        Some(agent_install),
+    )?;
+    let variant = linux_bash_variant(&context, conf_content);
+    Ok((
+        ArtifactAgentInstall {
+            enroll_code,
+            policy: policy_out,
+        },
+        vec![variant],
+    ))
 }
 
 /// Artefato de configuração do peer.

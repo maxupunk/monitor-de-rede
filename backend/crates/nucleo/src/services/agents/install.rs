@@ -68,6 +68,11 @@ umask 077
   if [ -n "${{AGENT_ENROLL_CODE:-}}" ]; then echo "AGENT_ENROLL_CODE=$AGENT_ENROLL_CODE"; fi
   if [ -n "${{AGENT_DATABASE_TARGETS:-}}" ]; then echo "AGENT_DATABASE_TARGETS=$AGENT_DATABASE_TARGETS"; fi
 }} > /etc/netmonitor-agent/agent.env
+# Reinstalação com código novo: descarta credencial antiga (inclusive no
+# StateDirectory de DynamicUser) para forçar o enrollment novo em vez de 401.
+if [ -n "${{AGENT_ENROLL_CODE:-}}" ]; then
+  rm -f /var/lib/netmonitor-agent/token /var/lib/private/netmonitor-agent/token
+fi
 
 cat > /etc/systemd/system/netmonitor-agent.service <<'UNIT'
 {unit}UNIT
@@ -102,5 +107,13 @@ mod tests {
         assert!(binary_path("aarch64").is_some());
         assert!(binary_path("../etc/passwd").is_none());
         assert!(binary_path("mips").is_none());
+    }
+
+    #[test]
+    fn codigo_novo_descarta_token_de_instalacao_anterior() {
+        let generated = script();
+        assert!(generated.contains(
+            "if [ -n \"${AGENT_ENROLL_CODE:-}\" ]; then\n  rm -f /var/lib/netmonitor-agent/token /var/lib/private/netmonitor-agent/token\nfi"
+        ));
     }
 }

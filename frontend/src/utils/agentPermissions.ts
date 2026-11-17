@@ -1,3 +1,4 @@
+import type { InstallPolicyView } from '@/bindings/InstallPolicyView'
 import type { Permission } from '@/bindings/Permission'
 
 /** Como a tela fala de cada permissão do agente (`AGENT_ALLOW`). */
@@ -45,4 +46,23 @@ export function permissionLabel(permission: Permission): string {
 
 export function permissionColor(permission: Permission): string {
   return SENSITIVE.includes(permission) ? 'warning' : 'primary'
+}
+
+/** Mesma faixa inicial de bancos em container usada por `InstallPolicy::suggested()`. */
+export const DEFAULT_DATABASE_TARGETS =
+  '172.16.0.0/12:5432,172.16.0.0/12:3306,192.168.0.0/16:5432,192.168.0.0/16:3306'
+
+/** Sugestão imediata para a tela abrir sem atraso nem salto de layout. */
+export function defaultInstallPolicy(): InstallPolicyView {
+  return {
+    allow: [...PERMISSION_ORDER],
+    databaseTargets: DEFAULT_DATABASE_TARGETS,
+  }
+}
+
+export function cloneInstallPolicy(policy: InstallPolicyView): InstallPolicyView {
+  return {
+    allow: [...policy.allow],
+    databaseTargets: policy.databaseTargets,
+  }
 }

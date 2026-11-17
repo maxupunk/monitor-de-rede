@@ -6,6 +6,7 @@
 use serde::Serialize;
 use ts_rs::TS;
 
+pub use netmonitor_core::agents::install_policy::InstallPolicyView;
 pub use netmonitor_core::shared::secret_store::PRIVATE_KEY_UNAVAILABLE;
 
 /// Keepalive fixo: sem ele o NAT do cliente expira e o servidor perde o caminho
@@ -56,6 +57,19 @@ pub struct AgentInstall {
     pub allow: String,
     /// `AGENT_DATABASE_TARGETS`; vazio sem a ponte de banco.
     pub database_targets: String,
+    /// Visão estruturada da política, devolvida no artefato para o visualizador
+    /// permitir ajustar as permissões antes de copiar o script.
+    pub policy: InstallPolicyView,
+}
+
+/// Dados da instalação do agente embutida na variante de script, quando o peer
+/// possui agente ativo e a chave privada está presente.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct ArtifactAgentInstall {
+    pub enroll_code: String,
+    pub policy: InstallPolicyView,
 }
 
 impl PeerConfigContext {
@@ -157,6 +171,9 @@ pub struct GeneratedArtifact {
     pub summary: Vec<ArtifactSummaryItem>,
     /// Scripts de terminal equivalentes, um por gerenciador de pacotes.
     pub variants: Vec<ArtifactVariant>,
+    /// Política e código do agente instalado pelo script (`linux`), quando o
+    /// artefato traz chave privada utilizável.
+    pub agent_install: Option<ArtifactAgentInstall>,
 }
 
 pub trait VpnProfileGenerator: Send + Sync {

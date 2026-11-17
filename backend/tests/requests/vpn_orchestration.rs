@@ -828,3 +828,130 @@ async fn queda_do_tunel_chega_ao_motor_pelo_dataset_da_area() {
     .await;
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[tokio::test]
+#[serial]
+async fn politica_do_agente_vpn_e_ajustavel_no_visualizador_e_preservada_na_rotacao_e_reemissao() {
+    let dir = isolar_volume_wireguard("agent-policy");
+    let _ = std::fs::remove_dir_all(&dir);
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+
+        request
+            .put("/api/vpn/server")
+            .json(&serde_json::json!({ "publicEndpoint": "vpn.exemplo.com.br" }))
+            .await;
+        // Mesmo com domínio público cadastrado, agente preso ao túnel VPN deve
+        // sugerir o IP do túnel (10.8.0.1) ao reemitir código de instalação.
+        request
+            .put("/api/server-addresses")
+            .json(&serde_json::json!({
+                "overrides": { "domain": "https://monitor.exemplo.com.br" },
+                "custom": [],
+                "preferredId": "domain"
+            }))
+            .await;
+
+        let criado = json_of(
+            &request
+                .post("/api/vpn/peers")
+                .json(&serde_json::json!({
+                    "name": "srv-filial",
+                    "profile": "linux",
+                    "installAgent": true,
+                    "agentPolicy": {
+                        "allow": ["read", "lifecycle"],
+                        "databaseTargets": ""
+                    }
+                }))
+                .await
+                .text(),
+        );
+        let peer_id = criado["peer"]["id"].as_i64().unwrap();
+        assert_eq!(criado["artifact"]["peerId"], peer_id);
+        assert_eq!(
+            criado["artifact"]["agentInstall"]["policy"]["allow"],
+            serde_json::json!(["read", "lifecycle"])
+        );
+        let conf_original = criado["artifact"]["content"].as_str().unwrap().to_string();
+        let enroll_code = criado["artifact"]["agentInstall"]["enrollCode"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let bash_inicial = criado["artifact"]["variants"][0]["content"]
+            .as_str()
+            .unwrap();
+        assert!(bash_inicial.contains("AGENT_ALLOW='read,lifecycle'"));
+
+        // Reestampar no visualizador mantém a chave privada e o código, mas grava a nova política.
+        let atualizado = request
+            .post(&format!("/api/vpn/peers/{peer_id}/agent-policy"))
+            .json(&serde_json::json!({
+                "enrollCode": enroll_code,
+                "confContent": conf_original,
+                "policy": {
+                    "allow": ["read", "compose", "database"],
+                    "databaseTargets": "10.0.0.5:5432"
+                }
+            }))
+            .await;
+        assert_eq!(atualizado.status_code(), 200, "{}", atualizado.text());
+        let atualizado = json_of(&atualizado.text());
+        let bash_atualizado = atualizado["variants"][0]["content"].as_str().unwrap();
+        assert!(bash_atualizado.contains(conf_original.trim()));
+        assert!(bash_atualizado.contains(&format!("AGENT_ENROLL_CODE='{enroll_code}'")));
+        assert!(bash_atualizado.contains(
+            "AGENT_ALLOW='read,compose,database' AGENT_DATABASE_TARGETS='10.0.0.5:5432'"
+        ));
+
+        // Rotacionar chaves preserva a última política escolhida.
+        let rotacionado = json_of(
+            &request
+                .post(&format!("/api/vpn/peers/{peer_id}/rotate"))
+                .await
+                .text(),
+        );
+        assert_eq!(
+            rotacionado["artifact"]["agentInstall"]["policy"]["allow"],
+            serde_json::json!(["read", "compose", "database"])
+        );
+        assert!(rotacionado["artifact"]["variants"][0]["content"]
+            .as_str()
+            .unwrap()
+            .contains(
+                "AGENT_ALLOW='read,compose,database' AGENT_DATABASE_TARGETS='10.0.0.5:5432'"
+            ));
+
+        // Reemitir "Código de instalação" em Servidores remotos usa 10.8.0.1 e mantém a política.
+        let agents = json_of(&request.get("/api/agents").await.text());
+        let agent_id = agents
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["name"] == "srv-filial")
+            .and_then(|item| item["id"].as_i64())
+            .expect("agente criado pelo peer");
+        let reemitido = json_of(
+            &request
+                .post(&format!("/api/agents/{agent_id}/enrollment"))
+                .await
+                .text(),
+        );
+        assert!(
+            reemitido["commands"]["serverUrl"]
+                .as_str()
+                .unwrap()
+                .starts_with("http://10.8.0.1:"),
+            "esperava endereço da VPN, veio: {}",
+            reemitido["commands"]["serverUrl"]
+        );
+        assert_eq!(
+            reemitido["commands"]["policy"]["allow"],
+            serde_json::json!(["read", "compose", "database"])
+        );
+    })
+    .await;
+    let _ = std::fs::remove_dir_all(&dir);
+}

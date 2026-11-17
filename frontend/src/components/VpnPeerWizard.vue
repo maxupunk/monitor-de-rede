@@ -113,21 +113,33 @@
                   gerado ele só reconecta pelo túnel — rode o script no servidor em seguida.
                 </v-alert>
               </v-col>
-              <v-col v-if="supportsAgent && form.installAgent && agentPolicy" cols="12">
-                <AgentPolicyPicker v-model="agentPolicy"></AgentPolicyPicker>
-              </v-col>
-              <v-col v-else-if="supportsAgent" cols="12">
-                <v-switch
-                  v-model="form.installAgent"
-                  color="primary"
-                  label="Conectar este servidor à central (Docker, métricas e monitores)"
-                  density="comfortable"
-                  hide-details
-                ></v-switch>
-                <div class="text-caption text-high-emphasis ml-2">
-                  O script do túnel termina instalando o agente NetMonitor, que se conecta pela VPN
-                  com um código de uso único. Acompanhe em Coleta remota → Servidores remotos.
-                </div>
+              <v-col v-if="supportsAgent" cols="12">
+                <v-card border flat class="pa-4 rounded-lg">
+                  <template v-if="!preset">
+                    <v-switch
+                      v-model="form.installAgent"
+                      color="primary"
+                      label="Conectar este servidor à central (Docker, métricas e monitores)"
+                      density="comfortable"
+                      hide-details
+                    ></v-switch>
+                    <div class="text-caption text-high-emphasis mt-1">
+                      O script do túnel termina instalando o agente NetMonitor, que se conecta pela
+                      VPN com um código de uso único. Acompanhe em Coleta remota → Servidores
+                      remotos.
+                    </div>
+                  </template>
+
+                  <template v-if="form.installAgent">
+                    <v-divider v-if="!preset" class="my-3"></v-divider>
+                    <AgentPolicyPicker
+                      :model-value="agentPolicy"
+                      :loading="loadingPolicy"
+                      immediate-targets
+                      @update:model-value="onPolicyEdited"
+                    ></AgentPolicyPicker>
+                  </template>
+                </v-card>
               </v-col>
             </v-row>
 
@@ -185,6 +197,7 @@ import type { InstallPolicyView } from '@/bindings/InstallPolicyView'
 import { useAgentsStore } from '@/stores/agents'
 import { useVpnStore, type VpnArtifact } from '@/stores/vpn'
 import { useSitesStore } from '@/stores/sites'
+import { cloneInstallPolicy, defaultInstallPolicy } from '@/utils/agentPermissions'
 
 const props = defineProps<{
   modelValue: boolean
@@ -208,13 +221,37 @@ const vpnStore = useVpnStore()
 const sitesStore = useSitesStore()
 const agentsStore = useAgentsStore()
 
-/** O que o agente instalado pelo script vai liberar; vem marcado com a sugestão. */
-const agentPolicy = ref<InstallPolicyView | null>(null)
+/** O que o agente instalado pelo script vai liberar; nasce com a sugestão local imediata. */
+const agentPolicy = ref<InstallPolicyView>(defaultInstallPolicy())
+const loadingPolicy = ref(false)
+const policyEditedByUser = ref(false)
+
+function onPolicyEdited(next: InstallPolicyView) {
+  policyEditedByUser.value = true
+  agentPolicy.value = next
+}
+
+async function loadSuggestedPolicy(existingAgentId?: number | null) {
+  loadingPolicy.value = true
+  const suggested = await agentsStore.suggestedPolicy()
+  loadingPolicy.value = false
+  if (policyEditedByUser.value) return
+  const base = suggested ? cloneInstallPolicy(suggested) : defaultInstallPolicy()
+  if (existingAgentId) {
+    const existing = agentsStore.agents.find((item) => item.id === existingAgentId)
+    if (existing && existing.host.policy.length > 0) {
+      base.allow = [...existing.host.policy]
+    }
+  }
+  agentPolicy.value = base
+}
 
 watch(
   () => form.installAgent,
-  async (install) => {
-    if (install && !agentPolicy.value) agentPolicy.value = await agentsStore.suggestedPolicy()
+  (install) => {
+    if (install && !policyEditedByUser.value) {
+      void loadSuggestedPolicy(props.preset?.agentId)
+    }
   }
 )
 
@@ -261,12 +298,14 @@ watch(
     form.snmpEnabled = false
     form.snmpCommunity = 'public'
     form.installAgent = false
-    agentPolicy.value = null
+    policyEditedByUser.value = false
+    agentPolicy.value = defaultInstallPolicy()
 
     if (props.preset) {
       form.profile = AGENT_PROFILE
       form.name = props.preset.name
       form.installAgent = true
+      void loadSuggestedPolicy(props.preset.agentId)
       void goToIdentification()
     }
 
@@ -305,7 +344,8 @@ async function submit() {
     snmpCommunity: form.snmpEnabled ? form.snmpCommunity : null,
     installAgent: supportsAgent.value && form.installAgent,
     agentId: props.preset?.agentId ?? null,
-    agentPolicy: supportsAgent.value && form.installAgent ? agentPolicy.value : null,
+    agentPolicy:
+      supportsAgent.value && form.installAgent ? cloneInstallPolicy(agentPolicy.value) : null,
   })
 
   if (artifact) {

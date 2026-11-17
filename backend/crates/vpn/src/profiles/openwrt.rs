@@ -234,6 +234,7 @@ impl VpnProfileGenerator for OpenWrtProfileGenerator {
             supports_qr_code: false,
             summary: artifact_summary(context),
             variants: self.build_variants(context),
+            agent_install: None,
         }
     }
 }

@@ -105,15 +105,16 @@ export const useAgentsStore = defineStore('agents', () => {
   async function installCommands(
     code: string,
     addressId: string | null,
-    policy: InstallPolicyView
+    policy?: InstallPolicyView
   ): Promise<AgentInstallCommands | null> {
     error.value = null
     try {
-      return await apiService.post<AgentInstallCommands>('/agents/install-commands', {
+      const payload: { code: string; addressId: string | null; policy?: InstallPolicyView } = {
         code,
         addressId,
-        policy,
-      })
+      }
+      if (policy) payload.policy = policy
+      return await apiService.post<AgentInstallCommands>('/agents/install-commands', payload)
     } catch (reason: unknown) {
       fail(reason, 'Erro ao gerar os comandos para este endereço')
       return null

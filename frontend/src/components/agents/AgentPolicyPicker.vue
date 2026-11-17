@@ -2,9 +2,35 @@
   <div>
     <div class="d-flex align-center flex-wrap ga-2 mb-1">
       <span class="text-subtitle-2 font-weight-medium">O que este servidor vai liberar</span>
+      <v-chip size="x-small" color="primary" variant="tonal">
+        {{ modelValue.allow.length }}/{{ PERMISSION_ORDER.length }} liberadas
+      </v-chip>
+      <v-progress-circular
+        v-if="loading"
+        indeterminate
+        size="16"
+        width="2"
+        color="primary"
+      ></v-progress-circular>
       <v-spacer></v-spacer>
-      <v-btn size="small" variant="text" color="primary" @click="setAll(true)">Tudo</v-btn>
-      <v-btn size="small" variant="text" color="primary" @click="setAll(false)">Só leitura</v-btn>
+      <v-btn
+        size="small"
+        variant="text"
+        color="primary"
+        :disabled="loading || allSelected"
+        @click="setAll(true)"
+      >
+        Tudo
+      </v-btn>
+      <v-btn
+        size="small"
+        variant="text"
+        color="primary"
+        :disabled="loading || onlyReadSelected"
+        @click="setAll(false)"
+      >
+        Só leitura
+      </v-btn>
     </div>
     <p class="text-caption text-high-emphasis mb-2">
       Vai no comando como <code>AGENT_ALLOW</code> e fica gravado no servidor: depois, só lá dá para
@@ -14,7 +40,7 @@
       <v-col v-for="permission in PERMISSION_ORDER" :key="permission" cols="12" sm="6">
         <v-checkbox
           :model-value="modelValue.allow.includes(permission)"
-          :disabled="permission === 'read'"
+          :disabled="permission === 'read' || loading"
           :color="permissionColor(permission)"
           density="compact"
           hide-details
@@ -40,6 +66,8 @@
       variant="outlined"
       density="compact"
       class="mt-3"
+      :disabled="loading"
+      @update:model-value="onTargetsInput"
       @blur="commitTargets"
       @keydown.enter.prevent="commitTargets"
     ></v-text-field>
@@ -51,13 +79,23 @@
  * As permissões que o comando de instalação libera no host. A tela marca
  * tudo; o operador desmarca o que não quer. Leitura é sempre liberada.
  */
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { InstallPolicyView } from '@/bindings/InstallPolicyView'
 import type { Permission } from '@/bindings/Permission'
 import { PERMISSION_ORDER, PERMISSIONS, permissionColor } from '@/utils/agentPermissions'
 
-const props = defineProps<{ modelValue: InstallPolicyView }>()
+const props = defineProps<{
+  modelValue: InstallPolicyView
+  loading?: boolean
+  /** Em formulários locais (wizard), sincroniza os alvos a cada tecla sem esperar blur. */
+  immediateTargets?: boolean
+}>()
 const emit = defineEmits<{ (event: 'update:modelValue', value: InstallPolicyView): void }>()
+
+const allSelected = computed(() => props.modelValue.allow.length === PERMISSION_ORDER.length)
+const onlyReadSelected = computed(
+  () => props.modelValue.allow.length === 1 && props.modelValue.allow[0] === 'read'
+)
 
 const targets = ref(props.modelValue.databaseTargets)
 watch(
@@ -79,6 +117,12 @@ function toggle(permission: Permission, checked: boolean) {
 
 function setAll(all: boolean) {
   update(all ? [...PERMISSION_ORDER] : ['read'])
+}
+
+function onTargetsInput(value: string) {
+  if (props.immediateTargets) {
+    update(props.modelValue.allow, value.trim())
+  }
 }
 
 function commitTargets() {

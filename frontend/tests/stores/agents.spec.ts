@@ -19,6 +19,7 @@ function agent(overrides: Partial<AgentView> = {}): AgentView {
     lastSeenAt: null,
     registeredAt: null,
     enforceTunnelIp: true,
+    local: false,
     host: {
       hostname: 'srv-remoto',
       os: 'Debian',
@@ -111,6 +112,19 @@ describe('agents store', () => {
       addressId: 'lan',
     })
     expect(commands?.serverUrl).toBe('http://192.168.0.10:3333')
+
+    await store.installCommands('nma_x', 'lan', {
+      allow: ['read', 'lifecycle'],
+      databaseTargets: '',
+    })
+    expect(post).toHaveBeenLastCalledWith('/agents/install-commands', {
+      code: 'nma_x',
+      addressId: 'lan',
+      policy: {
+        allow: ['read', 'lifecycle'],
+        databaseTargets: '',
+      },
+    })
   })
 
   it('probe:status de conexão traz o host anunciado sem nova consulta', async () => {

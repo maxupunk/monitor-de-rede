@@ -84,6 +84,19 @@
         </v-expansion-panels>
 
         <template v-if="hasPrivateKey">
+          <v-card
+            v-if="activeAgentInstall && effectivePeerId"
+            border
+            flat
+            class="pa-4 mb-4 rounded-lg"
+          >
+            <AgentPolicyPicker
+              :model-value="activeAgentInstall.policy"
+              :loading="updatingPolicy"
+              @update:model-value="changeAgentPolicy"
+            ></AgentPolicyPicker>
+          </v-card>
+
           <v-tabs v-model="activeTab" density="comfortable" color="primary" class="mb-2">
             <v-tab v-for="doc in documents" :key="doc.id" :value="doc.id">
               <v-icon size="18" start>{{ doc.icon }}</v-icon>
@@ -148,7 +161,7 @@
           {{ copied ? 'Copiado!' : copyLabel }}
         </v-btn>
         <v-btn
-          v-else-if="peerId"
+          v-else-if="effectivePeerId"
           color="warning"
           variant="flat"
           size="large"
@@ -166,6 +179,10 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import DOMPurify from 'dompurify'
+import AgentPolicyPicker from '@/components/agents/AgentPolicyPicker.vue'
+import type { ArtifactAgentInstall } from '@/bindings/ArtifactAgentInstall'
+import type { ArtifactVariant } from '@/bindings/ArtifactVariant'
+import type { InstallPolicyView } from '@/bindings/InstallPolicyView'
 import { useVpnStore, type VpnArtifact } from '@/stores/vpn'
 import { confirm } from '@/composables/useConfirm'
 
@@ -197,7 +214,23 @@ const vpnStore = useVpnStore()
 const copied = ref(false)
 const activeTab = ref('base')
 const summaryOpen = ref<string | undefined>()
+const updatingPolicy = ref(false)
+const localAgentInstall = ref<ArtifactAgentInstall | null>(null)
+const localVariants = ref<ArtifactVariant[] | null>(null)
 const stepIcons = ['mdi-numeric-1-circle', 'mdi-numeric-2-circle', 'mdi-numeric-3-circle']
+
+const effectivePeerId = computed(() => props.peerId ?? props.artifact?.peerId ?? null)
+const activeAgentInstall = computed(
+  () => localAgentInstall.value ?? props.artifact?.agentInstall ?? null
+)
+
+watch(
+  () => props.artifact,
+  () => {
+    localAgentInstall.value = null
+    localVariants.value = null
+  }
+)
 
 /** Limpa o artefato sensível da store quando o visualizador fecha. */
 watch(
@@ -248,7 +281,8 @@ const documents = computed<ArtifactDocument[]>(() => {
   const base = baseDocument.value
   if (!base) return []
 
-  const variants = (props.artifact?.variants ?? []).map((variant) => ({
+  const sourceVariants = localVariants.value ?? props.artifact?.variants ?? []
+  const variants = sourceVariants.map((variant) => ({
     id: variant.id,
     label: variant.label,
     hint: variant.hint,
@@ -315,8 +349,30 @@ function close() {
   emit('update:modelValue', false)
 }
 
+async function changeAgentPolicy(policy: InstallPolicyView) {
+  const peerId = effectivePeerId.value
+  const agentInstall = activeAgentInstall.value
+  const artifact = props.artifact
+  if (!peerId || !agentInstall || !artifact) return
+
+  updatingPolicy.value = true
+  const updated = await vpnStore.updatePeerAgentPolicy(
+    peerId,
+    agentInstall.enrollCode,
+    policy,
+    artifact.content
+  )
+  updatingPolicy.value = false
+  if (updated) {
+    localAgentInstall.value = updated.agentInstall
+    localVariants.value = updated.variants
+    copied.value = false
+  }
+}
+
 async function rotateKeys() {
-  if (!props.peerId) return
+  const peerId = effectivePeerId.value
+  if (!peerId) return
 
   const target = props.peerName?.trim() ? `"${props.peerName.trim()}"` : 'este dispositivo'
   const ok = await confirm({
@@ -328,7 +384,7 @@ async function rotateKeys() {
   })
   if (!ok) return
 
-  const artifact = await vpnStore.rotateKeys(props.peerId)
+  const artifact = await vpnStore.rotateKeys(peerId)
   if (artifact) {
     emit('rotated')
   }

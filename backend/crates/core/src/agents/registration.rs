@@ -175,6 +175,31 @@ pub async fn attach_to_device(
     Ok(active.update(db).await?)
 }
 
+/// Atualiza a política de instalação gravada no agente, para que rotações de
+/// chave e novos códigos saiam com a última escolha do operador.
+///
+/// # Errors
+///
+/// Propaga erro do banco.
+pub async fn save_policy(
+    db: &DatabaseConnection,
+    probe_id: i64,
+    policy: &InstallPolicy,
+) -> AppResult<Option<probes::Model>> {
+    let Some(agent) = probes::Entity::find_by_id(probe_id)
+        .one(db)
+        .await?
+        .filter(is_agent)
+    else {
+        return Ok(None);
+    };
+    let mut configuration = agent.configuration.clone().unwrap_or_else(|| json!({}));
+    policy.store(&mut configuration);
+    let mut active: probes::ActiveModel = agent.into();
+    active.configuration = Set(Some(configuration));
+    Ok(Some(active.update(db).await?))
+}
+
 /// Agente ativo vinculado ao dispositivo.
 ///
 /// # Errors

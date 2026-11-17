@@ -178,6 +178,7 @@ impl MikrotikProfileGenerator {
             supports_qr_code: false,
             summary: artifact_summary(context),
             variants: Vec::new(),
+            agent_install: None,
         }
     }
 }

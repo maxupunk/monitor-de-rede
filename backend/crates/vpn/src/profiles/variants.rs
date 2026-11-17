@@ -486,6 +486,7 @@ mod tests {
             enroll_code: "nma_codigo".into(),
             allow: "read,lifecycle,database".into(),
             database_targets: "172.16.0.0/12:5432".into(),
+            policy: netmonitor_core::agents::install_policy::InstallPolicy::suggested().view(),
         });
         let content = linux_bash_variant(&context, CONF).content;
         assert!(content.contains("# 5/5 · Instala o agente NetMonitor"));
@@ -548,6 +549,7 @@ mod tests {
             enroll_code: "nma_codigo".into(),
             allow: "read".into(),
             database_targets: String::new(),
+            policy: netmonitor_core::agents::install_policy::InstallPolicy::suggested().view(),
         });
         let content = linux_bash_variant(&context, CONF).content;
         assert!(content.contains("AGENT_READY=0"));

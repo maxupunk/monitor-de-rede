@@ -7,6 +7,7 @@ import type { ArtifactVariant } from '@/bindings/ArtifactVariant'
 import type { PreflightResult } from '@/bindings/PreflightResult'
 import type { ProfileCard } from '@/bindings/ProfileCard'
 import type { SerializedVpnArtifact } from '@/bindings/SerializedVpnArtifact'
+import type { VpnAgentPolicyResponse } from '@/bindings/VpnAgentPolicyResponse'
 import type { VpnPeerConnectionStatus } from '@/bindings/VpnPeerConnectionStatus'
 import type { VpnPeerDeviceView } from '@/bindings/VpnPeerDeviceView'
 import type { VpnPeerListItem } from '@/bindings/VpnPeerListItem'
@@ -259,11 +260,18 @@ export const useVpnStore = defineStore('vpn', () => {
     }
   }
 
-  async function rotateKeys(peerId: number): Promise<VpnArtifact | null> {
+  async function rotateKeys(
+    peerId: number,
+    agentPolicy?: InstallPolicyView | null
+  ): Promise<VpnArtifact | null> {
     saving.value = true
     error.value = null
     try {
-      const result = await apiService.post<{ artifact: VpnArtifact }>(`/vpn/peers/${peerId}/rotate`)
+      const payload = agentPolicy ? { agentPolicy } : undefined
+      const result = await apiService.post<{ artifact: VpnArtifact }>(
+        `/vpn/peers/${peerId}/rotate`,
+        payload
+      )
       lastArtifact.value = result.artifact
       await fetchPeers()
       return result.artifact
@@ -271,6 +279,40 @@ export const useVpnStore = defineStore('vpn', () => {
       return fail(err, 'Erro ao rotacionar as chaves')
     } finally {
       saving.value = false
+    }
+  }
+
+  /**
+   * Atualiza as permissões (`AGENT_ALLOW` / `AGENT_DATABASE_TARGETS`) do agente
+   * vinculado ao peer e reestampa o script Bash aberto na tela sem consumir a
+   * chave privada nem o código de uso único.
+   */
+  async function updatePeerAgentPolicy(
+    peerId: number,
+    enrollCode: string,
+    policy: InstallPolicyView,
+    confContent: string
+  ): Promise<VpnAgentPolicyResponse | null> {
+    error.value = null
+    try {
+      const updated = await apiService.post<VpnAgentPolicyResponse>(
+        `/vpn/peers/${peerId}/agent-policy`,
+        {
+          enrollCode,
+          policy,
+          confContent,
+        }
+      )
+      if (lastArtifact.value && lastArtifact.value.peerId === peerId) {
+        lastArtifact.value = {
+          ...lastArtifact.value,
+          agentInstall: updated.agentInstall,
+          variants: updated.variants,
+        }
+      }
+      return updated
+    } catch (err: unknown) {
+      return fail(err, 'Erro ao atualizar as permissões do agente no script')
     }
   }
 
@@ -319,6 +361,7 @@ export const useVpnStore = defineStore('vpn', () => {
     renamePeer,
     fetchConfig,
     rotateKeys,
+    updatePeerAgentPolicy,
     fetchFirewallHints,
     revokePeer,
     applyRealtimePeers,

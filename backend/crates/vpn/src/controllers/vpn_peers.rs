@@ -27,9 +27,9 @@ use crate::{
     peer_service::{self, CreatePeerPayload, PeerAgent},
     server_service,
     views::{
-        SerializedVpnArtifact, VpnFirewallHintsResponse, VpnKeyRotationResponse, VpnNextIpResponse,
-        VpnPeerCreatedResponse, VpnPeerListItem, VpnPeerResponse, VpnPeerRevokedResponse,
-        VpnPeerWithDevice, VpnQrCodeResponse,
+        SerializedVpnArtifact, VpnAgentPolicyResponse, VpnFirewallHintsResponse,
+        VpnKeyRotationResponse, VpnNextIpResponse, VpnPeerCreatedResponse, VpnPeerListItem,
+        VpnPeerResponse, VpnPeerRevokedResponse, VpnPeerWithDevice, VpnQrCodeResponse,
     },
     GeneratedArtifact, PRIVATE_KEY_UNAVAILABLE,
 };
@@ -61,6 +61,20 @@ struct CreatePeerInput {
 #[serde(rename_all = "camelCase")]
 struct RenamePeerInput {
     name: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RotatePeerInput {
+    agent_policy: Option<InstallPolicyView>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdatePeerAgentPolicyInput {
+    enroll_code: String,
+    policy: InstallPolicyView,
+    conf_content: String,
 }
 
 /// Identidade usada em rate limit e auditoria dos endpoints sensíveis.
@@ -112,10 +126,14 @@ fn enforce_rate_limit(scope: &str, requester: &str) -> AppResult<()> {
 /// primeira leitura, então buscar o QR Code numa segunda requisição devolveria
 /// um código com o placeholder no lugar da chave — e um celular que lesse esse
 /// código montaria um túnel que nunca conecta.
-fn serialize_artifact(artifact: GeneratedArtifact) -> SerializedVpnArtifact {
+fn serialize_artifact(peer_id: i64, artifact: GeneratedArtifact) -> SerializedVpnArtifact {
     let usable = artifact.supports_qr_code && !artifact.content.contains(PRIVATE_KEY_UNAVAILABLE);
     let qr_svg = usable.then(|| render_qr(&artifact.content)).flatten();
-    SerializedVpnArtifact { artifact, qr_svg }
+    SerializedVpnArtifact {
+        peer_id,
+        artifact,
+        qr_svg,
+    }
 }
 
 fn render_qr(content: &str) -> Option<String> {
@@ -269,7 +287,7 @@ async fn store(
         Json(VpnPeerCreatedResponse {
             peer: VpnPeerResponse::from(&peer),
             device: if device.is_null() { None } else { Some(device) },
-            artifact: serialize_artifact(artifact),
+            artifact: serialize_artifact(peer.id, artifact),
         }),
     )
         .into_response())
@@ -346,7 +364,7 @@ async fn config(
         &requester,
         json!({ "profile": artifact.profile }),
     );
-    Ok(format::json(serialize_artifact(artifact))?)
+    Ok(format::json(serialize_artifact(id, artifact))?)
 }
 
 /// `GET /api/vpn/peers/:id/qrcode` — 🔒 apenas perfis móveis.
@@ -368,7 +386,7 @@ async fn qrcode(
 
     let profile = artifact.profile.clone();
     let file_name = artifact.file_name.clone();
-    let serialized = serialize_artifact(artifact);
+    let serialized = serialize_artifact(id, artifact);
     let Some(svg) = serialized.qr_svg else {
         // Matriz de paridade #34: sem a chave, o QR Code levaria o celular a um
         // túnel que nunca conecta — 409 e a instrução de rotacionar.
@@ -395,9 +413,17 @@ async fn rotate(
     State(ctx): State<AppContext>,
     Path(id): Path<i64>,
     headers: HeaderMap,
+    bytes: axum::body::Bytes,
 ) -> AppResult<Response> {
     let requester = requester_id(&headers);
     enforce_rate_limit("rotate", &requester)?;
+
+    let input: RotatePeerInput = if bytes.is_empty() {
+        RotatePeerInput::default()
+    } else {
+        serde_json::from_slice(&bytes)
+            .map_err(|_| AppError::validation("Corpo da solicitação inválido"))?
+    };
 
     let old = netmonitor_core::models::vpn_peers::Entity::find_by_id(id)
         .one(&ctx.db)
@@ -405,7 +431,8 @@ async fn rotate(
         .ok_or_else(|| AppError::not_found("Peer não encontrado"))?;
     let old_response = VpnPeerResponse::from(&old);
 
-    let (peer, artifact) = peer_service::rotate_keys(&ctx.db, id).await?;
+    let (peer, artifact) =
+        peer_service::rotate_keys(&ctx.db, id, input.agent_policy.as_ref()).await?;
     emit_vpn_peers_updated(&ctx).await;
     audit_entry(
         VpnAuditAction::KeyRotation,
@@ -434,7 +461,28 @@ async fn rotate(
     Ok(format::json(VpnKeyRotationResponse {
         message: "Novo par de chaves gerado. A configuração anterior foi invalidada.".into(),
         peer: VpnPeerResponse::from(&peer),
-        artifact: serialize_artifact(artifact),
+        artifact: serialize_artifact(peer.id, artifact),
+    })?)
+}
+
+/// `POST /api/vpn/peers/:id/agent-policy` — atualiza a política de instalação
+/// do agente vinculado ao peer e reestampa o script Bash aberto na tela.
+async fn agent_policy(
+    State(ctx): State<AppContext>,
+    Path(id): Path<i64>,
+    Json(input): Json<UpdatePeerAgentPolicyInput>,
+) -> AppResult<Response> {
+    let (agent_install, variants) = peer_service::restamp_agent_policy(
+        &ctx.db,
+        id,
+        &input.enroll_code,
+        &input.policy,
+        &input.conf_content,
+    )
+    .await?;
+    Ok(format::json(VpnAgentPolicyResponse {
+        agent_install,
+        variants,
     })?)
 }
 
@@ -515,6 +563,7 @@ pub fn routes() -> Routes {
         .add("/{id}/config", get(config))
         .add("/{id}/qrcode", get(qrcode))
         .add("/{id}/rotate", post(rotate))
+        .add("/{id}/agent-policy", post(agent_policy))
         .add("/{id}/firewall-hints", post(firewall_hints))
 }
 

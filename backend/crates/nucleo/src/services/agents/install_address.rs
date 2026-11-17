@@ -88,23 +88,7 @@ pub fn server_url(
     Some(format!("http://{authority}"))
 }
 
-/// O código entra no comando colado no servidor: só o formato emitido pela
-/// central (`nma_` + 64 hex) é aceito.
-///
-/// # Errors
-///
-/// `validation` para qualquer outro formato.
-pub fn validate_code(code: &str) -> AppResult<&str> {
-    let code = code.trim();
-    let valid = code
-        .strip_prefix("nma_")
-        .is_some_and(|hex| hex.len() == 64 && hex.chars().all(|c| c.is_ascii_hexdigit()));
-    if valid {
-        Ok(code)
-    } else {
-        Err(AppError::validation("Código de instalação inválido"))
-    }
-}
+pub use netmonitor_core::agents::enrollment::validate_code;
 
 /// URL da central para uma entrada da lista. O domínio atrás de proxy HTTPS
 /// vira `https://domínio` — quem escuta é o proxy, não a porta da API.
@@ -117,24 +101,37 @@ pub fn server_url_for(address: &ServerAddress, ports: (u16, u16)) -> Option<Stri
     server_url(address.kind, value, ports)
 }
 
-/// Endereço padrão: o marcado pelo operador e, sem marcação, o domínio — o
-/// caminho que sobrevive a troca de IP. Sem nenhum dos dois, o que o
-/// dispositivo vinculado usaria para chegar aqui (mesma sugestão do
-/// provisionamento de syslog), senão o primeiro com valor.
+/// Endereço padrão: quando o dispositivo já é da VPN, a central exige que a
+/// conexão venha pelo túnel (`check_tunnel_origin`), então o endereço na VPN
+/// vem primeiro. Fora disso, vale o marcado pelo operador ou o domínio — o
+/// caminho que sobrevive a troca de IP — seguido da sugestão do dispositivo e
+/// do primeiro endereço utilizável.
 async fn default_address<'a>(
     ctx: &AppContext,
     addresses: &'a [ServerAddress],
     device: Option<&devices::Model>,
 ) -> AppResult<Option<&'a ServerAddress>> {
+    let usable = || addresses.iter().filter(|address| address.value.is_some());
+    let is_vpn_device = device.is_some_and(|dev| dev.access_mode.as_deref() == Some("vpn"));
+    if is_vpn_device {
+        if let Some(dev) = device {
+            if let Some((id, _)) = server_addresses::suggest_for(&ctx.db, dev, addresses).await? {
+                if let Some(found) = usable().find(|addr| addr.id == id) {
+                    return Ok(Some(found));
+                }
+            }
+        }
+    }
     let preferred = server_addresses::stored(&ctx.db).await?.preferred_id;
     if let Some(chosen) = server_addresses::default_address_id(addresses, preferred.as_deref()) {
         return Ok(Some(chosen));
     }
-    let usable = || addresses.iter().filter(|address| address.value.is_some());
-    if let Some(device) = device {
-        if let Some((value, _)) = server_addresses::suggest_for(&ctx.db, device, addresses).await? {
-            if let Some(found) = usable().find(|address| address.value.as_deref() == Some(&value)) {
-                return Ok(Some(found));
+    if !is_vpn_device {
+        if let Some(dev) = device {
+            if let Some((id, _)) = server_addresses::suggest_for(&ctx.db, dev, addresses).await? {
+                if let Some(found) = usable().find(|addr| addr.id == id) {
+                    return Ok(Some(found));
+                }
             }
         }
     }

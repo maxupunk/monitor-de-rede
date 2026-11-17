@@ -58,12 +58,13 @@
           {{ transport.text }}
         </v-alert>
 
-        <AgentPolicyPicker
-          v-if="commands"
-          :model-value="commands.policy"
-          class="mb-4"
-          @update:model-value="changePolicy"
-        ></AgentPolicyPicker>
+        <v-card v-if="commands" border flat class="pa-4 mb-4 rounded-lg">
+          <AgentPolicyPicker
+            :model-value="commands.policy"
+            :loading="switching"
+            @update:model-value="changePolicy"
+          ></AgentPolicyPicker>
+        </v-card>
 
         <CopyableCommand
           label="Serviço systemd (recomendado)"

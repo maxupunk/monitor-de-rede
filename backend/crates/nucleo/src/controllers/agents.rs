@@ -137,7 +137,15 @@ async fn store(
     let service = AgentService::new(&ctx.db);
     let (probe, code) = service.create(&input).await?;
     let devices = service.devices_of(std::slice::from_ref(&probe)).await?;
-    let enrollment = enrollment_of(&ctx, code, devices.first(), &request_origin(&headers)).await?;
+    let policy = InstallPolicy::of(&probe);
+    let enrollment = enrollment_of(
+        &ctx,
+        code,
+        devices.first(),
+        &request_origin(&headers),
+        &policy,
+    )
+    .await?;
     audit(
         &ctx,
         &headers,
@@ -185,7 +193,15 @@ async fn enrollment(
     let code = service.reissue_code(id).await?;
     let probe = service.find(id).await?;
     let devices = service.devices_of(std::slice::from_ref(&probe)).await?;
-    let enrollment = enrollment_of(&ctx, code, devices.first(), &request_origin(&headers)).await?;
+    let policy = InstallPolicy::of(&probe);
+    let enrollment = enrollment_of(
+        &ctx,
+        code,
+        devices.first(),
+        &request_origin(&headers),
+        &policy,
+    )
+    .await?;
     audit(
         &ctx,
         &headers,
@@ -198,14 +214,21 @@ async fn enrollment(
 }
 
 /// `POST /api/agents/install-commands` — os mesmos comandos, para outro
-/// endereço desta central. O código não é reemitido nem guardado: só volta
-/// estampado no texto.
+/// endereço desta central ou outra política. O código não é reemitido nem
+/// consumido: só volta estampado no texto (e a política escolhida fica salva no
+/// cadastro quando o código está ativo).
 async fn install_commands(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
     Json(input): Json<AgentInstallCommandsInput>,
 ) -> AppResult<Response> {
     let policy = InstallPolicy::chosen_or_suggested(input.policy.as_ref())?;
+    if input.policy.is_some() {
+        if let Some(probe_id) = netmonitor_core::agents::enrollment::peek(&input.code) {
+            let _ = netmonitor_core::agents::registration::save_policy(&ctx.db, probe_id, &policy)
+                .await;
+        }
+    }
     Ok(format::json(
         install_address::commands(
             &ctx,
@@ -225,22 +248,15 @@ async fn install_policy() -> AppResult<Response> {
     Ok(format::json(InstallPolicy::suggested().view())?)
 }
 
-/// Código recém-emitido com os comandos do endereço padrão.
+/// Código recém-emitido com os comandos do endereço padrão e da política salva.
 async fn enrollment_of(
     ctx: &AppContext,
     code: String,
     device: Option<&crate::models::devices::Model>,
     origin: &str,
+    policy: &InstallPolicy,
 ) -> AppResult<AgentEnrollmentView> {
-    let commands = install_address::commands(
-        ctx,
-        &code,
-        None,
-        device,
-        origin,
-        &InstallPolicy::suggested(),
-    )
-    .await?;
+    let commands = install_address::commands(ctx, &code, None, device, origin, policy).await?;
     Ok(AgentEnrollmentView {
         code,
         expires_in_seconds: ENROLLMENT_TTL_SECONDS,

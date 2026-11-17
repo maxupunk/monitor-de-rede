@@ -5,8 +5,9 @@
 
 use super::{
     contract::{
-        artifact_summary, ArtifactDelivery, ArtifactVariant, GeneratedArtifact, PeerConfigContext,
-        VpnProfileGenerator, PERSISTENT_KEEPALIVE_SECONDS, WG_TUNNEL_NAME,
+        artifact_summary, ArtifactAgentInstall, ArtifactDelivery, ArtifactVariant,
+        GeneratedArtifact, PeerConfigContext, VpnProfileGenerator, PERSISTENT_KEEPALIVE_SECONDS,
+        WG_TUNNEL_NAME,
     },
     variants::{linux_bash_variant, windows_winget_variant},
 };
@@ -91,6 +92,13 @@ impl VpnProfileGenerator for WgConfProfileGenerator {
             .iter()
             .map(|build| build(context, &content))
             .collect();
+        let agent_install = (self.profile == "linux")
+            .then_some(context.agent.as_ref())
+            .flatten()
+            .map(|agent| ArtifactAgentInstall {
+                enroll_code: agent.enroll_code.clone(),
+                policy: agent.policy.clone(),
+            });
 
         GeneratedArtifact {
             profile: self.profile.to_string(),
@@ -103,6 +111,7 @@ impl VpnProfileGenerator for WgConfProfileGenerator {
             supports_qr_code: self.supports_qr_code,
             summary: artifact_summary(context),
             variants,
+            agent_install,
         }
     }
 }
