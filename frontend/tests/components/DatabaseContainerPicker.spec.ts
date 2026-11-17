@@ -24,6 +24,8 @@ function container(overrides: Partial<DatabaseContainer>): DatabaseContainer {
     running: true,
     status: 'Up 3 hours',
     port: 5432,
+    protectedConnectionId: null,
+    protectedConnectionName: null,
     ...overrides,
   }
 }
@@ -93,5 +95,48 @@ describe('bancos em contêineres no "Nova conexão"', () => {
   it('sem contêiner do SGBD, manda preencher à mão', () => {
     mountWith(DatabaseContainerPicker, { engine: 'mariadb' }, pinia)
     expect(bodyText()).toContain('Nenhum contêiner de MariaDB nos agentes conectados')
+  })
+
+  it('filtra pela busca e marca os contêineres que já estão na lista de backup', async () => {
+    const store = useDatabasesStore()
+    store.containers = {
+      containers: [
+        container({
+          containerId: 'erp',
+          containerName: 'erp_postgres',
+          protectedConnectionId: 42,
+          protectedConnectionName: 'ERP Matriz',
+        }),
+        container({
+          containerId: 'crm',
+          containerName: 'crm_postgres',
+          project: 'vendas',
+        }),
+      ],
+      issues: [],
+    }
+    const wrapper = mountWith(DatabaseContainerPicker, { engine: 'postgres' }, pinia)
+
+    expect(bodyText()).toContain('1 já no backup')
+    expect(bodyText()).toContain('Já no backup · ERP Matriz')
+
+    // Filtra no campo de busca
+    const input = document.body.querySelector<HTMLInputElement>(
+      '[data-test="container-search"] input'
+    )
+    expect(input).not.toBeNull()
+    input!.value = 'vendas'
+    input!.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+    expect(bodyText()).toContain('crm_postgres')
+    expect(bodyText()).not.toContain('erp_postgres')
+
+    // Limpa busca e clica em Editar no banco já protegido
+    input!.value = ''
+    input!.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+    button('Editar')?.click()
+    await flushPromises()
+    expect(wrapper.emitted('editConnection')).toEqual([[42]])
   })
 })

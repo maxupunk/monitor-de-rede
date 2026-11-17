@@ -277,6 +277,20 @@ export function useNotifications() {
         })
       }
     })
+
+    // Ouve falhas de backup ou restauração do sistema e de bancos de dados
+    eventsStore.onEvent('backup:failed', (data) => {
+      const isRestore = data.kind === 'database_restore'
+      const target = String(data.name || 'NetMonitor')
+      const message = String(data.message || 'Verifique os detalhes na tela de Backup.')
+      void sendLocalNotification(
+        isRestore ? `🔴 Falha na restauração: ${target}` : `🔴 Falha no backup: ${target}`,
+        {
+          body: message,
+          tag: `backup-failed-${data.connectionId || 'system'}`,
+        }
+      )
+    })
   }
 
   onMounted(() => {

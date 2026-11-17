@@ -29,18 +29,21 @@ use serde::Serialize;
 use ts_rs::TS;
 
 use agent_protocol::{
-    docker::views::{DockerContainerDetail, DockerContainerPort, DockerContainerSummary},
+    docker::views::{
+        DockerContainerDetail, DockerContainerPort, DockerContainerSummary, DockerNetworkEndpoint,
+    },
     policy::Permission,
 };
 use netmonitor_core::{
     agents::{bridge::LocalBridge, hub::AgentHub},
+    models::database_connections,
     network_tools::tcp_probe::{probe_tcp, TcpProbeState},
     shared::errors::{AppError, AppResult},
 };
 
-use super::DatabaseEngine;
+use super::{service as db_service, DatabaseEngine};
 use crate::docker::{
-    engine::{inspect_container, list_containers},
+    engine::{inspect_container, list_containers, list_containers_with_networks},
     hosts::{self, HostKey},
 };
 use crate::views::docker::DockerHostView;
@@ -105,6 +108,10 @@ pub struct DatabaseContainer {
     pub running: bool,
     pub status: String,
     pub port: u16,
+    /// Conexão já cadastrada em `/backup` que aponta para este contêiner.
+    #[ts(type = "number | null")]
+    pub protected_connection_id: Option<i64>,
+    pub protected_connection_name: Option<String>,
 }
 
 /// Host que não pôde ser consultado.
@@ -261,6 +268,27 @@ pub fn candidate_addresses(
     port: u16,
     local: bool,
 ) -> Vec<CandidateAddress> {
+    candidate_addresses_from_parts(
+        &detail.id,
+        &detail.name,
+        &detail.networks,
+        &detail.host_config.network_mode,
+        ports,
+        port,
+        local,
+    )
+}
+
+#[must_use]
+pub fn candidate_addresses_from_parts(
+    container_id: &str,
+    container_name: &str,
+    endpoint_networks: &[DockerNetworkEndpoint],
+    network_mode: &str,
+    ports: &[DockerContainerPort],
+    port: u16,
+    local: bool,
+) -> Vec<CandidateAddress> {
     let mut out: Vec<CandidateAddress> = Vec::new();
     let mut push = |kind, host: &str, port, network: Option<&str>| {
         let host = host.trim();
@@ -274,8 +302,7 @@ pub fn candidate_addresses(
             network: network.map(str::to_string),
         });
     };
-    let networks: Vec<_> = detail
-        .networks
+    let networks: Vec<_> = endpoint_networks
         .iter()
         .filter(|network| !matches!(network.network_name.as_str(), "host" | "none"))
         .collect();
@@ -290,14 +317,14 @@ pub fn candidate_addresses(
     if let Some(first) = named.first() {
         push(
             AddressKind::Dns,
-            &detail.name,
+            container_name,
             port,
             Some(&first.network_name),
         );
     }
     for network in &named {
         for alias in &network.aliases {
-            if !is_container_id(alias, &detail.id) {
+            if !is_container_id(alias, container_id) {
                 push(AddressKind::Dns, alias, port, Some(&network.network_name));
             }
         }
@@ -344,7 +371,7 @@ pub fn candidate_addresses(
         }
     }
     // 4. Rede do host: o banco escuta no próprio host.
-    if detail.host_config.network_mode == "host" {
+    if network_mode == "host" {
         push(AddressKind::Loopback, "127.0.0.1", port, None);
     }
     out
@@ -377,7 +404,36 @@ pub fn summarize(
         running: summary.state == "running",
         status: summary.status.clone(),
         port: listening_port(engine, &summary.ports),
+        protected_connection_id: None,
+        protected_connection_name: None,
     }
+}
+
+/// Cruza um contêiner descoberto com as conexões já cadastradas em `/backup`:
+/// mesmo SGBD, mesma rota (`via_probe_id`) e endereço/porta candidato (nome na
+/// rede Docker, alias, IP do contêiner, porta publicada ou loopback).
+#[must_use]
+pub fn find_matching_connection<'a>(
+    container: &DatabaseContainer,
+    candidates: &[CandidateAddress],
+    connections: &'a [database_connections::Model],
+) -> Option<&'a database_connections::Model> {
+    connections.iter().find(|conn| {
+        if !conn.engine.eq_ignore_ascii_case(container.engine.as_str()) {
+            return false;
+        }
+        if conn.via_probe_id != container.via_probe_id {
+            return false;
+        }
+        let target_host = conn.host.trim();
+        let by_candidate = candidates.iter().any(|candidate| {
+            candidate.host.eq_ignore_ascii_case(target_host)
+                && i32::from(candidate.port) == conn.port
+        });
+        let by_name = target_host.eq_ignore_ascii_case(&container.container_name)
+            && i32::from(container.port) == conn.port;
+        by_candidate || by_name
+    })
 }
 
 /// O primeiro endereço, na ordem recomendada, que respondeu.
@@ -393,30 +449,43 @@ pub fn choose(attempts: &[AddressAttempt]) -> Option<CandidateAddress> {
 // Consulta aos hosts e teste de alcance
 // ---------------------------------------------------------------------------
 
-/// Os contêineres de banco de um host.
+/// Os contêineres de banco de um host, já cruzados com as conexões salvas.
 async fn host_containers(
     ctx: &AppContext,
     host: &DockerHostView,
+    connections: &[database_connections::Model],
 ) -> Result<Vec<DatabaseContainer>, String> {
     let key: HostKey = host
         .key
         .parse()
         .map_err(|error: AppError| error.to_string())?;
     let docker = hosts::resolve(ctx, key).map_err(|error| error.to_string())?;
-    let summaries = list_containers(docker.engine.as_ref())
+    let summaries = list_containers_with_networks(docker.engine.as_ref())
         .await
         .map_err(|error| error.to_string())?;
-    let found: Vec<_> = summaries
-        .iter()
-        .filter_map(|summary| {
-            let ports: Vec<u16> = summary.ports.iter().map(|p| p.private_port).collect();
-            detect_engine(&summary.image, &ports).map(|engine| (summary, engine))
-        })
-        .collect();
-    Ok(found
-        .into_iter()
-        .map(|(summary, engine)| summarize(host, summary, engine))
-        .collect())
+    let mut out = Vec::new();
+    for (summary, networks, network_mode) in summaries {
+        let ports: Vec<u16> = summary.ports.iter().map(|p| p.private_port).collect();
+        let Some(engine) = detect_engine(&summary.image, &ports) else {
+            continue;
+        };
+        let mut item = summarize(host, &summary, engine);
+        let candidates = candidate_addresses_from_parts(
+            &item.container_id,
+            &item.container_name,
+            &networks,
+            &network_mode,
+            &summary.ports,
+            item.port,
+            item.local,
+        );
+        if let Some(matched) = find_matching_connection(&item, &candidates, connections) {
+            item.protected_connection_id = Some(matched.id);
+            item.protected_connection_name = Some(matched.name.clone());
+        }
+        out.push(item);
+    }
+    Ok(out)
 }
 
 /// Os hosts que podem ter contêineres agora: conectados e com Docker.
@@ -435,8 +504,13 @@ async fn docker_hosts(ctx: &AppContext) -> AppResult<Vec<DockerHostView>> {
 ///
 /// Erro do banco ao listar os hosts.
 pub async fn list(ctx: &AppContext) -> AppResult<DatabaseContainersResponse> {
-    let hosts = docker_hosts(ctx).await?;
-    let results = join_all(hosts.iter().map(|host| host_containers(ctx, host))).await;
+    let (hosts, connections) = tokio::try_join!(docker_hosts(ctx), db_service::list(&ctx.db))?;
+    let results = join_all(
+        hosts
+            .iter()
+            .map(|host| host_containers(ctx, host, &connections)),
+    )
+    .await;
     let mut response = DatabaseContainersResponse {
         containers: Vec::new(),
         issues: Vec::new(),
@@ -962,5 +1036,86 @@ mod tests {
         drop(listener);
         let refused = attempt(None, None, address).await;
         assert!(!refused.reachable);
+    }
+
+    #[test]
+    fn identifica_conteiner_ja_protegido_por_nome_ip_ou_porta_publicada() {
+        let host = DockerHostView {
+            key: "agent-7".into(),
+            name: "hostinger-srv-1".into(),
+            kind: "agent".into(),
+            online: true,
+            agent_id: 7,
+            docker_available: true,
+            compose_available: true,
+            policy: vec![Permission::Database],
+        };
+        let summary = DockerContainerSummary {
+            id: "a1b2c3d4e5f6a7b8".into(),
+            names: vec!["/erp_postgres".into()],
+            image: "postgres:16".into(),
+            image_id: String::new(),
+            state: "running".into(),
+            status: "Up".into(),
+            labels: HashMap::new(),
+            ports: vec![port(5432, Some(15432), Some("0.0.0.0"))],
+            created: 0,
+            project_name: Some("erp".into()),
+            protected: false,
+        };
+        let item = summarize(&host, &summary, DatabaseEngine::Postgres);
+        let candidates = candidate_addresses_from_parts(
+            &item.container_id,
+            &item.container_name,
+            &[network("erp_default", "172.20.0.5", "172.20.0.1", &["db"])],
+            "erp_default",
+            &summary.ports,
+            item.port,
+            item.local,
+        );
+        let now = chrono::Utc::now().into();
+        let conn =
+            |id: i64, name: &str, h: &str, p: i32, via: Option<i64>| database_connections::Model {
+                id,
+                name: name.into(),
+                engine: "postgres".into(),
+                host: h.into(),
+                port: p,
+                username: "postgres".into(),
+                password_encrypted: String::new(),
+                ssl_mode: "prefer".into(),
+                databases: serde_json::json!([]),
+                storage_destination_id: Some(1),
+                via_probe_id: via,
+                backup_enabled: true,
+                backup_interval_hours: 24,
+                backup_retention: 7,
+                last_backup_at: None,
+                last_backup_status: None,
+                last_backup_error: None,
+                created_at: now,
+                updated_at: now,
+            };
+
+        // Pelo IP do contêiner naquele agente: casa mesmo com outro nome de conexão.
+        let by_ip = [conn(11, "ERP Produção", "172.20.0.5", 5432, Some(7))];
+        assert_eq!(
+            find_matching_connection(&item, &candidates, &by_ip).map(|c| c.id),
+            Some(11)
+        );
+
+        // Pela porta publicada no gateway da rede daquele agente: também casa.
+        let by_pub = [conn(12, "ERP Externo", "172.20.0.1", 15432, Some(7))];
+        assert_eq!(
+            find_matching_connection(&item, &candidates, &by_pub).map(|c| c.id),
+            Some(12)
+        );
+
+        // Mesmo IP em outro agente (`via_probe_id = None` ou `Some(9)`): não mistura!
+        let other_host = [
+            conn(13, "Central", "172.20.0.5", 5432, None),
+            conn(14, "Outra Filial", "172.20.0.5", 5432, Some(9)),
+        ];
+        assert!(find_matching_connection(&item, &candidates, &other_host).is_none());
     }
 }

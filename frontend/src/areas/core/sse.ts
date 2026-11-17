@@ -138,20 +138,37 @@ export const coreSse: SseRoutes = {
     const maintenanceStore = useMaintenanceWindowsStore()
     bus.scheduleRefresh('maintenance_windows', () => maintenanceStore.fetchWindows())
   },
-  'backup_plan:updated': (_data, _payload, bus) => {
-    const backupStore = useBackupStore()
-    bus.scheduleRefresh('backup_plan', () => backupStore.refreshPlanIfLoaded())
+  'backup_plan:updated': {
+    ephemeral: true,
+    handle: (_data, _payload, bus) => {
+      const backupStore = useBackupStore()
+      bus.scheduleRefresh('backup_plan', () => backupStore.refreshPlanIfLoaded())
+    },
   },
-  'storages:updated': (_data, _payload, bus) => {
-    const storagesStore = useStoragesStore()
-    bus.scheduleRefresh('storages', () => storagesStore.refreshIfLoaded())
+  'storages:updated': {
+    ephemeral: true,
+    handle: (_data, _payload, bus) => {
+      const storagesStore = useStoragesStore()
+      bus.scheduleRefresh('storages', () => storagesStore.refreshIfLoaded())
+    },
   },
-  'database_connections:updated': (_data, _payload, bus) => {
-    const databasesStore = useDatabasesStore()
-    bus.scheduleRefresh('database_connections', () => databasesStore.refreshIfLoaded())
+  'database_connections:updated': {
+    ephemeral: true,
+    handle: (_data, _payload, bus) => {
+      const databasesStore = useDatabasesStore()
+      bus.scheduleRefresh('database_connections', () => databasesStore.refreshIfLoaded())
+    },
   },
-  'database_jobs:updated': (data) => {
-    if (isDatabaseJobSnapshot(data)) useDatabasesStore().applyJob(data)
+  'database_jobs:updated': {
+    ephemeral: true,
+    handle: (data) => {
+      if (isDatabaseJobSnapshot(data)) useDatabasesStore().applyJob(data)
+    },
+  },
+  // Falha de backup ou restauração entra no feed de eventos e recarrega o plano/conexões.
+  'backup:failed': (_data, _payload, bus) => {
+    bus.scheduleRefresh('backup_plan', () => useBackupStore().refreshPlanIfLoaded())
+    bus.scheduleRefresh('database_connections', () => useDatabasesStore().refreshIfLoaded())
   },
 
   // Tarefa agendada: o começo e o sucesso de uma tarefa de minuto em minuto

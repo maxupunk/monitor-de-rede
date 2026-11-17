@@ -90,6 +90,28 @@ pub async fn list_containers(
     Ok(output)
 }
 
+/// Resumo acompanhado das redes e do `network_mode` que já vêm em
+/// `/containers/json` — evita `inspect` por contêiner ao cruzar com as
+/// conexões de banco já cadastradas.
+pub async fn list_containers_with_networks(
+    engine: &dyn DockerEngine,
+) -> Result<Vec<(DockerContainerSummary, Vec<DockerNetworkEndpoint>, String)>, DockerError> {
+    let mut output = engine
+        .list_containers_raw()
+        .await?
+        .iter()
+        .map(|raw| {
+            (
+                container_summary(raw),
+                parse_container_networks(raw),
+                parse_network_mode(raw),
+            )
+        })
+        .collect::<Vec<_>>();
+    output.sort_by_key(|a| container_name(&a.0));
+    Ok(output)
+}
+
 pub async fn inspect_container(
     engine: &dyn DockerEngine,
     id: &str,
@@ -412,12 +434,8 @@ fn container_summary(raw: &Value) -> DockerContainerSummary {
     }
 }
 
-fn container_detail(raw: &Value) -> DockerContainerDetail {
-    let state = field(raw, &["State", "state"]).unwrap_or(&Value::Null);
-    let config = field(raw, &["Config", "config"]).unwrap_or(&Value::Null);
-    let host = field(raw, &["HostConfig", "hostConfig"]).unwrap_or(&Value::Null);
-    let restart = field(host, &["RestartPolicy", "restartPolicy"]).unwrap_or(&Value::Null);
-    let networks = field(raw, &["NetworkSettings", "networkSettings"])
+fn parse_container_networks(raw: &Value) -> Vec<DockerNetworkEndpoint> {
+    field(raw, &["NetworkSettings", "networkSettings"])
         .and_then(|settings| field(settings, &["Networks", "networks"]))
         .and_then(Value::as_object)
         .map(|items| {
@@ -432,7 +450,20 @@ fn container_detail(raw: &Value) -> DockerContainerDetail {
                 })
                 .collect()
         })
-        .unwrap_or_default();
+        .unwrap_or_default()
+}
+
+fn parse_network_mode(raw: &Value) -> String {
+    let host = field(raw, &["HostConfig", "hostConfig"]).unwrap_or(&Value::Null);
+    string(host, &["NetworkMode", "networkMode"])
+}
+
+fn container_detail(raw: &Value) -> DockerContainerDetail {
+    let state = field(raw, &["State", "state"]).unwrap_or(&Value::Null);
+    let config = field(raw, &["Config", "config"]).unwrap_or(&Value::Null);
+    let host = field(raw, &["HostConfig", "hostConfig"]).unwrap_or(&Value::Null);
+    let restart = field(host, &["RestartPolicy", "restartPolicy"]).unwrap_or(&Value::Null);
+    let networks = parse_container_networks(raw);
     let mounts = field(raw, &["Mounts", "mounts"])
         .and_then(Value::as_array)
         .map(|items| {

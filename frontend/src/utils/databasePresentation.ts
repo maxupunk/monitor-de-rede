@@ -62,7 +62,133 @@ export function routeLabel(
   return `pelo agente ${connection.viaProbeName ?? '#' + connection.viaProbeId}`
 }
 
-/** "PostgreSQL em 10.0.0.20 pelo agente filial · erp, rh" — a linha da conexão. */
+export interface AccessOriginInfo {
+  key: string
+  /** Rótulo completo para o campo "Acessar a partir de". */
+  label: string
+  /** Rótulo enxuto para chips e agrupamentos. */
+  shortLabel: string
+  icon: string
+  color: 'primary' | 'info'
+  isAgent: boolean
+}
+
+/** Como a tela identifica "Acessar a partir de" de cada banco de dados. */
+export function accessOriginInfo(
+  connection: Pick<DatabaseConnectionResponse, 'viaProbeId' | 'viaProbeName'>
+): AccessOriginInfo {
+  if (connection.viaProbeId == null) {
+    return {
+      key: 'central',
+      label: 'Esta central (direto)',
+      shortLabel: 'Esta central',
+      icon: 'mdi-home-variant-outline',
+      color: 'primary',
+      isAgent: false,
+    }
+  }
+  const agentName = connection.viaProbeName ?? `#${connection.viaProbeId}`
+  return {
+    key: `agent-${connection.viaProbeId}`,
+    label: `Agente ${agentName}`,
+    shortLabel: agentName,
+    icon: 'mdi-transit-connection-variant',
+    color: 'info',
+    isAgent: true,
+  }
+}
+
+export type ConnectionHealthFilter = 'all' | 'healthy' | 'failed' | 'unprotected'
+
+export interface ConnectionFilters {
+  search?: string
+  originKey?: string | null
+  health?: ConnectionHealthFilter
+}
+
+export function normalizeSearchText(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+}
+
+export function matchesConnectionHealth(
+  connection: Pick<
+    DatabaseConnectionResponse,
+    'storageDestinationId' | 'lastBackupStatus' | 'backupEnabled' | 'lastBackupAt'
+  >,
+  health: ConnectionHealthFilter
+): boolean {
+  if (health === 'all') return true
+  if (health === 'unprotected') return connection.storageDestinationId == null
+  if (health === 'failed') return connection.lastBackupStatus === 'failed'
+  return (
+    connection.storageDestinationId != null &&
+    connection.lastBackupStatus !== 'failed' &&
+    connection.backupEnabled
+  )
+}
+
+/** Filtra conexões de banco por busca textual, origem ("Acessar a partir de") e saúde. */
+export function filterConnections(
+  connections: DatabaseConnectionResponse[],
+  filters: ConnectionFilters
+): DatabaseConnectionResponse[] {
+  const query = normalizeSearchText(filters.search ?? '')
+  const originKey = filters.originKey ?? null
+  const health = filters.health ?? 'all'
+
+  return connections.filter((conn) => {
+    if (originKey && accessOriginInfo(conn).key !== originKey) return false
+    if (!matchesConnectionHealth(conn, health)) return false
+    if (!query) return true
+
+    const origin = accessOriginInfo(conn)
+    const haystack = normalizeSearchText(
+      [
+        conn.name,
+        conn.host,
+        String(conn.port),
+        conn.username,
+        engineInfo(conn.engine).label,
+        conn.storageDestinationName ?? '',
+        origin.label,
+        origin.shortLabel,
+        ...conn.databases,
+      ].join(' ')
+    )
+    return haystack.includes(query)
+  })
+}
+
+export interface ConnectionOriginGroup {
+  origin: AccessOriginInfo
+  connections: DatabaseConnectionResponse[]
+}
+
+/** Agrupa conexões por "Acessar a partir de": central primeiro, depois cada agente por nome. */
+export function groupConnectionsByOrigin(
+  connections: DatabaseConnectionResponse[]
+): ConnectionOriginGroup[] {
+  const map = new Map<string, ConnectionOriginGroup>()
+  for (const conn of connections) {
+    const origin = accessOriginInfo(conn)
+    const existing = map.get(origin.key)
+    if (existing) {
+      existing.connections.push(conn)
+    } else {
+      map.set(origin.key, { origin, connections: [conn] })
+    }
+  }
+  return [...map.values()].sort((a, b) => {
+    if (a.origin.isAgent !== b.origin.isAgent) return a.origin.isAgent ? 1 : -1
+    return a.origin.shortLabel.localeCompare(b.origin.shortLabel)
+  })
+}
+
+/** "PostgreSQL em 10.0.0.20:5432 · erp, rh" — o resumo curto do cartão. */
 export function connectionSummary(connection: DatabaseConnectionResponse): string {
   const where = [connection.host, routeLabel(connection)].filter(Boolean).join(' ')
   return `${engineInfo(connection.engine).label} em ${where} · ${databasesLabel(connection.databases)}`

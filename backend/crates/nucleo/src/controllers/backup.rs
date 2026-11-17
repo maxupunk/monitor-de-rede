@@ -26,6 +26,7 @@ use crate::{
         audit::{self, AuditAction, ResourceType},
         backup::{
             copies::{self, RUN_SCOPE},
+            notify,
             plan::{self, PLAN_ID},
             service::{self, BackupFile},
         },
@@ -142,6 +143,15 @@ async fn run_now(State(ctx): State<AppContext>, headers: HeaderMap) -> AppResult
     // O resultado — inclusive a falha — já foi gravado no plano: as outras
     // abas precisam ver o novo status nos dois casos.
     plan::publish_updated(&ctx).await;
+    if let Err(ref error) = result {
+        notify::notify_system_backup_failed(
+            &ctx,
+            Some(&destination.row.name),
+            "manual",
+            &error.to_string(),
+        )
+        .await;
+    }
     let outcome = result?;
     audit::record(
         &ctx.db,

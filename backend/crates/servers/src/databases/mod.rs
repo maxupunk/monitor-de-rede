@@ -37,6 +37,7 @@ pub mod discovery;
 pub mod dump;
 pub mod jobs;
 pub mod mysql;
+pub mod notify;
 pub mod postgres;
 pub mod reach;
 pub mod restore;

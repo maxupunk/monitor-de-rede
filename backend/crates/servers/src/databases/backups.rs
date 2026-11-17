@@ -22,6 +22,7 @@ use sea_orm::{
 use super::{
     dump::{DumpFile, DumpStats, DumpWriter},
     jobs::{DatabaseJobKind, DatabaseJobSnapshot, DatabaseJobStatus, Job},
+    notify::{self, FailureKind},
     reach::{reach, Reached},
     restore::LineReader,
     service::{self, Connection},
@@ -267,6 +268,18 @@ pub async fn run_backup(
     row.last_backup_error = Set((!ok).then(|| message.clone()));
     if let Err(error) = row.update(db).await {
         tracing::warn!(%error, "não foi possível gravar o resultado do backup de banco");
+    }
+    if !ok {
+        notify::send_failure(
+            ctx,
+            FailureKind::Backup,
+            &connection.row.name,
+            connection.row.id,
+            Some(&destination.row.name),
+            Some(trigger.as_str()),
+            &message,
+        )
+        .await;
     }
     job.finish(ok, message);
 }
@@ -610,7 +623,20 @@ pub async fn start_restore(
                     ),
                 );
             }
-            Err(error) => job.finish(false, error.to_string()),
+            Err(error) => {
+                let message = error.to_string();
+                notify::send_failure(
+                    &ctx,
+                    FailureKind::Restore,
+                    &target.row.name,
+                    target.row.id,
+                    Some(&destination.row.name),
+                    Some("manual"),
+                    &message,
+                )
+                .await;
+                job.finish(false, message);
+            }
         }
     });
     Ok(snapshot)

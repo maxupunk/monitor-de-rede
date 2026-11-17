@@ -186,13 +186,83 @@ async fn conexao_pela_ponte_do_agente() {
 
 #[tokio::test]
 #[serial]
-async fn operador_nao_ve_as_conexoes() {
+async fn operador_nao_ve_os_conexoes_nem_dispara_backup() {
     request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
         session_with_role(&mut request, &ctx, Role::Operator).await;
         let response = request.get("/api/databases").await;
         assert_eq!(response.status_code(), 403, "{}", response.text());
     })
     .await;
+}
+
+/// Quando o banco não responde no ciclo agendado, a falha fica gravada na
+/// conexão (respeitando o intervalo antes da próxima tentativa, sem laço a cada
+/// minuto) e publica `backup:failed` no barramento de eventos.
+#[tokio::test]
+#[serial]
+async fn falha_no_backup_registra_erro_e_publica_aviso_sem_laco_curto() {
+    let root = tempfile::tempdir().unwrap();
+    std::env::set_var("STORAGE_LOCAL_ROOT", root.path());
+
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        session_with_role(&mut request, &ctx, Role::Admin).await;
+        let storage = request
+            .post("/api/storages")
+            .json(&json!({
+                "name": "Local",
+                "provider": "local",
+                "config": { "type": "local", "basePath": "copias" }
+            }))
+            .await;
+        assert_eq!(storage.status_code(), 201, "{}", storage.text());
+        let storage_id = body(&storage.text())["id"].as_i64().unwrap();
+
+        let mut input = connection("Banco indisponível", 1, "x", Some(storage_id));
+        input["databases"] = json!(["erp"]);
+        let created = request.post("/api/databases").json(&input).await;
+        assert_eq!(created.status_code(), 201, "{}", created.text());
+        let id = body(&created.text())["id"].as_i64().unwrap();
+
+        let now = chrono::Utc::now();
+        let ran = netmonitor_servers::databases::schedule::run_due(&ctx, now)
+            .await
+            .expect("ciclo de backup");
+        assert_eq!(ran, 1);
+
+        let list = body(&request.get("/api/databases").await.text());
+        let row = list
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["id"] == json!(id))
+            .expect("conexão listada");
+        assert_eq!(row["lastBackupStatus"], json!("failed"), "{row}");
+        assert!(row["lastBackupError"].as_str().is_some(), "{row}");
+
+        // No minuto seguinte não dispara de novo: aguarda a janela de retentativa.
+        let again = netmonitor_servers::databases::schedule::run_due(
+            &ctx,
+            now + chrono::Duration::minutes(1),
+        )
+        .await
+        .expect("segundo ciclo");
+        assert_eq!(again, 0);
+
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+        let events = netmonitor_core::models::_entities::event_outbox::Entity::find()
+            .filter(
+                netmonitor_core::models::_entities::event_outbox::Column::Type.eq("backup:failed"),
+            )
+            .all(&ctx.db)
+            .await
+            .unwrap();
+        assert_eq!(events.len(), 1, "{events:?}");
+        assert_eq!(events[0].payload["data"]["kind"], json!("database_backup"));
+        assert_eq!(events[0].payload["data"]["connectionId"], json!(id));
+        assert_eq!(events[0].payload["data"]["trigger"], json!("scheduled"));
+    })
+    .await;
+    std::env::remove_var("STORAGE_LOCAL_ROOT");
 }
 
 /// Ponta a ponta com um PostgreSQL local (`NETMONITOR_TEST_POSTGRES`).

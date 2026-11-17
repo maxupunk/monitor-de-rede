@@ -10,7 +10,7 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use loco_rs::app::AppContext;
 
-use super::{copies, plan};
+use super::{copies, notify, plan};
 use crate::services::{shared::errors::AppResult, storage};
 
 #[cfg(doc)]
@@ -57,14 +57,30 @@ pub async fn run_due(ctx: &AppContext, now: DateTime<Utc>) -> AppResult<bool> {
     let Some(destination_id) = current.storage_destination_id else {
         return Ok(false);
     };
-    let outcome = match storage::service::load(&ctx.db, destination_id).await {
-        Ok(destination) => copies::run(&ctx.db, &current, &destination, crate::app_version())
-            .await
-            .map(|_| ()),
-        Err(error) => Err(error),
+    let (destination_name, outcome) = match storage::service::load(&ctx.db, destination_id).await {
+        Ok(destination) => {
+            let name = destination.row.name.clone();
+            let result = copies::run(&ctx.db, &current, &destination, crate::app_version())
+                .await
+                .map(|_| ());
+            (Some(name), result)
+        }
+        Err(error) => {
+            let msg = error.to_string();
+            let _ = copies::record_failure(&ctx.db, &current, now, &msg).await;
+            (None, Err(error))
+        }
     };
     if let Err(error) = outcome {
+        let err_text = error.to_string();
         tracing::warn!(%error, "backup automático do NetMonitor falhou");
+        notify::notify_system_backup_failed(
+            ctx,
+            destination_name.as_deref(),
+            "scheduled",
+            &err_text,
+        )
+        .await;
     }
     plan::publish_updated(ctx).await;
     Ok(true)

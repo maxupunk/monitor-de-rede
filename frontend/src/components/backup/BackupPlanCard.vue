@@ -39,30 +39,38 @@
 
       <slot></slot>
 
-      <!-- Para onde e quando -->
-      <div v-if="plan.storageDestinationId != null" class="facts mt-3">
-        <div class="fact">
-          <v-icon size="18" color="primary">mdi-database-lock-outline</v-icon>
+      <!-- Onde busca, para onde vai e quando -->
+      <div v-if="extraFacts?.length || plan.storageDestinationId != null" class="facts mt-3">
+        <div v-for="fact in extraFacts" :key="fact.label" class="fact">
+          <v-icon size="18" :color="fact.color || 'primary'">{{ fact.icon }}</v-icon>
           <span>
-            Guardado em <strong>{{ plan.storageDestinationName ?? '—' }}</strong>
+            {{ fact.label }} <strong>{{ fact.value }}</strong>
           </span>
         </div>
-        <div class="fact">
-          <v-icon size="18" color="primary">mdi-calendar-sync</v-icon>
-          <span v-if="plan.backupEnabled">
-            {{ intervalLabel(plan.backupIntervalHours) }}, mantém as últimas
-            {{ plan.backupRetention }}
-          </span>
-          <span v-else>Backup automático desligado</span>
-        </div>
-        <div v-if="!hideStatus" class="fact">
-          <v-icon size="18" :color="last.color">{{ last.icon }}</v-icon>
-          <span>{{ last.text }}</span>
-        </div>
-        <div v-if="!hideStatus && plan.nextBackupAt" class="fact">
-          <v-icon size="18" color="primary">mdi-clock-outline</v-icon>
-          <span>Próximo automático {{ formatTimeUntil(plan.nextBackupAt) }}</span>
-        </div>
+        <template v-if="plan.storageDestinationId != null">
+          <div class="fact">
+            <v-icon size="18" color="primary">mdi-database-lock-outline</v-icon>
+            <span>
+              Guardado em <strong>{{ plan.storageDestinationName ?? '—' }}</strong>
+            </span>
+          </div>
+          <div class="fact">
+            <v-icon size="18" color="primary">mdi-calendar-sync</v-icon>
+            <span v-if="plan.backupEnabled">
+              {{ intervalLabel(plan.backupIntervalHours) }}, mantém as últimas
+              {{ plan.backupRetention }}
+            </span>
+            <span v-else>Backup automático desligado</span>
+          </div>
+          <div v-if="!hideStatus" class="fact">
+            <v-icon size="18" :color="last.color">{{ last.icon }}</v-icon>
+            <span>{{ last.text }}</span>
+          </div>
+          <div v-if="!hideStatus && plan.nextBackupAt" class="fact">
+            <v-icon size="18" color="primary">mdi-clock-outline</v-icon>
+            <span>Próximo automático {{ formatTimeUntil(plan.nextBackupAt) }}</span>
+          </div>
+        </template>
       </div>
       <v-alert
         v-if="!hideStatus && plan.lastBackupStatus === 'failed' && plan.lastBackupError"
@@ -88,7 +96,7 @@
           Fazer backup agora
         </v-btn>
         <v-btn color="primary" variant="tonal" prepend-icon="mdi-history" @click="emit('restore')">
-          Restaurar…
+          {{ restoreLabel || 'Restaurar…' }}
         </v-btn>
       </template>
       <v-btn
@@ -114,6 +122,13 @@ import { formatRelativeTime, formatTimeUntil } from '@/utils/formatters'
  * perguntas respondidas na mesma ordem: o quê, está protegido, onde, quando,
  * e as duas ações que importam.
  */
+export interface BackupCardFact {
+  icon: string
+  color?: string
+  label: string
+  value: string
+}
+
 const props = defineProps<{
   title: string
   /** O que é copiado, em uma frase. */
@@ -124,6 +139,10 @@ const props = defineProps<{
   running?: boolean
   /** Esconde o último/próximo backup (o andamento ao vivo ocupa o lugar). */
   hideStatus?: boolean
+  /** Fatos adicionais sempre visíveis (ex.: "Acessar a partir de:"). */
+  extraFacts?: BackupCardFact[]
+  /** Rótulo do botão secundário ("Restaurar…" por padrão). */
+  restoreLabel?: string
 }>()
 
 const emit = defineEmits<{

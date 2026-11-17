@@ -12,8 +12,8 @@
         Cópias de {{ connection.name }}
       </v-card-title>
       <v-card-subtitle class="px-6 text-wrap">
-        {{ engine.label }} em <code>{{ connection.host }}:{{ connection.port }}</code>
-        <span v-if="connection.viaProbeId != null"> {{ routeLabel(connection) }}</span>
+        {{ engine.label }} em <code>{{ connection.host }}:{{ connection.port }}</code> · Acessar a
+        partir de <strong>{{ origin.label }}</strong>
         <span v-if="connection.storageDestinationName">
           → {{ connection.storageDestinationName }}</span
         >
@@ -21,6 +21,24 @@
 
       <v-card-text class="px-6">
         <DatabaseJobProgress v-if="backupJob" :job="backupJob" class="mb-4" />
+
+        <div v-if="backups.length > 0" class="d-flex flex-wrap align-center ga-2 mb-3">
+          <v-chip size="small" color="success" variant="tonal" prepend-icon="mdi-check-circle">
+            {{ successCount }} {{ successCount === 1 ? 'cópia concluída' : 'cópias concluídas' }}
+          </v-chip>
+          <v-chip v-if="totalBytes > 0" size="small" color="info" variant="tonal">
+            {{ formatBytes(totalBytes) }} no destino
+          </v-chip>
+          <v-chip
+            v-if="failedCount > 0"
+            size="small"
+            color="error"
+            variant="tonal"
+            prepend-icon="mdi-alert-circle"
+          >
+            {{ failedCount }} {{ failedCount === 1 ? 'falha recente' : 'falhas recentes' }}
+          </v-chip>
+        </div>
 
         <div class="d-flex flex-wrap align-center ga-2 mb-3">
           <v-btn
@@ -42,6 +60,19 @@
             Atualizar
           </v-btn>
           <v-spacer></v-spacer>
+          <v-btn-toggle
+            v-if="failedCount > 0"
+            v-model="statusFilter"
+            color="primary"
+            variant="outlined"
+            density="compact"
+            divided
+            mandatory
+          >
+            <v-btn value="all" size="small">Todas</v-btn>
+            <v-btn value="success" size="small">Concluídas</v-btn>
+            <v-btn value="failed" size="small" color="error">Falhas</v-btn>
+          </v-btn-toggle>
           <v-select
             v-if="databaseNames.length > 1"
             v-model="filter"
@@ -140,7 +171,7 @@ import type { DatabaseConnectionResponse } from '@/bindings/DatabaseConnectionRe
 import DatabaseJobProgress from './DatabaseJobProgress.vue'
 import { useDatabasesStore } from '@/stores/databases'
 import { useStoragesStore } from '@/stores/storages'
-import { engineInfo, routeLabel } from '@/utils/databasePresentation'
+import { accessOriginInfo, engineInfo } from '@/utils/databasePresentation'
 import {
   formatBytes,
   formatCompactCount,
@@ -167,16 +198,29 @@ const loading = ref(false)
 const error = ref<string | null>(null)
 const downloading = ref<number | null>(null)
 const filter = ref<string | null>(null)
+const statusFilter = ref<'all' | 'success' | 'failed'>('all')
 
 const engine = computed(() => engineInfo(props.connection?.engine ?? 'postgres'))
+const origin = computed(() =>
+  accessOriginInfo(props.connection ?? { viaProbeId: null, viaProbeName: null })
+)
 const backupJob = computed(() =>
   props.connection ? databasesStore.jobFor('backup', props.connection.id) : null
+)
+const successCount = computed(() => backups.value.filter((b) => b.status === 'success').length)
+const failedCount = computed(() => backups.value.filter((b) => b.status === 'failed').length)
+const totalBytes = computed(() =>
+  backups.value.reduce((sum, item) => sum + (item.sizeBytes ?? 0), 0)
 )
 const databaseNames = computed(() =>
   [...new Set(backups.value.map((item) => item.databaseName))].sort()
 )
 const visible = computed(() =>
-  filter.value ? backups.value.filter((item) => item.databaseName === filter.value) : backups.value
+  backups.value.filter((item) => {
+    if (filter.value && item.databaseName !== filter.value) return false
+    if (statusFilter.value !== 'all' && item.status !== statusFilter.value) return false
+    return true
+  })
 )
 
 async function load() {
@@ -198,6 +242,7 @@ watch(
     if (!open) return
     backups.value = []
     filter.value = null
+    statusFilter.value = 'all'
     void load()
   }
 )

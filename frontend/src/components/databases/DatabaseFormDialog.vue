@@ -32,7 +32,12 @@
             </ChoiceCard>
           </v-col>
           <v-col v-if="showPickerOnEngineStep" cols="12" class="mt-2">
-            <DatabaseContainerPicker :key="session" :engine="null" @picked="applyResolution" />
+            <DatabaseContainerPicker
+              :key="session"
+              :engine="null"
+              @picked="applyResolution"
+              @edit-connection="switchToEdit"
+            />
           </v-col>
         </v-row>
 
@@ -53,7 +58,9 @@
             :key="session"
             :engine="form.engine"
             :selected="selectedContainer"
+            collapse-on-select
             @picked="applyResolution"
+            @edit-connection="switchToEdit"
           />
           <v-alert
             v-if="resolution && summary"
@@ -208,6 +215,10 @@
           </v-alert>
 
           <div class="section-title mt-4">O que copiar</div>
+          <div v-if="resolution?.database" class="text-caption text-high-emphasis mb-2">
+            Banco principal detectado nas variáveis do contêiner:
+            <code>{{ resolution.database }}</code>
+          </div>
           <v-radio-group v-model="scope" hide-details class="mb-2">
             <v-radio
               value="all"
@@ -336,6 +347,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'update:modelValue', value: boolean): void
   (e: 'saved', value: DatabaseConnectionResponse, created: boolean): void
+  (e: 'switchConnection', connectionId: number): void
 }>()
 
 const databasesStore = useDatabasesStore()
@@ -488,6 +500,15 @@ function fillFrom(row: DatabaseConnectionResponse) {
   secrets.reset(row.passwordSet ? ['password'] : [])
 }
 
+function switchToEdit(id: number) {
+  const existing = databasesStore.connections.find((item) => item.id === id)
+  if (!existing) return
+  emit('switchConnection', id)
+  resetForm()
+  fillFrom(existing)
+  step.value = 'form'
+}
+
 watch(
   () => props.modelValue,
   async (open) => {
@@ -496,6 +517,7 @@ watch(
     if (!props.connectionId) void databasesStore.fetchContainers()
     await Promise.all([
       storagesStore.loaded ? Promise.resolve() : storagesStore.fetchStorages(),
+      databasesStore.loaded ? Promise.resolve() : databasesStore.fetchConnections(),
       databasesStore.fetchAgents(),
     ])
     resetForm()

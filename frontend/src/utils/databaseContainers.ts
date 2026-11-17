@@ -1,8 +1,10 @@
 import type { AddressKind } from '@/bindings/AddressKind'
 import type { CandidateAddress } from '@/bindings/CandidateAddress'
+import type { DatabaseConnectionResponse } from '@/bindings/DatabaseConnectionResponse'
 import type { DatabaseContainer } from '@/bindings/DatabaseContainer'
 import type { DatabaseContainerResolution } from '@/bindings/DatabaseContainerResolution'
 import type { DatabaseEngine } from '@/bindings/DatabaseEngine'
+import { engineInfo, normalizeSearchText } from '@/utils/databasePresentation'
 
 /**
  * Bancos em contêineres dos agentes: como a tela fala deles. O backend
@@ -39,6 +41,89 @@ export function containerSubtitle(container: DatabaseContainer): string {
 /** A chave de um contêiner na lista: `agent-1/<id>`. */
 export function containerKey(container: Pick<DatabaseContainer, 'hostKey' | 'containerId'>) {
   return `${container.hostKey}/${container.containerId}`
+}
+
+export interface ProtectedContainerMatch {
+  id: number
+  name: string
+}
+
+/**
+ * Conexão já cadastrada em `/backup` que protege este contêiner: usa o vínculo
+ * resolvido pelo backend (que conhece redes/IPs/portas publicadas) e cai no
+ * estado em memória da store para refletir criações/edições imediatas.
+ */
+export function protectedConnectionOf(
+  container: DatabaseContainer,
+  connections: readonly DatabaseConnectionResponse[] = []
+): ProtectedContainerMatch | null {
+  if (container.protectedConnectionId != null) {
+    // Confere se a conexão ainda existe quando a store já carregou.
+    const inStore = connections.find((c) => c.id === container.protectedConnectionId)
+    if (connections.length === 0 || inStore) {
+      return {
+        id: container.protectedConnectionId,
+        name: inStore?.name ?? container.protectedConnectionName ?? container.containerName,
+      }
+    }
+  }
+  const byMemory = connections.find((conn) => {
+    if (conn.engine !== container.engine || conn.viaProbeId !== container.viaProbeId) return false
+    const host = conn.host.trim().toLowerCase()
+    const matchesHost =
+      (host === container.containerName.toLowerCase() ||
+        (container.service != null && host === container.service.toLowerCase())) &&
+      conn.port === container.port
+    const matchesName = conn.name.trim().toLowerCase() === container.containerName.toLowerCase()
+    return matchesHost || matchesName
+  })
+  return byMemory ? { id: byMemory.id, name: byMemory.name } : null
+}
+
+export type ContainerBackupFilter = 'all' | 'unprotected' | 'protected'
+
+export interface ContainerFilterOptions {
+  engine: DatabaseEngine | null
+  search?: string
+  hostKey?: string | null
+  backupFilter?: ContainerBackupFilter
+  showStopped?: boolean
+}
+
+/** Filtra contêineres por SGBD, estado de execução, host, proteção e busca textual. */
+export function filterContainers(
+  containers: DatabaseContainer[],
+  options: ContainerFilterOptions,
+  connections: readonly DatabaseConnectionResponse[] = []
+): DatabaseContainer[] {
+  const byEngine = containersFor(containers, options.engine)
+  const query = normalizeSearchText(options.search ?? '')
+  const hostKey = options.hostKey ?? null
+  const backupFilter = options.backupFilter ?? 'all'
+  const showStopped = options.showStopped ?? false
+
+  return byEngine.filter((item) => {
+    if (!showStopped && !item.running) return false
+    if (hostKey && item.hostKey !== hostKey) return false
+
+    const protectedMatch = protectedConnectionOf(item, connections)
+    if (backupFilter === 'protected' && !protectedMatch) return false
+    if (backupFilter === 'unprotected' && protectedMatch) return false
+
+    if (!query) return true
+    const haystack = normalizeSearchText(
+      [
+        item.containerName,
+        item.local ? 'central esta central' : item.hostName,
+        item.project ?? '',
+        item.service ?? '',
+        item.image,
+        engineInfo(item.engine).label,
+        protectedMatch?.name ?? '',
+      ].join(' ')
+    )
+    return haystack.includes(query)
+  })
 }
 
 /**

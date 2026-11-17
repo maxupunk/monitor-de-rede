@@ -239,6 +239,23 @@
     <PluginApprovalDialog />
     <AiApprovalNotice />
 
+    <v-snackbar v-model="backupAlert.visible" color="error" location="bottom right" timeout="10000">
+      <div class="font-weight-bold">{{ backupAlert.title }}</div>
+      <div class="text-caption">{{ backupAlert.message }}</div>
+      <template #actions>
+        <v-btn
+          v-if="route.path !== '/backup'"
+          variant="tonal"
+          size="small"
+          to="/backup"
+          @click="backupAlert.visible = false"
+        >
+          Abrir Backup
+        </v-btn>
+        <v-btn variant="text" size="small" @click="backupAlert.visible = false">Fechar</v-btn>
+      </template>
+    </v-snackbar>
+
     <!-- Diálogo de Instruções de Instalação no iOS -->
     <v-dialog v-model="showIosDialog" :fullscreen="$vuetify.display.xs" max-width="420">
       <v-card class="rounded-lg pa-4">
@@ -274,7 +291,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
+import { computed, reactive, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useDisplay } from 'vuetify'
 import { useEventsStore } from '@/stores/events'
@@ -409,16 +426,32 @@ watch(
 
 // As rotas SSE de cada área ligada; antes do `connect`, para o snapshot inicial.
 let uninstallAreaRealtime: (() => void) | null = null
+let unsubscribeBackupAlert: (() => void) | null = null
+
+const backupAlert = reactive({
+  visible: false,
+  title: '',
+  message: '',
+})
 
 onMounted(() => {
   void authStore.fetchMe()
   uninstallAreaRealtime = installAreaRealtime()
+  unsubscribeBackupAlert = eventsStore.onEvent('backup:failed', (data) => {
+    if (!authStore.isAdmin) return
+    const isRestore = data.kind === 'database_restore'
+    const name = String(data.name || 'NetMonitor')
+    backupAlert.title = isRestore ? `Falha na restauração: ${name}` : `Falha no backup: ${name}`
+    backupAlert.message = String(data.message || 'Verifique os detalhes na tela de Backup.')
+    backupAlert.visible = true
+  })
   eventsStore.connect()
   void onboardingStore.checkAndOpenIfNeeded()
   void pluginAppsStore.fetchApps()
 })
 
 onUnmounted(() => {
+  unsubscribeBackupAlert?.()
   eventsStore.disconnect()
   uninstallAreaRealtime?.()
 })

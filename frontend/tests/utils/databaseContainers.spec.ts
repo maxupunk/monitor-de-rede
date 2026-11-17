@@ -7,6 +7,8 @@ import {
   agentTargetHost,
   containersFor,
   fallbackAddress,
+  filterContainers,
+  protectedConnectionOf,
   resolutionSummary,
 } from '@/utils/databaseContainers'
 
@@ -45,6 +47,8 @@ function container(overrides: Partial<DatabaseContainer> = {}): DatabaseContaine
     running: true,
     status: 'Up 3 hours',
     port: 5432,
+    protectedConnectionId: null,
+    protectedConnectionName: null,
     ...overrides,
   }
 }
@@ -117,5 +121,47 @@ describe('bancos em contêineres', () => {
     expect(resolutionSummary(resolution(null, {}, [])).title).toBe(
       'O contêiner não tem endereço de rede'
     )
+  })
+
+  it('marca contêineres já protegidos e filtra por busca, host e status', () => {
+    const protectedItem = container({
+      containerId: 'p1',
+      containerName: 'erp_postgres',
+      hostKey: 'agent-7',
+      hostName: 'hostinger-srv-1',
+      local: false,
+      viaProbeId: 7,
+      protectedConnectionId: 10,
+      protectedConnectionName: 'ERP Produção',
+    })
+    const openItem = container({
+      containerId: 'p2',
+      containerName: 'analytics_postgres',
+      project: 'bi',
+    })
+
+    expect(protectedConnectionOf(protectedItem)).toEqual({ id: 10, name: 'ERP Produção' })
+    expect(protectedConnectionOf(openItem)).toBeNull()
+
+    expect(
+      filterContainers([protectedItem, openItem], {
+        engine: 'postgres',
+        search: 'hostinger',
+      }).map((c) => c.containerId)
+    ).toEqual(['p1'])
+
+    expect(
+      filterContainers([protectedItem, openItem], {
+        engine: 'postgres',
+        backupFilter: 'unprotected',
+      }).map((c) => c.containerId)
+    ).toEqual(['p2'])
+
+    expect(
+      filterContainers([protectedItem, openItem], {
+        engine: 'postgres',
+        backupFilter: 'protected',
+      }).map((c) => c.containerId)
+    ).toEqual(['p1'])
   })
 })

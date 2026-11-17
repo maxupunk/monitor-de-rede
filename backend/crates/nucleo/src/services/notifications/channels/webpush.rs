@@ -33,19 +33,40 @@ impl NotificationChannel for WebPushChannel {
     }
 
     async fn send(&self, ctx: &AppContext, message: &NotificationMessage) -> bool {
-        let payload = json!({
+        let target_url = message
+            .metadata
+            .get("url")
+            .and_then(serde_json::Value::as_str)
+            .filter(|url| !url.is_empty())
+            .unwrap_or("/alerts");
+        let tag = message
+            .metadata
+            .get("tag")
+            .and_then(serde_json::Value::as_str)
+            .filter(|tag| !tag.is_empty())
+            .map(ToString::to_string)
+            .unwrap_or_else(|| format!("alert-{}", chrono::Utc::now().timestamp_millis()));
+
+        let mut payload = json!({
             "title": message.title,
             "body": message.body,
             "severity": message.severity.as_str(),
             "icon": "/pwa-192x192.png",
             "badge": "/pwa-192x192.png",
-            "tag": format!("alert-{}", chrono::Utc::now().timestamp_millis()),
+            "tag": tag,
             "data": {
-                "url": "/alerts",
+                "url": target_url,
                 "severity": message.severity.as_str(),
                 "metadata": message.metadata
             }
         });
+        if let Some(actions) = message
+            .metadata
+            .get("actions")
+            .filter(|value| value.is_array())
+        {
+            payload["actions"] = actions.clone();
+        }
 
         // Alerta de área só a quem tem acesso a ela (ADR 019); o do Núcleo, a
         // todos.

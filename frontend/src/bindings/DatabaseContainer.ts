@@ -22,4 +22,8 @@ viaProbeId: number | null,
 /**
  * O agente libera a ponte de banco (`database` no `AGENT_ALLOW`).
  */
-routeAllowed: boolean, containerId: string, containerName: string, project: string | null, service: string | null, image: string, engine: DatabaseEngine, running: boolean, status: string, port: number, };
+routeAllowed: boolean, containerId: string, containerName: string, project: string | null, service: string | null, image: string, engine: DatabaseEngine, running: boolean, status: string, port: number, 
+/**
+ * Conexão já cadastrada em `/backup` que aponta para este contêiner.
+ */
+protectedConnectionId: number | null, protectedConnectionName: string | null, };

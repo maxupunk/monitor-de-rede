@@ -8,6 +8,7 @@
 //! | [`schedule`] | o ciclo que faz a cópia automática |
 
 pub mod copies;
+pub mod notify;
 pub mod plan;
 pub mod schedule;
 pub mod service;

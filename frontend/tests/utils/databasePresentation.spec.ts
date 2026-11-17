@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
+  accessOriginInfo,
   connectionSummary,
   DATABASE_ENGINES,
   databasesLabel,
   engineInfo,
+  filterConnections,
+  groupConnectionsByOrigin,
   restoredDatabaseName,
   routeLabel,
 } from '@/utils/databasePresentation'
@@ -70,5 +73,53 @@ describe('rota da conexão', () => {
       'PostgreSQL em 10.0.0.20 pelo agente filial-sp · erp, rh'
     )
     expect(routeLabel({ viaProbeId: 9, viaProbeName: null })).toBe('pelo agente #9')
+  })
+
+  it('descreve, filtra e agrupa por "Acessar a partir de"', () => {
+    const central = { ...base, id: 1, name: 'ERP Matriz', storageDestinationId: 2 }
+    const filialA = {
+      ...base,
+      id: 2,
+      name: 'Loja Sul',
+      viaProbeId: 4,
+      viaProbeName: 'srv-sul',
+      lastBackupStatus: 'failed',
+      storageDestinationId: 2,
+    }
+    const filialB = {
+      ...base,
+      id: 3,
+      name: 'Loja Norte',
+      viaProbeId: 5,
+      viaProbeName: 'srv-norte',
+      storageDestinationId: null,
+    }
+
+    expect(accessOriginInfo(central)).toMatchObject({
+      key: 'central',
+      label: 'Esta central (direto)',
+      isAgent: false,
+    })
+    expect(accessOriginInfo(filialA)).toMatchObject({
+      key: 'agent-4',
+      label: 'Agente srv-sul',
+      isAgent: true,
+    })
+
+    const groups = groupConnectionsByOrigin([filialB, central, filialA])
+    expect(groups.map((g) => g.origin.key)).toEqual(['central', 'agent-5', 'agent-4'])
+
+    expect(
+      filterConnections([central, filialA, filialB], { originKey: 'agent-4' }).map((c) => c.id)
+    ).toEqual([2])
+    expect(
+      filterConnections([central, filialA, filialB], { health: 'failed' }).map((c) => c.id)
+    ).toEqual([2])
+    expect(
+      filterConnections([central, filialA, filialB], { health: 'unprotected' }).map((c) => c.id)
+    ).toEqual([3])
+    expect(
+      filterConnections([central, filialA, filialB], { search: 'norte' }).map((c) => c.id)
+    ).toEqual([3])
   })
 })

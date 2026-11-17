@@ -7,11 +7,12 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use loco_rs::app::AppContext;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 
 use super::{
-    backups::{self, Trigger, BACKUP_SCOPE},
+    backups::{self, Trigger, BACKUP_SCOPE, STATUS_FAILED},
     jobs::{DatabaseJobKind, Job},
+    notify::{self, FailureKind},
     service,
 };
 use netmonitor_core::{
@@ -69,9 +70,11 @@ pub async fn run_due(ctx: &AppContext, now: DateTime<Utc>) -> AppResult<usize> {
     let mut ran = 0;
     for row in rows.into_iter().filter(|row| policy(row).is_due(now)) {
         let id = row.id;
+        let name = row.name.clone();
         let Ok(_guard) = RunGuard::acquire(BACKUP_SCOPE, id, "ocupado") else {
             continue;
         };
+        let row_for_error = row.clone();
         let prepared = async {
             let connection = service::open(row)?;
             let destination = backups::destination_of(&ctx.db, &connection).await?;
@@ -89,7 +92,23 @@ pub async fn run_due(ctx: &AppContext, now: DateTime<Utc>) -> AppResult<usize> {
                 backups::run_backup(ctx, &connection, &destination, &job, Trigger::Scheduled).await;
             }
             Err(error) => {
-                tracing::warn!(connection = id, %error, "backup automático de banco não começou")
+                let message = error.to_string();
+                tracing::warn!(connection = id, %error, "backup automático de banco não começou");
+                let mut active: database_connections::ActiveModel = row_for_error.into();
+                active.last_backup_at = Set(Some(now.into()));
+                active.last_backup_status = Set(Some(STATUS_FAILED.to_string()));
+                active.last_backup_error = Set(Some(message.clone()));
+                let _ = active.update(&ctx.db).await;
+                notify::send_failure(
+                    ctx,
+                    FailureKind::Backup,
+                    &name,
+                    id,
+                    None,
+                    Some("scheduled"),
+                    &message,
+                )
+                .await;
             }
         }
         ran += 1;

@@ -253,6 +253,18 @@ export function formatEventDetails(evt: RealtimeEventPayload): FormattedEventDet
         rawJson,
       }
     }
+    case 'backup:failed': {
+      const isRestore = d.kind === 'database_restore'
+      const target = d.name || 'Sistema'
+      return {
+        title: isRestore ? `Falha na restauração · ${target}` : `Falha no backup · ${target}`,
+        message: String(d.message || 'Ocorreu um erro durante a operação de backup'),
+        icon: 'mdi-database-alert',
+        color: 'error',
+        time: dateStr,
+        rawJson,
+      }
+    }
     default: {
       const summary =
         d.name ||

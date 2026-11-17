@@ -244,3 +244,59 @@ async fn operador_nao_ve_os_armazenamentos() {
     })
     .await;
 }
+
+/// Se o destino falha na gravação do backup do sistema, o plano registra o erro
+/// e emite `backup:failed` no barramento de eventos.
+#[tokio::test]
+#[serial]
+async fn falha_no_backup_do_sistema_grava_erro_e_publica_aviso() {
+    let root = isolated_local_root();
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        session_with_role(&mut request, &ctx, Role::Admin).await;
+
+        // Um arquivo comum no caminho do diretório faz a gravação local falhar na hora.
+        std::fs::write(root.path().join("ocupado"), b"arquivo").unwrap();
+
+        let created = request
+            .post("/api/storages")
+            .json(&json!({
+                "name": "Destino quebrado",
+                "provider": "local",
+                "config": { "type": "local", "basePath": "ocupado" }
+            }))
+            .await;
+        assert_eq!(created.status_code(), 201, "{}", created.text());
+        let id = body(&created.text())["id"].as_i64().unwrap();
+
+        let planned = request
+            .put("/api/backup/system")
+            .json(&json!({
+                "storageDestinationId": id,
+                "backupEnabled": true,
+                "backupIntervalHours": 24,
+                "backupRetention": 7
+            }))
+            .await;
+        assert_eq!(planned.status_code(), 200, "{}", planned.text());
+
+        let ran = request.post("/api/backup/system/run").await;
+        assert!(!ran.status_code().is_success(), "{}", ran.text());
+
+        let shown = body(&request.get("/api/backup/system").await.text());
+        assert_eq!(shown["lastBackupStatus"], json!("failed"), "{shown}");
+        assert!(shown["lastBackupError"].as_str().is_some(), "{shown}");
+
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+        let events = netmonitor_core::models::_entities::event_outbox::Entity::find()
+            .filter(
+                netmonitor_core::models::_entities::event_outbox::Column::Type.eq("backup:failed"),
+            )
+            .all(&ctx.db)
+            .await
+            .unwrap();
+        assert_eq!(events.len(), 1, "{events:?}");
+        assert_eq!(events[0].payload["data"]["kind"], json!("system_backup"));
+    })
+    .await;
+    std::env::remove_var("STORAGE_LOCAL_ROOT");
+}

@@ -141,6 +141,26 @@ pub async fn run(
     result
 }
 
+/// Registra falha quando nem foi possível abrir o destino do plano (ex.: chave
+/// ilegível ou destino removido), evitando repetição silenciosa a cada minuto.
+///
+/// # Errors
+///
+/// Erro do banco.
+pub async fn record_failure(
+    db: &DatabaseConnection,
+    plan: &system_backup_plan::Model,
+    started: DateTime<Utc>,
+    error: &str,
+) -> AppResult<()> {
+    let mut row: system_backup_plan::ActiveModel = plan.clone().into();
+    row.last_backup_at = Set(Some(started.into()));
+    row.last_backup_status = Set(Some(STATUS_FAILED.to_string()));
+    row.last_backup_error = Set(Some(error.to_string()));
+    row.update(db).await?;
+    Ok(())
+}
+
 async fn upload(
     db: &DatabaseConnection,
     destination: &Destination,
