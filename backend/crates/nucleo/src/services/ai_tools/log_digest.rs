@@ -22,7 +22,7 @@ const TOP_APPS: usize = 5;
 const BUSIEST_HOURS: usize = 3;
 /// Severidade numérica a partir da qual a linha conta como erro (erro,
 /// crítico, alerta, emergência).
-const ERROR_SEVERITY: i16 = 3;
+pub(super) const ERROR_SEVERITY: i16 = 3;
 
 // O padrão e o corte moram onde a ingestão também os usa.
 pub use crate::services::{shared::text::truncate_chars, syslog::template::normalize_message};

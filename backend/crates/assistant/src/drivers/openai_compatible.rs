@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc, time::Instant};
+use std::{collections::BTreeMap, sync::Arc, time::Instant};
 
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -233,7 +233,7 @@ fn spawn_sse_reader(res: reqwest::Response, notice: Option<String>) -> AiChunkSt
         let mut framed = FramedRead::new(reader, BytesCodec::new());
 
         let mut pending_buffer = String::new();
-        let mut accumulated_tools: HashMap<usize, (String, String, String)> = HashMap::new();
+        let mut accumulated_tools: BTreeMap<usize, (String, String, String)> = BTreeMap::new();
         // O id do modelo se repete em todo pedaço; basta repassar uma vez.
         let mut model_reported = false;
 
@@ -276,20 +276,7 @@ fn spawn_sse_reader(res: reqwest::Response, notice: Option<String>) -> AiChunkSt
                     let data_str = data_str.trim();
                     if data_str == "[DONE]" {
                         if !accumulated_tools.is_empty() {
-                            let mut calls = Vec::new();
-                            for (_, (mut id, name, args)) in accumulated_tools.drain() {
-                                if id.is_empty() {
-                                    id = format!(
-                                        "call_{}",
-                                        &uuid::Uuid::new_v4().simple().to_string()[..12]
-                                    );
-                                }
-                                calls.push(AiToolCall {
-                                    id,
-                                    name,
-                                    arguments: args,
-                                });
-                            }
+                            let calls = drain_calls(&mut accumulated_tools);
                             let _ = sender
                                 .send(Ok(AiChatChunk {
                                     text_delta: None,
@@ -395,19 +382,7 @@ fn spawn_sse_reader(res: reqwest::Response, notice: Option<String>) -> AiChunkSt
                                 if finish_reason.as_deref() == Some("tool_calls")
                                     && !accumulated_tools.is_empty()
                                 {
-                                    for (_, (mut id, name, args)) in accumulated_tools.drain() {
-                                        if id.is_empty() {
-                                            id = format!(
-                                                "call_{}",
-                                                &uuid::Uuid::new_v4().simple().to_string()[..12]
-                                            );
-                                        }
-                                        calls.push(AiToolCall {
-                                            id,
-                                            name,
-                                            arguments: args,
-                                        });
-                                    }
+                                    calls.extend(drain_calls(&mut accumulated_tools));
                                 }
 
                                 if (text_delta.is_some()
@@ -638,6 +613,23 @@ impl AiDriver for OpenAiCompatibleDriver {
             })
         }
     }
+}
+
+/// Esvazia as chamadas acumuladas na ordem do `index` do provedor — a ordem
+/// em que o modelo as pediu, e a que a tela mostra. Id vazio ganha um único.
+fn drain_calls(accumulated: &mut BTreeMap<usize, (String, String, String)>) -> Vec<AiToolCall> {
+    std::mem::take(accumulated)
+        .into_values()
+        .map(|(id, name, arguments)| AiToolCall {
+            id: if id.is_empty() {
+                format!("call_{}", &uuid::Uuid::new_v4().simple().to_string()[..12])
+            } else {
+                id
+            },
+            name,
+            arguments,
+        })
+        .collect()
 }
 
 #[cfg(test)]

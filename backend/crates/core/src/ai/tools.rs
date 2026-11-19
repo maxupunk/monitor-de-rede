@@ -169,7 +169,7 @@ impl ToolGroup {
             Self::Core => "The message asks about devices, monitors, current alerts or documentation.",
             Self::History => "Answering requires uptime, availability or metrics over a past period of time.",
             Self::Analysis => "The message asks why something happened, its root cause, a baseline or an incident timeline.",
-            Self::Charts => "The user wants a chart or graph of latency, traffic or resource usage.",
+            Self::Charts => "The user wants a chart or graph of latency, traffic, resource usage of devices or containers, or log volume.",
             Self::Logs => "Answering requires reading or searching system, device or syslog logs.",
             Self::Docker => "The message is about Docker containers, Docker hosts or their resource usage or logs.",
             Self::Diagnostics => "The user wants a live network test such as ping, traceroute, port scan or DNS lookup.",

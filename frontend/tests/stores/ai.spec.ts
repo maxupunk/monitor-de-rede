@@ -204,6 +204,35 @@ describe('acesso salvo no cartão da ferramenta', () => {
     ])
   })
 
+  it('conexão que fecha sem done vira erro e encerra a ferramenta pendente', async () => {
+    vi.mocked(apiService.postStream).mockResolvedValueOnce(
+      sseResponse([
+        { type: 'toolCall', id: 'c1', name: 'get_alerts', arguments: {} },
+        { type: 'textDelta', content: 'Consultando' },
+      ])
+    )
+    const store = useAiStore()
+    await store.sendMessage('Quais alertas estão ativos?')
+
+    const resposta = store.messages[1]
+    expect(resposta.error).toMatch(/interrompida/)
+    expect(resposta.toolCalls?.[0].status).toBe('error')
+    expect(store.streamError).toBe(resposta.error)
+  })
+
+  it('parar a resposta descarta a mensagem que esperava a vez', async () => {
+    const store = useAiStore()
+    const finish = pendingStream()
+    const first = store.sendMessage('Quais canais o AP-terraço usa?')
+    await expect(store.continueAfterAccess({ deviceId: 7, transport: 'ssh' })).resolves.toBe(
+      'queued'
+    )
+    store.cancelGeneration()
+    finish()
+    await first
+    expect(apiService.postStream).toHaveBeenCalledTimes(1)
+  })
+
   it('trocar de conversa descarta a mensagem que esperava', async () => {
     const store = useAiStore()
     const finish = pendingStream()

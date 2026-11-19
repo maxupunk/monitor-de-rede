@@ -364,10 +364,14 @@ async fn exporta_o_contrato_do_chat() {
 }
 
 /// O que toda pergunta de verdade paga em cada rodada, antes de qualquer
-/// dado: o system prompt e o núcleo de ferramentas. Medido em 2.970
-/// tokens (era 3.038, depois 2.795, 2.589, 2.675 e 2.727). Subir o teto é
+/// dado: o system prompt e o núcleo de ferramentas. Medido em 3.021
+/// tokens (era 3.038, depois 2.795, 2.589, 2.675, 2.727 e 2.970). Subir o teto é
 /// decisão, não acidente: cada token a mais aqui se paga em toda rodada de
-/// toda pergunta. Última subida (2.995 → 3.000): "Wi-Fi" na linha do grupo
+/// toda pergunta. Última subida (3.000 → 3.025): `chart_logs_volume` e
+/// `chart_docker_usage` na linha do grupo `charts` e a regra 5 (gráfico só
+/// por `chart_*`), ~21 tokens — sem ela o modelo pequeno inventava gráfico
+/// ("o gráfico mostra…", `<analysis_chart>`) para dado sem ferramenta.
+/// Antes (2.995 → 3.000): "Wi-Fi" na linha do grupo
 /// `platform` (a seção `wifi` do `get_platform_status`), ~2 tokens; a regra
 /// da tela aberta foi para o `<contexto>`, que só a carrega quando há tela.
 /// Antes (2.985 → 2.995): `get_deploy_guide` na
@@ -383,7 +387,7 @@ async fn exporta_o_contrato_do_chat() {
 /// (2.650 → 2.700): o grupo `audit` e a `list_plugin_apps`, ~25 tokens.
 #[test]
 fn custo_fixo_por_rodada_cabe_no_orcamento() {
-    const BUDGET: u64 = 3_000;
+    const BUDGET: u64 = 3_025;
     install_dashboard_widgets();
     install_ai_tools();
     let settings = AiSettings {

@@ -15,6 +15,8 @@ import {
   applyChatEvent,
   applyCompaction,
   buildChatHistory,
+  interruptRunningTools,
+  INTERRUPTED_TOOL,
   rewindTo,
   type AiDisplayMessage,
   type AiDraft,
@@ -49,6 +51,13 @@ function isCompactionEvent(event: unknown): event is Record<string, unknown> {
     event !== null &&
     (event as { type?: unknown }).type === 'contextCompacted'
   )
+}
+
+/** O backend fecha toda resposta com `done` (depois de `error`, se houve). */
+function isStreamEnd(event: unknown): boolean {
+  const type =
+    typeof event === 'object' && event !== null ? (event as { type?: unknown }).type : null
+  return type === 'done' || type === 'error'
 }
 
 export type {
@@ -345,12 +354,21 @@ export const useAiStore = defineStore('ai', () => {
       if (!reader) {
         throw new Error('Não foi possível inicializar o leitor de stream')
       }
+      let finished = false
       await readSseJson(reader, (event) => {
         if (isCompactionEvent(event)) applyCompaction(messages.value, history.ids, event)
         else applyChatEvent(assistantMsg, event)
+        if (isStreamEnd(event)) finished = true
       })
+      // Conexão fechada sem `done` nem `error` (servidor caiu, proxy cortou):
+      // a resposta está incompleta e precisa dizer isso.
+      if (!finished && !assistantMsg.error) {
+        assistantMsg.error = 'A resposta foi interrompida antes de terminar. Tente de novo.'
+      }
       if (assistantMsg.error) streamError.value = assistantMsg.error
+      interruptRunningTools(assistantMsg, INTERRUPTED_TOOL)
     } catch (err: unknown) {
+      interruptRunningTools(assistantMsg, INTERRUPTED_TOOL)
       if (err instanceof Error && err.name === 'AbortError') {
         assistantMsg.content += ' [Geração interrompida]'
       } else {
@@ -419,6 +437,8 @@ export const useAiStore = defineStore('ai', () => {
   }
 
   function cancelGeneration() {
+    // Parar ou desfazer também desiste da mensagem que esperava a vez.
+    queuedFollowUp = null
     if (activeAbortController) {
       activeAbortController.abort()
       activeAbortController = null
@@ -472,15 +492,15 @@ export const useAiStore = defineStore('ai', () => {
     if (!loaded) return
     streamError.value = null
     compactNext.value = false
-    messages.value = loaded.map((message) => ({
-      ...message,
-      isStreaming: false,
-      toolCalls: message.toolCalls?.map((tool) =>
-        tool.status === 'running'
-          ? { ...tool, status: 'error', result: { error: 'Interrompido' } }
-          : tool
-      ),
-    }))
+    messages.value = loaded.map((message) => {
+      const copy: AiDisplayMessage = {
+        ...message,
+        isStreaming: false,
+        toolCalls: message.toolCalls?.map((tool) => ({ ...tool })),
+      }
+      interruptRunningTools(copy, INTERRUPTED_TOOL)
+      return copy
+    })
   }
 
   async function deleteConversation(id: number) {
@@ -550,6 +570,10 @@ export const useAiStore = defineStore('ai', () => {
   async function confirmTool(messageId: string, toolId: string) {
     const tool = findTool(messageId, toolId)
     if (!tool || tool.status !== 'awaiting') return
+    // A execução pode durar minutos: o resultado é gravado na conversa dona
+    // do cartão, mesmo que o usuário abra outra no meio.
+    const owner = messages.value
+    const ownerKey = conversations.currentKey
     tool.status = 'running'
     try {
       const response = await apiService.post<ExecuteToolResponse>(
@@ -568,7 +592,7 @@ export const useAiStore = defineStore('ai', () => {
       tool.result = { error: errorMessage(err, 'Falha ao executar a ação') }
       tool.status = 'error'
     } finally {
-      void conversations.persist(messages.value)
+      void conversations.persist(owner, ownerKey)
     }
   }
 

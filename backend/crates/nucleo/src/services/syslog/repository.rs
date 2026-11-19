@@ -22,11 +22,12 @@
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use chrono::{DateTime, Duration, Utc};
 use sea_orm::{
-    ColumnTrait, Condition, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
+    ColumnTrait, Condition, DatabaseBackend, DatabaseConnection, EntityTrait, FromQueryResult,
+    QueryFilter, QueryOrder, QuerySelect,
 };
 
 use super::search;
-use sea_orm::sea_query::Query;
+use sea_orm::sea_query::{Expr, Query};
 
 use crate::{
     models::logs::{device_logs, log_templates},
@@ -292,6 +293,51 @@ pub async fn export(
     Ok(rows)
 }
 
+/// Linhas de uma hora da janela, com as de severidade `error_severity` ou
+/// pior separadas.
+#[derive(Debug, Clone, FromQueryResult)]
+pub struct HourlyCount {
+    pub bucket: sea_orm::prelude::DateTimeWithTimeZone,
+    pub total: i64,
+    pub errors: Option<i64>,
+}
+
+/// Contagem por hora da janela, com os mesmos filtros da tela. Horas sem
+/// linha não vêm: quem desenha completa com zero.
+///
+/// # Errors
+///
+/// Propaga erro do banco.
+pub async fn hourly_counts(
+    db: &DatabaseConnection,
+    query: &LogQuery,
+    error_severity: i16,
+) -> AppResult<Vec<HourlyCount>> {
+    let mut condicao = window_condition(query);
+    if let Some(termo) = &query.q {
+        condicao = condicao.add(search::select(db).await.condition(db, termo).await);
+    }
+    // O mesmo truncamento por hora do rollup dos monitores, nos dois dialetos.
+    let bucket = match db.get_database_backend() {
+        DatabaseBackend::Postgres => "date_trunc('hour', received_at)",
+        _ => "strftime('%Y-%m-%dT%H:00:00+00:00', received_at)",
+    };
+    // `SUM` no PostgreSQL pode vir `numeric`; o CAST dá o mesmo tipo nos dois.
+    let errors =
+        format!("CAST(SUM(CASE WHEN severity <= {error_severity} THEN 1 ELSE 0 END) AS BIGINT)");
+    Ok(device_logs::Entity::find()
+        .select_only()
+        .column_as(Expr::cust(bucket), "bucket")
+        .column_as(Expr::cust("COUNT(*)"), "total")
+        .column_as(Expr::cust(errors), "errors")
+        .filter(condicao)
+        .group_by(Expr::cust(bucket))
+        .order_by_asc(Expr::cust(bucket))
+        .into_model::<HourlyCount>()
+        .all(db)
+        .await?)
+}
+
 /// As `max_rows` linhas mais recentes da janela que contêm `needle` (sem
 /// caixa), em ordem cronológica — o pré-filtro do grep da IA.
 ///
@@ -508,6 +554,47 @@ mod tests {
             agora(),
         );
         assert_eq!(query.q, None, "espaço em branco viraria LIKE '%%'");
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn contagem_por_hora_separa_os_erros() {
+        let db = banco().await;
+        // 3 linhas às 10h e 2 às 11h (agora = 12h); uma das 11h é erro.
+        semeia(&db, 3, agora() - Duration::hours(2)).await;
+        semeia(&db, 2, agora() - Duration::hours(1)).await;
+        device_logs::ActiveModel {
+            source_ip: Set("192.168.88.1".into()),
+            received_at: Set((agora() - Duration::minutes(30)).into()),
+            severity: Set(Some(3)),
+            message: Set("link down".into()),
+            ..Default::default()
+        }
+        .insert(&db)
+        .await
+        .expect("linha de erro");
+
+        let horas = hourly_counts(&db, &consulta(None, None), 3)
+            .await
+            .expect("contagem");
+
+        let resumo: Vec<(DateTime<Utc>, i64, i64)> = horas
+            .iter()
+            .map(|hora| {
+                (
+                    hora.bucket.with_timezone(&Utc),
+                    hora.total,
+                    hora.errors.unwrap_or(0),
+                )
+            })
+            .collect();
+        assert_eq!(
+            resumo,
+            [
+                (agora() - Duration::hours(2), 3, 0),
+                (agora() - Duration::hours(1), 3, 1),
+            ]
+        );
     }
 
     #[tokio::test]

@@ -34,7 +34,7 @@ const OVERVIEW_SAMPLE: u64 = 5_000;
 /// Mesma janela máxima da tela de logs.
 pub(super) const MAX_HOURS: i64 = repository::MAX_WINDOW_DAYS * 24;
 
-fn filter_schema() -> Value {
+pub(super) fn filter_schema() -> Value {
     let properties = json!({
         "device": { "type": "string", "description": "Nome, IP ou id do dispositivo (omitido: todos)" },
         "severity": { "type": "string", "description": "Severidade máxima: error, warning, notice, info... ou 0-7. 'error' traz erro, crítico, alerta e emergência." },
@@ -45,7 +45,10 @@ fn filter_schema() -> Value {
 }
 
 /// Filtro resolvido a partir dos argumentos, ou a mensagem para a IA.
-async fn build_query(ctx: &AppContext, args: &ToolArgs) -> AppResult<Result<LogQuery, ToolOutput>> {
+pub(super) async fn build_query(
+    ctx: &AppContext,
+    args: &ToolArgs,
+) -> AppResult<Result<LogQuery, ToolOutput>> {
     let device_id = match args.text("device") {
         Some(identifier) => match find_device(&ctx.db, &identifier).await? {
             Some(device) => Some(device.id),
@@ -102,11 +105,11 @@ pub(super) const fn logs_disabled_message() -> &'static str {
     "A coleta de logs está desligada neste servidor (SYSLOG_ENABLED=false); não há logs para consultar."
 }
 
-fn logs_disabled() -> ToolOutput {
+pub(super) fn logs_disabled() -> ToolOutput {
     ToolOutput::not_found(logs_disabled_message())
 }
 
-fn window(query: &LogQuery) -> Value {
+pub(super) fn window(query: &LogQuery) -> Value {
     json!({ "from": query.from.to_rfc3339(), "to": query.to.to_rfc3339() })
 }
 

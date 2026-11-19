@@ -114,6 +114,16 @@ const TOOL_META: Record<string, AiToolLook> = {
     icon: 'mdi-chart-bell-curve-cumulative',
     color: 'deep-purple',
   },
+  chart_logs_volume: {
+    label: 'Gráfico de Logs por Hora',
+    icon: 'mdi-chart-bar',
+    color: 'info',
+  },
+  chart_docker_usage: {
+    label: 'Gráfico dos Containers',
+    icon: 'mdi-chart-multiline',
+    color: 'secondary',
+  },
   analyze_root_cause: {
     label: 'Causa Raiz (Topologia)',
     icon: 'mdi-source-branch',

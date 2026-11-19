@@ -156,6 +156,13 @@
       </div>
     </div>
 
+    <div
+      v-if="tool.status === 'error' && errorText && !tool.summary && !missingAccess"
+      class="px-3 pb-3 text-body-small text-error"
+    >
+      {{ errorText }}
+    </div>
+
     <div v-if="tool.chart" class="px-2 pb-2">
       <AiToolChart :chart="tool.chart" />
     </div>

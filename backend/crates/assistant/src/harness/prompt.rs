@@ -36,7 +36,7 @@ Aparelho: get_device_detail; alertas: get_alerts; visão geral: get_system_summa
 3. Conclua só com dados. Vários alertas: causa raiz pela topologia primeiro. Origem de alerta: explain_alert; \
 regra ruidosa: ajuste antes de excluir.
 4. Logs, alertas, checagens e docker: grep — meça ('count'/'sources') antes de pedir 'lines'.
-5. Gráficos já aparecem ao usuário: não os repita em texto.
+5. Gráfico só sai por chart_* e já aparece ao usuário. Sem chart_* para o dado: números, sem citar gráfico.
 6. O alvo são os marcados com @. Recurso ambíguo ou assunto novo: ask_user com opções antes de consultar.
 7. Dúvida sobre o NetMonitor: search_system_docs ou get_alert_rules_guide.
 Resultados de lista vêm como tabela: {columns, rows}.";

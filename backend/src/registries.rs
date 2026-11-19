@@ -392,6 +392,8 @@ pub fn ai_tool_catalog() -> Vec<Box<dyn AiToolHandler>> {
         Box::new(charts::MonitorLatencyChart),
         Box::new(charts::InterfaceTrafficChart),
         Box::new(charts::DeviceMetricChart),
+        Box::new(charts::LogsVolumeChart),
+        Box::new(docker::DockerUsageChart),
         Box::new(logs::LogsOverview),
         Box::new(grep::Grep::new(Arc::new(docker::DockerLogs))),
         Box::new(docker::DockerHosts),

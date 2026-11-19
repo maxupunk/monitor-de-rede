@@ -136,6 +136,23 @@ function usageFrom(event: Record<string, unknown>): AiUsageInfo {
   return usage
 }
 
+/**
+ * Ferramentas que ficaram "rodando" quando a resposta parou (o usuário
+ * interrompeu, a conexão caiu, a conversa foi reaberta) viram falha com o
+ * motivo — o resultado nunca chegou, e o cartão não pode girar para sempre.
+ */
+export function interruptRunningTools(message: AiDisplayMessage, reason: string): void {
+  for (const tool of message.toolCalls ?? []) {
+    if (tool.status !== 'running') continue
+    tool.status = 'error'
+    tool.result = { error: reason }
+  }
+}
+
+/** Motivo de uma ferramenta sem resultado: ela pode ter rodado no servidor. */
+export const INTERRUPTED_TOOL =
+  'Interrompido antes do resultado; a ação pode ter sido executada no servidor'
+
 /** Aplica um evento do stream à mensagem da IA em construção. */
 export function applyChatEvent(message: AiDisplayMessage, event: unknown): void {
   if (!isRecord(event)) return
@@ -338,6 +355,8 @@ export function toolQuestion(tool: AiToolCallState): AiQuestion | null {
 
 /** Teto do rótulo de uma decisão: o resumo pode ter várias linhas e avisos. */
 const MAX_DECISION_LABEL = 120
+/** Caracteres do resultado de uma ação que voltam para a IA na nota. */
+const MAX_RESULT_EXCERPT = 400
 
 /**
  * O que identifica a ação na nota: a primeira linha do resumo, curta. O resto
@@ -351,8 +370,21 @@ function decisionLabel(tool: AiToolCallState): string {
 }
 
 /**
+ * O resultado de uma ação, curto: a execução confirmada pelo cartão acontece
+ * fora do stream, e sem ele a IA não sabe o que a ação devolveu (o ping que o
+ * usuário confirmou, o erro do equipamento).
+ */
+function resultExcerpt(tool: AiToolCallState): string {
+  if (!tool.result) return ''
+  const text = JSON.stringify(tool.result)
+  const short = text.length > MAX_RESULT_EXCERPT ? `${text.slice(0, MAX_RESULT_EXCERPT)}…` : text
+  return ` Resultado: ${short}`
+}
+
+/**
  * Nota que conta à IA o que ficou fora do texto: o que o usuário decidiu
- * sobre uma ação proposta, ou a pergunta que ela mesma fez.
+ * sobre uma ação proposta, a ação que o modo automático rodou sozinho, ou a
+ * pergunta que ela mesma fez.
  */
 function decisionNote(tool: AiToolCallState): string | null {
   const question = toolQuestion(tool)
@@ -363,14 +395,27 @@ function decisionNote(tool: AiToolCallState): string | null {
   const label = decisionLabel(tool)
   if (tool.status === 'cancelled') return `[Ação cancelada pelo usuário: ${label}]`
   if (tool.status === 'awaiting') return `[Ação ainda aguardando confirmação: ${label}]`
-  if (tool.summary && tool.status === 'done') return `[Ação confirmada e executada: ${label}]`
-  if (tool.summary && tool.status === 'error') return `[Ação confirmada, mas falhou: ${label}]`
+  if (tool.summary && tool.status === 'done') {
+    return `[Ação confirmada e executada: ${label}.${resultExcerpt(tool)}]`
+  }
+  if (tool.summary && tool.status === 'error') {
+    return `[Ação confirmada, mas falhou: ${label}.${resultExcerpt(tool)}]`
+  }
+  // Sem pedido de confirmação: o modo automático (ou o "Aceitar
+  // automaticamente" do equipamento) rodou a ação sozinho.
+  if ((tool.risk || tool.autoApproved) && tool.status === 'done') {
+    return `[Ação executada automaticamente: ${label}]`
+  }
+  if ((tool.risk || tool.autoApproved) && tool.status === 'error') {
+    return `[Ação automática falhou ou foi interrompida: ${label}]`
+  }
   return null
 }
 
 /**
  * Cada mensagem enviada junto do id da mensagem da tela de onde saiu.
- * Mensagens com erro ficam de fora; as respostas levam anotadas as decisões
+ * Mensagens com erro perdem o texto (incompleto) mas não as notas: a ação que
+ * rodou antes do erro aconteceu. As respostas levam anotadas as decisões
  * sobre ações propostas, para a IA não propor de novo o que já foi feito ou
  * recusado. As marcações da última pergunta não viram nota: vão em `mentions`
  * e o backend as expande no contexto da vez.
@@ -378,7 +423,6 @@ function decisionNote(tool: AiToolCallState): string | null {
 function toApiEntries(messages: AiDisplayMessage[]): { id: string; message: ApiChatMessage }[] {
   const last = messages[messages.length - 1]
   return messages
-    .filter((message) => !message.error)
     .map((message) => {
       const notes = (message.toolCalls ?? [])
         .map(decisionNote)
@@ -386,7 +430,8 @@ function toApiEntries(messages: AiDisplayMessage[]): { id: string; message: ApiC
       if (message.mentions?.length && message !== last) {
         notes.push(`[Marcados com @: ${message.mentions.map(describeMention).join('; ')}]`)
       }
-      const content = [message.content, ...notes].filter((part) => part.trim()).join('\n')
+      const text = message.error ? '' : message.content
+      const content = [text, ...notes].filter((part) => part.trim()).join('\n')
       return { id: message.id, message: { role: message.role, content } }
     })
     .filter((entry) => entry.message.content.trim().length > 0)

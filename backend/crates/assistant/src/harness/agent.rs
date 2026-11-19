@@ -5,6 +5,7 @@
 use netmonitor_core::areas::AreaSet;
 use netmonitor_core::roles::AreaAccess;
 use std::{
+    collections::HashSet,
     pin::Pin,
     time::{Duration, Instant},
 };
@@ -39,7 +40,7 @@ use crate::{
     central::Central,
     context_window::{self, ContextWindow},
     decider::{runtime::DeciderRuntime, tool_routing},
-    drivers::traits::{AiChatOptions, AiDriver, AiMessage, AiToolCall, AiUsage},
+    drivers::traits::{AiChatOptions, AiChunkStream, AiDriver, AiMessage, AiToolCall, AiUsage},
     dtos::{AiChart, ChatMessageInput, ChatStreamRequest},
     mentions, screens,
     settings::AiSettings,
@@ -483,6 +484,8 @@ fn infer_group_from_unknown_tool(name: &str) -> Option<ToolGroup> {
         Some(ToolGroup::Schedules)
     } else if lower.contains("docker") || lower.contains("container") {
         Some(ToolGroup::Docker)
+    } else if lower.contains("topolog") {
+        Some(ToolGroup::Platform)
     } else if lower.contains("chart") || lower.contains("graph") {
         Some(ToolGroup::Charts)
     } else if lower.contains("audit") {
@@ -493,6 +496,14 @@ fn infer_group_from_unknown_tool(name: &str) -> Option<ToolGroup> {
         Some(ToolGroup::AlertRules)
     } else if lower.contains("plugin") || lower.contains("ssh") {
         Some(ToolGroup::Devices)
+    } else if lower.contains("log") {
+        // Depois de docker e audit: `docker_logs` e `audit_log` têm grupo próprio.
+        Some(ToolGroup::Logs)
+    } else if ["histor", "metric", "uptime", "sla"]
+        .iter()
+        .any(|k| lower.contains(k))
+    {
+        Some(ToolGroup::History)
     } else if ["ping", "trace", "scan", "dns"]
         .iter()
         .any(|k| lower.contains(k))
@@ -873,7 +884,8 @@ pub async fn run_agent_loop(
         let budget = ContextBudget::new(window.tokens, options.max_tokens);
 
         let mut summary = request.memory.summary.clone();
-        if !small_talk {
+        // Compactar a pedido vale até numa cortesia: a tela já zerou o pedido.
+        if !small_talk || request.memory.force_compaction {
             let fixed_for = |loaded: &ToolGroups| {
                 estimate_tokens(&system_prompt)
                     + estimate_tokens(
@@ -1009,6 +1021,7 @@ pub async fn run_agent_loop(
         }
         // A conferência da resposta final ganha uma rodada só por pergunta.
         let mut answer_retried = false;
+        let mut seen_call_ids = HashSet::new();
         for _ in 0..MAX_ITERATIONS {
             // Recalculado a cada rodada: um `load_tools` vale já na seguinte.
             let tools = if small_talk {
@@ -1030,7 +1043,7 @@ pub async fn run_agent_loop(
             metrics.estimated_context = estimate_messages(&conversation) + tools_tokens;
             metrics.tool_groups = loaded.ids();
             metrics.start_round();
-            let mut stream = match driver.chat_stream(&conversation, &tools, options).await {
+            let stream = match driver.chat_stream(&conversation, &tools, options).await {
                 Ok(stream) => stream,
                 Err(err) => {
                     return sink
@@ -1038,47 +1051,16 @@ pub async fn run_agent_loop(
                         .await
                 }
             };
-
-            let mut assistant_text = String::new();
-            let mut pending_tools = Vec::new();
-            let mut first_output: Option<Instant> = None;
-            while let Some(chunk) = stream.next().await {
-                let chunk = match chunk {
-                    Ok(chunk) => chunk,
-                    Err(err) => {
-                        return sink
-                            .fail(err.to_string(), &mut metrics, driver.as_ref())
-                            .await
+            // Depois de uma conferência o texto só sai conferido.
+            let (assistant_text, mut pending_tools) =
+                match read_round(stream, &sink, &mut metrics, !answer_retried).await {
+                    RoundRead::Done { text, tools } => (text, tools),
+                    RoundRead::Failed(message) => {
+                        return sink.fail(message, &mut metrics, driver.as_ref()).await
                     }
+                    RoundRead::Disconnected => return,
                 };
-                if chunk.text_delta.is_some() || !chunk.tool_calls.is_empty() {
-                    first_output.get_or_insert_with(Instant::now);
-                }
-                if let Some(notice) = chunk.notice {
-                    if !sink.send(HarnessEvent::Notice { message: notice }).await {
-                        return;
-                    }
-                }
-                if let Some(model) = chunk.model {
-                    metrics.model = Some(model);
-                }
-                if let Some(chunk_usage) = chunk.usage {
-                    metrics.add_usage(chunk_usage);
-                }
-                if let Some(delta) = chunk.text_delta {
-                    assistant_text.push_str(&delta);
-                    // Depois de uma conferência o texto só sai conferido.
-                    if !answer_retried
-                        && !sink.send(HarnessEvent::TextDelta { content: delta }).await
-                    {
-                        return;
-                    }
-                }
-                pending_tools.extend(chunk.tool_calls);
-            }
-            if let Some(first) = first_output {
-                metrics.generation += first.elapsed();
-            }
+            unique_call_ids(&mut pending_tools, &mut seen_call_ids);
 
             if pending_tools.is_empty() {
                 // Resposta que cita recurso que nada mostrou (`agente-west-01`
@@ -1204,10 +1186,115 @@ pub async fn run_agent_loop(
                 return sink.finish(&mut metrics, driver.as_ref()).await;
             }
         }
-        sink.finish(&mut metrics, driver.as_ref()).await;
+        // As rodadas acabaram sem resposta (ainda havia ferramenta, ou a
+        // conferência caiu na última): uma chamada sem ferramentas fecha com o
+        // que as consultas trouxeram — a tela nunca fica sem texto.
+        conversation.push(AiMessage {
+            role: "user".to_string(),
+            content: Some(ROUND_LIMIT_NOTE.to_string()),
+            tool_calls: None,
+            tool_call_id: None,
+        });
+        metrics.start_round();
+        let stream = match driver.chat_stream(&conversation, &[], options).await {
+            Ok(stream) => stream,
+            Err(err) => {
+                return sink
+                    .fail(err.to_string(), &mut metrics, driver.as_ref())
+                    .await
+            }
+        };
+        match read_round(stream, &sink, &mut metrics, true).await {
+            RoundRead::Done { text, .. } if text.trim().is_empty() => {
+                sink.fail(NO_ANSWER.to_string(), &mut metrics, driver.as_ref())
+                    .await;
+            }
+            RoundRead::Done { .. } => sink.finish(&mut metrics, driver.as_ref()).await,
+            RoundRead::Failed(message) => sink.fail(message, &mut metrics, driver.as_ref()).await,
+            RoundRead::Disconnected => {}
+        }
     });
 
     Box::pin(ReceiverStream::new(receiver))
+}
+
+/// Pedido de fechamento quando as rodadas acabam.
+const ROUND_LIMIT_NOTE: &str =
+    "Limite de consultas desta pergunta atingido. Responda agora, curto, \
+só com o que as consultas acima trouxeram; diga o que ficou sem verificar.";
+
+/// Quando nem a rodada de fechamento traz texto.
+const NO_ANSWER: &str =
+    "A IA não chegou a uma resposta dentro do limite de consultas. Reformule a pergunta ou peça algo mais específico.";
+
+/// Como terminou a leitura de uma rodada com o provedor.
+enum RoundRead {
+    Done {
+        text: String,
+        tools: Vec<AiToolCall>,
+    },
+    Failed(String),
+    Disconnected,
+}
+
+/// Lê a resposta de uma rodada: repassa os avisos, as métricas e, com
+/// `forward`, o texto à tela enquanto chega.
+async fn read_round(
+    mut stream: AiChunkStream,
+    sink: &EventSink,
+    metrics: &mut TurnMetrics,
+    forward: bool,
+) -> RoundRead {
+    let mut text = String::new();
+    let mut tools = Vec::new();
+    let mut first_output: Option<Instant> = None;
+    while let Some(chunk) = stream.next().await {
+        let chunk = match chunk {
+            Ok(chunk) => chunk,
+            Err(err) => return RoundRead::Failed(err.to_string()),
+        };
+        if chunk.text_delta.is_some() || !chunk.tool_calls.is_empty() {
+            first_output.get_or_insert_with(Instant::now);
+        }
+        if let Some(notice) = chunk.notice {
+            if !sink.send(HarnessEvent::Notice { message: notice }).await {
+                return RoundRead::Disconnected;
+            }
+        }
+        if let Some(model) = chunk.model {
+            metrics.model = Some(model);
+        }
+        if let Some(usage) = chunk.usage {
+            metrics.add_usage(usage);
+        }
+        if let Some(delta) = chunk.text_delta {
+            text.push_str(&delta);
+            if forward && !sink.send(HarnessEvent::TextDelta { content: delta }).await {
+                return RoundRead::Disconnected;
+            }
+        }
+        tools.extend(chunk.tool_calls);
+    }
+    if let Some(first) = first_output {
+        metrics.generation += first.elapsed();
+    }
+    RoundRead::Done { text, tools }
+}
+
+/// Provedor que repete o id entre rodadas (`call_0` em toda resposta) faria o
+/// resultado de uma chamada valer pelo de outra — na conversa, na poda de
+/// repetidas e no cartão da tela. O id já visto nesta vez ganha sufixo único.
+fn unique_call_ids(calls: &mut [AiToolCall], seen: &mut HashSet<String>) {
+    for call in calls {
+        if seen.contains(&call.id) {
+            call.id = format!(
+                "{}_{}",
+                call.id,
+                &uuid::Uuid::new_v4().simple().to_string()[..8]
+            );
+        }
+        seen.insert(call.id.clone());
+    }
 }
 
 /// Resposta completa de uma sessão sem tela (rotinas automáticas).
@@ -1265,6 +1352,37 @@ mod tests {
             role: role.into(),
             content: content.into(),
         }
+    }
+
+    #[test]
+    fn ferramenta_inventada_carrega_o_grupo_certo() {
+        let grupo = infer_group_from_unknown_tool;
+        assert_eq!(grupo("get_logs"), Some(ToolGroup::Logs));
+        assert_eq!(grupo("search_syslog"), Some(ToolGroup::Logs));
+        assert_eq!(grupo("docker_logs_tail"), Some(ToolGroup::Docker));
+        assert_eq!(grupo("get_audit_log"), Some(ToolGroup::Audit));
+        assert_eq!(grupo("topology_graph"), Some(ToolGroup::Platform));
+        assert_eq!(grupo("cpu_graph"), Some(ToolGroup::Charts));
+        assert_eq!(grupo("get_uptime"), Some(ToolGroup::History));
+        assert_eq!(grupo("qualquer_coisa"), None);
+    }
+
+    #[test]
+    fn id_repetido_entre_rodadas_ganha_sufixo() {
+        let chamada = |id: &str| AiToolCall {
+            id: id.into(),
+            name: "get_alerts".into(),
+            arguments: "{}".into(),
+        };
+        let mut vistos = HashSet::new();
+        let mut primeira = vec![chamada("call_0")];
+        unique_call_ids(&mut primeira, &mut vistos);
+        assert_eq!(primeira[0].id, "call_0");
+        let mut segunda = vec![chamada("call_0"), chamada("call_1")];
+        unique_call_ids(&mut segunda, &mut vistos);
+        assert_ne!(segunda[0].id, "call_0");
+        assert!(segunda[0].id.starts_with("call_0_"));
+        assert_eq!(segunda[1].id, "call_1");
     }
 
     #[test]

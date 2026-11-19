@@ -10,6 +10,8 @@ import {
   applyChatEvent,
   buildChatHistory,
   contextUsage,
+  INTERRUPTED_TOOL,
+  interruptRunningTools,
   shortModelName,
   tokensPerSecond,
   type AiDisplayMessage,
@@ -131,6 +133,72 @@ describe('eventos do chat', () => {
     expect(buildChatHistory(mensagens).messages[1].content).toBe(
       'Proponho reiniciar.\n[Ação cancelada pelo usuário: Executar reboot em Borda]'
     )
+  })
+
+  it('resposta com erro perde o texto mas mantém a ação que já rodou', () => {
+    const mensagens: AiDisplayMessage[] = [
+      { id: '1', role: 'user', content: 'reinicia o ollama' },
+      {
+        id: '2',
+        role: 'assistant',
+        content: 'Reiniciando…',
+        error: 'timeout',
+        toolCalls: [
+          {
+            id: 't1',
+            name: 'docker_container_action',
+            arguments: {},
+            status: 'done',
+            risk: 'low',
+          },
+        ],
+      },
+    ]
+    expect(buildChatHistory(mensagens).messages[1].content).toBe(
+      '[Ação executada automaticamente: docker_container_action]'
+    )
+  })
+
+  it('ação confirmada leva o resultado resumido para a IA', () => {
+    const mensagens: AiDisplayMessage[] = [
+      { id: '1', role: 'user', content: 'pinga o gateway' },
+      {
+        id: '2',
+        role: 'assistant',
+        content: '',
+        toolCalls: [
+          {
+            id: 't1',
+            name: 'ping',
+            arguments: {},
+            summary: 'Ping em 10.0.0.1',
+            status: 'done',
+            result: { loss_pct: 0, avg_ms: 2.5 },
+          },
+        ],
+      },
+    ]
+    expect(buildChatHistory(mensagens).messages[1].content).toBe(
+      '[Ação confirmada e executada: Ping em 10.0.0.1. Resultado: {"loss_pct":0,"avg_ms":2.5}]'
+    )
+  })
+
+  it('ferramenta sem resultado vira falha com o motivo quando a resposta para', () => {
+    const msg: AiDisplayMessage = {
+      id: '2',
+      role: 'assistant',
+      content: '',
+      toolCalls: [
+        { id: 't1', name: 'get_alerts', arguments: {}, status: 'running' },
+        { id: 't2', name: 'ping', arguments: {}, status: 'done', result: { ok: true } },
+      ],
+    }
+    interruptRunningTools(msg, INTERRUPTED_TOOL)
+    expect(msg.toolCalls?.[0]).toMatchObject({
+      status: 'error',
+      result: { error: INTERRUPTED_TOOL },
+    })
+    expect(msg.toolCalls?.[1].status).toBe('done')
   })
 })
 

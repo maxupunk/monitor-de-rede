@@ -108,10 +108,13 @@ export const useAiConversationsStore = defineStore('aiConversations', () => {
     upsertSummary(created)
   }
 
-  /** Grava as mensagens na conversa em tela (criando-a na primeira resposta). */
-  function persist<T extends TitledMessage>(messages: T[]): Promise<void> {
+  /**
+   * Grava as mensagens na conversa em tela (criando-a na primeira resposta).
+   * Quem termina depois de o usuário trocar de conversa (a execução de uma
+   * ação confirmada) passa a chave da conversa dona das mensagens.
+   */
+  function persist<T extends TitledMessage>(messages: T[], key = currentKey.value): Promise<void> {
     if (messages.length === 0) return queue
-    const key = currentKey.value
     const body: AiConversationInput = {
       title: conversationTitle(messages.find((message) => message.role === 'user')?.content),
       messages: JSON.parse(JSON.stringify(messages)) as unknown[],
@@ -158,6 +161,7 @@ export const useAiConversationsStore = defineStore('aiConversations', () => {
 
   return {
     summaries,
+    currentKey,
     activeId,
     loading,
     error,

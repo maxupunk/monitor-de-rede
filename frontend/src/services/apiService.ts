@@ -272,6 +272,8 @@ class ApiService {
       }
       return response
     } catch (err: unknown) {
+      // Quem chamou interrompeu (botão "Parar"): não é falha de conexão.
+      if (signal?.aborted) throw err
       if (isNetworkError(err)) {
         throw new NetworkError()
       }

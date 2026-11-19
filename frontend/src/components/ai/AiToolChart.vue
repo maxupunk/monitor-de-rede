@@ -29,18 +29,18 @@ import { computed } from 'vue'
 import BaseMetricChart, { type ChartSeriesInput } from '@/components/BaseMetricChart.vue'
 import type { AiChart } from '@/bindings/AiChart'
 import type { AiChartUnit } from '@/bindings/AiChartUnit'
-import { formatShortDateTime } from '@/utils/formatters'
 
 const props = defineProps<{
   chart: AiChart
 }>()
 
-type UnitType = 'latency' | 'bandwidth' | 'percentage' | 'generic'
+type UnitType = 'latency' | 'bandwidth' | 'percentage' | 'bytes' | 'generic'
 
 const UNIT_TYPES: Record<AiChartUnit, UnitType> = {
   latency: 'latency',
   bandwidth: 'bandwidth',
   percentage: 'percentage',
+  bytes: 'bytes',
   generic: 'generic',
 }
 
@@ -50,7 +50,7 @@ const SERIES_COLORS: Record<string, string> = {
   outBps: '#2196F3',
 }
 
-const PALETTE = ['#1976D2', '#FF9800', '#9C27B0', '#009688']
+const PALETTE = ['#1976D2', '#FF9800', '#9C27B0', '#009688', '#E91E63', '#3F51B5']
 
 const unitType = computed<UnitType>(() => UNIT_TYPES[props.chart.unit])
 
@@ -61,10 +61,9 @@ const series = computed<ChartSeriesInput[]>(() => {
     label: item.label,
     color: SERIES_COLORS[item.id] ?? PALETTE[index % PALETTE.length],
     fillArea: !multiple,
-    data: item.points.map((point) => ({
-      time: props.chart.xAxis === 'label' ? point.time : formatShortDateTime(point.time),
-      value: point.value,
-    })),
+    // O instante vai cru (RFC 3339): o gráfico escolhe o formato do eixo pela
+    // duração da janela, como nas telas de monitor e de container.
+    data: item.points.map((point) => ({ time: point.time, value: point.value })),
   }))
 })
 </script>

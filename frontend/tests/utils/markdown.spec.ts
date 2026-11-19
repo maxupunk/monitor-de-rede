@@ -10,6 +10,14 @@ describe('renderMarkdown', () => {
     expect(html).toContain('<ol class="md-list"><li>a</li><li>b</li></ol>')
   })
 
+  it('lista numerada mantém o número escrito pela IA', () => {
+    const separada = renderMarkdown('1. a\n\n2. b')
+    expect(separada).toContain('<ol class="md-list"><li>a</li><li>b</li></ol>')
+    const comSubitem = renderMarkdown('1. a\n   - detalhe\n2. b')
+    expect(comSubitem).toContain('<li>b</li></ol>')
+    expect(comSubitem).toMatch(/<ol[^>]*start="2"/)
+  })
+
   it('não reinterpreta o conteúdo de um bloco de código', () => {
     const html = renderMarkdown('```bash\nping *host*\n- não é lista\n```')
     expect(html).toContain('ping *host*\n- não é lista')

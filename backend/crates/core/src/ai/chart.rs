@@ -12,6 +12,9 @@ pub enum AiChartUnit {
     Latency,
     Bandwidth,
     Percentage,
+    /// Bytes (memória, disco): a tela escala em KiB/MiB/GiB.
+    Bytes,
+    /// Contagem (logs por hora...): número sem unidade.
     Generic,
 }
 

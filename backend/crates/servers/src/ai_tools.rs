@@ -5,6 +5,8 @@
 //! labels, que costumam carregar senha e token. Os logs de um container são
 //! lidos pelo `grep` (fonte `docker`), que devolve só o que casa.
 
+use std::collections::HashMap;
+
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use loco_rs::prelude::AppContext;
@@ -15,14 +17,18 @@ use agent_protocol::{docker::views::DockerContainerSummary, policy::Permission};
 use netmonitor_core::{
     ai::{
         args::ToolArgs,
+        chart::{AiChart, AiChartAxis, AiChartSeries, AiChartUnit},
         grep::{GrepFilter, GrepRecord, GrepSource, Scan, SCAN_CAP},
         risk::RiskAssessment,
-        series::round2,
+        series::{chart_points, round2, Sample},
         tools::{audit, AiToolHandler, ToolGroup, ToolKind, ToolOutput, VIA_AI},
     },
     audit::{AuditAction, AuditEntryInput, ResourceType},
     shared::errors::AppResult,
-    telemetry::{store, views::MetricsRange},
+    telemetry::{
+        store,
+        views::{ContainerHistoryPoint, ContainerUsageSummary, MetricsRange},
+    },
 };
 
 use crate::docker::{
@@ -407,7 +413,13 @@ impl AiToolHandler for DockerUsage {
         let range = range_for(hours);
         let host_key = host.key.to_string();
         let now = Utc::now();
-        if let Some(name) = container {
+        if let Some(wanted) = container {
+            let recorded = store::container_usage(&ctx.db, &host_key, range, now).await?;
+            let name = match match_container(recorded.iter().map(|row| row.name.as_str()), &wanted)
+            {
+                Ok(name) => name.to_string(),
+                Err(message) => return Ok(ToolOutput::not_found(message)),
+            };
             let points = store::container_history(&ctx.db, &host_key, &name, range, now).await?;
             if points.is_empty() {
                 return Ok(ToolOutput::not_found(format!(
@@ -481,6 +493,248 @@ async fn live_usage(host: &DockerHost, container: Option<&str>) -> ToolOutput {
         })).collect::<Vec<_>>(),
         "omitted": rows.len().saturating_sub(MAX_USAGE_ROWS),
     }))
+}
+
+/// Nome gravado do container que a pessoa quis dizer: o igual (sem caixa) ou,
+/// senão, o único que contém o termo — "ollama" acha "monitor-de-rede-ollama-1".
+fn match_container<'a>(
+    names: impl IntoIterator<Item = &'a str>,
+    wanted: &str,
+) -> Result<&'a str, String> {
+    let wanted = wanted.trim().to_lowercase();
+    let names: Vec<&str> = names.into_iter().collect();
+    if let Some(exact) = names.iter().find(|name| name.to_lowercase() == wanted) {
+        return Ok(exact);
+    }
+    let partial: Vec<&str> = names
+        .iter()
+        .copied()
+        .filter(|name| name.to_lowercase().contains(&wanted))
+        .collect();
+    match partial.as_slice() {
+        [only] => Ok(only),
+        [] => Err(format!(
+            "Sem histórico gravado para o container '{wanted}' na janela; confira o nome com get_docker_containers"
+        )),
+        many => Err(format!(
+            "'{wanted}' casa com vários containers ({}); diga qual",
+            many.join(", ")
+        )),
+    }
+}
+
+/// Grandeza do gráfico de consumo dos containers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UsageMetric {
+    Cpu,
+    Memory,
+}
+
+impl UsageMetric {
+    fn parse(raw: Option<&str>) -> Self {
+        match raw.map(|raw| raw.trim().to_lowercase()).as_deref() {
+            Some("memory" | "memoria" | "memória" | "mem" | "ram") => Self::Memory,
+            _ => Self::Cpu,
+        }
+    }
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Cpu => "CPU",
+            Self::Memory => "Memória",
+        }
+    }
+
+    const fn unit(self) -> AiChartUnit {
+        match self {
+            Self::Cpu => AiChartUnit::Percentage,
+            Self::Memory => AiChartUnit::Bytes,
+        }
+    }
+
+    /// Chave do resumo que a IA lê, já na unidade dele.
+    const fn key(self) -> &'static str {
+        match self {
+            Self::Cpu => "cpu_pct",
+            Self::Memory => "mem_mib",
+        }
+    }
+
+    const fn of(self, point: &ContainerHistoryPoint) -> f64 {
+        match self {
+            Self::Cpu => point.cpu_avg,
+            Self::Memory => point.memory_avg,
+        }
+    }
+
+    /// Valor no resumo da IA: CPU em %, memória em MiB.
+    fn summarized(self, value: f64) -> f64 {
+        match self {
+            Self::Cpu => value,
+            Self::Memory => value / MIB,
+        }
+    }
+
+    /// Ordem do ranking: quem mais consome na janela primeiro.
+    #[allow(clippy::cast_precision_loss)]
+    fn rank(self, row: &ContainerUsageSummary) -> f64 {
+        match self {
+            Self::Cpu => row.cpu_avg,
+            Self::Memory => row.memory_max as f64,
+        }
+    }
+}
+
+/// Containers comparados no mesmo gráfico.
+const CHART_CONTAINERS: usize = 5;
+
+/// Põe as séries na mesma linha do tempo: o gráfico posiciona os pontos pelo
+/// índice, então um container que subiu no meio da janela ficaria espremido no
+/// começo. O instante que falta numa série vira zero — container parado não
+/// consome.
+fn align_series(series: &[(String, Vec<(String, f64)>)]) -> Vec<(String, Vec<Sample>)> {
+    let parse = |at: &str| {
+        DateTime::parse_from_rfc3339(at)
+            .ok()
+            .map(|at| at.with_timezone(&Utc))
+    };
+    let mut timeline: Vec<DateTime<Utc>> = series
+        .iter()
+        .flat_map(|(_, points)| points.iter().filter_map(|(at, _)| parse(at)))
+        .collect();
+    timeline.sort_unstable();
+    timeline.dedup();
+    series
+        .iter()
+        .map(|(name, points)| {
+            let values: HashMap<DateTime<Utc>, f64> = points
+                .iter()
+                .filter_map(|(at, value)| parse(at).map(|at| (at, *value)))
+                .collect();
+            let samples = timeline
+                .iter()
+                .map(|at| Sample {
+                    at: *at,
+                    value: values.get(at).copied().unwrap_or(0.0),
+                })
+                .collect();
+            (name.clone(), samples)
+        })
+        .collect()
+}
+
+pub struct DockerUsageChart;
+
+#[async_trait]
+impl AiToolHandler for DockerUsageChart {
+    fn area(&self) -> Area {
+        Area::Servers
+    }
+
+    fn name(&self) -> &'static str {
+        "chart_docker_usage"
+    }
+
+    fn group(&self) -> ToolGroup {
+        ToolGroup::Charts
+    }
+
+    fn description(&self) -> &'static str {
+        "Exibe ao usuário o gráfico de CPU ou memória dos containers no histórico gravado: sem 'container', compara os 5 que mais consomem; com 'container', a série só dele. Devolve média, pico e último valor."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "host": { "type": "string", "description": HOST_ARG },
+                "container": { "type": "string", "description": "Nome ou parte do nome do container (opcional)" },
+                "metric": { "type": "string", "enum": ["cpu", "memory"], "description": "cpu (padrão) ou memory" },
+                "hours": { "type": "integer", "description": "Horas: 1–720, padrão 6" }
+            }
+        })
+    }
+
+    async fn execute(&self, ctx: &AppContext, args: &ToolArgs) -> AppResult<ToolOutput> {
+        let host = match resolve_host(ctx, args.text("host").as_deref()).await? {
+            Ok(host) => host,
+            Err(message) => return Ok(ToolOutput::not_found(message)),
+        };
+        let metric = UsageMetric::parse(args.text("metric").as_deref());
+        let hours = args.integer_in("hours", 6, 1, 720);
+        let range = range_for(hours);
+        let host_key = host.key.to_string();
+        let now = Utc::now();
+
+        let mut recorded = store::container_usage(&ctx.db, &host_key, range, now).await?;
+        if recorded.is_empty() {
+            return Ok(ToolOutput::not_found(format!(
+                "Sem histórico gravado de containers em {host_key} nas últimas {hours}h; nenhum gráfico exibido"
+            )));
+        }
+        let names: Vec<String> = match args.text("container") {
+            Some(wanted) => {
+                match match_container(recorded.iter().map(|row| row.name.as_str()), &wanted) {
+                    Ok(name) => vec![name.to_string()],
+                    Err(message) => return Ok(ToolOutput::not_found(message)),
+                }
+            }
+            None => {
+                recorded.sort_by(|a, b| metric.rank(b).total_cmp(&metric.rank(a)));
+                recorded
+                    .iter()
+                    .take(CHART_CONTAINERS)
+                    .map(|row| row.name.clone())
+                    .collect()
+            }
+        };
+
+        let mut raw = Vec::with_capacity(names.len());
+        for name in names {
+            let points = store::container_history(&ctx.db, &host_key, &name, range, now).await?;
+            let values = points
+                .iter()
+                .map(|point| (point.at.clone(), metric.of(point)))
+                .collect();
+            raw.push((name, values));
+        }
+        let aligned = align_series(&raw);
+        let summary: Vec<Value> = aligned
+            .iter()
+            .map(|(name, samples)| {
+                let values = samples.iter().map(|sample| metric.summarized(sample.value));
+                json!({ "container": name, (metric.key()): stats(values) })
+            })
+            .collect();
+        let title = match aligned.as_slice() {
+            [(name, _)] => format!("{} — {name}", metric.label()),
+            _ => format!("{} dos containers — {host_key}", metric.label()),
+        };
+        let chart = AiChart {
+            title,
+            subtitle: Some(format!("últimas {hours}h")),
+            unit: metric.unit(),
+            x_axis: AiChartAxis::Time,
+            series: aligned
+                .iter()
+                .map(|(name, samples)| AiChartSeries {
+                    id: name.clone(),
+                    label: name.clone(),
+                    points: chart_points(samples),
+                })
+                .collect(),
+            avg_value: None,
+        };
+        Ok(ToolOutput::with_chart(
+            json!({
+                "chart_shown": true,
+                "host": host_key,
+                "hours": hours,
+                "containers": summary,
+            }),
+            chart,
+        ))
+    }
 }
 
 /// O que a IA pode fazer com um container. Remover e atualizar ficam de fora:
@@ -776,6 +1030,43 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
+
+    #[test]
+    fn container_casa_pelo_nome_exato_ou_pelo_unico_parcial() {
+        let nomes = ["monitor-de-rede-ollama-1", "monitor-de-rede-api-1", "Minio"];
+        assert_eq!(match_container(nomes, "minio"), Ok("Minio"));
+        assert_eq!(
+            match_container(nomes, "OLLAMA"),
+            Ok("monitor-de-rede-ollama-1")
+        );
+        let ambiguo = match_container(nomes, "monitor-de-rede").unwrap_err();
+        assert!(ambiguo.contains("vários"), "{ambiguo}");
+        assert!(match_container(nomes, "redis").is_err());
+    }
+
+    #[test]
+    fn series_dos_containers_dividem_a_linha_do_tempo() {
+        let ponto = |minuto: u32, valor| (format!("2026-11-19T01:{minuto:02}:00+00:00"), valor);
+        let series = [
+            (
+                "api".to_string(),
+                vec![ponto(0, 10.0), ponto(1, 20.0), ponto(2, 30.0)],
+            ),
+            ("novo".to_string(), vec![ponto(2, 5.0)]),
+        ];
+        let alinhadas = align_series(&series);
+        let valores = |i: usize| alinhadas[i].1.iter().map(|s| s.value).collect::<Vec<_>>();
+        assert_eq!(valores(0), [10.0, 20.0, 30.0]);
+        assert_eq!(valores(1), [0.0, 0.0, 5.0]);
+        assert_eq!(alinhadas[1].1[2].at, alinhadas[0].1[2].at);
+    }
+
+    #[test]
+    fn metrica_do_grafico_aceita_portugues() {
+        assert_eq!(UsageMetric::parse(Some("Memória")), UsageMetric::Memory);
+        assert_eq!(UsageMetric::parse(Some("ram")), UsageMetric::Memory);
+        assert_eq!(UsageMetric::parse(None), UsageMetric::Cpu);
+    }
 
     #[test]
     fn stderr_pesa_como_erro() {

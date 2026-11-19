@@ -5,14 +5,17 @@
 //! memória) — e o frontend usa o mesmo `BaseMetricChart`. A IA recebe só as
 //! estatísticas; os pontos vão para a tela em [`ToolOutput::chart`].
 
+use std::collections::HashMap;
+
 use async_trait::async_trait;
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Duration, DurationRound, Utc};
 use loco_rs::prelude::AppContext;
 use netmonitor_core::areas::Area;
 use serde_json::{json, Value};
 
 use super::{
     history::{metric_samples, monitor_selector_schema},
+    log_digest::ERROR_SEVERITY,
     lookup::{device_interfaces_of, device_not_found, find_device, find_monitor, pick_interface},
     series::{chart_points, round2, stats, Sample},
     AiToolHandler, ToolArgs, ToolGroup, ToolOutput,
@@ -25,6 +28,10 @@ use crate::{
     services::{
         monitoring::{rollup::hourly_buckets, timeseries::calculate_monitor_timeseries},
         shared::errors::AppResult,
+        syslog::{
+            db::LogsDb,
+            repository::{self, HourlyCount},
+        },
     },
 };
 
@@ -386,9 +393,144 @@ impl AiToolHandler for DeviceMetricChart {
     }
 }
 
+/// Completa as horas sem linha com zero: o gráfico de volume mostra o
+/// silêncio, que também é informação. Devolve (todas, erros).
+fn hourly_series(
+    counts: &[HourlyCount],
+    from: DateTime<Utc>,
+    to: DateTime<Utc>,
+) -> (Vec<Sample>, Vec<Sample>) {
+    let hour = Duration::hours(1);
+    let by_hour: HashMap<DateTime<Utc>, &HourlyCount> = counts
+        .iter()
+        .map(|count| (count.bucket.with_timezone(&Utc), count))
+        .collect();
+    let (mut total, mut errors) = (Vec::new(), Vec::new());
+    let mut at = from.duration_trunc(hour).unwrap_or(from);
+    while at <= to {
+        let count = by_hour.get(&at);
+        #[allow(clippy::cast_precision_loss)]
+        let (all, bad) = count.map_or((0.0, 0.0), |count| {
+            (count.total as f64, count.errors.unwrap_or(0) as f64)
+        });
+        total.push(Sample { at, value: all });
+        errors.push(Sample { at, value: bad });
+        at += hour;
+    }
+    (total, errors)
+}
+
+pub struct LogsVolumeChart;
+
+#[async_trait]
+impl AiToolHandler for LogsVolumeChart {
+    fn area(&self) -> Area {
+        Area::Core
+    }
+
+    fn name(&self) -> &'static str {
+        "chart_logs_volume"
+    }
+
+    fn group(&self) -> ToolGroup {
+        ToolGroup::Charts
+    }
+
+    fn description(&self) -> &'static str {
+        "Exibe ao usuário o gráfico de logs recebidos por hora (todos e os de erro), com os mesmos filtros de get_logs_overview, e devolve total, média e horas de pico."
+    }
+
+    fn parameters(&self) -> Value {
+        super::logs::filter_schema()
+    }
+
+    async fn execute(&self, ctx: &AppContext, args: &ToolArgs) -> AppResult<ToolOutput> {
+        let Ok(logs) = LogsDb::from_context(ctx) else {
+            return Ok(super::logs::logs_disabled());
+        };
+        let query = match super::logs::build_query(ctx, args).await? {
+            Ok(query) => query,
+            Err(output) => return Ok(output),
+        };
+        let counts = repository::hourly_counts(logs.connection(), &query, ERROR_SEVERITY).await?;
+        let (total, errors) = hourly_series(&counts, query.from, query.to);
+        let sum = |samples: &[Sample]| samples.iter().map(|sample| sample.value).sum::<f64>();
+        let (logs_total, errors_total) = (sum(&total), sum(&errors));
+        if logs_total == 0.0 {
+            return Ok(ToolOutput::data(json!({
+                "window": super::logs::window(&query),
+                "total": 0,
+                "note": "Nenhum log na janela com esses filtros; nenhum gráfico exibido.",
+            })));
+        }
+        let Some(summary) = stats(&total) else {
+            return Ok(ToolOutput::not_found("Sem horas na janela"));
+        };
+        let mut busiest: Vec<&Sample> = total.iter().filter(|s| s.value > 0.0).collect();
+        busiest.sort_by(|a, b| b.value.total_cmp(&a.value));
+        let hours = (query.to - query.from).num_hours();
+
+        let mut series = vec![AiChartSeries {
+            id: "total".into(),
+            label: "Todos".into(),
+            points: chart_points(&total),
+        }];
+        if errors_total > 0.0 {
+            series.push(AiChartSeries {
+                id: "errors".into(),
+                label: "Erros".into(),
+                points: chart_points(&errors),
+            });
+        }
+        let chart = AiChart {
+            title: "Logs por hora".into(),
+            subtitle: Some(format!("últimas {hours}h")),
+            unit: AiChartUnit::Generic,
+            x_axis: AiChartAxis::Time,
+            series,
+            avg_value: Some(summary.avg),
+        };
+        Ok(ToolOutput::with_chart(
+            json!({
+                "chart_shown": true,
+                "window": super::logs::window(&query),
+                "total": logs_total,
+                "errors": errors_total,
+                "per_hour": summary,
+                "busiest_hours": busiest.iter().take(3).map(|sample| json!({
+                    "hour": sample.at.to_rfc3339(),
+                    "count": sample.value,
+                })).collect::<Vec<_>>(),
+            }),
+            chart,
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn volume_por_hora_completa_as_horas_vazias_com_zero() {
+        use chrono::TimeZone;
+        let hora = |h| Utc.with_ymd_and_hms(2026, 11, 19, h, 0, 0).unwrap();
+        let contagem = |h, total, errors| HourlyCount {
+            bucket: hora(h).fixed_offset(),
+            total,
+            errors: Some(errors),
+        };
+        let counts = [contagem(1, 801, 2), contagem(3, 151, 0)];
+        let (total, errors) = hourly_series(
+            &counts,
+            hora(0) + Duration::minutes(18),
+            hora(3) + Duration::minutes(5),
+        );
+        let valores = |s: &[Sample]| s.iter().map(|s| s.value).collect::<Vec<_>>();
+        assert_eq!(total.first().map(|s| s.at), Some(hora(0)));
+        assert_eq!(valores(&total), [0.0, 801.0, 0.0, 151.0]);
+        assert_eq!(valores(&errors), [0.0, 2.0, 0.0, 0.0]);
+    }
 
     #[test]
     fn janela_de_latencia_tolera_variacoes_e_cai_em_uma_hora() {

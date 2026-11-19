@@ -78,13 +78,28 @@ pub async fn confirm_in_chat(
     conversation: Option<String>,
 ) -> AppResult<ToolOutput> {
     if let (Some(call_id), Some(user_id)) = (call_id, actor.user_id) {
-        approvals::ensure_undecided(&approvals::settle(
-            ctx,
-            user_id,
-            call_id,
-            Decision::Confirmed,
-        ))?;
+        let settled = approvals::settle(ctx, user_id, call_id, Decision::Confirmed);
+        approvals::ensure_undecided(&settled)?;
+        // Pendência conhecida: roda o que a IA propôs e o usuário viu, não uma
+        // cópia vinda da tela (que poderia trocar o alvo ou os argumentos).
+        if let Settled::Pending(proposal) = settled {
+            let Proposal {
+                approval,
+                arguments,
+                conversation_key,
+            } = *proposal;
+            return execute_confirmed(
+                ctx,
+                settings,
+                &approval.tool,
+                arguments,
+                actor,
+                conversation_key.or(conversation),
+            )
+            .await;
+        }
     }
+    // Desconhecida (processo reiniciou, expirou): vale o card da conversa.
     execute_confirmed(ctx, settings, name, arguments, actor, conversation).await
 }
 

@@ -29,7 +29,7 @@ export interface MarkdownOptions {
 const FENCE = /^```\s*([\w-]*)\s*$/
 const HEADING = /^(#{1,6})\s+(.+?)\s*#*\s*$/
 const UNORDERED = /^\s*[-*+]\s+(.*)$/
-const ORDERED = /^\s*\d+[.)]\s+(.*)$/
+const ORDERED = /^\s*(\d+)[.)]\s+(.*)$/
 const QUOTE = /^>\s?(.*)$/
 const RULE = /^\s*([-*_])(\s*\1){2,}\s*$/
 const TABLE_SEPARATOR = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/
@@ -178,12 +178,29 @@ export function renderMarkdown(
     if (listKind) {
       flushParagraph()
       const pattern = listKind === 'ul' ? UNORDERED : ORDERED
+      // O texto do item é o último grupo; na lista numerada o primeiro é o número.
+      const text = (match: RegExpExecArray | null) => match?.[match.length - 1] ?? ''
+      // A IA retoma a numeração depois de um parágrafo ou sub-item ("3. …"):
+      // a lista começa no número escrito, não em 1.
+      const first = listKind === 'ol' ? Number(ORDERED.exec(line)?.[1] ?? 1) : 1
       const items: string[] = []
-      while (index < lines.length && pattern.test(lines[index])) {
-        items.push(`<li>${inline(pattern.exec(lines[index])?.[1] ?? '')}</li>`)
-        index += 1
+      while (index < lines.length) {
+        if (pattern.test(lines[index])) {
+          items.push(`<li>${inline(text(pattern.exec(lines[index])))}</li>`)
+          index += 1
+        } else if (
+          lines[index].trim() === '' &&
+          index + 1 < lines.length &&
+          pattern.test(lines[index + 1])
+        ) {
+          // Linha em branco entre itens ("1. A", "", "2. B") não quebra a lista.
+          index += 1
+        } else {
+          break
+        }
       }
-      blocks.push(`<${listKind} class="md-list">${items.join('')}</${listKind}>`)
+      const start = first > 1 ? ` start="${first}"` : ''
+      blocks.push(`<${listKind} class="md-list"${start}>${items.join('')}</${listKind}>`)
       continue
     }
 
@@ -240,6 +257,6 @@ export function renderMarkdown(
       'tr',
       'ul',
     ],
-    ALLOWED_ATTR: ['class', 'href', 'target', 'rel'],
+    ALLOWED_ATTR: ['class', 'href', 'target', 'rel', 'start'],
   })
 }
