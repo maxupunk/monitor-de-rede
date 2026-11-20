@@ -24,7 +24,7 @@
               <div class="text-caption text-high-emphasis">{{ formattedSize }}</div>
               <div class="text-caption text-info font-weight-bold">Ver o que ocupa ›</div>
             </div>
-            <v-icon color="info" size="28">mdi-chart-donut</v-icon>
+            <v-icon color="info" size="28">mdi-chart-pie</v-icon>
           </ChoiceCard>
         </v-col>
 

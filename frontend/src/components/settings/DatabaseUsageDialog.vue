@@ -8,7 +8,7 @@
   >
     <v-card class="rounded-lg">
       <v-card-title class="font-weight-bold d-flex align-center flex-wrap ga-2 pt-4 px-6">
-        <v-icon color="info">mdi-chart-donut</v-icon>
+        <v-icon color="info">mdi-chart-pie</v-icon>
         O que ocupa o espaço do banco
         <v-spacer></v-spacer>
         <v-btn

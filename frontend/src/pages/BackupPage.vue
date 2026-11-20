@@ -141,6 +141,7 @@
               color="primary"
               :plan="backupStore.plan"
               :running="backupStore.running || backupStore.plan.running"
+              restore-without-destination
               @backup="backupSystem"
               @restore="systemRestoreDialog = true"
               @configure="systemPlanDialog = true"

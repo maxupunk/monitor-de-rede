@@ -25,7 +25,11 @@
           density="comfortable"
           class="mb-4"
         >
-          <v-btn value="destination" prepend-icon="mdi-database-lock-outline">
+          <v-btn
+            value="destination"
+            prepend-icon="mdi-database-lock-outline"
+            :disabled="!storageItems.length"
+          >
             De um destino
           </v-btn>
           <v-btn value="file" prepend-icon="mdi-file-upload-outline">De um arquivo</v-btn>
@@ -192,8 +196,9 @@ watch(
     if (!open) return
     pending.value = null
     error.value = null
-    source.value = 'destination'
     if (!storagesStore.loaded) await storagesStore.fetchStorages()
+    // Sem destino cadastrado, só resta o arquivo: o diálogo já abre nele.
+    source.value = storagesStore.storages.length ? 'destination' : 'file'
     storageId.value =
       backupStore.plan?.storageDestinationId ?? storagesStore.storages[0]?.id ?? null
     void load()

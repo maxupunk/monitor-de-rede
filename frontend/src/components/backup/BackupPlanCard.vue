@@ -99,15 +99,25 @@
           {{ restoreLabel || 'Restaurar…' }}
         </v-btn>
       </template>
-      <v-btn
-        v-else
-        color="primary"
-        variant="flat"
-        prepend-icon="mdi-shield-plus-outline"
-        @click="emit('configure')"
-      >
-        Escolher onde guardar
-      </v-btn>
+      <template v-else>
+        <v-btn
+          color="primary"
+          variant="flat"
+          prepend-icon="mdi-shield-plus-outline"
+          @click="emit('configure')"
+        >
+          Escolher onde guardar
+        </v-btn>
+        <v-btn
+          v-if="restoreWithoutDestination"
+          color="primary"
+          variant="tonal"
+          prepend-icon="mdi-history"
+          @click="emit('restore')"
+        >
+          {{ restoreLabel || 'Restaurar…' }}
+        </v-btn>
+      </template>
     </div>
   </v-card>
 </template>
@@ -143,6 +153,11 @@ const props = defineProps<{
   extraFacts?: BackupCardFact[]
   /** Rótulo do botão secundário ("Restaurar…" por padrão). */
   restoreLabel?: string
+  /**
+   * Restaurar não depende de destino (o NetMonitor volta de um arquivo baixado):
+   * o botão aparece também antes de escolher onde guardar.
+   */
+  restoreWithoutDestination?: boolean
 }>()
 
 const emit = defineEmits<{
