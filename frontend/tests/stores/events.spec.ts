@@ -439,6 +439,20 @@ describe('events store', () => {
     send('ai:approval_resolved', { callId: 'c1', userId: 7, decision: 'confirmed' })
     expect(approvals.mine).toEqual([])
     expect(apiGet).not.toHaveBeenCalled()
+
+    // Vencido sem resposta também sai das telas.
+    send('ai:approval_pending', pedido('c3', 7))
+    send('ai:approval_resolved', { callId: 'c3', userId: 7, decision: 'expired' })
+    expect(approvals.mine).toEqual([])
+
+    // Reconexão: o snapshot traz a fila inteira; o decidido enquanto a aba
+    // estava sem conexão (o aviso efêmero se perdeu) não volta.
+    send('ai:approval_pending', pedido('c4', 7))
+    send('ai:approval_pending', pedido('c5', 7))
+    send('stream:connected', {})
+    send('ai:approval_pending', pedido('c5', 7))
+    expect(approvals.mine.map((item) => item.callId)).toEqual(['c5'])
+    expect(apiGet).not.toHaveBeenCalled()
     events.disconnect()
   })
 })

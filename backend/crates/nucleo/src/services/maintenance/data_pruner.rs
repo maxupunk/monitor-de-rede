@@ -97,6 +97,71 @@ impl PruneStats {
 /// delas do mesmo jeito.
 pub use netmonitor_core::routines::retention_days;
 
+/// A janela de retenção de uma tabela: a variável de ambiente que a ajusta e
+/// o padrão. É a fonte única da purga e da tela de espaço ocupado.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RetentionRule {
+    pub variable: &'static str,
+    pub default_days: i64,
+}
+
+impl RetentionRule {
+    /// Os dias em vigor (a variável, quando válida; senão o padrão).
+    #[must_use]
+    pub fn days(self) -> i64 {
+        retention_days(self.variable, self.default_days)
+    }
+}
+
+pub const MONITOR_RESULTS_RETENTION: RetentionRule = RetentionRule {
+    variable: "RETENTION_MONITOR_RESULTS_DAYS",
+    default_days: DEFAULT_RETENTION_MONITOR_RESULTS_DAYS,
+};
+pub const METRICS_RETENTION: RetentionRule = RetentionRule {
+    variable: "RETENTION_METRICS_DAYS",
+    default_days: DEFAULT_RETENTION_METRICS_DAYS,
+};
+pub const DISCOVERY_RETENTION: RetentionRule = RetentionRule {
+    variable: "RETENTION_DISCOVERY_DAYS",
+    default_days: DEFAULT_RETENTION_DISCOVERY_DAYS,
+};
+pub const ALERT_EVENTS_RETENTION: RetentionRule = RetentionRule {
+    variable: "RETENTION_ALERT_EVENTS_DAYS",
+    default_days: DEFAULT_RETENTION_ALERT_EVENTS_DAYS,
+};
+pub const NOTIFICATIONS_RETENTION: RetentionRule = RetentionRule {
+    variable: "RETENTION_NOTIFICATIONS_DAYS",
+    default_days: DEFAULT_RETENTION_NOTIFICATIONS_DAYS,
+};
+pub const AUDIT_RETENTION: RetentionRule = RetentionRule {
+    variable: "RETENTION_AUDIT_DAYS",
+    default_days: DEFAULT_RETENTION_AUDIT_DAYS,
+};
+pub const PLUGIN_RUNS_RETENTION: RetentionRule = RetentionRule {
+    variable: "RETENTION_PLUGIN_RUNS_DAYS",
+    default_days: DEFAULT_RETENTION_PLUGIN_RUNS_DAYS,
+};
+pub const SCHEDULED_TASK_RUNS_RETENTION: RetentionRule = RetentionRule {
+    variable: "RETENTION_SCHEDULED_TASK_RUNS_DAYS",
+    default_days: DEFAULT_RETENTION_SCHEDULED_TASK_RUNS_DAYS,
+};
+
+/// A janela que a purga aplica a cada tabela do banco principal.
+#[must_use]
+pub fn retention_of(table: &str) -> Option<RetentionRule> {
+    match table {
+        "monitor_results" => Some(MONITOR_RESULTS_RETENTION),
+        "metrics" | "host_metrics_1m" | "container_metrics_1m" => Some(METRICS_RETENTION),
+        "discovery_runs" | "discovery_results" => Some(DISCOVERY_RETENTION),
+        "alert_events" => Some(ALERT_EVENTS_RETENTION),
+        "notification_outbox" => Some(NOTIFICATIONS_RETENTION),
+        "audit_logs" => Some(AUDIT_RETENTION),
+        "plugin_runs" => Some(PLUGIN_RUNS_RETENTION),
+        "scheduled_task_runs" => Some(SCHEDULED_TASK_RUNS_RETENTION),
+        _ => None,
+    }
+}
+
 /// Apaga tudo que passou da janela de retenção.
 ///
 /// # Errors
@@ -104,8 +169,7 @@ pub use netmonitor_core::routines::retention_days;
 /// Propaga erro do banco.
 pub async fn prune_all<C: ConnectionTrait>(db: &C) -> AppResult<PruneStats> {
     let now = Utc::now();
-    let cutoff =
-        |variable: &str, default: i64| now - Duration::days(retention_days(variable, default));
+    let cutoff = |rule: RetentionRule| now - Duration::days(rule.days());
 
     let outbox_deleted = delete_in_batches::<event_outbox::Entity, _>(
         db,
@@ -119,14 +183,12 @@ pub async fn prune_all<C: ConnectionTrait>(db: &C) -> AppResult<PruneStats> {
     let results_deleted = delete_in_batches::<monitor_results::Entity, _>(
         db,
         monitor_results::Column::Id,
-        Condition::all().add(monitor_results::Column::CreatedAt.lt(cutoff(
-            "RETENTION_MONITOR_RESULTS_DAYS",
-            DEFAULT_RETENTION_MONITOR_RESULTS_DAYS,
-        ))),
+        Condition::all()
+            .add(monitor_results::Column::CreatedAt.lt(cutoff(MONITOR_RESULTS_RETENTION))),
     )
     .await?;
 
-    let metrics_cutoff = cutoff("RETENTION_METRICS_DAYS", DEFAULT_RETENTION_METRICS_DAYS);
+    let metrics_cutoff = cutoff(METRICS_RETENTION);
     let metrics_deleted = delete_in_batches::<metrics::Entity, _>(
         db,
         metrics::Column::Id,
@@ -139,19 +201,13 @@ pub async fn prune_all<C: ConnectionTrait>(db: &C) -> AppResult<PruneStats> {
     let discovery_deleted = delete_in_batches::<discovery_runs::Entity, _>(
         db,
         discovery_runs::Column::Id,
-        Condition::all().add(discovery_runs::Column::CreatedAt.lt(cutoff(
-            "RETENTION_DISCOVERY_DAYS",
-            DEFAULT_RETENTION_DISCOVERY_DAYS,
-        ))),
+        Condition::all().add(discovery_runs::Column::CreatedAt.lt(cutoff(DISCOVERY_RETENTION))),
     )
     .await?;
 
     // Só episódio **fechado** envelhece: um alerta ainda aberto é o que o
     // operador precisa ver na Central, por mais antigo que seja.
-    let alert_events_cutoff = cutoff(
-        "RETENTION_ALERT_EVENTS_DAYS",
-        DEFAULT_RETENTION_ALERT_EVENTS_DAYS,
-    );
+    let alert_events_cutoff = cutoff(ALERT_EVENTS_RETENTION);
     let alert_events_deleted = delete_in_batches::<alert_events::Entity, _>(
         db,
         alert_events::Column::Id,
@@ -177,20 +233,14 @@ pub async fn prune_all<C: ConnectionTrait>(db: &C) -> AppResult<PruneStats> {
         notification_outbox::Column::Id,
         Condition::all()
             .add(notification_outbox::Column::Status.ne("pending"))
-            .add(notification_outbox::Column::CreatedAt.lt(cutoff(
-                "RETENTION_NOTIFICATIONS_DAYS",
-                DEFAULT_RETENTION_NOTIFICATIONS_DAYS,
-            ))),
+            .add(notification_outbox::Column::CreatedAt.lt(cutoff(NOTIFICATIONS_RETENTION))),
     )
     .await?;
 
     let audit_deleted = delete_in_batches::<audit_logs::Entity, _>(
         db,
         audit_logs::Column::Id,
-        Condition::all().add(
-            audit_logs::Column::CreatedAt
-                .lt(cutoff("RETENTION_AUDIT_DAYS", DEFAULT_RETENTION_AUDIT_DAYS)),
-        ),
+        Condition::all().add(audit_logs::Column::CreatedAt.lt(cutoff(AUDIT_RETENTION))),
     )
     .await?;
 
@@ -198,10 +248,7 @@ pub async fn prune_all<C: ConnectionTrait>(db: &C) -> AppResult<PruneStats> {
     let plugin_runs_deleted = delete_in_batches::<plugin_runs::Entity, _>(
         db,
         plugin_runs::Column::Id,
-        Condition::all().add(plugin_runs::Column::FinishedAt.lt(cutoff(
-            "RETENTION_PLUGIN_RUNS_DAYS",
-            DEFAULT_RETENTION_PLUGIN_RUNS_DAYS,
-        ))),
+        Condition::all().add(plugin_runs::Column::FinishedAt.lt(cutoff(PLUGIN_RUNS_RETENTION))),
     )
     .await?;
 
@@ -209,10 +256,8 @@ pub async fn prune_all<C: ConnectionTrait>(db: &C) -> AppResult<PruneStats> {
     let scheduled_task_runs_deleted = delete_in_batches::<scheduled_task_runs::Entity, _>(
         db,
         scheduled_task_runs::Column::Id,
-        Condition::all().add(scheduled_task_runs::Column::FinishedAt.lt(cutoff(
-            "RETENTION_SCHEDULED_TASK_RUNS_DAYS",
-            DEFAULT_RETENTION_SCHEDULED_TASK_RUNS_DAYS,
-        ))),
+        Condition::all()
+            .add(scheduled_task_runs::Column::FinishedAt.lt(cutoff(SCHEDULED_TASK_RUNS_RETENTION))),
     )
     .await?;
 

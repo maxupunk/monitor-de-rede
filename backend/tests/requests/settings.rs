@@ -268,6 +268,46 @@ async fn database_size_retorna_tamanho_tipo_e_datas_do_banco() {
 
 #[tokio::test]
 #[serial]
+async fn database_usage_lista_as_tabelas_com_nome_area_e_linhas() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        autenticado(&mut request, &ctx).await;
+
+        let resposta = request.get("/api/settings/database-usage").await;
+        assert_eq!(resposta.status_code(), 200, "{}", resposta.text());
+        let corpo: serde_json::Value = serde_json::from_str(&resposta.text()).unwrap();
+
+        let principal = &corpo["databases"][0];
+        assert_eq!(principal["kind"], "main");
+        assert!(principal["sizeBytes"].as_i64().is_some_and(|v| v > 0));
+        assert!(corpo["totalBytes"].as_i64() >= principal["sizeBytes"].as_i64());
+        let tabelas = principal["tables"].as_array().expect("tabelas");
+        let usuarios = tabelas
+            .iter()
+            .find(|t| t["table"] == "users")
+            .expect("users listada");
+        assert_eq!(usuarios["label"], "Usuários");
+        assert_eq!(usuarios["area"], "core");
+        assert!(usuarios["rows"].as_i64().is_some_and(|v| v >= 1));
+        // A área vem do registro da área dona da tabela (ADR 017).
+        let peers = tabelas
+            .iter()
+            .find(|t| t["table"] == "vpn_peers")
+            .expect("vpn_peers listada");
+        assert_eq!(peers["area"], "vpn");
+        // Do maior para o menor, quando o banco informa o tamanho.
+        if principal["detailAvailable"] == true {
+            let tamanhos: Vec<i64> = tabelas
+                .iter()
+                .map(|t| t["totalBytes"].as_i64().unwrap())
+                .collect();
+            assert!(tamanhos.windows(2).all(|par| par[0] >= par[1]));
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
 async fn clear_history_limpa_dados_historicos_e_retorna_estatisticas() {
     use chrono::Utc;
     use netmonitor_core::models::_entities::{devices, metrics};

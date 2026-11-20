@@ -60,6 +60,15 @@ export interface AiCompaction {
   summarized: boolean
 }
 
+/** Aviso do backend sobre a resposta. */
+export interface AiNotice {
+  message: string
+  /** Resolve-se nas configurações da IA: a tela oferece o atalho. */
+  settings: boolean
+  /** Aviso que muda de estado ("conferindo" → "conferida"): o novo com a mesma chave toma o lugar do anterior. */
+  key?: string
+}
+
 export interface AiDisplayMessage {
   id: string
   role: 'user' | 'assistant'
@@ -76,8 +85,13 @@ export interface AiDisplayMessage {
   usage?: AiUsageInfo | null
   isStreaming?: boolean
   error?: string | null
-  /** Aviso sobre a resposta (ex: janela do modelo pequena demais). */
-  notice?: string | null
+  /** Avisos sobre a resposta (janela pequena, conferência, equipamento real). */
+  notices?: AiNotice[]
+  /**
+   * Onde começa o texto da rodada atual (depois da última ferramenta): o
+   * `retract` da conferência apaga só dali em diante.
+   */
+  roundStart?: number
 }
 
 export interface ApiChatMessage {
@@ -164,6 +178,7 @@ export function applyChatEvent(message: AiDisplayMessage, event: unknown): void 
       if (typeof event.content === 'string') message.content += event.content
       break
     case 'toolCall':
+      message.roundStart = message.content.length
       tools.push({
         id: String(event.id),
         name: String(event.name),
@@ -174,6 +189,7 @@ export function applyChatEvent(message: AiDisplayMessage, event: unknown): void 
       })
       break
     case 'toolResult': {
+      message.roundStart = message.content.length
       const tool = findTool()
       if (!tool) break
       const result = asRecord(event.result)
@@ -183,6 +199,7 @@ export function applyChatEvent(message: AiDisplayMessage, event: unknown): void 
       break
     }
     case 'confirmationRequired':
+      message.roundStart = message.content.length
       tools.push({
         id: String(event.id),
         name: String(event.name),
@@ -198,13 +215,21 @@ export function applyChatEvent(message: AiDisplayMessage, event: unknown): void 
     case 'error':
       message.error = typeof event.message === 'string' ? event.message : 'Erro no provedor'
       break
-    case 'notice':
-      if (typeof event.message === 'string') message.notice = event.message
+    case 'notice': {
+      if (typeof event.message !== 'string' || !event.message) break
+      const notices = (message.notices ??= [])
+      const key = typeof event.key === 'string' && event.key ? event.key : undefined
+      const notice: AiNotice = { message: event.message, settings: event.settings === true, key }
+      const previous = key ? notices.findIndex((item) => item.key === key) : -1
+      if (previous >= 0) notices.splice(previous, 1, notice)
+      else if (!notices.some((item) => item.message === event.message)) notices.push(notice)
       break
+    }
     case 'retract':
-      // A conferência do harness descartou o texto (citava o que nenhuma
-      // consulta mostrou): a versão conferida vem em seguida.
-      message.content = ''
+      // A conferência do harness descartou o texto da última rodada (citava
+      // o que nenhuma consulta mostrou): o que veio antes das ferramentas fica,
+      // e a versão conferida vem em seguida.
+      message.content = message.content.slice(0, message.roundStart ?? 0)
       break
     case 'done':
       message.isStreaming = false

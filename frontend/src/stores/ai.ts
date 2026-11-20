@@ -551,6 +551,9 @@ export const useAiStore = defineStore('ai', () => {
    * o evento SSE tenha chegado antes.
    */
   function applyApprovalDecision(resolved: AiApprovalResolved, response?: ExecuteToolResponse) {
+    // Vencido sem resposta: sai da fila das telas, mas o card da conversa
+    // continua confirmável (o servidor executa os argumentos do card).
+    if (resolved.decision === 'expired') return
     const tool = findToolById(resolved.callId)
     if (!tool) return
     if (response) {

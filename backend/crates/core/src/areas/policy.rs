@@ -93,6 +93,12 @@ pub trait AreaPolicy: Send + Sync {
     fn event_prefixes(&self) -> &'static [&'static str] {
         &[]
     }
+
+    /// As tabelas que guardam os dados desta área: a tela do espaço ocupado
+    /// agrupa por elas. Tabela que nenhuma área declara é do Núcleo.
+    fn tables(&self) -> &'static [&'static str] {
+        &[]
+    }
 }
 
 /// O caminho casa com o padrão de rota de uma área? Ver
@@ -155,6 +161,15 @@ impl AreaPolicies {
                     .iter()
                     .any(|pattern| path_matches(pattern, path))
             })
+            .map_or(Area::Core, |policy| policy.area())
+    }
+
+    /// A área dona de uma tabela; o Núcleo quando nenhuma área a declara.
+    #[must_use]
+    pub fn area_of_table(&self, table: &str) -> Area {
+        self.0
+            .iter()
+            .find(|policy| policy.tables().contains(&table))
             .map_or(Area::Core, |policy| policy.area())
     }
 

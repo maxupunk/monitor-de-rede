@@ -14,6 +14,12 @@ import { bodyText, button, mountWith, setRole, setupDom, teardownDom } from './d
 
 let pinia: Pinia
 
+const finishRestoreSpy = vi.hoisted(() => vi.fn())
+vi.mock('@/stores/backup', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/stores/backup')>()),
+  finishRestore: finishRestoreSpy,
+}))
+
 function snapshot(on: Partial<Record<Area, boolean>>): AreasSnapshot {
   const areas: Area[] = ['core', 'network', 'servers', 'vpn']
   return {
@@ -72,6 +78,12 @@ async function open() {
   return wrapper
 }
 
+/** O administrador começa escolhendo: restaurar um backup ou configurar do zero. */
+async function choose(option: 'restore' | 'fresh') {
+  document.body.querySelector<HTMLElement>(`[data-choice="${option}"]`)?.click()
+  await flushPromises()
+}
+
 describe('registro de etapas', () => {
   it('só Servidores: no máximo 3 etapas depois da escolha', () => {
     const only = (area: Area) => area === 'core' || area === 'servers'
@@ -94,6 +106,7 @@ describe('registro de etapas', () => {
 describe('Assistente de configuração inicial', () => {
   beforeEach(() => {
     pinia = setupDom()
+    finishRestoreSpy.mockReset()
   })
 
   afterEach(teardownDom)
@@ -106,6 +119,7 @@ describe('Assistente de configuração inicial', () => {
       .spyOn(apiService, 'post')
       .mockResolvedValue(snapshot({ network: false, servers: true, vpn: false }))
     await open()
+    await choose('fresh')
 
     expect(bodyText()).toContain('O que você vai gerenciar?')
     switchFor('Gerenciar Rede').click()
@@ -133,6 +147,7 @@ describe('Assistente de configuração inicial', () => {
     mockGet(status())
     const post = vi.spyOn(apiService, 'post')
     await open()
+    await choose('fresh')
 
     switchFor('Gerenciar Rede').click()
     await flushPromises()
@@ -150,6 +165,7 @@ describe('Assistente de configuração inicial', () => {
     mockGet(status())
     vi.spyOn(apiService, 'post').mockRejectedValue(new Error('A área VPN tem túneis ativos.'))
     await open()
+    await choose('fresh')
 
     button('Continuar')?.click()
     await flushPromises()
@@ -170,6 +186,86 @@ describe('Assistente de configuração inicial', () => {
     expect(ids).not.toContain('dns')
     expect(bodyText()).not.toContain('Identificação do Site Local')
     expect(bodyText()).toContain('Endereços por onde este Servidor')
+  })
+  it('administrador escolhe antes das etapas; do zero segue o assistente de sempre', async () => {
+    setRole('admin')
+    useAreasStore().apply(snapshot({ network: true, servers: true, vpn: false }))
+    mockGet(status())
+    await open()
+
+    expect(bodyText()).toContain('Como você quer começar?')
+    expect(bodyText()).toContain('Restaurar um backup')
+    expect(bodyText()).toContain('Configurar do zero')
+    expect(stepIds()).toEqual([])
+
+    await choose('fresh')
+    expect(bodyText()).toContain('O que você vai gerenciar?')
+    expect(stepIds()[0]).toBe('intent')
+
+    // Voltar da primeira etapa devolve à escolha.
+    button('Voltar')?.click()
+    await flushPromises()
+    expect(bodyText()).toContain('Como você quer começar?')
+  })
+
+  it('restaurar: confere o arquivo, aplica pela rota de backup e conclui o assistente', async () => {
+    setRole('admin')
+    useAreasStore().apply(snapshot({ network: true, servers: true, vpn: false }))
+    mockGet(status())
+    const counts = {
+      scope: 'full',
+      tables: [{ table: 'users', label: 'Usuários', rows: 2 }],
+      totalRows: 2,
+    }
+    const upload = vi
+      .spyOn(apiService, 'upload')
+      .mockResolvedValueOnce(counts)
+      .mockResolvedValueOnce({ counts, signInAgain: false })
+    const post = vi.spyOn(apiService, 'post').mockResolvedValue({})
+    await open()
+    await choose('restore')
+
+    expect(bodyText()).toContain('O que acontece depois')
+    const input = document.body.querySelector<HTMLInputElement>('input[type="file"]')
+    expect(input).not.toBeNull()
+    const file = new File(['{}'], 'netmonitor-backup-completo.json.gz', {
+      type: 'application/gzip',
+    })
+    Object.defineProperty(input, 'files', { value: [file] })
+    input?.dispatchEvent(new Event('change'))
+    await flushPromises()
+
+    expect(upload).toHaveBeenCalledWith('/backup/preview', file, expect.any(Function))
+    expect(bodyText()).toContain('Backup completo')
+    expect(bodyText()).toContain('Usuários: 2')
+
+    button('Restaurar esta cópia')?.click()
+    await flushPromises()
+
+    expect(upload).toHaveBeenLastCalledWith('/backup/restore', file, expect.any(Function))
+    expect(post).toHaveBeenCalledWith('/settings/onboarding/complete')
+    expect(finishRestoreSpy).toHaveBeenCalledWith({ counts, signInAgain: false })
+  })
+
+  it('restaurar: a recusa do arquivo aparece e nada é aplicado', async () => {
+    setRole('admin')
+    useAreasStore().apply(snapshot({ network: true, servers: true, vpn: false }))
+    mockGet(status())
+    const upload = vi
+      .spyOn(apiService, 'upload')
+      .mockRejectedValueOnce(new Error('O arquivo não é um backup do NetMonitor'))
+    await open()
+    await choose('restore')
+
+    const input = document.body.querySelector<HTMLInputElement>('input[type="file"]')
+    Object.defineProperty(input, 'files', { value: [new File(['x'], 'qualquer.json')] })
+    input?.dispatchEvent(new Event('change'))
+    await flushPromises()
+
+    expect(upload).toHaveBeenCalledTimes(1)
+    expect(bodyText()).toContain('O arquivo não é um backup do NetMonitor')
+    expect(button('Restaurar esta cópia')).toBeUndefined()
+    expect(finishRestoreSpy).not.toHaveBeenCalled()
   })
 })
 

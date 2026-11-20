@@ -83,7 +83,43 @@ describe('eventos do chat', () => {
     applyChatEvent(msg, { type: 'retract' })
     applyChatEvent(msg, { type: 'textDelta', content: 'Não há host com esse nome.' })
     expect(msg.content).toBe('Não há host com esse nome.')
-    expect(msg.notice).toContain('Conferindo')
+    expect(msg.notices?.[0].message).toContain('Conferindo')
+  })
+
+  it('retirada apaga só a última rodada, nunca o que veio antes das ferramentas', () => {
+    const msg = resposta()
+    applyChatEvent(msg, { type: 'textDelta', content: 'Vou consultar os hosts. ' })
+    applyChatEvent(msg, { type: 'toolCall', id: 't', name: 'get_docker_hosts', arguments: {} })
+    applyChatEvent(msg, { type: 'toolResult', id: 't', result: { hosts: [] } })
+    applyChatEvent(msg, { type: 'textDelta', content: 'No `agente-west-01`.' })
+    applyChatEvent(msg, { type: 'retract' })
+    applyChatEvent(msg, { type: 'textDelta', content: 'Sim, no `agente-west-01`.' })
+    // A conferida ainda inventou: troca de novo, no mesmo ponto.
+    applyChatEvent(msg, { type: 'retract' })
+    applyChatEvent(msg, { type: 'textDelta', content: 'Sim, no `[não confirmado]`.' })
+    expect(msg.content).toBe('Vou consultar os hosts. Sim, no `[não confirmado]`.')
+  })
+
+  it('avisos se acumulam e só os de configuração levam ao ajuste', () => {
+    const msg = resposta()
+    applyChatEvent(msg, { type: 'notice', message: 'Janela de 4096 tokens', settings: true })
+    applyChatEvent(msg, { type: 'notice', message: 'A IA vai acessar um equipamento real' })
+    applyChatEvent(msg, { type: 'notice', message: 'Janela de 4096 tokens', settings: true })
+    expect(msg.notices).toEqual([
+      { message: 'Janela de 4096 tokens', settings: true },
+      { message: 'A IA vai acessar um equipamento real', settings: false },
+    ])
+  })
+
+  it('aviso da conferência troca de estado no lugar, sem empilhar', () => {
+    const msg = resposta()
+    applyChatEvent(msg, { type: 'notice', message: 'A IA vai acessar um equipamento real' })
+    applyChatEvent(msg, { type: 'notice', message: 'Conferindo a resposta…', key: 'answer-check' })
+    applyChatEvent(msg, { type: 'notice', message: 'Resposta conferida.', key: 'answer-check' })
+    expect(msg.notices?.map((notice) => notice.message)).toEqual([
+      'A IA vai acessar um equipamento real',
+      'Resposta conferida.',
+    ])
   })
 
   it('resultado com erro marca a ferramenta como falha', () => {
@@ -99,7 +135,7 @@ describe('eventos do chat', () => {
   it('aviso do backend fica na mensagem sem virar erro', () => {
     const msg = resposta()
     applyChatEvent(msg, { type: 'notice', message: 'Janela de 4096 tokens' })
-    expect(msg.notice).toBe('Janela de 4096 tokens')
+    expect(msg.notices?.[0].message).toBe('Janela de 4096 tokens')
     expect(msg.error).toBeUndefined()
   })
 

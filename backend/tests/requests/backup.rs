@@ -280,3 +280,194 @@ async fn backup_exige_autenticacao() {
     })
     .await;
 }
+
+/// O `.json.gz` do backup completo, aberto para o teste olhar dentro.
+async fn descomprimir(gz: &[u8]) -> serde_json::Value {
+    use tokio::io::AsyncReadExt;
+    let mut json = Vec::new();
+    async_compression::tokio::bufread::GzipDecoder::new(gz)
+        .read_to_end(&mut json)
+        .await
+        .expect("gzip do backup completo");
+    serde_json::from_slice(&json).expect("JSON do backup completo")
+}
+
+/// O backup completo leva os bancos inteiros — usuários e histórico
+/// inclusive — e volta pelo mesmo `restore` da configuração, com os ids.
+#[tokio::test]
+#[serial]
+async fn backup_completo_volta_com_usuarios_e_historico() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+
+        let (site_id, device_id) = semear(&request).await;
+        let monitors = request.get("/api/monitors").await;
+        let monitors: serde_json::Value = serde_json::from_str(&monitors.text()).unwrap();
+        let monitor_id = monitors
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|monitor| monitor["type"] != "system_health")
+            .and_then(|monitor| monitor["id"].as_i64())
+            .unwrap();
+        monitor_results::ActiveModel {
+            monitor_id: Set(monitor_id),
+            status: Set("up".into()),
+            started_at: Set(Utc::now().into()),
+            finished_at: Set(Utc::now().into()),
+            duration_ms: Set(12),
+            ..Default::default()
+        }
+        .insert(&ctx.db)
+        .await
+        .expect("gravar resultado");
+
+        let baixado = request.get("/api/backup/full").await;
+        assert_eq!(baixado.status_code(), 200, "{}", baixado.text());
+        let headers = baixado.headers();
+        assert_eq!(headers.get("content-type").unwrap(), "application/gzip");
+        assert!(headers
+            .get("content-disposition")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("netmonitor-backup-completo-"));
+        let gz = baixado.as_bytes().to_vec();
+        let arquivo = descomprimir(&gz).await;
+        assert_eq!(arquivo["formatVersion"], 1);
+        assert_eq!(arquivo["scope"], "full");
+        assert!(!arquivo["tables"]["users"].as_array().unwrap().is_empty());
+        assert_eq!(
+            arquivo["tables"]["monitor_results"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        // Filas de entrega ficam de fora: voltar com elas reenviaria tudo.
+        assert!(arquivo["tables"].get("notification_outbox").is_none());
+
+        // A prévia lê o `.json.gz` cru e diz que é o completo.
+        let previa = request
+            .post("/api/backup/preview")
+            .bytes(gz.clone().into())
+            .await;
+        assert_eq!(previa.status_code(), 200, "{}", previa.text());
+        let previa: serde_json::Value = serde_json::from_str(&previa.text()).unwrap();
+        assert_eq!(previa["scope"], "full");
+        let usuarios = previa["tables"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["table"] == "users")
+            .expect("usuários na prévia");
+        assert_eq!(usuarios["label"], "Usuários");
+
+        // Some tudo o que o operador cadastrou, e o histórico junto.
+        assert_eq!(
+            request
+                .delete(&format!("/api/sites/{site_id}"))
+                .await
+                .status_code(),
+            204
+        );
+        monitor_results::Entity::delete_many()
+            .exec(&ctx.db)
+            .await
+            .unwrap();
+
+        let restaurado = request.post("/api/backup/restore").bytes(gz.into()).await;
+        assert_eq!(restaurado.status_code(), 200, "{}", restaurado.text());
+        let restaurado: serde_json::Value = serde_json::from_str(&restaurado.text()).unwrap();
+        assert_eq!(restaurado["counts"]["scope"], "full");
+        // A conta de quem restaurou está no backup: a sessão continua.
+        assert_eq!(restaurado["signInAgain"], false);
+        assert_eq!(request.get("/api/sites").await.status_code(), 200);
+
+        let device = request.get(&format!("/api/devices/{device_id}")).await;
+        assert_eq!(device.status_code(), 200, "{}", device.text());
+        let device: serde_json::Value = serde_json::from_str(&device.text()).unwrap();
+        assert_eq!(device["siteId"].as_i64(), Some(site_id));
+        let historico = monitor_results::Entity::find()
+            .count(&ctx.db)
+            .await
+            .unwrap();
+        assert_eq!(historico, 1, "o histórico não voltou");
+
+        // A sequência realinhada aceita um cadastro novo.
+        let novo = request
+            .post("/api/sites")
+            .json(&serde_json::json!({ "name": "Filial" }))
+            .await;
+        assert_eq!(novo.status_code(), 201, "{}", novo.text());
+    })
+    .await;
+}
+
+/// Um completo sem administrador ativo deixaria todo mundo do lado de fora:
+/// é recusado antes do `COMMIT`, e o banco fica como estava.
+#[tokio::test]
+#[serial]
+async fn backup_completo_sem_administrador_e_recusado_sem_tocar_no_banco() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+        semear(&request).await;
+
+        let sem_admin = serde_json::json!({
+            "formatVersion": 1, "appVersion": "teste", "scope": "full",
+            "tables": { "users": [], "sites": [] }
+        });
+        let recusado = request
+            .post("/api/backup/restore")
+            .bytes(serde_json::to_vec(&sem_admin).unwrap().into())
+            .await;
+        assert_eq!(recusado.status_code(), 422, "{}", recusado.text());
+        assert!(recusado.text().contains("administrador"));
+
+        // Nada mudou: o mesmo login vale e o cadastro continua lá.
+        let devices = request.get("/api/devices").await;
+        assert_eq!(devices.status_code(), 200);
+        let devices: serde_json::Value = serde_json::from_str(&devices.text()).unwrap();
+        assert_eq!(sem_o_do_sistema(&devices).len(), 1);
+    })
+    .await;
+}
+
+/// Arquivo que nem é JSON, ou sem a versão do formato, é recusado com
+/// mensagem, sem apagar nada.
+#[tokio::test]
+#[serial]
+async fn arquivo_que_nao_e_backup_e_recusado() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+        semear(&request).await;
+
+        for corpo in [&b"isto nao e json"[..], &br#"{"tables":{}}"#[..]] {
+            let recusado = request
+                .post("/api/backup/restore")
+                .bytes(corpo.to_vec().into())
+                .await;
+            assert_eq!(recusado.status_code(), 422, "{}", recusado.text());
+        }
+        let devices = request.get("/api/devices").await;
+        let devices: serde_json::Value = serde_json::from_str(&devices.text()).unwrap();
+        assert_eq!(sem_o_do_sistema(&devices).len(), 1);
+    })
+    .await;
+}
+
+/// O completo leva senhas com hash e segredos: só com login.
+#[tokio::test]
+#[serial]
+async fn backup_completo_exige_autenticacao() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |request, _ctx| async move {
+        assert_eq!(request.get("/api/backup/full").await.status_code(), 401);
+    })
+    .await;
+}

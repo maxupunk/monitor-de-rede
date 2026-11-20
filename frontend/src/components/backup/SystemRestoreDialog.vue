@@ -32,7 +32,7 @@
         </v-btn-toggle>
 
         <SystemRestoreConfirm
-          v-if="pending"
+          v-if="pending && source === 'destination'"
           :name="pending.name"
           :counts="pending.counts"
           :loading="restoring"
@@ -120,20 +120,10 @@
         <!-- Arquivo do computador -->
         <template v-else>
           <p class="text-body-2 text-high-emphasis mb-3">
-            Um arquivo <code>netmonitor-backup-….json</code> baixado antes — pelo "Baixar a
-            configuração" ou de um destino.
+            Um arquivo baixado antes: a configuração (<code>netmonitor-backup-….json</code>) ou o
+            backup completo (<code>netmonitor-backup-completo-….json.gz</code>).
           </p>
-          <v-file-input
-            v-model="file"
-            label="Arquivo de backup (.json)"
-            accept="application/json,.json"
-            variant="outlined"
-            prepend-icon=""
-            prepend-inner-icon="mdi-file-upload-outline"
-            :loading="previewing === 'file'"
-            hide-details
-            @update:model-value="onFile"
-          ></v-file-input>
+          <BackupFileRestore v-if="modelValue" @restored="finishRestore" />
         </template>
       </v-card-text>
 
@@ -151,8 +141,9 @@
 import { computed, ref, watch } from 'vue'
 import type { BackupCountsResponse } from '@/bindings/BackupCountsResponse'
 import type { SystemBackupCopyResponse } from '@/bindings/SystemBackupCopyResponse'
+import BackupFileRestore from './BackupFileRestore.vue'
 import SystemRestoreConfirm from './SystemRestoreConfirm.vue'
-import { reloadAfterRestore, useBackupStore } from '@/stores/backup'
+import { finishRestore, reloadAfterRestore, useBackupStore } from '@/stores/backup'
 import { useStoragesStore } from '@/stores/storages'
 import { formatBytes, formatDateTime, formatRelativeTime } from '@/utils/formatters'
 
@@ -165,14 +156,13 @@ const storagesStore = useStoragesStore()
 const source = ref<'destination' | 'file'>('destination')
 const storageId = ref<number | null>(null)
 const copies = ref<SystemBackupCopyResponse[]>([])
-const file = ref<File | File[] | null>(null)
 const loading = ref(false)
 const downloading = ref<string | null>(null)
 const previewing = ref<string | null>(null)
 const restoring = ref(false)
 const error = ref<string | null>(null)
-/** A cópia escolhida, com o que ela contém. `key` nulo é o arquivo enviado. */
-const pending = ref<{ name: string; key: string | null; counts: BackupCountsResponse } | null>(null)
+/** A cópia escolhida num destino, com o que ela contém. */
+const pending = ref<{ name: string; key: string; counts: BackupCountsResponse } | null>(null)
 
 const storageItems = computed(() =>
   storagesStore.storages.map((storage) => ({ id: storage.id, name: storage.name }))
@@ -202,8 +192,6 @@ watch(
     if (!open) return
     pending.value = null
     error.value = null
-    file.value = null
-    backupStore.clearFile()
     source.value = 'destination'
     if (!storagesStore.loaded) await storagesStore.fetchStorages()
     storageId.value =
@@ -273,34 +261,12 @@ async function askCopy(copy: SystemBackupCopyResponse) {
   }
 }
 
-async function onFile(value: File | File[] | null) {
-  const chosen = Array.isArray(value) ? value[0] : value
-  pending.value = null
-  if (!chosen) {
-    backupStore.clearFile()
-    return
-  }
-  previewing.value = 'file'
-  error.value = null
-  const ok = await backupStore.loadFile(chosen)
-  previewing.value = null
-  if (ok && backupStore.pendingCounts) {
-    pending.value = { name: chosen.name, key: null, counts: backupStore.pendingCounts }
-  } else {
-    error.value = backupStore.error
-  }
-}
-
 async function restore() {
-  if (!pending.value) return
+  if (!pending.value || storageId.value == null) return
   restoring.value = true
   error.value = null
   try {
-    if (pending.value.key != null && storageId.value != null) {
-      await backupStore.restoreCopy(storageId.value, pending.value.key)
-    } else if (!(await backupStore.restoreConfig())) {
-      throw new Error(backupStore.error ?? 'Erro ao restaurar o arquivo')
-    }
+    await backupStore.restoreCopy(storageId.value, pending.value.key)
     reloadAfterRestore()
   } catch (err) {
     fail(err, 'Erro ao restaurar')

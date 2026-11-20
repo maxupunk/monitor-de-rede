@@ -39,10 +39,13 @@ use netmonitor_core::{
 
 pub const PENDING_EVENT: &str = "ai:approval_pending";
 pub const RESOLVED_EVENT: &str = "ai:approval_resolved";
+/// A `decision` de [`RESOLVED_EVENT`] quando a pendência venceu sem resposta.
+const EXPIRED: &str = "expired";
 
 /// Quanto o usuário online tem para responder antes do lembrete no celular.
 pub const REMINDER_AFTER: Duration = Duration::from_secs(2 * 60);
-/// Depois disso a pendência some sozinha (o card da conversa continua lá).
+/// Depois disso a pendência some sozinha, de todas as telas (o card da
+/// conversa continua lá, confirmável).
 const EXPIRES_AFTER: Duration = Duration::from_secs(24 * 60 * 60);
 /// Decididas lembradas, para recusar a mesma proposta numa segunda aba.
 const SETTLED_MEMORY: usize = 512;
@@ -112,15 +115,18 @@ struct State {
     settled: VecDeque<String>,
 }
 
+/// Pendência vencida: o id da chamada e o dono, para avisar as telas dele.
+type Expired = (String, i64);
+
 impl State {
-    fn sweep(&mut self, now: Instant) -> Vec<String> {
-        let expired: Vec<String> = self
+    fn sweep(&mut self, now: Instant) -> Vec<Expired> {
+        let expired: Vec<Expired> = self
             .pending
             .iter()
             .filter(|(_, entry)| now.duration_since(entry.opened) >= EXPIRES_AFTER)
-            .map(|(id, _)| id.clone())
+            .map(|(id, entry)| (id.clone(), entry.proposal.approval.user_id))
             .collect();
-        for id in &expired {
+        for (id, _) in &expired {
             self.pending.remove(id);
         }
         expired
@@ -176,7 +182,13 @@ impl ApprovalDesk {
         self.lock().pending.contains_key(call_id)
     }
 
-    fn insert(&self, proposal: Proposal) -> Vec<String> {
+    /// Tira o que venceu. Pela idade, não pelo id: um id reutilizado pelo
+    /// provedor é outra proposta, com o próprio prazo.
+    fn sweep(&self) -> Vec<Expired> {
+        self.lock().sweep(Instant::now())
+    }
+
+    fn insert(&self, proposal: Proposal) -> Vec<Expired> {
         let mut state = self.lock();
         let expired = state.sweep(Instant::now());
         // Provedor que reutiliza ids (`call_0` em toda resposta): a proposta
@@ -195,6 +207,22 @@ impl ApprovalDesk {
 
     fn settle(&self, user_id: i64, call_id: &str) -> Settled {
         self.lock().settle(user_id, call_id)
+    }
+
+    /// As propostas (ferramenta e argumentos) que ainda esperam a decisão do
+    /// usuário nesta conversa: o cartão delas continua na tela.
+    #[must_use]
+    pub fn awaiting_in(&self, user_id: i64, conversation_key: &str) -> Vec<(String, Value)> {
+        self.lock()
+            .pending
+            .values()
+            .map(|entry| &entry.proposal)
+            .filter(|proposal| {
+                proposal.approval.user_id == user_id
+                    && proposal.conversation_key.as_deref() == Some(conversation_key)
+            })
+            .map(|proposal| (proposal.approval.tool.clone(), proposal.arguments.clone()))
+            .collect()
     }
 }
 
@@ -226,17 +254,40 @@ pub fn open(ctx: &AppContext, request: ApprovalRequest<'_>) {
         arguments: request.arguments,
         conversation_key: request.conversation_key,
     });
+    announce_expired(ctx, expired);
     if let Ok(bus) = EventBus::from_context(ctx) {
-        for call_id in expired {
-            bus.forget_snapshots(&call_id);
-        }
         bus.publish_snapshot(
             PENDING_EVENT,
             approval.call_id.clone(),
             serde_json::to_value(&approval).unwrap_or_default(),
         );
     }
-    tokio::spawn(remind(ctx.clone(), desk, approval));
+    tokio::spawn(remind(ctx.clone(), desk.clone(), approval));
+    tokio::spawn(expire(ctx.clone(), desk));
+}
+
+/// Vence a pendência no prazo, sem esperar o próximo pedido: ela sai das
+/// telas na hora certa.
+async fn expire(ctx: AppContext, desk: ApprovalDesk) {
+    tokio::time::sleep(EXPIRES_AFTER).await;
+    announce_expired(&ctx, desk.sweep());
+}
+
+/// Tira as vencidas do snapshot e avisa as telas abertas (`expired`).
+fn announce_expired(ctx: &AppContext, expired: Vec<Expired>) {
+    if expired.is_empty() {
+        return;
+    }
+    let Ok(bus) = EventBus::from_context(ctx) else {
+        return;
+    };
+    for (call_id, user_id) in expired {
+        bus.forget_snapshots(&call_id);
+        bus.publish_ephemeral(
+            RESOLVED_EVENT,
+            json!({ "callId": call_id, "userId": user_id, "decision": EXPIRED }),
+        );
+    }
 }
 
 /// Avisa por Web Push quem não está olhando: na hora, se está offline; depois
@@ -276,7 +327,7 @@ fn notification(approval: &AiPendingApproval) -> Value {
         AiToolRisk::Low => "Risco baixo",
     };
     json!({
-        "title": "Decisor aguarda sua aprovação",
+        "title": "Assistente IA aguarda sua aprovação",
         "body": format!("{}\n{risk}: {}", approval.summary, approval.reason),
         "icon": "/pwa-192x192.png",
         "badge": "/pwa-192x192.png",
@@ -340,6 +391,26 @@ mod tests {
     }
 
     #[test]
+    fn pendentes_da_conversa_sao_so_as_do_dono_e_dela() {
+        let desk = ApprovalDesk::default();
+        let mut nesta = proposal("a", 7);
+        nesta.conversation_key = Some("conversa".into());
+        let mut outra = proposal("b", 7);
+        outra.conversation_key = Some("outra".into());
+        let mut de_outro = proposal("c", 8);
+        de_outro.conversation_key = Some("conversa".into());
+        for item in [nesta.clone(), outra, de_outro] {
+            desk.insert(item);
+        }
+        assert_eq!(
+            desk.awaiting_in(7, "conversa"),
+            vec![(nesta.approval.tool.clone(), nesta.arguments.clone())]
+        );
+        desk.settle(7, "a");
+        assert!(desk.awaiting_in(7, "conversa").is_empty(), "decidida sai");
+    }
+
+    #[test]
     fn decidida_uma_vez_e_recusada_na_segunda() {
         let desk = ApprovalDesk::default();
         desk.insert(proposal("c1", 7));
@@ -387,7 +458,8 @@ mod tests {
         assert!(state.sweep(Instant::now()).is_empty());
         assert_eq!(
             state.sweep(Instant::now() + EXPIRES_AFTER),
-            vec!["velha".to_string()]
+            vec![("velha".to_string(), 1)],
+            "sai com o dono, para avisar as telas dele"
         );
         assert!(state.pending.is_empty());
     }
@@ -405,7 +477,7 @@ mod tests {
     #[test]
     fn notificacao_abre_o_chat_e_diz_o_risco() {
         let payload = notification(&proposal("c3", 1).approval);
-        assert_eq!(payload["title"], "Decisor aguarda sua aprovação");
+        assert_eq!(payload["title"], "Assistente IA aguarda sua aprovação");
         assert_eq!(payload["data"]["url"], "/ai-chat");
         assert_eq!(payload["tag"], "ai-approval-c3");
         assert!(payload["body"]

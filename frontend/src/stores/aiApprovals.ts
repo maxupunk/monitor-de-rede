@@ -8,8 +8,11 @@ import { useAuthStore } from './auth'
 
 export type { AiPendingApproval }
 
-/** Como o usuário decidiu um pedido (evento `ai:approval_resolved`). */
-export type AiApprovalDecision = 'confirmed' | 'dismissed'
+/**
+ * Como o pedido saiu da fila (evento `ai:approval_resolved`): decidido pelo
+ * usuário ou vencido sem resposta.
+ */
+export type AiApprovalDecision = 'confirmed' | 'dismissed' | 'expired'
 
 export interface AiApprovalResolved {
   callId: string
@@ -34,7 +37,8 @@ export function isPendingApproval(value: unknown): value is AiPendingApproval {
 
 export function asApprovalResolved(value: unknown): AiApprovalResolved | null {
   if (!isRecord(value) || typeof value.callId !== 'string') return null
-  const decision = value.decision === 'dismissed' ? 'dismissed' : 'confirmed'
+  const decision: AiApprovalDecision =
+    value.decision === 'dismissed' || value.decision === 'expired' ? value.decision : 'confirmed'
   return { callId: value.callId, decision }
 }
 
@@ -64,6 +68,14 @@ export const useAiApprovalsStore = defineStore('aiApprovals', () => {
     remove(resolved.callId)
   }
 
+  /**
+   * O stream (re)conectou: o snapshot que vem em seguida é a fila inteira. O
+   * que foi decidido ou venceu enquanto a aba estava sem conexão não volta.
+   */
+  function reset() {
+    pending.value = []
+  }
+
   /** Executa a proposta guardada no servidor (confirmação fora do chat). */
   async function confirm(callId: string): Promise<ExecuteToolResponse> {
     try {
@@ -85,5 +97,5 @@ export const useAiApprovalsStore = defineStore('aiApprovals', () => {
     await apiService.post(`/ai/approvals/${encodeURIComponent(callId)}/dismiss`, {})
   }
 
-  return { pending, mine, applyPending, applyResolved, confirm, dismiss }
+  return { pending, mine, applyPending, applyResolved, reset, confirm, dismiss }
 })

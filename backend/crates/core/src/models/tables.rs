@@ -117,6 +117,114 @@ pub const CREATION_ORDER: [&str; 67] = [
     "auth_tokens",
 ];
 
+/// As tabelas do banco de logs (`SYSLOG_DB_URL`, ADR 020), fora do
+/// [`CREATION_ORDER`] porque não nascem no migrator principal.
+pub const LOG_TABLES: [&str; 2] = ["device_logs", "log_templates"];
+
+/// Nome legível de cada tabela, para as telas que falam de banco (o espaço
+/// ocupado, o conteúdo de um backup). Um teste garante que nenhuma tabela do
+/// esquema fique sem nome.
+const LABELS: [(&str, &str); 70] = [
+    ("users", "Usuários"),
+    ("sites", "Sites"),
+    ("probes", "Agentes e sondas"),
+    ("networks", "Redes IP"),
+    ("devices", "Dispositivos"),
+    ("device_interfaces", "Interfaces dos dispositivos"),
+    ("device_links", "Enlaces de topologia"),
+    ("monitors", "Monitores"),
+    ("monitor_results", "Resultados dos monitores"),
+    (
+        "monitor_results_hourly",
+        "Resultados por hora (consolidado)",
+    ),
+    ("metrics", "Métricas dos dispositivos"),
+    ("discovery_runs", "Execuções de descoberta"),
+    ("discovery_results", "Resultados de descoberta"),
+    ("alert_rules", "Regras de alerta"),
+    ("alert_events", "Histórico de alertas"),
+    ("vpn_servers", "Servidor VPN"),
+    ("vpn_peers", "Dispositivos da VPN"),
+    ("dns_servers", "Servidores DNS"),
+    ("event_outbox", "Fila de eventos em tempo real"),
+    ("notification_outbox", "Diário de notificações"),
+    ("probe_tasks", "Tarefas das sondas"),
+    ("system_settings", "Preferências do sistema"),
+    ("maintenance_windows", "Janelas de manutenção"),
+    ("audit_logs", "Auditoria"),
+    ("push_subscriptions", "Inscrições de notificação push"),
+    ("ai_conversations", "Conversas do Assistente IA"),
+    ("host_metrics_1m", "Métricas dos servidores (1 min)"),
+    ("container_metrics_1m", "Métricas dos containers (1 min)"),
+    ("plugins", "Plugins de dispositivo"),
+    (
+        "device_credentials",
+        "Credenciais de acesso aos equipamentos",
+    ),
+    ("plugin_runs", "Execuções de plugins"),
+    ("plugin_auto_accept", "Aceites automáticos de plugins"),
+    (
+        "device_plugin_installs",
+        "Plugins instalados por equipamento",
+    ),
+    ("plugin_settings", "Configurações de plugins"),
+    ("plugin_batches", "Execuções de plugins em lote"),
+    ("oui_vendors", "Fabricantes (registro IEEE)"),
+    ("storage_destinations", "Destinos de backup"),
+    ("database_connections", "Bancos de dados protegidos"),
+    ("database_backups", "Histórico de backups de bancos"),
+    ("deploy_credentials", "Credenciais de deploy"),
+    ("deploy_github_connections", "Conexões com o GitHub"),
+    ("deploy_applications", "Aplicações de deploy"),
+    ("deploy_targets", "Destinos de deploy"),
+    ("deploy_env_versions", "Versões do .env das aplicações"),
+    ("deploy_build_secrets", "Segredos de compilação"),
+    ("deploy_builds", "Compilações"),
+    ("deploy_runs", "Execuções de deploy"),
+    ("registry_repositories", "Registry: repositórios"),
+    ("registry_blobs", "Registry: camadas"),
+    (
+        "registry_repository_blobs",
+        "Registry: camadas por repositório",
+    ),
+    ("registry_manifests", "Registry: manifests"),
+    ("registry_tags", "Registry: tags"),
+    ("registry_uploads", "Registry: envios em andamento"),
+    ("registry_tokens", "Registry: tokens pessoais"),
+    (
+        "registry_findings",
+        "Registry: vulnerabilidades encontradas",
+    ),
+    ("registry_advisories", "Registry: base de vulnerabilidades"),
+    ("registry_feeds", "Registry: fontes de vulnerabilidades"),
+    (
+        "registry_exceptions",
+        "Registry: exceções de vulnerabilidade",
+    ),
+    ("system_backup_plan", "Plano de backup do NetMonitor"),
+    ("link_test_schedules", "Agendamentos de teste de enlace"),
+    ("link_tests", "Testes de enlace"),
+    ("link_test_legs", "Medições dos testes de enlace"),
+    ("scheduled_tasks", "Tarefas agendadas"),
+    ("scheduled_task_runs", "Execuções de tarefas agendadas"),
+    ("wifi_watched_clients", "Clientes Wi-Fi vigiados"),
+    ("wifi_roaming_events", "Histórico de roaming Wi-Fi"),
+    ("auth_tokens", "Tokens de sessão"),
+    ("device_logs", "Logs dos dispositivos (Syslog)"),
+    ("log_templates", "Modelos de log aprendidos"),
+    ("seaql_migrations", "Controle de versões do esquema"),
+];
+
+/// O nome legível da tabela; o próprio nome técnico quando ela não é do
+/// esquema (uma tabela criada à mão no banco, por exemplo).
+#[must_use]
+pub fn label(table: &str) -> &str {
+    LABELS
+        .iter()
+        .find(|(name, _)| *name == table)
+        .map_or(table, |(_, label)| label)
+}
+
 /// Tabela de controle do migrator. Precisa ser esvaziada entre testes para que
 /// o `auto_migrate` do Loco reaplique as migrations sem erro de UNIQUE.
 pub const MIGRATIONS_TABLE: &str = "seaql_migrations";
@@ -209,6 +317,14 @@ mod tests {
         assert_eq!(CREATION_ORDER.len(), 67);
         let unicas: HashSet<&&str> = CREATION_ORDER.iter().collect();
         assert_eq!(unicas.len(), 67, "há nome de tabela repetido");
+    }
+
+    #[test]
+    fn toda_tabela_tem_nome_legivel() {
+        for table in CREATION_ORDER.iter().chain(LOG_TABLES.iter()) {
+            assert_ne!(label(table), *table, "tabela sem nome legível: {table}");
+        }
+        assert_eq!(label("tabela_qualquer"), "tabela_qualquer");
     }
 
     #[test]

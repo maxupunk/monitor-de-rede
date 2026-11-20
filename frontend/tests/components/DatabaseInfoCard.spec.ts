@@ -41,6 +41,8 @@ describe('DatabaseInfoCard.vue', () => {
           'v-btn': { template: '<button><slot /></button>' },
           'v-icon': { template: '<span />' },
           'v-dialog': { template: '<div class="stub-dialog"><slot /></div>' },
+          ChoiceCard: { template: '<div class="stub-choice"><slot /></div>' },
+          DatabaseUsageDialog: true,
         },
       },
     })
@@ -96,6 +98,8 @@ describe('DatabaseInfoCard.vue', () => {
           'v-btn': { template: '<button><slot /></button>' },
           'v-icon': { template: '<span />' },
           'v-dialog': { template: '<div class="stub-dialog"><slot /></div>' },
+          ChoiceCard: { template: '<div class="stub-choice"><slot /></div>' },
+          DatabaseUsageDialog: true,
         },
       },
     })

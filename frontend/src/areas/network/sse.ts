@@ -70,6 +70,8 @@ export const networkSse: SseRoutes = {
   'plugin:run_finished': (data) => usePluginsStore().applyRunFinished(data),
   'plugin:run_progress': (data) => usePluginsStore().applyRunProgress(data),
   'plugin:run_step': (data) => usePluginAppsStore().applyRunOutput(data),
+  // Antes do snapshot: a fila de aprovações chega inteira de novo.
+  'stream:connected': () => usePluginsStore().resetApprovals(),
   'plugin:approval_required': (data) => usePluginsStore().applyApprovalRequired(data),
   'plugin:approval_resolved': (data) => usePluginsStore().applyApprovalResolved(data),
   'plugin:batch_updated': (data) => usePluginAppsStore().applyBatchUpdated(data),

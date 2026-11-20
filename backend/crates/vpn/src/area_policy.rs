@@ -26,6 +26,10 @@ impl AreaPolicy for VpnPolicy {
         &["vpn:"]
     }
 
+    fn tables(&self) -> &'static [&'static str] {
+        &["vpn_servers", "vpn_peers"]
+    }
+
     async fn evidence(&self, db: &DatabaseConnection) -> AppResult<Evidence> {
         let servidores = vpn_servers::Entity::find().count(db).await?;
         Ok(if servidores > 0 {

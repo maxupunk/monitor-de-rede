@@ -1,5 +1,17 @@
 <template>
   <AuthShell title="Entrar" subtitle="Informe suas credenciais para acessar o painel.">
+    <v-alert
+      v-if="restoredFromBackup"
+      type="success"
+      variant="tonal"
+      density="comfortable"
+      class="mb-5"
+      rounded="lg"
+      data-restored
+    >
+      Backup completo restaurado. Entre com uma conta que existia no backup — as contas e senhas
+      agora são as dele.
+    </v-alert>
     <v-expand-transition>
       <v-alert
         v-if="authStore.error"
@@ -87,6 +99,8 @@ import { emailRule, requiredRule, type ValidationRule, type VuetifyForm } from '
 const authStore = useAuthStore()
 const router = useRouter()
 const route = useRoute()
+/** Chegou aqui depois de restaurar um backup completo (`finishRestore`). */
+const restoredFromBackup = route.query.restaurado === '1'
 
 const formRef = ref<VuetifyForm | null>(null)
 const email = ref('')

@@ -1,7 +1,14 @@
 <template>
   <v-alert type="warning" variant="tonal" border="start" icon="mdi-backup-restore">
     <div class="font-weight-bold mb-1">Voltar o NetMonitor para esta cópia?</div>
-    <div class="text-body-2 mb-3">
+    <div v-if="counts.scope === 'full'" class="text-body-2 mb-3" data-full-warning>
+      É um <strong>backup completo</strong>: os bancos inteiros — configuração, histórico, logs e
+      também os <strong>usuários e senhas</strong> — são substituídos pelos da cópia. Se a sua conta
+      não estiver no backup, você entra de novo com uma conta dele ao terminar. Segredos cifrados
+      (VPN, credenciais) só voltam a funcionar com a mesma <code>ENCRYPTION_KEY</code> da instalação
+      de origem.
+    </div>
+    <div v-else class="text-body-2 mb-3">
       Tudo o que está configurado agora — dispositivos, monitores, alertas, VPN e preferências — é
       substituído pelo que está na cópia, e o histórico de coleta dos equipamentos atuais é
       descartado. Usuários e senhas não mudam; a página recarrega ao terminar.

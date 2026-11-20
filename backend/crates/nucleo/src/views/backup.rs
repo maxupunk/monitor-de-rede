@@ -9,10 +9,12 @@ use serde::Serialize;
 use ts_rs::TS;
 
 use crate::{
-    models::system_backup_plan,
+    models::{system_backup_plan, tables},
     services::backup::{
+        catalog::BackupScope,
         copies::{BackupEntry, RunOutcome},
         plan,
+        restore::{Preview, Restored},
         service::TableCounts,
     },
 };
@@ -112,6 +114,8 @@ impl SystemBackupRunResponse {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct BackupCountsResponse {
+    /// Configuração ou os bancos inteiros (com usuários, histórico e logs).
+    pub scope: BackupScope,
     pub tables: Vec<BackupTableCount>,
     #[ts(type = "number")]
     pub total_rows: usize,
@@ -122,18 +126,59 @@ pub struct BackupCountsResponse {
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct BackupTableCount {
     pub table: String,
+    /// Nome da tabela em português.
+    pub label: String,
     #[ts(type = "number")]
     pub rows: usize,
 }
 
-impl From<TableCounts> for BackupCountsResponse {
-    fn from(counts: TableCounts) -> Self {
+impl BackupCountsResponse {
+    #[must_use]
+    pub fn new(scope: BackupScope, counts: TableCounts) -> Self {
         Self {
+            scope,
             total_rows: counts.iter().map(|(_, rows)| rows).sum(),
             tables: counts
                 .into_iter()
-                .map(|(table, rows)| BackupTableCount { table, rows })
+                .map(|(table, rows)| BackupTableCount {
+                    label: tables::label(&table).to_owned(),
+                    table,
+                    rows,
+                })
                 .collect(),
+        }
+    }
+}
+
+/// As cópias dos destinos são sempre de configuração.
+impl From<TableCounts> for BackupCountsResponse {
+    fn from(counts: TableCounts) -> Self {
+        Self::new(BackupScope::Config, counts)
+    }
+}
+
+impl From<Preview> for BackupCountsResponse {
+    fn from(preview: Preview) -> Self {
+        Self::new(preview.scope, preview.counts)
+    }
+}
+
+/// O que a restauração de um arquivo gravou e o que vem depois.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct BackupRestoreResponse {
+    pub counts: BackupCountsResponse,
+    /// A conta de quem restaurou deixou de existir (o completo trouxe os
+    /// usuários do backup): é preciso entrar de novo com uma conta dele.
+    pub sign_in_again: bool,
+}
+
+impl From<Restored> for BackupRestoreResponse {
+    fn from(restored: Restored) -> Self {
+        Self {
+            sign_in_again: !restored.session_kept,
+            counts: BackupCountsResponse::new(restored.scope, restored.counts),
         }
     }
 }

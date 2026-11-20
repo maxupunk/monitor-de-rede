@@ -91,6 +91,30 @@
               :message="message"
               @rewind="handleRewind"
             />
+            <!-- A conversa parou de ser salva (ex.: grande demais): avisa aqui, onde se lê -->
+            <v-alert
+              v-if="conversations.saveError"
+              type="error"
+              variant="tonal"
+              density="compact"
+              class="mb-3 text-body-small"
+            >
+              <div>
+                {{ conversations.saveError }} As mensagens novas não estão sendo salvas no
+                histórico.
+              </div>
+              <div class="mt-2 d-flex justify-end">
+                <v-btn
+                  size="small"
+                  variant="flat"
+                  color="error"
+                  prepend-icon="mdi-plus"
+                  @click="aiStore.newConversation()"
+                >
+                  Nova conversa
+                </v-btn>
+              </div>
+            </v-alert>
           </template>
         </div>
       </div>
@@ -130,6 +154,7 @@
 import { computed, ref } from 'vue'
 import ChoiceCard from '@/components/ChoiceCard.vue'
 import { useAiStore } from '@/stores/ai'
+import { useAiConversationsStore } from '@/stores/aiConversations'
 import { useChatAutoScroll } from '@/composables/useChatAutoScroll'
 import AiChatMessage from './AiChatMessage.vue'
 import AiChatComposer from './AiChatComposer.vue'
@@ -160,6 +185,7 @@ const emit = defineEmits<{
 }>()
 
 const aiStore = useAiStore()
+const conversations = useAiConversationsStore()
 const scroller = ref<HTMLElement | null>(null)
 const composer = ref<InstanceType<typeof AiChatComposer> | null>(null)
 

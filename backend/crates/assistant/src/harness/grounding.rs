@@ -8,9 +8,10 @@
 //! prompt) ou está cadastrado no inventário. Alvo público (`8.8.8.8`,
 //! `google.com`) é conhecimento geral e segue livre, como o loopback.
 
-use std::net::IpAddr;
+use std::{net::IpAddr, ops::Range, sync::LazyLock};
 
 use loco_rs::prelude::AppContext;
+use regex::Regex;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder};
 use serde_json::{json, Value};
 
@@ -703,22 +704,276 @@ pub fn redact(answer: &str, names: &[String]) -> String {
     text
 }
 
-/// [`unsupported_identifiers`] menos o que está cadastrado no inventário (o
-/// resultado que o mostrou pode ter sido podado da conversa).
+/// Os resultados de consulta que a IA leu nesta resposta, guardados antes da
+/// poda: o que saiu da conversa para caber na janela (ou foi trocado por uma
+/// consulta repetida) continua valendo como origem de um nome.
+#[derive(Debug, Default)]
+pub struct SeenResults {
+    texts: Vec<String>,
+    recorded: usize,
+}
+
+impl SeenResults {
+    /// Guarda os resultados que entraram na conversa desde a última vez. Vem
+    /// antes de qualquer poda da rodada: só as mensagens novas são lidas.
+    pub fn record(&mut self, conversation: &[AiMessage]) {
+        let fresh = conversation.iter().skip(self.recorded);
+        self.texts.extend(
+            fresh
+                .filter(|message| message.role == "tool")
+                .filter_map(|message| message.content.clone()),
+        );
+        self.recorded = conversation.len();
+    }
+
+    fn mentions(&self, target: &str) -> bool {
+        self.texts.iter().any(|text| mentions(text, target))
+    }
+}
+
+/// [`unsupported_identifiers`] menos o que algum resultado desta resposta
+/// mostrou (mesmo podado depois) e o que está cadastrado no inventário.
 pub async fn invented_in_answer<C: ConnectionTrait>(
     db: &C,
     answer: &str,
     conversation: &[AiMessage],
     earlier: usize,
+    seen: &SeenResults,
     is_tool: impl Fn(&str) -> bool,
 ) -> Vec<String> {
     let mut invented = Vec::new();
     for candidate in unsupported_identifiers(answer, conversation, earlier, is_tool) {
+        if seen.mentions(&candidate) {
+            continue;
+        }
         if !registered(db, &candidate).await.unwrap_or(false) {
             invented.push(candidate);
         }
     }
     invented
+}
+
+/// A chave do aviso da conferência na tela: cada estado substitui o anterior.
+pub const ANSWER_CHECK_NOTICE: &str = "answer-check";
+
+/// O desfecho quando a versão conferida saiu limpa.
+pub const ANSWER_CHECKED: &str = "Resposta conferida: a IA refez o que a conferência apontou.";
+
+/// O que fica no lugar de um gráfico que a IA desenhou em texto.
+pub const NO_CHART: &str = "[gráfico indisponível]";
+
+/// Abertura ou fechamento de uma tag qualquer (`<analysis_chart data=…>`,
+/// `</chart>`, `<grafico/>`).
+static TAG: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"<(/?)\s*(\p{L}[\w:.-]*)[^<>]*?(/?)>").expect("regex de tag"));
+
+/// A tag tem nome de gráfico: modelo pequeno inventa `analysis_chart`,
+/// `line-graph`, `grafico_cpu`, `plot`.
+fn is_chart_tag(name: &str) -> bool {
+    let name = name.to_lowercase();
+    ["chart", "graph", "grafico", "gráfico", "plot"]
+        .iter()
+        .any(|word| name.contains(word))
+}
+
+/// Os trechos em que a IA "desenha" um gráfico com uma tag inventada
+/// (`<analysis_chart data="[…]">…</analysis_chart>`). Gráfico só sai por
+/// ferramenta `chart_*`: a tela mostraria a tag crua, com números que nenhuma
+/// consulta trouxe. O par aberto/fechado vira um trecho só, com o miolo; a
+/// tag sem par sai sozinha.
+#[must_use]
+pub fn fake_charts(answer: &str) -> Vec<Range<usize>> {
+    let mut spans: Vec<Range<usize>> = Vec::new();
+    // Nome e trecho da abertura que espera o fechamento.
+    let mut open: Option<(&str, Range<usize>)> = None;
+    for tag in TAG.captures_iter(answer) {
+        let (Some(whole), Some(name)) = (tag.get(0), tag.get(2)) else {
+            continue;
+        };
+        if !is_chart_tag(name.as_str()) {
+            continue;
+        }
+        let closing = !tag[1].is_empty();
+        let self_closing = !tag[3].is_empty();
+        if closing {
+            match open.take() {
+                Some((opened, at)) if opened.eq_ignore_ascii_case(name.as_str()) => {
+                    spans.push(at.start..whole.end());
+                }
+                other => {
+                    open = other;
+                    spans.push(whole.range());
+                }
+            }
+        } else if self_closing {
+            spans.push(whole.range());
+        } else if let Some((_, at)) = open.replace((name.as_str(), whole.range())) {
+            spans.push(at);
+        }
+    }
+    if let Some((_, at)) = open {
+        spans.push(at);
+    }
+    spans.sort_by_key(|span| span.start);
+    // Um fechamento solto dentro de um par já está no trecho do par.
+    let mut merged: Vec<Range<usize>> = Vec::with_capacity(spans.len());
+    for span in spans {
+        match merged.last_mut() {
+            Some(last) if span.start < last.end => last.end = last.end.max(span.end),
+            _ => merged.push(span),
+        }
+    }
+    merged
+}
+
+/// Troca cada gráfico em texto por [`NO_CHART`].
+fn redact_charts(answer: &str) -> String {
+    let mut text = String::with_capacity(answer.len());
+    let mut last = 0;
+    for span in fake_charts(answer) {
+        text.push_str(&answer[last..span.start]);
+        text.push_str(NO_CHART);
+        last = span.end;
+    }
+    text.push_str(&answer[last..]);
+    text
+}
+
+/// O que a conferência acha na resposta final: nomes sem origem e gráfico
+/// desenhado em texto. Os textos para a tela e para a IA moram aqui, para o
+/// laço do agente só perguntar, pedir a correção e redigir.
+#[derive(Debug, Default)]
+pub struct AnswerCheck {
+    invented: Vec<String>,
+    fake_chart: bool,
+    /// Nomes de ferramenta (`chart_interface_traffic`) que a resposta cita
+    /// sem o usuário ter escrito: jargão que não diz nada a quem lê.
+    internal: Vec<String>,
+}
+
+/// Os nomes de ferramenta que a resposta cita e a pergunta não: modelo
+/// pequeno repete o erro que o harness lhe devolveu ("use uma destas:
+/// `chart_…`") como se fosse resposta. Todo nome do catálogo tem `_`.
+fn internal_names(answer: &str, question: &str, is_tool: impl Fn(&str) -> bool) -> Vec<String> {
+    let mut found = Vec::new();
+    for token in answer.split(|c: char| !(c.is_alphanumeric() || c == '_')) {
+        if found.len() >= MAX_UNSUPPORTED {
+            break;
+        }
+        if token.contains('_') && is_tool(token) && !question.contains(token) {
+            push_unique(&mut found, token);
+        }
+    }
+    found
+}
+
+impl AnswerCheck {
+    /// Confere a resposta. Ver [`invented_in_answer`] e [`fake_charts`].
+    pub async fn run<C: ConnectionTrait>(
+        db: &C,
+        answer: &str,
+        conversation: &[AiMessage],
+        earlier: usize,
+        seen: &SeenResults,
+        is_tool: impl Fn(&str) -> bool,
+    ) -> Self {
+        let question = conversation
+            .get(earlier)
+            .and_then(|message| message.content.as_deref())
+            .unwrap_or_default();
+        Self {
+            internal: internal_names(answer, question, &is_tool),
+            invented: invented_in_answer(db, answer, conversation, earlier, seen, &is_tool).await,
+            fake_chart: !fake_charts(answer).is_empty(),
+        }
+    }
+
+    #[must_use]
+    pub fn is_clean(&self) -> bool {
+        !self.needs_redaction() && self.internal.is_empty()
+    }
+
+    /// O que não pode ficar na tela mesmo depois da correção: nome inventado
+    /// e gráfico falso enganam. Jargão só confunde — fica, se a IA insistir.
+    #[must_use]
+    pub fn needs_redaction(&self) -> bool {
+        !self.invented.is_empty() || self.fake_chart
+    }
+
+    /// O aviso enquanto a IA confere a resposta.
+    #[must_use]
+    pub fn retry_notice(&self) -> String {
+        let mut problems = Vec::new();
+        if !self.invented.is_empty() {
+            problems.push(format!(
+                "{} não apareceu em nenhuma consulta",
+                self.invented.join(", ")
+            ));
+        }
+        if self.fake_chart {
+            problems.push("o gráfico veio escrito em texto, sem dados de consulta".to_string());
+        }
+        if !self.internal.is_empty() {
+            problems.push("a resposta citava nomes internos de ferramentas".to_string());
+        }
+        format!(
+            "Conferindo a resposta: {}; a IA está verificando nos dados.",
+            problems.join("; ")
+        )
+    }
+
+    /// O pedido de correção devolvido à IA.
+    #[must_use]
+    pub fn retry_request(&self) -> String {
+        let mut request = String::from(ANSWER_CHECK_TAG);
+        if !self.invented.is_empty() {
+            request.push_str(&format!(
+                "Sua resposta cita {}, que não veio de nenhuma consulta nem do pedido. Não invente recursos: consulte com as ferramentas. ",
+                self.invented.join(", ")
+            ));
+        }
+        if self.fake_chart {
+            request.push_str(
+                "Sua resposta desenha um gráfico com uma tag de texto, que a tela não desenha. Gráfico só sai por uma ferramenta chart_* (grupo charts); se nenhuma serve para esse dado, use uma tabela curta só com números que uma consulta trouxe. ",
+            );
+        }
+        if !self.internal.is_empty() {
+            request.push_str(&format!(
+                "Sua resposta cita nomes internos de ferramentas ({}), que o usuário não conhece. Diga em linguagem simples o que dá e o que não dá para mostrar, sem nomes de ferramentas. ",
+                self.internal.join(", ")
+            ));
+        }
+        request.push_str("Responda de novo, curto, ou diga que não encontrou.</conferencia>");
+        request
+    }
+
+    /// O aviso quando a IA insiste no que a conferência apontou.
+    #[must_use]
+    pub fn final_notice(&self) -> String {
+        let mut parts = Vec::new();
+        if !self.invented.is_empty() {
+            parts.push(format!(
+                "A IA citou nomes que não existem em nenhum dado consultado; eles aparecem como {UNCONFIRMED}."
+            ));
+        }
+        if self.fake_chart {
+            parts.push(format!(
+                "A IA escreveu um gráfico em texto, sem uma ferramenta de gráfico para esse dado; ele aparece como {NO_CHART}."
+            ));
+        }
+        parts.join(" ")
+    }
+
+    /// A resposta com os nomes inventados e os gráficos em texto trocados.
+    #[must_use]
+    pub fn redact(&self, answer: &str) -> String {
+        let named = redact(answer, &self.invented);
+        if self.fake_chart {
+            redact_charts(&named)
+        } else {
+            named
+        }
+    }
 }
 
 #[cfg(test)]
@@ -936,6 +1191,23 @@ mod tests {
     }
 
     #[test]
+    fn resultado_podado_continua_valendo_como_origem() {
+        let mut sessao = conversa(&[
+            ("user", "quais containers?"),
+            ("tool", r#"{"rows":[["grafana-01","running"]]}"#),
+        ]);
+        let mut vistos = SeenResults::default();
+        vistos.record(&sessao);
+        sessao[1].content = Some(super::super::compaction::PRUNED_NOTICE.to_string());
+        sessao.extend(conversa(&[("tool", r#"{"rows":[["loki-02"]]}"#)]));
+        vistos.record(&sessao);
+        assert!(vistos.mentions("grafana-01"), "lido antes da poda");
+        assert!(vistos.mentions("loki-02"), "o que chegou depois também");
+        assert!(!vistos.mentions("tempo-03"));
+        assert_eq!(vistos.texts.len(), 2, "cada resultado entra uma vez só");
+    }
+
+    #[test]
     fn nome_inventado_some_da_resposta_so_onde_aparece_inteiro() {
         let nomes = vec!["agente-west-01".to_string(), "10.0.0.1".to_string()];
         assert_eq!(
@@ -960,5 +1232,100 @@ mod tests {
             unsupported_identifiers(resposta, &sessao, 0, |nome| nome == "get_docker_hosts"),
             vec!["nginx-proxy"]
         );
+    }
+
+    #[test]
+    fn grafico_em_tag_inventada_e_achado_com_o_miolo() {
+        let resposta = "CPU por hora:
+<analysis_chart data=\"[12, 40, 7]\">
+Pico às 14h
+</analysis_chart>
+Fim.";
+        let trechos = fake_charts(resposta);
+        assert_eq!(trechos.len(), 1, "{trechos:?}");
+        assert_eq!(
+            &resposta[trechos[0].clone()],
+            "<analysis_chart data=\"[12, 40, 7]\">
+Pico às 14h
+</analysis_chart>"
+        );
+        assert_eq!(
+            redact_charts(resposta),
+            format!(
+                "CPU por hora:
+{NO_CHART}
+Fim."
+            )
+        );
+    }
+
+    #[test]
+    fn grafico_sem_par_ou_autofechado_sai_sozinho() {
+        assert_eq!(
+            redact_charts("Veja <line-graph values=\"1,2\"/> e <Grafico_CPU tipo=linha> ok"),
+            format!("Veja {NO_CHART} e {NO_CHART} ok")
+        );
+        assert_eq!(
+            redact_charts("antes </chart> depois"),
+            format!("antes {NO_CHART} depois")
+        );
+    }
+
+    #[test]
+    fn texto_comum_com_sinal_de_menor_nao_e_grafico() {
+        for resposta in [
+            "Latência < 5 ms e perda > 2%.",
+            "Use <b>negrito</b> e `<table>` sem medo.",
+            "O gráfico da tela mostra a CPU.",
+        ] {
+            assert!(fake_charts(resposta).is_empty(), "{resposta}");
+        }
+    }
+
+    #[test]
+    fn nome_de_ferramenta_na_resposta_e_jargao_salvo_se_o_usuario_escreveu() {
+        let ferramenta = |nome: &str| nome.starts_with("chart_") || nome == "list_devices";
+        assert_eq!(
+            internal_names(
+                "Use `chart_device_metric` ou chart_logs_volume; list_devices também.",
+                "o que o list_devices mostra?",
+                ferramenta
+            ),
+            vec!["chart_device_metric", "chart_logs_volume"]
+        );
+        assert!(internal_names("Tudo certo no snake_case.", "oi", ferramenta).is_empty());
+
+        let so_jargao = AnswerCheck {
+            internal: vec!["chart_device_metric".into()],
+            ..AnswerCheck::default()
+        };
+        assert!(
+            !so_jargao.is_clean(),
+            "pede uma rodada para explicar sem jargão"
+        );
+        assert!(
+            !so_jargao.needs_redaction(),
+            "mas não apaga nada se a IA insistir"
+        );
+        assert!(so_jargao.retry_request().contains("linguagem simples"));
+    }
+
+    #[test]
+    fn conferencia_junta_nome_inventado_e_grafico_em_texto() {
+        let conferencia = AnswerCheck {
+            invented: vec!["agente-west-01".into()],
+            fake_chart: true,
+            internal: Vec::new(),
+        };
+        assert!(!conferencia.is_clean());
+        let pedido = conferencia.retry_request();
+        assert!(pedido.starts_with(ANSWER_CHECK_TAG));
+        assert!(pedido.contains("agente-west-01") && pedido.contains("chart_*"));
+        assert!(conferencia.retry_notice().contains("gráfico"));
+        assert_eq!(
+            conferencia.redact("No `agente-west-01`: <chart/>"),
+            format!("No `{UNCONFIRMED}`: {NO_CHART}")
+        );
+        assert!(AnswerCheck::default().is_clean());
     }
 }

@@ -18,10 +18,16 @@ use sea_orm::{
 
 use crate::{
     models::logs::device_logs,
-    services::{maintenance::data_pruner::retention_days, shared::errors::AppResult},
+    services::{maintenance::data_pruner::RetentionRule, shared::errors::AppResult},
 };
 
 pub const DEFAULT_RETENTION_LOGS_DAYS: i64 = 7;
+
+/// A janela por tempo do banco de logs (o teto de tamanho vem à parte).
+pub const LOGS_RETENTION: RetentionRule = RetentionRule {
+    variable: "RETENTION_LOGS_DAYS",
+    default_days: DEFAULT_RETENTION_LOGS_DAYS,
+};
 
 /// Teto de disco do banco de logs.
 ///
@@ -79,7 +85,7 @@ pub async fn prune_with(
     teto: u64,
     chunk: u64,
 ) -> AppResult<LogPruneStats> {
-    let dias = retention_days("RETENTION_LOGS_DAYS", DEFAULT_RETENTION_LOGS_DAYS);
+    let dias = LOGS_RETENTION.days();
     let corte = Utc::now() - Duration::days(dias);
 
     let by_age = device_logs::Entity::delete_many()

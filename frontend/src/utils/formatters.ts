@@ -200,6 +200,14 @@ export function formatPercent(value?: number | null, digits = 1, fallback = '—
   })}%`
 }
 
+/** Inteiro com separador de milhar: `2.210` (linhas, registros apagados). */
+export function formatInteger(value?: number | bigint | null, fallback = '—'): string {
+  if (value === null || value === undefined) return fallback
+  const number = Number(value)
+  if (!Number.isFinite(number)) return fallback
+  return Math.round(number).toLocaleString('pt-BR')
+}
+
 /** Contagem compacta: `850`, `1,2 mil`, `3,4 mi` (tokens, amostras, eventos). */
 export function formatCompactCount(value?: number | null, fallback = '—'): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return fallback

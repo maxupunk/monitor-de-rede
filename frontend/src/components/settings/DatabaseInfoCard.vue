@@ -12,13 +12,20 @@
 
       <v-row dense>
         <v-col cols="12" sm="6" md="4">
-          <div class="d-flex align-center justify-space-between pa-3 rounded border h-100">
+          <ChoiceCard
+            color="info"
+            class="d-flex align-center justify-space-between pa-3 h-100"
+            data-usage-trigger
+            :aria-label="`Tamanho total ${formattedSize}: ver o que ocupa o espaço`"
+            @click="usageDialog = true"
+          >
             <div>
               <div class="font-weight-bold text-subtitle-2">Tamanho Total</div>
               <div class="text-caption text-high-emphasis">{{ formattedSize }}</div>
+              <div class="text-caption text-info font-weight-bold">Ver o que ocupa ›</div>
             </div>
-            <v-icon color="info" size="28">mdi-harddisk</v-icon>
-          </div>
+            <v-icon color="info" size="28">mdi-chart-donut</v-icon>
+          </ChoiceCard>
         </v-col>
 
         <v-col cols="12" sm="6" md="4">
@@ -122,6 +129,8 @@
       </v-btn>
     </v-card-actions>
 
+    <DatabaseUsageDialog v-model="usageDialog" @clear-history="confirmClearDialog = true" />
+
     <v-dialog
       v-model="confirmClearDialog"
       max-width="540"
@@ -219,11 +228,18 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import ChoiceCard from '@/components/ChoiceCard.vue'
+import DatabaseUsageDialog from './DatabaseUsageDialog.vue'
 import { apiService } from '@/services/apiService'
 import type { DatabaseInfo } from '@/bindings/DatabaseInfo'
 import type { ClearHistoryStats } from '@/bindings/ClearHistoryStats'
 import type { ClearAllItemsStats } from '@/bindings/ClearAllItemsStats'
-import { formatBinaryBytes, formatDateTime, formatTimeSpan } from '@/utils/formatters'
+import {
+  formatBinaryBytes,
+  formatDateTime,
+  formatInteger,
+  formatTimeSpan,
+} from '@/utils/formatters'
 
 const loading = ref(false)
 const clearing = ref(false)
@@ -232,6 +248,7 @@ const error = ref('')
 const successMessage = ref('')
 const confirmClearDialog = ref(false)
 const confirmClearAllDialog = ref(false)
+const usageDialog = ref(false)
 const info = ref<DatabaseInfo | null>(null)
 
 const formattedSize = computed(() => {
@@ -279,8 +296,7 @@ async function clearHistory(): Promise<void> {
   try {
     const stats = await apiService.post<ClearHistoryStats>('/settings/clear-history', {})
     confirmClearDialog.value = false
-    const count = Number(stats.totalDeleted)
-    successMessage.value = `Histórico apagado com sucesso! ${count.toLocaleString('pt-BR')} registros removidos e espaço em disco liberado.`
+    successMessage.value = `Histórico apagado com sucesso! ${formatInteger(stats.totalDeleted)} registros removidos e espaço em disco liberado.`
     await fetchDatabaseInfo()
   } catch (erro) {
     error.value =
@@ -297,10 +313,7 @@ async function clearAllItems(): Promise<void> {
   try {
     const stats = await apiService.post<ClearAllItemsStats>('/settings/clear-all-items', {})
     confirmClearAllDialog.value = false
-    const devCount = Number(stats.devicesDeleted)
-    const monCount = Number(stats.monitorsDeleted)
-    const netCount = Number(stats.networksDeleted)
-    successMessage.value = `Todos os itens foram apagados com sucesso! Removidos: ${devCount.toLocaleString('pt-BR')} dispositivo(s), ${monCount.toLocaleString('pt-BR')} monitor(es) e ${netCount.toLocaleString('pt-BR')} rede(s). Dispositivo local padrão restaurado.`
+    successMessage.value = `Todos os itens foram apagados com sucesso! Removidos: ${formatInteger(stats.devicesDeleted)} dispositivo(s), ${formatInteger(stats.monitorsDeleted)} monitor(es) e ${formatInteger(stats.networksDeleted)} rede(s). Dispositivo local padrão restaurado.`
     await fetchDatabaseInfo()
   } catch (erro) {
     error.value =

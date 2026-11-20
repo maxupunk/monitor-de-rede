@@ -32,27 +32,22 @@
 //! O arquivo também carrega `probes.token_hash` e `devices.snmp_community`,
 //! então é material sensível — quem o guarda, guarda o acesso.
 
-use sea_orm::{
-    ActiveModelTrait, ConnectionTrait, DatabaseBackend, DatabaseConnection, EntityTrait,
-    IntoActiveModel, Statement,
-};
-use serde::{de::DeserializeOwned, Serialize};
+use sea_orm::{DatabaseConnection, EntityTrait};
+use serde::Serialize;
 
-use crate::services::shared::transaction::begin_write;
-use crate::{
-    models::{
-        _entities::{
-            alert_rules, device_interfaces, device_links, devices, dns_servers, monitors, networks,
-            probes, sites, system_settings, vpn_peers, vpn_servers,
-        },
-        tables,
-    },
-    services::{
-        devices::system_device::{self, SystemDeviceService},
-        monitoring::managed::ensure_system_health_monitor,
-        shared::errors::{AppError, AppResult},
-    },
+use super::{
+    catalog::{BackupScope, Store},
+    restore::Loader,
 };
+use crate::{
+    models::_entities::{
+        alert_rules, device_interfaces, device_links, devices, dns_servers, monitors, networks,
+        probes, sites, system_settings, vpn_peers, vpn_servers,
+    },
+    services::shared::errors::{AppError, AppResult},
+};
+
+pub use super::restore::TableCounts;
 
 /// Versão do formato do arquivo.
 ///
@@ -63,7 +58,7 @@ pub const FORMAT_VERSION: u32 = 1;
 
 /// As tabelas do backup, na ordem de criação (pai antes de filho).
 ///
-/// A ordem é a mesma de [`tables::CREATION_ORDER`] e é o que permite inserir
+/// A ordem é a mesma de [`crate::models::tables::CREATION_ORDER`] e é o que permite inserir
 /// sem violar FK. Um teste garante que nenhuma tabela aqui esteja fora daquela
 /// lista nem fora de ordem.
 pub const BACKED_UP_TABLES: [&str; 12] = [
@@ -88,7 +83,7 @@ pub const BACKED_UP_TABLES: [&str; 12] = [
 /// id que passou a ser de outro equipamento — um gráfico de tráfego com os
 /// dados do vizinho. As FKs `CASCADE` resolveriam isso no PostgreSQL, mas o
 /// SQLite só as aplica com `foreign_keys=ON`; limpar à mão vale nos dois.
-const DEPENDENT_HISTORY: [&str; 18] = [
+pub(super) const DEPENDENT_HISTORY: [&str; 18] = [
     // Teste de enlace: pernas, testes e agendamentos citam ids de
     // equipamentos e de enlaces que a restauração substitui.
     "link_test_legs",
@@ -128,11 +123,11 @@ pub struct BackupFile {
     pub format_version: u32,
     pub app_version: String,
     pub generated_at: String,
+    /// Arquivo sem o campo é de antes do backup completo: configuração.
+    #[serde(default)]
+    pub scope: BackupScope,
     pub tables: serde_json::Map<String, serde_json::Value>,
 }
-
-/// Quantas linhas cada tabela tinha (na exportação) ou recebeu (na restauração).
-pub type TableCounts = Vec<(String, usize)>;
 
 /// Monta o arquivo de backup a partir do banco.
 ///
@@ -158,6 +153,7 @@ pub async fn export(db: &DatabaseConnection, app_version: String) -> AppResult<B
         format_version: FORMAT_VERSION,
         app_version,
         generated_at: chrono::Utc::now().to_rfc3339(),
+        scope: BackupScope::Config,
         tables,
     })
 }
@@ -206,69 +202,16 @@ pub async fn restore(db: &DatabaseConnection, file: &BackupFile) -> AppResult<Ta
     // apagar tudo primeiro para só então descobrir que não dava.
     inspect(file)?;
 
-    let txn = begin_write(db).await?;
-    wipe(&txn).await?;
-
-    let mut counts = Vec::new();
-    load::<sites::Entity>(&txn, file, "sites", &mut counts).await?;
-    load::<probes::Entity>(&txn, file, "probes", &mut counts).await?;
-    load::<networks::Entity>(&txn, file, "networks", &mut counts).await?;
-    load::<devices::Entity>(&txn, file, "devices", &mut counts).await?;
-    load::<device_interfaces::Entity>(&txn, file, "device_interfaces", &mut counts).await?;
-    load::<device_links::Entity>(&txn, file, "device_links", &mut counts).await?;
-    load::<monitors::Entity>(&txn, file, "monitors", &mut counts).await?;
-    load::<alert_rules::Entity>(&txn, file, "alert_rules", &mut counts).await?;
-    load::<vpn_servers::Entity>(&txn, file, "vpn_servers", &mut counts).await?;
-    load::<vpn_peers::Entity>(&txn, file, "vpn_peers", &mut counts).await?;
-    load::<dns_servers::Entity>(&txn, file, "dns_servers", &mut counts).await?;
-    load::<system_settings::Entity>(&txn, file, "system_settings", &mut counts).await?;
-
-    realign_sequences(&txn).await?;
-    txn.commit().await?;
-
-    // `DELETE` devolve páginas ao freelist, não ao filesystem. Em SQLite uma
-    // restauração pode apagar milhões de métricas e deixar um arquivo de vários
-    // GiB mapeável pelas conexões seguintes. A compactação ocorre fora da
-    // transação e é best effort: o restore já foi confirmado e não pode ser
-    // reportado como falho só porque outro leitor segurou o checkpoint.
-    compact_sqlite_after_restore(db).await;
-
-    // O `wipe` + recarga devolve as linhas **com os IDs do arquivo**. Sem
-    // esta reexecução o ID cacheado do dispositivo do sistema passaria a
-    // apontar para outro equipamento, e os logs internos seguintes iriam
-    // parar num roteador qualquer. Se o arquivo for anterior à feature, o
-    // `ensure` simplesmente recria a linha.
-    system_device::resolver::invalidate();
-    match SystemDeviceService::new(db).ensure().await {
-        Ok(device) => {
-            // O arquivo pode ser anterior à coleta de saúde, ou tê-la perdido
-            // junto com o dispositivo. Reprovisionar aqui evita um servidor
-            // restaurado que aparece na lista e nunca mais mede nada.
-            if let Err(error) = ensure_system_health_monitor(db, device.id).await {
-                tracing::warn!(%error, "não foi possível reprovisionar a coleta de saúde após restore");
-            }
-        }
-        Err(error) => {
-            tracing::warn!(%error, "não foi possível regarantir o dispositivo do sistema após restore");
-        }
+    let mut loader = Loader::begin(db, None, BackupScope::Config).await?;
+    for table in BACKED_UP_TABLES {
+        let Some(value) = file.tables.get(table) else {
+            continue;
+        };
+        let rows = value.as_array().cloned().unwrap_or_default();
+        loader.rows(Store::Main, table, rows).await?;
+        loader.table_end(Store::Main, table).await?;
     }
-
-    Ok(counts)
-}
-
-async fn compact_sqlite_after_restore(db: &DatabaseConnection) {
-    if db.get_database_backend() != DatabaseBackend::Sqlite {
-        return;
-    }
-    for statement in [
-        "PRAGMA wal_checkpoint(TRUNCATE);",
-        "VACUUM;",
-        "PRAGMA optimize;",
-    ] {
-        if let Err(error) = db.execute_unprepared(statement).await {
-            tracing::warn!(%error, statement, "não foi possível compactar o SQLite após restore");
-        }
-    }
+    Ok(loader.finish(db, None, None).await?.counts)
 }
 
 fn validate_version(file: &BackupFile) -> AppResult<()> {
@@ -298,114 +241,10 @@ where
     Ok(())
 }
 
-async fn load<E>(
-    txn: &sea_orm::DatabaseTransaction,
-    file: &BackupFile,
-    table: &str,
-    counts: &mut TableCounts,
-) -> AppResult<()>
-where
-    E: EntityTrait,
-    E::Model: DeserializeOwned + IntoActiveModel<E::ActiveModel>,
-    E::ActiveModel: ActiveModelTrait<Entity = E> + Send,
-{
-    let Some(value) = file.tables.get(table) else {
-        return Ok(());
-    };
-    let rows: Vec<E::Model> = serde_json::from_value(value.clone()).map_err(|err| {
-        AppError::validation(format!(
-            "A tabela '{table}' do backup não casa com o esquema atual: {err}"
-        ))
-    })?;
-
-    let total = rows.len();
-    for row in rows {
-        // `reset_all` troca todo campo de `Unchanged` para `Set`: sem isso o
-        // `insert` sairia sem colunas, porque um `ActiveModel` vindo de `Model`
-        // nasce inteiro como "não modificado". É também o que preserva o `id`
-        // em vez de deixar o banco gerar um novo.
-        E::insert(row.into_active_model().reset_all())
-            .exec(txn)
-            .await?;
-    }
-    counts.push((table.to_string(), total));
-    Ok(())
-}
-
-/// Apaga a configuração atual e o histórico que depende dela.
-///
-/// Percorre filhos antes de pais — a ordem inversa da criação — para não
-/// esbarrar em FK nos bancos que as checam.
-async fn wipe(txn: &sea_orm::DatabaseTransaction) -> AppResult<()> {
-    let existing = tables::existing_tables(txn).await?;
-    let backend = txn.get_database_backend();
-
-    let doomed = DEPENDENT_HISTORY
-        .iter()
-        .copied()
-        .chain(BACKED_UP_TABLES.iter().rev().copied());
-    // Plugin exclusivo de um equipamento some com ele. Os de modelo ficam: não
-    // pertencem a nenhum id que a restauração troca.
-    if existing.contains("plugins") {
-        txn.execute_raw(Statement::from_string(
-            backend,
-            "DELETE FROM \"plugins\" WHERE \"device_id\" IS NOT NULL",
-        ))
-        .await?;
-    }
-    // O ajuste de um equipamento que a restauração substitui não pode ir
-    // para outro que herde o mesmo id; a configuração da frota fica.
-    if existing.contains("plugin_settings") {
-        txn.execute_raw(Statement::from_string(
-            backend,
-            "DELETE FROM \"plugin_settings\" WHERE \"device_id\" IS NOT NULL",
-        ))
-        .await?;
-    }
-    // Um mesmo nome não aparece nas duas listas, mas a ordem final ainda tem de
-    // respeitar a hierarquia: histórico primeiro, depois configuração de baixo
-    // para cima.
-    for table in doomed {
-        if !existing.contains(table) {
-            continue;
-        }
-        txn.execute_raw(Statement::from_string(
-            backend,
-            format!("DELETE FROM \"{table}\""),
-        ))
-        .await?;
-    }
-    Ok(())
-}
-
-/// Realinha as sequências de `id` no PostgreSQL depois de uma carga com ids
-/// explícitos.
-///
-/// O `bigserial` não sabe que alguém inseriu id 42 à mão: a sequência continua
-/// no valor de antes e o próximo cadastro feito pela tela estouraria com
-/// violação de chave primária. `setval` com o maior id existente conserta isso.
-/// No SQLite não há o que fazer — o `rowid` seguinte é derivado do maior valor
-/// da tabela.
-async fn realign_sequences(txn: &sea_orm::DatabaseTransaction) -> AppResult<()> {
-    if txn.get_database_backend() != DatabaseBackend::Postgres {
-        return Ok(());
-    }
-    for table in BACKED_UP_TABLES {
-        // `is_called = false` faz o próximo `nextval` devolver o próprio valor
-        // passado, o que dá o comportamento certo na tabela vazia (começa em 1).
-        let sql = format!(
-            "SELECT setval(pg_get_serial_sequence('{table}', 'id'), \
-             COALESCE((SELECT MAX(id) FROM \"{table}\"), 0) + 1, false)"
-        );
-        txn.execute_raw(Statement::from_string(DatabaseBackend::Postgres, sql))
-            .await?;
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::tables;
     use std::collections::HashSet;
 
     #[test]
@@ -460,6 +299,7 @@ mod tests {
             format_version: FORMAT_VERSION + 1,
             app_version: "teste".into(),
             generated_at: "2026-08-12T00:00:00Z".into(),
+            scope: BackupScope::Config,
             tables: serde_json::Map::new(),
         };
         let erro = validate_version(&arquivo).unwrap_err();
@@ -477,6 +317,7 @@ mod tests {
             format_version: FORMAT_VERSION,
             app_version: "teste".into(),
             generated_at: "2026-08-12T00:00:00Z".into(),
+            scope: BackupScope::Config,
             tables,
         };
         let contagem = inspect(&arquivo).unwrap();
@@ -491,6 +332,7 @@ mod tests {
             format_version: FORMAT_VERSION,
             app_version: "teste".into(),
             generated_at: "2026-08-12T00:00:00Z".into(),
+            scope: BackupScope::Config,
             tables,
         };
         assert!(inspect(&arquivo).is_err());

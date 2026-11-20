@@ -72,6 +72,13 @@ pub fn resolve_url(database_url: &str) -> String {
     substitui_arquivo_sqlite(database_url, "logs.sqlite")
 }
 
+/// Os logs moram num banco à parte do principal? Não quando o principal é
+/// Postgres sem `SYSLOG_DB_URL`: aí as tabelas de log estão no mesmo banco.
+#[must_use]
+pub fn is_separate(database_url: &str) -> bool {
+    resolve_url(database_url) != database_url
+}
+
 /// Troca o nome do arquivo numa URL de SQLite, preservando esquema, diretório e
 /// query (`?mode=rwc`).
 fn substitui_arquivo_sqlite(url: &str, arquivo: &str) -> String {

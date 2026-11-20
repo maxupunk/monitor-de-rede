@@ -55,6 +55,34 @@ impl AreaPolicy for ServersPolicy {
         ]
     }
 
+    fn tables(&self) -> &'static [&'static str] {
+        &[
+            "host_metrics_1m",
+            "container_metrics_1m",
+            "database_connections",
+            "database_backups",
+            "deploy_credentials",
+            "deploy_github_connections",
+            "deploy_applications",
+            "deploy_targets",
+            "deploy_env_versions",
+            "deploy_build_secrets",
+            "deploy_builds",
+            "deploy_runs",
+            "registry_repositories",
+            "registry_blobs",
+            "registry_repository_blobs",
+            "registry_manifests",
+            "registry_tags",
+            "registry_uploads",
+            "registry_tokens",
+            "registry_findings",
+            "registry_advisories",
+            "registry_feeds",
+            "registry_exceptions",
+        ]
+    }
+
     async fn evidence(&self, db: &DatabaseConnection) -> AppResult<Evidence> {
         // O agente local nasce com toda instalação (ADR 014): não é evidência.
         let remotos = probes::Entity::find()

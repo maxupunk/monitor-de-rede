@@ -4,41 +4,48 @@
 //!
 //! * **plano** (`/backup/system`) — a cópia vai para um destino, sozinha ou
 //!   pelo "Fazer backup agora", e volta de lá pela restauração;
-//! * **arquivo** (`/backup/export|preview|restore`) — o operador baixa ou envia
-//!   o JSON pelo navegador.
+//! * **arquivo** (`/backup/export|full|preview|restore`) — o operador baixa ou
+//!   envia o arquivo pelo navegador: a configuração (`.json`) ou os bancos
+//!   inteiros (`/backup/full`, `.json.gz`).
 //!
-//! O corpo do arquivo trafega como JSON comum — o que o operador salva é a
-//! própria resposta do `export`, e é ela que volta no `restore`. Não há
-//! `multipart`: evita uma dependência de parsing só para reembrulhar um JSON
-//! que já está pronto, e deixa o endpoint utilizável por `curl`.
+//! O corpo do arquivo trafega cru — o que o operador salva é a própria
+//! resposta do `export`/`full`, e é ela que volta no `preview`/`restore`, lida
+//! em fluxo (sem limite de tamanho e sem carregá-la na memória). Não há
+//! `multipart`: deixa o endpoint utilizável por `curl --data-binary`.
 //!
 //! Só administrador chega aqui (`users::request_is_allowed`).
 
 use axum::{
+    body::Body,
     http::{header, HeaderMap, StatusCode},
     response::IntoResponse,
 };
+use futures::TryStreamExt;
 use loco_rs::prelude::*;
+use tokio_util::io::StreamReader;
 
 use crate::{
     dtos::backup::{SystemBackupCopiesQuery, SystemBackupCopyInput, SystemBackupPlanInput},
     services::{
         audit::{self, AuditAction, ResourceType},
         backup::{
+            archive,
+            catalog::BackupScope,
             copies::{self, RUN_SCOPE},
             notify,
             plan::{self, PLAN_ID},
-            service::{self, BackupFile},
+            restore as file_restore, service,
         },
         shared::{
             errors::{AppError, AppResult},
             run_guard::RunGuard,
         },
         storage,
+        syslog::db::LogsDb,
     },
     views::backup::{
-        BackupCountsResponse, SystemBackupCopyResponse, SystemBackupPlanResponse,
-        SystemBackupRunResponse,
+        BackupCountsResponse, BackupRestoreResponse, SystemBackupCopyResponse,
+        SystemBackupPlanResponse, SystemBackupRunResponse,
     },
 };
 
@@ -65,29 +72,85 @@ async fn export(State(ctx): State<AppContext>) -> AppResult<Response> {
         .into_response())
 }
 
-/// Lê o arquivo e diz o que ele contém, sem escrever nada.
-async fn preview(Json(file): Json<BackupFile>) -> AppResult<Response> {
-    let counts = service::inspect(&file)?;
-    Ok(format::json(BackupCountsResponse::from(counts))?)
-}
-
-/// Substitui a configuração atual pela do arquivo.
-async fn restore(
-    State(ctx): State<AppContext>,
-    headers: HeaderMap,
-    Json(file): Json<BackupFile>,
-) -> AppResult<Response> {
-    let counts = service::restore(&ctx.db, &file).await?;
+/// Baixa os bancos inteiros — principal e de logs — num `.json.gz` só.
+///
+/// A resposta é um fluxo: o servidor lê cada tabela em pedaços e comprime no
+/// caminho, sem montar o arquivo na memória. Sem `Content-Length` (o tamanho
+/// só se sabe no fim); a tela mostra quanto já chegou.
+async fn export_full(State(ctx): State<AppContext>, headers: HeaderMap) -> AppResult<Response> {
+    let logs = LogsDb::from_context(&ctx).ok().map(|logs| logs.0);
+    let stream = archive::export_full(ctx.db.clone(), logs, crate::app_version());
     audit::record(
         &ctx.db,
         &headers,
         AuditAction::Execute,
         ResourceType::Backup,
         RESOURCE,
-        "Configuração do NetMonitor restaurada a partir de um arquivo enviado",
+        "Backup completo do NetMonitor baixado (banco principal e de logs)",
     )
     .await;
-    Ok((StatusCode::OK, Json(BackupCountsResponse::from(counts))).into_response())
+    let filename = format!(
+        "netmonitor-backup-completo-{}.json.gz",
+        chrono::Utc::now().format("%Y%m%d-%H%M%S")
+    );
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/gzip")
+        .header(
+            header::CONTENT_DISPOSITION,
+            format!("attachment; filename=\"{filename}\""),
+        )
+        .header(header::CACHE_CONTROL, "no-store")
+        .body(Body::from_stream(stream))
+        .map_err(|err| AppError::Internal(err.into()))
+}
+
+/// O corpo da requisição como leitura em fluxo.
+fn body_reader(body: Body) -> impl tokio::io::AsyncRead + Send + Unpin + 'static {
+    StreamReader::new(body.into_data_stream().map_err(std::io::Error::other))
+}
+
+/// Lê o arquivo e diz o que ele contém, sem escrever nada.
+async fn preview(body: Body) -> AppResult<Response> {
+    let preview = file_restore::inspect(body_reader(body)).await?;
+    Ok(format::json(BackupCountsResponse::from(preview))?)
+}
+
+/// Substitui a configuração atual — ou, com o backup completo, os bancos
+/// inteiros — pelo que vem no arquivo.
+async fn restore(
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    body: Body,
+) -> AppResult<Response> {
+    let logs = LogsDb::from_context(&ctx).ok();
+    let session = headers
+        .get(crate::controllers::auth_guard::AUTHENTICATED_USER_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+    let restored = file_restore::restore(
+        &ctx.db,
+        logs.as_ref().map(LogsDb::connection),
+        body_reader(body),
+        session.as_deref(),
+    )
+    .await?;
+    let what = match restored.scope {
+        BackupScope::Config => "Configuração do NetMonitor restaurada a partir de um arquivo enviado",
+        BackupScope::Full => {
+            "Bancos do NetMonitor (completo, com usuários e histórico) restaurados a partir de um              arquivo enviado"
+        }
+    };
+    audit::record(
+        &ctx.db,
+        &headers,
+        AuditAction::Execute,
+        ResourceType::Backup,
+        RESOURCE,
+        what,
+    )
+    .await;
+    Ok((StatusCode::OK, Json(BackupRestoreResponse::from(restored))).into_response())
 }
 
 // --- Plano ---------------------------------------------------------------------
@@ -237,6 +300,7 @@ pub fn routes() -> Routes {
     Routes::new()
         .prefix("/backup")
         .add("/export", get(export))
+        .add("/full", get(export_full))
         .add("/preview", post(preview))
         .add("/restore", post(restore))
         .add("/system", get(show_plan).put(update_plan))

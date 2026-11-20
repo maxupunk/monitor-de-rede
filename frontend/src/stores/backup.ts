@@ -2,10 +2,13 @@ import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import { apiService } from '@/services/apiService'
 import type { BackupCountsResponse } from '@/bindings/BackupCountsResponse'
+import type { BackupRestoreResponse } from '@/bindings/BackupRestoreResponse'
 import type { SystemBackupCopyResponse } from '@/bindings/SystemBackupCopyResponse'
 import type { SystemBackupPlanInput } from '@/bindings/SystemBackupPlanInput'
 import type { SystemBackupPlanResponse } from '@/bindings/SystemBackupPlanResponse'
 import type { SystemBackupRunResponse } from '@/bindings/SystemBackupRunResponse'
+import { clearStoredAuth } from '@/utils/authStorage'
+import { triggerDownload } from '@/utils/download'
 
 /**
  * Envelope do arquivo de backup (`services::backup::service::BackupFile`).
@@ -23,26 +26,6 @@ export interface BackupFile {
 
 export type BackupCounts = BackupCountsResponse
 
-/** Rótulos em português para os nomes de tabela do arquivo. */
-const TABLE_LABELS: Record<string, string> = {
-  sites: 'Sites',
-  probes: 'Probes',
-  networks: 'Redes',
-  devices: 'Dispositivos',
-  device_interfaces: 'Interfaces',
-  device_links: 'Enlaces de topologia',
-  monitors: 'Monitores',
-  alert_rules: 'Regras de alerta',
-  vpn_servers: 'Servidores VPN',
-  vpn_peers: 'Peers VPN',
-  dns_servers: 'Servidores DNS',
-  system_settings: 'Preferências do sistema',
-}
-
-export function tableLabel(table: string): string {
-  return TABLE_LABELS[table] ?? table
-}
-
 /**
  * A restauração trocou sites, redes, dispositivos e monitores por baixo de
  * todas as stores já carregadas. Recarregar a aplicação é mais honesto do que
@@ -50,6 +33,27 @@ export function tableLabel(table: string): string {
  */
 export function reloadAfterRestore() {
   window.location.reload()
+}
+
+/**
+ * Depois de restaurar um arquivo: o backup completo traz os usuários dele, e
+ * a conta de quem restaurou pode não existir mais — aí a sessão acabou e o
+ * caminho é entrar de novo, com uma conta do backup. Senão, recarrega.
+ */
+export function finishRestore(result: BackupRestoreResponse) {
+  if (result.signInAgain) {
+    clearStoredAuth()
+    window.location.assign('/login?restaurado=1')
+  } else {
+    reloadAfterRestore()
+  }
+}
+
+/** Fase do envio do arquivo: a prévia lê o arquivo inteiro, a restauração de novo. */
+export interface UploadProgress {
+  phase: 'preview' | 'restore'
+  sentBytes: number
+  totalBytes: number
 }
 
 /**
@@ -66,13 +70,19 @@ export const useBackupStore = defineStore('backup', () => {
   const restoring = ref(false)
   const error = ref<string | null>(null)
 
-  /** Arquivo escolhido pelo operador, já lido e validado como JSON. */
-  const pendingFile = ref<BackupFile | null>(null)
+  /** Arquivo escolhido pelo operador, já conferido pelo backend na prévia. */
+  const pendingFile = ref<File | null>(null)
   const pendingName = ref<string | null>(null)
   const pendingCounts = ref<BackupCounts | null>(null)
+  /** Andamento do envio do arquivo (prévia ou restauração). */
+  const upload = ref<UploadProgress | null>(null)
 
   /** Resultado da última restauração, para a tela dizer o que entrou. */
-  const lastRestore = ref<BackupCounts | null>(null)
+  const lastRestore = ref<BackupRestoreResponse | null>(null)
+
+  /** O backup completo baixando: quantos bytes já chegaram. */
+  const fullDownload = ref<{ receivedBytes: number } | null>(null)
+  let fullDownloadAbort: AbortController | null = null
 
   function message(err: unknown, fallback: string): string {
     return err instanceof Error ? err.message : fallback
@@ -142,12 +152,7 @@ export const useBackupStore = defineStore('backup', () => {
       const file = await apiService.get<BackupFile>('/backup/export')
       const stamp = new Date().toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '-')
       const blob = new Blob([JSON.stringify(file, null, 2)], { type: 'application/json' })
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `netmonitor-backup-${stamp}.json`
-      link.click()
-      URL.revokeObjectURL(url)
+      triggerDownload(blob, `netmonitor-backup-${stamp}.json`)
       return true
     } catch (err) {
       error.value = message(err, 'Erro ao exportar as configurações')
@@ -158,28 +163,71 @@ export const useBackupStore = defineStore('backup', () => {
   }
 
   /**
-   * Lê o arquivo escolhido e pergunta ao backend o que há nele.
+   * Baixa os bancos inteiros (principal e de logs) num `.json.gz`.
+   *
+   * O servidor transmite em fluxo, sem saber o tamanho final: a tela mostra
+   * quanto já chegou. Cancelável pelo `cancelFullDownload`. Devolve o tamanho
+   * do arquivo baixado, ou `null` quando não baixou.
+   */
+  async function downloadFull(): Promise<number | null> {
+    if (fullDownload.value) return null
+    error.value = null
+    fullDownload.value = { receivedBytes: 0 }
+    fullDownloadAbort = new AbortController()
+    try {
+      const { blob, filename } = await apiService.downloadWithProgress(
+        '/backup/full',
+        (receivedBytes) => {
+          if (fullDownload.value) fullDownload.value.receivedBytes = receivedBytes
+        },
+        fullDownloadAbort.signal
+      )
+      triggerDownload(blob, filename ?? 'netmonitor-backup-completo.json.gz')
+      return blob.size
+    } catch (err) {
+      error.value = fullDownloadAbort?.signal.aborted
+        ? null
+        : message(err, 'Erro ao baixar o backup completo')
+      return null
+    } finally {
+      fullDownload.value = null
+      fullDownloadAbort = null
+    }
+  }
+
+  function cancelFullDownload() {
+    fullDownloadAbort?.abort()
+  }
+
+  /**
+   * Envia o arquivo escolhido e pergunta ao backend o que há nele.
    *
    * A prévia é o passo que separa "escolhi um arquivo" de "mandei apagar tudo":
-   * o operador vê a contagem por tabela antes de confirmar.
+   * o operador vê a contagem por tabela antes de confirmar. O arquivo vai cru
+   * (`.json` ou `.json.gz`) e o servidor o lê em fluxo, sem limite de tamanho.
    */
   async function loadFile(file: File): Promise<boolean> {
     error.value = null
     pendingFile.value = null
     pendingCounts.value = null
     pendingName.value = file.name
+    upload.value = { phase: 'preview', sentBytes: 0, totalBytes: file.size }
     try {
-      const parsed = JSON.parse(await file.text()) as BackupFile
-      pendingCounts.value = await apiService.post<BackupCounts>('/backup/preview', parsed)
-      pendingFile.value = parsed
+      pendingCounts.value = await apiService.upload<BackupCounts>(
+        '/backup/preview',
+        file,
+        (sentBytes, totalBytes) => {
+          upload.value = { phase: 'preview', sentBytes, totalBytes }
+        }
+      )
+      pendingFile.value = file
       return true
     } catch (err) {
       pendingName.value = null
-      error.value =
-        err instanceof SyntaxError
-          ? 'O arquivo escolhido não é um JSON válido'
-          : message(err, 'Erro ao ler o arquivo de backup')
+      error.value = message(err, 'Erro ao ler o arquivo de backup')
       return false
+    } finally {
+      upload.value = null
     }
   }
 
@@ -189,20 +237,33 @@ export const useBackupStore = defineStore('backup', () => {
     pendingCounts.value = null
   }
 
-  /** Aplica o arquivo já carregado, substituindo a configuração atual. */
-  async function restoreConfig(): Promise<boolean> {
-    if (!pendingFile.value) return false
+  /**
+   * Aplica o arquivo já conferido: substitui a configuração atual — ou, com o
+   * backup completo, os bancos inteiros. Quem chama decide o que vem depois
+   * (`finishRestore`).
+   */
+  async function restoreFile(): Promise<BackupRestoreResponse | null> {
+    const file = pendingFile.value
+    if (!file) return null
     restoring.value = true
     error.value = null
+    upload.value = { phase: 'restore', sentBytes: 0, totalBytes: file.size }
     try {
-      lastRestore.value = await apiService.post<BackupCounts>('/backup/restore', pendingFile.value)
+      lastRestore.value = await apiService.upload<BackupRestoreResponse>(
+        '/backup/restore',
+        file,
+        (sentBytes, totalBytes) => {
+          upload.value = { phase: 'restore', sentBytes, totalBytes }
+        }
+      )
       clearFile()
-      return true
+      return lastRestore.value
     } catch (err) {
-      error.value = message(err, 'Erro ao restaurar as configurações')
-      return false
+      error.value = message(err, 'Erro ao restaurar o backup')
+      return null
     } finally {
       restoring.value = false
+      upload.value = null
     }
   }
 
@@ -222,10 +283,14 @@ export const useBackupStore = defineStore('backup', () => {
     pendingFile,
     pendingName,
     pendingCounts,
+    upload,
     lastRestore,
+    fullDownload,
     exportConfig,
+    downloadFull,
+    cancelFullDownload,
     loadFile,
     clearFile,
-    restoreConfig,
+    restoreFile,
   }
 })

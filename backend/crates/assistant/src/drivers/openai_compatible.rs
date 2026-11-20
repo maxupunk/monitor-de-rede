@@ -37,6 +37,23 @@ pub struct OpenAiCompatibleDriver {
     min_output_tokens: Option<u32>,
 }
 
+/// Até conectar: provedor fora do ar responde logo.
+const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// Sem nenhum byte por tanto tempo, o provedor travou. Não há teto para a
+/// resposta inteira: modelo local em CPU leva minutos para ler um prompt grande
+/// e para escrever, e quem decide parar é a pessoa (fechar a tela ou "Parar"
+/// interrompe na hora).
+const SILENCE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
+
+/// Erro de prazo explicado para quem usa, com o que fazer.
+fn silence_message(provider: &str) -> String {
+    format!(
+        "{provider} ficou {} minutos sem responder. Em CPU, modelo grande ou janela de contexto grande demoram a ler a pergunta: escolha um modelo menor ou reduza a janela nas Configurações de IA.",
+        SILENCE_TIMEOUT.as_secs() / 60
+    )
+}
+
 impl OpenAiCompatibleDriver {
     pub fn new(
         driver_id: &'static str,
@@ -47,7 +64,8 @@ impl OpenAiCompatibleDriver {
         extra_headers: Vec<(String, String)>,
     ) -> Self {
         let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(120))
+            .connect_timeout(CONNECT_TIMEOUT)
+            .read_timeout(SILENCE_TIMEOUT)
             .build()
             .unwrap_or_default();
 
@@ -102,6 +120,15 @@ impl OpenAiCompatibleDriver {
         } else {
             format!("{}/chat/completions", self.base_url)
         }
+    }
+
+    /// O pedido não chegou a ter resposta: prazo esgotado ou provedor fora.
+    fn send_error(&self, err: &reqwest::Error) -> AppError {
+        AppError::service_unavailable(if err.is_timeout() {
+            silence_message(&format!("O provedor {}", self.display_name))
+        } else {
+            format!("Falha ao conectar ao provedor {}: {err}", self.display_name)
+        })
     }
 
     fn build_headers(&self) -> AppResult<HeaderMap> {
@@ -242,7 +269,9 @@ fn spawn_sse_reader(res: reqwest::Response, notice: Option<String>) -> AiChunkSt
                 Ok(b) => b,
                 Err(e) => {
                     let err_str = e.to_string();
-                    let friendly = if err_str.contains("error decoding response body")
+                    let friendly = if err_str.contains("timed out") {
+                        silence_message("O provedor de IA")
+                    } else if err_str.contains("error decoding response body")
                         || err_str.contains("connection closed")
                         || err_str.contains("broken pipe")
                     {
@@ -469,12 +498,7 @@ impl AiDriver for OpenAiCompatibleDriver {
             .json(&body)
             .send()
             .await
-            .map_err(|err| {
-                AppError::service_unavailable(format!(
-                    "Falha ao conectar ao provedor {}: {}",
-                    self.display_name, err
-                ))
-            })?;
+            .map_err(|err| self.send_error(&err))?;
 
         let mut status = res.status();
         let mut fallback_notice = None;
@@ -530,12 +554,7 @@ impl AiDriver for OpenAiCompatibleDriver {
                     .json(&body)
                     .send()
                     .await
-                    .map_err(|err| {
-                        AppError::service_unavailable(format!(
-                            "Falha ao conectar ao provedor {}: {}",
-                            self.display_name, err
-                        ))
-                    })?;
+                    .map_err(|err| self.send_error(&err))?;
                 status = retry.status();
                 if status.is_success() {
                     return Ok(spawn_sse_reader(retry, None));

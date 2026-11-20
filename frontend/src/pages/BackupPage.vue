@@ -6,6 +6,17 @@
     >
       <template #actions>
         <v-btn
+          color="primary"
+          variant="tonal"
+          prepend-icon="mdi-database-export-outline"
+          :loading="backupStore.fullDownload != null"
+          data-full-backup
+          @click="fullBackupDialog = true"
+        >
+          <span class="hidden-sm-and-down">Baixar backup completo</span>
+          <span class="hidden-md-and-up">Backup completo</span>
+        </v-btn>
+        <v-btn
           v-if="tab === 'protegido'"
           color="primary"
           prepend-icon="mdi-database-plus-outline"
@@ -401,6 +412,7 @@
       @saved="notify('Backup do NetMonitor salvo.')"
     />
     <SystemRestoreDialog v-model="systemRestoreDialog" />
+    <FullBackupDialog v-model="fullBackupDialog" />
 
     <DatabaseFormDialog
       v-model="databaseFormDialog"
@@ -443,6 +455,7 @@ import type { StorageDestinationDetail } from '@/bindings/StorageDestinationDeta
 import type { StorageDestinationResponse } from '@/bindings/StorageDestinationResponse'
 import PageHeader from '@/components/PageHeader.vue'
 import BackupPlanCard, { type BackupCardFact } from '@/components/backup/BackupPlanCard.vue'
+import FullBackupDialog from '@/components/backup/FullBackupDialog.vue'
 import SystemBackupPlanDialog from '@/components/backup/SystemBackupPlanDialog.vue'
 import SystemRestoreDialog from '@/components/backup/SystemRestoreDialog.vue'
 import DatabaseFormDialog from '@/components/databases/DatabaseFormDialog.vue'
@@ -481,6 +494,7 @@ const tab = computed({
 
 const systemPlanDialog = ref(false)
 const systemRestoreDialog = ref(false)
+const fullBackupDialog = ref(false)
 const databaseFormDialog = ref(false)
 const editingConnectionId = ref<number | null>(null)
 const historyDialog = ref(false)

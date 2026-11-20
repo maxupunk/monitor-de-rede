@@ -178,6 +178,8 @@ export const coreSse: SseRoutes = {
     handle: (data) => useScheduledTasksStore().applyUpdated(data),
   },
 
+  // Antes do snapshot: a fila de aprovações chega inteira de novo.
+  'stream:connected': () => useAiApprovalsStore().reset(),
   'ai:approval_pending': (data) => useAiApprovalsStore().applyPending(data),
   'ai:approval_resolved': (data) => {
     const resolved = asApprovalResolved(data)

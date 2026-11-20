@@ -161,7 +161,7 @@ async fn acesso_da_ia_pede_confirmacao_com_aviso_e_motivo() {
 
         assert!(eventos.iter().any(|evento| matches!(
             evento,
-            HarnessEvent::Notice { message } if message.contains("alucinar")
+            HarnessEvent::Notice { message, .. } if message.contains("alucinar")
         )));
         let resumo = eventos
             .iter()

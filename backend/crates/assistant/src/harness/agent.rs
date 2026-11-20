@@ -10,7 +10,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use futures::{Stream, StreamExt};
+use futures::{Future, Stream, StreamExt};
 use loco_rs::prelude::AppContext;
 use serde::Serialize;
 use serde_json::json;
@@ -20,13 +20,13 @@ use tokio_stream::wrappers::ReceiverStream;
 use super::{
     approval::{self, ActionReviewer, GateDecision, RunPlan},
     compaction::{
-        estimate_history, estimate_messages, estimate_tokens, fallback_summary, fold_count,
-        prune_tool_results, small_window_notice, summarize, supersede_repeated_results,
+        call_key, estimate_history, estimate_messages, estimate_tokens, fallback_summary,
+        fold_count, prune_tool_results, small_window_notice, summarize, supersede_repeated_results,
         worth_folding, ContextBudget,
     },
     grounding::{
-        invented_in_answer, invented_target, redact, sanitize_ask_user_arguments, ANSWER_CHECK_TAG,
-        UNCONFIRMED,
+        invented_target, sanitize_ask_user_arguments, AnswerCheck, SeenResults, ANSWER_CHECKED,
+        ANSWER_CHECK_NOTICE,
     },
     prompt::{build_small_talk_prompt, build_system_prompt, build_turn_context, ChatContext},
     tools::{
@@ -40,7 +40,9 @@ use crate::{
     central::Central,
     context_window::{self, ContextWindow},
     decider::{runtime::DeciderRuntime, tool_routing},
-    drivers::traits::{AiChatOptions, AiChunkStream, AiDriver, AiMessage, AiToolCall, AiUsage},
+    drivers::traits::{
+        AiChatOptions, AiChunkStream, AiDriver, AiMessage, AiTool, AiToolCall, AiUsage,
+    },
     dtos::{AiChart, ChatMessageInput, ChatStreamRequest},
     mentions, screens,
     settings::AiSettings,
@@ -122,8 +124,10 @@ pub enum HarnessEvent {
         /// Grupos de ferramentas carregados, na ordem: a tela devolve na
         /// próxima pergunta para a lista de ferramentas não mudar (cache).
         tool_groups: Vec<String>,
-        /// Tokens da última rodada (entrada + saída): o tamanho da conversa
-        /// que a próxima pergunta vai carregar.
+        /// Tokens da última rodada (entrada + saída) menos o tráfego desta
+        /// resposta que não volta no histórico (chamadas e resultados de
+        /// ferramenta, conferência): o tamanho da conversa que a próxima
+        /// pergunta vai carregar.
         context_tokens: u64,
         /// Janela do modelo; `None` sem modelo conhecido.
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -140,9 +144,17 @@ pub enum HarnessEvent {
     /// demais para as ferramentas, por exemplo). Não interrompe nada.
     Notice {
         message: String,
+        /// Resolve-se nas configurações da IA (janela pequena, modelo
+        /// trocado por limite de taxa): a tela oferece o atalho para lá.
+        settings: bool,
+        /// Aviso que muda de estado ("conferindo" → "conferida"): o novo
+        /// com a mesma chave substitui o anterior na tela, em vez de empilhar.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        key: Option<&'static str>,
     },
-    /// O texto desta resposta citou recurso que nada mostrou e foi
-    /// descartado: a tela apaga o que escreveu e espera a versão conferida.
+    /// O texto da última rodada (o que veio depois da última ferramenta)
+    /// citou recurso que nada mostrou e foi descartado: a tela apaga só esse
+    /// trecho; a versão conferida vem em seguida.
     Retract,
     /// As mensagens antigas viraram resumo para caber na janela. A tela
     /// guarda o resumo e passa a mandar só o que veio depois.
@@ -274,6 +286,25 @@ impl AgentRequest {
     }
 }
 
+impl HarnessEvent {
+    fn notice(message: impl Into<String>, settings: bool) -> Self {
+        Self::Notice {
+            message: message.into(),
+            settings,
+            key: None,
+        }
+    }
+
+    /// Um estado da conferência da resposta: cada um substitui o anterior.
+    fn answer_check(message: impl Into<String>) -> Self {
+        Self::Notice {
+            message: message.into(),
+            settings: false,
+            key: Some(ANSWER_CHECK_NOTICE),
+        }
+    }
+}
+
 /// Canal de eventos que para de trabalhar quando a tela fecha a conexão.
 struct EventSink(mpsc::Sender<HarnessEvent>);
 
@@ -281,6 +312,18 @@ impl EventSink {
     /// `false` quando ninguém escuta mais.
     async fn send(&self, event: HarnessEvent) -> bool {
         self.0.send(event).await.is_ok()
+    }
+
+    /// Espera `work` ou a tela fechar, o que vier antes: `None` quando ela
+    /// fechou e `work` foi largado. Só para o que pode parar no meio sem efeito
+    /// no mundo — provedor, Decisor, resumo, consulta. Uma ação que começou
+    /// termina: cortá-la no meio deixaria o equipamento pela metade.
+    async fn unless_closed<T>(&self, work: impl Future<Output = T>) -> Option<T> {
+        tokio::select! {
+            biased;
+            () = self.0.closed() => None,
+            value = work => Some(value),
+        }
     }
 
     /// Fecha a resposta: resolve a janela do modelo que de fato respondeu e
@@ -311,6 +354,9 @@ struct TurnMetrics {
     window: Option<(String, ContextWindow)>,
     /// Tamanho estimado da conversa, para quando o provedor não mede.
     estimated_context: u64,
+    /// Estimativa do que a última rodada leu desta resposta (ferramentas,
+    /// resultados, conferência): sai da conta porque não volta no histórico.
+    transient: u64,
     /// Grupos carregados ao fim da resposta.
     tool_groups: Vec<String>,
 }
@@ -327,6 +373,7 @@ impl TurnMetrics {
             generation: Duration::ZERO,
             window: None,
             estimated_context: 0,
+            transient: 0,
             tool_groups: Vec::new(),
         }
     }
@@ -368,23 +415,30 @@ impl TurnMetrics {
         self.last_round.add(usage);
     }
 
+    /// O que a próxima pergunta carrega: a última rodada medida (ou, sem
+    /// medida, estimada) menos o tráfego desta resposta. A estimativa do que
+    /// fica é o piso — o desconto nunca leva abaixo dela.
+    fn carried_context(&self) -> u64 {
+        let measured = self.last_round.prompt_tokens + self.last_round.completion_tokens;
+        let estimated = self.estimated_context.saturating_sub(self.transient);
+        if measured == 0 {
+            return estimated;
+        }
+        measured.saturating_sub(self.transient).max(estimated)
+    }
+
     /// O evento para a tela; `None` quando nada foi medido.
     fn event(&self) -> Option<HarnessEvent> {
         if self.usage == AiUsage::default() && self.model.is_none() {
             return None;
         }
-        let measured = self.last_round.prompt_tokens + self.last_round.completion_tokens;
         let window = self.current_window();
         Some(HarnessEvent::Usage {
             prompt_tokens: self.usage.prompt_tokens,
             completion_tokens: self.usage.completion_tokens,
             cached_tokens: self.usage.cached_tokens,
             tool_groups: self.tool_groups.clone(),
-            context_tokens: if measured > 0 {
-                measured
-            } else {
-                self.estimated_context
-            },
+            context_tokens: self.carried_context(),
             context_window: window.map(|window| window.tokens),
             context_window_reported: window.is_some_and(|window| window.reported),
             model: self.model.clone(),
@@ -415,6 +469,10 @@ struct ToolSession {
     conversation_key: Option<String>,
     warned: bool,
     reviewer: Option<ActionReviewer>,
+    /// As chamadas (ferramenta + argumentos) que já esperam confirmação nesta
+    /// resposta: o modelo pequeno repete a proposta na rodada seguinte, e
+    /// cada repetição seria mais um cartão igual na tela.
+    awaiting: HashSet<String>,
 }
 
 impl ToolSession {
@@ -459,6 +517,23 @@ impl ToolSession {
             },
         );
     }
+}
+
+/// As propostas desta conversa cujo cartão ainda espera a decisão: pedir de
+/// novo na pergunta seguinte ("faça", "e aí?") seria um segundo cartão igual.
+fn awaiting_in_conversation(
+    ctx: &AppContext,
+    user_id: Option<i64>,
+    conversation_key: Option<&str>,
+) -> HashSet<String> {
+    let (Some(user_id), Some(key)) = (user_id, conversation_key) else {
+        return HashSet::new();
+    };
+    approvals::ApprovalDesk::from_context(ctx)
+        .awaiting_in(user_id, key)
+        .into_iter()
+        .map(|(tool, arguments)| call_key(&tool, &arguments.to_string()))
+        .collect()
 }
 
 /// O que vem depois de uma chamada de ferramenta.
@@ -621,14 +696,30 @@ async fn handle_tool_call(
         }
     }
 
+    let proposal = call_key(&tool.name, &tool.arguments);
+    if session.awaiting.contains(&proposal) {
+        tracing::info!(tool = %tool.name, "proposta repetida: o cartão já está na tela");
+        conversation.push(AiMessage {
+            role: "tool".to_string(),
+            content: Some(
+                json!({
+                    "status": "awaiting_user_confirmation",
+                    "note": "Esta mesma proposta já espera confirmação na tela; não repita a chamada. Diga em uma frase o que propôs.",
+                })
+                .to_string(),
+            ),
+            tool_calls: None,
+            tool_call_id: Some(tool.id),
+        });
+        return ToolFlow::SuppressInteractive;
+    }
+
     let mut flow = ToolFlow::Continue;
     let device_access = kind == ToolKind::DeviceAccess;
     if device_access && !session.warned {
         session.warned = true;
         if !sink
-            .send(HarnessEvent::Notice {
-                message: DEVICE_ACCESS_WARNING.to_string(),
-            })
+            .send(HarnessEvent::notice(DEVICE_ACCESS_WARNING, false))
             .await
         {
             return ToolFlow::Disconnected;
@@ -641,19 +732,26 @@ async fn handle_tool_call(
     let decision = if auto_approved {
         GateDecision::Run(RunPlan::auto_accepted())
     } else {
-        approval::decide(
+        let review = approval::decide(
             ctx,
             registry,
             session.reviewer.as_ref(),
             &tool.name,
             &args,
             &tool.arguments,
-        )
-        .await
+        );
+        let Some(decision) = sink.unless_closed(review).await else {
+            return ToolFlow::Disconnected;
+        };
+        decision
     };
     let result = match decision {
         GateDecision::Ask(risk) => {
-            let summary = match registry.preview(ctx, &tool.name, &tool.arguments).await {
+            let preview = registry.preview(ctx, &tool.name, &tool.arguments);
+            let Some(preview) = sink.unless_closed(preview).await else {
+                return ToolFlow::Disconnected;
+            };
+            let summary = match preview {
                 Ok(text) => text,
                 Err(error) => {
                     conversation.push(AiMessage {
@@ -694,6 +792,7 @@ async fn handle_tool_call(
                 return ToolFlow::Disconnected;
             }
             session.await_user(ctx, &tool, arguments, &summary, &risk);
+            session.awaiting.insert(proposal);
             flow = ToolFlow::SuppressInteractive;
             json!({
                 "status": "awaiting_user_confirmation",
@@ -717,7 +816,16 @@ async fn handle_tool_call(
             {
                 return ToolFlow::Disconnected;
             }
-            let execution = plan.execution.run(ctx, registry, &tool.name, args).await;
+            let run = plan.execution.run(ctx, registry, &tool.name, args);
+            // Consulta e teste ativo param com a tela; ação vai até o fim.
+            let execution = if matches!(kind, ToolKind::Passive | ToolKind::Active) {
+                match sink.unless_closed(run).await {
+                    Some(execution) => execution,
+                    None => return ToolFlow::Disconnected,
+                }
+            } else {
+                run.await
+            };
             let (result, chart) = match execution {
                 Ok(output) => {
                     if output.ends_turn {
@@ -795,22 +903,27 @@ pub async fn run_agent_loop(
         // são chamadas de rede e nenhuma depende da outra.
         let consult_decider =
             request.tool_loading == ToolLoading::OnDemand && !small_talk && !trained;
-        let (routed, mut window) = tokio::join!(
-            async {
-                if consult_decider {
-                    tool_routing::route(
-                        &DeciderRuntime::from_context(&ctx),
-                        &settings.decider,
-                        question,
-                        &available,
-                    )
-                    .await
-                } else {
-                    None
-                }
-            },
-            context_window::resolve(driver.as_ref(), &configured_model)
-        );
+        let start = async {
+            tokio::join!(
+                async {
+                    if consult_decider {
+                        tool_routing::route(
+                            &DeciderRuntime::from_context(&ctx),
+                            &settings.decider,
+                            question,
+                            &available,
+                        )
+                        .await
+                    } else {
+                        None
+                    }
+                },
+                context_window::resolve(driver.as_ref(), &configured_model)
+            )
+        };
+        let Some((routed, mut window)) = sink.unless_closed(start).await else {
+            return;
+        };
         let everything = || available.iter().copied().collect::<ToolGroups>();
         // O que a pessoa marcou (`@container`, o alerta, a tela aberta) vai sempre.
         let marked = || context_groups(&request.context);
@@ -850,6 +963,11 @@ pub async fn run_agent_loop(
             central: Central::from_context(&ctx).ok(),
             conversation_key: request.memory.conversation_key.clone(),
             warned: false,
+            awaiting: awaiting_in_conversation(
+                &ctx,
+                request.actor.user_id,
+                request.memory.conversation_key.as_deref(),
+            ),
             // Só o chat tem pedido do usuário para o Decisor ler.
             reviewer: (request.tool_loading == ToolLoading::OnDemand).then(|| ActionReviewer {
                 runtime: DeciderRuntime::from_context(&ctx),
@@ -902,7 +1020,7 @@ pub async fn run_agent_loop(
                 fixed = fixed_for(&loaded);
             }
             if let Some(message) = small_window_notice(&budget, fixed, driver.id()) {
-                if !sink.send(HarnessEvent::Notice { message }).await {
+                if !sink.send(HarnessEvent::notice(message, true)).await {
                     return;
                 }
             }
@@ -924,14 +1042,16 @@ pub async fn run_agent_loop(
                     // O que `recent_history` já tinha deixado de fora entra no
                     // resumo também: nada some sem ser resumido.
                     let folded = requested.len() - history.len() + fold;
-                    let text = match summarize(
+                    let summarizing = summarize(
                         driver.as_ref(),
                         &budget,
                         summary.as_deref(),
                         &requested[..folded],
-                    )
-                    .await
-                    {
+                    );
+                    let Some(summarized) = sink.unless_closed(summarizing).await else {
+                        return;
+                    };
+                    let text = match summarized {
                         Ok(text) => Some(text),
                         Err(error) => {
                             tracing::warn!(%error, "falha ao resumir a conversa; mensagens antigas saem sem resumo");
@@ -1022,7 +1142,10 @@ pub async fn run_agent_loop(
         // A conferência da resposta final ganha uma rodada só por pergunta.
         let mut answer_retried = false;
         let mut seen_call_ids = HashSet::new();
+        let mut seen_results = SeenResults::default();
         for _ in 0..MAX_ITERATIONS {
+            // Antes da poda: o resultado podado continua valendo na conferência.
+            seen_results.record(&conversation);
             // Recalculado a cada rodada: um `load_tools` vale já na seguinte.
             let tools = if small_talk {
                 Vec::new()
@@ -1041,70 +1164,67 @@ pub async fn run_agent_loop(
                 tracing::info!("resultados de ferramenta antigos podados para caber na janela");
             }
             metrics.estimated_context = estimate_messages(&conversation) + tools_tokens;
+            metrics.transient = estimate_messages(&conversation[question_at + 1..]);
             metrics.tool_groups = loaded.ids();
             metrics.start_round();
-            let stream = match driver.chat_stream(&conversation, &tools, options).await {
-                Ok(stream) => stream,
-                Err(err) => {
-                    return sink
-                        .fail(err.to_string(), &mut metrics, driver.as_ref())
-                        .await
+            let (assistant_text, mut pending_tools) = match run_round(
+                driver.as_ref(),
+                &sink,
+                &mut metrics,
+                &conversation,
+                &tools,
+                options,
+            )
+            .await
+            {
+                RoundRead::Done { text, tools } => (text, tools),
+                RoundRead::Failed(message) => {
+                    return sink.fail(message, &mut metrics, driver.as_ref()).await
                 }
+                RoundRead::Disconnected => return,
             };
-            // Depois de uma conferência o texto só sai conferido.
-            let (assistant_text, mut pending_tools) =
-                match read_round(stream, &sink, &mut metrics, !answer_retried).await {
-                    RoundRead::Done { text, tools } => (text, tools),
-                    RoundRead::Failed(message) => {
-                        return sink.fail(message, &mut metrics, driver.as_ref()).await
-                    }
-                    RoundRead::Disconnected => return,
-                };
             unique_call_ids(&mut pending_tools, &mut seen_call_ids);
 
             if pending_tools.is_empty() {
                 // Resposta que cita recurso que nada mostrou (`agente-west-01`
-                // sem consulta): avisa e dá uma rodada para a IA conferir com
-                // os dados. Se ela insistir, fica o aviso claro — sem laço.
-                let invented = if small_talk {
-                    Vec::new()
+                // sem consulta) ou desenha um gráfico em texto: avisa e dá uma
+                // rodada para a IA conferir com os dados. Se ela insistir, fica
+                // o aviso claro — sem laço.
+                let check = if small_talk {
+                    AnswerCheck::default()
                 } else {
-                    invented_in_answer(
+                    AnswerCheck::run(
                         &ctx.db,
                         &assistant_text,
                         &conversation,
                         question_at,
+                        &seen_results,
                         |name| registry.kind_of(name).is_some(),
                     )
                     .await
                 };
                 if answer_retried {
-                    // A versão conferida sai inteira; o que ela ainda inventa
-                    // vira [não confirmado] — o nome não chega à tela.
-                    let mut shown = assistant_text.clone();
-                    if !invented.is_empty() {
-                        shown = redact(&shown, &invented);
-                        let notice = format!(
-                            "A IA citou nomes que não existem em nenhum dado consultado; eles aparecem como {UNCONFIRMED}."
-                        );
-                        if !sink.send(HarnessEvent::Notice { message: notice }).await {
+                    // A versão conferida chegou à tela enquanto era escrita; se
+                    // ainda inventa, ela é trocada pela redigida. O aviso de
+                    // "conferindo" vira o desfecho, nos dois casos.
+                    if !check.needs_redaction() {
+                        let _ = sink.send(HarnessEvent::answer_check(ANSWER_CHECKED)).await;
+                    } else {
+                        let notice = HarnessEvent::answer_check(check.final_notice());
+                        if !sink.send(notice).await || !sink.send(HarnessEvent::Retract).await {
                             return;
                         }
+                        let shown = check.redact(&assistant_text);
+                        let _ = sink.send(HarnessEvent::TextDelta { content: shown }).await;
                     }
-                    let _ = sink.send(HarnessEvent::TextDelta { content: shown }).await;
                     return sink.finish(&mut metrics, driver.as_ref()).await;
                 }
-                if invented.is_empty() {
+                if check.is_clean() {
                     return sink.finish(&mut metrics, driver.as_ref()).await;
                 }
-                let list = invented.join(", ");
                 answer_retried = true;
-                let notice = format!(
-                    "Conferindo a resposta: {list} não apareceu em nenhuma consulta. A IA verificou nos dados e respondeu de novo."
-                );
-                if !sink.send(HarnessEvent::Notice { message: notice }).await
-                    || !sink.send(HarnessEvent::Retract).await
-                {
+                let notice = HarnessEvent::answer_check(check.retry_notice());
+                if !sink.send(notice).await || !sink.send(HarnessEvent::Retract).await {
                     return;
                 }
                 round_start = conversation.len();
@@ -1116,23 +1236,13 @@ pub async fn run_agent_loop(
                 });
                 conversation.push(AiMessage {
                     role: "user".to_string(),
-                    content: Some(format!(
-                        "{ANSWER_CHECK_TAG}Sua resposta cita {list}, que não veio de nenhuma consulta nem do pedido. Não invente recursos: consulte com as ferramentas e responda de novo, curto, ou diga que não encontrou.</conferencia>"
-                    )),
+                    content: Some(check.retry_request()),
                     tool_calls: None,
                     tool_call_id: None,
                 });
                 continue;
             }
 
-            if answer_retried && !assistant_text.is_empty() {
-                let flushed = HarnessEvent::TextDelta {
-                    content: assistant_text.clone(),
-                };
-                if !sink.send(flushed).await {
-                    return;
-                }
-            }
             round_start = conversation.len();
             conversation.push(AiMessage {
                 role: "assistant".to_string(),
@@ -1195,16 +1305,18 @@ pub async fn run_agent_loop(
             tool_calls: None,
             tool_call_id: None,
         });
+        metrics.transient = estimate_messages(&conversation[question_at + 1..]);
         metrics.start_round();
-        let stream = match driver.chat_stream(&conversation, &[], options).await {
-            Ok(stream) => stream,
-            Err(err) => {
-                return sink
-                    .fail(err.to_string(), &mut metrics, driver.as_ref())
-                    .await
-            }
-        };
-        match read_round(stream, &sink, &mut metrics, true).await {
+        match run_round(
+            driver.as_ref(),
+            &sink,
+            &mut metrics,
+            &conversation,
+            &[],
+            options,
+        )
+        .await
+        {
             RoundRead::Done { text, .. } if text.trim().is_empty() => {
                 sink.fail(NO_ANSWER.to_string(), &mut metrics, driver.as_ref())
                     .await;
@@ -1237,18 +1349,43 @@ enum RoundRead {
     Disconnected,
 }
 
-/// Lê a resposta de uma rodada: repassa os avisos, as métricas e, com
-/// `forward`, o texto à tela enquanto chega.
+/// Pede uma rodada ao provedor e a lê. Largada no meio quando a tela fecha —
+/// também enquanto o modelo pensa sem escrever nada.
+async fn run_round(
+    driver: &dyn AiDriver,
+    sink: &EventSink,
+    metrics: &mut TurnMetrics,
+    conversation: &[AiMessage],
+    tools: &[AiTool],
+    options: AiChatOptions,
+) -> RoundRead {
+    match sink
+        .unless_closed(driver.chat_stream(conversation, tools, options))
+        .await
+    {
+        None => RoundRead::Disconnected,
+        Some(Err(err)) => RoundRead::Failed(err.to_string()),
+        Some(Ok(stream)) => read_round(stream, sink, metrics).await,
+    }
+}
+
+/// Lê a resposta de uma rodada: repassa os avisos, as métricas e o texto à
+/// tela enquanto chega.
 async fn read_round(
     mut stream: AiChunkStream,
     sink: &EventSink,
     metrics: &mut TurnMetrics,
-    forward: bool,
 ) -> RoundRead {
     let mut text = String::new();
     let mut tools = Vec::new();
     let mut first_output: Option<Instant> = None;
-    while let Some(chunk) = stream.next().await {
+    loop {
+        let Some(next) = sink.unless_closed(stream.next()).await else {
+            return RoundRead::Disconnected;
+        };
+        let Some(chunk) = next else {
+            break;
+        };
         let chunk = match chunk {
             Ok(chunk) => chunk,
             Err(err) => return RoundRead::Failed(err.to_string()),
@@ -1256,8 +1393,10 @@ async fn read_round(
         if chunk.text_delta.is_some() || !chunk.tool_calls.is_empty() {
             first_output.get_or_insert_with(Instant::now);
         }
-        if let Some(notice) = chunk.notice {
-            if !sink.send(HarnessEvent::Notice { message: notice }).await {
+        // O aviso do provedor é de configuração (modelo trocado por limite).
+        if let Some(message) = chunk.notice {
+            let notice = HarnessEvent::notice(message, true);
+            if !sink.send(notice).await {
                 return RoundRead::Disconnected;
             }
         }
@@ -1269,7 +1408,7 @@ async fn read_round(
         }
         if let Some(delta) = chunk.text_delta {
             text.push_str(&delta);
-            if forward && !sink.send(HarnessEvent::TextDelta { content: delta }).await {
+            if !sink.send(HarnessEvent::TextDelta { content: delta }).await {
                 return RoundRead::Disconnected;
             }
         }
@@ -1513,6 +1652,33 @@ mod tests {
         assert_eq!(context_tokens, 1520);
         assert_eq!(context_window, Some(131_072));
         assert_eq!(model.as_deref(), Some("meta-llama/llama-3.3-70b-instruct"));
+    }
+
+    #[test]
+    fn contexto_carregado_desconta_o_trafego_da_resposta() {
+        let mut metricas = TurnMetrics::new(Some("llama3.2"));
+        metricas.estimated_context = 9_000;
+        metricas.transient = 6_000;
+        metricas.start_round();
+        metricas.add_usage(AiUsage {
+            prompt_tokens: 9_500,
+            completion_tokens: 100,
+            cached_tokens: 0,
+        });
+        assert_eq!(metricas.carried_context(), 3_600, "medido menos o tráfego");
+        metricas.transient = 9_550;
+        assert_eq!(
+            metricas.carried_context(),
+            50,
+            "o desconto não passa da medida"
+        );
+        metricas.last_round = AiUsage::default();
+        metricas.transient = 6_000;
+        assert_eq!(
+            metricas.carried_context(),
+            3_000,
+            "sem medida, só a estimativa"
+        );
     }
 
     #[test]

@@ -349,12 +349,21 @@ enum Step {
     Index(usize),
 }
 
+/// A tabela de [`super::lean::lean`]: `{columns, rows}`.
+fn is_table(map: &serde_json::Map<String, Value>) -> bool {
+    map.len() == 2
+        && map.get("columns").is_some_and(Value::is_array)
+        && map.get("rows").is_some_and(Value::is_array)
+}
+
 /// Caminho da lista mais pesada que ainda dá para encurtar (mais de um item
-/// que não seja o marcador).
+/// que não seja o marcador). Numa tabela só as linhas encurtam: cortar o
+/// cabeçalho ou as células de uma linha desalinharia as colunas.
 fn heaviest_array_path(value: &Value) -> Option<Vec<Step>> {
     let mut best: Option<(usize, Vec<Step>)> = None;
-    let mut stack: Vec<(&Value, Vec<Step>)> = vec![(value, Vec::new())];
-    while let Some((node, path)) = stack.pop() {
+    // O terceiro campo diz se a lista pode encurtar (não é cabeçalho nem linha).
+    let mut stack: Vec<(&Value, Vec<Step>, bool)> = vec![(value, Vec::new(), true)];
+    while let Some((node, path, shrinkable)) = stack.pop() {
         match node {
             Value::Array(items) => {
                 let real = items
@@ -362,20 +371,40 @@ fn heaviest_array_path(value: &Value) -> Option<Vec<Step>> {
                     .filter(|item| item.get(OMITTED_KEY).is_none())
                     .count();
                 let weight = items.iter().map(size).sum::<usize>();
-                if real > 1 && best.as_ref().is_none_or(|(heaviest, _)| weight > *heaviest) {
+                if shrinkable
+                    && real > 1
+                    && best.as_ref().is_none_or(|(heaviest, _)| weight > *heaviest)
+                {
                     best = Some((weight, path.clone()));
                 }
                 for (index, item) in items.iter().enumerate() {
                     let mut child = path.clone();
                     child.push(Step::Index(index));
-                    stack.push((item, child));
+                    stack.push((item, child, true));
+                }
+            }
+            Value::Object(map) if is_table(map) => {
+                let mut rows_path = path.clone();
+                rows_path.push(Step::Key("rows".into()));
+                if let Some(Value::Array(rows)) = map.get("rows") {
+                    let weight = rows.iter().map(size).sum::<usize>();
+                    let real = rows.iter().filter(|row| row.is_array()).count();
+                    if real > 1 && best.as_ref().is_none_or(|(heaviest, _)| weight > *heaviest) {
+                        best = Some((weight, rows_path.clone()));
+                    }
+                    // A linha inteira fica; uma lista dentro de uma célula pode encurtar.
+                    for (index, row) in rows.iter().enumerate() {
+                        let mut row_path = rows_path.clone();
+                        row_path.push(Step::Index(index));
+                        stack.push((row, row_path, false));
+                    }
                 }
             }
             Value::Object(map) => {
                 for (key, item) in map {
                     let mut child = path.clone();
                     child.push(Step::Key(key.clone()));
-                    stack.push((item, child));
+                    stack.push((item, child, true));
                 }
             }
             _ => {}
@@ -596,5 +625,38 @@ mod tests {
         let cortado = compact_for_model(&grande);
         assert!(cortado.contains("resultado cortado"));
         assert!(cortado.chars().count() < MAX_TOOL_RESULT_CHARS + 200);
+    }
+
+    #[test]
+    fn encurtar_nao_desalinha_a_tabela() {
+        // Uma linha só já não cabe (a lista da célula `tags` é enorme): a
+        // lista mais pesada passa a ser a própria linha, e cortá-la tiraria
+        // colunas. O que encurta é a lista dentro da célula.
+        let tags: Vec<String> = (0..2_000).map(|i| format!("t{i}")).collect();
+        let lista = json!({
+            "linhas": (0..4).map(|i| json!({
+                "id": i,
+                "nome": format!("host-{i}"),
+                "status": "up",
+                "tags": tags,
+            })).collect::<Vec<_>>(),
+        });
+        let encurtado = compact_for_model(&lista);
+        let lido: Value = serde_json::from_str(&encurtado).expect("continua JSON válido");
+        let colunas = lido["linhas"]["columns"].as_array().unwrap();
+        assert_eq!(colunas.len(), 4, "o cabeçalho fica inteiro");
+        let linhas = lido["linhas"]["rows"].as_array().unwrap();
+        let celulas = linhas[0]
+            .as_array()
+            .expect("a primeira linha continua linha");
+        assert_eq!(celulas.len(), colunas.len(), "a linha com todas as colunas");
+        assert_eq!(celulas[1], "host-0");
+        assert!(celulas[3]
+            .as_array()
+            .unwrap()
+            .last()
+            .unwrap()
+            .get(OMITTED_KEY)
+            .is_some());
     }
 }

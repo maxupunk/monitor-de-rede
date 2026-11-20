@@ -6,7 +6,10 @@
 //! o núcleo e o que ela obviamente pede, e o resto chega com `load_tools`, sem
 //! aparecer na tela; rotina automática continua com o catálogo inteiro.
 
-use std::sync::{Arc, Mutex};
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use async_trait::async_trait;
 use backend::app::App;
@@ -30,6 +33,7 @@ use netmonitor_assistant::{
 use netmonitor_nucleo::services::shared::errors::AppResult;
 use serde_json::json;
 use serial_test::serial;
+use tokio::sync::oneshot;
 
 use super::fake_ollaya::{self, by_keyword, with_key};
 
@@ -296,13 +300,8 @@ async fn chamada_direta_pelo_catalogo_carrega_o_grupo_sem_load_tools() {
     .await;
 }
 
-async fn conversar_treinado(
-    ctx: &AppContext,
-    pergunta: &str,
-    roteiro: Vec<AiChatChunk>,
-    carga: ToolLoading,
-) -> (Vec<Rodada>, Vec<HarnessEvent>) {
-    let (driver, rodadas) = Gravador::novo(roteiro);
+/// Modelo treinado (sem roteamento do Decisor) e ações com confirmação.
+fn pedido_treinado(pergunta: &str, carga: ToolLoading) -> (AiSettings, AgentRequest) {
     let settings = AiSettings {
         enabled: true,
         action_mode: AiAutomationMode::Confirm,
@@ -313,27 +312,214 @@ async fn conversar_treinado(
         },
         ..AiSettings::default()
     };
-    let eventos: Vec<HarnessEvent> = run_agent_loop(
-        ctx.clone(),
-        settings.clone(),
-        Box::new(driver),
-        AgentRequest {
-            messages: vec![ChatMessageInput {
-                role: "user".into(),
-                content: pergunta.into(),
-            }],
-            context: ChatContext::default(),
-            policy: ToolPolicy::from_settings(&settings),
-            tool_loading: carga,
-            memory: ConversationMemory::default(),
-            actor: netmonitor_nucleo::services::audit::AuditActor::default(),
-        },
-    )
-    .await
-    .collect()
-    .await;
+    let request = AgentRequest {
+        messages: vec![ChatMessageInput {
+            role: "user".into(),
+            content: pergunta.into(),
+        }],
+        context: ChatContext::default(),
+        policy: ToolPolicy::from_settings(&settings),
+        tool_loading: carga,
+        memory: ConversationMemory::default(),
+        actor: netmonitor_nucleo::services::audit::AuditActor::default(),
+    };
+    (settings, request)
+}
+
+async fn conversar_treinado(
+    ctx: &AppContext,
+    pergunta: &str,
+    roteiro: Vec<AiChatChunk>,
+    carga: ToolLoading,
+) -> (Vec<Rodada>, Vec<HarnessEvent>) {
+    let (settings, request) = pedido_treinado(pergunta, carga);
+    rodar(ctx, settings, request, roteiro).await
+}
+
+/// Roda um pedido já montado contra o roteiro.
+async fn rodar(
+    ctx: &AppContext,
+    settings: AiSettings,
+    request: AgentRequest,
+    roteiro: Vec<AiChatChunk>,
+) -> (Vec<Rodada>, Vec<HarnessEvent>) {
+    let (driver, rodadas) = Gravador::novo(roteiro);
+    let eventos: Vec<HarnessEvent> =
+        run_agent_loop(ctx.clone(), settings, Box::new(driver), request)
+            .await
+            .collect()
+            .await;
     let rodadas = rodadas.lock().unwrap().clone();
     (rodadas, eventos)
+}
+
+fn cartoes(eventos: &[HarnessEvent]) -> usize {
+    eventos
+        .iter()
+        .filter(|evento| matches!(evento, HarnessEvent::ConfirmationRequired { .. }))
+        .count()
+}
+
+fn agendamento() -> AiChatChunk {
+    chamada(
+        "create_scheduled_task",
+        json!({
+            "name": "verificar_containers",
+            "tool": "get_docker_containers",
+            "cron": "0 9 * * *",
+            "arguments": {}
+        }),
+    )
+}
+
+/// O modelo pequeno repete a proposta na rodada seguinte, apesar da nota:
+/// cada repetição era mais um cartão igual na tela.
+#[tokio::test]
+#[serial]
+async fn proposta_repetida_nao_vira_segundo_cartao() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
+        let (rodadas, eventos) = conversar_treinado(
+            &ctx,
+            "Marque para amanhã às 9 horas verificar os contêineres.",
+            vec![agendamento(), agendamento(), texto("Proposta enviada.")],
+            ToolLoading::OnDemand,
+        )
+        .await;
+
+        assert_eq!(
+            cartoes(&eventos),
+            1,
+            "a mesma proposta pede confirmação uma vez só"
+        );
+        assert_eq!(
+            rodadas.len(),
+            3,
+            "a repetição volta à IA, que fecha com texto"
+        );
+    })
+    .await;
+}
+
+/// O cartão da pergunta anterior ainda espera a decisão e o usuário escreve
+/// "pode fazer": a IA propõe de novo, mas a tela continua com um cartão só.
+#[tokio::test]
+#[serial]
+async fn proposta_ainda_pendente_na_conversa_nao_vira_segundo_cartao() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
+        let pedido = |pergunta: &str, conversa: &str| {
+            let (settings, mut request) = pedido_treinado(pergunta, ToolLoading::OnDemand);
+            request.actor.user_id = Some(4242);
+            request.memory.conversation_key = Some(conversa.into());
+            (settings, request)
+        };
+        let (settings, request) = pedido(
+            "Marque para amanhã às 9 horas verificar os contêineres.",
+            "c-1",
+        );
+        let (_, primeira) = rodar(
+            &ctx,
+            settings,
+            request,
+            vec![agendamento(), texto("Proposta enviada.")],
+        )
+        .await;
+        assert_eq!(cartoes(&primeira), 1);
+
+        let (settings, request) = pedido("pode marcar o agendamento", "c-1");
+        let (_, segunda) = rodar(
+            &ctx,
+            settings,
+            request,
+            vec![agendamento(), texto("Confirme no cartão.")],
+        )
+        .await;
+        assert_eq!(
+            cartoes(&segunda),
+            0,
+            "o cartão da pergunta anterior continua valendo"
+        );
+
+        // Em outra conversa a mesma proposta é nova.
+        let (settings, request) = pedido("pode marcar o agendamento", "c-2");
+        let (_, outra) = rodar(
+            &ctx,
+            settings,
+            request,
+            vec![agendamento(), texto("Proposta enviada.")],
+        )
+        .await;
+        assert_eq!(cartoes(&outra), 1);
+    })
+    .await;
+}
+
+/// Provedor que pensa para sempre. Avisa quando é chamado e, ao ser largado
+/// (fim da resposta), fecha `largado`.
+struct Pensativo {
+    chamado: Mutex<Option<oneshot::Sender<()>>>,
+    _largado: oneshot::Sender<()>,
+}
+
+#[async_trait]
+impl AiDriver for Pensativo {
+    fn id(&self) -> &'static str {
+        "fake"
+    }
+
+    fn display_name(&self) -> &'static str {
+        "Fake"
+    }
+
+    async fn chat_stream(
+        &self,
+        _messages: &[AiMessage],
+        _tools: &[AiTool],
+        _options: AiChatOptions,
+    ) -> AppResult<AiChunkStream> {
+        if let Some(chamado) = self.chamado.lock().unwrap().take() {
+            let _ = chamado.send(());
+        }
+        futures::future::pending().await
+    }
+
+    async fn test_connection(&self) -> AppResult<TestConnectionResponse> {
+        Ok(TestConnectionResponse {
+            success: true,
+            latency_ms: 0.0,
+            message: String::new(),
+            model: None,
+        })
+    }
+}
+
+/// Fechar a tela larga a resposta na hora, mesmo com o modelo pensando sem
+/// escrever: antes, ela só parava ao tentar mandar o próximo evento.
+#[tokio::test]
+#[serial]
+async fn tela_fechada_larga_o_provedor_que_ainda_pensa() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
+        let (chamado, foi_chamado) = oneshot::channel();
+        let (largado, foi_largado) = oneshot::channel::<()>();
+        let driver = Pensativo {
+            chamado: Mutex::new(Some(chamado)),
+            _largado: largado,
+        };
+        let (settings, request) =
+            pedido_treinado("quais dispositivos estão offline?", ToolLoading::OnDemand);
+        let tela = run_agent_loop(ctx.clone(), settings, Box::new(driver), request).await;
+        tokio::time::timeout(Duration::from_secs(5), foi_chamado)
+            .await
+            .expect("o provedor é chamado")
+            .expect("o aviso chega");
+        drop(tela);
+        assert!(
+            tokio::time::timeout(Duration::from_secs(5), foi_largado)
+                .await
+                .is_ok(),
+            "a resposta para quando a tela fecha"
+        );
+    })
+    .await;
 }
 
 #[tokio::test]

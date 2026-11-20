@@ -254,7 +254,7 @@ pub const REPEATED_NOTICE: &str =
 
 /// A consulta como chave: ferramenta + argumentos canônicos (a ordem das
 /// chaves no JSON não faz duas consultas diferentes).
-fn call_key(name: &str, arguments: &str) -> String {
+pub(crate) fn call_key(name: &str, arguments: &str) -> String {
     let canonical = serde_json::from_str::<serde_json::Value>(arguments)
         .map_or_else(|_| arguments.trim().to_string(), |value| value.to_string());
     format!("{name}|{canonical}")

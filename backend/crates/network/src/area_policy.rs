@@ -49,6 +49,28 @@ impl AreaPolicy for NetworkPolicy {
         &["discovery:", "topology:", "plugin:", "link_test", "wifi:"]
     }
 
+    fn tables(&self) -> &'static [&'static str] {
+        &[
+            "discovery_runs",
+            "discovery_results",
+            "device_links",
+            "plugins",
+            "device_credentials",
+            "plugin_runs",
+            "plugin_auto_accept",
+            "device_plugin_installs",
+            "plugin_settings",
+            "plugin_batches",
+            "oui_vendors",
+            "link_test_schedules",
+            "link_tests",
+            "link_test_legs",
+            "wifi_watched_clients",
+            "wifi_roaming_events",
+            "networks",
+        ]
+    }
+
     async fn evidence(&self, db: &DatabaseConnection) -> AppResult<Evidence> {
         let redes = networks::Entity::find().count(db).await?;
         if redes > 0 {

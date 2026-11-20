@@ -40,6 +40,11 @@ export const useAiConversationsStore = defineStore('aiConversations', () => {
 
   const activeId = computed<number | null>(() => serverIds.value[currentKey.value] ?? null)
 
+  /** Gravações que falharam, por conversa: o aviso vai na conversa, não só na lista. */
+  const saveFailures = ref<Record<string, string>>({})
+  /** Por que a conversa em tela não está sendo salva (ex.: passou do limite). */
+  const saveError = computed<string | null>(() => saveFailures.value[currentKey.value] ?? null)
+
   function userKey(): string {
     const id = useAuthStore().user?.id
     return id ? String(id) : 'anon'
@@ -123,9 +128,14 @@ export const useAiConversationsStore = defineStore('aiConversations', () => {
       .then(() => save(key, body))
       .then(() => {
         error.value = null
+        if (!(key in saveFailures.value)) return
+        saveFailures.value = Object.fromEntries(
+          Object.entries(saveFailures.value).filter(([failed]) => failed !== key)
+        )
       })
       .catch((err: unknown) => {
         error.value = describe(err, 'Falha ao salvar a conversa')
+        saveFailures.value = { ...saveFailures.value, [key]: error.value }
       })
     return queue
   }
@@ -165,6 +175,7 @@ export const useAiConversationsStore = defineStore('aiConversations', () => {
     activeId,
     loading,
     error,
+    saveError,
     load,
     startNew,
     persist,

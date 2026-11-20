@@ -578,6 +578,11 @@ export const usePluginsStore = defineStore('plugins', () => {
     pendingApprovals.value = pendingApprovals.value.filter((item) => item.key !== data.key)
   }
 
+  /** O stream (re)conectou: o snapshot que vem em seguida é a fila inteira. */
+  function resetApprovals() {
+    pendingApprovals.value = []
+  }
+
   return {
     library,
     libraryLoading,
@@ -585,6 +590,7 @@ export const usePluginsStore = defineStore('plugins', () => {
     deviceLoading,
     pendingApprovals,
     nextApproval,
+    resetApprovals,
     runProgress,
     error,
     fetchLibrary,

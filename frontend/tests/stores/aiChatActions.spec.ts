@@ -132,6 +132,33 @@ describe('ações propostas pela IA', () => {
     expect(store.messages[1].toolCalls?.[0].status).toBe('cancelled')
   })
 
+  it('pedido vencido sai das telas, mas o card da conversa segue confirmável', async () => {
+    const store = await conversaComProposta()
+    store.applyApprovalDecision({ callId: 'c1', decision: 'expired' })
+    expect(store.messages[1].toolCalls?.[0].status).toBe('awaiting')
+  })
+
+  it('conversa que não salva avisa na própria conversa e some quando volta a salvar', async () => {
+    const store = await conversaComProposta()
+    const conversations = useAiConversationsStore()
+    // A conversa já foi criada na resposta: a próxima gravação é um PUT.
+    vi.mocked(apiService.put).mockRejectedValueOnce(
+      new Error('Conversa grande demais para salvar (2100 KB; limite de 2048 KB).')
+    )
+    await conversations.persist(store.messages)
+    expect(conversations.saveError).toContain('grande demais')
+
+    await conversations.persist(store.messages)
+    expect(conversations.saveError).toBeNull()
+
+    // A falha é da conversa dona: outra conversa em tela não herda o aviso.
+    vi.mocked(apiService.put).mockRejectedValueOnce(new Error('Falha de rede'))
+    await conversations.persist(store.messages)
+    expect(conversations.saveError).toBe('Falha de rede')
+    store.newConversation()
+    expect(conversations.saveError).toBeNull()
+  })
+
   it('confirmado fora do card, o resultado da execução vale mesmo depois do aviso SSE', async () => {
     const store = await conversaComProposta()
     store.applyApprovalDecision({ callId: 'c1', decision: 'confirmed' })

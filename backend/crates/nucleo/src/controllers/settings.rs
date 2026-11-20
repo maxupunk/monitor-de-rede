@@ -15,9 +15,9 @@ use crate::{
         onboarding,
         preferences::{self, Preferences},
         server_addresses,
-        settings::database,
+        settings::{database, usage},
         shared::errors::AppResult,
-        syslog::db::LogsDb,
+        syslog::db::{self as logs_db, LogsDb},
     },
 };
 
@@ -91,6 +91,18 @@ async fn database_size(State(ctx): State<AppContext>) -> AppResult<Response> {
             logs_db.as_ref().map(LogsDb::connection),
         )
         .await?,
+    )?)
+}
+
+/// `GET /api/settings/database-usage` — o que ocupa o espaço: tabela por
+/// tabela, do maior para o menor, com o banco de logs quando ele é separado.
+async fn database_usage(State(ctx): State<AppContext>) -> AppResult<Response> {
+    let logs = logs_db::is_separate(&ctx.config.database.uri)
+        .then(|| LogsDb::from_context(&ctx).ok())
+        .flatten();
+    let policies = netmonitor_core::areas::AreaPolicies::from_context(&ctx);
+    Ok(format::json(
+        usage::database_usage(&ctx.db, logs.as_ref().map(LogsDb::connection), &policies).await?,
     )?)
 }
 
@@ -171,6 +183,7 @@ pub fn routes() -> Routes {
         .add("/onboarding/complete", post(complete_onboarding))
         .add("/onboarding/intent", post(onboarding_intent))
         .add("/database-size", get(database_size))
+        .add("/database-usage", get(database_usage))
         .add("/clear-history", post(clear_history))
         .add("/clear-all-items", post(clear_all_items))
 }

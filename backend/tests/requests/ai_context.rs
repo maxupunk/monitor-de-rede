@@ -557,7 +557,7 @@ async fn oi_numa_janela_pequena_nao_compacta_e_avisa() {
         assert_eq!(chamadas.len(), 1, "nenhuma chamada extra de resumo");
         assert_eq!(chamadas[0].mensagens, 4, "sistema + as três mensagens");
         let aviso = eventos.iter().find_map(|evento| match evento {
-            HarnessEvent::Notice { message } => Some(message.clone()),
+            HarnessEvent::Notice { message, .. } => Some(message.clone()),
             _ => None,
         });
         assert!(
@@ -704,7 +704,7 @@ async fn resposta_que_inventa_recurso_e_conferida_uma_vez() {
         assert!(
             eventos.iter().any(|evento| matches!(
                 evento,
-                HarnessEvent::Notice { message } if message.contains("agente-west-01")
+                HarnessEvent::Notice { message, .. } if message.contains("agente-west-01")
             )),
             "{eventos:?}"
         );
@@ -722,8 +722,9 @@ async fn resposta_que_inventa_recurso_e_conferida_uma_vez() {
         .await;
         assert_eq!(direto.len(), 1);
 
-        // O modelo insiste: a primeira versão é retirada da tela e, na conferida,
-        // o nome inventado sai como [não confirmado] — sem terceira rodada.
+        // O modelo insiste: a primeira versão é retirada da tela; a conferida
+        // chega escrevendo e, por ainda inventar, é trocada pela versão em que
+        // o nome sai como [não confirmado] — sem terceira rodada.
         let (insiste, eventos) = conversar_dizendo(
             &ctx,
             128_000,
@@ -735,11 +736,25 @@ async fn resposta_que_inventa_recurso_e_conferida_uma_vez() {
         )
         .await;
         assert_eq!(insiste.len(), 2);
-        let retirada = eventos
+        let retiradas: Vec<usize> = eventos
             .iter()
-            .position(|evento| matches!(evento, HarnessEvent::Retract))
-            .expect("a resposta inventada é retirada");
-        let depois: String = eventos[retirada..]
+            .enumerate()
+            .filter(|(_, evento)| matches!(evento, HarnessEvent::Retract))
+            .map(|(posicao, _)| posicao)
+            .collect();
+        assert_eq!(retiradas.len(), 2, "a inventada e a conferida que insistiu");
+        let conferida: String = eventos[retiradas[0]..retiradas[1]]
+            .iter()
+            .filter_map(|evento| match evento {
+                HarnessEvent::TextDelta { content } => Some(content.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            conferida, "Sim, no `agente-west-01`.",
+            "a conferida chega escrevendo"
+        );
+        let depois: String = eventos[retiradas[1]..]
             .iter()
             .filter_map(|evento| match evento {
                 HarnessEvent::TextDelta { content } => Some(content.as_str()),
@@ -747,6 +762,112 @@ async fn resposta_que_inventa_recurso_e_conferida_uma_vez() {
             })
             .collect();
         assert_eq!(depois, "Sim, no `[não confirmado]`.");
+    })
+    .await;
+}
+
+/// O `lfm3` real respondeu "use `chart_device_metric`…" a quem pediu um
+/// gráfico sem ferramenta: jargão que o usuário não entende. Uma rodada para
+/// dizer em linguagem simples; o aviso termina como "conferida".
+#[tokio::test]
+#[serial]
+async fn resposta_com_nome_de_ferramenta_e_refeita_em_linguagem_simples() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
+        let (chamadas, eventos) = conversar_dizendo(
+            &ctx,
+            128_000,
+            None,
+            vec![ChatMessageInput {
+                role: "user".into(),
+                content: "faça um gráfico dos alertas por severidade".into(),
+            }],
+            ConversationMemory::default(),
+            ChatContext::default(),
+            &[
+                "Use `chart_device_metric` ou `chart_logs_volume`.",
+                "Não tenho gráfico de alertas por severidade; posso listar em tabela.",
+            ],
+        )
+        .await;
+
+        assert_eq!(chamadas.len(), 2, "uma rodada para refazer, e só uma");
+        assert!(
+            chamadas[1].ultima.contains("linguagem simples"),
+            "{}",
+            chamadas[1].ultima
+        );
+        let avisos: Vec<&str> = eventos
+            .iter()
+            .filter_map(|evento| match evento {
+                HarnessEvent::Notice { message, .. } => Some(message.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            avisos
+                .last()
+                .is_some_and(|aviso| aviso.starts_with("Resposta conferida")),
+            "{avisos:?}"
+        );
+        let retirada = eventos
+            .iter()
+            .rposition(|evento| matches!(evento, HarnessEvent::Retract))
+            .expect("a versão com jargão sai da tela");
+        let fica: String = eventos[retirada..]
+            .iter()
+            .filter_map(|evento| match evento {
+                HarnessEvent::TextDelta { content } => Some(content.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            fica,
+            "Não tenho gráfico de alertas por severidade; posso listar em tabela."
+        );
+    })
+    .await;
+}
+
+/// Modelo pequeno sem `chart_*` para o dado "desenha" o gráfico numa tag
+/// inventada, com números que nenhuma consulta trouxe: a tela mostrava a tag
+/// crua. Ele ganha uma rodada para trocar por tabela; insistindo, a tag sai.
+#[tokio::test]
+#[serial]
+async fn grafico_escrito_em_texto_e_conferido_e_sai_da_resposta() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
+        let grafico = "CPU por hora:\n<analysis_chart data=\"[12, 40, 7]\"></analysis_chart>";
+        let (chamadas, eventos) = conversar_dizendo(
+            &ctx,
+            128_000,
+            None,
+            vec![ChatMessageInput {
+                role: "user".into(),
+                content: "mostre a CPU dos containers por hora".into(),
+            }],
+            ConversationMemory::default(),
+            ChatContext::default(),
+            &[grafico, grafico],
+        )
+        .await;
+
+        assert_eq!(chamadas.len(), 2, "uma rodada de conferência, e só uma");
+        assert!(
+            chamadas[1].ultima.contains("<conferencia>") && chamadas[1].ultima.contains("chart_*"),
+            "{}",
+            chamadas[1].ultima
+        );
+        let ultima_retirada = eventos
+            .iter()
+            .rposition(|evento| matches!(evento, HarnessEvent::Retract))
+            .expect("a versão que insistiu é retirada");
+        let fica: String = eventos[ultima_retirada..]
+            .iter()
+            .filter_map(|evento| match evento {
+                HarnessEvent::TextDelta { content } => Some(content.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(fica, "CPU por hora:\n[gráfico indisponível]");
     })
     .await;
 }

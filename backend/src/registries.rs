@@ -577,6 +577,30 @@ mod tests {
     }
 
     #[test]
+    fn tabela_de_area_e_do_esquema_e_de_uma_area_so() {
+        use netmonitor_core::models::tables::CREATION_ORDER;
+        let mut donos = std::collections::HashMap::new();
+        for policy in area_policies() {
+            for table in policy.tables() {
+                assert!(
+                    CREATION_ORDER.contains(table),
+                    "{table} fora do esquema ({})",
+                    policy.area()
+                );
+                assert!(
+                    donos.insert(*table, policy.area()).is_none(),
+                    "{table} declarada por duas áreas"
+                );
+            }
+        }
+        let policies = netmonitor_core::areas::AreaPolicies::new(area_policies());
+        assert_eq!(policies.area_of_table("vpn_peers"), Area::Vpn);
+        assert_eq!(policies.area_of_table("deploy_runs"), Area::Servers);
+        assert_eq!(policies.area_of_table("wifi_roaming_events"), Area::Network);
+        assert_eq!(policies.area_of_table("monitor_results"), Area::Core);
+    }
+
+    #[test]
     fn o_monitor_de_container_esta_registrado() {
         assert!(monitor_checkers(None).find("container").is_some());
         assert!(monitor_checkers(None).find("snmp").is_some());

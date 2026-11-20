@@ -124,31 +124,37 @@ class ApiService {
     }
   }
 
+  /** A mensagem que o backend mandou no corpo do erro, ou o status HTTP. */
+  private errorMessage(status: number, statusText: string, data?: ApiErrorResponse): string {
+    if (data?.message) return data.message
+    if (data?.description) {
+      return data.error ? `${data.error}: ${data.description}` : data.description
+    }
+    if (data?.error) return data.error
+    if (Array.isArray(data?.errors) && data.errors.length > 0) {
+      return data.errors.map((e) => e.message).join(', ')
+    }
+    return `Erro HTTP ${status}: ${statusText}`
+  }
+
+  /** Erro da API, com o redirecionamento ao login quando a sessão acabou. */
+  private apiError(status: number, statusText: string, path: string, data?: ApiErrorResponse) {
+    if (status === 401 && !CREDENTIAL_PATHS.includes(path)) {
+      clearStoredAuth()
+      this.redirectToLogin()
+    }
+    return new ApiError(this.errorMessage(status, statusText, data), status, data)
+  }
+
   private async handleResponse<T>(response: Response, path = ''): Promise<T> {
     if (!response.ok) {
-      let errorMessage = `Erro HTTP ${response.status}: ${response.statusText}`
       let errorData: ApiErrorResponse | undefined
       try {
         errorData = (await response.json()) as ApiErrorResponse
-        if (errorData.message) {
-          errorMessage = errorData.message
-        } else if (errorData.description) {
-          errorMessage = errorData.error
-            ? `${errorData.error}: ${errorData.description}`
-            : errorData.description
-        } else if (errorData.error) {
-          errorMessage = errorData.error
-        } else if (Array.isArray(errorData.errors) && errorData.errors.length > 0) {
-          errorMessage = errorData.errors.map((e) => e.message).join(', ')
-        }
       } catch {
         // Fallback for non-JSON error responses
       }
-      if (response.status === 401 && !CREDENTIAL_PATHS.includes(path)) {
-        clearStoredAuth()
-        this.redirectToLogin()
-      }
-      throw new ApiError(errorMessage, response.status, errorData)
+      throw this.apiError(response.status, response.statusText, path, errorData)
     }
 
     if (response.status === 204) {
@@ -238,6 +244,98 @@ class ApiService {
       await this.handleResponse(response, path)
     }
     return response.blob()
+  }
+
+  /**
+   * Download longo com progresso: lê o corpo em pedaços, avisa quantos bytes
+   * já chegaram e entrega o arquivo inteiro no fim. Sem o timeout curto das
+   * APIs comuns — o arquivo pode levar minutos —, mas com cancelamento.
+   */
+  async downloadWithProgress(
+    path: string,
+    onProgress: (receivedBytes: number) => void,
+    signal?: AbortSignal
+  ): Promise<{ blob: Blob; filename: string | null }> {
+    let response: Response
+    try {
+      response = await fetch(this.buildUrl(path), {
+        method: 'GET',
+        headers: this.getHeaders(),
+        signal,
+      })
+    } catch (err: unknown) {
+      if (signal?.aborted) throw err
+      throw isNetworkError(err) ? new NetworkError() : err
+    }
+    if (!response.ok) await this.handleResponse(response, path)
+
+    const disposition = response.headers.get('Content-Disposition') ?? ''
+    const filename = /filename="?([^";]+)"?/.exec(disposition)?.[1] ?? null
+    if (!response.body) return { blob: await response.blob(), filename }
+
+    const reader = response.body.getReader()
+    const chunks: BlobPart[] = []
+    let received = 0
+    try {
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        chunks.push(value)
+        received += value.byteLength
+        onProgress(received)
+      }
+    } catch (err: unknown) {
+      if (signal?.aborted) throw err
+      throw new NetworkError('O download foi interrompido antes do fim. Tente de novo.')
+    }
+    const type = response.headers.get('Content-Type') ?? 'application/octet-stream'
+    return { blob: new Blob(chunks, { type }), filename }
+  }
+
+  /**
+   * Envia um arquivo cru (sem `multipart`) e devolve a resposta JSON, com o
+   * progresso do envio. Usa `XMLHttpRequest` porque o `fetch` não informa o
+   * andamento do upload; sem timeout curto, porque o arquivo pode ser grande.
+   */
+  upload<T>(
+    path: string,
+    file: Blob,
+    onProgress?: (sentBytes: number, totalBytes: number) => void
+  ): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const request = new XMLHttpRequest()
+      request.open('POST', this.buildUrl(path))
+      const headers = this.getHeaders() as Record<string, string>
+      for (const [name, value] of Object.entries(headers)) {
+        request.setRequestHeader(name, name === 'Content-Type' ? file.type || value : value)
+      }
+      request.upload.onprogress = (event) => {
+        onProgress?.(event.loaded, event.lengthComputable ? event.total : file.size)
+      }
+      request.onerror = () => reject(new NetworkError())
+      request.onabort = () => reject(new NetworkError('O envio foi cancelado.'))
+      request.onload = () => {
+        let data: unknown
+        try {
+          data = request.responseText ? JSON.parse(request.responseText) : {}
+        } catch {
+          data = undefined
+        }
+        if (request.status >= 200 && request.status < 300) {
+          resolve(data as T)
+        } else {
+          reject(
+            this.apiError(
+              request.status,
+              request.statusText,
+              path,
+              data as ApiErrorResponse | undefined
+            )
+          )
+        }
+      }
+      request.send(file)
+    })
   }
 
   /**

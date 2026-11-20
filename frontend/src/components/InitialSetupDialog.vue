@@ -29,7 +29,7 @@
         </v-card-subtitle>
         <template #append>
           <v-btn
-            v-if="!reviewing && !applying"
+            v-if="!reviewing && !applying && !backupStore.restoring"
             variant="text"
             size="small"
             color="primary"
@@ -43,7 +43,7 @@
       </v-card-item>
 
       <!-- Indicador Visual de Etapas -->
-      <div v-if="!reviewing && currentStep" class="px-5 pt-3 pb-2 border-b">
+      <div v-if="start === 'fresh' && !reviewing && currentStep" class="px-5 pt-3 pb-2 border-b">
         <div class="d-flex align-center justify-space-between mb-2">
           <span class="text-caption font-weight-bold text-primary">
             Etapa {{ stepIndex + 1 }} de {{ steps.length }}: {{ currentStep.title }}
@@ -94,7 +94,13 @@
 
       <!-- Conteúdo das Etapas -->
       <v-card-text class="pa-5 flex-grow-1 overflow-y-auto">
-        <div v-if="reviewing" class="py-2">
+        <div v-if="start === 'choose'" class="py-2">
+          <SetupStartStep @restore="start = 'restore'" @fresh="start = 'fresh'" />
+        </div>
+        <div v-else-if="start === 'restore'" class="py-2">
+          <SetupRestoreStep @restored="onRestored" />
+        </div>
+        <div v-else-if="reviewing" class="py-2">
           <SetupDoneStep
             v-if="appliedSuccess"
             :network="visibleIds.has('network')"
@@ -158,8 +164,9 @@
         </div>
 
         <div class="d-flex align-center ga-2">
+          <template v-if="start !== 'fresh'"></template>
           <v-btn
-            v-if="currentStep?.id === 'intent' && !reviewing"
+            v-else-if="currentStep?.id === 'intent' && !reviewing"
             color="primary"
             variant="flat"
             append-icon="mdi-arrow-right"
@@ -210,8 +217,10 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter, type RouteLocationRaw } from 'vue-router'
+import type { BackupRestoreResponse } from '@/bindings/BackupRestoreResponse'
 import type { OnboardingIntentInput } from '@/bindings/OnboardingIntentInput'
 import { useAreasStore } from '@/stores/areas'
+import { finishRestore, useBackupStore } from '@/stores/backup'
 import { useAuthStore } from '@/stores/auth'
 import { useOnboardingStore } from '@/stores/onboarding'
 import { usePluginsStore } from '@/stores/plugins'
@@ -231,8 +240,10 @@ import SetupGeneralStep from '@/components/setup/SetupGeneralStep.vue'
 import SetupIntentStep from '@/components/setup/SetupIntentStep.vue'
 import SetupNetworkStep from '@/components/setup/SetupNetworkStep.vue'
 import SetupNotificationsStep from '@/components/setup/SetupNotificationsStep.vue'
+import SetupRestoreStep from '@/components/setup/SetupRestoreStep.vue'
 import SetupReviewStep from '@/components/setup/SetupReviewStep.vue'
 import SetupSiteStep from '@/components/setup/SetupSiteStep.vue'
+import SetupStartStep from '@/components/setup/SetupStartStep.vue'
 import SetupVpnStep from '@/components/setup/SetupVpnStep.vue'
 import {
   createSetupForm,
@@ -263,6 +274,29 @@ const vpnStore = useVpnStore()
 const prefsStore = usePreferencesStore()
 const pluginsStore = usePluginsStore()
 const pluginAppsStore = usePluginAppsStore()
+const backupStore = useBackupStore()
+
+/**
+ * Antes das etapas, o administrador escolhe: restaurar um backup ou
+ * configurar do zero. Quem não é administrador não restaura (a rota de backup
+ * é só dele) e vai direto às etapas; um assistente já concluído, reaberto
+ * pelas Configurações, também.
+ */
+type StartMode = 'choose' | 'restore' | 'fresh'
+const start = ref<StartMode>('fresh')
+
+function initialStart(): StartMode {
+  return auth.isAdmin && onboardingStore.status?.completed !== true ? 'choose' : 'fresh'
+}
+
+/** Restaurado: o assistente não tem mais o que configurar. */
+async function onRestored(result: BackupRestoreResponse) {
+  // A conta continua valendo: marca o assistente como feito antes de
+  // recarregar, para ele não reabrir sobre a configuração restaurada. Sem a
+  // conta (completo de outra instalação), vale o estado que veio no backup.
+  if (!result.signInAgain) await onboardingStore.completeOnboarding()
+  finishRestore(result)
+}
 
 /** As etapas valem para as áreas ligadas; a escolha das áreas é só do administrador. */
 const steps = computed(() => setupSteps((area) => areasStore.isEnabled(area), auth.isAdmin))
@@ -304,9 +338,12 @@ const applyStatusMessage = ref('')
 const applyError = ref<string | null>(null)
 const appliedSuccess = ref(false)
 
-const canGoBack = computed(
-  () => !applying.value && !appliedSuccess.value && (reviewing.value || stepIndex.value > 0)
-)
+const canGoBack = computed(() => {
+  if (applying.value || appliedSuccess.value || backupStore.restoring) return false
+  if (start.value === 'restore') return true
+  if (start.value !== 'fresh') return false
+  return reviewing.value || stepIndex.value > 0 || initialStart() === 'choose'
+})
 
 function currentIntent(): OnboardingIntentInput {
   return {
@@ -350,7 +387,12 @@ function goToStep(index: number) {
 }
 
 function goBack() {
-  if (reviewing.value) {
+  if (
+    start.value === 'restore' ||
+    (start.value === 'fresh' && !reviewing.value && stepIndex.value === 0)
+  ) {
+    start.value = 'choose'
+  } else if (reviewing.value) {
     reviewing.value = false
     stepIndex.value = steps.value.length - 1
   } else if (stepIndex.value > 0) {
@@ -566,6 +608,7 @@ function finishAndNavigate(to: RouteLocationRaw) {
 }
 
 function reset() {
+  start.value = initialStart()
   stepIndex.value = 0
   reviewing.value = false
   appliedSuccess.value = false
