@@ -22,21 +22,25 @@
 #   produzir sempre o mesmo resultado.
 
 # ------------------------------------------------------------------- web ----
-FROM node:24-alpine@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43 AS web
+FROM ghcr.io/cirruslabs/flutter:stable AS web
 
 WORKDIR /web
-COPY frontend/package*.json ./
-RUN npm ci
+COPY frontend/pubspec.yaml frontend/pubspec.lock ./
+RUN flutter pub get
 
 COPY frontend/ ./
-RUN npm run build
+# `--no-web-resources-cdn` empacota CanvasKit/WASM localmente para funcionar
+# em LAN/VPN offline e respeitar a CSP restritiva de `backend/src/spa.rs`.
+RUN flutter build web --release --no-web-resources-cdn \
+    && mv build/web dist
 
 # `-k` mantém o original: o `ServeDir` só entrega o `.gz` a quem anunciar
 # `Accept-Encoding: gzip`, e ainda precisa do arquivo cru para os demais.
 # `-9` porque isto roda uma vez por build, não uma vez por request.
 RUN find dist -type f \
       \( -name '*.js' -o -name '*.css' -o -name '*.html' \
-         -o -name '*.svg' -o -name '*.json' -o -name '*.webmanifest' \) \
+         -o -name '*.svg' -o -name '*.json' -o -name '*.webmanifest' \
+         -o -name '*.wasm' \) \
       -size +1k -exec gzip -9 -k {} \;
 
 # ------------------------------------------------------------- rust-base ----

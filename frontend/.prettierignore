@@ -1,3 +1,0 @@
-# Gerado pelo ts-rs a cada `cargo test` (backend). Formatar aqui só cria
-# diff de vaivém: o próximo `cargo test` reescreve no estilo do gerador.
-src/bindings

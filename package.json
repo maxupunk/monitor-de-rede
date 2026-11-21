@@ -4,14 +4,16 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev:frontend": "pnpm --prefix frontend run dev",
-    "build:frontend": "pnpm --prefix frontend run build",
-    "typecheck:frontend": "pnpm --prefix frontend run typecheck",
-    "lint:frontend": "pnpm --prefix frontend run lint",
-    "format:frontend": "pnpm --prefix frontend run format",
-    "format": "pnpm --prefix frontend run format",
-    "lint": "pnpm --prefix frontend run lint",
-    "typecheck": "pnpm --prefix frontend run typecheck",
-    "build": "pnpm --prefix frontend run build"
+    "dev:frontend": "cd frontend && flutter run -d chrome",
+    "build:frontend": "cd frontend && flutter build web --release --no-web-resources-cdn",
+    "build:android": "cd frontend && flutter build apk --release",
+    "test:frontend": "cd frontend && flutter test",
+    "lint:frontend": "cd frontend && flutter analyze",
+    "format:frontend": "cd frontend && dart format lib test",
+    "format:check": "cd frontend && dart format --output=none --set-exit-if-changed lib test",
+    "format": "cd frontend && dart format lib test",
+    "lint": "cd frontend && flutter analyze",
+    "test": "cd frontend && flutter test",
+    "build": "cd frontend && flutter build web --release --no-web-resources-cdn"
   }
 }
