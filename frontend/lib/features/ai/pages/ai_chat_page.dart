@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -150,7 +152,7 @@ class _AiChatPageState extends ConsumerState<AiChatPage> {
       title: 'Conversas',
       maxWidth: 480,
       builder: (sheetCtx) => SizedBox(
-        height: 440,
+        height: math.min(440.0, MediaQuery.sizeOf(sheetCtx).height * 0.62),
         child: _buildSidebarContent(
           onSelect: () => Navigator.of(sheetCtx).pop(),
         ),
@@ -306,7 +308,9 @@ class _AiChatPageState extends ConsumerState<AiChatPage> {
   Widget build(BuildContext context) {
     final settings = ref.watch(aiSettingsProvider).settings;
     final scheme = context.colorScheme;
-    final isWide = MediaQuery.sizeOf(context).width >= 960;
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final isWide = screenWidth >= 960;
+    final isCompact = screenWidth < 600;
 
     return Row(
       children: <Widget>[
@@ -323,9 +327,9 @@ class _AiChatPageState extends ConsumerState<AiChatPage> {
           child: Column(
             children: <Widget>[
               Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 10,
+                padding: EdgeInsets.symmetric(
+                  horizontal: isCompact ? 8 : 14,
+                  vertical: isCompact ? 6 : 10,
                 ),
                 decoration: BoxDecoration(
                   color: scheme.surface,
@@ -361,6 +365,8 @@ class _AiChatPageState extends ConsumerState<AiChatPage> {
                         children: <Widget>[
                           Text(
                             'Assistente IA',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: context.textTheme.titleMedium?.copyWith(
                               fontWeight: FontWeight.w700,
                             ),
@@ -370,6 +376,8 @@ class _AiChatPageState extends ConsumerState<AiChatPage> {
                               settings.enabled
                                   ? settings.currentModelLabel
                                   : 'Desativado nas configurações',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                               style: context.textTheme.labelSmall?.copyWith(
                                 color: scheme.onSurfaceVariant,
                               ),
@@ -384,35 +392,78 @@ class _AiChatPageState extends ConsumerState<AiChatPage> {
                         onPressed: () =>
                             ref.read(aiChatProvider.notifier).newConversation(),
                       ),
-                    IconButton(
-                      tooltip: 'Capacidades da IA',
-                      icon: const Icon(Icons.info_outline),
-                      onPressed: () => _showCapabilitiesSheet(settings),
-                    ),
-                    IconButton(
-                      tooltip: 'Benchmark IA',
-                      icon: const Icon(Icons.speed_outlined),
-                      onPressed: () => context.go('/ai-benchmark'),
-                    ),
-                    IconButton(
-                      tooltip: 'Configurações de IA',
-                      icon: const Icon(Icons.settings_outlined),
-                      onPressed: () => context.go('/settings?tab=ia'),
-                    ),
+                    if (isCompact)
+                      PopupMenuButton<String>(
+                        tooltip: 'Mais opções',
+                        onSelected: (action) {
+                          if (action == 'capabilities') {
+                            _showCapabilitiesSheet(settings);
+                          } else if (action == 'benchmark') {
+                            context.go('/ai-benchmark');
+                          } else if (action == 'settings') {
+                            context.go('/settings?tab=ia');
+                          }
+                        },
+                        itemBuilder: (_) => const <PopupMenuEntry<String>>[
+                          PopupMenuItem<String>(
+                            value: 'capabilities',
+                            child: ListTile(
+                              dense: true,
+                              leading: Icon(Icons.info_outline),
+                              title: Text('Capacidades da IA'),
+                            ),
+                          ),
+                          PopupMenuItem<String>(
+                            value: 'benchmark',
+                            child: ListTile(
+                              dense: true,
+                              leading: Icon(Icons.speed_outlined),
+                              title: Text('Benchmark IA'),
+                            ),
+                          ),
+                          PopupMenuItem<String>(
+                            value: 'settings',
+                            child: ListTile(
+                              dense: true,
+                              leading: Icon(Icons.settings_outlined),
+                              title: Text('Configurações de IA'),
+                            ),
+                          ),
+                        ],
+                      )
+                    else ...<Widget>[
+                      IconButton(
+                        tooltip: 'Capacidades da IA',
+                        icon: const Icon(Icons.info_outline),
+                        onPressed: () => _showCapabilitiesSheet(settings),
+                      ),
+                      IconButton(
+                        tooltip: 'Benchmark IA',
+                        icon: const Icon(Icons.speed_outlined),
+                        onPressed: () => context.go('/ai-benchmark'),
+                      ),
+                      IconButton(
+                        tooltip: 'Configurações de IA',
+                        icon: const Icon(Icons.settings_outlined),
+                        onPressed: () => context.go('/settings?tab=ia'),
+                      ),
+                    ],
                   ],
                 ),
               ),
               if (settings != null && !settings.enabled)
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
                   child: NestedPanel(
                     tone: SemanticTone.warning,
-                    child: Row(
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      alignment: WrapAlignment.spaceBetween,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: <Widget>[
-                        const Expanded(
-                          child: Text(
-                            'O Assistente IA está desativado. Ative-o nas configurações para conversar.',
-                          ),
+                        const Text(
+                          'O Assistente IA está desativado. Ative-o nas configurações para conversar.',
                         ),
                         TextButton(
                           onPressed: () => context.go('/settings?tab=ia'),

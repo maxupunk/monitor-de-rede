@@ -103,15 +103,14 @@ class _DeployConnectionsBodyState
       _error = null;
     });
     try {
-      await ref.read(deploysProvider.notifier).saveCredential(
-        null,
-        <String, dynamic>{
-          'name': _credNameCtrl.text.trim(),
-          'registry': _credRegistryCtrl.text.trim(),
-          'username': _credUserCtrl.text.trim(),
-          'secret': _credSecretCtrl.text,
-        },
-      );
+      await ref
+          .read(deploysProvider.notifier)
+          .saveCredential(null, <String, dynamic>{
+            'name': _credNameCtrl.text.trim(),
+            'registry': _credRegistryCtrl.text.trim(),
+            'username': _credUserCtrl.text.trim(),
+            'secret': _credSecretCtrl.text,
+          });
       if (!mounted) return;
       _credNameCtrl.clear();
       _credUserCtrl.clear();
@@ -215,7 +214,8 @@ class _DeployConnectionsBodyState
               TextField(
                 controller: _orgCtrl,
                 decoration: const InputDecoration(
-                  labelText: 'Organização GitHub (opcional — deixe em branco para conta pessoal)',
+                  labelText:
+                      'Organização GitHub (opcional — deixe em branco para conta pessoal)',
                 ),
               ),
               const SizedBox(height: 6),
@@ -272,50 +272,46 @@ class _DeployConnectionsBodyState
           ),
         ),
         const SizedBox(height: 8),
-        Row(
+        ResponsiveFieldRow(
+          breakpoint: 480,
+          spacing: 8,
+          runSpacing: 8,
           children: <Widget>[
-            Expanded(
-              child: TextField(
-                controller: _credNameCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Nome',
-                  isDense: true,
-                ),
+            TextField(
+              controller: _credNameCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Nome',
+                isDense: true,
               ),
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: TextField(
-                controller: _credRegistryCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Registry',
-                  isDense: true,
-                ),
+            TextField(
+              controller: _credRegistryCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Registry',
+                isDense: true,
               ),
             ),
           ],
         ),
         const SizedBox(height: 8),
-        Row(
+        ResponsiveFieldRow(
+          breakpoint: 480,
+          spacing: 8,
+          runSpacing: 8,
           children: <Widget>[
-            Expanded(
-              child: TextField(
-                controller: _credUserCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Usuário',
-                  isDense: true,
-                ),
+            TextField(
+              controller: _credUserCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Usuário',
+                isDense: true,
               ),
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: TextField(
-                controller: _credSecretCtrl,
-                obscureText: true,
-                decoration: const InputDecoration(
-                  labelText: 'Token / PAT',
-                  isDense: true,
-                ),
+            TextField(
+              controller: _credSecretCtrl,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'Token / PAT',
+                isDense: true,
               ),
             ),
           ],
@@ -347,7 +343,8 @@ Future<void> showDeploySetupDialog(
   return showAdaptiveFormSheet<void>(
     context: context,
     title: 'Automatizar deploy contínuo',
-    subtitle: 'Passo 1: Repositório · Passo 2: Servidor alvo · Passo 3: Variáveis (.env)',
+    subtitle:
+        'Passo 1: Repositório · Passo 2: Servidor alvo · Passo 3: Variáveis (.env)',
     maxWidth: 780,
     builder: (_) => _DeploySetupBody(
       presetProbeId: presetProbeId,
@@ -586,10 +583,24 @@ class _DeploySetupBodyState extends ConsumerState<_DeploySetupBody> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
         SegmentedButton<int>(
+          showSelectedIcon: false,
+          style: SegmentedButton.styleFrom(
+            visualDensity: VisualDensity.compact,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+          ),
           segments: const <ButtonSegment<int>>[
-            ButtonSegment(value: 0, label: Text('1. Origem')),
-            ButtonSegment(value: 1, label: Text('2. Alvo')),
-            ButtonSegment(value: 2, label: Text('3. .env')),
+            ButtonSegment(
+              value: 0,
+              label: Text('1. Origem', maxLines: 1, softWrap: false),
+            ),
+            ButtonSegment(
+              value: 1,
+              label: Text('2. Alvo', maxLines: 1, softWrap: false),
+            ),
+            ButtonSegment(
+              value: 2,
+              label: Text('3. .env', maxLines: 1, softWrap: false),
+            ),
           ],
           selected: <int>{_step},
           onSelectionChanged: (set) {
@@ -601,18 +612,24 @@ class _DeploySetupBodyState extends ConsumerState<_DeploySetupBody> {
 
         if (_step == 0) ...<Widget>[
           if (deploys.applications.isNotEmpty) ...<Widget>[
-            DropdownButtonFormField<int?>(
+            AppDropdownFormField<int?>(
               initialValue: _existingAppId,
               decoration: const InputDecoration(labelText: 'Aplicação'),
               items: <DropdownMenuItem<int?>>[
                 const DropdownMenuItem<int?>(
                   value: null,
-                  child: Text('Criar nova aplicação'),
+                  child: Text(
+                    'Criar nova aplicação',
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
                 ...deploys.applications.map(
                   (a) => DropdownMenuItem<int?>(
                     value: a.id,
-                    child: Text('${a.name} (${a.repository})'),
+                    child: Text(
+                      '${a.name} (${a.repository})',
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
                 ),
               ],
@@ -641,7 +658,7 @@ class _DeploySetupBodyState extends ConsumerState<_DeploySetupBody> {
             ),
             const SizedBox(height: 12),
             if (deploys.githubConnections.isNotEmpty) ...<Widget>[
-              DropdownButtonFormField<int?>(
+              AppDropdownFormField<int?>(
                 initialValue: _githubConnectionId,
                 decoration: const InputDecoration(
                   labelText: 'Conexão GitHub App',
@@ -649,12 +666,18 @@ class _DeploySetupBodyState extends ConsumerState<_DeploySetupBody> {
                 items: <DropdownMenuItem<int?>>[
                   const DropdownMenuItem<int?>(
                     value: null,
-                    child: Text('Sem GitHub App'),
+                    child: Text(
+                      'Sem GitHub App',
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
                   ...deploys.githubConnections.map(
                     (c) => DropdownMenuItem<int?>(
                       value: c.id,
-                      child: Text('${c.account} (${c.appSlug})'),
+                      child: Text(
+                        '${c.account} (${c.appSlug})',
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   ),
                 ],
@@ -662,24 +685,41 @@ class _DeploySetupBodyState extends ConsumerState<_DeploySetupBody> {
               ),
               const SizedBox(height: 10),
             ],
-            Row(
-              children: <Widget>[
-                Expanded(
-                  child: TextField(
-                    controller: _repoCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Repositório (dono/repo)',
-                      hintText: 'minha-org/meu-app',
-                    ),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final repoField = TextField(
+                  controller: _repoCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Repositório (dono/repo)',
+                    hintText: 'minha-org/meu-app',
                   ),
-                ),
-                const SizedBox(width: 8),
-                OutlinedButton.icon(
+                );
+                final detectButton = OutlinedButton.icon(
                   onPressed: _discovering ? null : _discoverCompose,
                   icon: const Icon(Icons.search, size: 16),
                   label: const Text('Detectar'),
-                ),
-              ],
+                );
+                if (constraints.maxWidth < 420) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      repoField,
+                      const SizedBox(height: 8),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: detectButton,
+                      ),
+                    ],
+                  );
+                }
+                return Row(
+                  children: <Widget>[
+                    Expanded(child: repoField),
+                    const SizedBox(width: 8),
+                    detectButton,
+                  ],
+                );
+              },
             ),
             const SizedBox(height: 10),
             TextField(
@@ -695,7 +735,7 @@ class _DeploySetupBodyState extends ConsumerState<_DeploySetupBody> {
             ),
             const SizedBox(height: 10),
             if (_builder == 'netmonitor')
-              DropdownButtonFormField<int?>(
+              AppDropdownFormField<int?>(
                 initialValue: deploys.agents.any((a) => a.id == _buildProbeId)
                     ? _buildProbeId
                     : null,
@@ -709,6 +749,7 @@ class _DeploySetupBodyState extends ConsumerState<_DeploySetupBody> {
                         enabled: a.allowsBuild,
                         child: Text(
                           '${a.name}${!a.allowsBuild ? ' (sem permissão build)' : ''}',
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                     )
@@ -724,7 +765,7 @@ class _DeploySetupBodyState extends ConsumerState<_DeploySetupBody> {
             ),
           ),
           const SizedBox(height: 10),
-          DropdownButtonFormField<int?>(
+          AppDropdownFormField<int?>(
             initialValue: deploys.agents.any((a) => a.id == _probeId)
                 ? _probeId
                 : null,
@@ -738,6 +779,7 @@ class _DeploySetupBodyState extends ConsumerState<_DeploySetupBody> {
                     enabled: a.allowsDeploy,
                     child: Text(
                       '${a.name}${!a.allowsDeploy ? ' (sem permissão deploy)' : (!a.connected ? ' (offline)' : '')}',
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 )
@@ -748,25 +790,23 @@ class _DeploySetupBodyState extends ConsumerState<_DeploySetupBody> {
             },
           ),
           const SizedBox(height: 10),
-          Row(
+          ResponsiveFieldRow(
+            breakpoint: 480,
+            spacing: 8,
+            runSpacing: 10,
             children: <Widget>[
-              Expanded(
-                child: TextField(
-                  controller: _projectCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Projeto Docker Compose',
-                  ),
-                  onEditingComplete: _checkReadiness,
+              TextField(
+                controller: _projectCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Projeto Docker Compose',
                 ),
+                onEditingComplete: _checkReadiness,
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: TextField(
-                  controller: _refCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Branch ou tag',
-                    hintText: 'main ou v*',
-                  ),
+              TextField(
+                controller: _refCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Branch ou tag',
+                  hintText: 'main ou v*',
                 ),
               ),
             ],
@@ -784,31 +824,29 @@ class _DeploySetupBodyState extends ConsumerState<_DeploySetupBody> {
             title: const Text('Rollback automático se falhar saúde'),
             onChanged: (v) => setState(() => _autoRollback = v),
           ),
-          Row(
+          ResponsiveFieldRow(
+            breakpoint: 480,
+            spacing: 8,
+            runSpacing: 10,
             children: <Widget>[
-              Expanded(
-                child: TextField(
-                  controller: _windowStartCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Janela início (HH:MM)',
-                    hintText: '23:00',
-                  ),
+              TextField(
+                controller: _windowStartCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Janela início (HH:MM)',
+                  hintText: '23:00',
                 ),
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: TextField(
-                  controller: _windowEndCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Janela fim (HH:MM)',
-                    hintText: '05:00',
-                  ),
+              TextField(
+                controller: _windowEndCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Janela fim (HH:MM)',
+                  hintText: '05:00',
                 ),
               ),
             ],
           ),
           const SizedBox(height: 10),
-          DropdownButtonFormField<int?>(
+          AppDropdownFormField<int?>(
             initialValue: dbConnections.any((c) => c.id == _backupConnectionId)
                 ? _backupConnectionId
                 : null,
@@ -816,13 +854,17 @@ class _DeploySetupBodyState extends ConsumerState<_DeploySetupBody> {
               labelText: 'Backup de banco pré-deploy (opcional)',
             ),
             items: <DropdownMenuItem<int?>>[
-              const DropdownMenuItem<int?>(value: null, child: Text('Nenhum')),
+              const DropdownMenuItem<int?>(
+                value: null,
+                child: Text('Nenhum', overflow: TextOverflow.ellipsis),
+              ),
               ...dbConnections.map(
                 (c) => DropdownMenuItem<int?>(
                   value: c.id,
                   enabled: c.storageDestinationId != null,
                   child: Text(
                     '${c.name}${c.storageDestinationId == null ? ' (sem destino de backup)' : ''}',
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
               ),
@@ -831,7 +873,7 @@ class _DeploySetupBodyState extends ConsumerState<_DeploySetupBody> {
           ),
           if (_builder == 'netmonitor') ...<Widget>[
             const SizedBox(height: 10),
-            DropdownButtonFormField<String>(
+            AppDropdownFormField<String>(
               initialValue: _vulnPolicy,
               decoration: const InputDecoration(
                 labelText: 'Política de vulnerabilidades',
@@ -839,13 +881,22 @@ class _DeploySetupBodyState extends ConsumerState<_DeploySetupBody> {
               items: const <DropdownMenuItem<String>>[
                 DropdownMenuItem(
                   value: 'block_critical',
-                  child: Text('Bloquear crítica'),
+                  child: Text(
+                    'Bloquear crítica',
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
                 DropdownMenuItem(
                   value: 'block_high',
-                  child: Text('Bloquear alta ou crítica'),
+                  child: Text(
+                    'Bloquear alta ou crítica',
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
-                DropdownMenuItem(value: 'warn', child: Text('Só avisar')),
+                DropdownMenuItem(
+                  value: 'warn',
+                  child: Text('Só avisar', overflow: TextOverflow.ellipsis),
+                ),
               ],
               onChanged: (v) {
                 if (v != null) setState(() => _vulnPolicy = v);
@@ -989,16 +1040,28 @@ class _DeployPublishBodyState extends ConsumerState<_DeployPublishBody> {
         TextField(
           controller: _shaCtrl,
           decoration: InputDecoration(
-            labelText: 'Commit SHA (opcional — vazio usa o mais recente / reaplica .env)',
+            labelText:
+                'Commit SHA (opcional — vazio usa o mais recente / reaplica .env)',
             hintText: widget.target.live?.shortSha ?? '40 caracteres hex',
           ),
         ),
         const SizedBox(height: 12),
         if (hasWindow)
           SegmentedButton<String>(
+            showSelectedIcon: false,
+            style: SegmentedButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+            ),
             segments: const <ButtonSegment<String>>[
-              ButtonSegment(value: 'now', label: Text('Publicar agora')),
-              ButtonSegment(value: 'window', label: Text('Na janela')),
+              ButtonSegment(
+                value: 'now',
+                label: Text('Publicar agora', maxLines: 1, softWrap: false),
+              ),
+              ButtonSegment(
+                value: 'window',
+                label: Text('Na janela', maxLines: 1, softWrap: false),
+              ),
             ],
             selected: <String>{_when},
             onSelectionChanged: (set) => setState(() => _when = set.first),
@@ -1268,19 +1331,36 @@ class _DeployWorkflowBodyState extends ConsumerState<_DeployWorkflowBody> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        Row(
-          children: <Widget>[
-            Expanded(
-              child: TextField(
-                controller: _urlCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Endereço público HTTPS da central',
-                ),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final urlField = TextField(
+              controller: _urlCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Endereço público HTTPS da central',
               ),
-            ),
-            const SizedBox(width: 8),
-            OutlinedButton(onPressed: _load, child: const Text('Gerar')),
-          ],
+            );
+            final generateBtn = OutlinedButton(
+              onPressed: _load,
+              child: const Text('Gerar'),
+            );
+            if (constraints.maxWidth < 420) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  urlField,
+                  const SizedBox(height: 8),
+                  Align(alignment: Alignment.centerRight, child: generateBtn),
+                ],
+              );
+            }
+            return Row(
+              children: <Widget>[
+                Expanded(child: urlField),
+                const SizedBox(width: 8),
+                generateBtn,
+              ],
+            );
+          },
         ),
         if (isPrivate) ...<Widget>[
           const SizedBox(height: 8),
@@ -1297,11 +1377,13 @@ class _DeployWorkflowBodyState extends ConsumerState<_DeployWorkflowBody> {
             tone: _status!.workflow == 'current'
                 ? SemanticTone.success
                 : SemanticTone.info,
-            child: Row(
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: <Widget>[
-                Expanded(
-                  child: Text('Status no repositório: ${_status!.workflow}'),
-                ),
+                Text('Status no repositório: ${_status!.workflow}'),
                 if (_status!.canWrite && _status!.workflow != 'current')
                   FilledButton.tonalIcon(
                     onPressed: _openingPr ? null : _openPr,

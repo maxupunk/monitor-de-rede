@@ -80,7 +80,8 @@ class _LinkTestsPageState extends ConsumerState<LinkTestsPage>
     await showAdaptiveFormSheet<void>(
       context: context,
       title: 'Novo Teste de Velocidade / Enlace',
-      subtitle: 'Planeje pernas, resolva credenciais e acompanhe a medição em tempo real',
+      subtitle:
+          'Planeje pernas, resolva credenciais e acompanhe a medição em tempo real',
       maxWidth: 680,
       builder: (ctx) => _LinkTestWizardBody(
         initialDraft: draft,
@@ -134,32 +135,44 @@ class _LinkTestsPageState extends ConsumerState<LinkTestsPage>
               ),
             ),
             const SizedBox(height: 10),
-            DropdownButtonFormField<String>(
+            AppDropdownFormField<String>(
               initialValue: kind,
               decoration: const InputDecoration(labelText: 'Modo do teste'),
               items: const <DropdownMenuItem<String>>[
                 DropdownMenuItem(
                   value: 'server',
-                  child: Text('Central → Equipamento'),
+                  child: Text(
+                    'Central → Equipamento',
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
                 DropdownMenuItem(
                   value: 'link',
-                  child: Text('Enlace da Topologia'),
+                  child: Text(
+                    'Enlace da Topologia',
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
                 DropdownMenuItem(
                   value: 'end_to_end',
-                  child: Text('Ponta a ponta (A → B)'),
+                  child: Text(
+                    'Ponta a ponta (A → B)',
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
                 DropdownMenuItem(
                   value: 'path',
-                  child: Text('Caminho completo (salto a salto)'),
+                  child: Text(
+                    'Caminho completo (salto a salto)',
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
               ],
               onChanged: (v) => setModal(() => kind = v ?? 'server'),
             ),
             const SizedBox(height: 10),
             if (kind == 'link')
-              DropdownButtonFormField<int?>(
+              AppDropdownFormField<int?>(
                 initialValue: edges.any((e) => e.id == linkId) ? linkId : null,
                 decoration: const InputDecoration(labelText: 'Enlace'),
                 items: edges
@@ -169,6 +182,7 @@ class _LinkTestsPageState extends ConsumerState<LinkTestsPage>
                         value: e.id,
                         child: Text(
                           '${e.sourceDeviceName ?? '#${e.sourceDeviceId}'} ↔ ${e.targetDeviceName ?? '#${e.targetDeviceId}'}',
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                     )
@@ -177,7 +191,7 @@ class _LinkTestsPageState extends ConsumerState<LinkTestsPage>
               )
             else ...<Widget>[
               if (kind != 'server') ...<Widget>[
-                DropdownButtonFormField<int?>(
+                AppDropdownFormField<int?>(
                   initialValue: devices.any((d) => d.id == sourceId)
                       ? sourceId
                       : null,
@@ -186,7 +200,7 @@ class _LinkTestsPageState extends ConsumerState<LinkTestsPage>
                       .map(
                         (d) => DropdownMenuItem<int?>(
                           value: d.id,
-                          child: Text(d.name),
+                          child: Text(d.name, overflow: TextOverflow.ellipsis),
                         ),
                       )
                       .toList(growable: false),
@@ -194,7 +208,7 @@ class _LinkTestsPageState extends ConsumerState<LinkTestsPage>
                 ),
                 const SizedBox(height: 10),
               ],
-              DropdownButtonFormField<int?>(
+              AppDropdownFormField<int?>(
                 initialValue: devices.any((d) => d.id == targetId)
                     ? targetId
                     : null,
@@ -203,7 +217,7 @@ class _LinkTestsPageState extends ConsumerState<LinkTestsPage>
                     .map(
                       (d) => DropdownMenuItem<int?>(
                         value: d.id,
-                        child: Text(d.name),
+                        child: Text(d.name, overflow: TextOverflow.ellipsis),
                       ),
                     )
                     .toList(growable: false),
@@ -211,58 +225,56 @@ class _LinkTestsPageState extends ConsumerState<LinkTestsPage>
               ),
             ],
             const SizedBox(height: 10),
-            Row(
+            ResponsiveFieldRow(
+              breakpoint: 640,
               children: <Widget>[
-                Expanded(
-                  child: TextField(
-                    controller: intervalCtrl,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'Intervalo (min >= 15)',
+                TextField(
+                  controller: intervalCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Intervalo (min >= 15)',
+                  ),
+                ),
+                TextField(
+                  controller: durationCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'Duração (s)'),
+                ),
+                AppDropdownFormField<String>(
+                  initialValue: direction,
+                  decoration: const InputDecoration(labelText: 'Sentido'),
+                  items: const <DropdownMenuItem<String>>[
+                    DropdownMenuItem(
+                      value: 'both',
+                      child: Text('Ambos', overflow: TextOverflow.ellipsis),
                     ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: TextField(
-                    controller: durationCtrl,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: 'Duração (s)'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: DropdownButtonFormField<String>(
-                    initialValue: direction,
-                    decoration: const InputDecoration(labelText: 'Sentido'),
-                    items: const <DropdownMenuItem<String>>[
-                      DropdownMenuItem(value: 'both', child: Text('Ambos')),
-                      DropdownMenuItem(value: 'forward', child: Text('Ida')),
-                      DropdownMenuItem(value: 'reverse', child: Text('Volta')),
-                    ],
-                    onChanged: (v) => setModal(() => direction = v ?? 'both'),
-                  ),
+                    DropdownMenuItem(
+                      value: 'forward',
+                      child: Text('Ida', overflow: TextOverflow.ellipsis),
+                    ),
+                    DropdownMenuItem(
+                      value: 'reverse',
+                      child: Text('Volta', overflow: TextOverflow.ellipsis),
+                    ),
+                  ],
+                  onChanged: (v) => setModal(() => direction = v ?? 'both'),
                 ),
               ],
             ),
             const SizedBox(height: 10),
-            Row(
+            ResponsiveFieldRow(
+              breakpoint: 480,
               children: <Widget>[
-                Expanded(
-                  child: TextField(
-                    controller: windowStartCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Janela início (HH:MM)',
-                    ),
+                TextField(
+                  controller: windowStartCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Janela início (HH:MM)',
                   ),
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: TextField(
-                    controller: windowEndCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Janela fim (HH:MM)',
-                    ),
+                TextField(
+                  controller: windowEndCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Janela fim (HH:MM)',
                   ),
                 ),
               ],
@@ -335,60 +347,170 @@ class _LinkTestsPageState extends ConsumerState<LinkTestsPage>
     final canWrite = ref.watch(authProvider).canWrite;
     final focused = state.focused ?? state.activeTests.firstOrNull;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        SearchFilterHeader(
-          title: 'Testes de Velocidade e Enlaces',
-          subtitle: 'Medição ativa entre equipamentos via iPerf3/BTest com telemetria ao vivo via SSE',
-          actions: <Widget>[
-            if (canWrite) ...<Widget>[
-              OutlinedButton.icon(
-                onPressed: () => _openScheduleSheet(),
-                icon: const Icon(Icons.schedule, size: 18),
-                label: const Text('Agendar'),
-              ),
-              FilledButton.icon(
-                onPressed: () => _openWizard(),
-                icon: const Icon(Icons.speed, size: 18),
-                label: const Text('Novo Teste'),
-              ),
-            ],
-          ],
+    final activeFilterCount =
+        (_deviceFilter != null ? 1 : 0) +
+        (_statusFilter != null ? 1 : 0) +
+        (_kindFilter != null ? 1 : 0);
+
+    final activeDeviceName = _deviceFilter != null
+        ? devices.where((d) => d.id == _deviceFilter).firstOrNull?.name
+        : null;
+
+    final activeChips = <ActiveFilterChipData>[
+      if (activeDeviceName != null)
+        ActiveFilterChipData(
+          label: activeDeviceName,
+          onDeleted: () {
+            setState(() => _deviceFilter = null);
+            ref
+                .read(linkTestsProvider.notifier)
+                .fetchPage(page: 1, status: _statusFilter, kind: _kindFilter);
+          },
         ),
-        if (focused != null) ...<Widget>[
-          const SizedBox(height: 12),
-          _FocusedLinkTestCard(
-            test: focused,
-            state: state,
-            canWrite: canWrite,
-            onClose: () => ref.read(linkTestsProvider.notifier).focus(null),
-            onCancel: () =>
-                ref.read(linkTestsProvider.notifier).cancel(focused.id),
-          ),
-        ],
-        if (_compareA != null && _compareB != null) ...<Widget>[
-          const SizedBox(height: 10),
-          _LinkTestComparisonCard(
-            a: _compareA!,
-            b: _compareB!,
-            onClear: () => setState(() {
-              _compareA = null;
-              _compareB = null;
-            }),
-          ),
-        ],
-        const SizedBox(height: 10),
-        TabBar(
-          controller: _tabController,
-          tabs: <Widget>[
-            Tab(text: 'Histórico (${state.total})'),
-            Tab(text: 'Agendamentos (${state.schedules.length})'),
-          ],
+      if (_statusFilter != null)
+        ActiveFilterChipData(
+          label: 'Status: $_statusFilter',
+          onDeleted: () {
+            setState(() => _statusFilter = null);
+            ref
+                .read(linkTestsProvider.notifier)
+                .fetchPage(page: 1, deviceId: _deviceFilter, kind: _kindFilter);
+          },
         ),
-        const SizedBox(height: 10),
-        Expanded(
-          child: TabBarView(
+      if (_kindFilter != null)
+        ActiveFilterChipData(
+          label: 'Modo: $_kindFilter',
+          onDeleted: () {
+            setState(() => _kindFilter = null);
+            ref
+                .read(linkTestsProvider.notifier)
+                .fetchPage(
+                  page: 1,
+                  deviceId: _deviceFilter,
+                  status: _statusFilter,
+                );
+          },
+        ),
+    ];
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isCompact = constraints.maxWidth < 680;
+        return NestedScrollView(
+          headerSliverBuilder: (context, innerBoxIsScrolled) => <Widget>[
+            SliverToBoxAdapter(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  if (isCompact)
+                    Row(
+                      children: <Widget>[
+                        Expanded(
+                          child: Text(
+                            'Testes de Enlace',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: context.textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                        if (canWrite) ...<Widget>[
+                          const SizedBox(width: 8),
+                          FilledButton.icon(
+                            onPressed: () => _openWizard(),
+                            icon: const Icon(Icons.speed, size: 18),
+                            label: const Text('Novo'),
+                          ),
+                          PopupMenuButton<String>(
+                            tooltip: 'Mais ações',
+                            icon: const Icon(Icons.more_vert),
+                            onSelected: (v) {
+                              if (v == 'schedule') _openScheduleSheet();
+                            },
+                            itemBuilder: (_) => const <PopupMenuEntry<String>>[
+                              PopupMenuItem<String>(
+                                value: 'schedule',
+                                child: ListTile(
+                                  dense: true,
+                                  contentPadding: EdgeInsets.zero,
+                                  leading: Icon(Icons.schedule),
+                                  title: Text('Novo agendamento'),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ],
+                    )
+                  else
+                    SearchFilterHeader(
+                      title: 'Testes de Velocidade e Enlaces',
+                      subtitle:
+                          'Medição ativa entre equipamentos via iPerf3/BTest com telemetria ao vivo via SSE',
+                      actions: <Widget>[
+                        if (canWrite) ...<Widget>[
+                          OutlinedButton.icon(
+                            onPressed: () => _openScheduleSheet(),
+                            icon: const Icon(Icons.schedule, size: 18),
+                            label: const Text('Agendar'),
+                          ),
+                          FilledButton.icon(
+                            onPressed: () => _openWizard(),
+                            icon: const Icon(Icons.speed, size: 18),
+                            label: const Text('Novo Teste'),
+                          ),
+                        ],
+                      ],
+                    ),
+                  if (focused != null) ...<Widget>[
+                    const SizedBox(height: 10),
+                    _FocusedLinkTestCard(
+                      test: focused,
+                      state: state,
+                      canWrite: canWrite,
+                      onClose: () =>
+                          ref.read(linkTestsProvider.notifier).focus(null),
+                      onCancel: () => ref
+                          .read(linkTestsProvider.notifier)
+                          .cancel(focused.id),
+                    ),
+                  ],
+                  if (_compareA != null && _compareB != null) ...<Widget>[
+                    const SizedBox(height: 10),
+                    _LinkTestComparisonCard(
+                      a: _compareA!,
+                      b: _compareB!,
+                      onClear: () => setState(() {
+                        _compareA = null;
+                        _compareB = null;
+                      }),
+                    ),
+                  ],
+                  const SizedBox(height: 8),
+                ],
+              ),
+            ),
+            SliverPersistentHeader(
+              pinned: true,
+              delegate: _LinkTestsTabBarDelegate(
+                backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+                tabBar: TabBar(
+                  controller: _tabController,
+                  isScrollable: isCompact,
+                  tabAlignment: isCompact
+                      ? TabAlignment.start
+                      : TabAlignment.fill,
+                  labelPadding: const EdgeInsets.symmetric(horizontal: 14),
+                  tabs: <Widget>[
+                    Tab(text: 'Histórico (${state.total})'),
+                    Tab(text: 'Agendamentos (${state.schedules.length})'),
+                  ],
+                ),
+              ),
+            ),
+          ],
+          body: TabBarView(
             controller: _tabController,
             children: <Widget>[
               // ── Tab 1: Histórico ──
@@ -402,133 +524,163 @@ class _LinkTestsPageState extends ConsumerState<LinkTestsPage>
                       kind: _kindFilter,
                     ),
                 child: ListView(
+                  padding: const EdgeInsets.only(top: 10, bottom: 20),
                   children: <Widget>[
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: <Widget>[
-                        ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 200),
-                          child: DropdownButtonFormField<int?>(
+                    UnifiedFilterBar(
+                      activeFilterCount: activeFilterCount,
+                      filterSheetTitle: 'Filtrar Histórico de Testes',
+                      filterSheetBuilder: (sheetCtx, setSheet) => Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: <Widget>[
+                          AppDropdownFormField<int?>(
                             initialValue:
                                 devices.any((d) => d.id == _deviceFilter)
                                 ? _deviceFilter
                                 : null,
-                            isDense: true,
                             decoration: const InputDecoration(
                               labelText: 'Equipamento',
                             ),
                             items: <DropdownMenuItem<int?>>[
                               const DropdownMenuItem<int?>(
                                 value: null,
-                                child: Text('Todos'),
+                                child: Text(
+                                  'Todos',
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ),
                               for (final d in devices)
                                 DropdownMenuItem<int?>(
                                   value: d.id,
-                                  child: Text(d.name),
+                                  child: Text(
+                                    d.name,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
                                 ),
                             ],
                             onChanged: (v) {
                               setState(() => _deviceFilter = v);
-                              ref
-                                  .read(linkTestsProvider.notifier)
-                                  .fetchPage(
-                                    page: 1,
-                                    deviceId: v,
-                                    status: _statusFilter,
-                                    kind: _kindFilter,
-                                  );
+                              setSheet(() {});
                             },
                           ),
-                        ),
-                        ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 160),
-                          child: DropdownButtonFormField<String?>(
-                            initialValue: _statusFilter,
-                            isDense: true,
-                            decoration: const InputDecoration(
-                              labelText: 'Status',
-                            ),
-                            items: const <DropdownMenuItem<String?>>[
-                              DropdownMenuItem<String?>(
-                                value: null,
-                                child: Text('Todos'),
+                          const SizedBox(height: 12),
+                          ResponsiveFieldRow(
+                            breakpoint: 480,
+                            children: <Widget>[
+                              AppDropdownFormField<String?>(
+                                initialValue: _statusFilter,
+                                decoration: const InputDecoration(
+                                  labelText: 'Status',
+                                ),
+                                items: const <DropdownMenuItem<String?>>[
+                                  DropdownMenuItem<String?>(
+                                    value: null,
+                                    child: Text(
+                                      'Todos',
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  DropdownMenuItem<String?>(
+                                    value: 'succeeded',
+                                    child: Text(
+                                      'Concluído',
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  DropdownMenuItem<String?>(
+                                    value: 'running',
+                                    child: Text(
+                                      'Executando',
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  DropdownMenuItem<String?>(
+                                    value: 'failed',
+                                    child: Text(
+                                      'Falhou',
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  DropdownMenuItem<String?>(
+                                    value: 'cancelled',
+                                    child: Text(
+                                      'Cancelado',
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                                onChanged: (v) {
+                                  setState(() => _statusFilter = v);
+                                  setSheet(() {});
+                                },
                               ),
-                              DropdownMenuItem<String?>(
-                                value: 'succeeded',
-                                child: Text('Concluído'),
-                              ),
-                              DropdownMenuItem<String?>(
-                                value: 'running',
-                                child: Text('Executando'),
-                              ),
-                              DropdownMenuItem<String?>(
-                                value: 'failed',
-                                child: Text('Falhou'),
-                              ),
-                              DropdownMenuItem<String?>(
-                                value: 'cancelled',
-                                child: Text('Cancelado'),
+                              AppDropdownFormField<String?>(
+                                initialValue: _kindFilter,
+                                decoration: const InputDecoration(
+                                  labelText: 'Modo',
+                                ),
+                                items: const <DropdownMenuItem<String?>>[
+                                  DropdownMenuItem<String?>(
+                                    value: null,
+                                    child: Text(
+                                      'Todos',
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  DropdownMenuItem<String?>(
+                                    value: 'link',
+                                    child: Text(
+                                      'Enlace',
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  DropdownMenuItem<String?>(
+                                    value: 'path',
+                                    child: Text(
+                                      'Caminho',
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  DropdownMenuItem<String?>(
+                                    value: 'server',
+                                    child: Text(
+                                      'Servidor',
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  DropdownMenuItem<String?>(
+                                    value: 'end_to_end',
+                                    child: Text(
+                                      'Ponta a ponta',
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                                onChanged: (v) {
+                                  setState(() => _kindFilter = v);
+                                  setSheet(() {});
+                                },
                               ),
                             ],
-                            onChanged: (v) {
-                              setState(() => _statusFilter = v);
-                              ref
-                                  .read(linkTestsProvider.notifier)
-                                  .fetchPage(
-                                    page: 1,
-                                    deviceId: _deviceFilter,
-                                    status: v,
-                                    kind: _kindFilter,
-                                  );
-                            },
                           ),
-                        ),
-                        ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 170),
-                          child: DropdownButtonFormField<String?>(
-                            initialValue: _kindFilter,
-                            isDense: true,
-                            decoration: const InputDecoration(
-                              labelText: 'Modo',
-                            ),
-                            items: const <DropdownMenuItem<String?>>[
-                              DropdownMenuItem<String?>(
-                                value: null,
-                                child: Text('Todos'),
-                              ),
-                              DropdownMenuItem<String?>(
-                                value: 'link',
-                                child: Text('Enlace'),
-                              ),
-                              DropdownMenuItem<String?>(
-                                value: 'path',
-                                child: Text('Caminho'),
-                              ),
-                              DropdownMenuItem<String?>(
-                                value: 'server',
-                                child: Text('Servidor'),
-                              ),
-                              DropdownMenuItem<String?>(
-                                value: 'end_to_end',
-                                child: Text('Ponta a ponta'),
-                              ),
-                            ],
-                            onChanged: (v) {
-                              setState(() => _kindFilter = v);
-                              ref
-                                  .read(linkTestsProvider.notifier)
-                                  .fetchPage(
-                                    page: 1,
-                                    deviceId: _deviceFilter,
-                                    status: _statusFilter,
-                                    kind: v,
-                                  );
-                            },
+                        ],
+                      ),
+                      onApplyFilters: () => ref
+                          .read(linkTestsProvider.notifier)
+                          .fetchPage(
+                            page: 1,
+                            deviceId: _deviceFilter,
+                            status: _statusFilter,
+                            kind: _kindFilter,
                           ),
-                        ),
-                      ],
+                      onClearFilters: () {
+                        setState(() {
+                          _deviceFilter = null;
+                          _statusFilter = null;
+                          _kindFilter = null;
+                        });
+                        ref.read(linkTestsProvider.notifier).fetchPage(page: 1);
+                      },
+                      activeChips: activeChips,
                     ),
                     const SizedBox(height: 12),
                     if (state.pageLoading && state.pageItems.isEmpty)
@@ -538,7 +690,8 @@ class _LinkTestsPageState extends ConsumerState<LinkTestsPage>
                     else if (state.pageItems.isEmpty)
                       EmptyStateView(
                         title: 'Nenhum teste de velocidade registrado',
-                        description: 'Clique em "Novo Teste" para medir a capacidade real de um enlace.',
+                        description:
+                            'Clique em "Novo Teste" para medir a capacidade real de um enlace.',
                         icon: Icons.speed,
                         action: canWrite
                             ? FilledButton.icon(
@@ -553,7 +706,8 @@ class _LinkTestsPageState extends ConsumerState<LinkTestsPage>
                         Card(
                           elevation: 2,
                           margin: const EdgeInsets.only(bottom: 8),
-                          child: ListTile(
+                          child: InkWell(
+                            borderRadius: AppTheme.borderRadius,
                             onTap: () async {
                               await ref
                                   .read(linkTestsProvider.notifier)
@@ -562,58 +716,102 @@ class _LinkTestsPageState extends ConsumerState<LinkTestsPage>
                                   .read(linkTestsProvider.notifier)
                                   .focus(test.id);
                             },
-                            leading: StatusIndicator.fromStatus(
-                              test.status,
-                              compact: true,
-                            ),
-                            title: Text(
-                              test.title,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w700,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 10,
                               ),
-                            ),
-                            subtitle: Text(
-                              '${test.kind} · ${countNoun(test.legs.length, 'perna', 'pernas')} · ${formatShortDateTime(test.createdAt)}',
-                            ),
-                            trailing: Wrap(
-                              spacing: 6,
-                              crossAxisAlignment: WrapCrossAlignment.center,
-                              children: <Widget>[
-                                if (test.summary?.minForwardBps != null)
-                                  SemanticChip(
-                                    label:
-                                        '↓ ${formatBps(test.summary!.minForwardBps)}',
-                                    tone: SemanticTone.success,
-                                    compact: true,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: <Widget>[
+                                  Row(
+                                    children: <Widget>[
+                                      StatusIndicator.fromStatus(
+                                        test.status,
+                                        compact: true,
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: <Widget>[
+                                            Text(
+                                              test.title,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: context
+                                                  .textTheme
+                                                  .titleSmall
+                                                  ?.copyWith(
+                                                    fontWeight: FontWeight.w700,
+                                                  ),
+                                            ),
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              '${test.kind} · ${countNoun(test.legs.length, 'perna', 'pernas')} · ${formatShortDateTime(test.createdAt)}',
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: context.textTheme.bodySmall
+                                                  ?.copyWith(
+                                                    color: context
+                                                        .colorScheme
+                                                        .onSurfaceVariant,
+                                                  ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      IconButton(
+                                        visualDensity: VisualDensity.compact,
+                                        tooltip: 'Comparar resultado',
+                                        icon: Icon(
+                                          (_compareA?.id == test.id ||
+                                                  _compareB?.id == test.id)
+                                              ? Icons.compare
+                                              : Icons.compare_arrows,
+                                          size: 18,
+                                        ),
+                                        onPressed: () {
+                                          setState(() {
+                                            if (_compareA == null ||
+                                                _compareA!.id == test.id) {
+                                              _compareA = test;
+                                            } else {
+                                              _compareB = test;
+                                            }
+                                          });
+                                        },
+                                      ),
+                                    ],
                                   ),
-                                if (test.summary?.minReverseBps != null)
-                                  SemanticChip(
-                                    label:
-                                        '↑ ${formatBps(test.summary!.minReverseBps)}',
-                                    tone: SemanticTone.info,
-                                    compact: true,
-                                  ),
-                                IconButton(
-                                  tooltip: 'Comparar resultado',
-                                  icon: Icon(
-                                    (_compareA?.id == test.id ||
-                                            _compareB?.id == test.id)
-                                        ? Icons.compare
-                                        : Icons.compare_arrows,
-                                    size: 18,
-                                  ),
-                                  onPressed: () {
-                                    setState(() {
-                                      if (_compareA == null ||
-                                          _compareA!.id == test.id) {
-                                        _compareA = test;
-                                      } else {
-                                        _compareB = test;
-                                      }
-                                    });
-                                  },
-                                ),
-                              ],
+                                  if (test.summary?.minForwardBps != null ||
+                                      test.summary?.minReverseBps !=
+                                          null) ...<Widget>[
+                                    const SizedBox(height: 8),
+                                    Wrap(
+                                      spacing: 6,
+                                      runSpacing: 6,
+                                      children: <Widget>[
+                                        if (test.summary?.minForwardBps != null)
+                                          SemanticChip(
+                                            label:
+                                                '↓ ${formatBps(test.summary!.minForwardBps)}',
+                                            tone: SemanticTone.success,
+                                            compact: true,
+                                          ),
+                                        if (test.summary?.minReverseBps != null)
+                                          SemanticChip(
+                                            label:
+                                                '↑ ${formatBps(test.summary!.minReverseBps)}',
+                                            tone: SemanticTone.info,
+                                            compact: true,
+                                          ),
+                                      ],
+                                    ),
+                                  ],
+                                ],
+                              ),
                             ),
                           ),
                         ),
@@ -662,71 +860,93 @@ class _LinkTestsPageState extends ConsumerState<LinkTestsPage>
                       message: 'Carregando agendamentos...',
                     )
                   : state.schedules.isEmpty
-                  ? EmptyStateView(
-                      title: 'Nenhum agendamento configurado',
-                      description: 'Programe medições recorrentes em janelas de baixa utilização.',
-                      icon: Icons.schedule,
-                      action: canWrite
-                          ? FilledButton.icon(
-                              onPressed: () => _openScheduleSheet(),
-                              icon: const Icon(Icons.add),
-                              label: const Text('Criar agendamento'),
-                            )
-                          : null,
+                  ? ListView(
+                      children: <Widget>[
+                        const SizedBox(height: 24),
+                        EmptyStateView(
+                          title: 'Nenhum agendamento configurado',
+                          description:
+                              'Programe medições recorrentes em janelas de baixa utilização.',
+                          icon: Icons.schedule,
+                          action: canWrite
+                              ? FilledButton.icon(
+                                  onPressed: () => _openScheduleSheet(),
+                                  icon: const Icon(Icons.add),
+                                  label: const Text('Criar agendamento'),
+                                )
+                              : null,
+                        ),
+                      ],
                     )
                   : ListView.builder(
+                      padding: const EdgeInsets.only(top: 10, bottom: 20),
                       itemCount: state.schedules.length,
                       itemBuilder: (context, idx) {
                         final sched = state.schedules[idx];
                         return Card(
                           elevation: 2,
                           margin: const EdgeInsets.only(bottom: 8),
-                          child: ListTile(
-                            leading: Icon(
-                              Icons.event_repeat,
-                              color: sched.enabled
-                                  ? context.semanticColors.success
-                                  : context.colorScheme.onSurfaceVariant,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
                             ),
-                            title: Text(
-                              sched.name,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            subtitle: Text(
-                              'A cada ${sched.intervalMinutes} min · ${sched.kind}'
-                              '${sched.windowStart != null ? ' · Janela ${sched.windowStart}–${sched.windowEnd ?? ''}' : ''}'
-                              '${sched.nextRunAt != null ? ' · Próxima: ${formatTimeUntil(sched.nextRunAt)}' : ''}',
-                            ),
-                            trailing: canWrite
-                                ? Wrap(
-                                    spacing: 4,
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: <Widget>[
+                                Icon(
+                                  Icons.event_repeat,
+                                  color: sched.enabled
+                                      ? context.semanticColors.success
+                                      : context.colorScheme.onSurfaceVariant,
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: <Widget>[
-                                      IconButton(
-                                        tooltip: 'Executar agora',
-                                        icon: const Icon(Icons.play_arrow),
-                                        onPressed: () => ref
-                                            .read(linkTestsProvider.notifier)
-                                            .runScheduleNow(sched),
+                                      Text(
+                                        sched.name,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: context.textTheme.titleSmall
+                                            ?.copyWith(
+                                              fontWeight: FontWeight.w700,
+                                            ),
                                       ),
-                                      IconButton(
-                                        tooltip: 'Editar',
-                                        icon: const Icon(
-                                          Icons.edit_outlined,
-                                          size: 18,
-                                        ),
-                                        onPressed: () =>
-                                            _openScheduleSheet(existing: sched),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        'A cada ${sched.intervalMinutes} min · ${sched.kind}'
+                                        '${sched.windowStart != null ? ' · Janela ${sched.windowStart}–${sched.windowEnd ?? ''}' : ''}'
+                                        '${sched.nextRunAt != null ? ' · Próxima: ${formatTimeUntil(sched.nextRunAt)}' : ''}',
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: context.textTheme.bodySmall
+                                            ?.copyWith(
+                                              color: context
+                                                  .colorScheme
+                                                  .onSurfaceVariant,
+                                            ),
                                       ),
-                                      IconButton(
-                                        tooltip: 'Excluir',
-                                        icon: Icon(
-                                          Icons.delete_outline,
-                                          size: 18,
-                                          color: context.colorScheme.error,
-                                        ),
-                                        onPressed: () async {
+                                    ],
+                                  ),
+                                ),
+                                if (canWrite)
+                                  if (isCompact)
+                                    PopupMenuButton<String>(
+                                      tooltip: 'Ações do agendamento',
+                                      icon: const Icon(Icons.more_vert),
+                                      onSelected: (action) async {
+                                        if (action == 'run') {
+                                          await ref
+                                              .read(linkTestsProvider.notifier)
+                                              .runScheduleNow(sched);
+                                        } else if (action == 'edit') {
+                                          await _openScheduleSheet(
+                                            existing: sched,
+                                          );
+                                        } else if (action == 'delete') {
                                           final ok =
                                               await showConfirmActionDialog(
                                                 context: context,
@@ -742,20 +962,145 @@ class _LinkTestsPageState extends ConsumerState<LinkTestsPage>
                                                 )
                                                 .deleteSchedule(sched.id);
                                           }
-                                        },
-                                      ),
-                                    ],
-                                  )
-                                : null,
+                                        }
+                                      },
+                                      itemBuilder: (_) =>
+                                          <PopupMenuEntry<String>>[
+                                            const PopupMenuItem<String>(
+                                              value: 'run',
+                                              child: ListTile(
+                                                dense: true,
+                                                contentPadding: EdgeInsets.zero,
+                                                leading: Icon(Icons.play_arrow),
+                                                title: Text('Executar agora'),
+                                              ),
+                                            ),
+                                            const PopupMenuItem<String>(
+                                              value: 'edit',
+                                              child: ListTile(
+                                                dense: true,
+                                                contentPadding: EdgeInsets.zero,
+                                                leading: Icon(
+                                                  Icons.edit_outlined,
+                                                ),
+                                                title: Text('Editar'),
+                                              ),
+                                            ),
+                                            PopupMenuItem<String>(
+                                              value: 'delete',
+                                              child: ListTile(
+                                                dense: true,
+                                                contentPadding: EdgeInsets.zero,
+                                                leading: Icon(
+                                                  Icons.delete_outline,
+                                                  color:
+                                                      context.colorScheme.error,
+                                                ),
+                                                title: Text(
+                                                  'Excluir',
+                                                  style: TextStyle(
+                                                    color: context
+                                                        .colorScheme
+                                                        .error,
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                    )
+                                  else
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: <Widget>[
+                                        IconButton(
+                                          tooltip: 'Executar agora',
+                                          icon: const Icon(Icons.play_arrow),
+                                          onPressed: () => ref
+                                              .read(linkTestsProvider.notifier)
+                                              .runScheduleNow(sched),
+                                        ),
+                                        IconButton(
+                                          tooltip: 'Editar',
+                                          icon: const Icon(
+                                            Icons.edit_outlined,
+                                            size: 18,
+                                          ),
+                                          onPressed: () => _openScheduleSheet(
+                                            existing: sched,
+                                          ),
+                                        ),
+                                        IconButton(
+                                          tooltip: 'Excluir',
+                                          icon: Icon(
+                                            Icons.delete_outline,
+                                            size: 18,
+                                            color: context.colorScheme.error,
+                                          ),
+                                          onPressed: () async {
+                                            final ok =
+                                                await showConfirmActionDialog(
+                                                  context: context,
+                                                  title: 'Excluir agendamento',
+                                                  message:
+                                                      'Remover "${sched.name}"?',
+                                                  confirmLabel: 'Excluir',
+                                                );
+                                            if (ok) {
+                                              await ref
+                                                  .read(
+                                                    linkTestsProvider.notifier,
+                                                  )
+                                                  .deleteSchedule(sched.id);
+                                            }
+                                          },
+                                        ),
+                                      ],
+                                    ),
+                              ],
+                            ),
                           ),
                         );
                       },
                     ),
             ],
           ),
-        ),
-      ],
+        );
+      },
     );
+  }
+}
+
+class _LinkTestsTabBarDelegate extends SliverPersistentHeaderDelegate {
+  const _LinkTestsTabBarDelegate({
+    required this.tabBar,
+    required this.backgroundColor,
+  });
+
+  final TabBar tabBar;
+  final Color backgroundColor;
+
+  @override
+  double get minExtent => tabBar.preferredSize.height + 1;
+
+  @override
+  double get maxExtent => tabBar.preferredSize.height + 1;
+
+  @override
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
+    return ColoredBox(
+      color: backgroundColor,
+      child: Column(children: <Widget>[tabBar, const Divider(height: 1)]),
+    );
+  }
+
+  @override
+  bool shouldRebuild(covariant _LinkTestsTabBarDelegate oldDelegate) {
+    return oldDelegate.tabBar != tabBar ||
+        oldDelegate.backgroundColor != backgroundColor;
   }
 }
 
@@ -804,28 +1149,29 @@ class _FocusedLinkTestCard extends StatelessWidget {
           '${test.kind} · ${test.spec.direction} · ${test.spec.durationS}s (${test.spec.streams} streams)',
       icon: Icons.speed,
       iconTone: test.isActive ? SemanticTone.info : SemanticTone.success,
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          StatusIndicator.fromStatus(test.status, compact: true),
-          if (test.isActive && canWrite) ...<Widget>[
-            const SizedBox(width: 8),
-            OutlinedButton.icon(
-              onPressed: onCancel,
-              icon: const Icon(Icons.stop, size: 16),
-              label: const Text('Cancelar'),
-            ),
-          ],
-          IconButton(
-            tooltip: 'Fechar painel',
-            icon: const Icon(Icons.close),
-            onPressed: onClose,
-          ),
-        ],
+      trailing: IconButton(
+        tooltip: 'Fechar painel',
+        icon: const Icon(Icons.close),
+        onPressed: onClose,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: <Widget>[
+              StatusIndicator.fromStatus(test.status, compact: true),
+              if (test.isActive && canWrite)
+                OutlinedButton.icon(
+                  onPressed: onCancel,
+                  icon: const Icon(Icons.stop, size: 16),
+                  label: const Text('Cancelar'),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
           // Path Map visual das pernas
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
@@ -945,15 +1291,19 @@ class _LinkTestComparisonCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: <Widget>[
-              Text(
-                'Comparação: #${a.id} vs #${b.id}',
-                style: context.textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w800,
+              Expanded(
+                child: Text(
+                  'Comparação: #${a.id} vs #${b.id}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: context.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
               ),
               IconButton(
+                visualDensity: VisualDensity.compact,
                 onPressed: onClear,
                 icon: const Icon(Icons.close, size: 18),
               ),
@@ -1101,22 +1451,69 @@ class _LinkTestWizardBodyState extends ConsumerState<_LinkTestWizardBody> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        SegmentedButton<String>(
-          segments: const <ButtonSegment<String>>[
-            ButtonSegment(value: 'server', label: Text('Servidor')),
-            ButtonSegment(value: 'link', label: Text('Enlace')),
-            ButtonSegment(value: 'end_to_end', label: Text('A → B')),
-            ButtonSegment(value: 'path', label: Text('Caminho')),
-          ],
-          selected: <String>{_kind},
-          onSelectionChanged: (s) => setState(() {
-            _kind = s.first;
-            _plan = null;
-          }),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final isNarrow = constraints.maxWidth < 460;
+            return SegmentedButton<String>(
+              showSelectedIcon: false,
+              style: SegmentedButton.styleFrom(
+                visualDensity: isNarrow
+                    ? VisualDensity.compact
+                    : VisualDensity.standard,
+                padding: EdgeInsets.symmetric(
+                  horizontal: isNarrow ? 6 : 12,
+                  vertical: 8,
+                ),
+              ),
+              segments: const <ButtonSegment<String>>[
+                ButtonSegment(
+                  value: 'server',
+                  label: Text(
+                    'Servidor',
+                    maxLines: 1,
+                    softWrap: false,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                ButtonSegment(
+                  value: 'link',
+                  label: Text(
+                    'Enlace',
+                    maxLines: 1,
+                    softWrap: false,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                ButtonSegment(
+                  value: 'end_to_end',
+                  label: Text(
+                    'A → B',
+                    maxLines: 1,
+                    softWrap: false,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                ButtonSegment(
+                  value: 'path',
+                  label: Text(
+                    'Caminho',
+                    maxLines: 1,
+                    softWrap: false,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+              selected: <String>{_kind},
+              onSelectionChanged: (s) => setState(() {
+                _kind = s.first;
+                _plan = null;
+              }),
+            );
+          },
         ),
         const SizedBox(height: 12),
         if (_kind == 'link')
-          DropdownButtonFormField<int?>(
+          AppDropdownFormField<int?>(
             initialValue: edges.any((e) => e.id == _linkId) ? _linkId : null,
             decoration: const InputDecoration(labelText: 'Enlace da topologia'),
             items: edges
@@ -1125,6 +1522,7 @@ class _LinkTestWizardBodyState extends ConsumerState<_LinkTestWizardBody> {
                     value: e.id,
                     child: Text(
                       '${e.sourceDeviceName ?? '#${e.sourceDeviceId}'} ↔ ${e.targetDeviceName ?? '#${e.targetDeviceId}'}',
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 )
@@ -1133,7 +1531,7 @@ class _LinkTestWizardBodyState extends ConsumerState<_LinkTestWizardBody> {
           )
         else ...<Widget>[
           if (_kind != 'server') ...<Widget>[
-            DropdownButtonFormField<int?>(
+            AppDropdownFormField<int?>(
               initialValue: devices.any((d) => d.id == _sourceDeviceId)
                   ? _sourceDeviceId
                   : null,
@@ -1144,7 +1542,7 @@ class _LinkTestWizardBodyState extends ConsumerState<_LinkTestWizardBody> {
                   .map(
                     (DeviceModel d) => DropdownMenuItem<int?>(
                       value: d.id,
-                      child: Text(d.name),
+                      child: Text(d.name, overflow: TextOverflow.ellipsis),
                     ),
                   )
                   .toList(growable: false),
@@ -1152,69 +1550,110 @@ class _LinkTestWizardBodyState extends ConsumerState<_LinkTestWizardBody> {
             ),
             const SizedBox(height: 10),
           ],
-          DropdownButtonFormField<int?>(
+          AppDropdownFormField<int?>(
             initialValue: devices.any((d) => d.id == _targetDeviceId)
                 ? _targetDeviceId
                 : null,
             decoration: const InputDecoration(labelText: 'Equipamento destino'),
             items: devices
                 .map(
-                  (DeviceModel d) =>
-                      DropdownMenuItem<int?>(value: d.id, child: Text(d.name)),
+                  (DeviceModel d) => DropdownMenuItem<int?>(
+                    value: d.id,
+                    child: Text(d.name, overflow: TextOverflow.ellipsis),
+                  ),
                 )
                 .toList(growable: false),
             onChanged: (v) => setState(() => _targetDeviceId = v),
           ),
         ],
         const SizedBox(height: 12),
-        Row(
-          children: <Widget>[
-            Expanded(
-              child: DropdownButtonFormField<String>(
-                initialValue: _direction,
-                decoration: const InputDecoration(labelText: 'Sentido'),
-                items: const <DropdownMenuItem<String>>[
-                  DropdownMenuItem(value: 'both', child: Text('Ida e Volta')),
-                  DropdownMenuItem(
-                    value: 'forward',
-                    child: Text('Somente Ida'),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final directionField = AppDropdownFormField<String>(
+              initialValue: _direction,
+              decoration: const InputDecoration(labelText: 'Sentido'),
+              items: const <DropdownMenuItem<String>>[
+                DropdownMenuItem(
+                  value: 'both',
+                  child: Text('Ida e Volta', overflow: TextOverflow.ellipsis),
+                ),
+                DropdownMenuItem(
+                  value: 'forward',
+                  child: Text('Somente Ida', overflow: TextOverflow.ellipsis),
+                ),
+                DropdownMenuItem(
+                  value: 'reverse',
+                  child: Text('Somente Volta', overflow: TextOverflow.ellipsis),
+                ),
+              ],
+              onChanged: (v) => setState(() => _direction = v ?? 'both'),
+            );
+            final durationField = AppDropdownFormField<int>(
+              initialValue: _durationS,
+              decoration: const InputDecoration(labelText: 'Duração'),
+              items: const <DropdownMenuItem<int>>[
+                DropdownMenuItem(
+                  value: 5,
+                  child: Text('5 s', overflow: TextOverflow.ellipsis),
+                ),
+                DropdownMenuItem(
+                  value: 10,
+                  child: Text('10 s', overflow: TextOverflow.ellipsis),
+                ),
+                DropdownMenuItem(
+                  value: 20,
+                  child: Text('20 s', overflow: TextOverflow.ellipsis),
+                ),
+                DropdownMenuItem(
+                  value: 30,
+                  child: Text('30 s', overflow: TextOverflow.ellipsis),
+                ),
+              ],
+              onChanged: (v) => setState(() => _durationS = v ?? 10),
+            );
+            final streamsField = AppDropdownFormField<int>(
+              initialValue: _streams,
+              decoration: const InputDecoration(labelText: 'Streams'),
+              items: const <DropdownMenuItem<int>>[
+                DropdownMenuItem(
+                  value: 1,
+                  child: Text('1', overflow: TextOverflow.ellipsis),
+                ),
+                DropdownMenuItem(
+                  value: 4,
+                  child: Text('4', overflow: TextOverflow.ellipsis),
+                ),
+                DropdownMenuItem(
+                  value: 8,
+                  child: Text('8', overflow: TextOverflow.ellipsis),
+                ),
+              ],
+              onChanged: (v) => setState(() => _streams = v ?? 4),
+            );
+
+            if (constraints.maxWidth < 620) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  directionField,
+                  const SizedBox(height: 12),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Expanded(child: durationField),
+                      const SizedBox(width: 10),
+                      Expanded(child: streamsField),
+                    ],
                   ),
-                  DropdownMenuItem(
-                    value: 'reverse',
-                    child: Text('Somente Volta'),
-                  ),
                 ],
-                onChanged: (v) => setState(() => _direction = v ?? 'both'),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: DropdownButtonFormField<int>(
-                initialValue: _durationS,
-                decoration: const InputDecoration(labelText: 'Duração'),
-                items: const <DropdownMenuItem<int>>[
-                  DropdownMenuItem(value: 5, child: Text('5 s')),
-                  DropdownMenuItem(value: 10, child: Text('10 s')),
-                  DropdownMenuItem(value: 20, child: Text('20 s')),
-                  DropdownMenuItem(value: 30, child: Text('30 s')),
-                ],
-                onChanged: (v) => setState(() => _durationS = v ?? 10),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: DropdownButtonFormField<int>(
-                initialValue: _streams,
-                decoration: const InputDecoration(labelText: 'Streams'),
-                items: const <DropdownMenuItem<int>>[
-                  DropdownMenuItem(value: 1, child: Text('1')),
-                  DropdownMenuItem(value: 4, child: Text('4')),
-                  DropdownMenuItem(value: 8, child: Text('8')),
-                ],
-                onChanged: (v) => setState(() => _streams = v ?? 4),
-              ),
-            ),
-          ],
+              );
+            }
+
+            return ResponsiveFieldRow(
+              breakpoint: 620,
+              children: <Widget>[directionField, durationField, streamsField],
+            );
+          },
         ),
         const SizedBox(height: 10),
         TextField(
@@ -1226,7 +1665,9 @@ class _LinkTestWizardBodyState extends ConsumerState<_LinkTestWizardBody> {
           ),
         ),
         const SizedBox(height: 12),
-        Row(
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
           children: <Widget>[
             OutlinedButton.icon(
               onPressed: _planning ? null : _runPlan,
@@ -1239,7 +1680,6 @@ class _LinkTestWizardBodyState extends ConsumerState<_LinkTestWizardBody> {
                   : const Icon(Icons.fact_check_outlined),
               label: const Text('Planejar (Dry-Run)'),
             ),
-            const SizedBox(width: 8),
             if (_plan?.isReady == true)
               FilledButton.icon(
                 onPressed: _starting ? null : _startTest,

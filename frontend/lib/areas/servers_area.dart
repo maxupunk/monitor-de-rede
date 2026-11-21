@@ -29,7 +29,8 @@ import 'package:netmonitor_app/features/servers/widgets/storages_backup_tab.dart
 final AiScreenContribution _remoteServersAiScreen = AiScreenContribution(
   id: 'remote-servers',
   title: 'Servidores remotos',
-  description: 'Agentes conectados à central, capacidades Docker/Compose e política AGENT_ALLOW.',
+  description:
+      'Agentes conectados à central, capacidades Docker/Compose e política AGENT_ALLOW.',
   contextBuilder: (ref, _) {
     final agents = ref.read(agentsProvider).agents;
     final connected = agents.where((a) => a.connected).length;
@@ -51,7 +52,8 @@ final AiScreenContribution _remoteServersAiScreen = AiScreenContribution(
 final AiScreenContribution _dockerAiScreen = AiScreenContribution(
   id: 'docker',
   title: 'Docker',
-  description: 'Containers, projetos Compose, volumes, redes, imagens e histórico do host.',
+  description:
+      'Containers, projetos Compose, volumes, redes, imagens e histórico do host.',
   contextBuilder: (ref, state) {
     final docker = ref.read(dockerProvider);
     return <String, dynamic>{
@@ -68,7 +70,8 @@ final AiScreenContribution _dockerAiScreen = AiScreenContribution(
 final AiScreenContribution _deploysAiScreen = AiScreenContribution(
   id: 'deploys',
   title: 'Deploy contínuo',
-  description: 'Aplicações, alvos, aprovações pendentes, compilações isoladas e histórico de deploys.',
+  description:
+      'Aplicações, alvos, aprovações pendentes, compilações isoladas e histórico de deploys.',
   contextBuilder: (ref, _) {
     final deploys = ref.read(deploysProvider);
     final counts = deploys.overview?.counts;

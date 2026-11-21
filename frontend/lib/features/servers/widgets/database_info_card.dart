@@ -94,8 +94,9 @@ class _DatabaseInfoCardState extends ConsumerState<DatabaseInfoCard> {
       );
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Erro ao apagar itens: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Erro ao apagar itens: $err')));
     }
   }
 

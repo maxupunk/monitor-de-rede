@@ -77,7 +77,8 @@ class _DockerComposePageState extends ConsumerState<DockerComposePage> {
     final confirmed = await showConfirmActionDialog(
       context: context,
       title: '$label em $targetLabel?',
-      message: 'A operação será executada pelo agente Docker remoto e o progresso aparecerá no painel de operações.',
+      message:
+          'A operação será executada pelo agente Docker remoto e o progresso aparecerá no painel de operações.',
       confirmLabel: label,
       tone: (action == 'down' || action == 'stop')
           ? SemanticTone.warning
@@ -121,26 +122,27 @@ class _DockerComposePageState extends ConsumerState<DockerComposePage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          alignment: WrapAlignment.spaceBetween,
-          crossAxisAlignment: WrapCrossAlignment.center,
+        Row(
           children: <Widget>[
-            Text(
-              'Projetos Docker Compose',
-              style: context.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w800,
+            Expanded(
+              child: Text(
+                'Projetos Docker Compose',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: context.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
               ),
             ),
-            OutlinedButton.icon(
+            const SizedBox(width: 8),
+            IconButton.filledTonal(
+              tooltip: 'Recarregar projetos',
               onPressed: _loading ? null : _load,
-              icon: const Icon(Icons.refresh, size: 18),
-              label: const Text('Recarregar projetos'),
+              icon: const Icon(Icons.refresh, size: 19),
             ),
           ],
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 10),
 
         if (!composeReady) ...<Widget>[
           NestedPanel(
@@ -161,7 +163,8 @@ class _DockerComposePageState extends ConsumerState<DockerComposePage> {
         else if (_projects.isEmpty)
           const EmptyStateView(
             title: 'Nenhum projeto Compose detectado',
-            description: 'Stacks iniciadas com docker compose aparecerão aqui automaticamente.',
+            description:
+                'Stacks iniciadas com docker compose aparecerão aqui automaticamente.',
             icon: Icons.description_outlined,
           )
         else
@@ -175,16 +178,17 @@ class _DockerComposePageState extends ConsumerState<DockerComposePage> {
                 .map((project) {
                   return SectionCard(
                     title: project.name,
-                    subtitle:
-                        project.workingDir ??
-                        'Diretório de trabalho não informado',
+                    subtitle: project.services.isNotEmpty
+                        ? '${project.services.length} serviço(s)'
+                        : null,
                     icon: Icons.layers_outlined,
                     iconTone: project.running == project.containers
                         ? SemanticTone.success
                         : SemanticTone.warning,
                     trailing: Wrap(
                       spacing: 6,
-                      runSpacing: 4,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: <Widget>[
                         if (project.protected)
                           const SemanticChip(
@@ -251,100 +255,133 @@ class _DockerComposePageState extends ConsumerState<DockerComposePage> {
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: project.services
-                          .map((svc) {
-                            return Padding(
-                              padding: const EdgeInsets.only(bottom: 8),
-                              child: NestedPanel(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 8,
+                      children: <Widget>[
+                        if (project.workingDir != null &&
+                            project.workingDir!.isNotEmpty) ...<Widget>[
+                          Tooltip(
+                            message: project.workingDir!,
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: <Widget>[
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 2),
+                                  child: Icon(
+                                    Icons.folder_outlined,
+                                    size: 15,
+                                    color: context.colorScheme.onSurfaceVariant,
+                                  ),
                                 ),
-                                child: Row(
-                                  children: <Widget>[
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: <Widget>[
-                                          Text(
-                                            svc.name,
-                                            style: context.textTheme.titleSmall
-                                                ?.copyWith(
-                                                  fontWeight: FontWeight.w700,
-                                                ),
-                                          ),
-                                          Text(
-                                            '${svc.running}/${svc.containers} em execução',
-                                            style: context.textTheme.bodySmall
-                                                ?.copyWith(
-                                                  color: context
-                                                      .colorScheme
-                                                      .onSurfaceVariant,
-                                                ),
-                                          ),
-                                        ],
-                                      ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    project.workingDir!,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: context.textTheme.bodySmall
+                                        ?.copyWith(
+                                          fontFamily: 'monospace',
+                                          color: context
+                                              .colorScheme
+                                              .onSurfaceVariant,
+                                        ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                        ],
+                        ...project.services.map((svc) {
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: NestedPanel(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                              child: Row(
+                                children: <Widget>[
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: <Widget>[
+                                        Text(
+                                          svc.name,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: context.textTheme.titleSmall
+                                              ?.copyWith(
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                        ),
+                                        Text(
+                                          '${svc.running}/${svc.containers} em execução',
+                                          style: context.textTheme.bodySmall
+                                              ?.copyWith(
+                                                color: context
+                                                    .colorScheme
+                                                    .onSurfaceVariant,
+                                              ),
+                                        ),
+                                      ],
                                     ),
-                                    if (canAct)
-                                      Wrap(
-                                        spacing: 4,
-                                        children: <Widget>[
+                                  ),
+                                  if (canAct)
+                                    Wrap(
+                                      spacing: 4,
+                                      children: <Widget>[
+                                        IconButton(
+                                          tooltip:
+                                              'Baixar imagem de ${svc.name}',
+                                          icon: const Icon(
+                                            Icons.download_outlined,
+                                            size: 18,
+                                          ),
+                                          onPressed: () => _runComposeAction(
+                                            project,
+                                            'pull',
+                                            service: svc.name,
+                                          ),
+                                        ),
+                                        if (!project.protected) ...<Widget>[
                                           IconButton(
-                                            tooltip:
-                                                'Baixar imagem de ${svc.name}',
-                                            icon: const Icon(
-                                              Icons.download_outlined,
+                                            tooltip: svc.running > 0
+                                                ? 'Parar'
+                                                : 'Iniciar',
+                                            icon: Icon(
+                                              svc.running > 0
+                                                  ? Icons.stop
+                                                  : Icons.play_arrow,
                                               size: 18,
                                             ),
                                             onPressed: () => _runComposeAction(
                                               project,
-                                              'pull',
+                                              svc.running > 0 ? 'stop' : 'up',
                                               service: svc.name,
                                             ),
                                           ),
-                                          if (!project.protected) ...<Widget>[
-                                            IconButton(
-                                              tooltip: svc.running > 0
-                                                  ? 'Parar'
-                                                  : 'Iniciar',
-                                              icon: Icon(
-                                                svc.running > 0
-                                                    ? Icons.stop
-                                                    : Icons.play_arrow,
-                                                size: 18,
-                                              ),
-                                              onPressed: () =>
-                                                  _runComposeAction(
-                                                    project,
-                                                    svc.running > 0
-                                                        ? 'stop'
-                                                        : 'up',
-                                                    service: svc.name,
-                                                  ),
+                                          IconButton(
+                                            tooltip: 'Reiniciar ${svc.name}',
+                                            icon: const Icon(
+                                              Icons.restart_alt,
+                                              size: 18,
                                             ),
-                                            IconButton(
-                                              tooltip: 'Reiniciar ${svc.name}',
-                                              icon: const Icon(
-                                                Icons.restart_alt,
-                                                size: 18,
-                                              ),
-                                              onPressed: () =>
-                                                  _runComposeAction(
-                                                    project,
-                                                    'restart',
-                                                    service: svc.name,
-                                                  ),
+                                            onPressed: () => _runComposeAction(
+                                              project,
+                                              'restart',
+                                              service: svc.name,
                                             ),
-                                          ],
+                                          ),
                                         ],
-                                      ),
-                                  ],
-                                ),
+                                      ],
+                                    ),
+                                ],
                               ),
-                            );
-                          })
-                          .toList(growable: false),
+                            ),
+                          );
+                        }),
+                      ],
                     ),
                   );
                 })

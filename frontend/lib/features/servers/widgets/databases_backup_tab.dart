@@ -122,7 +122,8 @@ class _DatabasesBackupTabState extends ConsumerState<DatabasesBackupTab> {
     final confirmed = await showConfirmActionDialog(
       context: context,
       title: 'Excluir conexão ${conn.name}?',
-      message: 'Os arquivos de backup já gravados no destino de armazenamento serão mantidos.',
+      message:
+          'Os arquivos de backup já gravados no destino de armazenamento serão mantidos.',
       confirmLabel: 'Excluir conexão',
       tone: SemanticTone.error,
     );
@@ -179,82 +180,156 @@ class _DatabasesBackupTabState extends ConsumerState<DatabasesBackupTab> {
     final noStorageCount = connections
         .where((c) => c.storageDestinationId == null)
         .length;
+    final isCompact = MediaQuery.sizeOf(context).width < 680;
+    final activeSecondaryCount = _originFilter != 'all' ? 1 : 0;
 
     return RefreshIndicator(
       onRefresh: () => ref.read(databasesProvider.notifier).fetchConnections(),
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: <Widget>[
-          SearchFilterHeader(
-            title: 'Bancos de dados',
-            subtitle: 'Backups agendados e sob demanda de PostgreSQL, MySQL e MariaDB.',
+          if (isCompact)
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: Text(
+                    'Bancos de dados',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: context.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                FilledButton.icon(
+                  onPressed: () => _openForm(),
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('Adicionar'),
+                ),
+                IconButton(
+                  tooltip: 'Atualizar',
+                  onPressed: dbState.loading
+                      ? null
+                      : () => ref
+                            .read(databasesProvider.notifier)
+                            .fetchConnections(),
+                  icon: const Icon(Icons.refresh, size: 20),
+                ),
+              ],
+            )
+          else
+            SearchFilterHeader(
+              title: 'Bancos de dados',
+              subtitle:
+                  'Backups agendados e sob demanda de PostgreSQL, MySQL e MariaDB.',
+              actions: <Widget>[
+                OutlinedButton.icon(
+                  onPressed: dbState.loading
+                      ? null
+                      : () => ref
+                            .read(databasesProvider.notifier)
+                            .fetchConnections(),
+                  icon: const Icon(Icons.refresh, size: 18),
+                  label: const Text('Atualizar'),
+                ),
+                FilledButton.icon(
+                  onPressed: () => _openForm(),
+                  icon: const Icon(Icons.add),
+                  label: const Text('Adicionar banco'),
+                ),
+              ],
+            ),
+          const SizedBox(height: 10),
+          UnifiedFilterBar(
             searchController: _searchController,
             searchHint: 'Buscar banco, host, agente ou destino...',
             onSearchChanged: (v) => setState(() => _search = v),
-            actions: <Widget>[
-              OutlinedButton.icon(
-                onPressed: dbState.loading
-                    ? null
-                    : () => ref
-                          .read(databasesProvider.notifier)
-                          .fetchConnections(),
-                icon: const Icon(Icons.refresh, size: 18),
-                label: const Text('Atualizar'),
-              ),
-              FilledButton.icon(
-                onPressed: () => _openForm(),
-                icon: const Icon(Icons.add),
-                label: const Text('Adicionar banco'),
-              ),
-            ],
-            filters: <Widget>[
+            activeFilterCount: activeSecondaryCount,
+            filterSheetTitle: 'Filtros de bancos',
+            filterSheetBuilder: origins.length > 1
+                ? (sheetCtx, setSheetState) => Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      AppDropdownFormField<String>(
+                        initialValue: origins.containsKey(_originFilter)
+                            ? _originFilter
+                            : 'all',
+                        decoration: const InputDecoration(
+                          labelText: 'Filtrar por origem',
+                          isDense: true,
+                        ),
+                        items: <DropdownMenuItem<String>>[
+                          const DropdownMenuItem(
+                            value: 'all',
+                            child: Text(
+                              'Todas as origens',
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          ...origins.entries.map(
+                            (e) => DropdownMenuItem(
+                              value: e.key,
+                              child: Text(
+                                e.value,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ),
+                        ],
+                        onChanged: (v) {
+                          if (v != null) {
+                            setState(() => _originFilter = v);
+                            setSheetState(() {});
+                          }
+                        },
+                      ),
+                      const SizedBox(height: 8),
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        value: _groupByOrigin,
+                        title: const Text('Agrupar por origem'),
+                        onChanged: (v) {
+                          setState(() => _groupByOrigin = v);
+                          setSheetState(() {});
+                        },
+                      ),
+                    ],
+                  )
+                : null,
+            onClearFilters: () => setState(() {
+              _originFilter = 'all';
+              _healthFilter = 'all';
+            }),
+            quickChips: <Widget>[
               ChoiceChip(
                 selected: _healthFilter == 'all',
+                visualDensity: VisualDensity.compact,
                 label: Text('Todos (${connections.length})'),
                 onSelected: (_) => setState(() => _healthFilter = 'all'),
               ),
               ChoiceChip(
                 selected: _healthFilter == 'failed',
+                visualDensity: VisualDensity.compact,
                 label: Text('Com falha ($failedCount)'),
                 onSelected: (_) => setState(() => _healthFilter = 'failed'),
               ),
               ChoiceChip(
                 selected: _healthFilter == 'no_storage',
+                visualDensity: VisualDensity.compact,
                 label: Text('Sem destino ($noStorageCount)'),
                 onSelected: (_) => setState(() => _healthFilter = 'no_storage'),
               ),
-              if (origins.length > 1)
-                FilterChip(
-                  selected: _groupByOrigin,
-                  label: const Text('Agrupar por origem'),
-                  onSelected: (v) => setState(() => _groupByOrigin = v),
+            ],
+            activeChips: <ActiveFilterChipData>[
+              if (_originFilter != 'all' && origins.containsKey(_originFilter))
+                ActiveFilterChipData(
+                  label: origins[_originFilter]!,
+                  icon: Icons.dns_outlined,
+                  onDeleted: () => setState(() => _originFilter = 'all'),
                 ),
             ],
           ),
-          if (origins.length > 1) ...<Widget>[
-            const SizedBox(height: 10),
-            DropdownButtonFormField<String>(
-              initialValue: origins.containsKey(_originFilter)
-                  ? _originFilter
-                  : 'all',
-              decoration: const InputDecoration(
-                labelText: 'Filtrar por origem',
-                isDense: true,
-              ),
-              items: <DropdownMenuItem<String>>[
-                const DropdownMenuItem(
-                  value: 'all',
-                  child: Text('Todas as origens'),
-                ),
-                ...origins.entries.map(
-                  (e) => DropdownMenuItem(value: e.key, child: Text(e.value)),
-                ),
-              ],
-              onChanged: (v) {
-                if (v != null) setState(() => _originFilter = v);
-              },
-            ),
-          ],
           const SizedBox(height: 14),
 
           if (dbState.error != null) ...<Widget>[
@@ -366,6 +441,8 @@ class _DatabasesBackupTabState extends ConsumerState<DatabasesBackupTab> {
       iconTone: statusTone,
       trailing: Wrap(
         spacing: 6,
+        runSpacing: 6,
+        crossAxisAlignment: WrapCrossAlignment.center,
         children: <Widget>[
           SemanticChip(
             label: conn.backupEnabled
@@ -709,17 +786,26 @@ class _DatabaseFormBodyState extends ConsumerState<_DatabaseFormBody> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
-                Row(
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  alignment: WrapAlignment.spaceBetween,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: <Widget>[
-                    const Icon(Icons.auto_fix_high, size: 18),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Bancos detectados em containers Docker (${discoveredContainers.length})',
-                        style: context.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        const Icon(Icons.auto_fix_high, size: 18),
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: Text(
+                            'Bancos detectados (${discoveredContainers.length})',
+                            style: context.textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
                         ),
-                      ),
+                      ],
                     ),
                     TextButton(
                       onPressed: dbState.containersLoading
@@ -753,10 +839,24 @@ class _DatabaseFormBodyState extends ConsumerState<_DatabaseFormBody> {
         ],
 
         SegmentedButton<String>(
+          showSelectedIcon: false,
+          style: SegmentedButton.styleFrom(
+            visualDensity: VisualDensity.compact,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+          ),
           segments: const <ButtonSegment<String>>[
-            ButtonSegment(value: 'postgres', label: Text('PostgreSQL')),
-            ButtonSegment(value: 'mysql', label: Text('MySQL')),
-            ButtonSegment(value: 'mariadb', label: Text('MariaDB')),
+            ButtonSegment(
+              value: 'postgres',
+              label: Text('PostgreSQL', maxLines: 1, softWrap: false),
+            ),
+            ButtonSegment(
+              value: 'mysql',
+              label: Text('MySQL', maxLines: 1, softWrap: false),
+            ),
+            ButtonSegment(
+              value: 'mariadb',
+              label: Text('MariaDB', maxLines: 1, softWrap: false),
+            ),
           ],
           selected: <String>{_engine},
           onSelectionChanged: (set) {
@@ -778,7 +878,7 @@ class _DatabaseFormBodyState extends ConsumerState<_DatabaseFormBody> {
         const SizedBox(height: 12),
 
         // Rota / Ponte de banco via agente (ADR 013)
-        DropdownButtonFormField<int?>(
+        AppDropdownFormField<int?>(
           initialValue: dbState.agents.any((a) => a.id == _viaProbeId)
               ? _viaProbeId
               : null,
@@ -790,7 +890,10 @@ class _DatabaseFormBodyState extends ConsumerState<_DatabaseFormBody> {
           items: <DropdownMenuItem<int?>>[
             const DropdownMenuItem<int?>(
               value: null,
-              child: Text('Direto desta central'),
+              child: Text(
+                'Direto desta central',
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
             ...dbState.agents.map(
               (a) => DropdownMenuItem<int?>(
@@ -798,6 +901,7 @@ class _DatabaseFormBodyState extends ConsumerState<_DatabaseFormBody> {
                 enabled: a.allowed,
                 child: Text(
                   'Agente ${a.name}${!a.allowed ? ' (sem permissão database)' : (!a.connected ? ' (offline)' : '')}',
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ),
@@ -815,68 +919,71 @@ class _DatabaseFormBodyState extends ConsumerState<_DatabaseFormBody> {
         ],
         const SizedBox(height: 12),
 
-        Row(
+        ResponsiveFieldRow(
+          breakpoint: 480,
+          spacing: 10,
+          runSpacing: 12,
           children: <Widget>[
-            Expanded(
-              flex: 3,
-              child: TextField(
-                controller: _hostCtrl,
-                decoration: const InputDecoration(labelText: 'Host / IP'),
-              ),
+            TextField(
+              controller: _hostCtrl,
+              decoration: const InputDecoration(labelText: 'Host / IP'),
             ),
-            const SizedBox(width: 10),
-            Expanded(
-              flex: 1,
-              child: TextField(
-                controller: _portCtrl,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Porta'),
+            TextField(
+              controller: _portCtrl,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Porta'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+
+        ResponsiveFieldRow(
+          breakpoint: 480,
+          spacing: 10,
+          runSpacing: 12,
+          children: <Widget>[
+            TextField(
+              controller: _userCtrl,
+              decoration: const InputDecoration(labelText: 'Usuário'),
+            ),
+            TextField(
+              controller: _passCtrl,
+              obscureText: true,
+              decoration: InputDecoration(
+                labelText: 'Senha',
+                hintText: widget.existing?.passwordSet == true
+                    ? 'definida — deixe em branco para manter'
+                    : null,
               ),
             ),
           ],
         ),
         const SizedBox(height: 12),
 
-        Row(
-          children: <Widget>[
-            Expanded(
-              child: TextField(
-                controller: _userCtrl,
-                decoration: const InputDecoration(labelText: 'Usuário'),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: TextField(
-                controller: _passCtrl,
-                obscureText: true,
-                decoration: InputDecoration(
-                  labelText: 'Senha',
-                  hintText: widget.existing?.passwordSet == true
-                      ? 'definida — deixe em branco para manter'
-                      : null,
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-
-        DropdownButtonFormField<String>(
+        AppDropdownFormField<String>(
           initialValue: _sslMode,
           decoration: const InputDecoration(labelText: 'Modo SSL'),
           items: const <DropdownMenuItem<String>>[
             DropdownMenuItem(
               value: 'prefer',
-              child: Text('Preferir SSL (prefer)'),
+              child: Text(
+                'Preferir SSL (prefer)',
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
             DropdownMenuItem(
               value: 'require',
-              child: Text('Exigir SSL (require)'),
+              child: Text(
+                'Exigir SSL (require)',
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
             DropdownMenuItem(
               value: 'disable',
-              child: Text('Desabilitado (disable)'),
+              child: Text(
+                'Desabilitado (disable)',
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           ],
           onChanged: (v) {
@@ -937,7 +1044,7 @@ class _DatabaseFormBodyState extends ConsumerState<_DatabaseFormBody> {
           ),
 
         const Divider(height: 24),
-        DropdownButtonFormField<int?>(
+        AppDropdownFormField<int?>(
           initialValue: storages.any((s) => s.id == _storageDestinationId)
               ? _storageDestinationId
               : null,
@@ -947,12 +1054,15 @@ class _DatabaseFormBodyState extends ConsumerState<_DatabaseFormBody> {
           items: <DropdownMenuItem<int?>>[
             const DropdownMenuItem<int?>(
               value: null,
-              child: Text('Nenhum destino'),
+              child: Text('Nenhum destino', overflow: TextOverflow.ellipsis),
             ),
             ...storages.map(
               (s) => DropdownMenuItem<int?>(
                 value: s.id,
-                child: Text('${s.name} (${s.provider})'),
+                child: Text(
+                  '${s.name} (${s.provider})',
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             ),
           ],
@@ -971,26 +1081,20 @@ class _DatabaseFormBodyState extends ConsumerState<_DatabaseFormBody> {
               ? null
               : (v) => setState(() => _backupEnabled = v),
         ),
-        Row(
+        ResponsiveFieldRow(
+          breakpoint: 480,
+          spacing: 10,
+          runSpacing: 12,
           children: <Widget>[
-            Expanded(
-              child: TextField(
-                controller: _intervalCtrl,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: 'Intervalo (horas)',
-                ),
-              ),
+            TextField(
+              controller: _intervalCtrl,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Intervalo (horas)'),
             ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: TextField(
-                controller: _retentionCtrl,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: 'Retenção (cópias)',
-                ),
-              ),
+            TextField(
+              controller: _retentionCtrl,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Retenção (cópias)'),
             ),
           ],
         ),
@@ -1072,8 +1176,9 @@ class _DatabaseHistoryBodyState extends ConsumerState<_DatabaseHistoryBody> {
       );
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Erro ao baixar backup: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Erro ao baixar backup: $err')));
     }
   }
 
@@ -1124,10 +1229,24 @@ class _DatabaseHistoryBodyState extends ConsumerState<_DatabaseHistoryBody> {
         ),
         const SizedBox(height: 10),
         SegmentedButton<String>(
+          showSelectedIcon: false,
+          style: SegmentedButton.styleFrom(
+            visualDensity: VisualDensity.compact,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+          ),
           segments: const <ButtonSegment<String>>[
-            ButtonSegment(value: 'all', label: Text('Todas')),
-            ButtonSegment(value: 'success', label: Text('Concluídas')),
-            ButtonSegment(value: 'failed', label: Text('Falhas')),
+            ButtonSegment(
+              value: 'all',
+              label: Text('Todas', maxLines: 1, softWrap: false),
+            ),
+            ButtonSegment(
+              value: 'success',
+              label: Text('Concluídas', maxLines: 1, softWrap: false),
+            ),
+            ButtonSegment(
+              value: 'failed',
+              label: Text('Falhas', maxLines: 1, softWrap: false),
+            ),
           ],
           selected: <String>{_statusFilter},
           onSelectionChanged: (set) =>

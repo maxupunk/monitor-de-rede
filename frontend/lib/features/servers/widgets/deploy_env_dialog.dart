@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
@@ -217,8 +219,9 @@ class _DeployEnvBodyState extends ConsumerState<_DeployEnvBody>
       );
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Erro ao abrir versão: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Erro ao abrir versão: $err')));
     }
   }
 
@@ -229,6 +232,9 @@ class _DeployEnvBodyState extends ConsumerState<_DeployEnvBody>
     }
 
     final term = _searchController.text.trim().toLowerCase();
+    final viewportSize = MediaQuery.sizeOf(context);
+    final isCompact = viewportSize.width < 480;
+    final tabViewHeight = math.min(440.0, viewportSize.height * 0.56);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -236,6 +242,8 @@ class _DeployEnvBodyState extends ConsumerState<_DeployEnvBody>
       children: <Widget>[
         TabBar(
           controller: _tabController,
+          isScrollable: isCompact,
+          tabAlignment: isCompact ? TabAlignment.start : TabAlignment.fill,
           tabs: <Tab>[
             const Tab(text: 'Editar'),
             Tab(text: 'Histórico (${_versions.length})'),
@@ -243,7 +251,7 @@ class _DeployEnvBodyState extends ConsumerState<_DeployEnvBody>
         ),
         const SizedBox(height: 12),
         SizedBox(
-          height: 440,
+          height: tabViewHeight,
           child: TabBarView(
             controller: _tabController,
             children: <Widget>[
@@ -257,12 +265,28 @@ class _DeployEnvBodyState extends ConsumerState<_DeployEnvBody>
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: <Widget>[
                       SegmentedButton<bool>(
+                        showSelectedIcon: false,
+                        style: SegmentedButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                        ),
                         segments: const <ButtonSegment<bool>>[
                           ButtonSegment(
                             value: false,
-                            label: Text('Modo lista'),
+                            label: Text(
+                              'Modo lista',
+                              maxLines: 1,
+                              softWrap: false,
+                            ),
                           ),
-                          ButtonSegment(value: true, label: Text('Texto .env')),
+                          ButtonSegment(
+                            value: true,
+                            label: Text(
+                              'Texto .env',
+                              maxLines: 1,
+                              softWrap: false,
+                            ),
+                          ),
                         ],
                         selected: <bool>{_rawMode},
                         onSelectionChanged: (set) => _switchMode(set.first),
@@ -483,63 +507,85 @@ class _DeployEnvBodyState extends ConsumerState<_DeployEnvBody>
     final revealed = _revealedIndexes.contains(index);
     final validKey = isValidEnvKey(line.key);
 
+    final keyField = TextFormField(
+      initialValue: line.key,
+      readOnly: !widget.canAdmin,
+      style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+      decoration: InputDecoration(
+        labelText: 'Chave',
+        isDense: true,
+        errorText: validKey ? null : 'Chave inválida',
+      ),
+      onChanged: (v) => _updateVariable(index, key: v),
+    );
+
+    final valueField = TextFormField(
+      initialValue: line.value,
+      readOnly: !widget.canAdmin,
+      obscureText: secret && !revealed,
+      style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+      decoration: InputDecoration(
+        labelText: 'Valor',
+        isDense: true,
+        suffixIcon: secret
+            ? IconButton(
+                tooltip: revealed ? 'Ocultar' : 'Mostrar',
+                icon: Icon(
+                  revealed ? Icons.visibility_off : Icons.visibility,
+                  size: 18,
+                ),
+                onPressed: () => setState(() {
+                  if (revealed) {
+                    _revealedIndexes.remove(index);
+                  } else {
+                    _revealedIndexes.add(index);
+                  }
+                }),
+              )
+            : null,
+      ),
+      onChanged: (v) => _updateVariable(index, value: v),
+    );
+
+    final deleteButton = widget.canAdmin
+        ? IconButton(
+            tooltip: 'Remover variável',
+            icon: const Icon(Icons.delete_outline, size: 20),
+            onPressed: () => _removeLine(index),
+          )
+        : null;
+
     return NestedPanel(
       padding: const EdgeInsets.all(10),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Expanded(
-            flex: 2,
-            child: TextFormField(
-              initialValue: line.key,
-              readOnly: !widget.canAdmin,
-              style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
-              decoration: InputDecoration(
-                labelText: 'Chave',
-                isDense: true,
-                errorText: validKey ? null : 'Chave inválida',
-              ),
-              onChanged: (v) => _updateVariable(index, key: v),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            flex: 3,
-            child: TextFormField(
-              initialValue: line.value,
-              readOnly: !widget.canAdmin,
-              obscureText: secret && !revealed,
-              style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
-              decoration: InputDecoration(
-                labelText: 'Valor',
-                isDense: true,
-                suffixIcon: secret
-                    ? IconButton(
-                        tooltip: revealed ? 'Ocultar' : 'Mostrar',
-                        icon: Icon(
-                          revealed ? Icons.visibility_off : Icons.visibility,
-                          size: 18,
-                        ),
-                        onPressed: () => setState(() {
-                          if (revealed) {
-                            _revealedIndexes.remove(index);
-                          } else {
-                            _revealedIndexes.add(index);
-                          }
-                        }),
-                      )
-                    : null,
-              ),
-              onChanged: (v) => _updateVariable(index, value: v),
-            ),
-          ),
-          if (widget.canAdmin)
-            IconButton(
-              tooltip: 'Remover variável',
-              icon: const Icon(Icons.delete_outline, size: 20),
-              onPressed: () => _removeLine(index),
-            ),
-        ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth < 480) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Expanded(child: keyField),
+                    ?deleteButton,
+                  ],
+                ),
+                const SizedBox(height: 8),
+                valueField,
+              ],
+            );
+          }
+
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Expanded(flex: 2, child: keyField),
+              const SizedBox(width: 8),
+              Expanded(flex: 3, child: valueField),
+              ?deleteButton,
+            ],
+          );
+        },
       ),
     );
   }

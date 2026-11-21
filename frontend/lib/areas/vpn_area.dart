@@ -259,7 +259,8 @@ final AreaContribution vpnArea = AreaContribution(
       id: 'vpn',
       order: 20,
       title: 'Pela VPN',
-      description: 'Servidor em outra rede. Um script só sobe o túnel WireGuard até o IP público desta central e instala o agente, que passa a falar com ela apenas por dentro do túnel.',
+      description:
+          'Servidor em outra rede. Um script só sobe o túnel WireGuard até o IP público desta central e instala o agente, que passa a falar com ela apenas por dentro do túnel.',
       icon: Icons.vpn_lock_outlined,
       recommended: true,
       moveExistingLabel: 'Mover para a VPN',

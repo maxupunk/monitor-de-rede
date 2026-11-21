@@ -57,7 +57,8 @@ Future<void> showEphemeralRevealDialog({
   return showAdaptiveFormSheet<void>(
     context: context,
     title: actionTitle,
-    subtitle: 'Exibição temporária apenas para esta sessão — nunca gravada em histórico ou logs.',
+    subtitle:
+        'Exibição temporária apenas para esta sessão — nunca gravada em histórico ou logs.',
     maxWidth: 520,
     builder: (_) => _EphemeralRevealBody(
       deviceId: deviceId,

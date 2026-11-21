@@ -22,43 +22,49 @@ import 'package:netmonitor_app/theme/app_theme.dart';
 
 void main() {
   group('NetworkAreaContribution (ADR 017 / 019)', () {
-    test('declares exact routeMeta areas: core for /devices, network for network routes', () {
-      expect(networkArea.routeMeta['/devices']?.area, ProductArea.core);
-      expect(networkArea.routeMeta['/devices/:id']?.area, ProductArea.core);
-      expect(networkArea.routeMeta['/topology']?.area, ProductArea.network);
-      expect(networkArea.routeMeta['/topology']?.fullBleed, isTrue);
-      expect(networkArea.routeMeta['/discovery']?.area, ProductArea.network);
-      expect(networkArea.routeMeta['/networks']?.area, ProductArea.network);
-      expect(networkArea.routeMeta['/sites']?.area, ProductArea.network);
-      expect(networkArea.routeMeta['/link-tests']?.area, ProductArea.network);
-      expect(networkArea.routeMeta['/wifi']?.area, ProductArea.network);
-      expect(networkArea.routeMeta['/probes']?.area, ProductArea.network);
-      expect(networkArea.routeMeta['/probes']?.aiScreen, isNull);
-    });
+    test(
+      'declares exact routeMeta areas: core for /devices, network for network routes',
+      () {
+        expect(networkArea.routeMeta['/devices']?.area, ProductArea.core);
+        expect(networkArea.routeMeta['/devices/:id']?.area, ProductArea.core);
+        expect(networkArea.routeMeta['/topology']?.area, ProductArea.network);
+        expect(networkArea.routeMeta['/topology']?.fullBleed, isTrue);
+        expect(networkArea.routeMeta['/discovery']?.area, ProductArea.network);
+        expect(networkArea.routeMeta['/networks']?.area, ProductArea.network);
+        expect(networkArea.routeMeta['/sites']?.area, ProductArea.network);
+        expect(networkArea.routeMeta['/link-tests']?.area, ProductArea.network);
+        expect(networkArea.routeMeta['/wifi']?.area, ProductArea.network);
+        expect(networkArea.routeMeta['/probes']?.area, ProductArea.network);
+        expect(networkArea.routeMeta['/probes']?.aiScreen, isNull);
+      },
+    );
 
-    test('registers all 5 network dashboard widgets, 3 navActions, and 3 settings cards', () {
-      expect(
-        networkArea.widgets.keys,
-        containsAll(<String>[
-          'dns_latency',
-          'saas_services',
-          'saas_heatmap',
-          'ether_bandwidth',
-          'bandwidth_vs_latency',
-        ]),
-      );
-      expect(
-        networkArea.navActions.keys,
-        containsAll(<NavAction>[
-          NavAction.playbook,
-          NavAction.traceroute,
-          NavAction.speedTest,
-        ]),
-      );
-      expect(networkArea.settingsCards.length, 3);
-      expect(networkArea.settingsCards.first.tab, 'conectividade');
-      expect(networkArea.settingsCards.first.area, ProductArea.core);
-    });
+    test(
+      'registers all 5 network dashboard widgets, 3 navActions, and 3 settings cards',
+      () {
+        expect(
+          networkArea.widgets.keys,
+          containsAll(<String>[
+            'dns_latency',
+            'saas_services',
+            'saas_heatmap',
+            'ether_bandwidth',
+            'bandwidth_vs_latency',
+          ]),
+        );
+        expect(
+          networkArea.navActions.keys,
+          containsAll(<NavAction>[
+            NavAction.playbook,
+            NavAction.traceroute,
+            NavAction.speedTest,
+          ]),
+        );
+        expect(networkArea.settingsCards.length, 3);
+        expect(networkArea.settingsCards.first.tab, 'conectividade');
+        expect(networkArea.settingsCards.first.area, ProductArea.core);
+      },
+    );
   });
 
   group('Network SSE Handlers (ZERO polling)', () {
@@ -110,87 +116,93 @@ void main() {
       },
     );
 
-    test('wifi:snapshot, wifi:watched, and wifi:roamed mutate wifiClientsProvider live', () {
-      final container = ProviderContainer();
-      addTearDown(container.dispose);
+    test(
+      'wifi:snapshot, wifi:watched, and wifi:roamed mutate wifiClientsProvider live',
+      () {
+        final container = ProviderContainer();
+        addTearDown(container.dispose);
 
-      final notifier = container.read(wifiClientsProvider.notifier);
-      notifier.applySnapshot(const <String, dynamic>{
-        'deviceId': 10,
-        'deviceName': 'AP-Sala',
-        'status': 'ok',
-        'canPing': true,
-        'stations': <Map<String, dynamic>>[
-          <String, dynamic>{
-            'mac': 'aa:bb:cc:dd:ee:01',
-            'signalDbm': -58,
-            'signalGrade': 'excellent',
-            'health': 'good',
-            'linkScore': 0.9,
-            'ssid': 'CorpWiFi',
-            'band': '5GHz',
-          },
-        ],
-      });
-      notifier.applyWatched(const <String, dynamic>{
-        'clients': <Map<String, dynamic>>[
-          <String, dynamic>{
-            'id': 1,
-            'mac': 'aa:bb:cc:dd:ee:01',
-            'name': 'Cam Entrada',
-            'state': 'online',
-            'deviceId': 10,
-            'deviceName': 'AP-Sala',
-          },
-        ],
-      });
-      notifier.applyRoamed(const <String, dynamic>{
-        'id': 99,
-        'mac': 'aa:bb:cc:dd:ee:01',
-        'fromDeviceName': 'AP-Corredor',
-        'toDeviceName': 'AP-Sala',
-        'signalBeforeDbm': -79,
-        'signalAfterDbm': -58,
-        'occurredAt': '2026-11-20T22:00:00Z',
-        'pingPong': false,
-      });
+        final notifier = container.read(wifiClientsProvider.notifier);
+        notifier.applySnapshot(const <String, dynamic>{
+          'deviceId': 10,
+          'deviceName': 'AP-Sala',
+          'status': 'ok',
+          'canPing': true,
+          'stations': <Map<String, dynamic>>[
+            <String, dynamic>{
+              'mac': 'aa:bb:cc:dd:ee:01',
+              'signalDbm': -58,
+              'signalGrade': 'excellent',
+              'health': 'good',
+              'linkScore': 0.9,
+              'ssid': 'CorpWiFi',
+              'band': '5GHz',
+            },
+          ],
+        });
+        notifier.applyWatched(const <String, dynamic>{
+          'clients': <Map<String, dynamic>>[
+            <String, dynamic>{
+              'id': 1,
+              'mac': 'aa:bb:cc:dd:ee:01',
+              'name': 'Cam Entrada',
+              'state': 'online',
+              'deviceId': 10,
+              'deviceName': 'AP-Sala',
+            },
+          ],
+        });
+        notifier.applyRoamed(const <String, dynamic>{
+          'id': 99,
+          'mac': 'aa:bb:cc:dd:ee:01',
+          'fromDeviceName': 'AP-Corredor',
+          'toDeviceName': 'AP-Sala',
+          'signalBeforeDbm': -79,
+          'signalAfterDbm': -58,
+          'occurredAt': '2026-11-20T22:00:00Z',
+          'pingPong': false,
+        });
 
-      final wifi = container.read(wifiClientsProvider);
-      expect(wifi.rows.length, 1);
-      expect(wifi.watched.length, 1);
-      expect(wifi.roams.length, 1);
-      expect(wifi.roams.first.toDeviceName, 'AP-Sala');
-    });
+        final wifi = container.read(wifiClientsProvider);
+        expect(wifi.rows.length, 1);
+        expect(wifi.watched.length, 1);
+        expect(wifi.roams.length, 1);
+        expect(wifi.roams.first.toDeviceName, 'AP-Sala');
+      },
+    );
 
-    test('link_test:sample caps ring buffer at 120 and ignores out-of-order samples', () {
-      final container = ProviderContainer();
-      addTearDown(container.dispose);
+    test(
+      'link_test:sample caps ring buffer at 120 and ignores out-of-order samples',
+      () {
+        final container = ProviderContainer();
+        addTearDown(container.dispose);
 
-      final notifier = container.read(linkTestsProvider.notifier);
-      for (var i = 1; i <= 140; i++) {
-        notifier.applySample(<String, dynamic>{
+        final notifier = container.read(linkTestsProvider.notifier);
+        for (var i = 1; i <= 140; i++) {
+          notifier.applySample(<String, dynamic>{
+            'testId': 5,
+            'legSeq': 0,
+            'flow': 'forward',
+            'bps': i * 1000000.0,
+            'tMs': i * 1000,
+          });
+        }
+        // Fora de ordem ignorado
+        notifier.applySample(const <String, dynamic>{
           'testId': 5,
           'legSeq': 0,
           'flow': 'forward',
-          'bps': i * 1000000.0,
-          'tMs': i * 1000,
+          'bps': 999.0,
+          'tMs': 5000,
         });
-      }
-      // Fora de ordem ignorado
-      notifier.applySample(const <String, dynamic>{
-        'testId': 5,
-        'legSeq': 0,
-        'flow': 'forward',
-        'bps': 999.0,
-        'tMs': 5000,
-      });
 
-      final samples = container
-          .read(linkTestsProvider)
-          .samplesFor(5, 0, 'forward');
-      expect(samples.length, linkTestSampleLimit);
-      expect(samples.last.tMs, 140000);
-    });
+        final samples = container
+            .read(linkTestsProvider)
+            .samplesFor(5, 0, 'forward');
+        expect(samples.length, linkTestSampleLimit);
+        expect(samples.last.tMs, 140000);
+      },
+    );
   });
 
   group('Pure Network Helpers & Parsers', () {

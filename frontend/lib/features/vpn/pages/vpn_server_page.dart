@@ -184,403 +184,411 @@ class _VpnServerPageState extends ConsumerState<VpnServerPage> {
     );
     final cidrLocked = configured && peersTotal > 0;
 
+    final isCompact = MediaQuery.sizeOf(context).width < 560;
+    final preflightBtn = FilledButton.tonalIcon(
+      onPressed: vpn.testing
+          ? null
+          : () => ref
+                .read(vpnProvider.notifier)
+                .runPreflight(
+                  publicEndpoint: _endpointCtrl.text.trim().isEmpty
+                      ? null
+                      : _endpointCtrl.text.trim(),
+                  listenPort:
+                      int.tryParse(_listenPortCtrl.text.trim()) ?? 51820,
+                ),
+      icon: vpn.testing
+          ? const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const Icon(Icons.network_check, size: 18),
+      label: const Text('Testar acessibilidade'),
+    );
+
     return VpnLayout(
       activeTab: 'server',
-      child: vpn.loading && serverState == null
-          ? const LoadingStateView(message: 'Carregando servidor VPN...')
-          : SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  if (vpn.error != null) ...<Widget>[
-                    NestedPanel(
-                      tone: SemanticTone.error,
-                      child: Text(
-                        vpn.error!,
-                        style: context.textTheme.bodySmall?.copyWith(
-                          color: context.semanticColors
-                              .resolve(SemanticTone.error, scheme)
-                              .onContainer,
-                        ),
+      slivers: <Widget>[
+        if (vpn.loading && serverState == null)
+          const SliverFillRemaining(
+            hasScrollBody: false,
+            child: LoadingStateView(message: 'Carregando servidor VPN...'),
+          )
+        else
+          SliverToBoxAdapter(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                if (vpn.error != null) ...<Widget>[
+                  NestedPanel(
+                    tone: SemanticTone.error,
+                    child: Text(
+                      vpn.error!,
+                      style: context.textTheme.bodySmall?.copyWith(
+                        color: context.semanticColors
+                            .resolve(SemanticTone.error, scheme)
+                            .onContainer,
                       ),
                     ),
-                    const SizedBox(height: 12),
-                  ],
-                  // 1. Cartão de estado do serviço
-                  SectionCard(
-                    title: 'Estado do serviço WireGuard',
-                    subtitle: serverState?.server?.interfaceName ?? 'wg0',
-                    icon: Icons.shield_outlined,
-                    trailing: SemanticChip(
-                      label: statusLabel,
-                      tone: statusTone,
-                      compact: true,
-                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                // 1. Cartão de estado do serviço
+                SectionCard(
+                  title: 'Estado do serviço WireGuard',
+                  subtitle: serverState?.server?.interfaceName ?? 'wg0',
+                  icon: Icons.shield_outlined,
+                  trailing: SemanticChip(
+                    label: statusLabel,
+                    tone: statusTone,
+                    compact: true,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      ResponsiveGrid(
+                        xs: 2,
+                        sm: 2,
+                        md: 4,
+                        lg: 4,
+                        xl: 4,
+                        children: <Widget>[
+                          KpiCard(
+                            label: 'Peers conectados',
+                            value: '$peersConnected / $peersTotal',
+                            icon: Icons.devices_outlined,
+                            tone: peersConnected > 0
+                                ? SemanticTone.success
+                                : SemanticTone.info,
+                          ),
+                          KpiCard(
+                            label: 'Tráfego RX',
+                            value: formatBytes(serverState?.bytesRx ?? 0),
+                            icon: Icons.south_west,
+                            tone: SemanticTone.success,
+                          ),
+                          KpiCard(
+                            label: 'Tráfego TX',
+                            value: formatBytes(serverState?.bytesTx ?? 0),
+                            icon: Icons.north_east,
+                            tone: SemanticTone.info,
+                          ),
+                          KpiCard(
+                            label: 'IP do servidor',
+                            value: serverState?.serverAddress ?? '—',
+                            icon: Icons.hub_outlined,
+                            tone: SemanticTone.primary,
+                            subtitle: serverState?.cidr,
+                          ),
+                        ],
+                      ),
+                      if (serverState?.server?.publicKey.isNotEmpty ==
+                          true) ...<Widget>[
+                        const SizedBox(height: 12),
+                        KeyValueRow(
+                          label: 'Chave pública do servidor',
+                          value: serverState!.server!.publicKey,
+                          monospace: true,
+                          copyable: true,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // 2. Cartão de Preflight (acessibilidade externa)
+                SectionCard(
+                  title: 'Acessibilidade externa',
+                  subtitle:
+                      'Verifica se a porta UDP configurada responde pelo endereço público.',
+                  icon: Icons.travel_explore_outlined,
+                  trailing: isCompact ? null : preflightBtn,
+                  footer: isCompact
+                      ? Align(
+                          alignment: Alignment.centerRight,
+                          child: preflightBtn,
+                        )
+                      : null,
+                  child: vpn.preflight == null
+                      ? Text(
+                          'Execute o teste para verificar NAT, CGNAT, resolução DNS e porta UDP.',
+                          style: context.textTheme.bodySmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        )
+                      : NestedPanel(
+                          tone: vpn.preflight!.tone,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: <Widget>[
+                              Text(
+                                vpn.preflight!.message,
+                                style: context.textTheme.bodyMedium?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              if (vpn.preflight!.recommendation != null &&
+                                  vpn
+                                      .preflight!
+                                      .recommendation!
+                                      .isNotEmpty) ...<Widget>[
+                                const SizedBox(height: 4),
+                                Text(
+                                  vpn.preflight!.recommendation!,
+                                  style: context.textTheme.bodySmall,
+                                ),
+                              ],
+                              const SizedBox(height: 8),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 6,
+                                children: <Widget>[
+                                  if (vpn.preflight!.publicIp != null)
+                                    SemanticChip(
+                                      label:
+                                          'IP público: ${vpn.preflight!.publicIp}',
+                                      tone: SemanticTone.info,
+                                      compact: true,
+                                    ),
+                                  SemanticChip(
+                                    label: 'Porta UDP ${vpn.preflight!.port}',
+                                    tone: SemanticTone.primary,
+                                    compact: true,
+                                  ),
+                                  if (vpn.preflight!.isCgnat)
+                                    const SemanticChip(
+                                      label: 'CGNAT detectado',
+                                      tone: SemanticTone.warning,
+                                      compact: true,
+                                    ),
+                                  if (!vpn.preflight!.verified)
+                                    const SemanticChip(
+                                      label: 'Verificação parcial',
+                                      tone: SemanticTone.warning,
+                                      compact: true,
+                                    ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                ),
+                const SizedBox(height: 16),
+
+                // 3. Configuração do servidor
+                SectionCard(
+                  title: 'Configuração da interface',
+                  subtitle:
+                      'Parâmetros aplicados ao WireGuard pelo watcher local.',
+                  icon: Icons.tune,
+                  child: Form(
+                    key: _formKey,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: <Widget>[
-                        ResponsiveGrid(
-                          xs: 1,
-                          sm: 2,
-                          md: 4,
-                          lg: 4,
-                          xl: 4,
-                          children: <Widget>[
-                            KpiCard(
-                              label: 'Peers conectados',
-                              value: '$peersConnected / $peersTotal',
-                              icon: Icons.devices_outlined,
-                              tone: peersConnected > 0
-                                  ? SemanticTone.success
-                                  : SemanticTone.info,
-                            ),
-                            KpiCard(
-                              label: 'Tráfego RX',
-                              value: formatBytes(serverState?.bytesRx ?? 0),
-                              icon: Icons.south_west,
-                              tone: SemanticTone.success,
-                            ),
-                            KpiCard(
-                              label: 'Tráfego TX',
-                              value: formatBytes(serverState?.bytesTx ?? 0),
-                              icon: Icons.north_east,
-                              tone: SemanticTone.info,
-                            ),
-                            KpiCard(
-                              label: 'IP do servidor',
-                              value: serverState?.serverAddress ?? '—',
-                              icon: Icons.hub_outlined,
-                              tone: SemanticTone.primary,
-                              subtitle: serverState?.cidr,
-                            ),
-                          ],
-                        ),
-                        if (serverState?.server?.publicKey.isNotEmpty ==
-                            true) ...<Widget>[
-                          const SizedBox(height: 12),
-                          KeyValueRow(
-                            label: 'Chave pública do servidor',
-                            value: serverState!.server!.publicKey,
-                            monospace: true,
-                            copyable: true,
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-
-                  // 2. Cartão de Preflight (acessibilidade externa)
-                  SectionCard(
-                    title: 'Acessibilidade externa',
-                    subtitle: 'Verifica se a porta UDP configurada responde pelo endereço público.',
-                    icon: Icons.travel_explore_outlined,
-                    trailing: FilledButton.tonalIcon(
-                      onPressed: vpn.testing
-                          ? null
-                          : () => ref
-                                .read(vpnProvider.notifier)
-                                .runPreflight(
-                                  publicEndpoint:
-                                      _endpointCtrl.text.trim().isEmpty
-                                      ? null
-                                      : _endpointCtrl.text.trim(),
-                                  listenPort:
-                                      int.tryParse(
-                                        _listenPortCtrl.text.trim(),
-                                      ) ??
-                                      51820,
-                                ),
-                      icon: vpn.testing
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.network_check, size: 18),
-                      label: const Text('Testar acessibilidade'),
-                    ),
-                    child: vpn.preflight == null
-                        ? Text(
-                            'Execute o teste para verificar NAT, CGNAT, resolução DNS e porta UDP.',
-                            style: context.textTheme.bodySmall?.copyWith(
-                              color: scheme.onSurfaceVariant,
-                            ),
-                          )
-                        : NestedPanel(
-                            tone: vpn.preflight!.tone,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                        if (hasDivergence) ...<Widget>[
+                          NestedPanel(
+                            tone: SemanticTone.warning,
+                            child: Wrap(
+                              spacing: 8,
+                              runSpacing: 6,
+                              alignment: WrapAlignment.spaceBetween,
+                              crossAxisAlignment: WrapCrossAlignment.center,
                               children: <Widget>[
-                                Text(
-                                  vpn.preflight!.message,
-                                  style: context.textTheme.bodyMedium?.copyWith(
-                                    fontWeight: FontWeight.w700,
-                                  ),
+                                const Text(
+                                  'O endereço público definido na central difere do endpoint da VPN.',
                                 ),
-                                if (vpn.preflight!.recommendation != null &&
-                                    vpn
-                                        .preflight!
-                                        .recommendation!
-                                        .isNotEmpty) ...<Widget>[
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    vpn.preflight!.recommendation!,
-                                    style: context.textTheme.bodySmall,
-                                  ),
-                                ],
-                                const SizedBox(height: 8),
-                                Wrap(
-                                  spacing: 8,
-                                  runSpacing: 6,
-                                  children: <Widget>[
-                                    if (vpn.preflight!.publicIp != null)
-                                      SemanticChip(
-                                        label:
-                                            'IP público: ${vpn.preflight!.publicIp}',
-                                        tone: SemanticTone.info,
-                                        compact: true,
-                                      ),
-                                    SemanticChip(
-                                      label: 'Porta UDP ${vpn.preflight!.port}',
-                                      tone: SemanticTone.primary,
-                                      compact: true,
-                                    ),
-                                    if (vpn.preflight!.isCgnat)
-                                      const SemanticChip(
-                                        label: 'CGNAT detectado',
-                                        tone: SemanticTone.warning,
-                                        compact: true,
-                                      ),
-                                    if (!vpn.preflight!.verified)
-                                      const SemanticChip(
-                                        label: 'Verificação parcial',
-                                        tone: SemanticTone.warning,
-                                        compact: true,
-                                      ),
-                                  ],
+                                TextButton(
+                                  onPressed: canWrite
+                                      ? () => setState(
+                                          () => _endpointCtrl.text =
+                                              publicOverride!.address,
+                                        )
+                                      : null,
+                                  child: Text('Usar ${publicOverride.address}'),
                                 ),
                               ],
                             ),
                           ),
-                  ),
-                  const SizedBox(height: 16),
-
-                  // 3. Configuração do servidor
-                  SectionCard(
-                    title: 'Configuração da interface',
-                    subtitle:
-                        'Parâmetros aplicados ao WireGuard pelo watcher local.',
-                    icon: Icons.tune,
-                    child: Form(
-                      key: _formKey,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: <Widget>[
-                          if (hasDivergence) ...<Widget>[
-                            NestedPanel(
-                              tone: SemanticTone.warning,
-                              child: Row(
-                                children: <Widget>[
-                                  const Expanded(
-                                    child: Text(
-                                      'O endereço público definido na central difere do endpoint da VPN.',
+                          const SizedBox(height: 12),
+                        ],
+                        TextFormField(
+                          controller: _endpointCtrl,
+                          enabled: canWrite,
+                          decoration: InputDecoration(
+                            labelText: 'Endpoint público (IP ou domínio)',
+                            hintText: 'vpn.seudominio.com.br',
+                            suffixIcon: IconButton(
+                              tooltip: 'Detectar endereço público',
+                              onPressed: canWrite && !vpn.testing
+                                  ? _detectEndpoint
+                                  : null,
+                              icon: const Icon(Icons.my_location_outlined),
+                            ),
+                          ),
+                        ),
+                        if (vpn.addresses.isNotEmpty) ...<Widget>[
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            children: vpn.addresses
+                                .take(4)
+                                .map((addr) {
+                                  return ActionChip(
+                                    label: Text(
+                                      '${addr.label}: ${addr.address}',
                                     ),
-                                  ),
-                                  TextButton(
                                     onPressed: canWrite
                                         ? () => setState(
                                             () => _endpointCtrl.text =
-                                                publicOverride!.address,
+                                                addr.address,
                                           )
                                         : null,
-                                    child: Text(
-                                      'Usar ${publicOverride.address}',
-                                    ),
-                                  ),
-                                ],
+                                  );
+                                })
+                                .toList(growable: false),
+                          ),
+                        ],
+                        const SizedBox(height: 12),
+                        ResponsiveFieldRow(
+                          breakpoint: 640,
+                          spacing: 12,
+                          runSpacing: 12,
+                          children: <Widget>[
+                            TextFormField(
+                              controller: _listenPortCtrl,
+                              enabled: canWrite,
+                              keyboardType: TextInputType.number,
+                              decoration: const InputDecoration(
+                                labelText: 'Porta UDP *',
+                                hintText: '51820',
                               ),
+                              validator: (v) {
+                                final port = int.tryParse(v?.trim() ?? '');
+                                if (port == null || port < 1 || port > 65535) {
+                                  return 'Porta entre 1 e 65535';
+                                }
+                                return null;
+                              },
                             ),
-                            const SizedBox(height: 12),
-                          ],
-                          TextFormField(
-                            controller: _endpointCtrl,
-                            enabled: canWrite,
-                            decoration: InputDecoration(
-                              labelText: 'Endpoint público (IP ou domínio)',
-                              hintText: 'vpn.seudominio.com.br',
-                              suffixIcon: IconButton(
-                                tooltip: 'Detectar endereço público',
-                                onPressed: canWrite && !vpn.testing
-                                    ? _detectEndpoint
+                            TextFormField(
+                              controller: _cidrCtrl,
+                              enabled: canWrite && !cidrLocked,
+                              onChanged: (_) => setState(() {}),
+                              decoration: InputDecoration(
+                                labelText: 'Faixa CIDR da VPN *',
+                                hintText: '10.8.0.0/24',
+                                helperText: cidrLocked
+                                    ? 'Bloqueado enquanto houver peers ativos'
                                     : null,
-                                icon: const Icon(Icons.my_location_outlined),
                               ),
+                              validator: (v) {
+                                if (parseIpv4Cidr(v ?? '') == null) {
+                                  return 'CIDR IPv4 inválido (ex.: 10.8.0.0/24)';
+                                }
+                                return null;
+                              },
                             ),
-                          ),
-                          if (vpn.addresses.isNotEmpty) ...<Widget>[
-                            const SizedBox(height: 8),
-                            Wrap(
-                              spacing: 6,
-                              runSpacing: 6,
-                              children: vpn.addresses
-                                  .take(4)
-                                  .map((addr) {
-                                    return ActionChip(
-                                      label: Text(
-                                        '${addr.label}: ${addr.address}',
-                                      ),
-                                      onPressed: canWrite
-                                          ? () => setState(
-                                              () => _endpointCtrl.text =
-                                                  addr.address,
-                                            )
-                                          : null,
-                                    );
-                                  })
-                                  .toList(growable: false),
+                            TextFormField(
+                              controller: _mtuCtrl,
+                              enabled: canWrite,
+                              keyboardType: TextInputType.number,
+                              decoration: const InputDecoration(
+                                labelText: 'MTU',
+                                hintText: '1420',
+                              ),
+                              validator: (v) {
+                                final mtu = int.tryParse(v?.trim() ?? '');
+                                if (mtu == null || mtu < 1280 || mtu > 1500) {
+                                  return 'MTU entre 1280 e 1500';
+                                }
+                                return null;
+                              },
                             ),
                           ],
-                          const SizedBox(height: 12),
-                          ResponsiveGrid(
-                            xs: 1,
-                            sm: 2,
-                            md: 3,
-                            lg: 3,
-                            xl: 3,
-                            children: <Widget>[
-                              TextFormField(
-                                controller: _listenPortCtrl,
-                                enabled: canWrite,
-                                keyboardType: TextInputType.number,
-                                decoration: const InputDecoration(
-                                  labelText: 'Porta UDP *',
-                                  hintText: '51820',
-                                ),
-                                validator: (v) {
-                                  final port = int.tryParse(v?.trim() ?? '');
-                                  if (port == null ||
-                                      port < 1 ||
-                                      port > 65535) {
-                                    return 'Porta entre 1 e 65535';
-                                  }
-                                  return null;
-                                },
-                              ),
-                              TextFormField(
-                                controller: _cidrCtrl,
-                                enabled: canWrite && !cidrLocked,
-                                onChanged: (_) => setState(() {}),
-                                decoration: InputDecoration(
-                                  labelText: 'Faixa CIDR da VPN *',
-                                  hintText: '10.8.0.0/24',
-                                  helperText: cidrLocked
-                                      ? 'Bloqueado enquanto houver peers ativos'
-                                      : null,
-                                ),
-                                validator: (v) {
-                                  if (parseIpv4Cidr(v ?? '') == null) {
-                                    return 'CIDR IPv4 inválido (ex.: 10.8.0.0/24)';
-                                  }
-                                  return null;
-                                },
-                              ),
-                              TextFormField(
-                                controller: _mtuCtrl,
-                                enabled: canWrite,
-                                keyboardType: TextInputType.number,
-                                decoration: const InputDecoration(
-                                  labelText: 'MTU',
-                                  hintText: '1420',
-                                ),
-                                validator: (v) {
-                                  final mtu = int.tryParse(v?.trim() ?? '');
-                                  if (mtu == null || mtu < 1280 || mtu > 1500) {
-                                    return 'MTU entre 1280 e 1500';
-                                  }
-                                  return null;
-                                },
-                              ),
-                            ],
-                          ),
-                          if (!cidrLocked && freeCidrs.isNotEmpty) ...<Widget>[
-                            const SizedBox(height: 8),
-                            Wrap(
-                              spacing: 6,
-                              runSpacing: 6,
-                              children: freeCidrs
-                                  .take(4)
-                                  .map((cidr) {
-                                    return ActionChip(
-                                      label: Text(cidr),
-                                      onPressed: canWrite
-                                          ? () => setState(
-                                              () => _cidrCtrl.text = cidr,
-                                            )
-                                          : null,
-                                    );
-                                  })
-                                  .toList(growable: false),
-                            ),
-                          ],
-                          if (overlappingCidr != null) ...<Widget>[
-                            const SizedBox(height: 8),
-                            NestedPanel(
-                              tone: SemanticTone.warning,
-                              child: Text(
-                                'Atenção: a faixa $cidrValue sobrepõe a rede já cadastrada $overlappingCidr.',
-                              ),
-                            ),
-                          ],
-                          const SizedBox(height: 12),
-                          TextFormField(
-                            controller: _dnsCtrl,
-                            enabled: canWrite,
-                            decoration: const InputDecoration(
-                              labelText: 'Servidores DNS (opcional)',
-                              hintText: '1.1.1.1, 8.8.8.8',
-                            ),
-                          ),
+                        ),
+                        if (!cidrLocked && freeCidrs.isNotEmpty) ...<Widget>[
                           const SizedBox(height: 8),
-                          SwitchListTile(
-                            contentPadding: EdgeInsets.zero,
-                            title: const Text('Permitir tráfego entre peers'),
-                            subtitle: const Text(
-                              'Por padrão os dispositivos conversam apenas com a central (isolamento de clientes).',
-                            ),
-                            value: _allowPeerToPeer,
-                            onChanged: canWrite
-                                ? (v) => setState(() => _allowPeerToPeer = v)
-                                : null,
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            children: freeCidrs
+                                .take(4)
+                                .map((cidr) {
+                                  return ActionChip(
+                                    label: Text(cidr),
+                                    onPressed: canWrite
+                                        ? () => setState(
+                                            () => _cidrCtrl.text = cidr,
+                                          )
+                                        : null,
+                                  );
+                                })
+                                .toList(growable: false),
                           ),
-                          const SizedBox(height: 14),
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: FilledButton.icon(
-                              onPressed: canWrite && !vpn.saving ? _save : null,
-                              icon: vpn.saving
-                                  ? const SizedBox(
-                                      width: 16,
-                                      height: 16,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
-                                    )
-                                  : const Icon(Icons.save_outlined),
-                              label: Text(
-                                configured
-                                    ? 'Salvar configuração'
-                                    : 'Ativar servidor VPN',
-                              ),
+                        ],
+                        if (overlappingCidr != null) ...<Widget>[
+                          const SizedBox(height: 8),
+                          NestedPanel(
+                            tone: SemanticTone.warning,
+                            child: Text(
+                              'Atenção: a faixa $cidrValue sobrepõe a rede já cadastrada $overlappingCidr.',
                             ),
                           ),
                         ],
-                      ),
+                        const SizedBox(height: 12),
+                        TextFormField(
+                          controller: _dnsCtrl,
+                          enabled: canWrite,
+                          decoration: const InputDecoration(
+                            labelText: 'Servidores DNS (opcional)',
+                            hintText: '1.1.1.1, 8.8.8.8',
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Permitir tráfego entre peers'),
+                          subtitle: const Text(
+                            'Por padrão os dispositivos conversam apenas com a central (isolamento de clientes).',
+                          ),
+                          value: _allowPeerToPeer,
+                          onChanged: canWrite
+                              ? (v) => setState(() => _allowPeerToPeer = v)
+                              : null,
+                        ),
+                        const SizedBox(height: 14),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: FilledButton.icon(
+                            onPressed: canWrite && !vpn.saving ? _save : null,
+                            icon: vpn.saving
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.save_outlined),
+                            label: Text(
+                              configured
+                                  ? 'Salvar configuração'
+                                  : 'Ativar servidor VPN',
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
+          ),
+      ],
     );
   }
 }

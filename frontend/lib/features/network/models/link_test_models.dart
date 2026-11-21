@@ -260,19 +260,19 @@ class LinkTestLegModel {
       reverseBps: parseDoubleOrNull(json['reverseBps']),
       retransmits: parseIntOrNull(json['retransmits']),
       error: json['error'] as String?,
-      stages: asJsonMapList(json['stages'])
-          .map(LinkTestStageModel.fromJson)
-          .toList(growable: false),
+      stages: asJsonMapList(
+        json['stages'],
+      ).map(LinkTestStageModel.fromJson).toList(growable: false),
       issues: asStringList(json['issues']),
-      fixes: asJsonMapList(json['fixes'])
-          .map(LinkTestFixModel.fromJson)
-          .toList(growable: false),
-      samples: asJsonMapList(json['samples'])
-          .map(LinkTestSampleModel.fromJson)
-          .toList(growable: false),
-      health: asJsonMapList(json['health'])
-          .map(LinkTestHealthSampleModel.fromJson)
-          .toList(growable: false),
+      fixes: asJsonMapList(
+        json['fixes'],
+      ).map(LinkTestFixModel.fromJson).toList(growable: false),
+      samples: asJsonMapList(
+        json['samples'],
+      ).map(LinkTestSampleModel.fromJson).toList(growable: false),
+      health: asJsonMapList(
+        json['health'],
+      ).map(LinkTestHealthSampleModel.fromJson).toList(growable: false),
     );
   }
 }
@@ -364,9 +364,9 @@ class LinkTestModel {
       sourceDeviceId: parseIntOrNull(json['sourceDeviceId']),
       targetDeviceId: parseIntOrNull(json['targetDeviceId']),
       spec: LinkTestSpecModel.fromJson(asJsonMap(json['spec'])),
-      legs: asJsonMapList(json['legs'])
-          .map(LinkTestLegModel.fromJson)
-          .toList(growable: false),
+      legs: asJsonMapList(
+        json['legs'],
+      ).map(LinkTestLegModel.fromJson).toList(growable: false),
       summary: LinkTestSummaryModel.tryFromJson(json['summary']),
       error: json['error'] as String?,
       createdAt: (json['createdAt'] as String?) ?? '',
@@ -399,15 +399,15 @@ class LinkTestPlanModel {
   factory LinkTestPlanModel.fromJson(Map<String, dynamic> json) {
     return LinkTestPlanModel(
       kind: (json['kind'] as String?) ?? 'link',
-      legs: asJsonMapList(json['legs'])
-          .map(LinkTestLegModel.fromJson)
-          .toList(growable: false),
+      legs: asJsonMapList(
+        json['legs'],
+      ).map(LinkTestLegModel.fromJson).toList(growable: false),
       estimatedSeconds: parseIntOrNull(json['estimatedSeconds']) ?? 0,
       warnings: asStringList(json['warnings']),
       blocking: asStringList(json['blocking']),
-      fixes: asJsonMapList(json['fixes'])
-          .map(LinkTestFixModel.fromJson)
-          .toList(growable: false),
+      fixes: asJsonMapList(
+        json['fixes'],
+      ).map(LinkTestFixModel.fromJson).toList(growable: false),
     );
   }
 }

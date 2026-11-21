@@ -124,19 +124,21 @@ class _DockerContainersPageState extends ConsumerState<DockerContainersPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        SearchFilterHeader(
+        UnifiedFilterBar(
           searchController: _searchController,
           searchHint: 'Buscar container, imagem ou projeto compose...',
           onSearchChanged: (v) => setState(() => _search = v),
-          filters: <Widget>[
+          quickChips: <Widget>[
             ChoiceChip(
               selected: _filter == ContainerStateFilter.all,
+              visualDensity: VisualDensity.compact,
               label: Text('Todos (${counts[ContainerStateFilter.all]})'),
               onSelected: (_) =>
                   setState(() => _filter = ContainerStateFilter.all),
             ),
             ChoiceChip(
               selected: _filter == ContainerStateFilter.running,
+              visualDensity: VisualDensity.compact,
               label: Text(
                 'Em execução (${counts[ContainerStateFilter.running]})',
               ),
@@ -145,6 +147,7 @@ class _DockerContainersPageState extends ConsumerState<DockerContainersPage> {
             ),
             ChoiceChip(
               selected: _filter == ContainerStateFilter.stopped,
+              visualDensity: VisualDensity.compact,
               label: Text('Parados (${counts[ContainerStateFilter.stopped]})'),
               onSelected: (_) =>
                   setState(() => _filter = ContainerStateFilter.stopped),
@@ -186,22 +189,9 @@ class _DockerContainersPageState extends ConsumerState<DockerContainersPage> {
                           horizontal: 16,
                           vertical: 12,
                         ),
-                        child: Row(
-                          children: <Widget>[
-                            Icon(
-                              expanded ? Icons.expand_less : Icons.expand_more,
-                              color: context.colorScheme.onSurfaceVariant,
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                group.label,
-                                style: context.textTheme.titleSmall?.copyWith(
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                            ),
-                            Wrap(
+                        child: LayoutBuilder(
+                          builder: (context, constraints) {
+                            final chips = Wrap(
                               spacing: 6,
                               runSpacing: 4,
                               children: <Widget>[
@@ -225,8 +215,63 @@ class _DockerContainersPageState extends ConsumerState<DockerContainersPage> {
                                   compact: true,
                                 ),
                               ],
-                            ),
-                          ],
+                            );
+                            if (constraints.maxWidth < 480) {
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: <Widget>[
+                                  Row(
+                                    children: <Widget>[
+                                      Icon(
+                                        expanded
+                                            ? Icons.expand_less
+                                            : Icons.expand_more,
+                                        color: context
+                                            .colorScheme
+                                            .onSurfaceVariant,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          group.label,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: context.textTheme.titleSmall
+                                              ?.copyWith(
+                                                fontWeight: FontWeight.w800,
+                                              ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+                                  chips,
+                                ],
+                              );
+                            }
+                            return Row(
+                              children: <Widget>[
+                                Icon(
+                                  expanded
+                                      ? Icons.expand_less
+                                      : Icons.expand_more,
+                                  color: context.colorScheme.onSurfaceVariant,
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    group.label,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: context.textTheme.titleSmall
+                                        ?.copyWith(fontWeight: FontWeight.w800),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                chips,
+                              ],
+                            );
+                          },
                         ),
                       ),
                     ),
@@ -328,7 +373,8 @@ class _ContainerRowTile extends StatelessWidget {
                           ),
                           if (container.isProtected)
                             const Tooltip(
-                              message: 'Protegido (com.netmonitor.protected=true): parar, recriar e remover bloqueados.',
+                              message:
+                                  'Protegido (com.netmonitor.protected=true): parar, recriar e remover bloqueados.',
                               child: SemanticChip(
                                 label: 'Protegido',
                                 tone: SemanticTone.info,

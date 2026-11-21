@@ -125,12 +125,11 @@ class _SetupPageState extends ConsumerState<SetupPage> {
                           labelText: 'E-mail',
                           prefixIcon: Icon(Icons.email_outlined),
                         ),
-                        validator: FormValidators.compose(
-                          <FormFieldValidator<String>>[
-                            FormValidators.required('Informe seu e-mail.'),
-                            FormValidators.email(),
-                          ],
-                        ),
+                        validator:
+                            FormValidators.compose(<FormFieldValidator<String>>[
+                              FormValidators.required('Informe seu e-mail.'),
+                              FormValidators.email(),
+                            ]),
                       ),
                       const SizedBox(height: 12),
                       TextFormField(
@@ -208,7 +207,8 @@ class _SetupPageState extends ConsumerState<SetupPage> {
                         onFieldSubmitted: (_) => _submit(),
                         decoration: const InputDecoration(
                           labelText: 'Token de instalação (SETUP_TOKEN)',
-                          helperText: 'Obrigatório para confirmar que você opera este servidor.',
+                          helperText:
+                              'Obrigatório para confirmar que você opera este servidor.',
                           prefixIcon: Icon(Icons.vpn_key_outlined),
                         ),
                         validator: FormValidators.required(
@@ -268,7 +268,8 @@ class _SetupPageState extends ConsumerState<SetupPage> {
                               const SizedBox(height: 8),
                               const CodeViewer(
                                 title: 'Ou consultar via CLI',
-                                code: 'docker compose exec netmonitor backend-cli task auth_setup_token',
+                                code:
+                                    'docker compose exec netmonitor backend-cli task auth_setup_token',
                               ),
                             ],
                           ],

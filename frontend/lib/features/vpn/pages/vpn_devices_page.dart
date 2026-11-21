@@ -105,7 +105,8 @@ class _VpnDevicesPageState extends ConsumerState<VpnDevicesPage> {
     final confirmed = await showConfirmActionDialog(
       context: context,
       title: 'Rotacionar chaves de ${peer.displayName}?',
-      message: 'A chave anterior será revogada imediatamente e um novo script/QR será gerado.',
+      message:
+          'A chave anterior será revogada imediatamente e um novo script/QR será gerado.',
       confirmLabel: 'Rotacionar',
       tone: SemanticTone.warning,
       icon: Icons.key_outlined,
@@ -136,8 +137,9 @@ class _VpnDevicesPageState extends ConsumerState<VpnDevicesPage> {
     if (!confirmed || !mounted) return;
     final ok = await ref.read(vpnProvider.notifier).revokePeer(peer.id);
     if (ok && mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Acesso VPN revogado.')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Acesso VPN revogado.')));
     }
   }
 
@@ -180,302 +182,300 @@ class _VpnDevicesPageState extends ConsumerState<VpnDevicesPage> {
 
     return VpnLayout(
       activeTab: 'devices',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          if (!vpn.isConfigured && !vpn.loading) ...<Widget>[
-            NestedPanel(
-              tone: SemanticTone.info,
-              child: Row(
-                children: <Widget>[
-                  const Expanded(
-                    child: Text(
-                      'Configure o servidor VPN antes de adicionar dispositivos.',
-                    ),
+      slivers: <Widget>[
+        SliverToBoxAdapter(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              if (!vpn.isConfigured && !vpn.loading) ...<Widget>[
+                NestedPanel(
+                  tone: SemanticTone.info,
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    alignment: WrapAlignment.spaceBetween,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: <Widget>[
+                      const Text(
+                        'Configure o servidor VPN antes de adicionar dispositivos.',
+                      ),
+                      TextButton(
+                        onPressed: () => context.go('/vpn'),
+                        child: const Text('Configurar servidor'),
+                      ),
+                    ],
                   ),
-                  TextButton(
-                    onPressed: () => context.go('/vpn'),
-                    child: const Text('Configurar servidor'),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 12),
-          ],
-          SearchFilterHeader(
-            searchController: _searchCtrl,
-            searchHint: 'Buscar por nome, IP ou perfil...',
-            onSearchChanged: (value) => setState(() => _query = value.trim()),
-            filters: <Widget>[
-              FilterChip(
-                label: const Text('Todos'),
-                selected: _statusFilter == null,
-                onSelected: (_) => setState(() => _statusFilter = null),
-              ),
-              for (final status in VpnConnectionStatus.values)
-                FilterChip(
-                  label: Text(status.label),
-                  selected: _statusFilter == status,
-                  onSelected: (selected) =>
-                      setState(() => _statusFilter = selected ? status : null),
                 ),
-            ],
-            actions: <Widget>[
-              if (canWrite)
-                FilledButton.icon(
-                  onPressed: vpn.isConfigured ? _addPeer : null,
-                  icon: const Icon(Icons.add),
-                  label: const Text('Adicionar dispositivo'),
-                ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Expanded(
-            child: vpn.loading && vpn.peers.isEmpty
-                ? const LoadingStateView(
-                    message: 'Carregando dispositivos VPN...',
-                  )
-                : filtered.isEmpty
-                ? EmptyStateView(
-                    title: vpn.peers.isEmpty
-                        ? 'Nenhum dispositivo na VPN'
-                        : 'Nenhum dispositivo encontrado',
-                    description: vpn.peers.isEmpty
-                        ? 'Adicione equipamentos, servidores remotos ou celulares para conectar pelo WireGuard.'
-                        : 'Ajuste os filtros de busca para ver outros peers.',
-                    icon: Icons.vpn_key_off_outlined,
-                    action: canWrite && vpn.isConfigured && vpn.peers.isEmpty
-                        ? FilledButton.icon(
-                            onPressed: _addPeer,
+                const SizedBox(height: 12),
+              ],
+              UnifiedFilterBar(
+                searchController: _searchCtrl,
+                searchHint: 'Buscar por nome, IP ou perfil...',
+                onSearchChanged: (value) =>
+                    setState(() => _query = value.trim()),
+                trailingActions: <Widget>[
+                  if (canWrite)
+                    MediaQuery.sizeOf(context).width < 520
+                        ? IconButton.filled(
+                            tooltip: 'Adicionar dispositivo',
+                            onPressed: vpn.isConfigured ? _addPeer : null,
+                            icon: const Icon(Icons.add),
+                          )
+                        : FilledButton.icon(
+                            onPressed: vpn.isConfigured ? _addPeer : null,
                             icon: const Icon(Icons.add),
                             label: const Text('Adicionar dispositivo'),
-                          )
-                        : null,
-                  )
-                : ListView.separated(
-                    itemCount: filtered.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 10),
-                    itemBuilder: (context, index) {
-                      final peer = filtered[index];
-                      final supportsQr = vpnProfileSupportsQrCode(
-                        peer.deviceProfile,
-                        vpn.profiles,
-                      );
-                      final lastActivity =
-                          peer.lastSeenAt ?? peer.lastHandshakeAt;
-                      return SectionCard(
-                        padding: const EdgeInsets.all(14),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: <Widget>[
-                            Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: <Widget>[
-                                Container(
-                                  width: 40,
-                                  height: 40,
-                                  decoration: BoxDecoration(
-                                    color: scheme.primaryContainer,
-                                    borderRadius: BorderRadius.circular(10),
+                          ),
+                ],
+                quickChips: <Widget>[
+                  FilterChip(
+                    label: const Text('Todos'),
+                    visualDensity: VisualDensity.compact,
+                    selected: _statusFilter == null,
+                    onSelected: (_) => setState(() => _statusFilter = null),
+                  ),
+                  for (final status in VpnConnectionStatus.values)
+                    FilterChip(
+                      label: Text(status.label),
+                      visualDensity: VisualDensity.compact,
+                      selected: _statusFilter == status,
+                      onSelected: (selected) => setState(
+                        () => _statusFilter = selected ? status : null,
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 12),
+            ],
+          ),
+        ),
+        if (vpn.loading && vpn.peers.isEmpty)
+          const SliverFillRemaining(
+            hasScrollBody: false,
+            child: LoadingStateView(message: 'Carregando dispositivos VPN...'),
+          )
+        else if (filtered.isEmpty)
+          SliverFillRemaining(
+            hasScrollBody: false,
+            child: EmptyStateView(
+              title: vpn.peers.isEmpty
+                  ? 'Nenhum dispositivo na VPN'
+                  : 'Nenhum dispositivo encontrado',
+              description: vpn.peers.isEmpty
+                  ? 'Adicione equipamentos, servidores remotos ou celulares para conectar pelo WireGuard.'
+                  : 'Ajuste os filtros de busca para ver outros peers.',
+              icon: Icons.vpn_key_off_outlined,
+              action: canWrite && vpn.isConfigured && vpn.peers.isEmpty
+                  ? FilledButton.icon(
+                      onPressed: _addPeer,
+                      icon: const Icon(Icons.add),
+                      label: const Text('Adicionar dispositivo'),
+                    )
+                  : null,
+            ),
+          )
+        else
+          SliverList.separated(
+            itemCount: filtered.length,
+            separatorBuilder: (_, _) => const SizedBox(height: 10),
+            itemBuilder: (context, index) {
+              final peer = filtered[index];
+              final supportsQr = vpnProfileSupportsQrCode(
+                peer.deviceProfile,
+                vpn.profiles,
+              );
+              final lastActivity = peer.lastSeenAt ?? peer.lastHandshakeAt;
+              return SectionCard(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: scheme.primaryContainer,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Icon(
+                            vpnProfileIconData(
+                              peer.deviceProfile,
+                              vpn.profiles,
+                            ),
+                            color: scheme.onPrimaryContainer,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: <Widget>[
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 4,
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                children: <Widget>[
+                                  InkWell(
+                                    onTap: () => context.go(
+                                      '/devices/${peer.deviceId}?tab=vpn',
+                                    ),
+                                    child: Text(
+                                      peer.displayName,
+                                      style: context.textTheme.titleSmall
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w700,
+                                            color: scheme.primary,
+                                          ),
+                                    ),
                                   ),
-                                  child: Icon(
-                                    vpnProfileIconData(
+                                  SemanticChip(
+                                    label: peer.connectionStatus.label,
+                                    tone: peer.connectionStatus.tone,
+                                    icon: peer.connectionStatus.icon,
+                                    compact: true,
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              Wrap(
+                                spacing: 12,
+                                runSpacing: 4,
+                                children: <Widget>[
+                                  Text(
+                                    vpnProfileLabel(
                                       peer.deviceProfile,
                                       vpn.profiles,
                                     ),
-                                    color: scheme.onPrimaryContainer,
+                                    style: context.textTheme.bodySmall
+                                        ?.copyWith(
+                                          color: scheme.onSurfaceVariant,
+                                        ),
                                   ),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: <Widget>[
-                                      Wrap(
-                                        spacing: 8,
-                                        runSpacing: 4,
-                                        crossAxisAlignment:
-                                            WrapCrossAlignment.center,
-                                        children: <Widget>[
-                                          InkWell(
-                                            onTap: () => context.go(
-                                              '/devices/${peer.deviceId}?tab=vpn',
-                                            ),
-                                            child: Text(
-                                              peer.displayName,
-                                              style: context
-                                                  .textTheme
-                                                  .titleSmall
-                                                  ?.copyWith(
-                                                    fontWeight: FontWeight.w700,
-                                                    color: scheme.primary,
-                                                  ),
-                                            ),
+                                  Text(
+                                    peer.ipAddress,
+                                    style: context.textTheme.bodySmall
+                                        ?.copyWith(
+                                          fontFamily: 'monospace',
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                  ),
+                                  Tooltip(
+                                    message:
+                                        'Handshake: ${formatDateTime(peer.lastHandshakeAt)}',
+                                    child: Text(
+                                      'Atividade: ${formatRelativeTime(lastActivity)}',
+                                      style: context.textTheme.bodySmall
+                                          ?.copyWith(
+                                            color: scheme.onSurfaceVariant,
                                           ),
-                                          SemanticChip(
-                                            label: peer.connectionStatus.label,
-                                            tone: peer.connectionStatus.tone,
-                                            icon: peer.connectionStatus.icon,
-                                            compact: true,
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Wrap(
-                                        spacing: 12,
-                                        runSpacing: 4,
-                                        children: <Widget>[
-                                          Text(
-                                            vpnProfileLabel(
-                                              peer.deviceProfile,
-                                              vpn.profiles,
-                                            ),
-                                            style: context.textTheme.bodySmall
-                                                ?.copyWith(
-                                                  color:
-                                                      scheme.onSurfaceVariant,
-                                                ),
-                                          ),
-                                          Text(
-                                            peer.ipAddress,
-                                            style: context.textTheme.bodySmall
-                                                ?.copyWith(
-                                                  fontFamily: 'monospace',
-                                                  fontWeight: FontWeight.w600,
-                                                ),
-                                          ),
-                                          Tooltip(
-                                            message:
-                                                'Handshake: ${formatDateTime(peer.lastHandshakeAt)}',
-                                            child: Text(
-                                              'Atividade: ${formatRelativeTime(lastActivity)}',
-                                              style: context.textTheme.bodySmall
-                                                  ?.copyWith(
-                                                    color:
-                                                        scheme.onSurfaceVariant,
-                                                  ),
-                                            ),
-                                          ),
-                                          Text(
-                                            'RX ${formatBytes(peer.bytesRx)} · TX ${formatBytes(peer.bytesTx)}',
-                                            style: context.textTheme.bodySmall
-                                                ?.copyWith(
-                                                  fontWeight: FontWeight.w600,
-                                                ),
-                                          ),
-                                        ],
-                                      ),
-                                    ],
+                                    ),
                                   ),
-                                ),
-                              ],
-                            ),
-                            if (peer.needsFirewallHint) ...<Widget>[
-                              const SizedBox(height: 10),
-                              NestedPanel(
-                                tone: SemanticTone.warning,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 8,
-                                ),
-                                child: Row(
-                                  children: <Widget>[
-                                    const Expanded(
-                                      child: Text(
-                                        'Túnel conectado, mas não responde a ping',
-                                      ),
-                                    ),
-                                    TextButton(
-                                      onPressed: () => _openFirewallHints(peer),
-                                      child: const Text(
-                                        'Copiar regras de firewall',
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ] else if (peer.pingOutsideTunnel) ...<Widget>[
-                              const SizedBox(height: 10),
-                              const NestedPanel(
-                                tone: SemanticTone.info,
-                                padding: EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 8,
-                                ),
-                                child: Text(
-                                  'O ping não sai pelo túnel — registre o vpn-probe.',
-                                ),
-                              ),
-                            ],
-                            const SizedBox(height: 10),
-                            Wrap(
-                              spacing: 6,
-                              runSpacing: 6,
-                              alignment: WrapAlignment.end,
-                              children: <Widget>[
-                                if (peer.pingMonitorId != null)
-                                  TextButton.icon(
-                                    onPressed: () => context.go(
-                                      '/monitors/${peer.pingMonitorId}',
-                                    ),
-                                    icon: const Icon(
-                                      Icons.monitor_heart_outlined,
-                                      size: 18,
-                                    ),
-                                    label: const Text('Histórico ping'),
-                                  ),
-                                TextButton.icon(
-                                  onPressed: () => _openConfig(peer),
-                                  icon: Icon(
-                                    supportsQr
-                                        ? Icons.qr_code_2
-                                        : Icons.description_outlined,
-                                    size: 18,
-                                  ),
-                                  label: Text(
-                                    supportsQr ? 'QR / Config' : 'Config',
-                                  ),
-                                ),
-                                if (canWrite) ...<Widget>[
-                                  TextButton.icon(
-                                    onPressed: () => _renamePeer(peer),
-                                    icon: const Icon(
-                                      Icons.edit_outlined,
-                                      size: 18,
-                                    ),
-                                    label: const Text('Renomear'),
-                                  ),
-                                  TextButton.icon(
-                                    onPressed: () => _rotatePeer(peer),
-                                    icon: const Icon(
-                                      Icons.key_outlined,
-                                      size: 18,
-                                    ),
-                                    label: const Text('Rotacionar'),
-                                  ),
-                                  TextButton.icon(
-                                    style: TextButton.styleFrom(
-                                      foregroundColor: scheme.error,
-                                    ),
-                                    onPressed: () => _revokePeer(peer),
-                                    icon: const Icon(
-                                      Icons.delete_outline,
-                                      size: 18,
-                                    ),
-                                    label: const Text('Revogar'),
+                                  Text(
+                                    'RX ${formatBytes(peer.bytesRx)} · TX ${formatBytes(peer.bytesTx)}',
+                                    style: context.textTheme.bodySmall
+                                        ?.copyWith(fontWeight: FontWeight.w600),
                                   ),
                                 ],
-                              ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (peer.needsFirewallHint) ...<Widget>[
+                      const SizedBox(height: 10),
+                      NestedPanel(
+                        tone: SemanticTone.warning,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 6,
+                          alignment: WrapAlignment.spaceBetween,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: <Widget>[
+                            const Text(
+                              'Túnel conectado, mas não responde a ping',
+                            ),
+                            TextButton(
+                              onPressed: () => _openFirewallHints(peer),
+                              child: const Text('Copiar regras de firewall'),
                             ),
                           ],
                         ),
-                      );
-                    },
-                  ),
+                      ),
+                    ] else if (peer.pingOutsideTunnel) ...<Widget>[
+                      const SizedBox(height: 10),
+                      const NestedPanel(
+                        tone: SemanticTone.info,
+                        padding: EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        child: Text(
+                          'O ping não sai pelo túnel — registre o vpn-probe.',
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      alignment: WrapAlignment.end,
+                      children: <Widget>[
+                        if (peer.pingMonitorId != null)
+                          TextButton.icon(
+                            onPressed: () =>
+                                context.go('/monitors/${peer.pingMonitorId}'),
+                            icon: const Icon(
+                              Icons.monitor_heart_outlined,
+                              size: 18,
+                            ),
+                            label: const Text('Histórico ping'),
+                          ),
+                        TextButton.icon(
+                          onPressed: () => _openConfig(peer),
+                          icon: Icon(
+                            supportsQr
+                                ? Icons.qr_code_2
+                                : Icons.description_outlined,
+                            size: 18,
+                          ),
+                          label: Text(supportsQr ? 'QR / Config' : 'Config'),
+                        ),
+                        if (canWrite) ...<Widget>[
+                          TextButton.icon(
+                            onPressed: () => _renamePeer(peer),
+                            icon: const Icon(Icons.edit_outlined, size: 18),
+                            label: const Text('Renomear'),
+                          ),
+                          TextButton.icon(
+                            onPressed: () => _rotatePeer(peer),
+                            icon: const Icon(Icons.key_outlined, size: 18),
+                            label: const Text('Rotacionar'),
+                          ),
+                          TextButton.icon(
+                            style: TextButton.styleFrom(
+                              foregroundColor: scheme.error,
+                            ),
+                            onPressed: () => _revokePeer(peer),
+                            icon: const Icon(Icons.delete_outline, size: 18),
+                            label: const Text('Revogar'),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+              );
+            },
           ),
-        ],
-      ),
+      ],
     );
   }
 }

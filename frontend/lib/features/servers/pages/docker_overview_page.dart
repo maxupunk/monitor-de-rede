@@ -4,6 +4,8 @@ import 'package:go_router/go_router.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/servers/models/docker_models.dart';
 import 'package:netmonitor_app/features/servers/providers/docker_provider.dart';
+import 'package:netmonitor_app/features/servers/utils/stacked_usage.dart';
+import 'package:netmonitor_app/features/servers/widgets/stacked_container_usage_chart.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
 
@@ -25,15 +27,21 @@ class DockerOverviewPage extends ConsumerWidget {
     }
 
     final history = current.aggregateHistory;
-    final cpuPoints = <MetricSeriesPoint>[
-      for (var i = 0; i < history.length; i++)
-        MetricSeriesPoint(x: i.toDouble(), y: history[i].cpuPercent),
+    final containerLabels = <String, String>{};
+    for (final sample in history) {
+      containerLabels.addAll(sample.containerNames);
+    }
+    final cpuSamples = <UsageSample>[
+      for (final sample in history)
+        UsageSample(time: sample.recordedAt, values: sample.cpuByContainer),
     ];
-    final memPoints = <MetricSeriesPoint>[
-      for (var i = 0; i < history.length; i++)
-        MetricSeriesPoint(
-          x: i.toDouble(),
-          y: history[i].memoryUsageBytes.toDouble(),
+    final memSamples = <UsageSample>[
+      for (final sample in history)
+        UsageSample(
+          time: sample.recordedAt,
+          values: sample.memoryByContainer.map(
+            (id, bytes) => MapEntry<String, double>(id, bytes.toDouble()),
+          ),
         ),
     ];
 
@@ -94,7 +102,7 @@ class DockerOverviewPage extends ConsumerWidget {
             ),
           ],
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 12),
 
         if ((current.metrics?.failedContainerCount ?? 0) > 0) ...<Widget>[
           NestedPanel(
@@ -106,7 +114,7 @@ class DockerOverviewPage extends ConsumerWidget {
           const SizedBox(height: 12),
         ],
 
-        // Gráficos ao vivo do buffer circular SSE (60 amostras)
+        // Gráficos empilhados por container do buffer circular SSE (60 amostras)
         ResponsiveGrid(
           xs: 1,
           sm: 1,
@@ -115,48 +123,56 @@ class DockerOverviewPage extends ConsumerWidget {
           xl: 2,
           children: <Widget>[
             SectionCard(
-              title: 'CPU total dos containers',
+              title: 'CPU por container',
               subtitle: history.isNotEmpty
-                  ? 'Atual: ${formatPercent(history.last.cpuPercent)} (últimas ${history.length} amostras SSE)'
+                  ? 'Total: ${formatPercent(history.last.cpuPercent, digits: 1)} · ${history.length} amostras SSE'
                   : 'Recebendo amostras em tempo real via SSE',
               icon: Icons.memory,
               iconTone: SemanticTone.primary,
-              child: MetricLineChart(
+              child: StackedContainerUsageChart(
                 height: 200,
-                series: <MetricLineSeries>[
-                  MetricLineSeries(
-                    name: 'CPU total',
-                    points: cpuPoints,
-                    tone: SemanticTone.primary,
-                  ),
-                ],
-                yFormatter: (v) => formatPercent(v, digits: 0),
+                samples: cpuSamples,
+                labels: containerLabels,
+                totalLabel: 'CPU total',
+                scaleBase: 10,
+                minCeiling: 1,
+                valueFormatter: (v) => formatPercent(v, digits: v < 10 ? 1 : 0),
+                axisFormatter: (v, interval) =>
+                    formatPercent(v, digits: interval < 1 ? 1 : 0),
                 emptyText: 'Aguardando métricas ao vivo...',
               ),
             ),
             SectionCard(
-              title: 'RAM usada pelos containers',
+              title: 'RAM por container',
               subtitle: history.isNotEmpty
-                  ? '${formatBinaryBytes(history.last.memoryUsageBytes)} (${formatPercent(history.last.memoryPercent)} da Engine)'
+                  ? '${formatBinaryBytes(history.last.memoryUsageBytes)} (${formatPercent(history.last.memoryPercent, digits: 1)} da Engine)'
                   : 'Recebendo amostras em tempo real via SSE',
               icon: Icons.sd_storage_outlined,
               iconTone: SemanticTone.info,
-              child: MetricLineChart(
+              child: StackedContainerUsageChart(
                 height: 200,
-                series: <MetricLineSeries>[
-                  MetricLineSeries(
-                    name: 'RAM usada',
-                    points: memPoints,
-                    tone: SemanticTone.info,
-                  ),
-                ],
-                yFormatter: (v) => formatBinaryBytes(v, fractionDigits: 0),
+                samples: memSamples,
+                labels: containerLabels,
+                totalLabel: 'RAM total',
+                scaleBase: 1024,
+                minCeiling: 64 * 1024 * 1024,
+                valueFormatter: (v) => formatBinaryBytes(
+                  v,
+                  fractionDigits: v >= 1024 * 1024 * 1024 ? 1 : 0,
+                ),
+                axisFormatter: (v, interval) => formatBinaryBytes(
+                  v,
+                  fractionDigits:
+                      v >= 1024 * 1024 * 1024 && interval < 1024 * 1024 * 1024
+                      ? 1
+                      : 0,
+                ),
                 emptyText: 'Aguardando métricas ao vivo...',
               ),
             ),
           ],
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 12),
 
         // Informações da Docker Engine + Top 8 Containers
         ResponsiveGrid(

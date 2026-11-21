@@ -175,17 +175,24 @@ class _DeciderSettingsCardState extends ConsumerState<DeciderSettingsCard> {
                     : SemanticTone.secondary));
 
     final canEnable = gap == null && (!isOllaya || (online && installed));
+    final statusChip = SemanticChip(
+      label: statusLabel,
+      tone: statusTone,
+      compact: true,
+    );
 
     return SectionCard(
       title: 'Decisor Rápido (Ollaya / Roteador)',
-      subtitle: 'Seleciona ferramentas, classifica logs e faz triagem de alertas com baixa latência',
+      subtitle:
+          'Seleciona ferramentas, classifica logs e faz triagem de alertas com baixa latência',
       icon: Icons.bolt_outlined,
       iconTone: SemanticTone.ai,
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
+      trailing: Wrap(
+        spacing: 10,
+        runSpacing: 6,
+        crossAxisAlignment: WrapCrossAlignment.center,
         children: <Widget>[
-          SemanticChip(label: statusLabel, tone: statusTone, compact: true),
-          const SizedBox(width: 8),
+          statusChip,
           Switch(
             value: _form.enabled,
             onChanged: (_form.enabled || canEnable) ? _toggleEnabled : null,
@@ -199,7 +206,7 @@ class _DeciderSettingsCardState extends ConsumerState<DeciderSettingsCard> {
               children: <Widget>[
                 // Passo 1: Provedor
                 if (state.providers.isNotEmpty) ...<Widget>[
-                  DropdownButtonFormField<String>(
+                  AppDropdownFormField<String>(
                     initialValue:
                         state.providers.any((p) => p.id == _form.provider)
                         ? _form.provider
@@ -209,7 +216,10 @@ class _DeciderSettingsCardState extends ConsumerState<DeciderSettingsCard> {
                         .map(
                           (p) => DropdownMenuItem<String>(
                             value: p.id,
-                            child: Text(p.label),
+                            child: Text(
+                              p.label,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                         )
                         .toList(growable: false),
@@ -233,6 +243,11 @@ class _DeciderSettingsCardState extends ConsumerState<DeciderSettingsCard> {
                 ],
                 if (current.provider == 'custom') ...<Widget>[
                   SegmentedButton<String>(
+                    showSelectedIcon: false,
+                    style: SegmentedButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                    ),
                     selected: <String>{_form.customProtocol},
                     onSelectionChanged: (sel) => setState(
                       () => _form = _form.copyWith(customProtocol: sel.first),
@@ -240,11 +255,21 @@ class _DeciderSettingsCardState extends ConsumerState<DeciderSettingsCard> {
                     segments: const <ButtonSegment<String>>[
                       ButtonSegment<String>(
                         value: 'systemone',
-                        label: Text('SystemOne'),
+                        label: Text(
+                          'SystemOne',
+                          maxLines: 1,
+                          softWrap: false,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                       ButtonSegment<String>(
                         value: 'openai',
-                        label: Text('OpenAI compatível'),
+                        label: Text(
+                          'OpenAI compatível',
+                          maxLines: 1,
+                          softWrap: false,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                     ],
                   ),
@@ -488,19 +513,16 @@ class _DeciderSettingsCardState extends ConsumerState<DeciderSettingsCard> {
                       ),
                       childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
                       children: <Widget>[
-                        Row(
-                          children: <Widget>[
-                            Expanded(
-                              child: TextField(
-                                controller: _testQuestionCtrl,
-                                decoration: const InputDecoration(
-                                  labelText: 'Experimentar pergunta',
-                                  isDense: true,
-                                ),
+                        LayoutBuilder(
+                          builder: (context, constraints) {
+                            final questionField = TextField(
+                              controller: _testQuestionCtrl,
+                              decoration: const InputDecoration(
+                                labelText: 'Experimentar pergunta',
+                                isDense: true,
                               ),
-                            ),
-                            const SizedBox(width: 8),
-                            FilledButton.tonal(
+                            );
+                            final testBtn = FilledButton.tonal(
                               onPressed: state.testing
                                   ? null
                                   : () => ref
@@ -518,8 +540,28 @@ class _DeciderSettingsCardState extends ConsumerState<DeciderSettingsCard> {
                                       ),
                                     )
                                   : const Text('Testar'),
-                            ),
-                          ],
+                            );
+                            if (constraints.maxWidth < 400) {
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: <Widget>[
+                                  questionField,
+                                  const SizedBox(height: 8),
+                                  Align(
+                                    alignment: Alignment.centerRight,
+                                    child: testBtn,
+                                  ),
+                                ],
+                              );
+                            }
+                            return Row(
+                              children: <Widget>[
+                                Expanded(child: questionField),
+                                const SizedBox(width: 8),
+                                testBtn,
+                              ],
+                            );
+                          },
                         ),
                         if (state.testResult != null) ...<Widget>[
                           const SizedBox(height: 10),
@@ -542,9 +584,11 @@ class _DeciderSettingsCardState extends ConsumerState<DeciderSettingsCard> {
                                     child: Row(
                                       children: <Widget>[
                                         SizedBox(
-                                          width: 110,
+                                          width: 100,
                                           child: Text(
                                             group.group,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
                                             style: context.textTheme.labelSmall,
                                           ),
                                         ),
@@ -586,7 +630,7 @@ class _DeciderSettingsCardState extends ConsumerState<DeciderSettingsCard> {
                           ),
                         ),
                         if (_form.features.incidentTriage != 'off') ...<Widget>[
-                          DropdownButtonFormField<String>(
+                          AppDropdownFormField<String>(
                             initialValue:
                                 _form.features.incidentTriage == 'shadow'
                                 ? 'shadow'
@@ -597,11 +641,17 @@ class _DeciderSettingsCardState extends ConsumerState<DeciderSettingsCard> {
                             items: const <DropdownMenuItem<String>>[
                               DropdownMenuItem<String>(
                                 value: 'enforce',
-                                child: Text('Ativo (enforce)'),
+                                child: Text(
+                                  'Ativo (enforce)',
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ),
                               DropdownMenuItem<String>(
                                 value: 'shadow',
-                                child: Text('Observação (shadow)'),
+                                child: Text(
+                                  'Observação (shadow)',
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ),
                             ],
                             onChanged: (v) {

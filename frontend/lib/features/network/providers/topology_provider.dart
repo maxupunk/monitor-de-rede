@@ -115,12 +115,12 @@ class TopologyNotifier extends Notifier<TopologyState> {
       ]);
 
       final graphMap = asJsonMap(results[0]);
-      final parsedNodes = asJsonMapList(graphMap['nodes'])
-          .map(TopologyNodeModel.fromJson)
-          .toList(growable: false);
-      final parsedEdges = asJsonMapList(graphMap['edges'])
-          .map(TopologyEdgeModel.fromJson)
-          .toList(growable: false);
+      final parsedNodes = asJsonMapList(
+        graphMap['nodes'],
+      ).map(TopologyNodeModel.fromJson).toList(growable: false);
+      final parsedEdges = asJsonMapList(
+        graphMap['edges'],
+      ).map(TopologyEdgeModel.fromJson).toList(growable: false);
 
       final savedPositions = <int, TopologyPosition>{};
       if (results[1] is Map) {
@@ -175,9 +175,9 @@ class TopologyNotifier extends Notifier<TopologyState> {
       map.forEach((key, value) {
         final id = int.tryParse(key);
         if (id != null) {
-          out[id] = asJsonMapList(value)
-              .map(TopologyPluginActionModel.fromJson)
-              .toList(growable: false);
+          out[id] = asJsonMapList(
+            value,
+          ).map(TopologyPluginActionModel.fromJson).toList(growable: false);
         }
       });
       state = state.copyWith(pluginActions: out);

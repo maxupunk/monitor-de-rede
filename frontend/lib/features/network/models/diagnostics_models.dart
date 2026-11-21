@@ -165,9 +165,9 @@ class PlaybookSummary {
       status: (json['status'] as String?) ?? 'success',
       diagnosis: (json['diagnosis'] as String?) ?? '',
       recommendations: asStringList(json['recommendations']),
-      steps: asJsonMapList(json['steps'])
-          .map(PlaybookStepResult.fromJson)
-          .toList(growable: false),
+      steps: asJsonMapList(
+        json['steps'],
+      ).map(PlaybookStepResult.fromJson).toList(growable: false),
     );
   }
 }
@@ -443,9 +443,9 @@ class DnsSeriesItem {
       server: (json['server'] as String?) ?? '',
       label: (json['label'] ?? json['server'] ?? '').toString(),
       protocol: (json['protocol'] as String?) ?? 'udp',
-      points: asJsonMapList(json['points'])
-          .map(DnsHistoryPoint.fromJson)
-          .toList(growable: false),
+      points: asJsonMapList(
+        json['points'],
+      ).map(DnsHistoryPoint.fromJson).toList(growable: false),
     );
   }
 }

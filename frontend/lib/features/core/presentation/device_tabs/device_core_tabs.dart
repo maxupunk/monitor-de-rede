@@ -108,7 +108,8 @@ class _DeviceMonitorsTabState extends ConsumerState<_DeviceMonitorsTab> {
           else if (_items.isEmpty)
             const EmptyStateView(
               title: 'Nenhum monitor vinculado',
-              description: 'Adicione um monitor Ping, SNMP, TCP ou HTTP para este equipamento.',
+              description:
+                  'Adicione um monitor Ping, SNMP, TCP ou HTTP para este equipamento.',
               icon: Icons.monitor_heart_outlined,
             )
           else
@@ -126,9 +127,15 @@ class _DeviceMonitorsTabState extends ConsumerState<_DeviceMonitorsTab> {
                   ),
                   title: Text(
                     m.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
-                  subtitle: Text('${m.type.toUpperCase()} · ${m.target}'),
+                  subtitle: Text(
+                    '${m.type.toUpperCase()} · ${m.target}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: <Widget>[
@@ -234,7 +241,8 @@ class _DeviceAlertRulesTabState extends ConsumerState<_DeviceAlertRulesTab> {
           else if (_rules.isEmpty)
             const EmptyStateView(
               title: 'Nenhuma regra de alerta',
-              description: 'Aplique templates do catálogo ou crie uma regra personalizada.',
+              description:
+                  'Aplique templates do catálogo ou crie uma regra personalizada.',
               icon: Icons.rule_outlined,
             )
           else
@@ -247,11 +255,15 @@ class _DeviceAlertRulesTabState extends ConsumerState<_DeviceAlertRulesTab> {
                 child: ListTile(
                   title: Text(
                     r.name,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
                   subtitle: Text(
                     '${r.condition.field} ${r.condition.operator} ${r.condition.value} · '
                     '${r.deviceId == null ? 'Global' : 'Este dispositivo'}',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                   ),
                   trailing: SemanticChip(
                     label: r.isEnabled ? 'Ativa' : 'Inativa',

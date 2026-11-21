@@ -31,11 +31,33 @@ class SectionCard extends StatelessWidget {
   bool get _hasHeader =>
       title != null || subtitle != null || icon != null || trailing != null;
 
+  Widget _wrapTrailing(Widget trailingWidget, {double? maxWidth}) {
+    if (trailingWidget is Wrap) {
+      return maxWidth != null
+          ? ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: maxWidth),
+              child: trailingWidget,
+            )
+          : trailingWidget;
+    }
+    final scrollable = SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: trailingWidget,
+    );
+    return maxWidth != null
+        ? ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: maxWidth),
+            child: scrollable,
+          )
+        : scrollable;
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = context.colorScheme;
     final semantics = context.semanticColors;
     final iconColors = semantics.resolve(iconTone, scheme);
+    final hasIdentity = icon != null || title != null || subtitle != null;
 
     return Card(
       elevation: 2,
@@ -48,54 +70,104 @@ class SectionCard extends StatelessWidget {
           if (_hasHeader) ...<Widget>[
             Padding(
               padding: headerPadding,
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: <Widget>[
-                  if (icon != null) ...<Widget>[
-                    Container(
-                      width: 36,
-                      height: 36,
-                      decoration: BoxDecoration(
-                        color: iconColors.container,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Icon(
-                        icon,
-                        size: 20,
-                        color: iconColors.onContainer,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                  ],
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        if (title != null)
-                          Text(
-                            title!,
-                            style: context.textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w700,
-                              color: scheme.onSurface,
-                            ),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final identityRow = Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: <Widget>[
+                      if (icon != null) ...<Widget>[
+                        Container(
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(
+                            color: iconColors.container,
+                            borderRadius: BorderRadius.circular(10),
                           ),
-                        if (subtitle != null) ...<Widget>[
-                          const SizedBox(height: 2),
-                          Text(
-                            subtitle!,
-                            style: context.textTheme.bodySmall?.copyWith(
-                              color: scheme.onSurfaceVariant,
-                            ),
+                          child: Icon(
+                            icon,
+                            size: 20,
+                            color: iconColors.onContainer,
                           ),
-                        ],
+                        ),
+                        const SizedBox(width: 12),
                       ],
-                    ),
-                  ),
-                  if (trailing != null) ...<Widget>[
-                    const SizedBox(width: 12),
-                    trailing!,
-                  ],
-                ],
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            if (title != null)
+                              Text(
+                                title!,
+                                style: context.textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                  color: scheme.onSurface,
+                                ),
+                              ),
+                            if (subtitle != null) ...<Widget>[
+                              const SizedBox(height: 2),
+                              Text(
+                                subtitle!,
+                                style: context.textTheme.bodySmall?.copyWith(
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
+                  );
+
+                  if (trailing == null) {
+                    return identityRow;
+                  }
+
+                  if (!hasIdentity) {
+                    return Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: _wrapTrailing(
+                        trailing!,
+                        maxWidth: constraints.maxWidth,
+                      ),
+                    );
+                  }
+
+                  // Em larguras compactas (< 560px), empilha título e trailing
+                  // para evitar esmagamento vertical de texto por botões ou
+                  // SegmentedButton largos.
+                  if (constraints.maxWidth < 560) {
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        identityRow,
+                        const SizedBox(height: 10),
+                        Align(
+                          alignment: AlignmentDirectional.centerStart,
+                          child: _wrapTrailing(
+                            trailing!,
+                            maxWidth: constraints.maxWidth,
+                          ),
+                        ),
+                      ],
+                    );
+                  }
+
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: <Widget>[
+                      Expanded(child: identityRow),
+                      const SizedBox(width: 12),
+                      Flexible(
+                        flex: 0,
+                        child: _wrapTrailing(
+                          trailing!,
+                          maxWidth: constraints.maxWidth * 0.55,
+                        ),
+                      ),
+                    ],
+                  );
+                },
               ),
             ),
             if (showHeaderDivider) const Divider(height: 1),

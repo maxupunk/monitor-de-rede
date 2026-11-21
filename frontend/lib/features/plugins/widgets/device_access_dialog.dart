@@ -101,7 +101,8 @@ class _DeviceAccessBodyState extends ConsumerState<_DeviceAccessBody> {
   String? _error;
 
   late String _kind;
-  String _sshMode = 'ask'; // 'dedicated' | 'ask' | 'vault'
+  String _sshMode =
+      'ask'; // 'dedicated' | 'ask' (Rust SecretStorage: ask | key)
   bool _https = false;
   int? _viaProbeId;
   bool _obscureSecret = true;
@@ -142,7 +143,7 @@ class _DeviceAccessBodyState extends ConsumerState<_DeviceAccessBody> {
       if (mounted) {
         setState(() {
           _loading = false;
-          _error = err.toString();
+          _error = _formatError(err);
         });
       }
     }
@@ -165,50 +166,77 @@ class _DeviceAccessBodyState extends ConsumerState<_DeviceAccessBody> {
       } else if (_access?.dedicatedPlatform != null && existing == null) {
         _sshMode = 'dedicated';
       } else {
-        _sshMode = existing?.storage ?? 'ask';
+        _sshMode = 'ask';
       }
     }
   }
 
+  String _formatError(Object err) {
+    if (err is ApiException) {
+      return err.message.isNotEmpty
+          ? err.message
+          : 'Erro ao comunicar com o servidor.';
+    }
+    return err.toString();
+  }
+
   Future<void> _save() async {
+    final username = _userCtrl.text.trim();
+    if (username.isEmpty) {
+      setState(() => _error = 'Informe o usuário de acesso.');
+      return;
+    }
+    final isDedicatedProvision =
+        _kind == 'ssh' &&
+        _sshMode == 'dedicated' &&
+        _access?.dedicatedPlatform != null;
+    if (isDedicatedProvision && _secretCtrl.text.isEmpty) {
+      setState(
+        () => _error =
+            'Informe a senha de administrador (uso único) para provisionar a chave SSH.',
+      );
+      return;
+    }
+
     setState(() {
       _saving = true;
       _error = null;
     });
     try {
       final port = int.tryParse(_portCtrl.text.trim());
-      if (_kind == 'ssh' && _sshMode == 'dedicated') {
-        await ref.read(pluginsProvider.notifier).provisionDedicated(
-          widget.deviceId,
-          <String, dynamic>{
-            if (_access?.dedicatedPlatform != null)
-              'platform': _access!.dedicatedPlatform,
-            'username': _userCtrl.text.trim(),
-            'password': _secretCtrl.text,
-            'port': ?port,
-            if (_viaProbeId != null) 'viaProbeId': _viaProbeId,
-          },
-        );
+      if (isDedicatedProvision) {
+        // DTO Rust `ProvisionInput` (POST /devices/{id}/access/dedicated)
+        await ref
+            .read(pluginsProvider.notifier)
+            .provisionDedicated(widget.deviceId, <String, dynamic>{
+              if (_access?.dedicatedPlatform != null)
+                'platform': _access!.dedicatedPlatform,
+              'username': username,
+              'password': _secretCtrl.text,
+              'port': ?port,
+              if (_viaProbeId != null) 'viaProbeId': _viaProbeId,
+            });
       } else {
-        await ref.read(pluginsProvider.notifier).saveCredential(
-          widget.deviceId,
-          <String, dynamic>{
-            'kind': _kind,
-            'username': _userCtrl.text.trim(),
-            if (_secretCtrl.text.isNotEmpty) 'secret': _secretCtrl.text,
-            'storage': _kind == 'ssh' ? _sshMode : 'ask',
-            'port': ?port,
-            if (_kind == 'http') 'https': _https,
-            if (_viaProbeId != null) 'viaProbeId': _viaProbeId,
-          },
-        );
+        // DTO Rust `CredentialInput` (PUT /devices/{id}/credentials)
+        // SecretStorage aceita somente 'ask' (sessão 30 min) ou 'key' (via provisionDedicated).
+        await ref
+            .read(pluginsProvider.notifier)
+            .saveCredential(widget.deviceId, <String, dynamic>{
+              'kind': _kind,
+              'username': username,
+              if (_secretCtrl.text.isNotEmpty) 'secret': _secretCtrl.text,
+              'storage': 'ask',
+              'port': ?port,
+              if (_kind == 'http') 'https': _https,
+              if (_viaProbeId != null) 'viaProbeId': _viaProbeId,
+            });
       }
       if (mounted) Navigator.of(context).pop(true);
     } catch (err) {
       if (mounted) {
         setState(() {
           _saving = false;
-          _error = err.toString();
+          _error = _formatError(err);
         });
       }
     }
@@ -228,7 +256,7 @@ class _DeviceAccessBodyState extends ConsumerState<_DeviceAccessBody> {
         );
       }
     } catch (err) {
-      if (mounted) setState(() => _error = err.toString());
+      if (mounted) setState(() => _error = _formatError(err));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -263,7 +291,7 @@ class _DeviceAccessBodyState extends ConsumerState<_DeviceAccessBody> {
       }
       await _load();
     } catch (err) {
-      if (mounted) setState(() => _error = err.toString());
+      if (mounted) setState(() => _error = _formatError(err));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -299,6 +327,11 @@ class _DeviceAccessBodyState extends ConsumerState<_DeviceAccessBody> {
         ],
         if (widget.lockedTransport == null) ...<Widget>[
           SegmentedButton<String>(
+            showSelectedIcon: false,
+            style: SegmentedButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+            ),
             selected: <String>{_kind},
             onSelectionChanged: (sel) {
               setState(() {
@@ -307,9 +340,18 @@ class _DeviceAccessBodyState extends ConsumerState<_DeviceAccessBody> {
               });
             },
             segments: const <ButtonSegment<String>>[
-              ButtonSegment<String>(value: 'ssh', label: Text('SSH')),
-              ButtonSegment<String>(value: 'http', label: Text('HTTP')),
-              ButtonSegment<String>(value: 'telnet', label: Text('Telnet')),
+              ButtonSegment<String>(
+                value: 'ssh',
+                label: Text('SSH', maxLines: 1, softWrap: false),
+              ),
+              ButtonSegment<String>(
+                value: 'http',
+                label: Text('HTTP', maxLines: 1, softWrap: false),
+              ),
+              ButtonSegment<String>(
+                value: 'telnet',
+                label: Text('Telnet', maxLines: 1, softWrap: false),
+              ),
             ],
           ),
           const SizedBox(height: 12),
@@ -320,7 +362,11 @@ class _DeviceAccessBodyState extends ConsumerState<_DeviceAccessBody> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
-                Row(
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  alignment: WrapAlignment.spaceBetween,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: <Widget>[
                     const SemanticChip(
                       label: 'Chave dedicada ativa',
@@ -328,7 +374,6 @@ class _DeviceAccessBodyState extends ConsumerState<_DeviceAccessBody> {
                       icon: Icons.vpn_key_outlined,
                       compact: true,
                     ),
-                    const Spacer(),
                     if (dedicated.rotatedAt != null)
                       Text(
                         'Rotacionada ${formatRelativeTime(dedicated.rotatedAt)}',
@@ -339,7 +384,9 @@ class _DeviceAccessBodyState extends ConsumerState<_DeviceAccessBody> {
                 const SizedBox(height: 8),
                 KeyValueRow(
                   label: 'Usuário dedicado',
-                  value: dedicated.username,
+                  value: dedicated.username.isNotEmpty
+                      ? dedicated.username
+                      : (existingSsh?.username ?? 'netmonitor'),
                 ),
                 if (dedicated.fingerprint != null)
                   KeyValueRow(
@@ -381,48 +428,64 @@ class _DeviceAccessBodyState extends ConsumerState<_DeviceAccessBody> {
             ),
           ),
         ] else ...<Widget>[
-          if (_kind == 'ssh') ...<Widget>[
-            SegmentedButton<String>(
-              selected: <String>{_sshMode},
-              onSelectionChanged: (sel) => setState(() => _sshMode = sel.first),
-              segments: <ButtonSegment<String>>[
-                if (_access?.dedicatedPlatform != null)
-                  const ButtonSegment<String>(
-                    value: 'dedicated',
-                    label: Text('Chave dedicada'),
-                  ),
-                const ButtonSegment<String>(
-                  value: 'ask',
-                  label: Text('Sessão 30 min'),
-                ),
-                const ButtonSegment<String>(
-                  value: 'vault',
-                  label: Text('Cofre'),
-                ),
-              ],
+          if (_kind == 'ssh' && _access?.dedicatedPlatform != null) ...<Widget>[
+            ChoiceCard(
+              title: 'Chave SSH dedicada (${_access!.dedicatedPlatform})',
+              subtitle:
+                  'Cria chave ed25519 exclusiva no equipamento usando a senha admin uma única vez (nunca salva).',
+              icon: Icons.vpn_key_outlined,
+              badge: 'Recomendado',
+              badgeTone: SemanticTone.success,
+              tone: SemanticTone.plugin,
+              selected: _sshMode == 'dedicated',
+              onTap: () => setState(() => _sshMode = 'dedicated'),
             ),
-            const SizedBox(height: 10),
-            if (_sshMode == 'dedicated')
-              const NestedPanel(
-                tone: SemanticTone.info,
-                child: Text(
-                  'A senha de administrador é usada uma única vez para criar um usuário/chave dedicados no equipamento e nunca é armazenada.',
+            const SizedBox(height: 8),
+            ChoiceCard(
+              title: 'Usuário e senha (sessão 30 min)',
+              subtitle:
+                  'Mantém a credencial apenas em memória por 30 minutos (nunca gravada no banco).',
+              icon: Icons.schedule,
+              tone: SemanticTone.primary,
+              selected: _sshMode != 'dedicated',
+              onTap: () => setState(() => _sshMode = 'ask'),
+            ),
+            const SizedBox(height: 12),
+          ],
+          ResponsiveFieldRow(
+            breakpoint: 480,
+            spacing: 10,
+            runSpacing: 10,
+            children: <Widget>[
+              TextField(
+                controller: _userCtrl,
+                decoration: InputDecoration(
+                  labelText:
+                      _kind == 'ssh' &&
+                          _sshMode == 'dedicated' &&
+                          _access?.dedicatedPlatform != null
+                      ? 'Usuário admin atual *'
+                      : 'Usuário *',
                 ),
               ),
-            const SizedBox(height: 10),
-          ],
-          TextField(
-            controller: _userCtrl,
-            decoration: const InputDecoration(labelText: 'Usuário *'),
+              TextField(
+                controller: _portCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Porta'),
+              ),
+            ],
           ),
           const SizedBox(height: 10),
           TextField(
             controller: _secretCtrl,
             obscureText: _obscureSecret,
             decoration: InputDecoration(
-              labelText: _kind == 'ssh' && _sshMode == 'dedicated'
-                  ? 'Senha de administrador (uso único) *'
-                  : 'Senha / Segredo',
+              labelText:
+                  _kind == 'ssh' &&
+                      _sshMode == 'dedicated' &&
+                      _access?.dedicatedPlatform != null
+                  ? 'Senha admin (uso único) *'
+                  : 'Senha / Segredo (sessão 30 min)',
               suffixIcon: IconButton(
                 icon: Icon(
                   _obscureSecret ? Icons.visibility : Icons.visibility_off,
@@ -431,12 +494,6 @@ class _DeviceAccessBodyState extends ConsumerState<_DeviceAccessBody> {
                     setState(() => _obscureSecret = !_obscureSecret),
               ),
             ),
-          ),
-          const SizedBox(height: 10),
-          TextField(
-            controller: _portCtrl,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(labelText: 'Porta'),
           ),
           if (_kind == 'http') ...<Widget>[
             const SizedBox(height: 6),
@@ -449,7 +506,7 @@ class _DeviceAccessBodyState extends ConsumerState<_DeviceAccessBody> {
           ],
           if (agents.isNotEmpty) ...<Widget>[
             const SizedBox(height: 10),
-            DropdownButtonFormField<int?>(
+            AppDropdownFormField<int?>(
               initialValue: _viaProbeId,
               decoration: const InputDecoration(
                 labelText: 'Rota de acesso (agente com device_io)',
@@ -457,13 +514,17 @@ class _DeviceAccessBodyState extends ConsumerState<_DeviceAccessBody> {
               items: <DropdownMenuItem<int?>>[
                 const DropdownMenuItem<int?>(
                   value: null,
-                  child: Text('Direto pela central'),
+                  child: Text(
+                    'Direto pela central',
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
                 for (final agent in agents)
                   DropdownMenuItem<int?>(
                     value: agent.probeId,
                     child: Text(
                       '${agent.name}${agent.online ? '' : ' (offline)'}',
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
               ],
@@ -471,8 +532,10 @@ class _DeviceAccessBodyState extends ConsumerState<_DeviceAccessBody> {
             ),
           ],
           const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
+          Wrap(
+            alignment: WrapAlignment.end,
+            spacing: 8,
+            runSpacing: 8,
             children: <Widget>[
               TextButton(
                 onPressed: _saving
@@ -480,7 +543,6 @@ class _DeviceAccessBodyState extends ConsumerState<_DeviceAccessBody> {
                     : () => Navigator.of(context).pop(false),
                 child: const Text('Cancelar'),
               ),
-              const SizedBox(width: 8),
               FilledButton.icon(
                 onPressed: _saving ? null : _save,
                 icon: _saving
@@ -491,7 +553,9 @@ class _DeviceAccessBodyState extends ConsumerState<_DeviceAccessBody> {
                       )
                     : const Icon(Icons.save_outlined, size: 18),
                 label: Text(
-                  _kind == 'ssh' && _sshMode == 'dedicated'
+                  _kind == 'ssh' &&
+                          _sshMode == 'dedicated' &&
+                          _access?.dedicatedPlatform != null
                       ? 'Provisionar chave dedicada'
                       : 'Salvar acesso',
                 ),

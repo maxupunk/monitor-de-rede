@@ -149,12 +149,11 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                           labelText: 'E-mail',
                           prefixIcon: Icon(Icons.email_outlined),
                         ),
-                        validator: FormValidators.compose(
-                          <FormFieldValidator<String>>[
-                            FormValidators.required('Informe seu e-mail.'),
-                            FormValidators.email(),
-                          ],
-                        ),
+                        validator:
+                            FormValidators.compose(<FormFieldValidator<String>>[
+                              FormValidators.required('Informe seu e-mail.'),
+                              FormValidators.email(),
+                            ]),
                       ),
                       const SizedBox(height: 14),
                       TextFormField(

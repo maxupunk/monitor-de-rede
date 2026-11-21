@@ -304,29 +304,34 @@ class _DeployRunBodyState extends ConsumerState<_DeployRunBody> {
                 ),
                 const SizedBox(height: 6),
                 ..._backups.map(
-                  (b) => Row(
-                    children: <Widget>[
-                      Expanded(
-                        child: Text(
+                  (b) => Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      alignment: WrapAlignment.spaceBetween,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: <Widget>[
+                        Text(
                           '${b.databaseName} · ${formatDateTime(b.startedAt)} (${b.status})',
                           style: context.textTheme.bodySmall,
                         ),
-                      ),
-                      if (widget.canAdmin && b.status == 'success')
-                        FilledButton.tonalIcon(
-                          onPressed: () => showDatabaseRestoreDialog(
-                            context,
-                            backupId: b.id,
-                            sourceDatabaseName: b.databaseName,
-                            sourceConnectionId: b.connectionId,
+                        if (widget.canAdmin && b.status == 'success')
+                          FilledButton.tonalIcon(
+                            onPressed: () => showDatabaseRestoreDialog(
+                              context,
+                              backupId: b.id,
+                              sourceDatabaseName: b.databaseName,
+                              sourceConnectionId: b.connectionId,
+                            ),
+                            icon: const Icon(
+                              Icons.settings_backup_restore,
+                              size: 16,
+                            ),
+                            label: const Text('Restaurar este banco'),
                           ),
-                          icon: const Icon(
-                            Icons.settings_backup_restore,
-                            size: 16,
-                          ),
-                          label: const Text('Restaurar este banco'),
-                        ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ],
@@ -343,14 +348,16 @@ class _DeployRunBodyState extends ConsumerState<_DeployRunBody> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
-                Row(
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  alignment: WrapAlignment.spaceBetween,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: <Widget>[
-                    Expanded(
-                      child: Text(
-                        'O que muda (${countNoun(_changes!.total, 'commit')})',
-                        style: context.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
+                    Text(
+                      'O que muda (${countNoun(_changes!.total, 'commit')})',
+                      style: context.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
                     if (_changes!.compareUrl != null)
@@ -517,8 +524,9 @@ class _DeployBuildBodyState extends ConsumerState<_DeployBuildBody> {
     } catch (err) {
       if (!mounted) return;
       setState(() => _acting = false);
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Erro ao recompilar: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Erro ao recompilar: $err')));
     }
   }
 
@@ -651,7 +659,8 @@ Future<void> showDeployBuildSecretsDialog(
   return showAdaptiveFormSheet<void>(
     context: context,
     title: 'Segredos de build · ${application.name}',
-    subtitle: 'Injetados somente via BuildKit --secret (nunca expostos na imagem ou nos logs)',
+    subtitle:
+        'Injetados somente via BuildKit --secret (nunca expostos na imagem ou nos logs)',
     maxWidth: 640,
     builder: (_) => _BuildSecretsBody(applicationId: application.id),
   );
@@ -762,31 +771,32 @@ class _BuildSecretsBodyState extends ConsumerState<_BuildSecretsBody> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        Row(
+        ResponsiveFieldRow(
+          breakpoint: 480,
+          spacing: 8,
+          runSpacing: 10,
           children: <Widget>[
-            Expanded(
-              child: TextField(
-                controller: _nameCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Nome do segredo',
-                  hintText: 'NPM_TOKEN',
-                ),
+            TextField(
+              controller: _nameCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Nome do segredo',
+                hintText: 'NPM_TOKEN',
               ),
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: TextField(
-                controller: _valueCtrl,
-                obscureText: true,
-                decoration: const InputDecoration(labelText: 'Valor'),
-              ),
-            ),
-            const SizedBox(width: 8),
-            FilledButton(
-              onPressed: _saving ? null : _save,
-              child: const Text('Salvar'),
+            TextField(
+              controller: _valueCtrl,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: 'Valor'),
             ),
           ],
+        ),
+        const SizedBox(height: 10),
+        Align(
+          alignment: Alignment.centerRight,
+          child: FilledButton(
+            onPressed: _saving ? null : _save,
+            child: const Text('Salvar'),
+          ),
         ),
         if (_error != null) ...<Widget>[
           const SizedBox(height: 10),

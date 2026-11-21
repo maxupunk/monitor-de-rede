@@ -272,12 +272,11 @@ class DeploysNotifier extends Notifier<DeploysState> {
         }),
       );
     }
-    final results = await Future.wait<Map<String, dynamic>>(
-      <Future<Map<String, dynamic>>>[
-        _api.get<Map<String, dynamic>>('/deploys/runs/$runId/log'),
-        _api.get<Map<String, dynamic>>('/deploys/runs/$runId'),
-      ],
-    );
+    final results =
+        await Future.wait<Map<String, dynamic>>(<Future<Map<String, dynamic>>>[
+          _api.get<Map<String, dynamic>>('/deploys/runs/$runId/log'),
+          _api.get<Map<String, dynamic>>('/deploys/runs/$runId'),
+        ]);
     final savedLog = (results[0]['log'] as String?) ?? '';
     final savedLines = savedLog.isEmpty
         ? <String>[]

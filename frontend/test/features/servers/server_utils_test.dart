@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:netmonitor_app/features/servers/models/docker_models.dart';
 import 'package:netmonitor_app/features/servers/models/registry_models.dart';
 import 'package:netmonitor_app/features/servers/utils/server_utils.dart';
+import 'package:netmonitor_app/features/servers/utils/stacked_usage.dart';
 
 void main() {
   group('Docker protected container security rules (ADR 014)', () {
@@ -37,20 +38,23 @@ void main() {
       },
     );
 
-    test('running container with com.netmonitor.protected=true label blocks stop/restart/update/remove', () {
-      final container = makeContainer(
-        state: 'running',
-        protectedFlag: false,
-        labels: const <String, String>{'com.netmonitor.protected': 'true'},
-      );
-      expect(container.isProtected, isTrue);
-      final actions = allowedContainerActions(
-        container: container,
-        canLifecycle: true,
-        canUpdate: true,
-      );
-      expect(actions, isEmpty);
-    });
+    test(
+      'running container with com.netmonitor.protected=true label blocks stop/restart/update/remove',
+      () {
+        final container = makeContainer(
+          state: 'running',
+          protectedFlag: false,
+          labels: const <String, String>{'com.netmonitor.protected': 'true'},
+        );
+        expect(container.isProtected, isTrue);
+        final actions = allowedContainerActions(
+          container: container,
+          canLifecycle: true,
+          canUpdate: true,
+        );
+        expect(actions, isEmpty);
+      },
+    );
 
     test('stopped protected container ONLY allows start', () {
       final actions = allowedContainerActions(
@@ -64,22 +68,25 @@ void main() {
       );
     });
 
-    test('normal running container with lifecycle+update allows stop, restart, update, remove', () {
-      final actions = allowedContainerActions(
-        container: makeContainer(state: 'running', protectedFlag: false),
-        canLifecycle: true,
-        canUpdate: true,
-      );
-      expect(
-        actions.map((a) => a.key),
-        equals(<DockerContainerActionKey>[
-          DockerContainerActionKey.stop,
-          DockerContainerActionKey.restart,
-          DockerContainerActionKey.update,
-          DockerContainerActionKey.remove,
-        ]),
-      );
-    });
+    test(
+      'normal running container with lifecycle+update allows stop, restart, update, remove',
+      () {
+        final actions = allowedContainerActions(
+          container: makeContainer(state: 'running', protectedFlag: false),
+          canLifecycle: true,
+          canUpdate: true,
+        );
+        expect(
+          actions.map((a) => a.key),
+          equals(<DockerContainerActionKey>[
+            DockerContainerActionKey.stop,
+            DockerContainerActionKey.restart,
+            DockerContainerActionKey.update,
+            DockerContainerActionKey.remove,
+          ]),
+        );
+      },
+    );
   });
 
   group('Lossless .env parser & serializer', () {
@@ -159,5 +166,67 @@ void main() {
       expect(isPrivateHost('localhost'), isTrue);
       expect(isPrivateHost('monitor.empresa.com.br'), isFalse);
     });
+  });
+
+  group('Stacked container usage & human Y-axis scale', () {
+    test('niceAxisScale produces clean human steps for MiB and %', () {
+      // 763 MiB -> 800 MiB with 200 MiB intervals (never 191/381/572/763 MiB)
+      const mib = 1024 * 1024;
+      final memScale = niceAxisScale(763 * mib.toDouble(), base: 1024);
+      expect(memScale.maxY, equals(800 * mib.toDouble()));
+      expect(memScale.interval, equals(200 * mib.toDouble()));
+      expect(memScale.divisions, equals(4));
+
+      // 5.2% -> 8% with 2% intervals
+      final cpuScale = niceAxisScale(5.2, base: 10);
+      expect(cpuScale.maxY, equals(8.0));
+      expect(cpuScale.interval, equals(2.0));
+
+      // 0.3% with minCeiling 1.0 -> 1.0% with 0.25% intervals
+      final tinyCpu = niceAxisScale(0.3, base: 10, minCeiling: 1.0);
+      expect(tinyCpu.maxY, equals(1.0));
+      expect(tinyCpu.interval, equals(0.25));
+    });
+
+    test(
+      'buildStackedUsage ranks top series, stabilizes colors, and aggregates Outros',
+      () {
+        final samples = <UsageSample>[
+          const UsageSample(
+            time: '2026-11-21T16:00:00Z',
+            values: <String, double>{'a': 10, 'b': 30, 'c': 20, 'd': 2, 'e': 1},
+          ),
+          const UsageSample(
+            time: '2026-11-21T16:00:05Z',
+            values: <String, double>{'a': 40, 'b': 15, 'c': 5, 'd': 3, 'e': 2},
+          ),
+        ];
+        const labels = <String, String>{
+          'a': 'api',
+          'b': 'postgres',
+          'c': 'nginx',
+          'd': 'redis',
+          'e': 'worker',
+        };
+
+        final stacked = buildStackedUsage(samples, labels, maxSeries: 2);
+        // Top 2 by sum: a (50), b (45); rest: c, d, e -> Outros (3)
+        expect(stacked.layers.length, 3);
+        expect(stacked.layers[0].id, 'a');
+        expect(stacked.layers[0].color, kStackedChartPalette[0]);
+        expect(stacked.layers[1].id, 'b');
+        expect(stacked.layers[1].color, kStackedChartPalette[1]);
+        expect(stacked.layers[2].id, kOthersLayerId);
+        expect(stacked.layers[2].label, 'Outros (3)');
+        expect(stacked.layers[2].color, kOthersLayerColor);
+
+        // Cumulative stacking sums to exact sample totals
+        expect(stacked.totals, equals(<double>[63.0, 65.0]));
+        expect(stacked.peak, equals(65.0));
+        expect(stacked.layers[1].lower, equals(<double>[10.0, 40.0]));
+        expect(stacked.layers[1].upper, equals(<double>[40.0, 55.0]));
+        expect(stacked.layers[2].upper, equals(<double>[63.0, 65.0]));
+      },
+    );
   });
 }

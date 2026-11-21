@@ -310,18 +310,18 @@ class _VpnPeerWizardBodyState extends ConsumerState<_VpnPeerWizardBody> {
           ),
           if (vpn.sites.isNotEmpty) ...<Widget>[
             const SizedBox(height: 12),
-            DropdownButtonFormField<int?>(
+            AppDropdownFormField<int?>(
               initialValue: _siteId,
               decoration: const InputDecoration(labelText: 'Site (opcional)'),
               items: <DropdownMenuItem<int?>>[
                 const DropdownMenuItem<int?>(
                   value: null,
-                  child: Text('Nenhum'),
+                  child: Text('Nenhum', overflow: TextOverflow.ellipsis),
                 ),
                 for (final site in vpn.sites)
                   DropdownMenuItem<int?>(
                     value: site.id,
-                    child: Text(site.name),
+                    child: Text(site.name, overflow: TextOverflow.ellipsis),
                   ),
               ],
               onChanged: (value) => setState(() => _siteId = value),
@@ -428,8 +428,10 @@ class _VpnPeerWizardBodyState extends ConsumerState<_VpnPeerWizardBody> {
             ),
           ],
           const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
+          Wrap(
+            alignment: WrapAlignment.end,
+            spacing: 8,
+            runSpacing: 8,
             children: <Widget>[
               TextButton(
                 onPressed: _submitting
@@ -437,7 +439,6 @@ class _VpnPeerWizardBodyState extends ConsumerState<_VpnPeerWizardBody> {
                     : () => Navigator.of(context).pop(),
                 child: const Text('Cancelar'),
               ),
-              const SizedBox(width: 8),
               FilledButton.icon(
                 onPressed: _submitting ? null : _submit,
                 icon: _submitting

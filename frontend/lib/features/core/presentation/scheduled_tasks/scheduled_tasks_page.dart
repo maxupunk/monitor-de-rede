@@ -155,7 +155,7 @@ class _ScheduledTasksPageState extends ConsumerState<ScheduledTasksPage> {
                   ),
                   const SizedBox(height: 12),
                   if (allTools.isNotEmpty)
-                    DropdownButtonFormField<String>(
+                    AppDropdownFormField<String>(
                       initialValue: allTools.any((t) => t.name == selectedTool)
                           ? selectedTool
                           : allTools.first.name,
@@ -257,23 +257,20 @@ class _ScheduledTasksPageState extends ConsumerState<ScheduledTasksPage> {
                     ],
                   ),
                   const SizedBox(height: 10),
-                  Row(
-                    children: <Widget>[
-                      Expanded(
-                        child: TextFormField(
-                          controller: cronCtrl,
-                          style: const TextStyle(fontFamily: 'monospace'),
-                          decoration: const InputDecoration(
-                            labelText: 'Expressão Cron',
-                            hintText: '0 3 * * *',
-                          ),
-                          validator: FormValidators.required(
-                            'Informe a expressão Cron.',
-                          ),
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final cronField = TextFormField(
+                        controller: cronCtrl,
+                        style: const TextStyle(fontFamily: 'monospace'),
+                        decoration: const InputDecoration(
+                          labelText: 'Expressão Cron',
+                          hintText: '0 3 * * *',
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      OutlinedButton.icon(
+                        validator: FormValidators.required(
+                          'Informe a expressão Cron.',
+                        ),
+                      );
+                      final previewBtn = OutlinedButton.icon(
                         onPressed: previewLoading
                             ? null
                             : () => runPreview(setModalState),
@@ -287,8 +284,25 @@ class _ScheduledTasksPageState extends ConsumerState<ScheduledTasksPage> {
                               )
                             : const Icon(Icons.preview_outlined, size: 18),
                         label: const Text('Conferir'),
-                      ),
-                    ],
+                      );
+                      if (constraints.maxWidth < 440) {
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: <Widget>[
+                            cronField,
+                            const SizedBox(height: 8),
+                            previewBtn,
+                          ],
+                        );
+                      }
+                      return Row(
+                        children: <Widget>[
+                          Expanded(child: cronField),
+                          const SizedBox(width: 8),
+                          previewBtn,
+                        ],
+                      );
+                    },
                   ),
                   if (preview != null) ...<Widget>[
                     const SizedBox(height: 12),
@@ -429,224 +443,299 @@ class _ScheduledTasksPageState extends ConsumerState<ScheduledTasksPage> {
         })
         .toList(growable: false);
 
-    return RefreshIndicator(
-      onRefresh: () => ref.read(scheduledTasksProvider.notifier).fetchTasks(),
-      child: ListView(
-        children: <Widget>[
-          SearchFilterHeader(
-            title: 'Tarefas Agendadas',
-            subtitle: 'Automação periódica com prévia de risco e histórico por execução',
-            searchController: _searchCtrl,
-            searchHint: 'Buscar tarefa ou ferramenta...',
-            onSearchChanged: (_) => setState(() {}),
-            actions: <Widget>[
-              if (auth.canWrite)
-                FilledButton.icon(
-                  onPressed: () => _openTaskForm(),
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Nova tarefa'),
-                ),
-            ],
-          ),
-          if (auth.canWrite) ...<Widget>[
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: <Widget>[
-                ActionChip(
-                  avatar: const Icon(Icons.radar, size: 16),
-                  label: const Text('Modelo: Checagem diária'),
-                  onPressed: () => _openTaskForm(
-                    presetName: 'Checagem diária de rede',
-                    presetCron: '0 7 * * *',
-                  ),
-                ),
-                if (auth.isAdmin)
-                  ActionChip(
-                    avatar: const Icon(Icons.view_in_ar_outlined, size: 16),
-                    label: const Text('Modelo: Rotina Docker (Admin)'),
-                    onPressed: () => _openTaskForm(
-                      presetName: 'Rotina programada de container',
-                      presetCron: '0 4 * * 0',
-                    ),
-                  ),
-              ],
-            ),
-          ],
-          const SizedBox(height: 14),
-          if (state.loading && state.tasks.isEmpty)
-            const LoadingStateView(message: 'Carregando tarefas agendadas...')
-          else if (state.error != null && state.tasks.isEmpty)
-            ErrorStateView(
-              message: state.error!,
-              onRetry: () =>
-                  ref.read(scheduledTasksProvider.notifier).fetchTasks(),
-            )
-          else if (filtered.isEmpty)
-            EmptyStateView(
-              title: 'Nenhuma tarefa agendada',
-              description: 'Crie automações recorrentes usando as ferramentas do catálogo.',
-              icon: Icons.event_repeat_outlined,
-              action: auth.canWrite
-                  ? FilledButton.icon(
-                      onPressed: () => _openTaskForm(),
-                      icon: const Icon(Icons.add),
-                      label: const Text('Nova tarefa'),
-                    )
-                  : null,
-            )
-          else
-            for (final task in filtered) ...<Widget>[
-              SectionCard(
-                title: task.name,
-                subtitle: '${task.scheduleLabel} (${task.cron})',
-                icon: Icons.event_repeat_outlined,
-                iconTone: task.lastStatus == 'failed'
-                    ? SemanticTone.error
-                    : (task.enabled
-                          ? SemanticTone.primary
-                          : SemanticTone.secondary),
-                trailing: auth.canWrite
-                    ? Switch(
-                        value: task.enabled,
-                        onChanged: (v) => ref
-                            .read(scheduledTasksProvider.notifier)
-                            .setEnabled(task.id, v),
-                      )
-                    : SemanticChip(
-                        label: task.enabled ? 'Ativa' : 'Pausada',
-                        tone: task.enabled
-                            ? SemanticTone.success
-                            : SemanticTone.secondary,
-                        compact: true,
-                      ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isCompact = constraints.maxWidth < 680;
+        final scheme = context.colorScheme;
+
+        return RefreshIndicator(
+          onRefresh: () =>
+              ref.read(scheduledTasksProvider.notifier).fetchTasks(),
+          child: ListView(
+            children: <Widget>[
+              if (isCompact)
+                Row(
                   children: <Widget>[
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
-                      children: <Widget>[
-                        SemanticChip(
-                          label: task.tool,
-                          tone: SemanticTone.info,
-                          compact: true,
+                    Expanded(
+                      child: Text(
+                        'Tarefas Agendadas',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: context.textTheme.headlineSmall?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          color: scheme.onSurface,
                         ),
-                        if (task.origin == 'ai')
-                          const SemanticChip(
-                            label: 'Criada pela IA',
-                            tone: SemanticTone.ai,
-                            compact: true,
-                          ),
-                        if (task.running)
-                          const SemanticChip(
-                            label: 'Executando...',
-                            tone: SemanticTone.warning,
-                            compact: true,
-                          )
-                        else if (task.lastStatus != null)
-                          StatusIndicator.fromStatus(
-                            task.lastStatus!,
-                            compact: true,
-                          ),
-                        if (task.ownerName != null)
-                          SemanticChip(
-                            label: 'Por ${task.ownerName!}',
-                            tone: SemanticTone.secondary,
-                            compact: true,
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Próxima: ${task.nextRunAt != null ? formatShortDateTime(task.nextRunAt) : '—'} · '
-                      'Última: ${formatRelativeTime(task.lastRunAt)}',
-                      style: context.textTheme.bodySmall?.copyWith(
-                        color: context.colorScheme.onSurfaceVariant,
                       ),
                     ),
-                    if (task.lastMessage != null &&
-                        task.lastMessage!.isNotEmpty) ...<Widget>[
-                      const SizedBox(height: 4),
-                      Text(
-                        task.lastMessage!,
-                        style: context.textTheme.bodySmall,
+                    if (auth.canWrite) ...<Widget>[
+                      const SizedBox(width: 8),
+                      FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
+                        ),
+                        onPressed: () => _openTaskForm(),
+                        icon: const Icon(Icons.add, size: 18),
+                        label: const Text('Nova'),
                       ),
                     ],
-                    const SizedBox(height: 10),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 6,
+                  ],
+                )
+              else
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 10,
+                  alignment: WrapAlignment.spaceBetween,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: <Widget>[
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
-                        if (auth.canWrite)
-                          FilledButton.tonalIcon(
-                            onPressed: task.running
-                                ? null
-                                : () async {
-                                    await ref
-                                        .read(scheduledTasksProvider.notifier)
-                                        .runNow(task.id);
-                                    if (!context.mounted) return;
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text(
-                                          'Execução disparada. Aguarde o retorno via SSE.',
-                                        ),
-                                      ),
-                                    );
-                                  },
-                            icon: const Icon(Icons.play_arrow, size: 18),
-                            label: const Text('Rodar agora'),
+                        Text(
+                          'Tarefas Agendadas',
+                          style: context.textTheme.headlineSmall?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            color: scheme.onSurface,
                           ),
-                        OutlinedButton.icon(
-                          onPressed: () => _openRunsSheet(task),
-                          icon: const Icon(Icons.history, size: 18),
-                          label: const Text('Histórico'),
                         ),
-                        if (auth.canWrite) ...<Widget>[
-                          TextButton.icon(
-                            onPressed: () => _openTaskForm(existing: task),
-                            icon: const Icon(Icons.edit_outlined, size: 18),
-                            label: const Text('Editar'),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Automação periódica com prévia de risco e histórico por execução',
+                          style: context.textTheme.bodyMedium?.copyWith(
+                            color: scheme.onSurfaceVariant,
                           ),
-                          TextButton.icon(
-                            onPressed: () async {
-                              final ok = await showConfirmActionDialog(
-                                context: context,
-                                title: 'Excluir tarefa?',
-                                message:
-                                    'A tarefa "${task.name}" será removida permanentemente.',
-                                confirmLabel: 'Excluir',
-                              );
-                              if (ok) {
-                                await ref
-                                    .read(scheduledTasksProvider.notifier)
-                                    .remove(task.id);
-                              }
-                            },
-                            icon: Icon(
-                              Icons.delete_outline,
-                              size: 18,
-                              color: context.colorScheme.error,
-                            ),
-                            label: Text(
-                              'Excluir',
-                              style: TextStyle(
-                                color: context.colorScheme.error,
-                              ),
-                            ),
-                          ),
-                        ],
+                        ),
                       ],
                     ),
+                    if (auth.canWrite)
+                      FilledButton.icon(
+                        onPressed: () => _openTaskForm(),
+                        icon: const Icon(Icons.add, size: 18),
+                        label: const Text('Nova tarefa'),
+                      ),
                   ],
                 ),
-              ),
               const SizedBox(height: 10),
+              UnifiedFilterBar(
+                searchController: _searchCtrl,
+                searchHint: 'Buscar tarefa ou ferramenta...',
+                onSearchChanged: (_) => setState(() {}),
+                quickChips: auth.canWrite
+                    ? <Widget>[
+                        ActionChip(
+                          visualDensity: VisualDensity.compact,
+                          materialTapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
+                          avatar: const Icon(Icons.radar, size: 16),
+                          label: const Text('Modelo: Checagem diária'),
+                          onPressed: () => _openTaskForm(
+                            presetName: 'Checagem diária de rede',
+                            presetCron: '0 7 * * *',
+                          ),
+                        ),
+                        if (auth.isAdmin)
+                          ActionChip(
+                            visualDensity: VisualDensity.compact,
+                            materialTapTargetSize:
+                                MaterialTapTargetSize.shrinkWrap,
+                            avatar: const Icon(
+                              Icons.view_in_ar_outlined,
+                              size: 16,
+                            ),
+                            label: const Text('Modelo: Rotina Docker (Admin)'),
+                            onPressed: () => _openTaskForm(
+                              presetName: 'Rotina programada de container',
+                              presetCron: '0 4 * * 0',
+                            ),
+                          ),
+                      ]
+                    : const <Widget>[],
+              ),
+              const SizedBox(height: 14),
+              if (state.loading && state.tasks.isEmpty)
+                const LoadingStateView(
+                  message: 'Carregando tarefas agendadas...',
+                )
+              else if (state.error != null && state.tasks.isEmpty)
+                ErrorStateView(
+                  message: state.error!,
+                  onRetry: () =>
+                      ref.read(scheduledTasksProvider.notifier).fetchTasks(),
+                )
+              else if (filtered.isEmpty)
+                EmptyStateView(
+                  title: 'Nenhuma tarefa agendada',
+                  description:
+                      'Crie automações recorrentes usando as ferramentas do catálogo.',
+                  icon: Icons.event_repeat_outlined,
+                  action: auth.canWrite
+                      ? FilledButton.icon(
+                          onPressed: () => _openTaskForm(),
+                          icon: const Icon(Icons.add),
+                          label: const Text('Nova tarefa'),
+                        )
+                      : null,
+                )
+              else
+                for (final task in filtered) ...<Widget>[
+                  SectionCard(
+                    title: task.name,
+                    subtitle: '${task.scheduleLabel} (${task.cron})',
+                    icon: Icons.event_repeat_outlined,
+                    iconTone: task.lastStatus == 'failed'
+                        ? SemanticTone.error
+                        : (task.enabled
+                              ? SemanticTone.primary
+                              : SemanticTone.secondary),
+                    trailing: auth.canWrite
+                        ? Switch(
+                            value: task.enabled,
+                            onChanged: (v) => ref
+                                .read(scheduledTasksProvider.notifier)
+                                .setEnabled(task.id, v),
+                          )
+                        : SemanticChip(
+                            label: task.enabled ? 'Ativa' : 'Pausada',
+                            tone: task.enabled
+                                ? SemanticTone.success
+                                : SemanticTone.secondary,
+                            compact: true,
+                          ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: <Widget>[
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: <Widget>[
+                            SemanticChip(
+                              label: task.tool,
+                              tone: SemanticTone.info,
+                              compact: true,
+                            ),
+                            if (task.origin == 'ai')
+                              const SemanticChip(
+                                label: 'Criada pela IA',
+                                tone: SemanticTone.ai,
+                                compact: true,
+                              ),
+                            if (task.running)
+                              const SemanticChip(
+                                label: 'Executando...',
+                                tone: SemanticTone.warning,
+                                compact: true,
+                              )
+                            else if (task.lastStatus != null)
+                              StatusIndicator.fromStatus(
+                                task.lastStatus!,
+                                compact: true,
+                              ),
+                            if (task.ownerName != null)
+                              SemanticChip(
+                                label: 'Por ${task.ownerName!}',
+                                tone: SemanticTone.secondary,
+                                compact: true,
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Próxima: ${task.nextRunAt != null ? formatShortDateTime(task.nextRunAt) : '—'} · '
+                          'Última: ${formatRelativeTime(task.lastRunAt)}',
+                          style: context.textTheme.bodySmall?.copyWith(
+                            color: context.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        if (task.lastMessage != null &&
+                            task.lastMessage!.isNotEmpty) ...<Widget>[
+                          const SizedBox(height: 4),
+                          Text(
+                            task.lastMessage!,
+                            style: context.textTheme.bodySmall,
+                          ),
+                        ],
+                        const SizedBox(height: 10),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 6,
+                          children: <Widget>[
+                            if (auth.canWrite)
+                              FilledButton.tonalIcon(
+                                onPressed: task.running
+                                    ? null
+                                    : () async {
+                                        await ref
+                                            .read(
+                                              scheduledTasksProvider.notifier,
+                                            )
+                                            .runNow(task.id);
+                                        if (!context.mounted) return;
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).showSnackBar(
+                                          const SnackBar(
+                                            content: Text(
+                                              'Execução disparada. Aguarde o retorno via SSE.',
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                icon: const Icon(Icons.play_arrow, size: 18),
+                                label: const Text('Rodar agora'),
+                              ),
+                            OutlinedButton.icon(
+                              onPressed: () => _openRunsSheet(task),
+                              icon: const Icon(Icons.history, size: 18),
+                              label: const Text('Histórico'),
+                            ),
+                            if (auth.canWrite) ...<Widget>[
+                              TextButton.icon(
+                                onPressed: () => _openTaskForm(existing: task),
+                                icon: const Icon(Icons.edit_outlined, size: 18),
+                                label: const Text('Editar'),
+                              ),
+                              TextButton.icon(
+                                onPressed: () async {
+                                  final ok = await showConfirmActionDialog(
+                                    context: context,
+                                    title: 'Excluir tarefa?',
+                                    message:
+                                        'A tarefa "${task.name}" será removida permanentemente.',
+                                    confirmLabel: 'Excluir',
+                                  );
+                                  if (ok) {
+                                    await ref
+                                        .read(scheduledTasksProvider.notifier)
+                                        .remove(task.id);
+                                  }
+                                },
+                                icon: Icon(
+                                  Icons.delete_outline,
+                                  size: 18,
+                                  color: context.colorScheme.error,
+                                ),
+                                label: Text(
+                                  'Excluir',
+                                  style: TextStyle(
+                                    color: context.colorScheme.error,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                ],
             ],
-        ],
-      ),
+          ),
+        );
+      },
     );
   }
 }
@@ -682,7 +771,7 @@ class _SchemaFieldInput extends StatelessWidget {
     }
 
     if (enumValues != null && enumValues.isNotEmpty) {
-      return DropdownButtonFormField<Object?>(
+      return AppDropdownFormField<Object?>(
         initialValue: enumValues.contains(value) ? value : null,
         decoration: InputDecoration(
           labelText: fieldName,
@@ -693,7 +782,7 @@ class _SchemaFieldInput extends StatelessWidget {
           for (final item in enumValues)
             DropdownMenuItem<Object?>(
               value: item,
-              child: Text(item.toString()),
+              child: Text(item.toString(), overflow: TextOverflow.ellipsis),
             ),
         ],
         onChanged: onChanged,
@@ -799,8 +888,9 @@ class _TaskRunsBodyState extends ConsumerState<_TaskRunsBody> {
                   padding: const EdgeInsets.only(bottom: 10),
                   child: CodeViewer(
                     title: 'Resultado',
-                    code: const JsonEncoder.withIndent('  ')
-                        .convert(run.result),
+                    code: const JsonEncoder.withIndent(
+                      '  ',
+                    ).convert(run.result),
                     maxHeight: 220,
                   ),
                 ),

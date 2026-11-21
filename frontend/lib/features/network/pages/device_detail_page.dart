@@ -170,8 +170,11 @@ class _DeviceDetailPageState extends ConsumerState<DeviceDetailPage> {
         ),
     ];
 
-    final activeTab =
-        tabs.where((t) => t.id == _selectedTabId).firstOrNull ?? tabs.first;
+    final activeIndex = tabs
+        .indexWhere((t) => t.id == _selectedTabId)
+        .clamp(0, tabs.length - 1);
+    final activeTab = tabs[activeIndex];
+    final tabKeySignature = tabs.map((t) => t.id).join('|');
 
     // Telemetria rápida extraída das métricas recentes
     double? latestCpu;
@@ -195,348 +198,651 @@ class _DeviceDetailPageState extends ConsumerState<DeviceDetailPage> {
         .where((m) => m.status == 'up' || m.status == 'online')
         .length;
 
-    return RefreshIndicator(
-      onRefresh: () => ref
-          .read(deviceDetailProvider.notifier)
-          .loadDeviceDetails(widget.deviceId),
-      child: ListView(
-        children: <Widget>[
-          // ── Header do equipamento ──
-          SectionCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+    Future<void> editDevice() async {
+      final saved = await showDeviceFormSheet(
+        context: context,
+        existing: device,
+      );
+      if (saved != null) {
+        ref.read(deviceDetailProvider.notifier).loadDeviceDetails(device.id);
+      }
+    }
+
+    void openLinkTest() {
+      ref.read(pendingLinkTestDraftProvider.notifier).state =
+          LinkTestRequestDraft(kind: 'server', targetDeviceId: device.id);
+      context.go('/link-tests?deviceId=${device.id}');
+    }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isCompact = constraints.maxWidth < 680;
+        return RefreshIndicator(
+          onRefresh: () => ref
+              .read(deviceDetailProvider.notifier)
+              .loadDeviceDetails(widget.deviceId),
+          child: CustomScrollView(
+            slivers: <Widget>[
+              SliverToBoxAdapter(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: <Widget>[
-                    IconButton(
-                      tooltip: 'Voltar para Dispositivos',
-                      onPressed: () => context.go('/devices'),
-                      icon: const Icon(Icons.arrow_back),
-                    ),
-                    const SizedBox(width: 4),
-                    Container(
-                      width: 48,
-                      height: 48,
-                      decoration: BoxDecoration(
-                        color: context.colorScheme.primaryContainer,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Icon(
-                        deviceTypeIcon(device.type),
-                        size: 26,
-                        color: context.colorScheme.onPrimaryContainer,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
+                    // ── Header do equipamento ──
+                    SectionCard(
+                      padding: EdgeInsets.all(isCompact ? 12 : 16),
                       child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: <Widget>[
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 6,
-                            crossAxisAlignment: WrapCrossAlignment.center,
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: <Widget>[
-                              Text(
-                                device.name,
-                                style: context.textTheme.headlineSmall
-                                    ?.copyWith(fontWeight: FontWeight.w800),
+                              IconButton(
+                                visualDensity: VisualDensity.compact,
+                                tooltip: 'Voltar para Dispositivos',
+                                onPressed: () => context.go('/devices'),
+                                icon: const Icon(Icons.arrow_back),
                               ),
-                              StatusIndicator.fromStatus(device.status),
+                              const SizedBox(width: 4),
+                              Container(
+                                width: isCompact ? 40 : 48,
+                                height: isCompact ? 40 : 48,
+                                decoration: BoxDecoration(
+                                  color: context.colorScheme.primaryContainer,
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Icon(
+                                  deviceTypeIcon(device.type),
+                                  size: isCompact ? 22 : 26,
+                                  color: context.colorScheme.onPrimaryContainer,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: <Widget>[
+                                    Wrap(
+                                      spacing: 8,
+                                      runSpacing: 4,
+                                      crossAxisAlignment:
+                                          WrapCrossAlignment.center,
+                                      children: <Widget>[
+                                        Text(
+                                          device.name,
+                                          style:
+                                              (isCompact
+                                                      ? context
+                                                            .textTheme
+                                                            .titleMedium
+                                                      : context
+                                                            .textTheme
+                                                            .headlineSmall)
+                                                  ?.copyWith(
+                                                    fontWeight: FontWeight.w800,
+                                                  ),
+                                        ),
+                                        StatusIndicator.fromStatus(
+                                          device.status,
+                                          compact: isCompact,
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Wrap(
+                                      spacing: 6,
+                                      runSpacing: 4,
+                                      children: <Widget>[
+                                        if (device.hasIp)
+                                          SemanticChip(
+                                            label: device.ipAddress!,
+                                            tone: SemanticTone.primary,
+                                            compact: true,
+                                            icon: Icons.lan_outlined,
+                                          ),
+                                        if (device.macAddress != null &&
+                                            !isCompact)
+                                          SemanticChip(
+                                            label: device.macAddress!,
+                                            tone: SemanticTone.secondary,
+                                            compact: true,
+                                          ),
+                                        if (device.site != null)
+                                          SemanticChip(
+                                            label: device.site!.name,
+                                            tone: SemanticTone.info,
+                                            compact: true,
+                                            icon: Icons.domain_outlined,
+                                          ),
+                                        if (!isCompact &&
+                                            (device.vendor != null ||
+                                                device.model != null))
+                                          SemanticChip(
+                                            label: [
+                                              if (device.vendor != null)
+                                                device.vendor!,
+                                              if (device.model != null)
+                                                device.model!,
+                                            ].join(' '),
+                                            tone: SemanticTone.info,
+                                            compact: true,
+                                          ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (isCompact) ...<Widget>[
+                                if (auth.canWrite)
+                                  IconButton(
+                                    visualDensity: VisualDensity.compact,
+                                    tooltip: 'Editar',
+                                    onPressed: editDevice,
+                                    icon: const Icon(Icons.edit_outlined),
+                                  ),
+                                PopupMenuButton<String>(
+                                  tooltip: 'Mais ações',
+                                  icon: const Icon(Icons.more_vert),
+                                  onSelected: (action) {
+                                    switch (action) {
+                                      case 'ping':
+                                        showQuickPingDialog(
+                                          context,
+                                          deviceId: device.id,
+                                          deviceName: device.name,
+                                        );
+                                      case 'playbook':
+                                        showDiagnosticPlaybookDialog(
+                                          context,
+                                          device: device,
+                                        );
+                                      case 'traceroute':
+                                        showTracerouteDialog(
+                                          context,
+                                          initialHost: device.ipAddress,
+                                        );
+                                      case 'portscan':
+                                        showPortScanDialog(
+                                          context,
+                                          initialHost: device.ipAddress,
+                                        );
+                                      case 'snmp_poll':
+                                        ref
+                                            .read(deviceDetailProvider.notifier)
+                                            .triggerSnmpPoll(device.id);
+                                      case 'snmp_scan':
+                                        showSnmpScanDialog(
+                                          context,
+                                          deviceId: device.id,
+                                          deviceName: device.name,
+                                        );
+                                      case 'link_test':
+                                        openLinkTest();
+                                      case 'delete':
+                                        _confirmDelete(device);
+                                    }
+                                  },
+                                  itemBuilder: (_) => <PopupMenuEntry<String>>[
+                                    if (auth.canWrite &&
+                                        !device.isSystem &&
+                                        device.hasIp)
+                                      const PopupMenuItem<String>(
+                                        value: 'ping',
+                                        child: ListTile(
+                                          dense: true,
+                                          contentPadding: EdgeInsets.zero,
+                                          leading: Icon(Icons.network_ping),
+                                          title: Text('Ping Rápido'),
+                                        ),
+                                      ),
+                                    const PopupMenuItem<String>(
+                                      value: 'playbook',
+                                      child: ListTile(
+                                        dense: true,
+                                        contentPadding: EdgeInsets.zero,
+                                        leading: Icon(Icons.playlist_play),
+                                        title: Text('Playbook'),
+                                      ),
+                                    ),
+                                    if (device
+                                        .hasIp) ...<PopupMenuEntry<String>>[
+                                      const PopupMenuItem<String>(
+                                        value: 'traceroute',
+                                        child: ListTile(
+                                          dense: true,
+                                          contentPadding: EdgeInsets.zero,
+                                          leading: Icon(Icons.alt_route),
+                                          title: Text('Traceroute'),
+                                        ),
+                                      ),
+                                      const PopupMenuItem<String>(
+                                        value: 'portscan',
+                                        child: ListTile(
+                                          dense: true,
+                                          contentPadding: EdgeInsets.zero,
+                                          leading: Icon(Icons.radar),
+                                          title: Text('Port Scan'),
+                                        ),
+                                      ),
+                                    ],
+                                    if (auth.canWrite &&
+                                        device.snmpEnabled) ...<
+                                      PopupMenuEntry<String>
+                                    >[
+                                      PopupMenuItem<String>(
+                                        value: 'snmp_poll',
+                                        enabled: !detail.pollingSnmp,
+                                        child: const ListTile(
+                                          dense: true,
+                                          contentPadding: EdgeInsets.zero,
+                                          leading: Icon(Icons.sync),
+                                          title: Text('Poll SNMP'),
+                                        ),
+                                      ),
+                                      const PopupMenuItem<String>(
+                                        value: 'snmp_scan',
+                                        child: ListTile(
+                                          dense: true,
+                                          contentPadding: EdgeInsets.zero,
+                                          leading: Icon(Icons.manage_search),
+                                          title: Text('Escanear SNMP'),
+                                        ),
+                                      ),
+                                    ],
+                                    if (networkEnabled)
+                                      const PopupMenuItem<String>(
+                                        value: 'link_test',
+                                        child: ListTile(
+                                          dense: true,
+                                          contentPadding: EdgeInsets.zero,
+                                          leading: Icon(Icons.speed),
+                                          title: Text('Testar Enlace'),
+                                        ),
+                                      ),
+                                    if (auth.canWrite && !device.isSystem) ...<
+                                      PopupMenuEntry<String>
+                                    >[
+                                      const PopupMenuDivider(),
+                                      PopupMenuItem<String>(
+                                        value: 'delete',
+                                        child: ListTile(
+                                          dense: true,
+                                          contentPadding: EdgeInsets.zero,
+                                          leading: Icon(
+                                            Icons.delete_outline,
+                                            color: context.colorScheme.error,
+                                          ),
+                                          title: Text(
+                                            'Excluir',
+                                            style: TextStyle(
+                                              color: context.colorScheme.error,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ],
                             ],
                           ),
-                          const SizedBox(height: 4),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 4,
-                            children: <Widget>[
-                              if (device.hasIp)
-                                SemanticChip(
-                                  label: device.ipAddress!,
-                                  tone: SemanticTone.primary,
-                                  compact: true,
-                                  icon: Icons.lan_outlined,
+                          if (!isCompact) ...<Widget>[
+                            const SizedBox(height: 12),
+                            const Divider(height: 1),
+                            const SizedBox(height: 10),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: <Widget>[
+                                if (auth.canWrite)
+                                  OutlinedButton.icon(
+                                    onPressed: editDevice,
+                                    icon: const Icon(
+                                      Icons.edit_outlined,
+                                      size: 18,
+                                    ),
+                                    label: const Text('Editar'),
+                                  ),
+                                if (auth.canWrite &&
+                                    !device.isSystem &&
+                                    device.hasIp)
+                                  FilledButton.tonalIcon(
+                                    onPressed: () => showQuickPingDialog(
+                                      context,
+                                      deviceId: device.id,
+                                      deviceName: device.name,
+                                    ),
+                                    icon: const Icon(
+                                      Icons.network_ping,
+                                      size: 18,
+                                    ),
+                                    label: const Text('Ping Rápido'),
+                                  ),
+                                OutlinedButton.icon(
+                                  onPressed: () => showDiagnosticPlaybookDialog(
+                                    context,
+                                    device: device,
+                                  ),
+                                  icon: const Icon(
+                                    Icons.playlist_play,
+                                    size: 18,
+                                  ),
+                                  label: const Text('Playbook'),
                                 ),
-                              if (device.macAddress != null)
-                                SemanticChip(
-                                  label: device.macAddress!,
-                                  tone: SemanticTone.secondary,
-                                  compact: true,
-                                ),
-                              if (device.site != null)
-                                SemanticChip(
-                                  label: device.site!.name,
-                                  tone: SemanticTone.info,
-                                  compact: true,
-                                  icon: Icons.domain_outlined,
-                                ),
-                              if (device.vendor != null || device.model != null)
-                                SemanticChip(
-                                  label: [
-                                    if (device.vendor != null) device.vendor!,
-                                    if (device.model != null) device.model!,
-                                  ].join(' '),
-                                  tone: SemanticTone.info,
-                                  compact: true,
-                                ),
-                            ],
-                          ),
+                                if (device.hasIp) ...<Widget>[
+                                  OutlinedButton.icon(
+                                    onPressed: () => showTracerouteDialog(
+                                      context,
+                                      initialHost: device.ipAddress,
+                                    ),
+                                    icon: const Icon(Icons.alt_route, size: 18),
+                                    label: const Text('Traceroute'),
+                                  ),
+                                  OutlinedButton.icon(
+                                    onPressed: () => showPortScanDialog(
+                                      context,
+                                      initialHost: device.ipAddress,
+                                    ),
+                                    icon: const Icon(Icons.radar, size: 18),
+                                    label: const Text('Port Scan'),
+                                  ),
+                                ],
+                                if (auth.canWrite &&
+                                    device.snmpEnabled) ...<Widget>[
+                                  OutlinedButton.icon(
+                                    onPressed: detail.pollingSnmp
+                                        ? null
+                                        : () => ref
+                                              .read(
+                                                deviceDetailProvider.notifier,
+                                              )
+                                              .triggerSnmpPoll(device.id),
+                                    icon: detail.pollingSnmp
+                                        ? const SizedBox(
+                                            width: 15,
+                                            height: 15,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                            ),
+                                          )
+                                        : const Icon(Icons.sync, size: 18),
+                                    label: const Text('Poll SNMP'),
+                                  ),
+                                  OutlinedButton.icon(
+                                    onPressed: () => showSnmpScanDialog(
+                                      context,
+                                      deviceId: device.id,
+                                      deviceName: device.name,
+                                    ),
+                                    icon: const Icon(
+                                      Icons.manage_search,
+                                      size: 18,
+                                    ),
+                                    label: const Text('Escanear SNMP'),
+                                  ),
+                                ],
+                                if (networkEnabled)
+                                  OutlinedButton.icon(
+                                    onPressed: openLinkTest,
+                                    icon: const Icon(Icons.speed, size: 18),
+                                    label: const Text('Testar Enlace'),
+                                  ),
+                                if (auth.canWrite && !device.isSystem)
+                                  TextButton.icon(
+                                    onPressed: () => _confirmDelete(device),
+                                    icon: Icon(
+                                      Icons.delete_outline,
+                                      size: 18,
+                                      color: context.colorScheme.error,
+                                    ),
+                                    label: Text(
+                                      'Excluir',
+                                      style: TextStyle(
+                                        color: context.colorScheme.error,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ],
                         ],
                       ),
                     ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                const Divider(height: 1),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: <Widget>[
-                    if (auth.canWrite)
-                      OutlinedButton.icon(
-                        onPressed: () async {
-                          final saved = await showDeviceFormSheet(
-                            context: context,
-                            existing: device,
-                          );
-                          if (saved != null) {
-                            ref
-                                .read(deviceDetailProvider.notifier)
-                                .loadDeviceDetails(device.id);
-                          }
-                        },
-                        icon: const Icon(Icons.edit_outlined, size: 18),
-                        label: const Text('Editar'),
-                      ),
-                    if (auth.canWrite && !device.isSystem && device.hasIp)
-                      FilledButton.tonalIcon(
-                        onPressed: () => showQuickPingDialog(
-                          context,
-                          deviceId: device.id,
-                          deviceName: device.name,
+                    const SizedBox(height: 10),
+                    // ── Saúde e Telemetria (2x2 simétrico no mobile, 4 colunas no desktop) ──
+                    ResponsiveGrid(
+                      xs: 2,
+                      sm: 2,
+                      md: 4,
+                      lg: 4,
+                      xl: 4,
+                      spacing: isCompact ? 8 : 12,
+                      runSpacing: isCompact ? 8 : 12,
+                      children: <Widget>[
+                        KpiCard(
+                          label: 'CPU',
+                          value: latestCpu != null
+                              ? formatPercent(latestCpu)
+                              : '—',
+                          icon: Icons.memory,
+                          tone: latestCpu != null && latestCpu > 85
+                              ? SemanticTone.error
+                              : SemanticTone.primary,
                         ),
-                        icon: const Icon(Icons.network_ping, size: 18),
-                        label: const Text('Ping Rápido'),
-                      ),
-                    OutlinedButton.icon(
-                      onPressed: () =>
-                          showDiagnosticPlaybookDialog(context, device: device),
-                      icon: const Icon(Icons.playlist_play, size: 18),
-                      label: const Text('Playbook'),
+                        KpiCard(
+                          label: 'Memória',
+                          value: latestMem != null
+                              ? formatPercent(latestMem)
+                              : '—',
+                          icon: Icons.sd_storage_outlined,
+                          tone: latestMem != null && latestMem > 85
+                              ? SemanticTone.warning
+                              : SemanticTone.info,
+                        ),
+                        KpiCard(
+                          label: 'Interfaces',
+                          value: '$upIfaces / ${detail.interfaces.length}',
+                          subtitle: 'Ativas',
+                          icon: Icons.settings_ethernet,
+                          tone: SemanticTone.success,
+                        ),
+                        KpiCard(
+                          label: 'Monitores',
+                          value: '$upMonitors / ${detail.monitors.length}',
+                          subtitle: 'Saudáveis',
+                          icon: Icons.monitor_heart_outlined,
+                          tone: upMonitors == detail.monitors.length
+                              ? SemanticTone.success
+                              : SemanticTone.warning,
+                        ),
+                      ],
                     ),
-                    if (device.hasIp) ...<Widget>[
-                      OutlinedButton.icon(
-                        onPressed: () => showTracerouteDialog(
-                          context,
-                          initialHost: device.ipAddress,
-                        ),
-                        icon: const Icon(Icons.alt_route, size: 18),
-                        label: const Text('Traceroute'),
-                      ),
-                      OutlinedButton.icon(
-                        onPressed: () => showPortScanDialog(
-                          context,
-                          initialHost: device.ipAddress,
-                        ),
-                        icon: const Icon(Icons.radar, size: 18),
-                        label: const Text('Port Scan'),
-                      ),
-                    ],
-                    if (auth.canWrite && device.snmpEnabled) ...<Widget>[
-                      OutlinedButton.icon(
-                        onPressed: detail.pollingSnmp
-                            ? null
-                            : () => ref
-                                  .read(deviceDetailProvider.notifier)
-                                  .triggerSnmpPoll(device.id),
-                        icon: detail.pollingSnmp
-                            ? const SizedBox(
-                                width: 15,
-                                height: 15,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(Icons.sync, size: 18),
-                        label: const Text('Poll SNMP'),
-                      ),
-                      OutlinedButton.icon(
-                        onPressed: () => showSnmpScanDialog(
-                          context,
-                          deviceId: device.id,
-                          deviceName: device.name,
-                        ),
-                        icon: const Icon(Icons.manage_search, size: 18),
-                        label: const Text('Escanear SNMP'),
-                      ),
-                    ],
-                    if (networkEnabled)
-                      OutlinedButton.icon(
-                        onPressed: () {
-                          ref
-                              .read(pendingLinkTestDraftProvider.notifier)
-                              .state = LinkTestRequestDraft(
-                            kind: 'server',
-                            targetDeviceId: device.id,
-                          );
-                          context.go('/link-tests?deviceId=${device.id}');
-                        },
-                        icon: const Icon(Icons.speed, size: 18),
-                        label: const Text('Testar Enlace'),
-                      ),
-                    if (auth.canWrite && !device.isSystem)
-                      TextButton.icon(
-                        onPressed: () => _confirmDelete(device),
-                        icon: Icon(
-                          Icons.delete_outline,
-                          size: 18,
-                          color: context.colorScheme.error,
-                        ),
-                        label: Text(
-                          'Excluir',
-                          style: TextStyle(color: context.colorScheme.error),
-                        ),
-                      ),
+                    const SizedBox(height: 10),
                   ],
                 ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-          // ── Saúde e Telemetria ──
-          ResponsiveGrid(
-            xs: 2,
-            sm: 2,
-            md: 4,
-            lg: 4,
-            xl: 4,
-            children: <Widget>[
-              KpiCard(
-                label: 'CPU',
-                value: latestCpu != null ? formatPercent(latestCpu) : '—',
-                icon: Icons.memory,
-                tone: latestCpu != null && latestCpu > 85
-                    ? SemanticTone.error
-                    : SemanticTone.primary,
               ),
-              KpiCard(
-                label: 'Memória',
-                value: latestMem != null ? formatPercent(latestMem) : '—',
-                icon: Icons.sd_storage_outlined,
-                tone: latestMem != null && latestMem > 85
-                    ? SemanticTone.warning
-                    : SemanticTone.info,
+              // ── Barra de abas fixa com TabBar rolável e distinção PLUGIN (Teal #00796B / #1DE9B6) ──
+              SliverPersistentHeader(
+                pinned: true,
+                delegate: _DeviceDetailTabHeaderDelegate(
+                  backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+                  child: _DeviceDetailTabBar(
+                    key: ValueKey<String>(tabKeySignature),
+                    tabs: tabs,
+                    selectedIndex: activeIndex,
+                    onSelected: (index) {
+                      setState(() => _selectedTabId = tabs[index].id);
+                    },
+                  ),
+                ),
               ),
-              KpiCard(
-                label: 'Interfaces',
-                value: '$upIfaces / ${detail.interfaces.length}',
-                subtitle: 'Ativas',
-                icon: Icons.settings_ethernet,
-                tone: SemanticTone.success,
-              ),
-              KpiCard(
-                label: 'Monitores',
-                value: '$upMonitors / ${detail.monitors.length}',
-                subtitle: 'Saudáveis',
-                icon: Icons.monitor_heart_outlined,
-                tone: upMonitors == detail.monitors.length
-                    ? SemanticTone.success
-                    : SemanticTone.warning,
+              SliverPadding(
+                padding: const EdgeInsets.only(top: 12, bottom: 24),
+                sliver: SliverToBoxAdapter(child: activeTab.builder(context)),
               ),
             ],
           ),
-          const SizedBox(height: 14),
-          // ── Barra de abas com distinção estrita de cor PLUGIN (Teal #00796B / #1DE9B6) vs Nativa (primary) ──
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: tabs
-                  .map((tab) {
-                    final selected = tab.id == activeTab.id;
-                    final pluginColors = context.semanticColors.resolve(
-                      SemanticTone.plugin,
-                      context.colorScheme,
-                    );
-                    final activeColor = tab.isPlugin
-                        ? pluginColors.foreground
-                        : context.colorScheme.primary;
-                    final activeBg = tab.isPlugin
-                        ? pluginColors.container
-                        : context.colorScheme.primaryContainer;
-                    final activeFg = tab.isPlugin
-                        ? pluginColors.onContainer
-                        : context.colorScheme.onPrimaryContainer;
+        );
+      },
+    );
+  }
+}
 
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: Material(
-                        color: selected
-                            ? activeBg
-                            : context.colorScheme.surface,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          side: BorderSide(
-                            color: selected
-                                ? activeColor
-                                : (tab.isPlugin
-                                      ? pluginColors.border
-                                      : context.colorScheme.outlineVariant),
-                            width: selected ? 2 : 1,
-                          ),
-                        ),
-                        clipBehavior: Clip.antiAlias,
-                        child: InkWell(
-                          onTap: () => setState(() => _selectedTabId = tab.id),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 10,
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: <Widget>[
-                                Icon(
-                                  tab.icon,
-                                  size: 18,
-                                  color: selected
-                                      ? activeFg
-                                      : (tab.isPlugin
-                                            ? pluginColors.foreground
-                                            : context
-                                                  .colorScheme
-                                                  .onSurfaceVariant),
-                                ),
-                                const SizedBox(width: 8),
-                                Text(
-                                  tab.title,
-                                  style: TextStyle(
-                                    fontWeight: selected
-                                        ? FontWeight.w800
-                                        : FontWeight.w600,
-                                    color: selected
-                                        ? activeFg
-                                        : (tab.isPlugin
-                                              ? pluginColors.foreground
-                                              : context.colorScheme.onSurface),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    );
-                  })
-                  .toList(growable: false),
-            ),
-          ),
-          const SizedBox(height: 14),
-          activeTab.builder(context),
-          const SizedBox(height: 24),
+class _DeviceDetailTabHeaderDelegate extends SliverPersistentHeaderDelegate {
+  const _DeviceDetailTabHeaderDelegate({
+    required this.child,
+    required this.backgroundColor,
+  });
+
+  final Widget child;
+  final Color backgroundColor;
+
+  @override
+  double get minExtent => 49;
+
+  @override
+  double get maxExtent => 49;
+
+  @override
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
+    return ColoredBox(
+      color: backgroundColor,
+      child: Column(
+        children: <Widget>[
+          Expanded(child: child),
+          const Divider(height: 1),
         ],
       ),
+    );
+  }
+
+  @override
+  bool shouldRebuild(covariant _DeviceDetailTabHeaderDelegate oldDelegate) {
+    return oldDelegate.child != child ||
+        oldDelegate.backgroundColor != backgroundColor;
+  }
+}
+
+class _DeviceDetailTabBar extends StatefulWidget {
+  const _DeviceDetailTabBar({
+    super.key,
+    required this.tabs,
+    required this.selectedIndex,
+    required this.onSelected,
+  });
+
+  final List<_ResolvedTab> tabs;
+  final int selectedIndex;
+  final ValueChanged<int> onSelected;
+
+  @override
+  State<_DeviceDetailTabBar> createState() => _DeviceDetailTabBarState();
+}
+
+class _DeviceDetailTabBarState extends State<_DeviceDetailTabBar>
+    with SingleTickerProviderStateMixin {
+  late final TabController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TabController(
+      length: widget.tabs.length,
+      vsync: this,
+      initialIndex: widget.selectedIndex.clamp(0, widget.tabs.length - 1),
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant _DeviceDetailTabBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final nextIdx = widget.selectedIndex.clamp(0, widget.tabs.length - 1);
+    if (_controller.index != nextIdx) {
+      _controller.animateTo(nextIdx);
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = context.colorScheme;
+    final pluginColors = context.semanticColors.resolve(
+      SemanticTone.plugin,
+      scheme,
+    );
+    final activeTab = widget.tabs[widget.selectedIndex];
+
+    return TabBar(
+      controller: _controller,
+      isScrollable: true,
+      tabAlignment: TabAlignment.start,
+      dividerColor: Colors.transparent,
+      indicatorColor: activeTab.isPlugin
+          ? pluginColors.foreground
+          : scheme.primary,
+      labelPadding: const EdgeInsets.symmetric(horizontal: 12),
+      onTap: widget.onSelected,
+      tabs: <Widget>[
+        for (var i = 0; i < widget.tabs.length; i++)
+          Builder(
+            builder: (_) {
+              final tab = widget.tabs[i];
+              final selected = i == widget.selectedIndex;
+              final fg = tab.isPlugin
+                  ? (selected
+                        ? pluginColors.onContainer
+                        : pluginColors.foreground)
+                  : (selected ? scheme.primary : scheme.onSurfaceVariant);
+
+              return Tab(
+                child: Container(
+                  padding: tab.isPlugin
+                      ? const EdgeInsets.symmetric(horizontal: 8, vertical: 4)
+                      : EdgeInsets.zero,
+                  decoration: tab.isPlugin
+                      ? BoxDecoration(
+                          color: selected
+                              ? pluginColors.container
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: selected
+                                ? pluginColors.foreground
+                                : pluginColors.border,
+                          ),
+                        )
+                      : null,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      Icon(tab.icon, size: 17, color: fg),
+                      const SizedBox(width: 6),
+                      Text(
+                        tab.title,
+                        maxLines: 1,
+                        softWrap: false,
+                        style: TextStyle(
+                          fontWeight: selected
+                              ? FontWeight.w800
+                              : FontWeight.w600,
+                          color: fg,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+      ],
     );
   }
 }
@@ -810,6 +1116,8 @@ class _DeviceInterfacesTab extends ConsumerWidget {
                     ),
                     title: Text(
                       iface.displayName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(fontWeight: FontWeight.w700),
                     ),
                     subtitle: Text(
@@ -821,6 +1129,8 @@ class _DeviceInterfacesTab extends ConsumerWidget {
                         if (iface.alias != null && iface.alias!.isNotEmpty)
                           iface.alias!,
                       ].join(' · '),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                     ),
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
@@ -922,79 +1232,91 @@ class _DeviceWifiTab extends ConsumerWidget {
     final snapshot = wifi.snapshotFor(device.id);
     final canWrite = ref.watch(authProvider).canWrite;
 
-    return SectionCard(
-      title: 'Clientes Wi-Fi · ${device.name}',
-      subtitle: snapshot?.readAt != null
-          ? 'Última leitura ${formatRelativeTime(snapshot!.readAt)}'
-          : 'Dados em tempo real via plugin Wi-Fi',
-      icon: Icons.wifi,
-      iconTone: SemanticTone.plugin,
-      trailing: Wrap(
-        spacing: 8,
-        children: <Widget>[
-          OutlinedButton.icon(
-            onPressed: () => showWifiQrSheet(
-              context,
-              initialSsid: snapshot?.stations.firstOrNull?.ssid ?? '',
-              deviceId: device.id,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isCompact = constraints.maxWidth < 540;
+        final actions = Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: <Widget>[
+            OutlinedButton.icon(
+              onPressed: () => showWifiQrSheet(
+                context,
+                initialSsid: snapshot?.stations.firstOrNull?.ssid ?? '',
+                deviceId: device.id,
+              ),
+              icon: const Icon(Icons.qr_code_2, size: 18),
+              label: const Text('QR Wi-Fi'),
             ),
-            icon: const Icon(Icons.qr_code_2, size: 18),
-            label: const Text('QR Wi-Fi'),
-          ),
-          if (canWrite)
-            FilledButton.tonalIcon(
-              onPressed: wifi.requesting
-                  ? null
-                  : () => ref
-                        .read(wifiClientsProvider.notifier)
-                        .refresh(deviceId: device.id),
-              icon: const Icon(Icons.refresh, size: 18),
-              label: const Text('Atualizar AP'),
-            ),
-        ],
-      ),
-      child: snapshot == null || snapshot.stations.isEmpty
-          ? const EmptyStateView(
-              title: 'Nenhum cliente Wi-Fi conectado neste AP',
-              icon: Icons.wifi_off,
-              tone: SemanticTone.plugin,
-            )
-          : Column(
-              children: snapshot.stations
-                  .map((st) {
-                    return ListTile(
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      leading: SemanticChip(
-                        label: '${st.signalDbm} dBm',
-                        tone: st.signalDbm >= -60
-                            ? SemanticTone.success
-                            : st.signalDbm >= -75
-                            ? SemanticTone.warning
-                            : SemanticTone.error,
-                        compact: true,
-                      ),
-                      title: Text(
-                        st.hostname ?? st.vendor ?? st.mac,
-                        style: const TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                      subtitle: Text(
-                        '${st.mac}${st.ip != null ? ' · ${st.ip}' : ''}'
-                        '${st.ssid != null ? ' · ${st.ssid}' : ''}'
-                        '${st.band != null ? ' (${st.band})' : ''}',
-                      ),
-                      trailing: st.distance != null
-                          ? Text(
-                              formatDistanceRange(
-                                st.distance!.minM,
-                                st.distance!.maxM,
-                              ),
-                            )
-                          : null,
-                    );
-                  })
-                  .toList(growable: false),
-            ),
+            if (canWrite)
+              FilledButton.tonalIcon(
+                onPressed: wifi.requesting
+                    ? null
+                    : () => ref
+                          .read(wifiClientsProvider.notifier)
+                          .refresh(deviceId: device.id),
+                icon: const Icon(Icons.refresh, size: 18),
+                label: const Text('Atualizar AP'),
+              ),
+          ],
+        );
+        return SectionCard(
+          title: 'Clientes Wi-Fi · ${device.name}',
+          subtitle: snapshot?.readAt != null
+              ? 'Última leitura ${formatRelativeTime(snapshot!.readAt)}'
+              : 'Dados em tempo real via plugin Wi-Fi',
+          icon: Icons.wifi,
+          iconTone: SemanticTone.plugin,
+          trailing: isCompact ? null : actions,
+          footer: isCompact ? actions : null,
+          child: snapshot == null || snapshot.stations.isEmpty
+              ? const EmptyStateView(
+                  title: 'Nenhum cliente Wi-Fi conectado neste AP',
+                  icon: Icons.wifi_off,
+                  tone: SemanticTone.plugin,
+                )
+              : Column(
+                  children: snapshot.stations
+                      .map((st) {
+                        return ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          leading: SemanticChip(
+                            label: '${st.signalDbm} dBm',
+                            tone: st.signalDbm >= -60
+                                ? SemanticTone.success
+                                : st.signalDbm >= -75
+                                ? SemanticTone.warning
+                                : SemanticTone.error,
+                            compact: true,
+                          ),
+                          title: Text(
+                            st.hostname ?? st.vendor ?? st.mac,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                          subtitle: Text(
+                            '${st.mac}${st.ip != null ? ' · ${st.ip}' : ''}'
+                            '${st.ssid != null ? ' · ${st.ssid}' : ''}'
+                            '${st.band != null ? ' (${st.band})' : ''}',
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          trailing: st.distance != null
+                              ? Text(
+                                  formatDistanceRange(
+                                    st.distance!.minM,
+                                    st.distance!.maxM,
+                                  ),
+                                )
+                              : null,
+                        );
+                      })
+                      .toList(growable: false),
+                ),
+        );
+      },
     );
   }
 }

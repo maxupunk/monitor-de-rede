@@ -37,48 +37,54 @@ void main() {
       },
     );
 
-    test('topologyProvider applies realtime status, health, traffic, and layout revision', () {
-      final container = ProviderContainer();
-      addTearDown(container.dispose);
+    test(
+      'topologyProvider applies realtime status, health, traffic, and layout revision',
+      () {
+        final container = ProviderContainer();
+        addTearDown(container.dispose);
 
-      final notifier = container.read(topologyProvider.notifier);
-      notifier.applyLayoutUpdated(const <String, dynamic>{'siteId': null});
-      expect(container.read(topologyProvider).remoteLayoutRevision, 1);
+        final notifier = container.read(topologyProvider.notifier);
+        notifier.applyLayoutUpdated(const <String, dynamic>{'siteId': null});
+        expect(container.read(topologyProvider).remoteLayoutRevision, 1);
 
-      // Outro siteId não dispara revisão
-      notifier.applyLayoutUpdated(const <String, dynamic>{'siteId': 99});
-      expect(container.read(topologyProvider).remoteLayoutRevision, 1);
-    });
+        // Outro siteId não dispara revisão
+        notifier.applyLayoutUpdated(const <String, dynamic>{'siteId': 99});
+        expect(container.read(topologyProvider).remoteLayoutRevision, 1);
+      },
+    );
 
-    test('discoveryProvider.applyConflictsDetected accepts inline conflict payload', () {
-      final container = ProviderContainer();
-      addTearDown(container.dispose);
+    test(
+      'discoveryProvider.applyConflictsDetected accepts inline conflict payload',
+      () {
+        final container = ProviderContainer();
+        addTearDown(container.dispose);
 
-      container.read(discoveryProvider.notifier).applyConflictsDetected(
-        const <String, dynamic>{
-          'conflicts': <Map<String, dynamic>>[
-            <String, dynamic>{
-              'id': 'c1',
-              'conflictType': 'ipCollision',
-              'ipAddress': '192.168.10.50',
-              'macAddresses': <String>[
-                'aa:bb:cc:00:00:01',
-                'aa:bb:cc:00:00:02',
-              ],
-              'vendors': <String>['MikroTik', 'Ubiquiti'],
-              'severity': 'critical',
-              'description': 'IP duplicado na sub-rede',
-              'detectedAt': '2026-11-20T23:00:00Z',
-            },
-          ],
-        },
-      );
+        container.read(discoveryProvider.notifier).applyConflictsDetected(
+          const <String, dynamic>{
+            'conflicts': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'id': 'c1',
+                'conflictType': 'ipCollision',
+                'ipAddress': '192.168.10.50',
+                'macAddresses': <String>[
+                  'aa:bb:cc:00:00:01',
+                  'aa:bb:cc:00:00:02',
+                ],
+                'vendors': <String>['MikroTik', 'Ubiquiti'],
+                'severity': 'critical',
+                'description': 'IP duplicado na sub-rede',
+                'detectedAt': '2026-11-20T23:00:00Z',
+              },
+            ],
+          },
+        );
 
-      final conflicts = container.read(discoveryProvider).conflicts;
-      expect(conflicts.length, 1);
-      expect(conflicts.first.ipAddress, '192.168.10.50');
-      expect(conflicts.first.macAddresses.length, 2);
-    });
+        final conflicts = container.read(discoveryProvider).conflicts;
+        expect(conflicts.length, 1);
+        expect(conflicts.first.ipAddress, '192.168.10.50');
+        expect(conflicts.first.macAddresses.length, 2);
+      },
+    );
 
     test('probesProvider.applyRealtimeStatus ignores missing id safely', () {
       final container = ProviderContainer();
@@ -130,30 +136,33 @@ void main() {
   });
 
   group('Model edge cases', () {
-    test('TopologyEdgeModel recalculates utilization and down status on traffic patch', () {
-      final edge = TopologyEdgeModel.fromJson(const <String, dynamic>{
-        'id': 5,
-        'source': 1,
-        'target': 2,
-        'linkType': 'ethernet',
-        'discoveryMethod': 'lldp',
-        'status': 'up',
-        'speedBps': 1000000000,
-      });
+    test(
+      'TopologyEdgeModel recalculates utilization and down status on traffic patch',
+      () {
+        final edge = TopologyEdgeModel.fromJson(const <String, dynamic>{
+          'id': 5,
+          'source': 1,
+          'target': 2,
+          'linkType': 'ethernet',
+          'discoveryMethod': 'lldp',
+          'status': 'up',
+          'speedBps': 1000000000,
+        });
 
-      final updated = edge.withTrafficUpdate(
-        inBps: 500000000,
-        outBps: 250000000,
-        sourceInterfaceStatus: 'up',
-        targetInterfaceStatus: 'up',
-      );
-      expect(updated.utilization, closeTo(0.5, 0.01));
-      expect(updated.trafficBps, 750000000);
-      expect(updated.status, 'up');
+        final updated = edge.withTrafficUpdate(
+          inBps: 500000000,
+          outBps: 250000000,
+          sourceInterfaceStatus: 'up',
+          targetInterfaceStatus: 'up',
+        );
+        expect(updated.utilization, closeTo(0.5, 0.01));
+        expect(updated.trafficBps, 750000000);
+        expect(updated.status, 'up');
 
-      final downed = updated.withTrafficUpdate(sourceInterfaceStatus: 'down');
-      expect(downed.status, 'down');
-    });
+        final downed = updated.withTrafficUpdate(sourceInterfaceStatus: 'down');
+        expect(downed.status, 'down');
+      },
+    );
 
     test('NetworkModel parses usableHosts and scannable flags', () {
       final net = NetworkModel.fromJson(const <String, dynamic>{

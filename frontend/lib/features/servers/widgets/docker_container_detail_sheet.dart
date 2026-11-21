@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -190,8 +191,9 @@ class _ContainerDetailBodyState extends ConsumerState<_ContainerDetailBody>
             timestamps: true,
           );
       if (!mounted) return;
-      final name = containerDisplayName(widget.initialContainer)
-          .replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
+      final name = containerDisplayName(
+        widget.initialContainer,
+      ).replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
       await shareTextFile(
         context,
         content: all.map((e) => e.formattedLine).join('\n'),
@@ -199,8 +201,9 @@ class _ContainerDetailBodyState extends ConsumerState<_ContainerDetailBody>
       );
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Erro ao baixar logs: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Erro ao baixar logs: $err')));
     }
   }
 
@@ -208,7 +211,8 @@ class _ContainerDetailBodyState extends ConsumerState<_ContainerDetailBody>
     final ok = await showConfirmActionDialog(
       context: context,
       title: 'Limpar logs do container?',
-      message: 'Para limpar o arquivo de logs, o container pode ser brevemente parado e iniciado.',
+      message:
+          'Para limpar o arquivo de logs, o container pode ser brevemente parado e iniciado.',
       confirmLabel: 'Limpar logs',
       tone: SemanticTone.warning,
     );
@@ -310,7 +314,8 @@ class _ContainerDetailBodyState extends ConsumerState<_ContainerDetailBody>
             ),
             if (liveSummary.isProtected)
               const Tooltip(
-                message: 'Container protegido (com.netmonitor.protected=true): não pode ser parado, recriado ou removido.',
+                message:
+                    'Container protegido (com.netmonitor.protected=true): não pode ser parado, recriado ou removido.',
                 child: SemanticChip(
                   label: 'Protegido',
                   tone: SemanticTone.info,
@@ -346,7 +351,7 @@ class _ContainerDetailBodyState extends ConsumerState<_ContainerDetailBody>
         const SizedBox(height: 12),
 
         SizedBox(
-          height: 420,
+          height: math.min(440.0, MediaQuery.sizeOf(context).height * 0.56),
           child: TabBarView(
             controller: _tabController,
             children: <Widget>[
@@ -394,12 +399,32 @@ class _ContainerDetailBodyState extends ConsumerState<_ContainerDetailBody>
           ),
         const SizedBox(height: 12),
         SegmentedButton<String>(
+          showSelectedIcon: false,
+          style: SegmentedButton.styleFrom(
+            visualDensity: VisualDensity.compact,
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+          ),
           segments: const <ButtonSegment<String>>[
-            ButtonSegment(value: '1h', label: Text('1h')),
-            ButtonSegment(value: '6h', label: Text('6h')),
-            ButtonSegment(value: '24h', label: Text('24h')),
-            ButtonSegment(value: '7d', label: Text('7d')),
-            ButtonSegment(value: '30d', label: Text('30d')),
+            ButtonSegment(
+              value: '1h',
+              label: Text('1h', maxLines: 1, softWrap: false),
+            ),
+            ButtonSegment(
+              value: '6h',
+              label: Text('6h', maxLines: 1, softWrap: false),
+            ),
+            ButtonSegment(
+              value: '24h',
+              label: Text('24h', maxLines: 1, softWrap: false),
+            ),
+            ButtonSegment(
+              value: '7d',
+              label: Text('7d', maxLines: 1, softWrap: false),
+            ),
+            ButtonSegment(
+              value: '30d',
+              label: Text('30d', maxLines: 1, softWrap: false),
+            ),
           ],
           selected: <String>{_historyRange},
           onSelectionChanged: (set) {
@@ -587,40 +612,53 @@ class _ContainerDetailBodyState extends ConsumerState<_ContainerDetailBody>
     return ListView(
       children: <Widget>[
         if (isAdmin && availableToConnect.isNotEmpty) ...<Widget>[
-          Row(
-            children: <Widget>[
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  initialValue:
-                      availableToConnect.any(
-                        (n) => n.id == _selectedConnectNetworkId,
-                      )
-                      ? _selectedConnectNetworkId
-                      : null,
-                  decoration: const InputDecoration(
-                    labelText: 'Conectar a uma rede',
-                    isDense: true,
-                  ),
-                  items: availableToConnect
-                      .map(
-                        (n) => DropdownMenuItem<String>(
-                          value: n.id,
-                          child: Text(n.name),
-                        ),
-                      )
-                      .toList(growable: false),
-                  onChanged: (v) =>
-                      setState(() => _selectedConnectNetworkId = v),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final dropdown = AppDropdownFormField<String>(
+                initialValue:
+                    availableToConnect.any(
+                      (n) => n.id == _selectedConnectNetworkId,
+                    )
+                    ? _selectedConnectNetworkId
+                    : null,
+                decoration: const InputDecoration(
+                  labelText: 'Conectar a uma rede',
+                  isDense: true,
                 ),
-              ),
-              const SizedBox(width: 8),
-              FilledButton(
+                items: availableToConnect
+                    .map(
+                      (n) => DropdownMenuItem<String>(
+                        value: n.id,
+                        child: Text(n.name, overflow: TextOverflow.ellipsis),
+                      ),
+                    )
+                    .toList(growable: false),
+                onChanged: (v) => setState(() => _selectedConnectNetworkId = v),
+              );
+              final addBtn = FilledButton(
                 onPressed: _selectedConnectNetworkId == null
                     ? null
                     : _connectNetwork,
                 child: const Text('Adicionar'),
-              ),
-            ],
+              );
+              if (constraints.maxWidth < 420) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    dropdown,
+                    const SizedBox(height: 8),
+                    Align(alignment: Alignment.centerRight, child: addBtn),
+                  ],
+                );
+              }
+              return Row(
+                children: <Widget>[
+                  Expanded(child: dropdown),
+                  const SizedBox(width: 8),
+                  addBtn,
+                ],
+              );
+            },
           ),
           const SizedBox(height: 12),
         ],
@@ -690,14 +728,12 @@ class _ContainerDetailBodyState extends ConsumerState<_ContainerDetailBody>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: <Widget>[
-            SizedBox(
-              width: 110,
-              child: DropdownButtonFormField<String>(
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final isCompact = constraints.maxWidth < 520;
+            final linesField = SizedBox(
+              width: 104,
+              child: AppDropdownFormField<String>(
                 initialValue: _tail,
                 isDense: true,
                 decoration: const InputDecoration(labelText: 'Linhas'),
@@ -717,34 +753,99 @@ class _ContainerDetailBodyState extends ConsumerState<_ContainerDetailBody>
                         }
                       },
               ),
-            ),
-            OutlinedButton.icon(
-              onPressed: _logStreamId != null || _loadingLogs
-                  ? null
-                  : _loadLogs,
-              icon: const Icon(Icons.refresh, size: 16),
-              label: const Text('Atualizar'),
-            ),
-            FilledButton.tonalIcon(
+            );
+            final liveBtn = FilledButton.tonalIcon(
               onPressed: _toggleLiveLogs,
               icon: Icon(
                 _logStreamId != null ? Icons.pause : Icons.play_arrow,
                 size: 16,
               ),
-              label: Text(_logStreamId != null ? 'Pausar ao vivo' : 'Ao vivo'),
-            ),
-            OutlinedButton.icon(
-              onPressed: _downloadLogs,
-              icon: const Icon(Icons.download, size: 16),
-              label: const Text('Baixar'),
-            ),
-            if (isAdmin)
-              TextButton.icon(
-                onPressed: _clearLogs,
-                icon: const Icon(Icons.delete_sweep_outlined, size: 16),
-                label: const Text('Limpar'),
-              ),
-          ],
+              label: Text(_logStreamId != null ? 'Pausar' : 'Ao vivo'),
+            );
+
+            if (isCompact) {
+              return Row(
+                children: <Widget>[
+                  linesField,
+                  const SizedBox(width: 8),
+                  Expanded(child: liveBtn),
+                  PopupMenuButton<String>(
+                    tooltip: 'Mais ações de log',
+                    onSelected: (cmd) {
+                      if (cmd == 'refresh' &&
+                          _logStreamId == null &&
+                          !_loadingLogs) {
+                        _loadLogs();
+                      } else if (cmd == 'download') {
+                        _downloadLogs();
+                      } else if (cmd == 'clear') {
+                        _clearLogs();
+                      }
+                    },
+                    itemBuilder: (_) => <PopupMenuEntry<String>>[
+                      PopupMenuItem<String>(
+                        value: 'refresh',
+                        enabled: _logStreamId == null && !_loadingLogs,
+                        child: const ListTile(
+                          dense: true,
+                          leading: Icon(Icons.refresh, size: 18),
+                          title: Text('Atualizar'),
+                        ),
+                      ),
+                      const PopupMenuItem<String>(
+                        value: 'download',
+                        child: ListTile(
+                          dense: true,
+                          leading: Icon(Icons.download, size: 18),
+                          title: Text('Baixar'),
+                        ),
+                      ),
+                      if (isAdmin)
+                        const PopupMenuItem<String>(
+                          value: 'clear',
+                          child: ListTile(
+                            dense: true,
+                            leading: Icon(
+                              Icons.delete_sweep_outlined,
+                              size: 18,
+                            ),
+                            title: Text('Limpar'),
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              );
+            }
+
+            return Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: <Widget>[
+                linesField,
+                OutlinedButton.icon(
+                  onPressed: _logStreamId != null || _loadingLogs
+                      ? null
+                      : _loadLogs,
+                  icon: const Icon(Icons.refresh, size: 16),
+                  label: const Text('Atualizar'),
+                ),
+                liveBtn,
+                OutlinedButton.icon(
+                  onPressed: _downloadLogs,
+                  icon: const Icon(Icons.download, size: 16),
+                  label: const Text('Baixar'),
+                ),
+                if (isAdmin)
+                  TextButton.icon(
+                    onPressed: _clearLogs,
+                    icon: const Icon(Icons.delete_sweep_outlined, size: 16),
+                    label: const Text('Limpar'),
+                  ),
+              ],
+            );
+          },
         ),
         const SizedBox(height: 8),
         TextField(

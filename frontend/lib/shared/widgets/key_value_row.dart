@@ -27,7 +27,8 @@ class KeyValueRow extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final isNarrow = constraints.maxWidth < 360;
+          final isNarrow =
+              constraints.maxWidth < (trailing != null ? 400 : 360);
           final labelWidget = Text(
             label,
             style: context.textTheme.bodySmall?.copyWith(
@@ -35,23 +36,17 @@ class KeyValueRow extends StatelessWidget {
               fontWeight: FontWeight.w600,
             ),
           );
-          final valueWidget = Row(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              Flexible(
-                child: SelectableText(
-                  value,
-                  textAlign: isNarrow ? TextAlign.start : TextAlign.end,
-                  style: context.textTheme.bodyMedium?.copyWith(
-                    color: scheme.onSurface,
-                    fontWeight: FontWeight.w600,
-                    fontFamily: monospace ? 'monospace' : null,
-                  ),
-                ),
-              ),
-              if (copyable && value.isNotEmpty) ...<Widget>[
-                const SizedBox(width: 4),
-                IconButton(
+          final textWidget = SelectableText(
+            value,
+            textAlign: isNarrow ? TextAlign.start : TextAlign.end,
+            style: context.textTheme.bodyMedium?.copyWith(
+              color: scheme.onSurface,
+              fontWeight: FontWeight.w600,
+              fontFamily: monospace ? 'monospace' : null,
+            ),
+          );
+          final copyButton = (copyable && value.isNotEmpty)
+              ? IconButton(
                   tooltip: 'Copiar',
                   visualDensity: VisualDensity.compact,
                   icon: const Icon(Icons.copy, size: 16),
@@ -64,14 +59,30 @@ class KeyValueRow extends StatelessWidget {
                       ),
                     );
                   },
-                ),
-              ],
-              if (trailing != null) ...<Widget>[
-                const SizedBox(width: 6),
-                trailing!,
-              ],
-            ],
-          );
+                )
+              : null;
+
+          final Widget valueWidget = (isNarrow && trailing != null)
+              ? Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: <Widget>[textWidget, ?copyButton, trailing!],
+                )
+              : Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Flexible(child: textWidget),
+                    if (copyButton != null) ...<Widget>[
+                      const SizedBox(width: 4),
+                      copyButton,
+                    ],
+                    if (trailing != null) ...<Widget>[
+                      const SizedBox(width: 6),
+                      Flexible(flex: 0, child: trailing!),
+                    ],
+                  ],
+                );
 
           if (isNarrow) {
             return Column(

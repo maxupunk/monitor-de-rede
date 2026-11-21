@@ -54,116 +54,157 @@ class _VendorRegistryCardState extends ConsumerState<VendorRegistryCard> {
     final status = state.status;
     final canWrite = ref.watch(authProvider).canWrite;
 
-    return SectionCard(
-      title: 'Base de Fabricantes (MAC OUI)',
-      subtitle: 'Identificação automática de fabricante e tipo de equipamento pelo MAC',
-      icon: Icons.factory_outlined,
-      trailing: canWrite
-          ? FilledButton.icon(
-              onPressed: state.refreshing
-                  ? null
-                  : () => ref.read(vendorsProvider.notifier).refreshRegistry(),
-              icon: state.refreshing
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.sync, size: 18),
-              label: Text(
-                state.refreshing ? 'Atualizando...' : 'Atualizar IEEE',
-              ),
-            )
-          : null,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          if (state.loading && status == null)
-            const LoadingStateView(message: 'Consultando base OUI...')
-          else if (status != null) ...<Widget>[
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: <Widget>[
-                SemanticChip(
-                  label: '${formatInteger(status.entries)} registros IEEE',
-                  tone: SemanticTone.primary,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isCompact = constraints.maxWidth < 520;
+        final refreshButton = canWrite
+            ? FilledButton.icon(
+                onPressed: state.refreshing
+                    ? null
+                    : () =>
+                          ref.read(vendorsProvider.notifier).refreshRegistry(),
+                icon: state.refreshing
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.sync, size: 18),
+                label: Text(
+                  state.refreshing ? 'Atualizando...' : 'Atualizar IEEE',
                 ),
-                SemanticChip(
-                  label: '${formatInteger(status.builtinEntries)} embutidos',
-                  tone: SemanticTone.info,
+              )
+            : null;
+
+        return SectionCard(
+          title: 'Base de Fabricantes (MAC OUI)',
+          subtitle:
+              'Identificação automática de fabricante e tipo de equipamento pelo MAC',
+          icon: Icons.factory_outlined,
+          trailing: isCompact ? null : refreshButton,
+          footer: isCompact && refreshButton != null
+              ? Align(alignment: Alignment.centerRight, child: refreshButton)
+              : null,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              if (state.loading && status == null)
+                const LoadingStateView(message: 'Consultando base OUI...')
+              else if (status != null) ...<Widget>[
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: <Widget>[
+                    SemanticChip(
+                      label: '${formatInteger(status.entries)} registros IEEE',
+                      tone: SemanticTone.primary,
+                    ),
+                    SemanticChip(
+                      label:
+                          '${formatInteger(status.builtinEntries)} embutidos',
+                      tone: SemanticTone.info,
+                    ),
+                    SemanticChip(
+                      label: status.stale ? 'Desatualizada' : 'Atualizada',
+                      tone: status.stale
+                          ? SemanticTone.warning
+                          : SemanticTone.success,
+                    ),
+                  ],
                 ),
-                SemanticChip(
-                  label: status.stale ? 'Desatualizada' : 'Atualizada',
-                  tone: status.stale
-                      ? SemanticTone.warning
-                      : SemanticTone.success,
+                const SizedBox(height: 10),
+                KeyValueRow(
+                  label: 'Última atualização',
+                  value: formatDateTime(
+                    status.updatedAt,
+                    fallback: 'Nunca atualizada',
+                  ),
+                ),
+                if (status.sources.isNotEmpty)
+                  KeyValueRow(
+                    label: 'Fontes',
+                    value: status.sources.join(', '),
+                  ),
+              ],
+              const SizedBox(height: 14),
+              if (constraints.maxWidth < 460)
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    TextField(
+                      controller: _macCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Testar consulta de MAC',
+                        hintText: 'Ex.: DC:2C:6E:00:00:01',
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: OutlinedButton.icon(
+                        onPressed: _lookingUp ? null : _testLookup,
+                        icon: const Icon(Icons.search, size: 18),
+                        label: const Text('Consultar'),
+                      ),
+                    ),
+                  ],
+                )
+              else
+                Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: TextField(
+                        controller: _macCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Testar consulta de MAC',
+                          hintText: 'Ex.: DC:2C:6E:00:00:01',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    OutlinedButton.icon(
+                      onPressed: _lookingUp ? null : _testLookup,
+                      icon: const Icon(Icons.search, size: 18),
+                      label: const Text('Consultar'),
+                    ),
+                  ],
+                ),
+              if (_lookupResult != null) ...<Widget>[
+                const SizedBox(height: 10),
+                NestedPanel(
+                  tone: _lookupResult!.vendor != null
+                      ? SemanticTone.success
+                      : SemanticTone.warning,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        _lookupResult!.vendor ?? 'Fabricante não encontrado',
+                        style: context.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      if (_lookupResult!.organization != null)
+                        Text(
+                          _lookupResult!.organization!,
+                          style: context.textTheme.bodySmall,
+                        ),
+                      if (_lookupResult!.locallyAdministered)
+                        const Text(
+                          'MAC aleatório / administrado localmente (privacidade).',
+                        ),
+                      if (_lookupResult!.hintDeviceType != null)
+                        Text(
+                          'Sugestão de tipo: ${_lookupResult!.hintDeviceType}',
+                        ),
+                    ],
+                  ),
                 ),
               ],
-            ),
-            const SizedBox(height: 10),
-            KeyValueRow(
-              label: 'Última atualização',
-              value: formatDateTime(
-                status.updatedAt,
-                fallback: 'Nunca atualizada',
-              ),
-            ),
-            if (status.sources.isNotEmpty)
-              KeyValueRow(label: 'Fontes', value: status.sources.join(', ')),
-          ],
-          const SizedBox(height: 14),
-          Row(
-            children: <Widget>[
-              Expanded(
-                child: TextField(
-                  controller: _macCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Testar consulta de MAC',
-                    hintText: 'Ex.: DC:2C:6E:00:00:01',
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              OutlinedButton.icon(
-                onPressed: _lookingUp ? null : _testLookup,
-                icon: const Icon(Icons.search, size: 18),
-                label: const Text('Consultar'),
-              ),
             ],
           ),
-          if (_lookupResult != null) ...<Widget>[
-            const SizedBox(height: 10),
-            NestedPanel(
-              tone: _lookupResult!.vendor != null
-                  ? SemanticTone.success
-                  : SemanticTone.warning,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(
-                    _lookupResult!.vendor ?? 'Fabricante não encontrado',
-                    style: context.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  if (_lookupResult!.organization != null)
-                    Text(
-                      _lookupResult!.organization!,
-                      style: context.textTheme.bodySmall,
-                    ),
-                  if (_lookupResult!.locallyAdministered)
-                    const Text(
-                      'MAC aleatório / administrado localmente (privacidade).',
-                    ),
-                  if (_lookupResult!.hintDeviceType != null)
-                    Text('Sugestão de tipo: ${_lookupResult!.hintDeviceType}'),
-                ],
-              ),
-            ),
-          ],
-        ],
-      ),
+        );
+      },
     );
   }
 }
@@ -250,7 +291,8 @@ class _WifiSettingsCardState extends ConsumerState<WifiSettingsCard> {
 
     return SectionCard(
       title: 'Configurações de Sinais Wi-Fi',
-      subtitle: 'Cadência de leitura dos APs, ambiente de propagação RF e regras de roaming',
+      subtitle:
+          'Cadência de leitura dos APs, ambiente de propagação RF e regras de roaming',
       icon: Icons.wifi,
       iconTone: SemanticTone.plugin,
       child: state.loading && state.settings == null
@@ -267,35 +309,31 @@ class _WifiSettingsCardState extends ConsumerState<WifiSettingsCard> {
                   ),
                   const SizedBox(height: 12),
                 ],
-                Row(
+                ResponsiveFieldRow(
+                  breakpoint: 480,
                   children: <Widget>[
-                    Expanded(
-                      child: TextField(
-                        controller: _liveCtrl,
-                        enabled: canWrite,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Cadência ao vivo (s)',
-                          helperText: 'Com o Mapa Wi-Fi aberto',
-                        ),
+                    TextField(
+                      controller: _liveCtrl,
+                      enabled: canWrite,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Cadência ao vivo (s)',
+                        helperText: 'Com o Mapa Wi-Fi aberto',
                       ),
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: TextField(
-                        controller: _bgCtrl,
-                        enabled: canWrite,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Segundo plano (s)',
-                          helperText: 'Sem mapa aberto (alertas e roaming)',
-                        ),
+                    TextField(
+                      controller: _bgCtrl,
+                      enabled: canWrite,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Segundo plano (s)',
+                        helperText: 'Sem mapa aberto (alertas e roaming)',
                       ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
+                AppDropdownFormField<String>(
                   initialValue: _environment,
                   decoration: const InputDecoration(
                     labelText: 'Ambiente RF padrão (estimativa de distância)',
@@ -303,15 +341,24 @@ class _WifiSettingsCardState extends ConsumerState<WifiSettingsCard> {
                   items: const <DropdownMenuItem<String>>[
                     DropdownMenuItem(
                       value: 'open',
-                      child: Text('Espaço aberto (pouca atenuação)'),
+                      child: Text(
+                        'Espaço aberto (pouca atenuação)',
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                     DropdownMenuItem(
                       value: 'office',
-                      child: Text('Escritório / Divisórias (padrão)'),
+                      child: Text(
+                        'Escritório / Divisórias (padrão)',
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                     DropdownMenuItem(
                       value: 'walls',
-                      child: Text('Alvenaria / Muitas paredes'),
+                      child: Text(
+                        'Alvenaria / Muitas paredes',
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   ],
                   onChanged: canWrite
@@ -319,38 +366,31 @@ class _WifiSettingsCardState extends ConsumerState<WifiSettingsCard> {
                       : null,
                 ),
                 const SizedBox(height: 12),
-                Row(
+                ResponsiveFieldRow(
+                  breakpoint: 640,
                   children: <Widget>[
-                    Expanded(
-                      child: TextField(
-                        controller: _retentionCtrl,
-                        enabled: canWrite,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Retenção roaming (dias)',
-                        ),
+                    TextField(
+                      controller: _retentionCtrl,
+                      enabled: canWrite,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Retenção roaming (dias)',
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: TextField(
-                        controller: _pingPongCountCtrl,
-                        enabled: canWrite,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Trocas ping-pong',
-                        ),
+                    TextField(
+                      controller: _pingPongCountCtrl,
+                      enabled: canWrite,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Trocas ping-pong',
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: TextField(
-                        controller: _pingPongWindowCtrl,
-                        enabled: canWrite,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Janela (min)',
-                        ),
+                    TextField(
+                      controller: _pingPongWindowCtrl,
+                      enabled: canWrite,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Janela (min)',
                       ),
                     ),
                   ],

@@ -123,9 +123,9 @@ class WifiClientsNotifier extends Notifier<WifiClientsState> {
   /// SSE `wifi:watched`
   void applyWatched(Map<String, dynamic> data) {
     if (data['clients'] is! List) return;
-    final parsed = asJsonMapList(data['clients'])
-        .map(WifiWatchedClientModel.fromJson)
-        .toList(growable: false);
+    final parsed = asJsonMapList(
+      data['clients'],
+    ).map(WifiWatchedClientModel.fromJson).toList(growable: false);
     state = state.copyWith(watched: parsed);
   }
 

@@ -47,9 +47,9 @@ class DevicesNotifier extends Notifier<DevicesState> {
     state = state.copyWith(loading: true, clearError: true);
     try {
       final raw = await ref.read(apiClientProvider).get<dynamic>('/devices');
-      final list = asJsonMapList(raw)
-          .map(DeviceModel.fromJson)
-          .toList(growable: false);
+      final list = asJsonMapList(
+        raw,
+      ).map(DeviceModel.fromJson).toList(growable: false);
       state = state.copyWith(items: list, loading: false);
     } catch (err) {
       state = state.copyWith(loading: false, error: err.toString());
@@ -274,24 +274,24 @@ class DeviceDetailNotifier extends Notifier<DeviceDetailState> {
       final device = devRaw is Map
           ? DeviceModel.fromJson(asJsonMap(devRaw))
           : null;
-      final interfaces = asJsonMapList(results[1])
-          .map(DeviceInterfaceModel.fromJson)
-          .toList(growable: false);
-      final monitors = asJsonMapList(results[2])
-          .map(DeviceMonitorSummary.fromJson)
-          .toList(growable: false);
+      final interfaces = asJsonMapList(
+        results[1],
+      ).map(DeviceInterfaceModel.fromJson).toList(growable: false);
+      final monitors = asJsonMapList(
+        results[2],
+      ).map(DeviceMonitorSummary.fromJson).toList(growable: false);
       final rawMetrics = results[3] is Map
           ? (results[3] as Map)['data']
           : results[3];
-      final metrics = asJsonMapList(rawMetrics)
-          .map(DeviceMetricModel.fromJson)
-          .toList(growable: false);
+      final metrics = asJsonMapList(
+        rawMetrics,
+      ).map(DeviceMetricModel.fromJson).toList(growable: false);
       final rawEvents = results[4] is Map
           ? (results[4] as Map)['data']
           : results[4];
-      final events = asJsonMapList(rawEvents)
-          .map(DeviceEventModel.fromJson)
-          .toList(growable: false);
+      final events = asJsonMapList(
+        rawEvents,
+      ).map(DeviceEventModel.fromJson).toList(growable: false);
       final capRaw = results[5];
       final capabilities = capRaw is Map
           ? DeviceCapabilitiesModel.fromJson(asJsonMap(capRaw))
@@ -604,9 +604,9 @@ class OperatingSystemsNotifier extends Notifier<List<OperatingSystemOption>> {
       final raw = await ref
           .read(apiClientProvider)
           .get<dynamic>('/devices/systems');
-      state = asJsonMapList(raw)
-          .map(OperatingSystemOption.fromJson)
-          .toList(growable: false);
+      state = asJsonMapList(
+        raw,
+      ).map(OperatingSystemOption.fromJson).toList(growable: false);
       _loaded = true;
     } catch (_) {}
   }
@@ -651,9 +651,9 @@ class SnmpProfilesNotifier extends Notifier<List<SnmpProfileModel>> {
       final raw = await ref
           .read(apiClientProvider)
           .get<dynamic>('/snmp/profiles');
-      state = asJsonMapList(raw)
-          .map(SnmpProfileModel.fromJson)
-          .toList(growable: false);
+      state = asJsonMapList(
+        raw,
+      ).map(SnmpProfileModel.fromJson).toList(growable: false);
     } catch (_) {}
   }
 
@@ -722,9 +722,9 @@ class SnmpProfilesNotifier extends Notifier<List<SnmpProfileModel>> {
             'community': community,
           },
         );
-    return asJsonMapList(raw)
-        .map(DeviceInterfaceModel.fromJson)
-        .toList(growable: false);
+    return asJsonMapList(
+      raw,
+    ).map(DeviceInterfaceModel.fromJson).toList(growable: false);
   }
 }
 

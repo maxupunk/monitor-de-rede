@@ -267,11 +267,12 @@ class _DatabaseRestoreBodyState extends ConsumerState<_DatabaseRestoreBody> {
             ),
           )
         else
-          DropdownButtonFormField<int>(
+          AppDropdownFormField<int>(
             initialValue: effectiveTargetId,
             decoration: const InputDecoration(
               labelText: 'Conexão de destino',
-              helperText: 'Somente conexões do mesmo protocolo (PostgreSQL ou MySQL/MariaDB).',
+              helperText:
+                  'Somente conexões do mesmo protocolo (PostgreSQL ou MySQL/MariaDB).',
             ),
             items: compatible
                 .map(
@@ -279,6 +280,7 @@ class _DatabaseRestoreBodyState extends ConsumerState<_DatabaseRestoreBody> {
                     value: c.id,
                     child: Text(
                       '${c.name} (${c.engineLabel} · ${c.host}:${c.port})',
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 )
@@ -287,16 +289,25 @@ class _DatabaseRestoreBodyState extends ConsumerState<_DatabaseRestoreBody> {
           ),
         const SizedBox(height: 14),
         SegmentedButton<String>(
+          showSelectedIcon: false,
           segments: const <ButtonSegment<String>>[
             ButtonSegment(
               value: 'new_database',
-              label: Text('Novo banco (seguro)'),
-              icon: Icon(Icons.add_circle_outline),
+              label: Text(
+                'Novo banco',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              icon: Icon(Icons.add_circle_outline, size: 17),
             ),
             ButtonSegment(
               value: 'replace',
-              label: Text('Substituir atual'),
-              icon: Icon(Icons.warning_amber_rounded),
+              label: Text(
+                'Substituir atual',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              icon: Icon(Icons.warning_amber_rounded, size: 17),
             ),
           ],
           selected: <String>{_mode},
@@ -308,7 +319,8 @@ class _DatabaseRestoreBodyState extends ConsumerState<_DatabaseRestoreBody> {
             controller: _targetDbController,
             decoration: const InputDecoration(
               labelText: 'Nome do novo banco',
-              helperText: 'Se a restauração falhar, o banco recém-criado é removido automaticamente.',
+              helperText:
+                  'Se a restauração falhar, o banco recém-criado é removido automaticamente.',
             ),
           ),
         ] else ...<Widget>[

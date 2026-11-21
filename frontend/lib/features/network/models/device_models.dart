@@ -238,6 +238,61 @@ class DeviceModel {
   }
 }
 
+String? _normalizeInterfaceStatus(Object? raw) {
+  if (raw == null) return null;
+  if (raw is num) {
+    return switch (raw.toInt()) {
+      1 => 'up',
+      2 => 'down',
+      3 => 'testing',
+      5 => 'dormant',
+      6 => 'notPresent',
+      7 => 'lowerLayerDown',
+      _ => 'unknown',
+    };
+  }
+  final text = raw.toString().trim();
+  if (text.isEmpty) return null;
+  final numeric = int.tryParse(text);
+  if (numeric != null) return _normalizeInterfaceStatus(numeric);
+  return switch (text.toLowerCase()) {
+    'up' => 'up',
+    'down' => 'down',
+    'testing' => 'testing',
+    'dormant' => 'dormant',
+    'notpresent' => 'notPresent',
+    'lowerlayerdown' => 'lowerLayerDown',
+    'unknown' => 'unknown',
+    _ => text,
+  };
+}
+
+double? _parseInterfaceSpeedBps(Map<String, dynamic> json) {
+  // Backend (`SnmpInterface.ifSpeed` / `DeviceInterfaceView.speed`) já envia
+  // a velocidade negociada em bps (incorporando `ifHighSpeed * 1_000_000`).
+  // Ainda assim suportamos payloads com `ifHighSpeed` / `highSpeed` / `speedMbps`.
+  final highSpeedMbps = parseDoubleOrNull(
+    json['ifHighSpeed'] ??
+        json['highSpeed'] ??
+        json['speedMbps'] ??
+        json['if_high_speed'] ??
+        json['speed_mbps'],
+  );
+  final rawBps = parseDoubleOrNull(
+    json['ifSpeed'] ??
+        json['speed'] ??
+        json['speedBps'] ??
+        json['if_speed'] ??
+        json['speed_bps'],
+  );
+  if (highSpeedMbps != null && highSpeedMbps > 0) {
+    if (rawBps == null || rawBps <= 0 || rawBps >= 4294967295) {
+      return highSpeedMbps * 1000000;
+    }
+  }
+  return rawBps;
+}
+
 @immutable
 class DeviceInterfaceModel {
   const DeviceInterfaceModel({
@@ -278,9 +333,72 @@ class DeviceInterfaceModel {
   final double? outBps;
   final bool isMonitored;
 
-  String get displayName => (ifName != null && ifName!.isNotEmpty)
-      ? ifName!
-      : ((name != null && name!.isNotEmpty) ? name! : 'if-$id');
+  String get displayName {
+    final primary = ifName?.trim();
+    if (primary != null && primary.isNotEmpty) return primary;
+    final fallback = name?.trim();
+    if (fallback != null && fallback.isNotEmpty) return fallback;
+    return 'if-${ifIndex ?? snmpIndex ?? id}';
+  }
+
+  /// Indica se a interface está operacionalmente ativa (`up`).
+  bool get isUp => operStatus?.trim().toLowerCase() == 'up';
+
+  /// Velocidade negociada em bps (`0` quando ausente ou inválida).
+  double get negotiatedSpeedBps {
+    final s = speed;
+    return (s != null && s.isFinite && s > 0) ? s : 0;
+  }
+
+  /// Alias ou descrição complementar quando traz informação além do nome.
+  String? get subtitleText {
+    final cleanName = displayName.toLowerCase();
+    final cleanAlias = alias?.trim();
+    if (cleanAlias != null &&
+        cleanAlias.isNotEmpty &&
+        cleanAlias.toLowerCase() != cleanName) {
+      return cleanAlias;
+    }
+    final cleanDesc = description?.trim();
+    if (cleanDesc != null &&
+        cleanDesc.isNotEmpty &&
+        cleanDesc.toLowerCase() != cleanName) {
+      return cleanDesc;
+    }
+    return null;
+  }
+
+  /// Ordena interfaces para seleção de uplink: UP primeiro (maior velocidade
+  /// negociada primeiro), depois DOWN, desempatando por índice SNMP e nome.
+  static int compareForUplinkSelection(
+    DeviceInterfaceModel a,
+    DeviceInterfaceModel b,
+  ) {
+    if (a.isUp != b.isUp) return a.isUp ? -1 : 1;
+    final speedCmp = b.negotiatedSpeedBps.compareTo(a.negotiatedSpeedBps);
+    if (speedCmp != 0) return speedCmp;
+    final aIdx = a.ifIndex ?? a.snmpIndex ?? a.id;
+    final bIdx = b.ifIndex ?? b.snmpIndex ?? b.id;
+    final idxCmp = aIdx.compareTo(bIdx);
+    if (idxCmp != 0) return idxCmp;
+    return a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase());
+  }
+
+  /// Retorna lista ordenada e deduplicada por `displayName` para uso seguro
+  /// em menus suspensos (`DropdownButtonFormField`).
+  static List<DeviceInterfaceModel> sortForUplinkSelection(
+    Iterable<DeviceInterfaceModel> interfaces,
+  ) {
+    final sorted = interfaces.toList()..sort(compareForUplinkSelection);
+    final seen = <String>{};
+    final unique = <DeviceInterfaceModel>[];
+    for (final iface in sorted) {
+      if (seen.add(iface.displayName)) {
+        unique.add(iface);
+      }
+    }
+    return List<DeviceInterfaceModel>.unmodifiable(unique);
+  }
 
   factory DeviceInterfaceModel.fromJson(Map<String, dynamic> json) {
     return DeviceInterfaceModel(
@@ -297,11 +415,19 @@ class DeviceInterfaceModel {
           (json['description'] ?? json['ifDescr'] ?? json['if_descr'])
               as String?,
       alias: (json['alias'] ?? json['ifAlias'] ?? json['if_alias']) as String?,
-      adminStatus: (json['ifAdminStatus'] ?? json['adminStatus'])?.toString(),
-      operStatus: (json['ifOperStatus'] ?? json['operStatus'])?.toString(),
-      speed: parseDoubleOrNull(
-        json['ifSpeed'] ?? json['speed'] ?? json['if_speed'],
+      adminStatus: _normalizeInterfaceStatus(
+        json['ifAdminStatus'] ??
+            json['adminStatus'] ??
+            json['if_admin_status'] ??
+            json['admin_status'],
       ),
+      operStatus: _normalizeInterfaceStatus(
+        json['ifOperStatus'] ??
+            json['operStatus'] ??
+            json['if_oper_status'] ??
+            json['oper_status'],
+      ),
+      speed: _parseInterfaceSpeedBps(json),
       macAddress: json['macAddress'] as String?,
       ipAddress: json['ipAddress'] as String?,
       inBps: parseDoubleOrNull(json['inBps']),
@@ -649,12 +775,12 @@ class SnmpScanResultModel {
       hasCpuMonitor: json['hasCpuMonitor'] == true,
       hasMemoryMonitor: json['hasMemoryMonitor'] == true,
       matchedProfileName: prof['name'] as String?,
-      interfaces: asJsonMapList(json['interfaces'])
-          .map(SnmpScanInterfaceItem.fromJson)
-          .toList(growable: false),
-      sensors: asJsonMapList(json['sensors'])
-          .map(DiscoveredSensorItem.fromJson)
-          .toList(growable: false),
+      interfaces: asJsonMapList(
+        json['interfaces'],
+      ).map(SnmpScanInterfaceItem.fromJson).toList(growable: false),
+      sensors: asJsonMapList(
+        json['sensors'],
+      ).map(DiscoveredSensorItem.fromJson).toList(growable: false),
       collectorErrors: rawErrors.map((k, v) => MapEntry(k, v.toString())),
     );
   }
@@ -800,9 +926,9 @@ class BandwidthLatencyResponse {
   factory BandwidthLatencyResponse.fromJson(Map<String, dynamic> json) {
     return BandwidthLatencyResponse(
       timeframe: (json['timeframe'] as String?) ?? '1h',
-      samples: asJsonMapList(json['samples'])
-          .map(BandwidthLatencyPoint.fromJson)
-          .toList(growable: false),
+      samples: asJsonMapList(
+        json['samples'],
+      ).map(BandwidthLatencyPoint.fromJson).toList(growable: false),
       currentBw: parseDoubleOrNull(json['currentBw']) ?? 0,
       peakBw: parseDoubleOrNull(json['peakBw']) ?? 0,
       currentLatency: parseDoubleOrNull(json['currentLatency']) ?? 0,
@@ -905,12 +1031,12 @@ class DeviceAccessViewModel {
     return DeviceAccessViewModel(
       deviceId: parseIntOrNull(json['deviceId']) ?? 0,
       deviceName: (json['deviceName'] as String?) ?? '',
-      credentials: asJsonMapList(json['credentials'])
-          .map(DeviceCredentialView.fromJson)
-          .toList(growable: false),
-      agents: asJsonMapList(json['agents'])
-          .map(AgentRouteOption.fromJson)
-          .toList(growable: false),
+      credentials: asJsonMapList(
+        json['credentials'],
+      ).map(DeviceCredentialView.fromJson).toList(growable: false),
+      agents: asJsonMapList(
+        json['agents'],
+      ).map(AgentRouteOption.fromJson).toList(growable: false),
       dedicatedPlatform: json['dedicatedPlatform']?.toString(),
     );
   }

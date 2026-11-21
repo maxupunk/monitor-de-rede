@@ -90,60 +90,76 @@ class _SaasServicesWidgetState extends ConsumerState<SaasServicesWidget> {
 
   @override
   Widget build(BuildContext context) {
-    return SectionCard(
-      title: 'Serviços SaaS e Nuvem',
-      subtitle: 'Monitoramento de experiência (QoE) de serviços externos',
-      icon: Icons.cloud_done_outlined,
-      iconTone: SemanticTone.secondary,
-      trailing: FilledButton.tonalIcon(
-        onPressed: () async {
-          await showSaasPresetsDialog(context);
-          _load();
-        },
-        icon: const Icon(Icons.add, size: 18),
-        label: const Text('Catálogo SaaS'),
-      ),
-      child: _loading
-          ? const LoadingStateView(message: 'Carregando serviços SaaS...')
-          : _monitors.isEmpty
-          ? EmptyStateView(
-              title: 'Nenhum serviço SaaS provisionado',
-              description: 'Adicione bancos, nuvens e ferramentas de produtividade em um clique.',
-              icon: Icons.cloud_outlined,
-              action: FilledButton.icon(
-                onPressed: () async {
-                  await showSaasPresetsDialog(context);
-                  _load();
-                },
-                icon: const Icon(Icons.add),
-                label: const Text('Abrir catálogo SaaS'),
-              ),
-            )
-          : Column(
-              children: _monitors
-                  .map((m) {
-                    return ListTile(
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      leading: StatusIndicator.fromStatus(
-                        m.status,
-                        compact: true,
-                      ),
-                      title: Text(
-                        m.name,
-                        style: const TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                      subtitle: Text(m.target ?? m.type),
-                      trailing: Text(
-                        formatLatency(m.latencyMs),
-                        style: context.textTheme.labelLarge?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    );
-                  })
-                  .toList(growable: false),
-            ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isCompact = constraints.maxWidth < 520;
+        final catalogBtn = FilledButton.tonalIcon(
+          onPressed: () async {
+            await showSaasPresetsDialog(context);
+            _load();
+          },
+          icon: const Icon(Icons.add, size: 18),
+          label: const Text('Catálogo SaaS'),
+        );
+        return SectionCard(
+          title: 'Serviços SaaS e Nuvem',
+          subtitle: 'Monitoramento de experiência (QoE) de serviços externos',
+          icon: Icons.cloud_done_outlined,
+          iconTone: SemanticTone.secondary,
+          trailing: isCompact ? null : catalogBtn,
+          footer: isCompact
+              ? Align(alignment: Alignment.centerRight, child: catalogBtn)
+              : null,
+          child: _loading
+              ? const LoadingStateView(message: 'Carregando serviços SaaS...')
+              : _monitors.isEmpty
+              ? EmptyStateView(
+                  title: 'Nenhum serviço SaaS provisionado',
+                  description:
+                      'Adicione bancos, nuvens e ferramentas de produtividade em um clique.',
+                  icon: Icons.cloud_outlined,
+                  action: FilledButton.icon(
+                    onPressed: () async {
+                      await showSaasPresetsDialog(context);
+                      _load();
+                    },
+                    icon: const Icon(Icons.add),
+                    label: const Text('Abrir catálogo SaaS'),
+                  ),
+                )
+              : Column(
+                  children: _monitors
+                      .map((m) {
+                        return ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          leading: StatusIndicator.fromStatus(
+                            m.status,
+                            compact: true,
+                          ),
+                          title: Text(
+                            m.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                          subtitle: Text(
+                            m.target ?? m.type,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          trailing: Text(
+                            formatLatency(m.latencyMs),
+                            style: context.textTheme.labelLarge?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        );
+                      })
+                      .toList(growable: false),
+                ),
+        );
+      },
     );
   }
 }
@@ -201,9 +217,9 @@ class _SaasPresetsBodyState extends ConsumerState<_SaasPresetsBody> {
       final listRaw = raw is Map ? (raw['presets'] ?? raw['items']) : raw;
       if (mounted) {
         setState(() {
-          _presets = asJsonMapList(listRaw)
-              .map(SaasPresetItem.fromJson)
-              .toList(growable: false);
+          _presets = asJsonMapList(
+            listRaw,
+          ).map(SaasPresetItem.fromJson).toList(growable: false);
           _loading = false;
         });
       }
@@ -377,9 +393,9 @@ class _SaasLatencyHeatmapWidgetState
       final cellsRaw = map['cells'] ?? map['buckets'] ?? map['data'] ?? raw;
       if (mounted) {
         setState(() {
-          _cells = asJsonMapList(cellsRaw)
-              .map(HeatmapCell.fromJson)
-              .toList(growable: false);
+          _cells = asJsonMapList(
+            cellsRaw,
+          ).map(HeatmapCell.fromJson).toList(growable: false);
           _loading = false;
         });
       }
@@ -407,87 +423,107 @@ class _SaasLatencyHeatmapWidgetState
       for (final c in _cells) '${c.day}:${c.hour}': c,
     };
 
-    return SectionCard(
-      title: 'Mapa de Calor · Latência por Hora',
-      subtitle: 'Média horária dos últimos $_days dias',
-      icon: Icons.grid_on_outlined,
-      iconTone: SemanticTone.warning,
-      trailing: SegmentedButton<int>(
-        segments: const <ButtonSegment<int>>[
-          ButtonSegment(value: 7, label: Text('7d')),
-          ButtonSegment(value: 14, label: Text('14d')),
-        ],
-        selected: <int>{_days},
-        onSelectionChanged: (s) {
-          setState(() => _days = s.first);
-          _load();
-        },
-      ),
-      child: _loading
-          ? const LoadingStateView(message: 'Gerando mapa de calor...')
-          : days.isEmpty
-          ? const EmptyStateView(
-              title: 'Sem histórico horário suficiente',
-              icon: Icons.grid_off_outlined,
-            )
-          : SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Row(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isCompact = constraints.maxWidth < 520;
+        final daysToggle = SegmentedButton<int>(
+          showSelectedIcon: !isCompact,
+          segments: const <ButtonSegment<int>>[
+            ButtonSegment(value: 7, label: Text('7d')),
+            ButtonSegment(value: 14, label: Text('14d')),
+          ],
+          selected: <int>{_days},
+          onSelectionChanged: (s) {
+            setState(() => _days = s.first);
+            _load();
+          },
+        );
+        return SectionCard(
+          title: 'Mapa de Calor · Latência por Hora',
+          subtitle: 'Média horária dos últimos $_days dias',
+          icon: Icons.grid_on_outlined,
+          iconTone: SemanticTone.warning,
+          trailing: isCompact ? null : daysToggle,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              if (isCompact) ...<Widget>[
+                Align(alignment: Alignment.centerLeft, child: daysToggle),
+                const SizedBox(height: 10),
+              ],
+              if (_loading)
+                const LoadingStateView(message: 'Gerando mapa de calor...')
+              else if (days.isEmpty)
+                const EmptyStateView(
+                  title: 'Sem histórico horário suficiente',
+                  icon: Icons.grid_off_outlined,
+                )
+              else
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
-                      const SizedBox(width: 72),
-                      for (var h = 0; h < 24; h += 3)
-                        SizedBox(
-                          width: 48,
-                          child: Text(
-                            '${h.toString().padLeft(2, '0')}h',
-                            style: context.textTheme.labelSmall,
-                          ),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  for (final day in days)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 4),
-                      child: Row(
+                      Row(
                         children: <Widget>[
-                          SizedBox(
-                            width: 72,
-                            child: Text(
-                              day.length >= 10 ? day.substring(5, 10) : day,
-                              style: context.textTheme.labelSmall,
-                            ),
-                          ),
-                          for (var h = 0; h < 24; h++)
-                            Tooltip(
-                              message: () {
-                                final c = lookup['$day:$h'];
-                                if (c == null || c.checks == 0) {
-                                  return '$day ${formatHourOfDay(h)}: sem medições';
-                                }
-                                return '$day ${formatHourOfDay(h)} · Média ${formatLatency(c.avgLatencyMs)}'
-                                    '${c.p95LatencyMs != null ? ' · P95 ${formatLatency(c.p95LatencyMs)}' : ''}'
-                                    ' (${c.checks} checks)';
-                              }(),
-                              child: Container(
-                                width: 14,
-                                height: 14,
-                                margin: const EdgeInsets.only(right: 2),
-                                decoration: BoxDecoration(
-                                  color: _cellColor(context, lookup['$day:$h']),
-                                  borderRadius: BorderRadius.circular(3),
-                                ),
+                          const SizedBox(width: 72),
+                          for (var h = 0; h < 24; h += 3)
+                            SizedBox(
+                              width: 48,
+                              child: Text(
+                                '${h.toString().padLeft(2, '0')}h',
+                                style: context.textTheme.labelSmall,
                               ),
                             ),
                         ],
                       ),
-                    ),
-                ],
-              ),
-            ),
+                      const SizedBox(height: 4),
+                      for (final day in days)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 4),
+                          child: Row(
+                            children: <Widget>[
+                              SizedBox(
+                                width: 72,
+                                child: Text(
+                                  day.length >= 10 ? day.substring(5, 10) : day,
+                                  style: context.textTheme.labelSmall,
+                                ),
+                              ),
+                              for (var h = 0; h < 24; h++)
+                                Tooltip(
+                                  message: () {
+                                    final c = lookup['$day:$h'];
+                                    if (c == null || c.checks == 0) {
+                                      return '$day ${formatHourOfDay(h)}: sem medições';
+                                    }
+                                    return '$day ${formatHourOfDay(h)} · Média ${formatLatency(c.avgLatencyMs)}'
+                                        '${c.p95LatencyMs != null ? ' · P95 ${formatLatency(c.p95LatencyMs)}' : ''}'
+                                        ' (${c.checks} checks)';
+                                  }(),
+                                  child: Container(
+                                    width: 14,
+                                    height: 14,
+                                    margin: const EdgeInsets.only(right: 2),
+                                    decoration: BoxDecoration(
+                                      color: _cellColor(
+                                        context,
+                                        lookup['$day:$h'],
+                                      ),
+                                      borderRadius: BorderRadius.circular(3),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -548,9 +584,9 @@ class _EtherBandwidthWidgetState extends ConsumerState<EtherBandwidthWidget> {
             .read(apiClientProvider)
             .get<dynamic>('/devices/$_deviceId/metrics');
         final listRaw = raw is Map ? raw['data'] : raw;
-        final metrics = asJsonMapList(listRaw)
-            .map(DeviceMetricModel.fromJson)
-            .toList();
+        final metrics = asJsonMapList(
+          listRaw,
+        ).map(DeviceMetricModel.fromJson).toList();
         _inPoints.clear();
         _outPoints.clear();
         for (final m in metrics) {
@@ -615,48 +651,68 @@ class _EtherBandwidthWidgetState extends ConsumerState<EtherBandwidthWidget> {
     final lastIn = _inPoints.isNotEmpty ? _inPoints.last.y : null;
     final lastOut = _outPoints.isNotEmpty ? _outPoints.last.y : null;
 
-    return SectionCard(
-      title: 'Largura de Banda da Interface',
-      subtitle:
-          _interfaceName ??
-          (_deviceId != null ? 'Dispositivo #$_deviceId' : 'Ao vivo via SSE'),
-      icon: Icons.swap_vert,
-      iconTone: SemanticTone.primary,
-      trailing: Wrap(
-        spacing: 6,
-        children: <Widget>[
-          if (lastIn != null)
-            SemanticChip(
-              label: 'RX ${formatBps(lastIn)}',
-              tone: SemanticTone.success,
-              compact: true,
-            ),
-          if (lastOut != null)
-            SemanticChip(
-              label: 'TX ${formatBps(lastOut)}',
-              tone: SemanticTone.info,
-              compact: true,
-            ),
-        ],
-      ),
-      child: _loading
-          ? const LoadingStateView(message: 'Carregando tráfego...')
-          : MetricLineChart(
-              height: 190,
-              yFormatter: (v) => formatBps(v),
-              series: <MetricLineSeries>[
-                MetricLineSeries(
-                  name: 'Download (RX)',
-                  points: _inPoints,
-                  tone: SemanticTone.success,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isCompact = constraints.maxWidth < 520;
+        final chips = (lastIn != null || lastOut != null)
+            ? Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: <Widget>[
+                  if (lastIn != null)
+                    SemanticChip(
+                      label: 'RX ${formatBps(lastIn)}',
+                      tone: SemanticTone.success,
+                      compact: true,
+                    ),
+                  if (lastOut != null)
+                    SemanticChip(
+                      label: 'TX ${formatBps(lastOut)}',
+                      tone: SemanticTone.info,
+                      compact: true,
+                    ),
+                ],
+              )
+            : null;
+        return SectionCard(
+          title: 'Largura de Banda da Interface',
+          subtitle:
+              _interfaceName ??
+              (_deviceId != null
+                  ? 'Dispositivo #$_deviceId'
+                  : 'Ao vivo via SSE'),
+          icon: Icons.swap_vert,
+          iconTone: SemanticTone.primary,
+          trailing: isCompact ? null : chips,
+          child: _loading
+              ? const LoadingStateView(message: 'Carregando tráfego...')
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    if (isCompact && chips != null) ...<Widget>[
+                      chips,
+                      const SizedBox(height: 10),
+                    ],
+                    MetricLineChart(
+                      height: 190,
+                      yFormatter: (v) => formatBps(v),
+                      series: <MetricLineSeries>[
+                        MetricLineSeries(
+                          name: 'Download (RX)',
+                          points: _inPoints,
+                          tone: SemanticTone.success,
+                        ),
+                        MetricLineSeries(
+                          name: 'Upload (TX)',
+                          points: _outPoints,
+                          tone: SemanticTone.info,
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
-                MetricLineSeries(
-                  name: 'Upload (TX)',
-                  points: _outPoints,
-                  tone: SemanticTone.info,
-                ),
-              ],
-            ),
+        );
+      },
     );
   }
 }
@@ -754,30 +810,40 @@ class _BandwidthVsLatencyWidgetState
       latMs.add(MetricSeriesPoint(x: i.toDouble(), y: samples[i].latency));
     }
 
-    return SectionCard(
-      title: 'Banda × Latência (Bufferbloat)',
-      subtitle: 'Correlação entre tráfego (Mbps) e latência ICMP (ms)',
-      icon: Icons.show_chart,
-      iconTone: _data?.hasSaturationCorrelation == true
-          ? SemanticTone.warning
-          : SemanticTone.info,
-      trailing: SegmentedButton<String>(
-        segments: const <ButtonSegment<String>>[
-          ButtonSegment(value: '15m', label: Text('15m')),
-          ButtonSegment(value: '1h', label: Text('1h')),
-          ButtonSegment(value: '24h', label: Text('24h')),
-        ],
-        selected: <String>{_timeframe},
-        onSelectionChanged: (s) {
-          setState(() => _timeframe = s.first);
-          _load();
-        },
-      ),
-      child: _loading
-          ? const LoadingStateView(message: 'Analisando correlação...')
-          : Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isCompact = constraints.maxWidth < 520;
+        final timeframeToggle = SegmentedButton<String>(
+          showSelectedIcon: !isCompact,
+          segments: const <ButtonSegment<String>>[
+            ButtonSegment(value: '15m', label: Text('15m')),
+            ButtonSegment(value: '1h', label: Text('1h')),
+            ButtonSegment(value: '24h', label: Text('24h')),
+          ],
+          selected: <String>{_timeframe},
+          onSelectionChanged: (s) {
+            setState(() => _timeframe = s.first);
+            _load();
+          },
+        );
+        return SectionCard(
+          title: 'Banda × Latência (Bufferbloat)',
+          subtitle: 'Correlação entre tráfego (Mbps) e latência ICMP (ms)',
+          icon: Icons.show_chart,
+          iconTone: _data?.hasSaturationCorrelation == true
+              ? SemanticTone.warning
+              : SemanticTone.info,
+          trailing: isCompact ? null : timeframeToggle,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              if (isCompact) ...<Widget>[
+                Align(alignment: Alignment.centerLeft, child: timeframeToggle),
+                const SizedBox(height: 10),
+              ],
+              if (_loading)
+                const LoadingStateView(message: 'Analisando correlação...')
+              else ...<Widget>[
                 if (_data != null) ...<Widget>[
                   Wrap(
                     spacing: 8,
@@ -824,7 +890,10 @@ class _BandwidthVsLatencyWidgetState
                   ],
                 ),
               ],
-            ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

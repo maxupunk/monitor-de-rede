@@ -306,21 +306,23 @@ class _PreferencesCardState extends ConsumerState<PreferencesCard> {
           ),
           const SizedBox(height: 8),
           SegmentedButton<ThemeMode>(
+            showSelectedIcon: false,
+            style: const ButtonStyle(visualDensity: VisualDensity.compact),
             segments: const <ButtonSegment<ThemeMode>>[
               ButtonSegment<ThemeMode>(
                 value: ThemeMode.light,
                 icon: Icon(Icons.light_mode_outlined, size: 16),
-                label: Text('Claro'),
+                label: Text('Claro', overflow: TextOverflow.ellipsis),
               ),
               ButtonSegment<ThemeMode>(
                 value: ThemeMode.dark,
                 icon: Icon(Icons.dark_mode_outlined, size: 16),
-                label: Text('Escuro'),
+                label: Text('Escuro', overflow: TextOverflow.ellipsis),
               ),
               ButtonSegment<ThemeMode>(
                 value: ThemeMode.system,
                 icon: Icon(Icons.brightness_auto_outlined, size: 16),
-                label: Text('Sistema'),
+                label: Text('Sistema', overflow: TextOverflow.ellipsis),
               ),
             ],
             selected: <ThemeMode>{themeMode},
@@ -422,7 +424,8 @@ class DashboardSyncCard extends ConsumerWidget {
 
     return SectionCard(
       title: 'Sincronização do Dashboard',
-      subtitle: 'Escolha se o layout dos cards sincroniza com o servidor ou fica local',
+      subtitle:
+          'Escolha se o layout dos cards sincroniza com o servidor ou fica local',
       icon: Icons.cloud_sync_outlined,
       iconTone: SemanticTone.info,
       child: Column(
@@ -531,7 +534,8 @@ class AreasCard extends ConsumerWidget {
         final confirmed = await showConfirmActionDialog(
           context: context,
           title: 'Desligar área ${item.title}?',
-          message: 'Os dados cadastrados não são apagados, mas as telas e widgets desta área serão ocultados.',
+          message:
+              'Os dados cadastrados não são apagados, mas as telas e widgets desta área serão ocultados.',
           confirmLabel: 'Desligar área',
           tone: SemanticTone.warning,
           details: impact.consequences.isEmpty
@@ -549,8 +553,9 @@ class AreasCard extends ConsumerWidget {
         if (!confirmed) return;
       } catch (err) {
         if (!context.mounted) return;
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(err.toString())));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(err.toString())));
         return;
       }
     }
@@ -559,8 +564,9 @@ class AreasCard extends ConsumerWidget {
       await ref.read(areasProvider.notifier).setEnabled(item.area, nextEnabled);
     } catch (err) {
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(err.toString())));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(err.toString())));
     }
   }
 
@@ -571,7 +577,8 @@ class AreasCard extends ConsumerWidget {
 
     return SectionCard(
       title: 'Áreas do sistema',
-      subtitle: 'Ative ou desative módulos opcionais conforme o perfil da sua infraestrutura',
+      subtitle:
+          'Ative ou desative módulos opcionais conforme o perfil da sua infraestrutura',
       icon: Icons.apps,
       child: Column(
         children: <Widget>[
@@ -643,23 +650,13 @@ class _OnboardingCardState extends ConsumerState<OnboardingCard> {
           : 'Reabra o assistente guiado a qualquer momento para revisar áreas e rede',
       icon: Icons.auto_fix_high,
       iconTone: SemanticTone.primary,
-      trailing: auth.isAdmin
-          ? FilledButton.tonalIcon(
-              onPressed: () {
-                final trigger = ref.read(onboardingTriggerProvider);
-                if (trigger != null) {
-                  trigger(context);
-                } else {
-                  ref.read(onboardingProvider.notifier).openWizard();
-                }
-              },
-              icon: const Icon(Icons.play_arrow, size: 18),
-              label: const Text('Abrir assistente'),
-            )
-          : null,
-      child: st == null
-          ? const Text('Carregando estado da configuração inicial...')
-          : Wrap(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          if (st == null)
+            const Text('Carregando estado da configuração inicial...')
+          else
+            Wrap(
               spacing: 8,
               runSpacing: 8,
               children: <Widget>[
@@ -687,6 +684,26 @@ class _OnboardingCardState extends ConsumerState<OnboardingCard> {
                 ),
               ],
             ),
+          if (auth.isAdmin) ...<Widget>[
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: FilledButton.tonalIcon(
+                onPressed: () {
+                  final trigger = ref.read(onboardingTriggerProvider);
+                  if (trigger != null) {
+                    trigger(context);
+                  } else {
+                    ref.read(onboardingProvider.notifier).openWizard();
+                  }
+                },
+                icon: const Icon(Icons.play_arrow, size: 18),
+                label: const Text('Abrir assistente'),
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 }
@@ -785,7 +802,8 @@ Future<void> showServerAddressesSheet(
   await showAdaptiveFormSheet<void>(
     context: context,
     title: 'Endereços deste servidor',
-    subtitle: 'Corrija endereços detectados ou adicione domínios/FQDNs personalizados.',
+    subtitle:
+        'Corrija endereços detectados ou adicione domínios/FQDNs personalizados.',
     maxWidth: 640,
     builder: (sheetCtx) {
       return StatefulBuilder(
@@ -838,8 +856,11 @@ Future<void> showServerAddressesSheet(
                 ),
                 const SizedBox(height: 10),
               ],
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                alignment: WrapAlignment.spaceBetween,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: <Widget>[
                   Text(
                     'Endereços personalizados',
@@ -862,28 +883,31 @@ Future<void> showServerAddressesSheet(
               ),
               for (var i = 0; i < customEntries.length; i++) ...<Widget>[
                 Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
                     Expanded(
-                      flex: 2,
-                      child: TextFormField(
-                        initialValue: customEntries[i]['label'],
-                        decoration: const InputDecoration(
-                          labelText: 'Rótulo',
-                          isDense: true,
-                        ),
-                        onChanged: (v) => customEntries[i]['label'] = v,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      flex: 3,
-                      child: TextFormField(
-                        initialValue: customEntries[i]['value'],
-                        decoration: const InputDecoration(
-                          labelText: 'Endereço',
-                          isDense: true,
-                        ),
-                        onChanged: (v) => customEntries[i]['value'] = v,
+                      child: ResponsiveFieldRow(
+                        breakpoint: 480,
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: <Widget>[
+                          TextFormField(
+                            initialValue: customEntries[i]['label'],
+                            decoration: const InputDecoration(
+                              labelText: 'Rótulo',
+                              isDense: true,
+                            ),
+                            onChanged: (v) => customEntries[i]['label'] = v,
+                          ),
+                          TextFormField(
+                            initialValue: customEntries[i]['value'],
+                            decoration: const InputDecoration(
+                              labelText: 'Endereço',
+                              isDense: true,
+                            ),
+                            onChanged: (v) => customEntries[i]['value'] = v,
+                          ),
+                        ],
                       ),
                     ),
                     IconButton(
@@ -899,7 +923,7 @@ Future<void> showServerAddressesSheet(
                 const SizedBox(height: 8),
               ],
               const SizedBox(height: 8),
-              DropdownButtonFormField<String?>(
+              AppDropdownFormField<String?>(
                 initialValue: current.addresses.any((e) => e.id == preferredId)
                     ? preferredId
                     : null,
@@ -909,12 +933,12 @@ Future<void> showServerAddressesSheet(
                 items: <DropdownMenuItem<String?>>[
                   const DropdownMenuItem<String?>(
                     value: null,
-                    child: Text('Automático'),
+                    child: Text('Automático', overflow: TextOverflow.ellipsis),
                   ),
                   for (final e in current.addresses)
                     DropdownMenuItem<String?>(
                       value: e.id,
-                      child: Text(e.label),
+                      child: Text(e.label, overflow: TextOverflow.ellipsis),
                     ),
                 ],
                 onChanged: (v) => setModalState(() => preferredId = v),
@@ -997,7 +1021,8 @@ class _NotificationsCardState extends ConsumerState<NotificationsCard> {
 
     return SectionCard(
       title: 'Notificações Push e Alertas Locais',
-      subtitle: 'Receba alertas críticos, quedas de monitor e falhas de backup em tempo real',
+      subtitle:
+          'Receba alertas críticos, quedas de monitor e falhas de backup em tempo real',
       icon: Icons.notifications_active_outlined,
       iconTone: push?.configured == true
           ? SemanticTone.success
@@ -1040,8 +1065,9 @@ class _NotificationsCardState extends ConsumerState<NotificationsCard> {
                           .sendTestPush();
                       if (!context.mounted) return;
                       setState(() => _testing = false);
-                      ScaffoldMessenger.of(context)
-                          .showSnackBar(SnackBar(content: Text(msg)));
+                      ScaffoldMessenger.of(
+                        context,
+                      ).showSnackBar(SnackBar(content: Text(msg)));
                     },
               icon: _testing
                   ? const SizedBox(
@@ -1090,16 +1116,25 @@ class _BackupShortcutCardState extends ConsumerState<BackupShortcutCard> {
           ? 'Backup automático ativo (${plan!.storageDestinationName ?? 'destino'})'
           : 'Gerencie cópias automáticas, bancos de dados e destinos de armazenamento',
       icon: Icons.settings_backup_restore,
-      trailing: FilledButton.tonalIcon(
-        onPressed: () => context.go('/backup'),
-        icon: const Icon(Icons.open_in_new, size: 18),
-        label: const Text('Abrir Backup'),
-      ),
-      child: KeyValueRow(
-        label: 'Último backup do sistema',
-        value: plan?.lastBackupAt != null
-            ? formatDateTime(plan!.lastBackupAt)
-            : 'Nenhum registro',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          KeyValueRow(
+            label: 'Último backup do sistema',
+            value: plan?.lastBackupAt != null
+                ? formatDateTime(plan!.lastBackupAt)
+                : 'Nenhum registro',
+          ),
+          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: FilledButton.tonalIcon(
+              onPressed: () => context.go('/backup'),
+              icon: const Icon(Icons.open_in_new, size: 18),
+              label: const Text('Abrir Backup'),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1164,20 +1199,18 @@ class _CoreCatalogsCardState extends ConsumerState<CoreCatalogsCard> {
               decoration: const InputDecoration(labelText: 'Nome'),
             ),
             const SizedBox(height: 10),
-            Row(
+            ResponsiveFieldRow(
+              breakpoint: 480,
+              spacing: 8,
+              runSpacing: 10,
               children: <Widget>[
-                Expanded(
-                  child: TextField(
-                    controller: vendorCtrl,
-                    decoration: const InputDecoration(labelText: 'Fabricante'),
-                  ),
+                TextField(
+                  controller: vendorCtrl,
+                  decoration: const InputDecoration(labelText: 'Fabricante'),
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: TextField(
-                    controller: catCtrl,
-                    decoration: const InputDecoration(labelText: 'Categoria'),
-                  ),
+                TextField(
+                  controller: catCtrl,
+                  decoration: const InputDecoration(labelText: 'Categoria'),
                 ),
               ],
             ),
@@ -1258,13 +1291,17 @@ class _CoreCatalogsCardState extends ConsumerState<CoreCatalogsCard> {
 
     return SectionCard(
       title: 'Catálogos do Núcleo (SNMP, Sistemas e Fabricantes OUI)',
-      subtitle: 'Perfis SNMP reutilizáveis, sistemas operacionais suportados e consulta MAC IEEE',
+      subtitle:
+          'Perfis SNMP reutilizáveis, sistemas operacionais suportados e consulta MAC IEEE',
       icon: Icons.library_books_outlined,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: <Widget>[
               Text(
                 'Perfis SNMP (${settings.snmpProfiles.length})',
@@ -1286,6 +1323,8 @@ class _CoreCatalogsCardState extends ConsumerState<CoreCatalogsCard> {
               contentPadding: EdgeInsets.zero,
               title: Text(
                 p.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: const TextStyle(fontWeight: FontWeight.w600),
               ),
               subtitle: Text('${p.vendor} · ${p.sensors.length} sensor(es)'),
@@ -1328,8 +1367,11 @@ class _CoreCatalogsCardState extends ConsumerState<CoreCatalogsCard> {
             ],
           ),
           const Divider(height: 20),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: <Widget>[
               Text(
                 'Base de Fabricantes MAC (IEEE OUI)',
@@ -1365,20 +1407,17 @@ class _CoreCatalogsCardState extends ConsumerState<CoreCatalogsCard> {
             ),
           ],
           const SizedBox(height: 10),
-          Row(
-            children: <Widget>[
-              Expanded(
-                child: TextField(
-                  controller: _macLookupCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Consultar fabricante por MAC',
-                    hintText: 'AA:BB:CC:11:22:33',
-                    isDense: true,
-                  ),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final field = TextField(
+                controller: _macLookupCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Consultar fabricante por MAC',
+                  hintText: 'AA:BB:CC:11:22:33',
+                  isDense: true,
                 ),
-              ),
-              const SizedBox(width: 8),
-              FilledButton.tonal(
+              );
+              final btn = FilledButton.tonal(
                 onPressed: () async {
                   final res = await ref
                       .read(coreSettingsProvider.notifier)
@@ -1386,8 +1425,21 @@ class _CoreCatalogsCardState extends ConsumerState<CoreCatalogsCard> {
                   if (mounted) setState(() => _macResult = res);
                 },
                 child: const Text('Consultar'),
-              ),
-            ],
+              );
+              if (constraints.maxWidth < 400) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[field, const SizedBox(height: 8), btn],
+                );
+              }
+              return Row(
+                children: <Widget>[
+                  Expanded(child: field),
+                  const SizedBox(width: 8),
+                  btn,
+                ],
+              );
+            },
           ),
           if (_macResult != null) ...<Widget>[
             const SizedBox(height: 8),

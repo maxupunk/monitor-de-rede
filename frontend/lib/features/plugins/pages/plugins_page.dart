@@ -92,8 +92,9 @@ class _PluginsPageState extends ConsumerState<PluginsPage> {
       );
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Erro ao exportar: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Erro ao exportar: $err')));
     }
   }
 
@@ -122,7 +123,8 @@ class _PluginsPageState extends ConsumerState<PluginsPage> {
     final ok = await showConfirmActionDialog(
       context: context,
       title: 'Excluir "${summary.name}"?',
-      message: 'O plugin será removido da biblioteca e desinstalado de todos os equipamentos.',
+      message:
+          'O plugin será removido da biblioteca e desinstalado de todos os equipamentos.',
       confirmLabel: 'Excluir',
       tone: SemanticTone.error,
     );
@@ -161,56 +163,118 @@ class _PluginsPageState extends ConsumerState<PluginsPage> {
           return a.name.toLowerCase().compareTo(b.name.toLowerCase());
         });
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    final isCompact = MediaQuery.sizeOf(context).width < 680;
+    const filterEntries = <(String, String)>[
+      ('all', 'Todos'),
+      ('pending', 'Em preparo'),
+      ('active', 'Ativos'),
+      ('disabled', 'Desativados'),
+    ];
+
+    return ListView(
+      padding: EdgeInsets.zero,
       children: <Widget>[
-        SearchFilterHeader(
-          title: 'Plugins de dispositivo',
-          subtitle: 'Biblioteca de scripts Rhai em sandbox com revisão de quarentena e aplicativos de frota',
-          searchController: _searchCtrl,
-          searchHint: 'Buscar por nome, slug ou descrição...',
-          onSearchChanged: (v) => setState(() => _query = v.trim()),
-          filters: <Widget>[
-            for (final entry in const <(String, String)>[
-              ('all', 'Todos'),
-              ('pending', 'Em preparo'),
-              ('active', 'Ativos'),
-              ('disabled', 'Desativados'),
-            ])
-              ChoiceChip(
-                label: Text(entry.$2),
-                selected: _filter == entry.$1,
-                onSelected: (_) => setState(() => _filter = entry.$1),
+        if (isCompact) ...<Widget>[
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  'Plugins',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: context.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
               ),
-          ],
-          actions: <Widget>[
-            OutlinedButton.icon(
-              onPressed: _importPluginFile,
-              icon: const Icon(Icons.upload_file_outlined, size: 18),
-              label: const Text('Importar'),
-            ),
-            FilledButton.icon(
-              style: FilledButton.styleFrom(
-                backgroundColor: context.semanticColors.plugin,
-                foregroundColor: context.semanticColors.onPlugin,
+              FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: context.semanticColors.plugin,
+                  foregroundColor: context.semanticColors.onPlugin,
+                ),
+                onPressed: () => _openEditor(null),
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('Novo'),
               ),
-              onPressed: () => _openEditor(null),
-              icon: const Icon(Icons.add, size: 18),
-              label: const Text('Novo plugin'),
-            ),
-          ],
-        ),
+              PopupMenuButton<String>(
+                tooltip: 'Mais ações',
+                onSelected: (cmd) {
+                  if (cmd == 'import') _importPluginFile();
+                },
+                itemBuilder: (_) => const <PopupMenuEntry<String>>[
+                  PopupMenuItem<String>(
+                    value: 'import',
+                    child: ListTile(
+                      dense: true,
+                      leading: Icon(Icons.upload_file_outlined),
+                      title: Text('Importar pacote (.json)'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          UnifiedFilterBar(
+            searchController: _searchCtrl,
+            searchHint: 'Buscar por nome, slug ou descrição...',
+            onSearchChanged: (v) => setState(() => _query = v.trim()),
+            quickChips: <Widget>[
+              for (final entry in filterEntries)
+                ChoiceChip(
+                  label: Text(entry.$2),
+                  visualDensity: VisualDensity.compact,
+                  selected: _filter == entry.$1,
+                  onSelected: (_) => setState(() => _filter = entry.$1),
+                ),
+            ],
+          ),
+        ] else
+          SearchFilterHeader(
+            title: 'Plugins de dispositivo',
+            subtitle:
+                'Biblioteca de scripts Rhai em sandbox com revisão de quarentena e aplicativos de frota',
+            searchController: _searchCtrl,
+            searchHint: 'Buscar por nome, slug ou descrição...',
+            onSearchChanged: (v) => setState(() => _query = v.trim()),
+            filters: <Widget>[
+              for (final entry in filterEntries)
+                ChoiceChip(
+                  label: Text(entry.$2),
+                  selected: _filter == entry.$1,
+                  onSelected: (_) => setState(() => _filter = entry.$1),
+                ),
+            ],
+            actions: <Widget>[
+              OutlinedButton.icon(
+                onPressed: _importPluginFile,
+                icon: const Icon(Icons.upload_file_outlined, size: 18),
+                label: const Text('Importar'),
+              ),
+              FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: context.semanticColors.plugin,
+                  foregroundColor: context.semanticColors.onPlugin,
+                ),
+                onPressed: () => _openEditor(null),
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('Novo plugin'),
+              ),
+            ],
+          ),
         if (attentionCount > 0) ...<Widget>[
           const SizedBox(height: 12),
           NestedPanel(
             tone: SemanticTone.warning,
-            child: Row(
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: <Widget>[
-                Expanded(
-                  child: Text(
-                    '${countNoun(attentionCount, 'plugin precisa', 'plugins precisam')} de revisão de segurança ou ativação.',
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
+                Text(
+                  '${countNoun(attentionCount, 'plugin precisa', 'plugins precisam')} de revisão de segurança ou ativação.',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
                 TextButton(
                   onPressed: () => setState(() => _filter = 'pending'),
@@ -225,29 +289,27 @@ class _PluginsPageState extends ConsumerState<PluginsPage> {
           NestedPanel(tone: SemanticTone.error, child: Text(state.error!)),
         ],
         const SizedBox(height: 14),
-        Expanded(
-          child: state.libraryLoading && state.library.isEmpty
-              ? const LoadingStateView(message: 'Carregando biblioteca...')
-              : filtered.isEmpty
-              ? EmptyStateView(
-                  title: 'Nenhum plugin encontrado',
-                  description: 'Crie um novo plugin ou importe um arquivo .nmplugin.json para revisar na quarentena.',
-                  icon: Icons.extension_outlined,
-                  tone: SemanticTone.plugin,
-                )
-              : SingleChildScrollView(
-                  child: ResponsiveGrid(
-                    xs: 1,
-                    sm: 2,
-                    md: 2,
-                    lg: 3,
-                    xl: 3,
-                    children: filtered
-                        .map((summary) => _buildPluginCard(context, summary))
-                        .toList(growable: false),
-                  ),
-                ),
-        ),
+        if (state.libraryLoading && state.library.isEmpty)
+          const LoadingStateView(message: 'Carregando biblioteca...')
+        else if (filtered.isEmpty)
+          const EmptyStateView(
+            title: 'Nenhum plugin encontrado',
+            description:
+                'Crie um novo plugin ou importe um arquivo .nmplugin.json para revisar na quarentena.',
+            icon: Icons.extension_outlined,
+            tone: SemanticTone.plugin,
+          )
+        else
+          ResponsiveGrid(
+            xs: 1,
+            sm: 2,
+            md: 2,
+            lg: 3,
+            xl: 3,
+            children: filtered
+                .map((summary) => _buildPluginCard(context, summary))
+                .toList(growable: false),
+          ),
       ],
     );
   }

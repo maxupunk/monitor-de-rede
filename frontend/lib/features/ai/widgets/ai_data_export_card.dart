@@ -82,7 +82,8 @@ class _AiDataExportCardState extends ConsumerState<AiDataExportCard> {
 
     return SectionCard(
       title: 'Exportar dados do Assistente',
-      subtitle: 'Gera um pacote ZIP com conversas, avaliações e execuções para auditoria ou ajuste fino',
+      subtitle:
+          'Gera um pacote ZIP com conversas, avaliações e execuções para auditoria ou ajuste fino',
       icon: Icons.archive_outlined,
       iconTone: SemanticTone.ai,
       child: Column(

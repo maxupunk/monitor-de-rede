@@ -936,7 +936,8 @@ class AiChatNotifier extends Notifier<AiChatState> {
             .map((m) {
               if (m.id != assistantId) return m;
               return interruptRunningTools(m).copyWith(
-                error: 'A resposta foi interrompida antes de terminar. Tente de novo.',
+                error:
+                    'A resposta foi interrompida antes de terminar. Tente de novo.',
                 isStreaming: false,
               );
             })
@@ -953,8 +954,9 @@ class AiChatNotifier extends Notifier<AiChatState> {
       final failed = state.messages
           .map((m) {
             if (m.id != assistantId) return m;
-            return interruptRunningTools(m)
-                .copyWith(error: errMsg, isStreaming: false);
+            return interruptRunningTools(
+              m,
+            ).copyWith(error: errMsg, isStreaming: false);
           })
           .toList(growable: false);
       state = state.copyWith(

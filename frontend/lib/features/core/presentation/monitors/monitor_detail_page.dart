@@ -366,8 +366,11 @@ class _MonitorDetailViewState extends ConsumerState<MonitorDetailView> {
               ],
             ),
           const SizedBox(height: 14),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: <Widget>[
               Text(
                 'Disponibilidade',
@@ -538,7 +541,7 @@ class _MonitorDetailViewState extends ConsumerState<MonitorDetailView> {
                   _loadHistory(page: 1);
                 }
               },
-              child: Text(_historyExpanded ? 'Ocultar' : 'Carregar histórico'),
+              child: Text(_historyExpanded ? 'Ocultar' : 'Carregar'),
             ),
             child: !_historyExpanded
                 ? Text(
@@ -560,7 +563,11 @@ class _MonitorDetailViewState extends ConsumerState<MonitorDetailView> {
                             item.status,
                             compact: true,
                           ),
-                          title: Text(formatDateTime(item.finishedAt)),
+                          title: Text(
+                            formatDateTime(item.finishedAt),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                           subtitle:
                               item.message != null && item.message!.isNotEmpty
                               ? Text(
@@ -604,7 +611,7 @@ class _MonitorDetailViewState extends ConsumerState<MonitorDetailView> {
                   _loadAlerts(page: 1);
                 }
               },
-              child: Text(_alertsExpanded ? 'Ocultar' : 'Carregar alertas'),
+              child: Text(_alertsExpanded ? 'Ocultar' : 'Carregar'),
             ),
             child: !_alertsExpanded
                 ? Text(
@@ -630,6 +637,8 @@ class _MonitorDetailViewState extends ConsumerState<MonitorDetailView> {
                           contentPadding: EdgeInsets.zero,
                           title: Text(
                             alert.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                             style: const TextStyle(fontWeight: FontWeight.w700),
                           ),
                           subtitle: Text(

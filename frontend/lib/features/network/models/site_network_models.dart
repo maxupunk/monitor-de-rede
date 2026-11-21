@@ -377,9 +377,9 @@ class ScanSessionState {
   static ScanSessionState? tryFromJson(Map<String, dynamic> json) {
     if (json['status'] is! String || json['hosts'] is! List) return null;
     final parsedHosts =
-        asJsonMapList(json['hosts'])
-            .map(StreamedDiscoveryHost.fromJson)
-            .toList()
+        asJsonMapList(
+            json['hosts'],
+          ).map(StreamedDiscoveryHost.fromJson).toList()
           ..sort((a, b) => compareIpAddresses(a.ipAddress, b.ipAddress));
     return ScanSessionState(
       runId: parseIntOrNull(json['runId']),

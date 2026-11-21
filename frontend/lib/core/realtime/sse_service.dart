@@ -16,16 +16,11 @@ abstract class SseBus {
   void scheduleRefresh(String key, VoidCallback action);
 }
 
-typedef SseRouteHandler = void Function(
-  Map<String, dynamic> data,
-  SseEvent event,
-  SseBus bus,
-);
+typedef SseRouteHandler =
+    void Function(Map<String, dynamic> data, SseEvent event, SseBus bus);
 
-typedef SseEventListener = void Function(
-  Map<String, dynamic> data,
-  SseEvent event,
-);
+typedef SseEventListener =
+    void Function(Map<String, dynamic> data, SseEvent event);
 
 /// Definição de rota SSE de um domínio (ex.: `alert:triggered` ou `docker:*`).
 class SseRoute {

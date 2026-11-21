@@ -160,7 +160,8 @@ class _VpnScriptViewerBodyState extends ConsumerState<_VpnScriptViewerBody> {
     final confirmed = await showConfirmActionDialog(
       context: context,
       title: 'Gerar novas chaves?',
-      message: 'A chave anterior será invalidada imediatamente. O dispositivo perderá o túnel até receber a nova configuração.',
+      message:
+          'A chave anterior será invalidada imediatamente. O dispositivo perderá o túnel até receber a nova configuração.',
       confirmLabel: 'Gerar novas chaves',
       tone: SemanticTone.warning,
       icon: Icons.key_outlined,
@@ -446,6 +447,11 @@ class _VpnScriptViewerBodyState extends ConsumerState<_VpnScriptViewerBody> {
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: SegmentedButton<String>(
+                showSelectedIcon: false,
+                style: SegmentedButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                ),
                 selected: <String>{_selectedDocId},
                 onSelectionChanged: (selection) {
                   setState(() => _selectedDocId = selection.first);
@@ -457,12 +463,14 @@ class _VpnScriptViewerBodyState extends ConsumerState<_VpnScriptViewerBody> {
                       _artifact.language == 'ini'
                           ? 'Configuração WireGuard'
                           : 'Script padrão',
+                      maxLines: 1,
+                      softWrap: false,
                     ),
                   ),
                   for (final variant in _artifact.variants)
                     ButtonSegment<String>(
                       value: variant.id,
-                      label: Text(variant.label),
+                      label: Text(variant.label, maxLines: 1, softWrap: false),
                     ),
                 ],
               ),

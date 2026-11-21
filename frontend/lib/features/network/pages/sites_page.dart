@@ -71,14 +71,15 @@ class _SitesPageState extends ConsumerState<SitesPage> {
                 ),
               ),
               const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
+              Wrap(
+                alignment: WrapAlignment.end,
+                spacing: 8,
+                runSpacing: 8,
                 children: <Widget>[
                   TextButton(
                     onPressed: saving ? null : () => Navigator.of(ctx).pop(),
                     child: const Text('Cancelar'),
                   ),
-                  const SizedBox(width: 8),
                   FilledButton.icon(
                     onPressed: saving
                         ? null
@@ -153,175 +154,292 @@ class _SitesPageState extends ConsumerState<SitesPage> {
       (acc, s) => acc + s.networksCount,
     );
 
-    return RefreshIndicator(
-      onRefresh: () => ref.read(sitesProvider.notifier).fetchSites(),
-      child: ListView(
-        children: <Widget>[
-          SearchFilterHeader(
-            title: 'Sites',
-            subtitle: 'Unidades físicas, filiais e datacenters monitorados',
-            searchController: _searchCtrl,
-            searchHint: 'Buscar site por nome ou localização...',
-            onSearchChanged: (_) => setState(() {}),
-            actions: <Widget>[
-              if (canWrite)
-                FilledButton.icon(
-                  onPressed: () => _openSiteSheet(),
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Novo Site'),
-                ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          ResponsiveGrid(
-            xs: 1,
-            sm: 3,
-            md: 3,
-            lg: 3,
-            xl: 3,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isCompact = constraints.maxWidth < 680;
+        return RefreshIndicator(
+          onRefresh: () => ref.read(sitesProvider.notifier).fetchSites(),
+          child: ListView(
             children: <Widget>[
-              KpiCard(
-                label: 'Sites cadastrados',
-                value: formatInteger(state.items.length),
-                icon: Icons.domain_outlined,
-                tone: SemanticTone.primary,
-              ),
-              KpiCard(
-                label: 'Dispositivos alocados',
-                value: formatInteger(totalDevices),
-                icon: Icons.devices_outlined,
-                tone: SemanticTone.info,
-              ),
-              KpiCard(
-                label: 'Redes IP associadas',
-                value: formatInteger(totalNetworks),
-                icon: Icons.lan_outlined,
-                tone: SemanticTone.success,
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          if (state.loading && state.items.isEmpty)
-            const LoadingStateView(message: 'Carregando sites...')
-          else if (state.error != null && state.items.isEmpty)
-            ErrorStateView(
-              message: state.error!,
-              onRetry: () => ref.read(sitesProvider.notifier).fetchSites(),
-            )
-          else if (filtered.isEmpty)
-            EmptyStateView(
-              title: 'Nenhum site encontrado',
-              description: 'Crie sites para organizar redes, dispositivos e mapas de topologia.',
-              icon: Icons.domain_disabled_outlined,
-              action: canWrite
-                  ? FilledButton.icon(
-                      onPressed: () => _openSiteSheet(),
-                      icon: const Icon(Icons.add),
-                      label: const Text('Criar primeiro site'),
-                    )
-                  : null,
-            )
-          else
-            ResponsiveGrid(
-              xs: 1,
-              sm: 1,
-              md: 2,
-              lg: 3,
-              xl: 3,
-              children: filtered
-                  .map((site) {
-                    return SectionCard(
-                      title: site.name,
-                      subtitle: site.location ?? 'Localização não informada',
-                      icon: Icons.domain_outlined,
-                      trailing: canWrite
-                          ? Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: <Widget>[
-                                IconButton(
-                                  tooltip: 'Editar site',
-                                  icon: const Icon(
-                                    Icons.edit_outlined,
-                                    size: 18,
-                                  ),
-                                  onPressed: () =>
-                                      _openSiteSheet(existing: site),
-                                ),
-                                IconButton(
-                                  tooltip: 'Excluir site',
-                                  icon: Icon(
-                                    Icons.delete_outline,
-                                    size: 18,
-                                    color: context.colorScheme.error,
-                                  ),
-                                  onPressed: () => _confirmDelete(site),
-                                ),
-                              ],
-                            )
-                          : null,
-                      footer: Wrap(
-                        spacing: 8,
-                        runSpacing: 6,
-                        children: <Widget>[
-                          TextButton.icon(
-                            onPressed: () => context.go('/topology'),
-                            icon: const Icon(
-                              Icons.account_tree_outlined,
-                              size: 16,
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: <Widget>[
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          'Sites',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style:
+                              (isCompact
+                                      ? context.textTheme.titleLarge
+                                      : context.textTheme.headlineSmall)
+                                  ?.copyWith(fontWeight: FontWeight.w800),
+                        ),
+                        if (!isCompact) ...<Widget>[
+                          const SizedBox(height: 2),
+                          Text(
+                            'Unidades físicas, filiais e datacenters monitorados',
+                            style: context.textTheme.bodySmall?.copyWith(
+                              color: context.colorScheme.onSurfaceVariant,
                             ),
-                            label: const Text('Topologia'),
-                          ),
-                          TextButton.icon(
-                            onPressed: () => context.go('/networks'),
-                            icon: const Icon(Icons.lan_outlined, size: 16),
-                            label: const Text('Redes IP'),
                           ),
                         ],
+                      ],
+                    ),
+                  ),
+                  if (canWrite) ...<Widget>[
+                    const SizedBox(width: 8),
+                    FilledButton.icon(
+                      onPressed: () => _openSiteSheet(),
+                      icon: const Icon(Icons.add, size: 18),
+                      label: Text(isCompact ? 'Novo' : 'Novo Site'),
+                    ),
+                  ],
+                ],
+              ),
+              const SizedBox(height: 10),
+              UnifiedFilterBar(
+                searchController: _searchCtrl,
+                searchHint: 'Buscar site por nome ou localização...',
+                onSearchChanged: (_) => setState(() {}),
+              ),
+              const SizedBox(height: 12),
+              if (isCompact)
+                Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: _CompactSiteStat(
+                        label: 'Sites',
+                        value: formatInteger(state.items.length),
+                        tone: SemanticTone.primary,
                       ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: <Widget>[
-                          Wrap(
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _CompactSiteStat(
+                        label: 'Dispositivos',
+                        value: formatInteger(totalDevices),
+                        tone: SemanticTone.info,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _CompactSiteStat(
+                        label: 'Redes IP',
+                        value: formatInteger(totalNetworks),
+                        tone: SemanticTone.success,
+                      ),
+                    ),
+                  ],
+                )
+              else
+                ResponsiveGrid(
+                  xs: 3,
+                  sm: 3,
+                  md: 3,
+                  lg: 3,
+                  xl: 3,
+                  children: <Widget>[
+                    KpiCard(
+                      label: 'Sites cadastrados',
+                      value: formatInteger(state.items.length),
+                      icon: Icons.domain_outlined,
+                      tone: SemanticTone.primary,
+                    ),
+                    KpiCard(
+                      label: 'Dispositivos alocados',
+                      value: formatInteger(totalDevices),
+                      icon: Icons.devices_outlined,
+                      tone: SemanticTone.info,
+                    ),
+                    KpiCard(
+                      label: 'Redes IP associadas',
+                      value: formatInteger(totalNetworks),
+                      icon: Icons.lan_outlined,
+                      tone: SemanticTone.success,
+                    ),
+                  ],
+                ),
+              const SizedBox(height: 14),
+              if (state.loading && state.items.isEmpty)
+                const LoadingStateView(message: 'Carregando sites...')
+              else if (state.error != null && state.items.isEmpty)
+                ErrorStateView(
+                  message: state.error!,
+                  onRetry: () => ref.read(sitesProvider.notifier).fetchSites(),
+                )
+              else if (filtered.isEmpty)
+                EmptyStateView(
+                  title: 'Nenhum site encontrado',
+                  description:
+                      'Crie sites para organizar redes, dispositivos e mapas de topologia.',
+                  icon: Icons.domain_disabled_outlined,
+                  action: canWrite
+                      ? FilledButton.icon(
+                          onPressed: () => _openSiteSheet(),
+                          icon: const Icon(Icons.add),
+                          label: const Text('Criar primeiro site'),
+                        )
+                      : null,
+                )
+              else
+                ResponsiveGrid(
+                  xs: 1,
+                  sm: 1,
+                  md: 2,
+                  lg: 3,
+                  xl: 3,
+                  children: filtered
+                      .map((site) {
+                        return SectionCard(
+                          title: site.name,
+                          subtitle:
+                              site.location ?? 'Localização não informada',
+                          icon: Icons.domain_outlined,
+                          trailing: canWrite
+                              ? Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: <Widget>[
+                                    IconButton(
+                                      tooltip: 'Editar site',
+                                      icon: const Icon(
+                                        Icons.edit_outlined,
+                                        size: 18,
+                                      ),
+                                      onPressed: () =>
+                                          _openSiteSheet(existing: site),
+                                    ),
+                                    IconButton(
+                                      tooltip: 'Excluir site',
+                                      icon: Icon(
+                                        Icons.delete_outline,
+                                        size: 18,
+                                        color: context.colorScheme.error,
+                                      ),
+                                      onPressed: () => _confirmDelete(site),
+                                    ),
+                                  ],
+                                )
+                              : null,
+                          footer: Wrap(
                             spacing: 8,
                             runSpacing: 6,
                             children: <Widget>[
-                              SemanticChip(
-                                label: countNoun(
-                                  site.devicesCount,
-                                  'dispositivo',
-                                  'dispositivos',
+                              TextButton.icon(
+                                onPressed: () => context.go('/topology'),
+                                icon: const Icon(
+                                  Icons.account_tree_outlined,
+                                  size: 16,
                                 ),
-                                tone: SemanticTone.primary,
-                                icon: Icons.devices_outlined,
-                                compact: true,
+                                label: const Text('Topologia'),
                               ),
-                              SemanticChip(
-                                label: countNoun(
-                                  site.networksCount,
-                                  'rede IP',
-                                  'redes IP',
-                                ),
-                                tone: SemanticTone.info,
-                                icon: Icons.lan_outlined,
-                                compact: true,
+                              TextButton.icon(
+                                onPressed: () => context.go('/networks'),
+                                icon: const Icon(Icons.lan_outlined, size: 16),
+                                label: const Text('Redes IP'),
                               ),
                             ],
                           ),
-                          if (site.description != null &&
-                              site.description!.isNotEmpty) ...<Widget>[
-                            const SizedBox(height: 10),
-                            Text(
-                              site.description!,
-                              style: context.textTheme.bodySmall,
-                            ),
-                          ],
-                        ],
-                      ),
-                    );
-                  })
-                  .toList(growable: false),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: <Widget>[
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 6,
+                                children: <Widget>[
+                                  SemanticChip(
+                                    label: countNoun(
+                                      site.devicesCount,
+                                      'dispositivo',
+                                      'dispositivos',
+                                    ),
+                                    tone: SemanticTone.primary,
+                                    icon: Icons.devices_outlined,
+                                    compact: true,
+                                  ),
+                                  SemanticChip(
+                                    label: countNoun(
+                                      site.networksCount,
+                                      'rede IP',
+                                      'redes IP',
+                                    ),
+                                    tone: SemanticTone.info,
+                                    icon: Icons.lan_outlined,
+                                    compact: true,
+                                  ),
+                                ],
+                              ),
+                              if (site.description != null &&
+                                  site.description!.isNotEmpty) ...<Widget>[
+                                const SizedBox(height: 10),
+                                Text(
+                                  site.description!,
+                                  style: context.textTheme.bodySmall,
+                                ),
+                              ],
+                            ],
+                          ),
+                        );
+                      })
+                      .toList(growable: false),
+                ),
+              const SizedBox(height: 24),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _CompactSiteStat extends StatelessWidget {
+  const _CompactSiteStat({
+    required this.label,
+    required this.value,
+    required this.tone,
+  });
+
+  final String label;
+  final String value;
+  final SemanticTone tone;
+
+  @override
+  Widget build(BuildContext context) {
+    final pair = context.semanticColors.resolve(tone, context.colorScheme);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: pair.container,
+        borderRadius: AppTheme.borderRadius,
+        border: Border.all(color: pair.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: context.textTheme.labelSmall?.copyWith(
+              color: pair.onContainer,
+              fontWeight: FontWeight.w600,
             ),
-          const SizedBox(height: 24),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: context.textTheme.titleMedium?.copyWith(
+              color: pair.onContainer,
+              fontWeight: FontWeight.w800,
+              fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
+            ),
+          ),
         ],
       ),
     );

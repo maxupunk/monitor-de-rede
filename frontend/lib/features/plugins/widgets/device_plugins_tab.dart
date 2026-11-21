@@ -147,7 +147,8 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
                           onChanged: (v) =>
                               setModalState(() => confirmWrite = v == true),
                           title: Text(
-                            action.confirmMessage ?? 'Confirmo que esta ação altera a configuração do equipamento.',
+                            action.confirmMessage ??
+                                'Confirmo que esta ação altera a configuração do equipamento.',
                             style: const TextStyle(fontSize: 13),
                           ),
                         ),
@@ -441,6 +442,15 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
           item.deviceSettings ?? pluginSchemaDefaults(plugin.settings?.device),
         );
 
+    final isCompact = MediaQuery.sizeOf(context).width < 520;
+    final openAppBtn = plugin.opensApp
+        ? OutlinedButton.icon(
+            onPressed: () => context.go('/apps/${plugin.id}'),
+            icon: const Icon(Icons.apps, size: 17),
+            label: const Text('Abrir aplicativo'),
+          )
+        : null;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
@@ -452,12 +462,7 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
           trailing: Wrap(
             spacing: 6,
             children: <Widget>[
-              if (plugin.opensApp)
-                OutlinedButton.icon(
-                  onPressed: () => context.go('/apps/${plugin.id}'),
-                  icon: const Icon(Icons.apps, size: 17),
-                  label: const Text('Abrir aplicativo'),
-                ),
+              if (!isCompact && openAppBtn != null) openAppBtn,
               if (isAdmin)
                 PopupMenuButton<String>(
                   onSelected: (cmd) async {
@@ -510,6 +515,10 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
+              if (isCompact && openAppBtn != null) ...<Widget>[
+                Align(alignment: Alignment.centerLeft, child: openAppBtn),
+                const SizedBox(height: 10),
+              ],
               Text(
                 'Ações disponíveis',
                 style: context.textTheme.titleSmall?.copyWith(
@@ -551,21 +560,30 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
               if (activeRun != null &&
                   activeRun.pluginId == plugin.id) ...<Widget>[
                 const Divider(height: 24),
-                Row(
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  alignment: WrapAlignment.spaceBetween,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: <Widget>[
-                    Text(
-                      'Execução #${activeRun.id} (${activeRun.action})',
-                      style: context.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: <Widget>[
+                        Text(
+                          'Execução #${activeRun.id} (${activeRun.action})',
+                          style: context.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        SemanticChip(
+                          label: runStatusPresentation(activeRun.status).label,
+                          tone: runStatusPresentation(activeRun.status).tone,
+                          compact: true,
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 8),
-                    SemanticChip(
-                      label: runStatusPresentation(activeRun.status).label,
-                      tone: runStatusPresentation(activeRun.status).tone,
-                      compact: true,
-                    ),
-                    const Spacer(),
                     if (!activeRun.isFinished)
                       TextButton(
                         onPressed: () => ref
@@ -778,34 +796,41 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
     DevicePluginsView view,
     bool isAdmin,
   ) {
+    final isCompact = MediaQuery.sizeOf(context).width < 520;
+    final configureBtn = isAdmin
+        ? FilledButton.icon(
+            onPressed: () async {
+              final saved = await showDeviceAccessDialog(
+                context: context,
+                ref: ref,
+                deviceId: widget.deviceId,
+              );
+              if (saved) {
+                await ref
+                    .read(pluginsProvider.notifier)
+                    .loadDevice(widget.deviceId);
+              }
+            },
+            icon: const Icon(Icons.add, size: 18),
+            label: const Text('Configurar acesso'),
+          )
+        : null;
+
     return SectionCard(
       title: 'Credenciais de acesso',
       subtitle:
           'Senhas nunca são exibidas; SSH suporta chave dedicada (ADR 016).',
       icon: Icons.vpn_key_outlined,
       iconTone: SemanticTone.plugin,
-      trailing: isAdmin
-          ? FilledButton.icon(
-              onPressed: () async {
-                final saved = await showDeviceAccessDialog(
-                  context: context,
-                  ref: ref,
-                  deviceId: widget.deviceId,
-                );
-                if (saved) {
-                  await ref
-                      .read(pluginsProvider.notifier)
-                      .loadDevice(widget.deviceId);
-                }
-              },
-              icon: const Icon(Icons.add, size: 18),
-              label: const Text('Configurar acesso'),
-            )
+      trailing: isCompact ? null : configureBtn,
+      footer: isCompact && configureBtn != null
+          ? Align(alignment: Alignment.centerRight, child: configureBtn)
           : null,
       child: view.credentials.isEmpty
           ? const EmptyStateView(
               title: 'Nenhuma credencial cadastrada',
-              description: 'Configure SSH, HTTP ou Telnet para executar plugins neste equipamento.',
+              description:
+                  'Configure SSH, HTTP ou Telnet para executar plugins neste equipamento.',
               icon: Icons.lock_outline,
               tone: SemanticTone.plugin,
             )

@@ -148,9 +148,9 @@ class WifiDeviceSnapshotModel {
       status: (json['status'] as String?) ?? 'ok',
       readAt: json['readAt'] as String?,
       error: json['error'] as String?,
-      stations: asJsonMapList(json['stations'])
-          .map(WifiStationModel.fromJson)
-          .toList(growable: false),
+      stations: asJsonMapList(
+        json['stations'],
+      ).map(WifiStationModel.fromJson).toList(growable: false),
       canPing: json['canPing'] == true,
     );
   }

@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
@@ -142,33 +142,56 @@ class _WifiQrBodyState extends ConsumerState<_WifiQrBody> {
           onChanged: (_) => setState(() {}),
         ),
         const SizedBox(height: 10),
-        Row(
-          children: <Widget>[
-            Expanded(
-              child: DropdownButtonFormField<String>(
-                initialValue: _security,
-                decoration: const InputDecoration(labelText: 'Segurança'),
-                items: const <DropdownMenuItem<String>>[
-                  DropdownMenuItem(
-                    value: 'WPA',
-                    child: Text('WPA / WPA2 / WPA3'),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final securityField = AppDropdownFormField<String>(
+              initialValue: _security,
+              decoration: const InputDecoration(labelText: 'Segurança'),
+              items: const <DropdownMenuItem<String>>[
+                DropdownMenuItem(
+                  value: 'WPA',
+                  child: Text(
+                    'WPA / WPA2 / WPA3',
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  DropdownMenuItem(value: 'WEP', child: Text('WEP')),
-                  DropdownMenuItem(
-                    value: 'nopass',
-                    child: Text('Aberta (sem senha)'),
+                ),
+                DropdownMenuItem(
+                  value: 'WEP',
+                  child: Text('WEP', overflow: TextOverflow.ellipsis),
+                ),
+                DropdownMenuItem(
+                  value: 'nopass',
+                  child: Text(
+                    'Aberta (sem senha)',
+                    overflow: TextOverflow.ellipsis,
                   ),
-                ],
-                onChanged: (v) => setState(() => _security = v ?? 'WPA'),
-              ),
-            ),
-            const SizedBox(width: 8),
-            FilterChip(
+                ),
+              ],
+              onChanged: (v) => setState(() => _security = v ?? 'WPA'),
+            );
+            final hiddenChip = FilterChip(
               label: const Text('Rede oculta'),
               selected: _hidden,
               onSelected: (v) => setState(() => _hidden = v),
-            ),
-          ],
+            );
+            if (constraints.maxWidth < 420) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  securityField,
+                  const SizedBox(height: 8),
+                  Align(alignment: Alignment.centerLeft, child: hiddenChip),
+                ],
+              );
+            }
+            return Row(
+              children: <Widget>[
+                Expanded(child: securityField),
+                const SizedBox(width: 8),
+                hiddenChip,
+              ],
+            );
+          },
         ),
         if (_security != 'nopass') ...<Widget>[
           const SizedBox(height: 10),

@@ -41,9 +41,9 @@ class SitesNotifier extends Notifier<SitesState> {
     try {
       final raw = await ref.read(apiClientProvider).get<dynamic>('/sites');
       state = state.copyWith(
-        items: asJsonMapList(raw)
-            .map(SiteModel.fromJson)
-            .toList(growable: false),
+        items: asJsonMapList(
+          raw,
+        ).map(SiteModel.fromJson).toList(growable: false),
         loading: false,
       );
     } catch (err) {
@@ -143,9 +143,9 @@ class NetworksNotifier extends Notifier<NetworksState> {
     try {
       final raw = await ref.read(apiClientProvider).get<dynamic>('/networks');
       state = state.copyWith(
-        items: asJsonMapList(raw)
-            .map(NetworkModel.fromJson)
-            .toList(growable: false),
+        items: asJsonMapList(
+          raw,
+        ).map(NetworkModel.fromJson).toList(growable: false),
         loading: false,
       );
     } catch (err) {
@@ -264,9 +264,9 @@ class ProbesNotifier extends Notifier<ProbesState> {
     try {
       final raw = await ref.read(apiClientProvider).get<dynamic>('/probes');
       state = state.copyWith(
-        items: asJsonMapList(raw)
-            .map(ProbeModel.fromJson)
-            .toList(growable: false),
+        items: asJsonMapList(
+          raw,
+        ).map(ProbeModel.fromJson).toList(growable: false),
         loading: false,
       );
     } catch (err) {
@@ -389,9 +389,9 @@ class DiscoveryNotifier extends Notifier<DiscoveryState> {
           .read(apiClientProvider)
           .get<dynamic>('/discovery/runs');
       state = state.copyWith(
-        runs: asJsonMapList(raw)
-            .map(DiscoveryRunModel.fromJson)
-            .toList(growable: false),
+        runs: asJsonMapList(
+          raw,
+        ).map(DiscoveryRunModel.fromJson).toList(growable: false),
         loading: false,
       );
     } catch (err) {
@@ -417,9 +417,9 @@ class DiscoveryNotifier extends Notifier<DiscoveryState> {
           .read(apiClientProvider)
           .get<dynamic>('/discovery/conflicts');
       state = state.copyWith(
-        conflicts: asJsonMapList(raw)
-            .map(NetworkConflictModel.fromJson)
-            .toList(growable: false),
+        conflicts: asJsonMapList(
+          raw,
+        ).map(NetworkConflictModel.fromJson).toList(growable: false),
         loadingConflicts: false,
       );
     } catch (_) {
@@ -434,9 +434,9 @@ class DiscoveryNotifier extends Notifier<DiscoveryState> {
           .read(apiClientProvider)
           .post<dynamic>('/discovery/check-conflicts');
       final map = asJsonMap(raw);
-      final parsed = asJsonMapList(map['conflicts'])
-          .map(NetworkConflictModel.fromJson)
-          .toList(growable: false);
+      final parsed = asJsonMapList(
+        map['conflicts'],
+      ).map(NetworkConflictModel.fromJson).toList(growable: false);
       state = state.copyWith(conflicts: parsed, loadingConflicts: false);
       return parsed.length;
     } catch (err) {
@@ -502,9 +502,9 @@ class DiscoveryNotifier extends Notifier<DiscoveryState> {
   void applyConflictsDetected(Map<String, dynamic> data) {
     if (data['conflicts'] is List) {
       state = state.copyWith(
-        conflicts: asJsonMapList(data['conflicts'])
-            .map(NetworkConflictModel.fromJson)
-            .toList(growable: false),
+        conflicts: asJsonMapList(
+          data['conflicts'],
+        ).map(NetworkConflictModel.fromJson).toList(growable: false),
       );
     } else {
       fetchConflicts();

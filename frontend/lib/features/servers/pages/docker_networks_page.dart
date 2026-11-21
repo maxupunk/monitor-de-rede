@@ -44,7 +44,7 @@ class _DockerNetworksPageState extends ConsumerState<DockerNetworksPage> {
               ),
             ),
             const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
+            AppDropdownFormField<String>(
               initialValue: driver,
               decoration: const InputDecoration(labelText: 'Driver'),
               items: const <DropdownMenuItem<String>>[
@@ -84,8 +84,9 @@ class _DockerNetworksPageState extends ConsumerState<DockerNetworksPage> {
     );
     nameController.dispose();
     if (created == true && mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Rede Docker criada.')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Rede Docker criada.')));
     }
   }
 
@@ -108,8 +109,9 @@ class _DockerNetworksPageState extends ConsumerState<DockerNetworksPage> {
           refresh: ref.read(dockerProvider.notifier).refreshAll,
         );
     if (ok && mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Rede ${net.name} removida.')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Rede ${net.name} removida.')));
     }
   }
 
@@ -135,20 +137,28 @@ class _DockerNetworksPageState extends ConsumerState<DockerNetworksPage> {
         })
         .toList(growable: false);
 
+    final isCompact = MediaQuery.sizeOf(context).width < 520;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        SearchFilterHeader(
+        UnifiedFilterBar(
           searchController: _searchController,
           searchHint: 'Buscar rede Docker...',
           onSearchChanged: (v) => setState(() => _search = v),
-          actions: <Widget>[
+          trailingActions: <Widget>[
             if (isAdmin)
-              FilledButton.icon(
-                onPressed: _openCreateNetworkDialog,
-                icon: const Icon(Icons.add),
-                label: const Text('Nova rede'),
-              ),
+              isCompact
+                  ? IconButton.filled(
+                      tooltip: 'Nova rede',
+                      onPressed: _openCreateNetworkDialog,
+                      icon: const Icon(Icons.add),
+                    )
+                  : FilledButton.icon(
+                      onPressed: _openCreateNetworkDialog,
+                      icon: const Icon(Icons.add),
+                      label: const Text('Nova rede'),
+                    ),
           ],
         ),
         const SizedBox(height: 14),
@@ -344,35 +354,52 @@ class _NetworkDetailBodyState extends ConsumerState<_NetworkDetailBody> {
         ],
         const SizedBox(height: 12),
         if (isAdmin && unconnected.isNotEmpty) ...<Widget>[
-          Row(
-            children: <Widget>[
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  initialValue:
-                      unconnected.any((c) => c.id == _selectedContainerId)
-                      ? _selectedContainerId
-                      : null,
-                  decoration: const InputDecoration(
-                    labelText: 'Conectar container',
-                    isDense: true,
-                  ),
-                  items: unconnected
-                      .map(
-                        (c) => DropdownMenuItem<String>(
-                          value: c.id,
-                          child: Text(containerDisplayName(c)),
-                        ),
-                      )
-                      .toList(growable: false),
-                  onChanged: (v) => setState(() => _selectedContainerId = v),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final dropdown = AppDropdownFormField<String>(
+                initialValue:
+                    unconnected.any((c) => c.id == _selectedContainerId)
+                    ? _selectedContainerId
+                    : null,
+                decoration: const InputDecoration(
+                  labelText: 'Conectar container',
+                  isDense: true,
                 ),
-              ),
-              const SizedBox(width: 8),
-              FilledButton(
+                items: unconnected
+                    .map(
+                      (c) => DropdownMenuItem<String>(
+                        value: c.id,
+                        child: Text(
+                          containerDisplayName(c),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    )
+                    .toList(growable: false),
+                onChanged: (v) => setState(() => _selectedContainerId = v),
+              );
+              final connectBtn = FilledButton(
                 onPressed: _selectedContainerId == null ? null : _connect,
                 child: const Text('Conectar'),
-              ),
-            ],
+              );
+              if (constraints.maxWidth < 420) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    dropdown,
+                    const SizedBox(height: 8),
+                    Align(alignment: Alignment.centerRight, child: connectBtn),
+                  ],
+                );
+              }
+              return Row(
+                children: <Widget>[
+                  Expanded(child: dropdown),
+                  const SizedBox(width: 8),
+                  connectBtn,
+                ],
+              );
+            },
           ),
           const SizedBox(height: 12),
         ],

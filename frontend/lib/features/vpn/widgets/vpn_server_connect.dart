@@ -105,7 +105,8 @@ class _VpnServerConnectDialogState
       content: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 420),
         child: Text(
-          _error ?? 'O servidor WireGuard ainda não está configurado. Defina o endereço público e a faixa da VPN para gerar o túnel deste servidor.',
+          _error ??
+              'O servidor WireGuard ainda não está configurado. Defina o endereço público e a faixa da VPN para gerar o túnel deste servidor.',
         ),
       ),
       actions: <Widget>[

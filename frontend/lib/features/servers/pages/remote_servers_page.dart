@@ -56,7 +56,8 @@ class _RemoteServersPageState extends ConsumerState<RemoteServersPage> {
         >(
           context: context,
           title: 'Conectar servidor remoto',
-          subtitle: 'O agente só disca para fora — nenhuma porta é aberta no servidor.',
+          subtitle:
+              'O agente só disca para fora — nenhuma porta é aberta no servidor.',
           maxWidth: 620,
           builder: (sheetCtx) {
             return StatefulBuilder(
@@ -111,8 +112,9 @@ class _RemoteServersPageState extends ConsumerState<RemoteServersPage> {
                             );
                             return;
                           }
-                          Navigator.of(ctx)
-                              .pop((name: name, path: selectedPath));
+                          Navigator.of(
+                            ctx,
+                          ).pop((name: name, path: selectedPath));
                         },
                         icon: const Icon(Icons.arrow_forward),
                         label: const Text('Continuar'),
@@ -228,8 +230,9 @@ class _RemoteServersPageState extends ConsumerState<RemoteServersPage> {
     );
     nameController.dispose();
     if (saved == true && mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Servidor atualizado.')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Servidor atualizado.')));
     }
   }
 
@@ -308,66 +311,132 @@ class _RemoteServersPageState extends ConsumerState<RemoteServersPage> {
     final pendingCount = agentsState.agents
         .where((a) => a.status == 'pending')
         .length;
+    final isCompact = MediaQuery.sizeOf(context).width < 680;
 
     return RefreshIndicator(
       onRefresh: () => ref.read(agentsProvider.notifier).fetchAgents(),
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: <Widget>[
-          SearchFilterHeader(
-            title: 'Servidores remotos',
-            subtitle: 'Agentes conectados à central para Docker, métricas, bancos e deploys.',
-            searchController: _searchController,
-            searchHint: 'Buscar por nome, hostname, OS ou IP...',
-            onSearchChanged: (v) => setState(() => _search = v),
-            actions: <Widget>[
-              OutlinedButton.icon(
-                onPressed: agentsState.loading
-                    ? null
-                    : () => ref.read(agentsProvider.notifier).fetchAgents(),
-                icon: const Icon(Icons.refresh, size: 18),
-                label: const Text('Atualizar'),
-              ),
-              if (isAdmin)
-                FilledButton.icon(
-                  onPressed: _openCreateWizard,
-                  icon: const Icon(Icons.add),
-                  label: const Text('Conectar servidor'),
+          if (isCompact) ...<Widget>[
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: Text(
+                    'Servidores remotos',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: context.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
                 ),
-            ],
-          ),
-          const SizedBox(height: 16),
-
-          ResponsiveGrid(
-            xs: 1,
-            sm: 3,
-            md: 3,
-            lg: 3,
-            xl: 3,
-            children: <Widget>[
-              KpiCard(
-                label: 'Servidores cadastrados',
-                value: formatInteger(agentsState.agents.length),
-                icon: Icons.dns_outlined,
-                tone: SemanticTone.primary,
-              ),
-              KpiCard(
-                label: 'Conectados agora',
-                value: formatInteger(connectedCount),
-                icon: Icons.cloud_done_outlined,
-                tone: SemanticTone.success,
-              ),
-              KpiCard(
-                label: 'Aguardando instalação',
-                value: formatInteger(pendingCount),
-                icon: Icons.hourglass_top,
-                tone: pendingCount > 0
-                    ? SemanticTone.info
-                    : SemanticTone.secondary,
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
+                if (isAdmin)
+                  FilledButton.icon(
+                    onPressed: _openCreateWizard,
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Conectar'),
+                  ),
+                IconButton(
+                  tooltip: 'Atualizar',
+                  onPressed: agentsState.loading
+                      ? null
+                      : () => ref.read(agentsProvider.notifier).fetchAgents(),
+                  icon: const Icon(Icons.refresh, size: 20),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            UnifiedFilterBar(
+              searchController: _searchController,
+              searchHint: 'Buscar por nome, hostname, OS ou IP...',
+              onSearchChanged: (v) => setState(() => _search = v),
+            ),
+            const SizedBox(height: 10),
+            // Faixa simétrica compacta de 3 contadores (evita card órfão em 2 colunas)
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              children: <Widget>[
+                SemanticChip(
+                  label: '${formatInteger(agentsState.agents.length)} total',
+                  tone: SemanticTone.primary,
+                  icon: Icons.dns_outlined,
+                  compact: true,
+                ),
+                SemanticChip(
+                  label: '${formatInteger(connectedCount)} conectados',
+                  tone: SemanticTone.success,
+                  icon: Icons.cloud_done_outlined,
+                  compact: true,
+                ),
+                SemanticChip(
+                  label: '${formatInteger(pendingCount)} pendentes',
+                  tone: pendingCount > 0
+                      ? SemanticTone.info
+                      : SemanticTone.secondary,
+                  icon: Icons.hourglass_top,
+                  compact: true,
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+          ] else ...<Widget>[
+            SearchFilterHeader(
+              title: 'Servidores remotos',
+              subtitle:
+                  'Agentes conectados à central para Docker, métricas, bancos e deploys.',
+              searchController: _searchController,
+              searchHint: 'Buscar por nome, hostname, OS ou IP...',
+              onSearchChanged: (v) => setState(() => _search = v),
+              actions: <Widget>[
+                OutlinedButton.icon(
+                  onPressed: agentsState.loading
+                      ? null
+                      : () => ref.read(agentsProvider.notifier).fetchAgents(),
+                  icon: const Icon(Icons.refresh, size: 18),
+                  label: const Text('Atualizar'),
+                ),
+                if (isAdmin)
+                  FilledButton.icon(
+                    onPressed: _openCreateWizard,
+                    icon: const Icon(Icons.add),
+                    label: const Text('Conectar servidor'),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            ResponsiveGrid(
+              xs: 3,
+              sm: 3,
+              md: 3,
+              lg: 3,
+              xl: 3,
+              children: <Widget>[
+                KpiCard(
+                  label: 'Servidores cadastrados',
+                  value: formatInteger(agentsState.agents.length),
+                  icon: Icons.dns_outlined,
+                  tone: SemanticTone.primary,
+                ),
+                KpiCard(
+                  label: 'Conectados agora',
+                  value: formatInteger(connectedCount),
+                  icon: Icons.cloud_done_outlined,
+                  tone: SemanticTone.success,
+                ),
+                KpiCard(
+                  label: 'Aguardando instalação',
+                  value: formatInteger(pendingCount),
+                  icon: Icons.hourglass_top,
+                  tone: pendingCount > 0
+                      ? SemanticTone.info
+                      : SemanticTone.secondary,
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+          ],
 
           if (agentsState.error != null) ...<Widget>[
             NestedPanel(
@@ -485,7 +554,8 @@ class _AgentCard extends StatelessWidget {
         children: <Widget>[
           if (agent.local)
             const Tooltip(
-              message: 'Agente local gerenciado pelo docker-compose.yml (netmonitor-agent — ADR 014).',
+              message:
+                  'Agente local gerenciado pelo docker-compose.yml (netmonitor-agent — ADR 014).',
               child: SemanticChip(
                 label: 'Esta central',
                 tone: SemanticTone.info,

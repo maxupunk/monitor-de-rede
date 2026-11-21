@@ -133,7 +133,8 @@ Future<void> showAlertCorrelationSheet({
           if (data == null) {
             return const EmptyStateView(
               title: 'Sem correlação disponível',
-              description: 'Não foram encontrados incidentes correlacionados nesta janela.',
+              description:
+                  'Não foram encontrados incidentes correlacionados nesta janela.',
               icon: Icons.hub_outlined,
             );
           }
@@ -437,103 +438,107 @@ class _AlertRuleFormBodyState extends ConsumerState<_AlertRuleFormBody> {
             validator: FormValidators.required('Informe o nome da regra.'),
           ),
           const SizedBox(height: 12),
-          Row(
+          ResponsiveFieldRow(
+            breakpoint: 480,
             children: <Widget>[
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  initialValue: _type,
-                  decoration: const InputDecoration(labelText: 'Tipo'),
-                  items: const <DropdownMenuItem<String>>[
-                    DropdownMenuItem(
-                      value: 'device_offline',
-                      child: Text('Dispositivo offline'),
+              AppDropdownFormField<String>(
+                initialValue: _type,
+                decoration: const InputDecoration(labelText: 'Tipo'),
+                items: const <DropdownMenuItem<String>>[
+                  DropdownMenuItem(
+                    value: 'device_offline',
+                    child: Text(
+                      'Dispositivo offline',
+                      overflow: TextOverflow.ellipsis,
                     ),
-                    DropdownMenuItem(
-                      value: 'latency_high',
-                      child: Text('Latência alta'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'http_failure',
-                      child: Text('Falha HTTP'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'tcp_failure',
-                      child: Text('Falha TCP'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'custom',
-                      child: Text('Personalizada / Log'),
-                    ),
-                  ],
-                  onChanged: (v) {
-                    if (v != null) setState(() => _type = v);
-                  },
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  initialValue: _severity,
-                  decoration: const InputDecoration(labelText: 'Severidade'),
-                  items: const <DropdownMenuItem<String>>[
-                    DropdownMenuItem(value: 'info', child: Text('Informação')),
-                    DropdownMenuItem(value: 'warning', child: Text('Aviso')),
-                    DropdownMenuItem(value: 'critical', child: Text('Crítico')),
-                  ],
-                  onChanged: (v) {
-                    if (v != null) setState(() => _severity = v);
-                  },
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: <Widget>[
-              Expanded(
-                flex: 3,
-                child: TextFormField(
-                  controller: _fieldCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Campo',
-                    hintText: 'status, latency_ms, cpu_usage, log_pattern',
                   ),
-                  validator: FormValidators.required('Campo obrigatório.'),
-                ),
+                  DropdownMenuItem(
+                    value: 'latency_high',
+                    child: Text(
+                      'Latência alta',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  DropdownMenuItem(
+                    value: 'http_failure',
+                    child: Text('Falha HTTP', overflow: TextOverflow.ellipsis),
+                  ),
+                  DropdownMenuItem(
+                    value: 'tcp_failure',
+                    child: Text('Falha TCP', overflow: TextOverflow.ellipsis),
+                  ),
+                  DropdownMenuItem(
+                    value: 'custom',
+                    child: Text(
+                      'Personalizada / Log',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+                onChanged: (v) {
+                  if (v != null) setState(() => _type = v);
+                },
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                flex: 2,
-                child: DropdownButtonFormField<String>(
-                  initialValue: _operator,
-                  decoration: const InputDecoration(labelText: 'Operador'),
-                  items: const <DropdownMenuItem<String>>[
-                    DropdownMenuItem(value: '==', child: Text('==')),
-                    DropdownMenuItem(value: '!=', child: Text('!=')),
-                    DropdownMenuItem(value: '>', child: Text('>')),
-                    DropdownMenuItem(value: '>=', child: Text('>=')),
-                    DropdownMenuItem(value: '<', child: Text('<')),
-                    DropdownMenuItem(value: '<=', child: Text('<=')),
-                    DropdownMenuItem(value: 'matches', child: Text('regex')),
-                  ],
-                  onChanged: (v) {
-                    if (v != null) setState(() => _operator = v);
-                  },
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                flex: 3,
-                child: TextFormField(
-                  controller: _valueCtrl,
-                  decoration: const InputDecoration(labelText: 'Valor / Regex'),
-                  validator: FormValidators.required('Informe o valor.'),
-                ),
+              AppDropdownFormField<String>(
+                initialValue: _severity,
+                decoration: const InputDecoration(labelText: 'Severidade'),
+                items: const <DropdownMenuItem<String>>[
+                  DropdownMenuItem(
+                    value: 'info',
+                    child: Text('Informação', overflow: TextOverflow.ellipsis),
+                  ),
+                  DropdownMenuItem(
+                    value: 'warning',
+                    child: Text('Aviso', overflow: TextOverflow.ellipsis),
+                  ),
+                  DropdownMenuItem(
+                    value: 'critical',
+                    child: Text('Crítico', overflow: TextOverflow.ellipsis),
+                  ),
+                ],
+                onChanged: (v) {
+                  if (v != null) setState(() => _severity = v);
+                },
               ),
             ],
           ),
           const SizedBox(height: 12),
-          DropdownButtonFormField<int?>(
+          ResponsiveFieldRow(
+            breakpoint: 640,
+            children: <Widget>[
+              TextFormField(
+                controller: _fieldCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Campo',
+                  hintText: 'status, latency_ms, cpu_usage, log_pattern',
+                ),
+                validator: FormValidators.required('Campo obrigatório.'),
+              ),
+              AppDropdownFormField<String>(
+                initialValue: _operator,
+                decoration: const InputDecoration(labelText: 'Operador'),
+                items: const <DropdownMenuItem<String>>[
+                  DropdownMenuItem(value: '==', child: Text('==')),
+                  DropdownMenuItem(value: '!=', child: Text('!=')),
+                  DropdownMenuItem(value: '>', child: Text('>')),
+                  DropdownMenuItem(value: '>=', child: Text('>=')),
+                  DropdownMenuItem(value: '<', child: Text('<')),
+                  DropdownMenuItem(value: '<=', child: Text('<=')),
+                  DropdownMenuItem(value: 'matches', child: Text('regex')),
+                ],
+                onChanged: (v) {
+                  if (v != null) setState(() => _operator = v);
+                },
+              ),
+              TextFormField(
+                controller: _valueCtrl,
+                decoration: const InputDecoration(labelText: 'Valor / Regex'),
+                validator: FormValidators.required('Informe o valor.'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          AppDropdownFormField<int?>(
             initialValue: _deviceId,
             decoration: const InputDecoration(
               labelText: 'Escopo — Dispositivo (opcional)',
@@ -541,54 +546,47 @@ class _AlertRuleFormBodyState extends ConsumerState<_AlertRuleFormBody> {
             items: <DropdownMenuItem<int?>>[
               const DropdownMenuItem<int?>(
                 value: null,
-                child: Text('Global (todos)'),
+                child: Text('Global (todos)', overflow: TextOverflow.ellipsis),
               ),
               for (final d in monitorsState.devices)
-                DropdownMenuItem<int?>(value: d.id, child: Text(d.name)),
+                DropdownMenuItem<int?>(
+                  value: d.id,
+                  child: Text(d.name, overflow: TextOverflow.ellipsis),
+                ),
             ],
             onChanged: (v) => setState(() => _deviceId = v),
           ),
           const SizedBox(height: 12),
-          Row(
+          ResponsiveFieldRow(
+            breakpoint: 480,
             children: <Widget>[
-              Expanded(
-                child: TextFormField(
-                  controller: _durationCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'Duração (s)'),
-                ),
+              TextFormField(
+                controller: _durationCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Duração (s)'),
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: TextFormField(
-                  controller: _recoveryCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: 'Estabilização (s)',
-                  ),
+              TextFormField(
+                controller: _recoveryCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Estabilização (s)',
                 ),
               ),
             ],
           ),
           const SizedBox(height: 12),
-          Row(
+          ResponsiveFieldRow(
+            breakpoint: 480,
             children: <Widget>[
-              Expanded(
-                child: TextFormField(
-                  controller: _flapThresholdCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: 'Limiar flapping',
-                  ),
-                ),
+              TextFormField(
+                controller: _flapThresholdCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Limiar flapping'),
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: TextFormField(
-                  controller: _cooldownCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'Cooldown (s)'),
-                ),
+              TextFormField(
+                controller: _cooldownCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Cooldown (s)'),
               ),
             ],
           ),
@@ -643,7 +641,8 @@ Future<void> showAlertRuleCatalogSheet({
   await showAdaptiveFormSheet<void>(
     context: context,
     title: 'Catálogo de regras prontas',
-    subtitle: 'Aplique templates validados em lote sem duplicar regras já existentes.',
+    subtitle:
+        'Aplique templates validados em lote sem duplicar regras já existentes.',
     maxWidth: 680,
     builder: (sheetCtx) {
       return StatefulBuilder(

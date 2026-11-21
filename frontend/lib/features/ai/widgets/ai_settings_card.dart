@@ -176,9 +176,9 @@ class _AiSettingsCardState extends ConsumerState<AiSettingsCard> {
                         if (q.isNotEmpty) ...<Widget>[
                           const SizedBox(height: 8),
                           FilledButton.tonal(
-                            onPressed: () =>
-                                Navigator.of(sheetCtx)
-                                    .pop(searchCtrl.text.trim()),
+                            onPressed: () => Navigator.of(
+                              sheetCtx,
+                            ).pop(searchCtrl.text.trim()),
                             child: Text('Usar "${searchCtrl.text.trim()}"'),
                           ),
                         ],
@@ -328,7 +328,7 @@ class _AiSettingsCardState extends ConsumerState<AiSettingsCard> {
                   ),
                   const SizedBox(height: 12),
                 ],
-                DropdownButtonFormField<String>(
+                AppDropdownFormField<String>(
                   initialValue: _form.activeDriver,
                   decoration: const InputDecoration(
                     labelText: 'Provedor ativo',
@@ -336,15 +336,24 @@ class _AiSettingsCardState extends ConsumerState<AiSettingsCard> {
                   items: const <DropdownMenuItem<String>>[
                     DropdownMenuItem<String>(
                       value: 'ollama',
-                      child: Text('Ollama (Local / Privado)'),
+                      child: Text(
+                        'Ollama (Local / Privado)',
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                     DropdownMenuItem<String>(
                       value: 'openrouter',
-                      child: Text('OpenRouter (Nuvem)'),
+                      child: Text(
+                        'OpenRouter (Nuvem)',
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                     DropdownMenuItem<String>(
                       value: 'opencode',
-                      child: Text('OpenCode Zen (Nuvem)'),
+                      child: Text(
+                        'OpenCode Zen (Nuvem)',
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   ],
                   onChanged: (value) {
@@ -370,26 +379,40 @@ class _AiSettingsCardState extends ConsumerState<AiSettingsCard> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  Row(
-                    children: <Widget>[
-                      Expanded(
-                        child: TextField(
-                          controller: _ollamaModelCtrl,
-                          decoration: const InputDecoration(
-                            labelText: 'Modelo Ollama',
-                            hintText: 'netmonitor/chat:q8_0',
-                          ),
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final field = TextField(
+                        controller: _ollamaModelCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Modelo Ollama',
+                          hintText: 'netmonitor/chat:q8_0',
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      OutlinedButton.icon(
+                      );
+                      final btn = OutlinedButton.icon(
                         onPressed: () => _openModelSearchDialog(
                           catalog?.models ?? const <AiProviderModelItem>[],
                         ),
                         icon: const Icon(Icons.search, size: 18),
                         label: const Text('Catálogo'),
-                      ),
-                    ],
+                      );
+                      if (constraints.maxWidth < 400) {
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: <Widget>[
+                            field,
+                            const SizedBox(height: 8),
+                            Align(alignment: Alignment.centerRight, child: btn),
+                          ],
+                        );
+                      }
+                      return Row(
+                        children: <Widget>[
+                          Expanded(child: field),
+                          const SizedBox(width: 8),
+                          btn,
+                        ],
+                      );
+                    },
                   ),
                   const SizedBox(height: 8),
                   Wrap(
@@ -411,7 +434,7 @@ class _AiSettingsCardState extends ConsumerState<AiSettingsCard> {
                     ],
                   ),
                   const SizedBox(height: 8),
-                  DropdownButtonFormField<int>(
+                  AppDropdownFormField<int>(
                     initialValue: _ollamaCtxSteps.contains(_form.ollamaNumCtx)
                         ? _form.ollamaNumCtx
                         : 16384,
@@ -422,7 +445,10 @@ class _AiSettingsCardState extends ConsumerState<AiSettingsCard> {
                         .map(
                           (v) => DropdownMenuItem<int>(
                             value: v,
-                            child: Text(formatContextWindow(v, detailed: true)),
+                            child: Text(
+                              formatContextWindow(v, detailed: true),
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                         )
                         .toList(growable: false),
@@ -472,43 +498,59 @@ class _AiSettingsCardState extends ConsumerState<AiSettingsCard> {
                           ),
                         ),
                         const SizedBox(height: 8),
-                        Row(
-                          children: <Widget>[
-                            Expanded(
-                              child: TextField(
-                                controller: _pullModelCtrl,
-                                enabled: !state.pulling,
-                                decoration: const InputDecoration(
-                                  hintText: 'Ex.: qwen2.5:7b-instruct',
-                                  isDense: true,
-                                ),
+                        LayoutBuilder(
+                          builder: (context, constraints) {
+                            final field = TextField(
+                              controller: _pullModelCtrl,
+                              enabled: !state.pulling,
+                              decoration: const InputDecoration(
+                                hintText: 'Ex.: qwen2.5:7b-instruct',
+                                isDense: true,
                               ),
-                            ),
-                            const SizedBox(width: 8),
-                            if (state.pulling)
-                              OutlinedButton.icon(
-                                onPressed: () => ref
-                                    .read(aiSettingsProvider.notifier)
-                                    .cancelPull(),
-                                icon: const Icon(Icons.close, size: 18),
-                                label: const Text('Cancelar'),
-                              )
-                            else
-                              FilledButton.tonalIcon(
-                                onPressed: () {
-                                  final m = _pullModelCtrl.text.trim();
-                                  if (m.isEmpty) return;
-                                  ref
-                                      .read(aiSettingsProvider.notifier)
-                                      .pullOllamaModel(
-                                        m,
-                                        baseUrl: _ollamaUrlCtrl.text,
-                                      );
-                                },
-                                icon: const Icon(Icons.download, size: 18),
-                                label: const Text('Baixar'),
-                              ),
-                          ],
+                            );
+                            final actionBtn = state.pulling
+                                ? OutlinedButton.icon(
+                                    onPressed: () => ref
+                                        .read(aiSettingsProvider.notifier)
+                                        .cancelPull(),
+                                    icon: const Icon(Icons.close, size: 18),
+                                    label: const Text('Cancelar'),
+                                  )
+                                : FilledButton.tonalIcon(
+                                    onPressed: () {
+                                      final m = _pullModelCtrl.text.trim();
+                                      if (m.isEmpty) return;
+                                      ref
+                                          .read(aiSettingsProvider.notifier)
+                                          .pullOllamaModel(
+                                            m,
+                                            baseUrl: _ollamaUrlCtrl.text,
+                                          );
+                                    },
+                                    icon: const Icon(Icons.download, size: 18),
+                                    label: const Text('Baixar'),
+                                  );
+                            if (constraints.maxWidth < 400) {
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: <Widget>[
+                                  field,
+                                  const SizedBox(height: 8),
+                                  Align(
+                                    alignment: Alignment.centerRight,
+                                    child: actionBtn,
+                                  ),
+                                ],
+                              );
+                            }
+                            return Row(
+                              children: <Widget>[
+                                Expanded(child: field),
+                                const SizedBox(width: 8),
+                                actionBtn,
+                              ],
+                            );
+                          },
                         ),
                         if (state.pullProgress != null) ...<Widget>[
                           const SizedBox(height: 10),
@@ -626,6 +668,11 @@ class _AiSettingsCardState extends ConsumerState<AiSettingsCard> {
                 ),
                 const SizedBox(height: 10),
                 SegmentedButton<AiResponseStyle>(
+                  showSelectedIcon: false,
+                  style: SegmentedButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                  ),
                   selected: <AiResponseStyle>{_form.responseStyle},
                   onSelectionChanged: (sel) => setState(
                     () => _form = _form.copyWith(responseStyle: sel.first),
@@ -633,23 +680,21 @@ class _AiSettingsCardState extends ConsumerState<AiSettingsCard> {
                   segments: const <ButtonSegment<AiResponseStyle>>[
                     ButtonSegment<AiResponseStyle>(
                       value: AiResponseStyle.concise,
-                      label: Text('Direto'),
+                      label: Text('Direto', maxLines: 1, softWrap: false),
                     ),
                     ButtonSegment<AiResponseStyle>(
                       value: AiResponseStyle.normal,
-                      label: Text('Normal'),
+                      label: Text('Normal', maxLines: 1, softWrap: false),
                     ),
                   ],
                 ),
                 const SizedBox(height: 12),
-                ResponsiveGrid(
-                  xs: 1,
-                  sm: 3,
-                  md: 3,
-                  lg: 3,
-                  xl: 3,
+                ResponsiveFieldRow(
+                  breakpoint: 640,
+                  spacing: 12,
+                  runSpacing: 12,
                   children: <Widget>[
-                    DropdownButtonFormField<AiAutomationMode>(
+                    AppDropdownFormField<AiAutomationMode>(
                       initialValue: _form.activeToolsMode,
                       decoration: const InputDecoration(
                         labelText: 'Testes ativos de rede',
@@ -658,7 +703,10 @@ class _AiSettingsCardState extends ConsumerState<AiSettingsCard> {
                           .map(
                             (m) => DropdownMenuItem<AiAutomationMode>(
                               value: m,
-                              child: Text(m.label),
+                              child: Text(
+                                m.label,
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
                           )
                           .toList(growable: false),
@@ -673,7 +721,7 @@ class _AiSettingsCardState extends ConsumerState<AiSettingsCard> {
                         });
                       },
                     ),
-                    DropdownButtonFormField<AiAutomationMode>(
+                    AppDropdownFormField<AiAutomationMode>(
                       initialValue: _form.actionMode,
                       decoration: const InputDecoration(
                         labelText: 'Ações do sistema',
@@ -682,7 +730,10 @@ class _AiSettingsCardState extends ConsumerState<AiSettingsCard> {
                           .map(
                             (m) => DropdownMenuItem<AiAutomationMode>(
                               value: m,
-                              child: Text(m.label),
+                              child: Text(
+                                m.label,
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
                           )
                           .toList(growable: false),
@@ -694,7 +745,7 @@ class _AiSettingsCardState extends ConsumerState<AiSettingsCard> {
                         }
                       },
                     ),
-                    DropdownButtonFormField<AiAutomationMode>(
+                    AppDropdownFormField<AiAutomationMode>(
                       initialValue: _form.containerActions,
                       decoration: const InputDecoration(
                         labelText: 'Ações em containers',
@@ -703,7 +754,10 @@ class _AiSettingsCardState extends ConsumerState<AiSettingsCard> {
                           .map(
                             (m) => DropdownMenuItem<AiAutomationMode>(
                               value: m,
-                              child: Text(m.label),
+                              child: Text(
+                                m.label,
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
                           )
                           .toList(growable: false),
@@ -720,7 +774,10 @@ class _AiSettingsCardState extends ConsumerState<AiSettingsCard> {
                 ),
 
                 const Divider(height: 28),
-                Row(
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: <Widget>[
                     Text(
                       'IA Proativa (resumos e digests)',
@@ -728,7 +785,6 @@ class _AiSettingsCardState extends ConsumerState<AiSettingsCard> {
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                    const SizedBox(width: 8),
                     const SemanticChip(
                       label: 'consome tokens',
                       tone: SemanticTone.warning,
@@ -751,14 +807,12 @@ class _AiSettingsCardState extends ConsumerState<AiSettingsCard> {
                   ),
                 ),
                 if (_form.proactive.incidentSummaries) ...<Widget>[
-                  ResponsiveGrid(
-                    xs: 1,
-                    sm: 2,
-                    md: 2,
-                    lg: 2,
-                    xl: 2,
+                  ResponsiveFieldRow(
+                    breakpoint: 480,
+                    spacing: 12,
+                    runSpacing: 12,
                     children: <Widget>[
-                      DropdownButtonFormField<String>(
+                      AppDropdownFormField<String>(
                         initialValue: _form.proactive.incidentMinSeverity,
                         decoration: const InputDecoration(
                           labelText: 'Severidade mínima',
@@ -766,11 +820,17 @@ class _AiSettingsCardState extends ConsumerState<AiSettingsCard> {
                         items: const <DropdownMenuItem<String>>[
                           DropdownMenuItem<String>(
                             value: 'critical',
-                            child: Text('Crítico'),
+                            child: Text(
+                              'Crítico',
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                           DropdownMenuItem<String>(
                             value: 'warning',
-                            child: Text('Aviso ou maior'),
+                            child: Text(
+                              'Aviso ou maior',
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                         ],
                         onChanged: (v) {
@@ -785,7 +845,7 @@ class _AiSettingsCardState extends ConsumerState<AiSettingsCard> {
                           }
                         },
                       ),
-                      DropdownButtonFormField<int>(
+                      AppDropdownFormField<int>(
                         initialValue: _form.proactive.maxSummariesPerHour.clamp(
                           1,
                           60,
@@ -797,7 +857,10 @@ class _AiSettingsCardState extends ConsumerState<AiSettingsCard> {
                             .map(
                               (n) => DropdownMenuItem<int>(
                                 value: n,
-                                child: Text('$n / hora'),
+                                child: Text(
+                                  '$n / hora',
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ),
                             )
                             .toList(growable: false),
@@ -817,14 +880,12 @@ class _AiSettingsCardState extends ConsumerState<AiSettingsCard> {
                   ),
                   const SizedBox(height: 10),
                 ],
-                ResponsiveGrid(
-                  xs: 1,
-                  sm: 2,
-                  md: 2,
-                  lg: 2,
-                  xl: 2,
+                ResponsiveFieldRow(
+                  breakpoint: 480,
+                  spacing: 12,
+                  runSpacing: 12,
                   children: <Widget>[
-                    DropdownButtonFormField<String>(
+                    AppDropdownFormField<String>(
                       initialValue: _form.proactive.digest,
                       decoration: const InputDecoration(
                         labelText: 'Resumo periódico (Digest)',
@@ -832,15 +893,24 @@ class _AiSettingsCardState extends ConsumerState<AiSettingsCard> {
                       items: const <DropdownMenuItem<String>>[
                         DropdownMenuItem<String>(
                           value: 'off',
-                          child: Text('Desligado'),
+                          child: Text(
+                            'Desligado',
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                         DropdownMenuItem<String>(
                           value: 'daily',
-                          child: Text('Diário'),
+                          child: Text(
+                            'Diário',
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                         DropdownMenuItem<String>(
                           value: 'weekly',
-                          child: Text('Semanal'),
+                          child: Text(
+                            'Semanal',
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                       ],
                       onChanged: (v) {
@@ -854,7 +924,7 @@ class _AiSettingsCardState extends ConsumerState<AiSettingsCard> {
                       },
                     ),
                     if (_form.proactive.digest != 'off')
-                      DropdownButtonFormField<int>(
+                      AppDropdownFormField<int>(
                         initialValue: _form.proactive.digestHour.clamp(0, 23),
                         decoration: const InputDecoration(
                           labelText: 'Horário do servidor',
@@ -863,7 +933,10 @@ class _AiSettingsCardState extends ConsumerState<AiSettingsCard> {
                           24,
                           (h) => DropdownMenuItem<int>(
                             value: h,
-                            child: Text(formatHourOfDay(h)),
+                            child: Text(
+                              formatHourOfDay(h),
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                         ),
                         onChanged: (v) {
@@ -898,7 +971,8 @@ class _AiSettingsCardState extends ConsumerState<AiSettingsCard> {
                   maxLines: 3,
                   decoration: const InputDecoration(
                     labelText: 'Instruções personalizadas (opcional)',
-                    hintText: 'Ex.: Sempre responda com foco em links BGP e clientes corporativos.',
+                    hintText:
+                        'Ex.: Sempre responda com foco em links BGP e clientes corporativos.',
                   ),
                 ),
 

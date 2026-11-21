@@ -81,27 +81,30 @@ void main() {
       expect(groupOfPath(sections, '/devices'), isNull);
     });
 
-    test('applies pinned and hidden menu prefs without bypassing area/admin filters', () {
-      final sections = buildNavSections(
-        const NavContext(
-          isAdmin: false,
-          enabledAreas: <ProductArea>{ProductArea.core, ProductArea.servers},
-          menu: MenuPrefs(
-            pinned: <String>['/docker', '/users', '/alerts'],
-            hidden: <String>['/events', '/logs'],
+    test(
+      'applies pinned and hidden menu prefs without bypassing area/admin filters',
+      () {
+        final sections = buildNavSections(
+          const NavContext(
+            isAdmin: false,
+            enabledAreas: <ProductArea>{ProductArea.core, ProductArea.servers},
+            menu: MenuPrefs(
+              pinned: <String>['/docker', '/users', '/alerts'],
+              hidden: <String>['/events', '/logs'],
+            ),
           ),
-        ),
-        allNavEntries,
-      );
+          allNavEntries,
+        );
 
-      expect(sections.first.title, pinnedSectionTitle);
-      final pinnedPaths = sections.first.items.map((i) => i.to).toList();
-      // `/users` é admin-only e não pode reaparecer mesmo fixado.
-      expect(pinnedPaths, <String>['/docker', '/alerts']);
+        expect(sections.first.title, pinnedSectionTitle);
+        final pinnedPaths = sections.first.items.map((i) => i.to).toList();
+        // `/users` é admin-only e não pode reaparecer mesmo fixado.
+        expect(pinnedPaths, <String>['/docker', '/alerts']);
 
-      final allPaths = navLeaves(sections).map((e) => e.leaf.to).toSet();
-      expect(allPaths, isNot(contains('/events')));
-      expect(allPaths, isNot(contains('/logs')));
-    });
+        final allPaths = navLeaves(sections).map((e) => e.leaf.to).toSet();
+        expect(allPaths, isNot(contains('/events')));
+        expect(allPaths, isNot(contains('/logs')));
+      },
+    );
   });
 }

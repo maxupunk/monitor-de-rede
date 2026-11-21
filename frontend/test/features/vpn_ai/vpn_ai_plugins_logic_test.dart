@@ -98,199 +98,210 @@ void main() {
     });
   });
 
-  group('AI SSE-over-POST stream logic, mentions, screen disambiguation & Decider', () {
-    test('handles all 10 SSE-over-POST frame types accurately', () {
-      var msg = const AiDisplayMessage(
-        id: 'a-1',
-        role: 'assistant',
-        content: '',
-        isStreaming: true,
+  group(
+    'AI SSE-over-POST stream logic, mentions, screen disambiguation & Decider',
+    () {
+      test('handles all 10 SSE-over-POST frame types accurately', () {
+        var msg = const AiDisplayMessage(
+          id: 'a-1',
+          role: 'assistant',
+          content: '',
+          isStreaming: true,
+        );
+
+        msg = applyChatEvent(msg, const <String, dynamic>{
+          'type': 'textDelta',
+          'content': 'Verificando ',
+        });
+        msg = applyChatEvent(msg, const <String, dynamic>{
+          'type': 'toolCall',
+          'id': 'c1',
+          'name': 'list_alerts',
+          'arguments': <String, dynamic>{'active': true},
+        });
+        msg = applyChatEvent(msg, const <String, dynamic>{
+          'type': 'toolResult',
+          'id': 'c1',
+          'result': <String, dynamic>{'count': 2},
+        });
+        msg = applyChatEvent(msg, const <String, dynamic>{
+          'type': 'textDelta',
+          'content': 'Texto alucinado',
+        });
+        msg = applyChatEvent(msg, const <String, dynamic>{'type': 'retract'});
+        expect(msg.content, 'Verificando ');
+
+        msg = applyChatEvent(msg, const <String, dynamic>{
+          'type': 'textDelta',
+          'content': 'há 2 alertas ativos.',
+        });
+        msg = applyChatEvent(msg, const <String, dynamic>{
+          'type': 'confirmationRequired',
+          'id': 'c2',
+          'name': 'device_ssh_exec',
+          'arguments': <String, dynamic>{'cmd': 'reboot'},
+          'summary': 'ALTERA O EQUIPAMENTO: reiniciar roteador',
+          'risk': 'high',
+          'reason': 'Reinício interrompe tráfego',
+        });
+        msg = applyChatEvent(msg, const <String, dynamic>{
+          'type': 'notice',
+          'key': 'ctx',
+          'message': 'Janela pequena',
+          'settings': true,
+        });
+        msg = applyChatEvent(msg, const <String, dynamic>{
+          'type': 'usage',
+          'promptTokens': 500,
+          'completionTokens': 100,
+          'contextTokens': 600,
+          'contextWindow': 16384,
+          'generationMs': 2000,
+          'model': 'netmonitor/chat:q8_0',
+        });
+        msg = applyChatEvent(msg, const <String, dynamic>{'type': 'done'});
+
+        expect(msg.isStreaming, isFalse);
+        expect(msg.content, 'Verificando há 2 alertas ativos.');
+        expect(msg.toolCalls.length, 2);
+        expect(msg.toolCalls[0].status, AiToolStatus.done);
+        expect(msg.toolCalls[1].status, AiToolStatus.awaiting);
+        expect(msg.toolCalls[1].risk, AiToolRisk.high);
+        expect(isDeviceAccessTool(msg.toolCalls[1].name), isTrue);
+        expect(msg.notices.length, 1);
+        expect(msg.notices.first.settings, isTrue);
+        expect(tokensPerSecond(msg.usage), closeTo(50.0, 0.1));
+      });
+
+      test(
+        'applies contextCompacted and builds trimmed history with decision notes',
+        () {
+          const m1 = AiDisplayMessage(id: 'u1', role: 'user', content: 'Oi');
+          const m2 = AiDisplayMessage(
+            id: 'a1',
+            role: 'assistant',
+            content: 'Olá',
+          );
+          const m3 = AiDisplayMessage(
+            id: 'a2',
+            role: 'assistant',
+            content: 'Pronto',
+            toolCalls: <AiToolCallState>[
+              AiToolCallState(
+                id: 'c9',
+                name: 'silence_alert',
+                summary: 'Silenciar alerta #12',
+                status: AiToolStatus.cancelled,
+              ),
+            ],
+          );
+
+          final compacted = applyCompaction(
+            const <AiDisplayMessage>[m1, m2, m3],
+            const <String>['u1', 'a1', 'a2'],
+            const <String, dynamic>{
+              'foldedMessages': 2,
+              'summary': 'Resumo inicial',
+              'tokensBefore': 4000,
+              'tokensAfter': 900,
+            },
+          );
+
+          expect(compacted[1].compaction?.summary, 'Resumo inicial');
+          final history = buildChatHistory(compacted);
+          expect(history.summary, 'Resumo inicial');
+          expect(history.messages.length, 1);
+          expect(
+            history.messages.first['content'],
+            contains('[Ação cancelada pelo usuário: Silenciar alerta #12]'),
+          );
+        },
       );
 
-      msg = applyChatEvent(msg, const <String, dynamic>{
-        'type': 'textDelta',
-        'content': 'Verificando ',
-      });
-      msg = applyChatEvent(msg, const <String, dynamic>{
-        'type': 'toolCall',
-        'id': 'c1',
-        'name': 'list_alerts',
-        'arguments': <String, dynamic>{'active': true},
-      });
-      msg = applyChatEvent(msg, const <String, dynamic>{
-        'type': 'toolResult',
-        'id': 'c1',
-        'result': <String, dynamic>{'count': 2},
-      });
-      msg = applyChatEvent(msg, const <String, dynamic>{
-        'type': 'textDelta',
-        'content': 'Texto alucinado',
-      });
-      msg = applyChatEvent(msg, const <String, dynamic>{'type': 'retract'});
-      expect(msg.content, 'Verificando ');
+      test(
+        'mentions parser and ambiguous Portuguese screen disambiguation',
+        () {
+          final q = findMentionQuery('verifique @core-sw', 18);
+          expect(q, isNotNull);
+          expect(q!.query, 'core-sw');
+          final inserted = insertMention(
+            'verifique @core-sw',
+            q,
+            18,
+            'Core-SW-01',
+          );
+          expect(inserted.text, 'verifique @Core-SW-01 ');
 
-      msg = applyChatEvent(msg, const <String, dynamic>{
-        'type': 'textDelta',
-        'content': 'há 2 alertas ativos.',
-      });
-      msg = applyChatEvent(msg, const <String, dynamic>{
-        'type': 'confirmationRequired',
-        'id': 'c2',
-        'name': 'device_ssh_exec',
-        'arguments': <String, dynamic>{'cmd': 'reboot'},
-        'summary': 'ALTERA O EQUIPAMENTO: reiniciar roteador',
-        'risk': 'high',
-        'reason': 'Reinício interrompe tráfego',
-      });
-      msg = applyChatEvent(msg, const <String, dynamic>{
-        'type': 'notice',
-        'key': 'ctx',
-        'message': 'Janela pequena',
-        'settings': true,
-      });
-      msg = applyChatEvent(msg, const <String, dynamic>{
-        'type': 'usage',
-        'promptTokens': 500,
-        'completionTokens': 100,
-        'contextTokens': 600,
-        'contextWindow': 16384,
-        'generationMs': 2000,
-        'model': 'netmonitor/chat:q8_0',
-      });
-      msg = applyChatEvent(msg, const <String, dynamic>{'type': 'done'});
-
-      expect(msg.isStreaming, isFalse);
-      expect(msg.content, 'Verificando há 2 alertas ativos.');
-      expect(msg.toolCalls.length, 2);
-      expect(msg.toolCalls[0].status, AiToolStatus.done);
-      expect(msg.toolCalls[1].status, AiToolStatus.awaiting);
-      expect(msg.toolCalls[1].risk, AiToolRisk.high);
-      expect(isDeviceAccessTool(msg.toolCalls[1].name), isTrue);
-      expect(msg.notices.length, 1);
-      expect(msg.notices.first.settings, isTrue);
-      expect(tokensPerSecond(msg.usage), closeTo(50.0, 0.1));
-    });
-
-    test(
-      'applies contextCompacted and builds trimmed history with decision notes',
-      () {
-        const m1 = AiDisplayMessage(id: 'u1', role: 'user', content: 'Oi');
-        const m2 = AiDisplayMessage(
-          id: 'a1',
-          role: 'assistant',
-          content: 'Olá',
-        );
-        const m3 = AiDisplayMessage(
-          id: 'a2',
-          role: 'assistant',
-          content: 'Pronto',
-          toolCalls: <AiToolCallState>[
-            AiToolCallState(
-              id: 'c9',
-              name: 'silence_alert',
-              summary: 'Silenciar alerta #12',
-              status: AiToolStatus.cancelled,
+          const prevScreen = AskedScreen(
+            id: 'alerts',
+            label: 'Alertas',
+            icon: 'mdi-bell',
+          );
+          const currScreen = AskedScreen(
+            id: 'vpn',
+            label: 'VPN',
+            icon: 'mdi-shield',
+          );
+          const messages = <AiDisplayMessage>[
+            AiDisplayMessage(
+              id: 'u1',
+              role: 'user',
+              content: 'Ver alertas',
+              screen: prevScreen,
             ),
-          ],
-        );
+          ];
 
-        final compacted = applyCompaction(
-          const <AiDisplayMessage>[m1, m2, m3],
-          const <String>['u1', 'a1', 'a2'],
-          const <String, dynamic>{
-            'foldedMessages': 2,
-            'summary': 'Resumo inicial',
-            'tokensBefore': 4000,
-            'tokensAfter': 900,
-          },
-        );
+          expect(
+            screenToConfirm(
+              currentScreen: currScreen,
+              messages: messages,
+              text: 'e isso, é grave?',
+              hasMentions: false,
+            )?.length,
+            2,
+          );
+          expect(
+            screenToConfirm(
+              currentScreen: currScreen,
+              messages: messages,
+              text: 'e isso aqui, é grave?',
+              hasMentions: false,
+            ),
+            isNull,
+          );
+        },
+      );
 
-        expect(compacted[1].compaction?.summary, 'Resumo inicial');
-        final history = buildChatHistory(compacted);
-        expect(history.summary, 'Resumo inicial');
-        expect(history.messages.length, 1);
+      test('Decider local host, model install matching and SSE approvals', () {
+        expect(isLocalOllaya('http://ollaya:11435'), isTrue);
+        expect(isLocalOllaya('http://127.0.0.1:11435'), isTrue);
+        expect(isLocalOllaya('https://ollaya.remote.example'), isFalse);
+        expect(isModelInstalled(const <String>['laya:latest'], 'laya'), isTrue);
         expect(
-          history.messages.first['content'],
-          contains('[Ação cancelada pelo usuário: Silenciar alerta #12]'),
+          isModelInstalled(const <String>['laya:q4_k_m'], 'laya:q8_0'),
+          isFalse,
         );
-      },
-    );
 
-    test('mentions parser and ambiguous Portuguese screen disambiguation', () {
-      final q = findMentionQuery('verifique @core-sw', 18);
-      expect(q, isNotNull);
-      expect(q!.query, 'core-sw');
-      final inserted = insertMention('verifique @core-sw', q, 18, 'Core-SW-01');
-      expect(inserted.text, 'verifique @Core-SW-01 ');
-
-      const prevScreen = AskedScreen(
-        id: 'alerts',
-        label: 'Alertas',
-        icon: 'mdi-bell',
-      );
-      const currScreen = AskedScreen(
-        id: 'vpn',
-        label: 'VPN',
-        icon: 'mdi-shield',
-      );
-      const messages = <AiDisplayMessage>[
-        AiDisplayMessage(
-          id: 'u1',
-          role: 'user',
-          content: 'Ver alertas',
-          screen: prevScreen,
-        ),
-      ];
-
-      expect(
-        screenToConfirm(
-          currentScreen: currScreen,
-          messages: messages,
-          text: 'e isso, é grave?',
-          hasMentions: false,
-        )?.length,
-        2,
-      );
-      expect(
-        screenToConfirm(
-          currentScreen: currScreen,
-          messages: messages,
-          text: 'e isso aqui, é grave?',
-          hasMentions: false,
-        ),
-        isNull,
-      );
-    });
-
-    test('Decider local host, model install matching and SSE approvals', () {
-      expect(isLocalOllaya('http://ollaya:11435'), isTrue);
-      expect(isLocalOllaya('http://127.0.0.1:11435'), isTrue);
-      expect(isLocalOllaya('https://ollaya.remote.example'), isFalse);
-      expect(isModelInstalled(const <String>['laya:latest'], 'laya'), isTrue);
-      expect(
-        isModelInstalled(const <String>['laya:q4_k_m'], 'laya:q8_0'),
-        isFalse,
-      );
-
-      final container = ProviderContainer();
-      addTearDown(container.dispose);
-      final approvals = container.read(aiApprovalsProvider.notifier);
-      approvals.applyPending(const <String, dynamic>{
-        'callId': 'call-1',
-        'userId': 5,
-        'tool': 'device_ssh_exec',
-        'summary': 'Executar comando',
-        'risk': 'high',
+        final container = ProviderContainer();
+        addTearDown(container.dispose);
+        final approvals = container.read(aiApprovalsProvider.notifier);
+        approvals.applyPending(const <String, dynamic>{
+          'callId': 'call-1',
+          'userId': 5,
+          'tool': 'device_ssh_exec',
+          'summary': 'Executar comando',
+          'risk': 'high',
+        });
+        expect(container.read(aiApprovalsProvider).mine(5).length, 1);
+        expect(container.read(aiApprovalsProvider).mine(9).length, 0);
+        approvals.applyResolved(const <String, dynamic>{
+          'callId': 'call-1',
+          'decision': 'confirmed',
+        });
+        expect(container.read(aiApprovalsProvider).pending, isEmpty);
       });
-      expect(container.read(aiApprovalsProvider).mine(5).length, 1);
-      expect(container.read(aiApprovalsProvider).mine(9).length, 0);
-      approvals.applyResolved(const <String, dynamic>{
-        'callId': 'call-1',
-        'decision': 'confirmed',
-      });
-      expect(container.read(aiApprovalsProvider).pending, isEmpty);
-    });
-  });
+    },
+  );
 
   group('Plugins Wi-Fi QR, Schema Forms, Quarantine Review & SSE', () {
     test(

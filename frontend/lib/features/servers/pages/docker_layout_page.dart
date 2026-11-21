@@ -101,217 +101,261 @@ class _DockerLayoutScaffoldState extends ConsumerState<DockerLayoutScaffold> {
     final selectedHost = docker.selectedHost;
     final current = docker.current;
     final ops = docker.selectedHostOperations;
+    final isCompact = MediaQuery.sizeOf(context).width < 600;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        // Cabeçalho com seletor de host (HostKey = agent-<id>) e status ao vivo
-        Material(
-          color: context.colorScheme.surface,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
-                child: Wrap(
-                  spacing: 12,
-                  runSpacing: 10,
-                  alignment: WrapAlignment.spaceBetween,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: <Widget>[
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+    final summaryBadge = (selectedHost != null && !selectedHost.online)
+        ? const SemanticChip(
+            label: 'Desconectado',
+            tone: SemanticTone.error,
+            icon: Icons.cloud_off,
+            compact: true,
+          )
+        : (current.status != null && !current.available)
+        ? const SemanticChip(
+            label: 'Engine indisponível',
+            tone: SemanticTone.warning,
+            icon: Icons.warning_amber_rounded,
+            compact: true,
+          )
+        : current.available
+        ? SemanticChip(
+            label:
+                '${current.runningContainers} ativos · ${current.stoppedContainers} parados',
+            tone: current.runningContainers > 0
+                ? SemanticTone.success
+                : SemanticTone.secondary,
+            compact: true,
+          )
+        : null;
+
+    final desktopMetaChips = <Widget>[
+      ?summaryBadge,
+      if (selectedHost != null &&
+          selectedHost.online &&
+          current.status?.engineVersion != null)
+        SemanticChip(
+          label: 'Engine ${current.status!.engineVersion}',
+          tone: SemanticTone.secondary,
+          compact: true,
+        ),
+      if (current.lastUpdatedAt != null)
+        SemanticChip(
+          label: 'Ao vivo · ${formatRelativeTime(current.lastUpdatedAt)}',
+          tone: SemanticTone.success,
+          icon: Icons.sensors,
+          compact: true,
+        ),
+    ];
+
+    final hostDropdown = docker.hosts.isNotEmpty
+        ? AppDropdownFormField<String>(
+            initialValue:
+                docker.hosts.any((h) => h.key == docker.selectedHostKey)
+                ? docker.selectedHostKey
+                : docker.hosts.first.key,
+            isDense: true,
+            decoration: const InputDecoration(
+              labelText: 'Host Docker',
+              contentPadding: EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 10,
+              ),
+            ),
+            items: docker.hosts
+                .map(
+                  (host) => DropdownMenuItem<String>(
+                    value: host.key,
+                    child: Row(
                       children: <Widget>[
-                        Text(
-                          'Docker',
-                          style: context.textTheme.headlineSmall?.copyWith(
-                            fontWeight: FontWeight.w800,
+                        Icon(
+                          Icons.circle,
+                          size: 10,
+                          color: host.online
+                              ? context.semanticColors.success
+                              : context.semanticColors.error,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            host.isLocal ? '${host.name} (local)' : host.name,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                        const SizedBox(height: 6),
-                        Wrap(
-                          spacing: 6,
-                          runSpacing: 6,
+                      ],
+                    ),
+                  ),
+                )
+                .toList(growable: false),
+            onChanged: _onHostChanged,
+          )
+        : null;
+
+    final canRefresh =
+        selectedHost != null && selectedHost.online && !docker.loading;
+    final refreshIconButton = IconButton.filledTonal(
+      tooltip: 'Atualizar',
+      onPressed: canRefresh
+          ? () => ref.read(dockerProvider.notifier).refreshAll()
+          : null,
+      icon: const Icon(Icons.refresh, size: 20),
+    );
+
+    return CustomScrollView(
+      slivers: <Widget>[
+        // Cabeçalho compacto e simétrico (sem margens duplas sobre o AdaptiveAppShell)
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+              0,
+              isCompact ? 2 : 4,
+              0,
+              isCompact ? 6 : 8,
+            ),
+            child: isCompact
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      Row(
+                        children: <Widget>[
+                          Text(
+                            'Docker',
+                            style: context.textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          if (summaryBadge != null)
+                            Expanded(
+                              child: Align(
+                                alignment: Alignment.centerRight,
+                                child: summaryBadge,
+                              ),
+                            )
+                          else
+                            const Spacer(),
+                          if (hostDropdown == null) ...<Widget>[
+                            const SizedBox(width: 6),
+                            refreshIconButton,
+                          ],
+                        ],
+                      ),
+                      if (hostDropdown != null) ...<Widget>[
+                        const SizedBox(height: 8),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
                           children: <Widget>[
-                            if (selectedHost != null && !selectedHost.online)
-                              const SemanticChip(
-                                label: 'Agente desconectado',
-                                tone: SemanticTone.error,
-                                icon: Icons.cloud_off,
-                                compact: true,
-                              )
-                            else if (current.status != null &&
-                                !current.available)
-                              const SemanticChip(
-                                label: 'Engine indisponível',
-                                tone: SemanticTone.warning,
-                                icon: Icons.warning_amber_rounded,
-                                compact: true,
-                              )
-                            else if (selectedHost != null) ...<Widget>[
-                              SemanticChip(
-                                label: selectedHost.isLocal
-                                    ? 'Docker desta central'
-                                    : 'Servidor remoto',
-                                tone: SemanticTone.info,
-                                icon: selectedHost.isLocal
-                                    ? Icons.hub_outlined
-                                    : Icons.dns_outlined,
-                                compact: true,
-                              ),
-                              if (current.status?.engineVersion != null)
-                                SemanticChip(
-                                  label:
-                                      'Engine ${current.status!.engineVersion}',
-                                  tone: SemanticTone.secondary,
-                                  compact: true,
-                                ),
-                              if (current.available) ...<Widget>[
-                                SemanticChip(
-                                  label: '${current.runningContainers} rodando',
-                                  tone: SemanticTone.success,
-                                  compact: true,
-                                ),
-                                SemanticChip(
-                                  label: '${current.stoppedContainers} parados',
-                                  tone: current.stoppedContainers > 0
-                                      ? SemanticTone.warning
-                                      : SemanticTone.secondary,
-                                  compact: true,
-                                ),
-                              ],
-                            ],
-                            if (current.lastUpdatedAt != null)
-                              SemanticChip(
-                                label:
-                                    'Ao vivo · ${formatRelativeTime(current.lastUpdatedAt)}',
-                                tone: SemanticTone.success,
-                                icon: Icons.sensors,
-                                compact: true,
-                              ),
+                            Expanded(child: hostDropdown),
+                            const SizedBox(width: 8),
+                            refreshIconButton,
                           ],
                         ),
                       ],
-                    ),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: <Widget>[
-                        if (docker.hosts.isNotEmpty)
-                          ConstrainedBox(
-                            constraints: const BoxConstraints(
-                              minWidth: 200,
-                              maxWidth: 280,
-                            ),
-                            child: DropdownButtonFormField<String>(
-                              initialValue:
-                                  docker.hosts.any(
-                                    (h) => h.key == docker.selectedHostKey,
-                                  )
-                                  ? docker.selectedHostKey
-                                  : docker.hosts.first.key,
-                              isDense: true,
-                              decoration: const InputDecoration(
-                                labelText: 'Host Docker',
-                                contentPadding: EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 10,
-                                ),
+                    ],
+                  )
+                : Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: <Widget>[
+                      Expanded(
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 6,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: <Widget>[
+                            Text(
+                              'Docker',
+                              style: context.textTheme.headlineSmall?.copyWith(
+                                fontWeight: FontWeight.w800,
                               ),
-                              items: docker.hosts
-                                  .map(
-                                    (host) => DropdownMenuItem<String>(
-                                      value: host.key,
-                                      child: Row(
-                                        children: <Widget>[
-                                          Icon(
-                                            Icons.circle,
-                                            size: 10,
-                                            color: host.online
-                                                ? context.semanticColors.success
-                                                : context.semanticColors.error,
-                                          ),
-                                          const SizedBox(width: 8),
-                                          Expanded(
-                                            child: Text(
-                                              host.isLocal
-                                                  ? '${host.name} (local)'
-                                                  : host.name,
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  )
-                                  .toList(growable: false),
-                              onChanged: _onHostChanged,
                             ),
-                          ),
-                        OutlinedButton.icon(
-                          onPressed:
-                              (selectedHost == null ||
-                                  !selectedHost.online ||
-                                  docker.loading)
-                              ? null
-                              : () => ref
-                                    .read(dockerProvider.notifier)
-                                    .refreshAll(),
-                          icon: const Icon(Icons.refresh, size: 18),
-                          label: const Text('Atualizar'),
+                            ...desktopMetaChips,
+                          ],
                         ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              // Navegação horizontal mobile-first entre as 7 sub-páginas Docker
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Row(
-                  children: DockerTab.values
-                      .map((tab) {
-                        final selected = tab == widget.activeTab;
-                        final badgeCount = !current.available
-                            ? null
-                            : switch (tab) {
-                                DockerTab.containers =>
-                                  current.containers.length,
-                                DockerTab.volumes => current.volumes.length,
-                                DockerTab.networks => current.networks.length,
-                                DockerTab.images => current.images.length,
-                                _ => null,
-                              };
-                        return Padding(
-                          padding: const EdgeInsets.only(right: 4, bottom: 8),
-                          child: ChoiceChip(
-                            selected: selected,
-                            showCheckmark: false,
-                            avatar: Icon(tab.icon, size: 17),
-                            label: Text(
-                              badgeCount != null
-                                  ? '${tab.label} ($badgeCount)'
-                                  : tab.label,
+                      ),
+                      const SizedBox(width: 12),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: <Widget>[
+                          if (hostDropdown != null) ...<Widget>[
+                            ConstrainedBox(
+                              constraints: const BoxConstraints(
+                                minWidth: 200,
+                                maxWidth: 260,
+                              ),
+                              child: hostDropdown,
                             ),
-                            onSelected: (_) => _navigateTab(tab),
-                          ),
-                        );
-                      })
-                      .toList(growable: false),
-                ),
-              ),
-              const Divider(height: 1),
-            ],
+                            const SizedBox(width: 8),
+                          ],
+                          refreshIconButton,
+                        ],
+                      ),
+                    ],
+                  ),
           ),
         ),
 
-        // Conteúdo principal
-        Expanded(
-          child: ListView(
-            padding: const EdgeInsets.all(16),
-            children: <Widget>[
+        // Barra compacta fixa apenas para as 7 abas Docker
+        SliverPersistentHeader(
+          pinned: true,
+          delegate: _DockerTabBarDelegate(
+            height: 44,
+            child: Material(
+              color: context.colorScheme.surface,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: <Widget>[
+                  Expanded(
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      padding: EdgeInsets.zero,
+                      child: Row(
+                        children: DockerTab.values
+                            .map((tab) {
+                              final selected = tab == widget.activeTab;
+                              final badgeCount = !current.available
+                                  ? null
+                                  : switch (tab) {
+                                      DockerTab.containers =>
+                                        current.containers.length,
+                                      DockerTab.volumes =>
+                                        current.volumes.length,
+                                      DockerTab.networks =>
+                                        current.networks.length,
+                                      DockerTab.images => current.images.length,
+                                      _ => null,
+                                    };
+                              return Padding(
+                                padding: const EdgeInsets.only(right: 6),
+                                child: ChoiceChip(
+                                  selected: selected,
+                                  showCheckmark: false,
+                                  visualDensity: VisualDensity.compact,
+                                  avatar: Icon(tab.icon, size: 16),
+                                  label: Text(
+                                    badgeCount != null
+                                        ? '${tab.label} ($badgeCount)'
+                                        : tab.label,
+                                  ),
+                                  onSelected: (_) => _navigateTab(tab),
+                                ),
+                              );
+                            })
+                            .toList(growable: false),
+                      ),
+                    ),
+                  ),
+                  const Divider(height: 1),
+                ],
+              ),
+            ),
+          ),
+        ),
+
+        // Conteúdo principal alinhado às bordas do cabeçalho (sem double-padding)
+        SliverPadding(
+          padding: EdgeInsets.only(top: isCompact ? 8 : 10, bottom: 16),
+          sliver: SliverList(
+            delegate: SliverChildListDelegate(<Widget>[
               if (ops.isNotEmpty) ...<Widget>[
                 _DockerOperationsPanel(
                   operations: ops,
@@ -330,7 +374,8 @@ class _DockerLayoutScaffoldState extends ConsumerState<DockerLayoutScaffold> {
               if (docker.hostsLoaded && docker.hosts.isEmpty)
                 const EmptyStateView(
                   title: 'Nenhum host Docker disponível',
-                  description: 'Conecte o serviço netmonitor-agent no docker-compose.yml ou um servidor remoto.',
+                  description:
+                      'Conecte o serviço netmonitor-agent no docker-compose.yml ou um servidor remoto.',
                   icon: Icons.view_in_ar_outlined,
                 )
               else ...<Widget>[
@@ -339,18 +384,27 @@ class _DockerLayoutScaffoldState extends ConsumerState<DockerLayoutScaffold> {
                     widget.activeTab != DockerTab.history) ...<Widget>[
                   NestedPanel(
                     tone: SemanticTone.warning,
-                    child: Row(
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      alignment: WrapAlignment.spaceBetween,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: <Widget>[
-                        Icon(
-                          Icons.cloud_off,
-                          color: context.semanticColors.warning,
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            'O agente ${selectedHost.name} está desconectado. '
-                            'O histórico de métricas continua disponível na aba Histórico.',
-                          ),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: <Widget>[
+                            Icon(
+                              Icons.cloud_off,
+                              color: context.semanticColors.warning,
+                            ),
+                            const SizedBox(width: 10),
+                            Flexible(
+                              child: Text(
+                                'O agente ${selectedHost.name} está desconectado. '
+                                'O histórico de métricas continua disponível na aba Histórico.',
+                              ),
+                            ),
+                          ],
                         ),
                         TextButton(
                           onPressed: () => _navigateTab(DockerTab.history),
@@ -371,12 +425,38 @@ class _DockerLayoutScaffoldState extends ConsumerState<DockerLayoutScaffold> {
                 else
                   widget.child,
               ],
-            ],
+            ]),
           ),
         ),
       ],
     );
   }
+}
+
+class _DockerTabBarDelegate extends SliverPersistentHeaderDelegate {
+  const _DockerTabBarDelegate({required this.height, required this.child});
+
+  final double height;
+  final Widget child;
+
+  @override
+  double get minExtent => height;
+
+  @override
+  double get maxExtent => height;
+
+  @override
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
+    return SizedBox.expand(child: child);
+  }
+
+  @override
+  bool shouldRebuild(covariant _DockerTabBarDelegate oldDelegate) =>
+      oldDelegate.height != height || oldDelegate.child != child;
 }
 
 class _DockerOperationsPanel extends StatelessWidget {

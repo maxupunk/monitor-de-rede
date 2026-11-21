@@ -6,6 +6,7 @@ import 'package:netmonitor_app/areas/composition_registries.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/core/models/admin_models.dart';
+import 'package:netmonitor_app/features/core/presentation/widgets/pinned_sliver_header.dart';
 import 'package:netmonitor_app/features/core/providers/backup_provider.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
@@ -37,7 +38,8 @@ class _BackupPageState extends ConsumerState<BackupPage> {
     if (!auth.isAdmin) {
       return const EmptyStateView(
         title: 'Acesso restrito a administradores',
-        description: 'Backups e restaurações são permitidos apenas para administradores.',
+        description:
+            'Backups e restaurações são permitidos apenas para administradores.',
         icon: Icons.lock_outline,
         tone: SemanticTone.error,
       );
@@ -74,33 +76,49 @@ class _BackupPageState extends ConsumerState<BackupPage> {
       }
     }
 
-    return DefaultTabController(
-      length: tabs.length,
-      initialIndex: initialIndex,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          const SearchFilterHeader(
-            title: 'Backup e Restauração',
-            subtitle: 'Cópias agendadas do sistema, exportação completa e destinos de armazenamento',
-          ),
-          const SizedBox(height: 10),
-          TabBar(
-            isScrollable: true,
-            tabAlignment: TabAlignment.start,
-            tabs: <Widget>[
-              for (final t in tabs)
-                Tab(icon: Icon(t.icon, size: 18), text: t.title),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isCompact = constraints.maxWidth < 680;
+        return DefaultTabController(
+          length: tabs.length,
+          initialIndex: initialIndex,
+          child: NestedScrollView(
+            headerSliverBuilder: (context, innerBoxIsScrolled) => <Widget>[
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: SearchFilterHeader(
+                    title: 'Backup e Restauração',
+                    subtitle: isCompact
+                        ? null
+                        : 'Cópias agendadas do sistema, exportação completa e destinos de armazenamento',
+                  ),
+                ),
+              ),
+              SliverPersistentHeader(
+                pinned: true,
+                delegate: PinnedSliverHeaderDelegate(
+                  height: 60,
+                  bottomBorder: true,
+                  child: TabBar(
+                    isScrollable: isCompact,
+                    tabAlignment: isCompact
+                        ? TabAlignment.start
+                        : TabAlignment.fill,
+                    tabs: <Widget>[
+                      for (final t in tabs)
+                        Tab(icon: Icon(t.icon, size: 18), text: t.title),
+                    ],
+                  ),
+                ),
+              ),
             ],
-          ),
-          const SizedBox(height: 12),
-          Expanded(
-            child: TabBarView(
+            body: TabBarView(
               children: <Widget>[for (final t in tabs) t.builder(context)],
             ),
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
@@ -135,7 +153,7 @@ class _SystemBackupTab extends ConsumerWidget {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
-                DropdownButtonFormField<int?>(
+                AppDropdownFormField<int?>(
                   initialValue: state.storages.any((s) => s.id == storageId)
                       ? storageId
                       : null,
@@ -145,36 +163,38 @@ class _SystemBackupTab extends ConsumerWidget {
                   items: <DropdownMenuItem<int?>>[
                     const DropdownMenuItem<int?>(
                       value: null,
-                      child: Text('Nenhum destino'),
+                      child: Text(
+                        'Nenhum destino',
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                     for (final s in state.storages)
                       DropdownMenuItem<int?>(
                         value: s.id,
-                        child: Text('${s.name} (${s.kind})'),
+                        child: Text(
+                          '${s.name} (${s.kind})',
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                   ],
                   onChanged: (v) => setModalState(() => storageId = v),
                 ),
                 const SizedBox(height: 12),
-                Row(
+                ResponsiveFieldRow(
+                  breakpoint: 480,
                   children: <Widget>[
-                    Expanded(
-                      child: TextField(
-                        controller: intervalCtrl,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Intervalo (horas)',
-                        ),
+                    TextField(
+                      controller: intervalCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Intervalo (horas)',
                       ),
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: TextField(
-                        controller: retentionCtrl,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Retenção (1–365)',
-                        ),
+                    TextField(
+                      controller: retentionCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Retenção (1–365)',
                       ),
                     ),
                   ],
@@ -271,6 +291,8 @@ class _SystemBackupTab extends ConsumerWidget {
                     leading: const Icon(Icons.inventory_2_outlined),
                     title: Text(
                       copy.name,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(fontWeight: FontWeight.w700),
                     ),
                     subtitle: Text(
@@ -324,6 +346,8 @@ class _SystemBackupTab extends ConsumerWidget {
     return RefreshIndicator(
       onRefresh: () => ref.read(backupProvider.notifier).fetchPlan(),
       child: ListView(
+        padding: const EdgeInsets.only(top: 12),
+        physics: const AlwaysScrollableScrollPhysics(),
         children: <Widget>[
           if (state.error != null) ...<Widget>[
             NestedPanel(tone: SemanticTone.error, child: Text(state.error!)),
@@ -392,14 +416,15 @@ class _SystemBackupTab extends ConsumerWidget {
                                           .read(backupProvider.notifier)
                                           .runNow();
                                       if (!context.mounted) return;
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(
-                                            const SnackBar(
-                                              content: Text(
-                                                'Backup do sistema concluído.',
-                                              ),
-                                            ),
-                                          );
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        const SnackBar(
+                                          content: Text(
+                                            'Backup do sistema concluído.',
+                                          ),
+                                        ),
+                                      );
                                     } catch (err) {
                                       if (!context.mounted) return;
                                       ScaffoldMessenger.of(
@@ -441,7 +466,8 @@ class _SystemBackupTab extends ConsumerWidget {
           const SizedBox(height: 14),
           SectionCard(
             title: 'Exportar arquivo de backup',
-            subtitle: 'Baixe apenas configurações (.json) ou o banco completo com histórico (.json.gz)',
+            subtitle:
+                'Baixe apenas configurações (.json) ou o banco completo com histórico (.json.gz)',
             icon: Icons.download_outlined,
             iconTone: SemanticTone.primary,
             child: Column(
@@ -563,7 +589,8 @@ class BackupFileRestoreCard extends ConsumerWidget {
 
     return SectionCard(
       title: 'Restaurar a partir de arquivo',
-      subtitle: 'Envio binário direto (.json ou .json.gz) com prévia obrigatória antes de aplicar',
+      subtitle:
+          'Envio binário direto (.json ou .json.gz) com prévia obrigatória antes de aplicar',
       icon: Icons.upload_file_outlined,
       iconTone: SemanticTone.warning,
       child: Column(
@@ -635,7 +662,8 @@ class BackupFileRestoreCard extends ConsumerWidget {
                           final ok = await showConfirmActionDialog(
                             context: context,
                             title: 'Aplicar restauração agora?',
-                            message: 'Os dados atuais serão substituídos pelos registros listados na prévia.',
+                            message:
+                                'Os dados atuais serão substituídos pelos registros listados na prévia.',
                             confirmLabel: 'Confirmar restauração',
                           );
                           if (!ok) return;
@@ -700,10 +728,18 @@ class BackupCountsSummaryWidget extends StatelessWidget {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: <Widget>[
-                Text(
-                  t.table,
-                  style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+                Expanded(
+                  child: Text(
+                    t.table,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 12,
+                    ),
+                  ),
                 ),
+                const SizedBox(width: 8),
                 Text(
                   formatInteger(t.rows),
                   style: const TextStyle(fontWeight: FontWeight.w700),

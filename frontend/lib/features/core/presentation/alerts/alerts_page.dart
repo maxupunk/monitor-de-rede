@@ -5,6 +5,7 @@ import 'package:netmonitor_app/core/auth/auth_state.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/core/models/alert_models.dart';
 import 'package:netmonitor_app/features/core/presentation/alerts/alert_dialogs.dart';
+import 'package:netmonitor_app/features/core/presentation/widgets/pinned_sliver_header.dart';
 import 'package:netmonitor_app/features/core/providers/alerts_provider.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
@@ -121,94 +122,245 @@ class _AlertsPageState extends ConsumerState<AlertsPage>
         .toList(growable: false);
   }
 
+  Future<void> _verifyAll() async {
+    final res = await ref.read(alertsProvider.notifier).verifyAllAlerts();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          res.message ??
+              'Verificação concluída (${res.resolvedCount} resolvido(s)).',
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeader(
+    BuildContext context,
+    AuthState auth, {
+    required bool isCompact,
+  }) {
+    final scheme = context.colorScheme;
+    final severityChips = <Widget>[
+      for (final (v, label) in const <(String, String)>[
+        ('all', 'Todas'),
+        ('critical', 'Crítico'),
+        ('warning', 'Aviso'),
+        ('info', 'Info'),
+      ])
+        FilterChip(
+          selected: _severityFilter == v,
+          label: Text(label),
+          visualDensity: VisualDensity.compact,
+          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          onSelected: (_) => setState(() => _severityFilter = v),
+        ),
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        if (isCompact)
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  'Alertas',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: context.textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: scheme.onSurface,
+                  ),
+                ),
+              ),
+              if (auth.canWrite)
+                FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                  ),
+                  onPressed: () => showAlertRuleFormSheet(
+                    context: context,
+                    ref: ref,
+                    presetDeviceId: widget.deviceId,
+                  ),
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('Nova regra'),
+                ),
+              PopupMenuButton<String>(
+                tooltip: 'Mais ações',
+                icon: const Icon(Icons.more_vert),
+                onSelected: (action) {
+                  switch (action) {
+                    case 'verify':
+                      _verifyAll();
+                    case 'catalog':
+                      showAlertRuleCatalogSheet(
+                        context: context,
+                        ref: ref,
+                        deviceId: widget.deviceId,
+                      );
+                    case 'push':
+                      context.go('/settings?tab=notificacoes');
+                  }
+                },
+                itemBuilder: (_) => <PopupMenuEntry<String>>[
+                  if (auth.canWrite) ...<PopupMenuEntry<String>>[
+                    const PopupMenuItem<String>(
+                      value: 'verify',
+                      child: ListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        leading: Icon(Icons.fact_check_outlined, size: 18),
+                        title: Text('Verificar todos'),
+                      ),
+                    ),
+                    const PopupMenuItem<String>(
+                      value: 'catalog',
+                      child: ListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        leading: Icon(Icons.auto_awesome_motion, size: 18),
+                        title: Text('Catálogo de regras'),
+                      ),
+                    ),
+                    const PopupMenuDivider(),
+                  ],
+                  const PopupMenuItem<String>(
+                    value: 'push',
+                    child: ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(
+                        Icons.notifications_active_outlined,
+                        size: 18,
+                      ),
+                      title: Text('Configurar notificações Push'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          )
+        else
+          Wrap(
+            spacing: 12,
+            runSpacing: 10,
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: <Widget>[
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'Alertas',
+                    style: context.textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: scheme.onSurface,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Incidentes em tempo real, análise de causa raiz e regras',
+                    style: context.textTheme.bodyMedium?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: <Widget>[
+                  if (auth.canWrite) ...<Widget>[
+                    OutlinedButton.icon(
+                      onPressed: _verifyAll,
+                      icon: const Icon(Icons.fact_check_outlined, size: 18),
+                      label: const Text('Verificar todos'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => showAlertRuleCatalogSheet(
+                        context: context,
+                        ref: ref,
+                        deviceId: widget.deviceId,
+                      ),
+                      icon: const Icon(Icons.auto_awesome_motion, size: 18),
+                      label: const Text('Catálogo'),
+                    ),
+                    FilledButton.icon(
+                      onPressed: () => showAlertRuleFormSheet(
+                        context: context,
+                        ref: ref,
+                        presetDeviceId: widget.deviceId,
+                      ),
+                      icon: const Icon(Icons.add, size: 18),
+                      label: const Text('Nova regra'),
+                    ),
+                  ],
+                  IconButton(
+                    tooltip: 'Configurar notificações Push',
+                    icon: const Icon(Icons.notifications_active_outlined),
+                    onPressed: () => context.go('/settings?tab=notificacoes'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        const SizedBox(height: 10),
+        UnifiedFilterBar(
+          searchController: _searchCtrl,
+          searchHint: 'Filtrar por título, mensagem ou dispositivo...',
+          onSearchChanged: (_) => setState(() {}),
+          quickChips: severityChips,
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(alertsProvider);
     final auth = ref.watch(authProvider);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        SearchFilterHeader(
-          title: 'Alertas',
-          subtitle: 'Incidentes em tempo real, análise de causa raiz e regras',
-          searchController: _searchCtrl,
-          searchHint: 'Filtrar por título, mensagem ou dispositivo...',
-          onSearchChanged: (_) => setState(() {}),
-          actions: <Widget>[
-            if (auth.canWrite) ...<Widget>[
-              OutlinedButton.icon(
-                onPressed: () async {
-                  final res = await ref
-                      .read(alertsProvider.notifier)
-                      .verifyAllAlerts();
-                  if (!context.mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        res.message ??
-                            'Verificação concluída (${res.resolvedCount} resolvido(s)).',
-                      ),
-                    ),
-                  );
-                },
-                icon: const Icon(Icons.fact_check_outlined, size: 18),
-                label: const Text('Verificar todos'),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isCompact = constraints.maxWidth < 680;
+
+        return NestedScrollView(
+          headerSliverBuilder: (context, innerBoxIsScrolled) => <Widget>[
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: _buildHeader(context, auth, isCompact: isCompact),
               ),
-              OutlinedButton.icon(
-                onPressed: () => showAlertRuleCatalogSheet(
-                  context: context,
-                  ref: ref,
-                  deviceId: widget.deviceId,
+            ),
+            SliverPersistentHeader(
+              pinned: true,
+              delegate: PinnedSliverHeaderDelegate(
+                height: 48,
+                bottomBorder: true,
+                child: TabBar(
+                  controller: _tabController,
+                  isScrollable: isCompact,
+                  tabAlignment: isCompact
+                      ? TabAlignment.start
+                      : TabAlignment.fill,
+                  tabs: <Widget>[
+                    Tab(text: 'Ativos (${state.activeAlerts.length})'),
+                    Tab(text: 'Resolvidos (${state.resolvedAlerts.length})'),
+                    Tab(text: 'Regras (${state.alertRules.length})'),
+                    const Tab(text: 'Histórico'),
+                  ],
                 ),
-                icon: const Icon(Icons.auto_awesome_motion, size: 18),
-                label: const Text('Catálogo'),
               ),
-              FilledButton.icon(
-                onPressed: () => showAlertRuleFormSheet(
-                  context: context,
-                  ref: ref,
-                  presetDeviceId: widget.deviceId,
-                ),
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text('Nova regra'),
-              ),
-            ],
-            IconButton(
-              tooltip: 'Configurar notificações Push',
-              icon: const Icon(Icons.notifications_active_outlined),
-              onPressed: () => context.go('/settings?tab=notificacoes'),
             ),
           ],
-          filters: <Widget>[
-            for (final (v, label) in const <(String, String)>[
-              ('all', 'Todas severidades'),
-              ('critical', 'Crítico'),
-              ('warning', 'Aviso'),
-              ('info', 'Info'),
-            ])
-              FilterChip(
-                selected: _severityFilter == v,
-                label: Text(label),
-                onSelected: (_) => setState(() => _severityFilter = v),
-              ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        TabBar(
-          controller: _tabController,
-          isScrollable: true,
-          tabAlignment: TabAlignment.start,
-          tabs: <Widget>[
-            Tab(text: 'Ativos (${state.activeAlerts.length})'),
-            Tab(text: 'Resolvidos (${state.resolvedAlerts.length})'),
-            Tab(text: 'Regras (${state.alertRules.length})'),
-            const Tab(text: 'Histórico'),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Expanded(
-          child: TabBarView(
+          body: TabBarView(
             controller: _tabController,
             children: <Widget>[
               _buildActiveTab(state, auth),
@@ -217,8 +369,8 @@ class _AlertsPageState extends ConsumerState<AlertsPage>
               _buildHistoryTab(state),
             ],
           ),
-        ),
-      ],
+        );
+      },
     );
   }
 
@@ -233,23 +385,29 @@ class _AlertsPageState extends ConsumerState<AlertsPage>
         await ref.read(alertsProvider.notifier).fetchRootCauseAnalysis();
       },
       child: ListView(
+        padding: const EdgeInsets.only(top: 10, bottom: 24),
+        physics: const AlwaysScrollableScrollPhysics(),
         children: <Widget>[
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: <Widget>[
-              for (final (v, label) in const <(String, String)>[
-                ('all', 'Todos status'),
-                ('active', 'Abertos'),
-                ('acknowledged', 'Reconhecidos'),
-                ('silenced', 'Silenciados'),
-              ])
-                FilterChip(
-                  selected: _statusFilter == v,
-                  label: Text(label),
-                  onSelected: (_) => setState(() => _statusFilter = v),
-                ),
-            ],
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: <Widget>[
+                for (final (i, item) in const <(String, String)>[
+                  ('all', 'Todos status'),
+                  ('active', 'Abertos'),
+                  ('acknowledged', 'Reconhecidos'),
+                  ('silenced', 'Silenciados'),
+                ].indexed) ...<Widget>[
+                  if (i > 0) const SizedBox(width: 6),
+                  FilterChip(
+                    visualDensity: VisualDensity.compact,
+                    selected: _statusFilter == item.$1,
+                    label: Text(item.$2),
+                    onSelected: (_) => setState(() => _statusFilter = item.$1),
+                  ),
+                ],
+              ],
+            ),
           ),
           const SizedBox(height: 12),
           if (clusters.isNotEmpty) ...<Widget>[
@@ -292,7 +450,8 @@ class _AlertsPageState extends ConsumerState<AlertsPage>
           else if (active.isEmpty)
             const EmptyStateView(
               title: 'Nenhum alerta ativo',
-              description: 'Todos os dispositivos e monitores estão operando dentro do esperado.',
+              description:
+                  'Todos os dispositivos e monitores estão operando dentro do esperado.',
               icon: Icons.check_circle_outline,
               tone: SemanticTone.success,
             )
@@ -355,12 +514,19 @@ class _AlertsPageState extends ConsumerState<AlertsPage>
   Widget _buildResolvedTab(AlertsState state) {
     final resolved = _filterEvents(state.resolvedAlerts);
     if (resolved.isEmpty) {
-      return const EmptyStateView(
-        title: 'Nenhum alerta resolvido recentemente',
-        icon: Icons.history,
+      return ListView(
+        padding: const EdgeInsets.only(top: 12),
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: const <Widget>[
+          EmptyStateView(
+            title: 'Nenhum alerta resolvido recentemente',
+            icon: Icons.history,
+          ),
+        ],
       );
     }
     return ListView.separated(
+      padding: const EdgeInsets.only(top: 12, bottom: 24),
       itemCount: resolved.length,
       separatorBuilder: (_, _) => const SizedBox(height: 10),
       itemBuilder: (context, index) {
@@ -388,25 +554,33 @@ class _AlertsPageState extends ConsumerState<AlertsPage>
         .toList(growable: false);
 
     if (rules.isEmpty) {
-      return EmptyStateView(
-        title: 'Nenhuma regra configurada',
-        description: 'Crie uma regra personalizada ou aplique regras prontas do catálogo.',
-        icon: Icons.rule_outlined,
-        action: auth.canWrite
-            ? FilledButton.icon(
-                onPressed: () => showAlertRuleCatalogSheet(
-                  context: context,
-                  ref: ref,
-                  deviceId: widget.deviceId,
-                ),
-                icon: const Icon(Icons.auto_awesome_motion),
-                label: const Text('Abrir catálogo'),
-              )
-            : null,
+      return ListView(
+        padding: const EdgeInsets.only(top: 12),
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: <Widget>[
+          EmptyStateView(
+            title: 'Nenhuma regra configurada',
+            description:
+                'Crie uma regra personalizada ou aplique regras prontas do catálogo.',
+            icon: Icons.rule_outlined,
+            action: auth.canWrite
+                ? FilledButton.icon(
+                    onPressed: () => showAlertRuleCatalogSheet(
+                      context: context,
+                      ref: ref,
+                      deviceId: widget.deviceId,
+                    ),
+                    icon: const Icon(Icons.auto_awesome_motion),
+                    label: const Text('Abrir catálogo'),
+                  )
+                : null,
+          ),
+        ],
       );
     }
 
     return ListView.separated(
+      padding: const EdgeInsets.only(top: 12, bottom: 24),
       itemCount: rules.length,
       separatorBuilder: (_, _) => const SizedBox(height: 10),
       itemBuilder: (context, index) {
@@ -510,21 +684,33 @@ class _AlertsPageState extends ConsumerState<AlertsPage>
 
   Widget _buildHistoryTab(AlertsState state) {
     if (state.historyLoading && state.historyItems.isEmpty) {
-      return const LoadingStateView(message: 'Carregando histórico...');
+      return ListView(
+        padding: const EdgeInsets.only(top: 12),
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: const <Widget>[
+          LoadingStateView(message: 'Carregando histórico...'),
+        ],
+      );
     }
     if (state.historyItems.isEmpty) {
-      return const EmptyStateView(
-        title: 'Histórico vazio',
-        icon: Icons.history,
+      return ListView(
+        padding: const EdgeInsets.only(top: 12),
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: const <Widget>[
+          EmptyStateView(title: 'Histórico vazio', icon: Icons.history),
+        ],
       );
     }
     return ListView(
+      padding: const EdgeInsets.only(top: 8, bottom: 24),
       children: <Widget>[
         for (final item in state.historyItems) ...<Widget>[
           ListTile(
             leading: StatusIndicator.fromStatus(item.status, compact: true),
             title: Text(
               item.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontWeight: FontWeight.w700),
             ),
             subtitle: Text(

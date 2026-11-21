@@ -107,15 +107,25 @@ class _MaintenanceWindowsPageState
                   ),
                   const SizedBox(height: 12),
                   SegmentedButton<String>(
+                    showSelectedIcon: false,
+                    style: const ButtonStyle(
+                      visualDensity: VisualDensity.compact,
+                    ),
                     segments: const <ButtonSegment<String>>[
                       ButtonSegment<String>(
                         value: 'global',
-                        label: Text('Global'),
+                        label: Text('Global', overflow: TextOverflow.ellipsis),
                       ),
-                      ButtonSegment<String>(value: 'site', label: Text('Site')),
+                      ButtonSegment<String>(
+                        value: 'site',
+                        label: Text('Site', overflow: TextOverflow.ellipsis),
+                      ),
                       ButtonSegment<String>(
                         value: 'device',
-                        label: Text('Dispositivo'),
+                        label: Text(
+                          'Dispositivo',
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                     ],
                     selected: <String>{scope},
@@ -127,18 +137,24 @@ class _MaintenanceWindowsPageState
                   ),
                   if (scope == 'site') ...<Widget>[
                     const SizedBox(height: 12),
-                    DropdownButtonFormField<int?>(
+                    AppDropdownFormField<int?>(
                       initialValue: siteId,
                       decoration: const InputDecoration(labelText: 'Site'),
                       items: <DropdownMenuItem<int?>>[
                         const DropdownMenuItem<int?>(
                           value: null,
-                          child: Text('Selecione o site'),
+                          child: Text(
+                            'Selecione o site',
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                         for (final s in monitorsState.sites)
                           DropdownMenuItem<int?>(
                             value: s.id,
-                            child: Text(s.name),
+                            child: Text(
+                              s.name,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                       ],
                       onChanged: (v) => setModalState(() => siteId = v),
@@ -146,7 +162,7 @@ class _MaintenanceWindowsPageState
                   ],
                   if (scope == 'device') ...<Widget>[
                     const SizedBox(height: 12),
-                    DropdownButtonFormField<int?>(
+                    AppDropdownFormField<int?>(
                       initialValue: deviceId,
                       decoration: const InputDecoration(
                         labelText: 'Dispositivo',
@@ -154,12 +170,18 @@ class _MaintenanceWindowsPageState
                       items: <DropdownMenuItem<int?>>[
                         const DropdownMenuItem<int?>(
                           value: null,
-                          child: Text('Selecione o dispositivo'),
+                          child: Text(
+                            'Selecione o dispositivo',
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                         for (final d in monitorsState.devices)
                           DropdownMenuItem<int?>(
                             value: d.id,
-                            child: Text(d.name),
+                            child: Text(
+                              d.name,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                       ],
                       onChanged: (v) => setModalState(() => deviceId = v),
@@ -280,162 +302,230 @@ class _MaintenanceWindowsPageState
         })
         .toList(growable: false);
 
-    return RefreshIndicator(
-      onRefresh: () =>
-          ref.read(maintenanceWindowsProvider.notifier).fetchWindows(),
-      child: ListView(
-        children: <Widget>[
-          SearchFilterHeader(
-            title: 'Janelas de Manutenção',
-            subtitle: 'Programe paradas planejadas sem gerar alertas falsos',
-            searchController: _searchCtrl,
-            searchHint: 'Buscar janela...',
-            onSearchChanged: (_) => setState(() {}),
-            actions: <Widget>[
-              if (auth.canWrite)
-                FilledButton.icon(
-                  onPressed: () => _openForm(),
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Nova janela'),
-                ),
-            ],
-            filters: <Widget>[
-              for (final (v, label) in const <(String, String)>[
-                ('all', 'Todas'),
-                ('active', 'Ativas agora'),
-                ('scheduled', 'Agendadas'),
-                ('ended', 'Encerradas'),
-              ])
-                FilterChip(
-                  selected: _statusFilter == v,
-                  label: Text(label),
-                  onSelected: (_) => setState(() => _statusFilter = v),
-                ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          if (state.loading && state.windows.isEmpty)
-            const LoadingStateView(
-              message: 'Carregando janelas de manutenção...',
-            )
-          else if (state.error != null && state.windows.isEmpty)
-            ErrorStateView(
-              message: state.error!,
-              onRetry: () =>
-                  ref.read(maintenanceWindowsProvider.notifier).fetchWindows(),
-            )
-          else if (filtered.isEmpty)
-            EmptyStateView(
-              title: 'Nenhuma janela de manutenção',
-              description: 'Crie uma janela para silenciar alertas durante intervenções programadas.',
-              icon: Icons.build_circle_outlined,
-              action: auth.canWrite
-                  ? FilledButton.icon(
-                      onPressed: () => _openForm(),
-                      icon: const Icon(Icons.add),
-                      label: const Text('Nova janela'),
-                    )
-                  : null,
-            )
-          else
-            for (final w in filtered) ...<Widget>[
-              Builder(
-                builder: (context) {
-                  final st = w.statusAt(now);
-                  final (String stLabel, SemanticTone tone) = switch (st) {
-                    'active' => ('Ativa agora', SemanticTone.warning),
-                    'scheduled' => ('Agendada', SemanticTone.info),
-                    _ => ('Encerrada', SemanticTone.secondary),
-                  };
-                  final scopeLabel = w.deviceId != null
-                      ? 'Dispositivo #${w.deviceId}'
-                      : (w.siteId != null ? 'Site #${w.siteId}' : 'Global');
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isCompact = constraints.maxWidth < 680;
+        final scheme = context.colorScheme;
 
-                  return SectionCard(
-                    title: w.name,
-                    subtitle:
-                        '${formatDateTime(w.startsAt)} → ${formatDateTime(w.endsAt)} (${formatTimeSpan(w.startsAt, w.endsAt)})',
-                    icon: Icons.build_circle_outlined,
-                    iconTone: tone,
-                    trailing: SemanticChip(
-                      label: stLabel,
-                      tone: tone,
-                      compact: true,
+        return RefreshIndicator(
+          onRefresh: () =>
+              ref.read(maintenanceWindowsProvider.notifier).fetchWindows(),
+          child: ListView(
+            children: <Widget>[
+              if (isCompact)
+                Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: Text(
+                        'Janelas de Manutenção',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: context.textTheme.headlineSmall?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          color: scheme.onSurface,
+                        ),
+                      ),
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                    if (auth.canWrite) ...<Widget>[
+                      const SizedBox(width: 8),
+                      FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
+                        ),
+                        onPressed: () => _openForm(),
+                        icon: const Icon(Icons.add, size: 18),
+                        label: const Text('Nova'),
+                      ),
+                    ],
+                  ],
+                )
+              else
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 10,
+                  alignment: WrapAlignment.spaceBetween,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: <Widget>[
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
-                        if (w.description != null &&
-                            w.description!.isNotEmpty) ...<Widget>[
-                          Text(w.description!),
-                          const SizedBox(height: 8),
-                        ],
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          alignment: WrapAlignment.spaceBetween,
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          children: <Widget>[
-                            SemanticChip(
-                              label: 'Escopo: $scopeLabel',
-                              tone: SemanticTone.primary,
-                              compact: true,
-                            ),
-                            if (auth.canWrite)
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: <Widget>[
-                                  TextButton.icon(
-                                    onPressed: () => _openForm(w),
-                                    icon: const Icon(
-                                      Icons.edit_outlined,
-                                      size: 18,
-                                    ),
-                                    label: const Text('Editar'),
-                                  ),
-                                  TextButton.icon(
-                                    onPressed: () async {
-                                      final ok = await showConfirmActionDialog(
-                                        context: context,
-                                        title: 'Excluir janela?',
-                                        message:
-                                            'A janela "${w.name}" será removida.',
-                                        confirmLabel: 'Excluir',
-                                      );
-                                      if (ok) {
-                                        await ref
-                                            .read(
-                                              maintenanceWindowsProvider
-                                                  .notifier,
-                                            )
-                                            .deleteWindow(w.id);
-                                      }
-                                    },
-                                    icon: Icon(
-                                      Icons.delete_outline,
-                                      size: 18,
-                                      color: context.colorScheme.error,
-                                    ),
-                                    label: Text(
-                                      'Excluir',
-                                      style: TextStyle(
-                                        color: context.colorScheme.error,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                          ],
+                        Text(
+                          'Janelas de Manutenção',
+                          style: context.textTheme.headlineSmall?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            color: scheme.onSurface,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Programe paradas planejadas sem gerar alertas falsos',
+                          style: context.textTheme.bodyMedium?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
                         ),
                       ],
                     ),
-                  );
-                },
-              ),
+                    if (auth.canWrite)
+                      FilledButton.icon(
+                        onPressed: () => _openForm(),
+                        icon: const Icon(Icons.add, size: 18),
+                        label: const Text('Nova janela'),
+                      ),
+                  ],
+                ),
               const SizedBox(height: 10),
+              UnifiedFilterBar(
+                searchController: _searchCtrl,
+                searchHint: 'Buscar janela...',
+                onSearchChanged: (_) => setState(() {}),
+                quickChips: <Widget>[
+                  for (final (v, label) in const <(String, String)>[
+                    ('all', 'Todas'),
+                    ('active', 'Ativas agora'),
+                    ('scheduled', 'Agendadas'),
+                    ('ended', 'Encerradas'),
+                  ])
+                    FilterChip(
+                      visualDensity: VisualDensity.compact,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      selected: _statusFilter == v,
+                      label: Text(label),
+                      onSelected: (_) => setState(() => _statusFilter = v),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              if (state.loading && state.windows.isEmpty)
+                const LoadingStateView(
+                  message: 'Carregando janelas de manutenção...',
+                )
+              else if (state.error != null && state.windows.isEmpty)
+                ErrorStateView(
+                  message: state.error!,
+                  onRetry: () => ref
+                      .read(maintenanceWindowsProvider.notifier)
+                      .fetchWindows(),
+                )
+              else if (filtered.isEmpty)
+                EmptyStateView(
+                  title: 'Nenhuma janela de manutenção',
+                  description:
+                      'Crie uma janela para silenciar alertas durante intervenções programadas.',
+                  icon: Icons.build_circle_outlined,
+                  action: auth.canWrite
+                      ? FilledButton.icon(
+                          onPressed: () => _openForm(),
+                          icon: const Icon(Icons.add),
+                          label: const Text('Nova janela'),
+                        )
+                      : null,
+                )
+              else
+                for (final w in filtered) ...<Widget>[
+                  Builder(
+                    builder: (context) {
+                      final st = w.statusAt(now);
+                      final (String stLabel, SemanticTone tone) = switch (st) {
+                        'active' => ('Ativa agora', SemanticTone.warning),
+                        'scheduled' => ('Agendada', SemanticTone.info),
+                        _ => ('Encerrada', SemanticTone.secondary),
+                      };
+                      final scopeLabel = w.deviceId != null
+                          ? 'Dispositivo #${w.deviceId}'
+                          : (w.siteId != null ? 'Site #${w.siteId}' : 'Global');
+
+                      return SectionCard(
+                        title: w.name,
+                        subtitle:
+                            '${formatDateTime(w.startsAt)} → ${formatDateTime(w.endsAt)} (${formatTimeSpan(w.startsAt, w.endsAt)})',
+                        icon: Icons.build_circle_outlined,
+                        iconTone: tone,
+                        trailing: SemanticChip(
+                          label: stLabel,
+                          tone: tone,
+                          compact: true,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: <Widget>[
+                            if (w.description != null &&
+                                w.description!.isNotEmpty) ...<Widget>[
+                              Text(w.description!),
+                              const SizedBox(height: 8),
+                            ],
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              alignment: WrapAlignment.spaceBetween,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: <Widget>[
+                                SemanticChip(
+                                  label: 'Escopo: $scopeLabel',
+                                  tone: SemanticTone.primary,
+                                  compact: true,
+                                ),
+                                if (auth.canWrite)
+                                  Wrap(
+                                    spacing: 4,
+                                    runSpacing: 4,
+                                    children: <Widget>[
+                                      TextButton.icon(
+                                        onPressed: () => _openForm(w),
+                                        icon: const Icon(
+                                          Icons.edit_outlined,
+                                          size: 18,
+                                        ),
+                                        label: const Text('Editar'),
+                                      ),
+                                      TextButton.icon(
+                                        onPressed: () async {
+                                          final ok = await showConfirmActionDialog(
+                                            context: context,
+                                            title: 'Excluir janela?',
+                                            message:
+                                                'A janela "${w.name}" será removida.',
+                                            confirmLabel: 'Excluir',
+                                          );
+                                          if (ok) {
+                                            await ref
+                                                .read(
+                                                  maintenanceWindowsProvider
+                                                      .notifier,
+                                                )
+                                                .deleteWindow(w.id);
+                                          }
+                                        },
+                                        icon: Icon(
+                                          Icons.delete_outline,
+                                          size: 18,
+                                          color: context.colorScheme.error,
+                                        ),
+                                        label: Text(
+                                          'Excluir',
+                                          style: TextStyle(
+                                            color: context.colorScheme.error,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                ],
             ],
-        ],
-      ),
+          ),
+        );
+      },
     );
   }
 }

@@ -258,7 +258,7 @@ class _AgentEnrollmentBodyState extends ConsumerState<_AgentEnrollmentBody> {
         ],
 
         if (addresses.isNotEmpty) ...<Widget>[
-          DropdownButtonFormField<String?>(
+          AppDropdownFormField<String?>(
             initialValue: addresses.any((a) => a.id == _selectedAddressId)
                 ? _selectedAddressId
                 : null,
@@ -269,12 +269,18 @@ class _AgentEnrollmentBodyState extends ConsumerState<_AgentEnrollmentBody> {
             items: <DropdownMenuItem<String?>>[
               const DropdownMenuItem<String?>(
                 value: null,
-                child: Text('Padrão configurado na central'),
+                child: Text(
+                  'Padrão configurado na central',
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
               ...addresses.map(
                 (addr) => DropdownMenuItem<String?>(
                   value: addr.id,
-                  child: Text('${addr.label} (${addr.host})'),
+                  child: Text(
+                    '${addr.label} (${addr.host})',
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
               ),
             ],
@@ -399,7 +405,8 @@ class _AgentEnrollmentBodyState extends ConsumerState<_AgentEnrollmentBody> {
                     labelText:
                         'AGENT_DATABASE_TARGETS (faixas privadas permitidas)',
                     hintText: defaultDatabaseTargets,
-                    helperText: 'Lista host/CIDR:porta alcançável pela ponte de banco (ADR 013).',
+                    helperText:
+                        'Lista host/CIDR:porta alcançável pela ponte de banco (ADR 013).',
                   ),
                   onSubmitted: (_) => _regenerateCommands(),
                   onEditingComplete: _regenerateCommands,
@@ -411,16 +418,25 @@ class _AgentEnrollmentBodyState extends ConsumerState<_AgentEnrollmentBody> {
         const SizedBox(height: 14),
 
         SegmentedButton<int>(
+          showSelectedIcon: false,
           segments: const <ButtonSegment<int>>[
             ButtonSegment<int>(
               value: 0,
-              label: Text('Serviço systemd'),
-              icon: Icon(Icons.terminal),
+              label: Text(
+                'Serviço systemd',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              icon: Icon(Icons.terminal, size: 17),
             ),
             ButtonSegment<int>(
               value: 1,
-              label: Text('Container Docker'),
-              icon: Icon(Icons.view_in_ar_outlined),
+              label: Text(
+                'Container Docker',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              icon: Icon(Icons.view_in_ar_outlined, size: 17),
             ),
           ],
           selected: <int>{_selectedCommandTab},

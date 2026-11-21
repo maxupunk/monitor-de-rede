@@ -30,66 +30,81 @@ class _DnsServersCardState extends ConsumerState<DnsServersCard> {
     final state = ref.watch(dnsServersProvider);
     final canWrite = ref.watch(authProvider).canWrite;
 
-    return SectionCard(
-      title: 'Servidores DNS',
-      subtitle: 'Resolvers UDP, TCP e DoH usados no benchmark e monitoramento em lote',
-      icon: Icons.dns_outlined,
-      trailing: canWrite
-          ? Wrap(
-              spacing: 8,
-              children: <Widget>[
-                OutlinedButton.icon(
-                  onPressed: () => showDnsBatchMonitorDialog(context),
-                  icon: const Icon(Icons.playlist_add_check, size: 18),
-                  label: const Text('Monitorar em lote'),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isCompact = constraints.maxWidth < 560;
+        final actions = canWrite
+            ? Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: <Widget>[
+                  OutlinedButton.icon(
+                    onPressed: () => showDnsBatchMonitorDialog(context),
+                    icon: const Icon(Icons.playlist_add_check, size: 18),
+                    label: const Text('Monitorar em lote'),
+                  ),
+                  FilledButton.icon(
+                    onPressed: () => showDnsServersDialog(context),
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Gerenciar'),
+                  ),
+                ],
+              )
+            : null;
+
+        return SectionCard(
+          title: 'Servidores DNS',
+          subtitle:
+              'Resolvers UDP, TCP e DoH usados no benchmark e monitoramento em lote',
+          icon: Icons.dns_outlined,
+          trailing: isCompact ? null : actions,
+          footer: isCompact && actions != null ? actions : null,
+          child: state.loading && state.items.isEmpty
+              ? const LoadingStateView(message: 'Carregando servidores DNS...')
+              : state.items.isEmpty
+              ? const EmptyStateView(
+                  title: 'Nenhum servidor DNS cadastrado',
+                  description:
+                      'Adicione resolvers como 1.1.1.1, 8.8.8.8 ou seu DNS interno.',
+                  icon: Icons.dns_outlined,
+                )
+              : Column(
+                  children: state.items
+                      .map((server) {
+                        return ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: SemanticChip(
+                            label: server.protocol.toUpperCase(),
+                            tone: server.protocol == 'doh'
+                                ? SemanticTone.success
+                                : SemanticTone.info,
+                            compact: true,
+                          ),
+                          title: Text(
+                            server.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                          subtitle: Text(
+                            server.address,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontFamily: 'monospace'),
+                          ),
+                          trailing: server.isDefault
+                              ? const SemanticChip(
+                                  label: 'Benchmark',
+                                  tone: SemanticTone.primary,
+                                  compact: true,
+                                )
+                              : null,
+                        );
+                      })
+                      .toList(growable: false),
                 ),
-                FilledButton.icon(
-                  onPressed: () => showDnsServersDialog(context),
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Gerenciar'),
-                ),
-              ],
-            )
-          : null,
-      child: state.loading && state.items.isEmpty
-          ? const LoadingStateView(message: 'Carregando servidores DNS...')
-          : state.items.isEmpty
-          ? const EmptyStateView(
-              title: 'Nenhum servidor DNS cadastrado',
-              description: 'Adicione resolvers como 1.1.1.1, 8.8.8.8 ou seu DNS interno.',
-              icon: Icons.dns_outlined,
-            )
-          : Column(
-              children: state.items
-                  .map((server) {
-                    return ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: SemanticChip(
-                        label: server.protocol.toUpperCase(),
-                        tone: server.protocol == 'doh'
-                            ? SemanticTone.success
-                            : SemanticTone.info,
-                        compact: true,
-                      ),
-                      title: Text(
-                        server.name,
-                        style: const TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                      subtitle: Text(
-                        server.address,
-                        style: const TextStyle(fontFamily: 'monospace'),
-                      ),
-                      trailing: server.isDefault
-                          ? const SemanticChip(
-                              label: 'Benchmark',
-                              tone: SemanticTone.primary,
-                              compact: true,
-                            )
-                          : null,
-                    );
-                  })
-                  .toList(growable: false),
-            ),
+        );
+      },
     );
   }
 }
@@ -190,35 +205,40 @@ class _DnsServersDialogBodyState extends ConsumerState<_DnsServersDialogBody> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              Row(
+              ResponsiveFieldRow(
+                breakpoint: 480,
                 children: <Widget>[
-                  Expanded(
-                    child: TextField(
-                      controller: _nameCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'Nome (ex: Cloudflare)',
-                      ),
+                  TextField(
+                    controller: _nameCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Nome (ex: Cloudflare)',
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: DropdownButtonFormField<String>(
-                      initialValue: _protocol,
-                      decoration: const InputDecoration(labelText: 'Protocolo'),
-                      items: const <DropdownMenuItem<String>>[
-                        DropdownMenuItem(value: 'udp', child: Text('UDP')),
-                        DropdownMenuItem(value: 'tcp', child: Text('TCP')),
-                        DropdownMenuItem(
-                          value: 'doh',
-                          child: Text('DoH (HTTPS)'),
+                  AppDropdownFormField<String>(
+                    initialValue: _protocol,
+                    decoration: const InputDecoration(labelText: 'Protocolo'),
+                    items: const <DropdownMenuItem<String>>[
+                      DropdownMenuItem(
+                        value: 'udp',
+                        child: Text('UDP', overflow: TextOverflow.ellipsis),
+                      ),
+                      DropdownMenuItem(
+                        value: 'tcp',
+                        child: Text('TCP', overflow: TextOverflow.ellipsis),
+                      ),
+                      DropdownMenuItem(
+                        value: 'doh',
+                        child: Text(
+                          'DoH (HTTPS)',
+                          overflow: TextOverflow.ellipsis,
                         ),
-                      ],
-                      onChanged: (v) => setState(() => _protocol = v ?? 'udp'),
-                    ),
+                      ),
+                    ],
+                    onChanged: (v) => setState(() => _protocol = v ?? 'udp'),
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
               TextField(
                 controller: _addressCtrl,
                 decoration: const InputDecoration(
@@ -233,8 +253,10 @@ class _DnsServersDialogBodyState extends ConsumerState<_DnsServersDialogBody> {
                 value: _isDefault,
                 onChanged: (v) => setState(() => _isDefault = v),
               ),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
+              Wrap(
+                alignment: WrapAlignment.end,
+                spacing: 8,
+                runSpacing: 8,
                 children: <Widget>[
                   if (_editingId != null)
                     TextButton(
@@ -265,10 +287,14 @@ class _DnsServersDialogBodyState extends ConsumerState<_DnsServersDialogBody> {
                     children: <Widget>[
                       Text(
                         server.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: const TextStyle(fontWeight: FontWeight.w700),
                       ),
                       Text(
                         '${server.address} · ${server.protocol.toUpperCase()}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: context.textTheme.bodySmall?.copyWith(
                           fontFamily: 'monospace',
                         ),
@@ -434,33 +460,50 @@ class _DnsBatchMonitorBodyState extends ConsumerState<_DnsBatchMonitorBody> {
           ),
         ),
         const SizedBox(height: 10),
-        Row(
+        ResponsiveFieldRow(
+          breakpoint: 480,
           children: <Widget>[
-            Expanded(
-              child: DropdownButtonFormField<String>(
-                initialValue: _recordType,
-                decoration: const InputDecoration(labelText: 'Registro'),
-                items: const <DropdownMenuItem<String>>[
-                  DropdownMenuItem(value: 'A', child: Text('A')),
-                  DropdownMenuItem(value: 'AAAA', child: Text('AAAA')),
-                  DropdownMenuItem(value: 'MX', child: Text('MX')),
-                  DropdownMenuItem(value: 'TXT', child: Text('TXT')),
-                ],
-                onChanged: (v) => setState(() => _recordType = v ?? 'A'),
-              ),
+            AppDropdownFormField<String>(
+              initialValue: _recordType,
+              decoration: const InputDecoration(labelText: 'Registro'),
+              items: const <DropdownMenuItem<String>>[
+                DropdownMenuItem(
+                  value: 'A',
+                  child: Text('A', overflow: TextOverflow.ellipsis),
+                ),
+                DropdownMenuItem(
+                  value: 'AAAA',
+                  child: Text('AAAA', overflow: TextOverflow.ellipsis),
+                ),
+                DropdownMenuItem(
+                  value: 'MX',
+                  child: Text('MX', overflow: TextOverflow.ellipsis),
+                ),
+                DropdownMenuItem(
+                  value: 'TXT',
+                  child: Text('TXT', overflow: TextOverflow.ellipsis),
+                ),
+              ],
+              onChanged: (v) => setState(() => _recordType = v ?? 'A'),
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: DropdownButtonFormField<int>(
-                initialValue: _intervalSeconds,
-                decoration: const InputDecoration(labelText: 'Intervalo'),
-                items: const <DropdownMenuItem<int>>[
-                  DropdownMenuItem(value: 30, child: Text('30 s')),
-                  DropdownMenuItem(value: 60, child: Text('1 min')),
-                  DropdownMenuItem(value: 300, child: Text('5 min')),
-                ],
-                onChanged: (v) => setState(() => _intervalSeconds = v ?? 60),
-              ),
+            AppDropdownFormField<int>(
+              initialValue: _intervalSeconds,
+              decoration: const InputDecoration(labelText: 'Intervalo'),
+              items: const <DropdownMenuItem<int>>[
+                DropdownMenuItem(
+                  value: 30,
+                  child: Text('30 s', overflow: TextOverflow.ellipsis),
+                ),
+                DropdownMenuItem(
+                  value: 60,
+                  child: Text('1 min', overflow: TextOverflow.ellipsis),
+                ),
+                DropdownMenuItem(
+                  value: 300,
+                  child: Text('5 min', overflow: TextOverflow.ellipsis),
+                ),
+              ],
+              onChanged: (v) => setState(() => _intervalSeconds = v ?? 60),
             ),
           ],
         ),
@@ -567,9 +610,11 @@ class _DnsLatencyCardState extends ConsumerState<DnsLatencyCard> {
       icon: Icons.dns_outlined,
       iconTone: SemanticTone.info,
       trailing: Wrap(
-        spacing: 6,
+        spacing: 2,
+        runSpacing: 2,
         children: <Widget>[
           IconButton(
+            visualDensity: VisualDensity.compact,
             tooltip: 'Benchmark ao vivo',
             icon: state.benchmarking
                 ? const SizedBox(
@@ -584,11 +629,13 @@ class _DnsLatencyCardState extends ConsumerState<DnsLatencyCard> {
                       ref.read(dnsPerformanceProvider.notifier).runBenchmark(),
           ),
           IconButton(
+            visualDensity: VisualDensity.compact,
             tooltip: 'Configurar servidores DNS',
             icon: const Icon(Icons.tune),
             onPressed: () => showDnsServersDialog(context),
           ),
           IconButton(
+            visualDensity: VisualDensity.compact,
             tooltip: 'Criar monitores DNS em lote',
             icon: const Icon(Icons.playlist_add),
             onPressed: () => showDnsBatchMonitorDialog(context),
@@ -691,6 +738,7 @@ class _DnsRankingBar extends StatelessWidget {
                 ),
               ),
             ),
+            const SizedBox(width: 8),
             Text(
               avg != null
                   ? '${formatLatency(avg)} · ${formatPercent(entry.normalizedSuccessPct, digits: 0)}'

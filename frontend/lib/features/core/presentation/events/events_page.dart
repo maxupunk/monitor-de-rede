@@ -6,6 +6,7 @@ import 'package:netmonitor_app/core/network/sse_client.dart';
 import 'package:netmonitor_app/core/realtime/sse_service.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/core/models/event_models.dart';
+import 'package:netmonitor_app/features/core/presentation/widgets/pinned_sliver_header.dart';
 import 'package:netmonitor_app/features/core/providers/events_provider.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
@@ -27,6 +28,15 @@ class _EventsPageState extends ConsumerState<EventsPage>
   List<SseEvent> _frozenSnapshot = const <SseEvent>[];
   DateTime? _clearedAfter;
 
+  static const List<String> _categories = <String>[
+    'Todos',
+    'Alertas',
+    'Monitores',
+    'Dispositivos',
+    'Operação',
+    'Sistema',
+  ];
+
   @override
   void initState() {
     super.initState();
@@ -45,6 +55,17 @@ class _EventsPageState extends ConsumerState<EventsPage>
     _tabController.dispose();
     _searchCtrl.dispose();
     super.dispose();
+  }
+
+  void _togglePause(List<SseEvent> recentEvents) {
+    setState(() {
+      if (_paused) {
+        _paused = false;
+      } else {
+        _frozenSnapshot = List<SseEvent>.from(recentEvents);
+        _paused = true;
+      }
+    });
   }
 
   Future<void> _showEventDetail({
@@ -81,6 +102,151 @@ class _EventsPageState extends ConsumerState<EventsPage>
     );
   }
 
+  Widget _buildHeader(
+    BuildContext context,
+    RealtimeState realtime, {
+    required bool isCompact,
+  }) {
+    final scheme = context.colorScheme;
+    final sem = context.semanticColors;
+    final dotColor = _paused
+        ? sem.warning
+        : (realtime.isConnected ? sem.success : sem.warning);
+
+    final categoryChips = <Widget>[
+      for (final cat in _categories)
+        FilterChip(
+          visualDensity: VisualDensity.compact,
+          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          selected: _categoryFilter == cat,
+          label: Text(cat),
+          onSelected: (_) => setState(() => _categoryFilter = cat),
+        ),
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        if (isCompact)
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  'Eventos',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: context.textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: scheme.onSurface,
+                  ),
+                ),
+              ),
+              FilledButton.tonal(
+                style: FilledButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                ),
+                onPressed: () => _togglePause(realtime.recentEvents),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: dotColor,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Icon(_paused ? Icons.play_arrow : Icons.pause, size: 16),
+                    const SizedBox(width: 4),
+                    Text(_paused ? 'Retomar' : 'Pausar'),
+                  ],
+                ),
+              ),
+              IconButton(
+                tooltip: 'Limpar tela',
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(Icons.clear_all),
+                onPressed: () => setState(() => _clearedAfter = DateTime.now()),
+              ),
+            ],
+          )
+        else
+          Wrap(
+            spacing: 12,
+            runSpacing: 10,
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: <Widget>[
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'Eventos',
+                    style: context.textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: scheme.onSurface,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Fluxo SSE em tempo real e histórico persistido',
+                    style: context.textTheme.bodyMedium?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: <Widget>[
+                  SemanticChip(
+                    label: realtime.isConnected
+                        ? 'SSE Conectado'
+                        : 'Reconectando...',
+                    tone: realtime.isConnected
+                        ? SemanticTone.success
+                        : SemanticTone.warning,
+                    icon: realtime.isConnected
+                        ? Icons.radio_button_checked
+                        : Icons.sync,
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: () => _togglePause(realtime.recentEvents),
+                    icon: Icon(
+                      _paused ? Icons.play_arrow : Icons.pause,
+                      size: 18,
+                    ),
+                    label: Text(_paused ? 'Retomar' : 'Pausar'),
+                  ),
+                  TextButton.icon(
+                    onPressed: () =>
+                        setState(() => _clearedAfter = DateTime.now()),
+                    icon: const Icon(Icons.clear_all, size: 18),
+                    label: const Text('Limpar tela'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        const SizedBox(height: 10),
+        UnifiedFilterBar(
+          searchController: _searchCtrl,
+          searchHint: 'Filtrar por tipo ou mensagem...',
+          onSearchChanged: (_) => setState(() {}),
+          quickChips: categoryChips,
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final realtime = ref.watch(sseServiceProvider);
@@ -109,209 +275,162 @@ class _EventsPageState extends ConsumerState<EventsPage>
         })
         .toList(growable: false);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        SearchFilterHeader(
-          title: 'Eventos',
-          subtitle: 'Fluxo SSE em tempo real e histórico persistido',
-          searchController: _searchCtrl,
-          searchHint: 'Filtrar por tipo ou mensagem...',
-          onSearchChanged: (_) => setState(() {}),
-          actions: <Widget>[
-            SemanticChip(
-              label: realtime.isConnected ? 'SSE Conectado' : 'Reconectando...',
-              tone: realtime.isConnected
-                  ? SemanticTone.success
-                  : SemanticTone.warning,
-              icon: realtime.isConnected
-                  ? Icons.radio_button_checked
-                  : Icons.sync,
-            ),
-            OutlinedButton.icon(
-              onPressed: () {
-                setState(() {
-                  if (_paused) {
-                    _paused = false;
-                  } else {
-                    _frozenSnapshot = List<SseEvent>.from(
-                      realtime.recentEvents,
-                    );
-                    _paused = true;
-                  }
-                });
-              },
-              icon: Icon(_paused ? Icons.play_arrow : Icons.pause, size: 18),
-              label: Text(_paused ? 'Retomar' : 'Pausar'),
-            ),
-            TextButton.icon(
-              onPressed: () => setState(() => _clearedAfter = DateTime.now()),
-              icon: const Icon(Icons.clear_all, size: 18),
-              label: const Text('Limpar tela'),
-            ),
-          ],
-          filters: <Widget>[
-            for (final cat in const <String>[
-              'Todos',
-              'Alertas',
-              'Monitores',
-              'Dispositivos',
-              'Operação',
-              'Sistema',
-            ])
-              FilterChip(
-                selected: _categoryFilter == cat,
-                label: Text(cat),
-                onSelected: (_) => setState(() => _categoryFilter = cat),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isCompact = constraints.maxWidth < 680;
+
+        return NestedScrollView(
+          headerSliverBuilder: (context, innerBoxIsScrolled) => <Widget>[
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: _buildHeader(context, realtime, isCompact: isCompact),
               ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        TabBar(
-          controller: _tabController,
-          isScrollable: true,
-          tabAlignment: TabAlignment.start,
-          tabs: <Widget>[
-            Tab(text: 'Tempo Real (${liveEvents.length})'),
-            Tab(
-              text:
-                  'Histórico (${history.meta?.total ?? history.items.length})',
+            ),
+            SliverPersistentHeader(
+              pinned: true,
+              delegate: PinnedSliverHeaderDelegate(
+                height: 48,
+                bottomBorder: true,
+                child: TabBar(
+                  controller: _tabController,
+                  isScrollable: isCompact,
+                  tabAlignment: isCompact
+                      ? TabAlignment.start
+                      : TabAlignment.fill,
+                  tabs: <Widget>[
+                    Tab(text: 'Tempo Real (${liveEvents.length})'),
+                    Tab(
+                      text:
+                          'Histórico (${history.meta?.total ?? history.items.length})',
+                    ),
+                  ],
+                ),
+              ),
             ),
           ],
-        ),
-        const SizedBox(height: 12),
-        Expanded(
-          child: TabBarView(
+          body: TabBarView(
             controller: _tabController,
             children: <Widget>[
-              liveEvents.isEmpty
-                  ? const EmptyStateView(
-                      title: 'Nenhum evento em tempo real',
-                      description: 'Os eventos do barramento SSE aparecerão aqui instantaneamente.',
-                      icon: Icons.bolt_outlined,
-                    )
-                  : ListView.separated(
-                      itemCount: liveEvents.length,
-                      separatorBuilder: (_, _) => const SizedBox(height: 8),
-                      itemBuilder: (context, index) {
-                        final ev = liveEvents[index];
-                        final p = EventPresentation.describe(ev.type, ev.data);
-                        return Card(
-                          elevation: 1,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: AppTheme.borderRadius,
-                          ),
-                          child: ListTile(
-                            onTap: () => _showEventDetail(
-                              type: ev.type,
-                              timestamp: ev.timestamp,
-                              data: ev.data,
-                            ),
-                            leading: Icon(
-                              p.icon,
-                              color: context.semanticColors
-                                  .resolve(p.tone, context.colorScheme)
-                                  .foreground,
-                            ),
-                            title: Wrap(
-                              spacing: 6,
-                              crossAxisAlignment: WrapCrossAlignment.center,
-                              children: <Widget>[
-                                Text(
-                                  p.label,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                                SemanticChip(
-                                  label: p.category,
-                                  tone: p.tone,
-                                  compact: true,
-                                ),
-                              ],
-                            ),
-                            subtitle: Text(
-                              p.summary,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            trailing: Text(
-                              formatClockTime(ev.timestamp),
-                              style: context.textTheme.labelSmall,
-                            ),
-                          ),
-                        );
-                      },
-                    ),
+              _buildLiveTab(liveEvents),
               _buildHistoryTab(history),
             ],
           ),
-        ),
-      ],
+        );
+      },
+    );
+  }
+
+  Widget _buildLiveTab(List<SseEvent> liveEvents) {
+    if (liveEvents.isEmpty) {
+      return ListView(
+        padding: const EdgeInsets.only(top: 12),
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: const <Widget>[
+          EmptyStateView(
+            title: 'Nenhum evento em tempo real',
+            description:
+                'Os eventos do barramento SSE aparecerão aqui instantaneamente.',
+            icon: Icons.bolt_outlined,
+          ),
+        ],
+      );
+    }
+
+    return ListView.separated(
+      padding: const EdgeInsets.only(top: 10, bottom: 24),
+      itemCount: liveEvents.length,
+      separatorBuilder: (_, _) => const SizedBox(height: 8),
+      itemBuilder: (context, index) {
+        final ev = liveEvents[index];
+        final p = EventPresentation.describe(ev.type, ev.data);
+        return Card(
+          elevation: 1,
+          shape: RoundedRectangleBorder(borderRadius: AppTheme.borderRadius),
+          child: ListTile(
+            onTap: () => _showEventDetail(
+              type: ev.type,
+              timestamp: ev.timestamp,
+              data: ev.data,
+            ),
+            leading: Icon(
+              p.icon,
+              color: context.semanticColors
+                  .resolve(p.tone, context.colorScheme)
+                  .foreground,
+            ),
+            title: Wrap(
+              spacing: 6,
+              runSpacing: 4,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: <Widget>[
+                Text(
+                  p.label,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                SemanticChip(label: p.category, tone: p.tone, compact: true),
+              ],
+            ),
+            subtitle: Text(
+              p.summary,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            trailing: Text(
+              formatClockTime(ev.timestamp),
+              style: context.textTheme.labelSmall,
+            ),
+          ),
+        );
+      },
     );
   }
 
   Widget _buildHistoryTab(EventsHistoryState history) {
     if (history.loading && history.items.isEmpty) {
-      return const LoadingStateView(
-        message: 'Carregando histórico de eventos...',
+      return ListView(
+        padding: const EdgeInsets.only(top: 12),
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: const <Widget>[
+          LoadingStateView(message: 'Carregando histórico de eventos...'),
+        ],
       );
     }
     if (history.error != null && history.items.isEmpty) {
-      return ErrorStateView(
-        message: history.error!,
-        onRetry: () =>
-            ref.read(eventsHistoryProvider.notifier).fetchPage(page: 1),
+      return ListView(
+        padding: const EdgeInsets.only(top: 12),
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: <Widget>[
+          ErrorStateView(
+            message: history.error!,
+            onRetry: () =>
+                ref.read(eventsHistoryProvider.notifier).fetchPage(page: 1),
+          ),
+        ],
       );
     }
     if (history.items.isEmpty) {
-      return const EmptyStateView(
-        title: 'Sem eventos persistidos',
-        icon: Icons.history,
+      return ListView(
+        padding: const EdgeInsets.only(top: 12),
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: const <Widget>[
+          EmptyStateView(title: 'Sem eventos persistidos', icon: Icons.history),
+        ],
       );
     }
 
+    final hasNext = history.meta?.hasNext == true;
     return RefreshIndicator(
       onRefresh: () =>
           ref.read(eventsHistoryProvider.notifier).fetchPage(page: 1),
-      child: ListView(
-        children: <Widget>[
-          for (final item in history.items) ...<Widget>[
-            Builder(
-              builder: (context) {
-                final p = EventPresentation.describe(item.type, item.data);
-                return ListTile(
-                  onTap: () => _showEventDetail(
-                    type: item.type,
-                    timestamp: item.timestamp,
-                    data: item.data,
-                  ),
-                  leading: Icon(
-                    p.icon,
-                    color: context.semanticColors
-                        .resolve(p.tone, context.colorScheme)
-                        .foreground,
-                  ),
-                  title: Text(
-                    item.title ?? p.label,
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  subtitle: Text(
-                    item.message ?? p.summary,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  trailing: Text(
-                    formatShortDateTime(item.timestamp),
-                    style: context.textTheme.labelSmall,
-                  ),
-                );
-              },
-            ),
-            const Divider(height: 1),
-          ],
-          if (history.meta?.hasNext == true)
-            Padding(
+      child: ListView.separated(
+        padding: const EdgeInsets.only(top: 8, bottom: 24),
+        physics: const AlwaysScrollableScrollPhysics(),
+        itemCount: history.items.length + (hasNext ? 1 : 0),
+        separatorBuilder: (_, _) => const Divider(height: 1),
+        itemBuilder: (context, index) {
+          if (index >= history.items.length) {
+            return Padding(
               padding: const EdgeInsets.symmetric(vertical: 12),
               child: OutlinedButton(
                 onPressed: history.loading
@@ -324,8 +443,39 @@ class _EventsPageState extends ConsumerState<EventsPage>
                           ),
                 child: const Text('Carregar mais eventos'),
               ),
+            );
+          }
+          final item = history.items[index];
+          final p = EventPresentation.describe(item.type, item.data);
+          return ListTile(
+            onTap: () => _showEventDetail(
+              type: item.type,
+              timestamp: item.timestamp,
+              data: item.data,
             ),
-        ],
+            leading: Icon(
+              p.icon,
+              color: context.semanticColors
+                  .resolve(p.tone, context.colorScheme)
+                  .foreground,
+            ),
+            title: Text(
+              item.title ?? p.label,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+            subtitle: Text(
+              item.message ?? p.summary,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            trailing: Text(
+              formatShortDateTime(item.timestamp),
+              style: context.textTheme.labelSmall,
+            ),
+          );
+        },
       ),
     );
   }

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/areas/area_contribution.dart';
 import 'package:netmonitor_app/areas/composition_registries.dart';
 import 'package:netmonitor_app/core/areas/areas_provider.dart';
+import 'package:netmonitor_app/features/core/presentation/widgets/pinned_sliver_header.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 
 /// Tela de Configurações com abas e cartões compostos dinamicamente por área
@@ -44,43 +45,60 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         : 0;
     final currentView = tabs[activeIndex];
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        const SearchFilterHeader(
-          title: 'Configurações',
-          subtitle: 'Preferências globais, áreas do produto, conectividade, notificações e sistema',
-        ),
-        const SizedBox(height: 12),
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: <Widget>[
-              for (var i = 0; i < tabs.length; i++) ...<Widget>[
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: ChoiceChip(
-                    selected: i == activeIndex,
-                    avatar: Icon(tabs[i].tab.icon, size: 16),
-                    label: Text(tabs[i].tab.title),
-                    onSelected: (_) =>
-                        setState(() => _selectedTab = tabs[i].tab.value),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isCompact = constraints.maxWidth < 680;
+
+        return CustomScrollView(
+          slivers: <Widget>[
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: SearchFilterHeader(
+                  title: 'Configurações',
+                  subtitle: isCompact
+                      ? null
+                      : 'Preferências globais, áreas do produto, conectividade, notificações e sistema',
+                ),
+              ),
+            ),
+            SliverPersistentHeader(
+              pinned: true,
+              delegate: PinnedSliverHeaderDelegate(
+                height: 52,
+                bottomBorder: true,
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    children: <Widget>[
+                      for (var i = 0; i < tabs.length; i++) ...<Widget>[
+                        if (i > 0) const SizedBox(width: 8),
+                        ChoiceChip(
+                          visualDensity: isCompact
+                              ? VisualDensity.compact
+                              : VisualDensity.standard,
+                          selected: i == activeIndex,
+                          avatar: Icon(tabs[i].tab.icon, size: 16),
+                          label: Text(tabs[i].tab.title),
+                          onSelected: (_) =>
+                              setState(() => _selectedTab = tabs[i].tab.value),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
-              ],
-            ],
-          ),
-        ),
-        const SizedBox(height: 14),
-        Expanded(
-          child: ListView(
-            children: <Widget>[
-              _SettingsCardsGrid(cards: currentView.cards),
-              const SizedBox(height: 24),
-            ],
-          ),
-        ),
-      ],
+              ),
+            ),
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.only(top: 12, bottom: 24),
+                child: _SettingsCardsGrid(cards: currentView.cards),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }

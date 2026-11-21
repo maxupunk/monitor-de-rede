@@ -66,15 +66,15 @@ class DashboardState {
   }
 
   List<DashboardWidgetConfig> visibleWidgets(Set<ProductArea> visibleAreas) {
-    return availableWidgets(visibleAreas)
-        .where((w) => w.visible)
-        .toList(growable: false);
+    return availableWidgets(
+      visibleAreas,
+    ).where((w) => w.visible).toList(growable: false);
   }
 
   List<DashboardWidgetConfig> hiddenWidgets(Set<ProductArea> visibleAreas) {
-    return availableWidgets(visibleAreas)
-        .where((w) => !w.visible)
-        .toList(growable: false);
+    return availableWidgets(
+      visibleAreas,
+    ).where((w) => !w.visible).toList(growable: false);
   }
 
   DashboardState copyWith({

@@ -49,71 +49,77 @@ void main() {
       },
     );
 
-    test('SettingsCardContribution.area keeps core AI cards visible when vpn area is off', () {
-      final coreMod = AreaContribution(
-        id: ProductArea.core,
-        settingsTabs: const <SettingsTabContribution>[
-          SettingsTabContribution(
-            value: 'ia',
-            title: 'Inteligência artificial',
-            icon: Icons.smart_toy_outlined,
-            order: 50,
-          ),
-        ],
-      );
-      final vpnMod = AreaContribution(
-        id: ProductArea.vpn,
-        settingsCards: <SettingsCardContribution>[
-          SettingsCardContribution(
-            tab: 'ia',
-            order: 10,
-            area: ProductArea.core,
-            builder: (_) => const SizedBox.shrink(),
-          ),
-          SettingsCardContribution(
-            tab: 'ia',
-            order: 20,
-            // Sem `area` explícito -> herda `ProductArea.vpn`
-            builder: (_) => const SizedBox.shrink(),
-          ),
-        ],
-      );
+    test(
+      'SettingsCardContribution.area keeps core AI cards visible when vpn area is off',
+      () {
+        final coreMod = AreaContribution(
+          id: ProductArea.core,
+          settingsTabs: const <SettingsTabContribution>[
+            SettingsTabContribution(
+              value: 'ia',
+              title: 'Inteligência artificial',
+              icon: Icons.smart_toy_outlined,
+              order: 50,
+            ),
+          ],
+        );
+        final vpnMod = AreaContribution(
+          id: ProductArea.vpn,
+          settingsCards: <SettingsCardContribution>[
+            SettingsCardContribution(
+              tab: 'ia',
+              order: 10,
+              area: ProductArea.core,
+              builder: (_) => const SizedBox.shrink(),
+            ),
+            SettingsCardContribution(
+              tab: 'ia',
+              order: 20,
+              // Sem `area` explícito -> herda `ProductArea.vpn`
+              builder: (_) => const SizedBox.shrink(),
+            ),
+          ],
+        );
 
-      final tabsWhenVpnOff = buildVisibleSettingsTabsFrom(
-        <AreaContribution>[coreMod, vpnMod],
-        const <ProductArea>{ProductArea.core},
-      );
-      expect(tabsWhenVpnOff.length, 1);
-      expect(tabsWhenVpnOff.first.tab.value, 'ia');
-      expect(tabsWhenVpnOff.first.cards.length, 1);
-      expect(tabsWhenVpnOff.first.cards.first.order, 10);
-    });
+        final tabsWhenVpnOff = buildVisibleSettingsTabsFrom(
+          <AreaContribution>[coreMod, vpnMod],
+          const <ProductArea>{ProductArea.core},
+        );
+        expect(tabsWhenVpnOff.length, 1);
+        expect(tabsWhenVpnOff.first.tab.value, 'ia');
+        expect(tabsWhenVpnOff.first.cards.length, 1);
+        expect(tabsWhenVpnOff.first.cards.first.order, 10);
+      },
+    );
 
-    test('extraShellOverlays respects per-area ADR 017 visibility independently of module id', () {
-      Widget coreOverlay(BuildContext _) => const SizedBox.shrink();
-      Widget networkOverlay(BuildContext _) => const SizedBox.shrink();
-      Widget vpnOverlay(BuildContext _) => const SizedBox.shrink();
+    test(
+      'extraShellOverlays respects per-area ADR 017 visibility independently of module id',
+      () {
+        Widget coreOverlay(BuildContext _) => const SizedBox.shrink();
+        Widget networkOverlay(BuildContext _) => const SizedBox.shrink();
+        Widget vpnOverlay(BuildContext _) => const SizedBox.shrink();
 
-      final vpnMod = AreaContribution(
-        id: ProductArea.vpn,
-        shellOverlays: <WidgetBuilder>[vpnOverlay],
-        extraShellOverlays: <ProductArea, List<WidgetBuilder>>{
-          ProductArea.core: <WidgetBuilder>[coreOverlay],
-          ProductArea.network: <WidgetBuilder>[networkOverlay],
-        },
-      );
+        final vpnMod = AreaContribution(
+          id: ProductArea.vpn,
+          shellOverlays: <WidgetBuilder>[vpnOverlay],
+          extraShellOverlays: <ProductArea, List<WidgetBuilder>>{
+            ProductArea.core: <WidgetBuilder>[coreOverlay],
+            ProductArea.network: <WidgetBuilder>[networkOverlay],
+          },
+        );
 
-      final onlyCore = visibleShellOverlaysFrom(
-        <AreaContribution>[vpnMod],
-        const <ProductArea>{ProductArea.core},
-      );
-      expect(onlyCore, <WidgetBuilder>[coreOverlay]);
+        final onlyCore = visibleShellOverlaysFrom(
+          <AreaContribution>[vpnMod],
+          const <ProductArea>{ProductArea.core},
+        );
+        expect(onlyCore, <WidgetBuilder>[coreOverlay]);
 
-      final coreAndNetwork = visibleShellOverlaysFrom(
-        <AreaContribution>[vpnMod],
-        const <ProductArea>{ProductArea.core, ProductArea.network},
-      );
-      expect(coreAndNetwork, <WidgetBuilder>[coreOverlay, networkOverlay]);
-    });
+        final coreAndNetwork = visibleShellOverlaysFrom(
+          <AreaContribution>[vpnMod],
+          const <ProductArea>{ProductArea.core, ProductArea.network},
+        );
+        expect(coreAndNetwork, <WidgetBuilder>[coreOverlay, networkOverlay]);
+      },
+    );
   });
 }

@@ -229,14 +229,17 @@ class _MonitorFormBodyState extends ConsumerState<_MonitorFormBody> {
             validator: FormValidators.required('Informe o nome do monitor.'),
           ),
           const SizedBox(height: 12),
-          DropdownButtonFormField<String>(
+          AppDropdownFormField<String>(
             initialValue: kMonitorKinds.any((k) => k.$1 == _type)
                 ? _type
                 : 'ping',
             decoration: const InputDecoration(labelText: 'Tipo de verificação'),
             items: <DropdownMenuItem<String>>[
               for (final (value, label) in kMonitorKinds)
-                DropdownMenuItem<String>(value: value, child: Text(label)),
+                DropdownMenuItem<String>(
+                  value: value,
+                  child: Text(label, overflow: TextOverflow.ellipsis),
+                ),
             ],
             onChanged: (v) {
               if (v == null) return;
@@ -247,7 +250,7 @@ class _MonitorFormBodyState extends ConsumerState<_MonitorFormBody> {
             },
           ),
           const SizedBox(height: 12),
-          DropdownButtonFormField<int?>(
+          AppDropdownFormField<int?>(
             initialValue: _deviceId,
             decoration: const InputDecoration(
               labelText: 'Dispositivo vinculado',
@@ -255,13 +258,14 @@ class _MonitorFormBodyState extends ConsumerState<_MonitorFormBody> {
             items: <DropdownMenuItem<int?>>[
               const DropdownMenuItem<int?>(
                 value: null,
-                child: Text('Sem vínculo'),
+                child: Text('Sem vínculo', overflow: TextOverflow.ellipsis),
               ),
               for (final d in monitorsState.devices)
                 DropdownMenuItem<int?>(
                   value: d.id,
                   child: Text(
                     d.ipAddress != null ? '${d.name} (${d.ipAddress})' : d.name,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
             ],
@@ -324,14 +328,17 @@ class _MonitorFormBodyState extends ConsumerState<_MonitorFormBody> {
           ],
           if (_type == 'snmp') ...<Widget>[
             const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
+            AppDropdownFormField<String>(
               initialValue: kSnmpModes.any((m) => m.$1 == _snmpMode)
                   ? _snmpMode
                   : 'oid',
               decoration: const InputDecoration(labelText: 'Modo SNMP'),
               items: <DropdownMenuItem<String>>[
                 for (final (value, label) in kSnmpModes)
-                  DropdownMenuItem<String>(value: value, child: Text(label)),
+                  DropdownMenuItem<String>(
+                    value: value,
+                    child: Text(label, overflow: TextOverflow.ellipsis),
+                  ),
               ],
               onChanged: (v) {
                 if (v != null) setState(() => _snmpMode = v);
@@ -352,41 +359,61 @@ class _MonitorFormBodyState extends ConsumerState<_MonitorFormBody> {
                     _snmpMode == 'interface_traffic') &&
                 _deviceId != null) ...<Widget>[
               const SizedBox(height: 12),
-              Row(
-                children: <Widget>[
-                  Expanded(
-                    child: DropdownButtonFormField<DeviceInterfaceRef?>(
-                      initialValue: _selectedInterface,
-                      decoration: const InputDecoration(labelText: 'Interface'),
-                      items: <DropdownMenuItem<DeviceInterfaceRef?>>[
-                        const DropdownMenuItem<DeviceInterfaceRef?>(
-                          value: null,
-                          child: Text('Selecione a interface'),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final dropdown = AppDropdownFormField<DeviceInterfaceRef?>(
+                    initialValue: _selectedInterface,
+                    decoration: const InputDecoration(labelText: 'Interface'),
+                    items: <DropdownMenuItem<DeviceInterfaceRef?>>[
+                      const DropdownMenuItem<DeviceInterfaceRef?>(
+                        value: null,
+                        child: Text(
+                          'Selecione a interface',
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        for (final intf in _interfaces)
-                          DropdownMenuItem<DeviceInterfaceRef?>(
-                            value: intf,
-                            child: Text(intf.name),
+                      ),
+                      for (final intf in _interfaces)
+                        DropdownMenuItem<DeviceInterfaceRef?>(
+                          value: intf,
+                          child: Text(
+                            intf.name,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                      ],
-                      onChanged: (v) => setState(() => _selectedInterface = v),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  OutlinedButton.icon(
+                        ),
+                    ],
+                    onChanged: (v) => setState(() => _selectedInterface = v),
+                  );
+                  final discoverBtn = OutlinedButton.icon(
                     onPressed: _loadingIfs
                         ? null
                         : () => _loadInterfaces(_deviceId!, scan: true),
                     icon: const Icon(Icons.radar, size: 18),
                     label: const Text('Descobrir'),
-                  ),
-                ],
+                  );
+                  if (constraints.maxWidth < 460) {
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: <Widget>[
+                        dropdown,
+                        const SizedBox(height: 8),
+                        discoverBtn,
+                      ],
+                    );
+                  }
+                  return Row(
+                    children: <Widget>[
+                      Expanded(child: dropdown),
+                      const SizedBox(width: 8),
+                      discoverBtn,
+                    ],
+                  );
+                },
               ),
             ],
           ],
           if (monitorsState.probes.isNotEmpty) ...<Widget>[
             const SizedBox(height: 12),
-            DropdownButtonFormField<int?>(
+            AppDropdownFormField<int?>(
               initialValue: _probeId,
               decoration: const InputDecoration(
                 labelText: 'Sonda / Agente (opcional)',
@@ -394,42 +421,41 @@ class _MonitorFormBodyState extends ConsumerState<_MonitorFormBody> {
               items: <DropdownMenuItem<int?>>[
                 const DropdownMenuItem<int?>(
                   value: null,
-                  child: Text('Execução local (central)'),
+                  child: Text(
+                    'Execução local (central)',
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
                 for (final p in monitorsState.probes)
-                  DropdownMenuItem<int?>(value: p.id, child: Text(p.name)),
+                  DropdownMenuItem<int?>(
+                    value: p.id,
+                    child: Text(p.name, overflow: TextOverflow.ellipsis),
+                  ),
               ],
               onChanged: (v) => setState(() => _probeId = v),
             ),
           ],
           const SizedBox(height: 12),
-          Row(
+          ResponsiveFieldRow(
+            breakpoint: 640,
             children: <Widget>[
-              Expanded(
-                child: TextFormField(
-                  controller: _intervalCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'Intervalo (s)'),
-                  validator: FormValidators.integerRange(5, 86400),
-                ),
+              TextFormField(
+                controller: _intervalCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Intervalo (s)'),
+                validator: FormValidators.integerRange(5, 86400),
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: TextFormField(
-                  controller: _timeoutCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'Timeout (s)'),
-                  validator: FormValidators.integerRange(1, 120),
-                ),
+              TextFormField(
+                controller: _timeoutCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Timeout (s)'),
+                validator: FormValidators.integerRange(1, 120),
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: TextFormField(
-                  controller: _retryCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'Tentativas'),
-                  validator: FormValidators.integerRange(0, 10),
-                ),
+              TextFormField(
+                controller: _retryCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Tentativas'),
+                validator: FormValidators.integerRange(0, 10),
               ),
             ],
           ),
@@ -465,7 +491,8 @@ Future<void> showSaasPresetsSheet(BuildContext context, WidgetRef ref) async {
   await showAdaptiveFormSheet<void>(
     context: context,
     title: 'Serviços SaaS pré-configurados',
-    subtitle: 'Selecione serviços externos para monitorar disponibilidade e latência.',
+    subtitle:
+        'Selecione serviços externos para monitorar disponibilidade e latência.',
     maxWidth: 640,
     builder: (_) => const _SaasPresetsBody(),
   );

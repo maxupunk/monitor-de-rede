@@ -146,7 +146,8 @@ class _DeploysPageState extends ConsumerState<DeploysPage> {
     final ok = await showConfirmActionDialog(
       context: context,
       title: 'Remover aplicação ${app.name}?',
-      message: 'Remove a automação de deploy do NetMonitor. Os containers que já estão rodando no servidor continuam no ar.',
+      message:
+          'Remove a automação de deploy do NetMonitor. Os containers que já estão rodando no servidor continuam no ar.',
       confirmLabel: 'Remover aplicação',
       tone: SemanticTone.error,
     );
@@ -158,7 +159,8 @@ class _DeploysPageState extends ConsumerState<DeploysPage> {
     final ok = await showConfirmActionDialog(
       context: context,
       title: 'Remover alvo ${target.name}?',
-      message: 'O alvo será desvinculado dos próximos deploys. Os containers atuais continuam rodando.',
+      message:
+          'O alvo será desvinculado dos próximos deploys. Os containers atuais continuam rodando.',
       confirmLabel: 'Remover alvo',
       tone: SemanticTone.error,
     );
@@ -222,6 +224,7 @@ class _DeploysPageState extends ConsumerState<DeploysPage> {
     final overview = deploys.overview;
     final counts = overview?.counts ?? const DeployCounts();
     final awaiting = deploys.awaitingApproval;
+    final isCompact = MediaQuery.sizeOf(context).width < 680;
 
     return RefreshIndicator(
       onRefresh: () async {
@@ -233,31 +236,85 @@ class _DeploysPageState extends ConsumerState<DeploysPage> {
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: <Widget>[
-          SearchFilterHeader(
-            title: 'Deploy contínuo',
-            subtitle: 'Automação de stacks Docker Compose com compilação isolada, aprovação e rollback.',
-            actions: <Widget>[
-              OutlinedButton.icon(
-                onPressed: deploys.loading
-                    ? null
-                    : () => ref.read(deploysProvider.notifier).fetchOverview(),
-                icon: const Icon(Icons.refresh, size: 18),
-                label: const Text('Atualizar'),
-              ),
-              if (canAdmin) ...<Widget>[
-                OutlinedButton.icon(
-                  onPressed: () => showDeployConnectionsDialog(context),
-                  icon: const Icon(Icons.link, size: 18),
-                  label: const Text('GitHub'),
+          if (isCompact)
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: Text(
+                    'Deploy contínuo',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: context.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
                 ),
-                FilledButton.icon(
-                  onPressed: () => showDeploySetupDialog(context),
-                  icon: const Icon(Icons.rocket_launch_outlined, size: 18),
-                  label: const Text('Automatizar deploy'),
+                if (canAdmin)
+                  FilledButton.icon(
+                    onPressed: () => showDeploySetupDialog(context),
+                    icon: const Icon(Icons.rocket_launch_outlined, size: 17),
+                    label: const Text('Automatizar'),
+                  ),
+                PopupMenuButton<String>(
+                  tooltip: 'Mais ações',
+                  onSelected: (cmd) {
+                    if (cmd == 'refresh' && !deploys.loading) {
+                      ref.read(deploysProvider.notifier).fetchOverview();
+                    } else if (cmd == 'github') {
+                      showDeployConnectionsDialog(context);
+                    }
+                  },
+                  itemBuilder: (_) => <PopupMenuEntry<String>>[
+                    PopupMenuItem<String>(
+                      value: 'refresh',
+                      enabled: !deploys.loading,
+                      child: const ListTile(
+                        dense: true,
+                        leading: Icon(Icons.refresh),
+                        title: Text('Atualizar'),
+                      ),
+                    ),
+                    if (canAdmin)
+                      const PopupMenuItem<String>(
+                        value: 'github',
+                        child: ListTile(
+                          dense: true,
+                          leading: Icon(Icons.link),
+                          title: Text('Conexões GitHub'),
+                        ),
+                      ),
+                  ],
                 ),
               ],
-            ],
-          ),
+            )
+          else
+            SearchFilterHeader(
+              title: 'Deploy contínuo',
+              subtitle:
+                  'Automação de stacks Docker Compose com compilação isolada, aprovação e rollback.',
+              actions: <Widget>[
+                OutlinedButton.icon(
+                  onPressed: deploys.loading
+                      ? null
+                      : () =>
+                            ref.read(deploysProvider.notifier).fetchOverview(),
+                  icon: const Icon(Icons.refresh, size: 18),
+                  label: const Text('Atualizar'),
+                ),
+                if (canAdmin) ...<Widget>[
+                  OutlinedButton.icon(
+                    onPressed: () => showDeployConnectionsDialog(context),
+                    icon: const Icon(Icons.link, size: 18),
+                    label: const Text('GitHub'),
+                  ),
+                  FilledButton.icon(
+                    onPressed: () => showDeploySetupDialog(context),
+                    icon: const Icon(Icons.rocket_launch_outlined, size: 18),
+                    label: const Text('Automatizar deploy'),
+                  ),
+                ],
+              ],
+            ),
           const SizedBox(height: 14),
 
           if (_processingGithubCallback) ...<Widget>[
@@ -377,7 +434,8 @@ class _DeploysPageState extends ConsumerState<DeploysPage> {
           else if (deploys.applications.isEmpty)
             EmptyStateView(
               title: 'Nenhuma aplicação automatizada',
-              description: 'Conecte um repositório GitHub e um agente com permissão deploy para automatizar atualizações.',
+              description:
+                  'Conecte um repositório GitHub e um agente com permissão deploy para automatizar atualizações.',
               icon: Icons.rocket_launch_outlined,
               action: canAdmin
                   ? FilledButton.icon(
@@ -535,25 +593,27 @@ class _DeploysPageState extends ConsumerState<DeploysPage> {
                         padding: const EdgeInsets.only(bottom: 8),
                         child: NestedPanel(
                           tone: tone,
-                          child: Row(
+                          child: Wrap(
+                            spacing: 8,
+                            runSpacing: 6,
+                            alignment: WrapAlignment.spaceBetween,
+                            crossAxisAlignment: WrapCrossAlignment.center,
                             children: <Widget>[
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: <Widget>[
-                                    Text(
-                                      step.title,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w700,
-                                      ),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: <Widget>[
+                                  Text(
+                                    step.title,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w700,
                                     ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      step.detail,
-                                      style: context.textTheme.bodySmall,
-                                    ),
-                                  ],
-                                ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    step.detail,
+                                    style: context.textTheme.bodySmall,
+                                  ),
+                                ],
                               ),
                               if (actionAllowed)
                                 FilledButton.tonal(
@@ -582,6 +642,12 @@ class _DeploysPageState extends ConsumerState<DeploysPage> {
   ) {
     final latestBuild = deploys.latestBuildOf(app.id);
     final isNetmonitorBuilder = app.builder == 'netmonitor';
+    final isCompact = MediaQuery.sizeOf(context).width < 520;
+    final builderChip = SemanticChip(
+      label: isNetmonitorBuilder ? 'Compila no NetMonitor' : 'GitHub Actions',
+      tone: isNetmonitorBuilder ? SemanticTone.info : SemanticTone.secondary,
+      compact: true,
+    );
 
     return SectionCard(
       title: app.name,
@@ -593,15 +659,7 @@ class _DeploysPageState extends ConsumerState<DeploysPage> {
         spacing: 6,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: <Widget>[
-          SemanticChip(
-            label: isNetmonitorBuilder
-                ? 'Compila no NetMonitor'
-                : 'GitHub Actions',
-            tone: isNetmonitorBuilder
-                ? SemanticTone.info
-                : SemanticTone.secondary,
-            compact: true,
-          ),
+          if (!isCompact) builderChip,
           if (canAdmin)
             PopupMenuButton<String>(
               onSelected: (action) {
@@ -659,6 +717,10 @@ class _DeploysPageState extends ConsumerState<DeploysPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
+          if (isCompact) ...<Widget>[
+            Align(alignment: Alignment.centerLeft, child: builderChip),
+            const SizedBox(height: 10),
+          ],
           if (canAdmin) ...<Widget>[
             Wrap(
               spacing: 8,

@@ -115,7 +115,8 @@ class _DockerImagesPageState extends ConsumerState<DockerImagesPage> {
     final confirmed = await showConfirmActionDialog(
       context: context,
       title: 'Remover imagem ${image.primaryTag}?',
-      message: 'Se a imagem estiver em uso por algum container, a Engine recusará a remoção.',
+      message:
+          'Se a imagem estiver em uso por algum container, a Engine recusará a remoção.',
       confirmLabel: 'Remover imagem',
       tone: SemanticTone.error,
     );
@@ -159,26 +160,61 @@ class _DockerImagesPageState extends ConsumerState<DockerImagesPage> {
         })
         .toList(growable: false);
 
+    final isCompact = MediaQuery.sizeOf(context).width < 560;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        SearchFilterHeader(
+        UnifiedFilterBar(
           searchController: _searchController,
           searchHint: 'Buscar imagem por tag, digest ou ID...',
           onSearchChanged: (v) => setState(() => _search = v),
-          actions: <Widget>[
-            if (canUpdate)
-              OutlinedButton.icon(
-                onPressed: _openPullDialog,
-                icon: const Icon(Icons.download_outlined, size: 18),
-                label: const Text('Baixar imagem'),
-              ),
-            if (isAdmin)
-              FilledButton.tonalIcon(
-                onPressed: _pruneImages,
-                icon: const Icon(Icons.cleaning_services_outlined, size: 18),
-                label: const Text('Limpar sem uso'),
-              ),
+          trailingActions: <Widget>[
+            if (isCompact && (canUpdate || isAdmin))
+              PopupMenuButton<String>(
+                tooltip: 'Ações de imagens',
+                onSelected: (cmd) {
+                  if (cmd == 'pull') {
+                    _openPullDialog();
+                  } else if (cmd == 'prune') {
+                    _pruneImages();
+                  }
+                },
+                itemBuilder: (_) => <PopupMenuEntry<String>>[
+                  if (canUpdate)
+                    const PopupMenuItem<String>(
+                      value: 'pull',
+                      child: ListTile(
+                        dense: true,
+                        leading: Icon(Icons.download_outlined),
+                        title: Text('Baixar imagem'),
+                      ),
+                    ),
+                  if (isAdmin)
+                    const PopupMenuItem<String>(
+                      value: 'prune',
+                      child: ListTile(
+                        dense: true,
+                        leading: Icon(Icons.cleaning_services_outlined),
+                        title: Text('Limpar sem uso'),
+                      ),
+                    ),
+                ],
+              )
+            else ...<Widget>[
+              if (canUpdate)
+                OutlinedButton.icon(
+                  onPressed: _openPullDialog,
+                  icon: const Icon(Icons.download_outlined, size: 18),
+                  label: const Text('Baixar imagem'),
+                ),
+              if (isAdmin)
+                FilledButton.tonalIcon(
+                  onPressed: _pruneImages,
+                  icon: const Icon(Icons.cleaning_services_outlined, size: 18),
+                  label: const Text('Limpar sem uso'),
+                ),
+            ],
           ],
         ),
         const SizedBox(height: 14),

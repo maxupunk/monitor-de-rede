@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
@@ -248,6 +249,7 @@ class _PluginEditorBodyState extends ConsumerState<_PluginEditorBody>
         TabBar(
           controller: _tabCtrl,
           isScrollable: true,
+          tabAlignment: TabAlignment.start,
           indicatorColor: pluginColor,
           labelColor: pluginColor,
           tabs: const <Tab>[
@@ -265,7 +267,7 @@ class _PluginEditorBodyState extends ConsumerState<_PluginEditorBody>
           const SizedBox(height: 10),
         ],
         SizedBox(
-          height: 360,
+          height: math.min(360.0, MediaQuery.sizeOf(context).height * 0.50),
           child: TabBarView(
             controller: _tabCtrl,
             children: <Widget>[
@@ -310,30 +312,42 @@ class _PluginEditorBodyState extends ConsumerState<_PluginEditorBody>
                   ),
                 ],
               ),
-              Row(
-                children: <Widget>[
-                  Expanded(
-                    child: TextField(
-                      controller: _usageCtrl,
-                      readOnly: _isBuiltin,
-                      maxLines: null,
-                      expands: true,
-                      onChanged: (_) => setState(() {}),
-                      decoration: const InputDecoration(
-                        alignLabelWithHint: true,
-                        labelText: 'Uso (Markdown)',
-                      ),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final editor = TextField(
+                    controller: _usageCtrl,
+                    readOnly: _isBuiltin,
+                    maxLines: null,
+                    expands: true,
+                    onChanged: (_) => setState(() {}),
+                    decoration: const InputDecoration(
+                      alignLabelWithHint: true,
+                      labelText: 'Uso (Markdown)',
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: NestedPanel(
-                      child: SingleChildScrollView(
-                        child: MarkdownBody(data: _usageCtrl.text),
-                      ),
+                  );
+                  final preview = NestedPanel(
+                    child: SingleChildScrollView(
+                      child: MarkdownBody(data: _usageCtrl.text),
                     ),
-                  ),
-                ],
+                  );
+                  if (constraints.maxWidth < 520) {
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: <Widget>[
+                        Expanded(child: editor),
+                        const SizedBox(height: 8),
+                        Expanded(child: preview),
+                      ],
+                    );
+                  }
+                  return Row(
+                    children: <Widget>[
+                      Expanded(child: editor),
+                      const SizedBox(width: 10),
+                      Expanded(child: preview),
+                    ],
+                  );
+                },
               ),
               TextField(
                 controller: _testsCtrl,

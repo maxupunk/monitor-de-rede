@@ -52,71 +52,111 @@ class ChoiceCard extends StatelessWidget {
           opacity: enabled ? 1.0 : 0.55,
           child: Padding(
             padding: const EdgeInsets.all(14),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                if (icon != null) ...<Widget>[
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: colors.container,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Icon(icon, size: 22, color: colors.onContainer),
-                  ),
-                  const SizedBox(width: 12),
-                ],
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 4,
-                        crossAxisAlignment: WrapCrossAlignment.center,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final stackTrailing =
+                    trailing != null && constraints.maxWidth < 400;
+                final bodyRow = Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    if (icon != null) ...<Widget>[
+                      Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: colors.container,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Icon(icon, size: 22, color: colors.onContainer),
+                      ),
+                      const SizedBox(width: 12),
+                    ],
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: <Widget>[
-                          Text(
-                            title,
-                            style: context.textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.w700,
-                              color: scheme.onSurface,
-                            ),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 4,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: <Widget>[
+                              Text(
+                                title,
+                                style: context.textTheme.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                  color: scheme.onSurface,
+                                ),
+                              ),
+                              if (badge != null)
+                                SemanticChip(
+                                  label: badge!,
+                                  tone: badgeTone,
+                                  compact: true,
+                                ),
+                            ],
                           ),
-                          if (badge != null)
-                            SemanticChip(
-                              label: badge!,
-                              tone: badgeTone,
-                              compact: true,
+                          if (subtitle != null &&
+                              subtitle!.isNotEmpty) ...<Widget>[
+                            const SizedBox(height: 4),
+                            Text(
+                              subtitle!,
+                              style: context.textTheme.bodySmall?.copyWith(
+                                color: scheme.onSurfaceVariant,
+                                height: 1.35,
+                              ),
                             ),
+                          ],
                         ],
                       ),
-                      if (subtitle != null && subtitle!.isNotEmpty) ...<Widget>[
-                        const SizedBox(height: 4),
-                        Text(
-                          subtitle!,
-                          style: context.textTheme.bodySmall?.copyWith(
-                            color: scheme.onSurfaceVariant,
-                            height: 1.35,
+                    ),
+                    if (trailing != null && !stackTrailing) ...<Widget>[
+                      const SizedBox(width: 8),
+                      Flexible(
+                        flex: 0,
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            maxWidth: constraints.maxWidth * 0.45,
                           ),
+                          child: trailing is Wrap
+                              ? trailing!
+                              : SingleChildScrollView(
+                                  scrollDirection: Axis.horizontal,
+                                  child: trailing!,
+                                ),
                         ),
-                      ],
+                      ),
+                    ] else if (trailing == null) ...<Widget>[
+                      const SizedBox(width: 8),
+                      Icon(
+                        selected ? Icons.check_circle : Icons.chevron_right,
+                        color: selected
+                            ? colors.foreground
+                            : scheme.onSurfaceVariant,
+                      ),
                     ],
-                  ),
-                ),
-                if (trailing != null) ...<Widget>[
-                  const SizedBox(width: 8),
-                  trailing!,
-                ] else ...<Widget>[
-                  const SizedBox(width: 8),
-                  Icon(
-                    selected ? Icons.check_circle : Icons.chevron_right,
-                    color: selected
-                        ? colors.foreground
-                        : scheme.onSurfaceVariant,
-                  ),
-                ],
-              ],
+                  ],
+                );
+
+                if (!stackTrailing) return bodyRow;
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    bodyRow,
+                    const SizedBox(height: 10),
+                    Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: trailing is Wrap
+                          ? trailing!
+                          : SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: trailing!,
+                            ),
+                    ),
+                  ],
+                );
+              },
             ),
           ),
         ),

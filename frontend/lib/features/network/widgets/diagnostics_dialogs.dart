@@ -125,17 +125,23 @@ class _DiagnosticPlaybookBodyState
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        DropdownButtonFormField<String>(
+        AppDropdownFormField<String>(
           initialValue: _playbookType,
           decoration: const InputDecoration(labelText: 'Tipo de Playbook'),
           items: const <DropdownMenuItem<String>>[
             DropdownMenuItem(
               value: 'internet_health',
-              child: Text('Saúde da Internet (DNS + Rota + WAN)'),
+              child: Text(
+                'Saúde da Internet (DNS + Rota + WAN)',
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
             DropdownMenuItem(
               value: 'device_reachability',
-              child: Text('Alcance e Saúde de Equipamento'),
+              child: Text(
+                'Alcance e Saúde de Equipamento',
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           ],
           onChanged: _running
@@ -156,7 +162,9 @@ class _DiagnosticPlaybookBodyState
           ),
         ],
         const SizedBox(height: 12),
-        Row(
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
           children: <Widget>[
             FilledButton.icon(
               onPressed: _running ? null : _run,
@@ -169,14 +177,12 @@ class _DiagnosticPlaybookBodyState
                   : const Icon(Icons.play_arrow),
               label: Text(_running ? 'Executando...' : 'Executar Playbook'),
             ),
-            if (_running) ...<Widget>[
-              const SizedBox(width: 8),
+            if (_running)
               OutlinedButton.icon(
                 onPressed: () => _cancel?.call(),
                 icon: const Icon(Icons.stop),
                 label: const Text('Abortar'),
               ),
-            ],
           ],
         ),
         if (_error != null) ...<Widget>[
@@ -341,38 +347,44 @@ class _TracerouteBodyState extends ConsumerState<_TracerouteBody> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        Row(
+        ResponsiveFieldRow(
+          breakpoint: 480,
           children: <Widget>[
-            Expanded(
-              flex: 3,
-              child: TextField(
-                controller: _hostCtrl,
-                enabled: !_running,
-                decoration: const InputDecoration(
-                  labelText: 'Host ou IP destino',
-                  hintText: 'Ex.: 8.8.8.8 ou cloudflare.com',
-                ),
+            TextField(
+              controller: _hostCtrl,
+              enabled: !_running,
+              decoration: const InputDecoration(
+                labelText: 'Host ou IP destino',
+                hintText: 'Ex.: 8.8.8.8 ou cloudflare.com',
               ),
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: DropdownButtonFormField<int>(
-                initialValue: _maxHops,
-                decoration: const InputDecoration(labelText: 'Máx. saltos'),
-                items: const <DropdownMenuItem<int>>[
-                  DropdownMenuItem(value: 15, child: Text('15')),
-                  DropdownMenuItem(value: 30, child: Text('30')),
-                  DropdownMenuItem(value: 45, child: Text('45')),
-                ],
-                onChanged: _running
-                    ? null
-                    : (v) => setState(() => _maxHops = v ?? 30),
-              ),
+            AppDropdownFormField<int>(
+              initialValue: _maxHops,
+              decoration: const InputDecoration(labelText: 'Máx. saltos'),
+              items: const <DropdownMenuItem<int>>[
+                DropdownMenuItem(
+                  value: 15,
+                  child: Text('15', overflow: TextOverflow.ellipsis),
+                ),
+                DropdownMenuItem(
+                  value: 30,
+                  child: Text('30', overflow: TextOverflow.ellipsis),
+                ),
+                DropdownMenuItem(
+                  value: 45,
+                  child: Text('45', overflow: TextOverflow.ellipsis),
+                ),
+              ],
+              onChanged: _running
+                  ? null
+                  : (v) => setState(() => _maxHops = v ?? 30),
             ),
           ],
         ),
         const SizedBox(height: 12),
-        Row(
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
           children: <Widget>[
             FilledButton.icon(
               onPressed: _running ? null : _start,
@@ -385,14 +397,12 @@ class _TracerouteBodyState extends ConsumerState<_TracerouteBody> {
                   : const Icon(Icons.alt_route),
               label: Text(_running ? 'Traçando...' : 'Iniciar Traceroute'),
             ),
-            if (_running) ...<Widget>[
-              const SizedBox(width: 8),
+            if (_running)
               OutlinedButton.icon(
                 onPressed: () => _cancel?.call(),
                 icon: const Icon(Icons.stop),
                 label: const Text('Parar'),
               ),
-            ],
           ],
         ),
         if (_error != null) ...<Widget>[
@@ -627,44 +637,51 @@ class _PortScanBodyState extends ConsumerState<_PortScanBody> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        Row(
+        ResponsiveFieldRow(
+          breakpoint: 640,
           children: <Widget>[
-            Expanded(
-              flex: 2,
-              child: TextField(
-                controller: _hostCtrl,
-                enabled: !_running,
-                decoration: const InputDecoration(labelText: 'Host ou IP'),
-              ),
+            TextField(
+              controller: _hostCtrl,
+              enabled: !_running,
+              decoration: const InputDecoration(labelText: 'Host ou IP'),
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: DropdownButtonFormField<String>(
-                initialValue: _protocol,
-                decoration: const InputDecoration(labelText: 'Protocolo'),
-                items: const <DropdownMenuItem<String>>[
-                  DropdownMenuItem(value: 'tcp', child: Text('TCP')),
-                  DropdownMenuItem(value: 'udp', child: Text('UDP')),
-                ],
-                onChanged: _running
-                    ? null
-                    : (v) => setState(() => _protocol = v ?? 'tcp'),
-              ),
+            AppDropdownFormField<String>(
+              initialValue: _protocol,
+              decoration: const InputDecoration(labelText: 'Protocolo'),
+              items: const <DropdownMenuItem<String>>[
+                DropdownMenuItem(
+                  value: 'tcp',
+                  child: Text('TCP', overflow: TextOverflow.ellipsis),
+                ),
+                DropdownMenuItem(
+                  value: 'udp',
+                  child: Text('UDP', overflow: TextOverflow.ellipsis),
+                ),
+              ],
+              onChanged: _running
+                  ? null
+                  : (v) => setState(() => _protocol = v ?? 'tcp'),
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: DropdownButtonFormField<String>(
-                initialValue: _profile,
-                decoration: const InputDecoration(labelText: 'Perfil'),
-                items: const <DropdownMenuItem<String>>[
-                  DropdownMenuItem(value: 'fast', child: Text('Rápido')),
-                  DropdownMenuItem(value: 'reliable', child: Text('Confiável')),
-                  DropdownMenuItem(value: 'complete', child: Text('Completo')),
-                ],
-                onChanged: _running
-                    ? null
-                    : (v) => setState(() => _profile = v ?? 'fast'),
-              ),
+            AppDropdownFormField<String>(
+              initialValue: _profile,
+              decoration: const InputDecoration(labelText: 'Perfil'),
+              items: const <DropdownMenuItem<String>>[
+                DropdownMenuItem(
+                  value: 'fast',
+                  child: Text('Rápido', overflow: TextOverflow.ellipsis),
+                ),
+                DropdownMenuItem(
+                  value: 'reliable',
+                  child: Text('Confiável', overflow: TextOverflow.ellipsis),
+                ),
+                DropdownMenuItem(
+                  value: 'complete',
+                  child: Text('Completo', overflow: TextOverflow.ellipsis),
+                ),
+              ],
+              onChanged: _running
+                  ? null
+                  : (v) => setState(() => _profile = v ?? 'fast'),
             ),
           ],
         ),
@@ -739,7 +756,13 @@ class _PortScanBodyState extends ConsumerState<_PortScanBody> {
                       ),
                     ),
                   ),
-                  Expanded(child: Text(item.service ?? 'serviço desconhecido')),
+                  Expanded(
+                    child: Text(
+                      item.service ?? 'serviço desconhecido',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
                   Text(
                     formatLatency(item.latencyMs),
                     style: context.textTheme.bodySmall,
@@ -865,40 +888,55 @@ class _SpeedTestBodyState extends ConsumerState<_SpeedTestBody> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        SegmentedButton<String>(
-          segments: const <ButtonSegment<String>>[
-            ButtonSegment(
-              value: 'wan',
-              label: Text('Internet (WAN)'),
-              icon: Icon(Icons.public, size: 16),
-            ),
-            ButtonSegment(
-              value: 'lan',
-              label: Text('Rede Local (LAN)'),
-              icon: Icon(Icons.lan, size: 16),
-            ),
-          ],
-          selected: <String>{_scope},
-          onSelectionChanged: _running
-              ? null
-              : (s) => setState(() => _scope = s.first),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final compact = constraints.maxWidth < 400;
+            return SegmentedButton<String>(
+              showSelectedIcon: !compact,
+              segments: <ButtonSegment<String>>[
+                ButtonSegment<String>(
+                  value: 'wan',
+                  label: Text(compact ? 'WAN' : 'Internet (WAN)'),
+                  icon: const Icon(Icons.public, size: 16),
+                ),
+                ButtonSegment<String>(
+                  value: 'lan',
+                  label: Text(compact ? 'LAN' : 'Rede Local (LAN)'),
+                  icon: const Icon(Icons.lan, size: 16),
+                ),
+              ],
+              selected: <String>{_scope},
+              onSelectionChanged: _running
+                  ? null
+                  : (s) => setState(() => _scope = s.first),
+            );
+          },
         ),
         const SizedBox(height: 10),
-        DropdownButtonFormField<String>(
+        AppDropdownFormField<String>(
           initialValue: _mode,
           decoration: const InputDecoration(labelText: 'Intensidade do teste'),
           items: const <DropdownMenuItem<String>>[
             DropdownMenuItem(
               value: 'simple',
-              child: Text('Rápido (menor tráfego)'),
+              child: Text(
+                'Rápido (menor tráfego)',
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
             DropdownMenuItem(
               value: 'medium',
-              child: Text('Padrão (equilibrado)'),
+              child: Text(
+                'Padrão (equilibrado)',
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
             DropdownMenuItem(
               value: 'complete',
-              child: Text('Completo (alta precisão)'),
+              child: Text(
+                'Completo (alta precisão)',
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           ],
           onChanged: _running
@@ -906,15 +944,16 @@ class _SpeedTestBodyState extends ConsumerState<_SpeedTestBody> {
               : (v) => setState(() => _mode = v ?? 'medium'),
         ),
         const SizedBox(height: 12),
-        Row(
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
           children: <Widget>[
             FilledButton.icon(
               onPressed: _running ? null : _start,
               icon: const Icon(Icons.speed),
               label: Text(_running ? 'Medindo...' : 'Iniciar teste'),
             ),
-            if (_running) ...<Widget>[
-              const SizedBox(width: 8),
+            if (_running)
               OutlinedButton.icon(
                 onPressed: () {
                   _cancelWan?.call();
@@ -923,7 +962,6 @@ class _SpeedTestBodyState extends ConsumerState<_SpeedTestBody> {
                 icon: const Icon(Icons.stop),
                 label: const Text('Cancelar'),
               ),
-            ],
           ],
         ),
         if (_progress != null) ...<Widget>[
@@ -1208,47 +1246,46 @@ class _SnmpTestBodyState extends ConsumerState<_SnmpTestBody> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        Row(
+        ResponsiveFieldRow(
+          breakpoint: 480,
           children: <Widget>[
-            Expanded(
-              flex: 2,
-              child: TextField(
-                controller: _hostCtrl,
-                decoration: const InputDecoration(labelText: 'Host / IP'),
-              ),
+            TextField(
+              controller: _hostCtrl,
+              decoration: const InputDecoration(labelText: 'Host / IP'),
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: TextField(
-                controller: _portCtrl,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Porta'),
-              ),
+            TextField(
+              controller: _portCtrl,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Porta'),
             ),
           ],
         ),
         const SizedBox(height: 10),
-        Row(
+        ResponsiveFieldRow(
+          breakpoint: 480,
           children: <Widget>[
-            Expanded(
-              child: DropdownButtonFormField<String>(
-                initialValue: _version,
-                decoration: const InputDecoration(labelText: 'Versão'),
-                items: const <DropdownMenuItem<String>>[
-                  DropdownMenuItem(value: 'v1', child: Text('v1')),
-                  DropdownMenuItem(value: 'v2c', child: Text('v2c')),
-                  DropdownMenuItem(value: 'v3', child: Text('v3')),
-                ],
-                onChanged: (v) => setState(() => _version = v ?? 'v2c'),
-              ),
+            AppDropdownFormField<String>(
+              initialValue: _version,
+              decoration: const InputDecoration(labelText: 'Versão'),
+              items: const <DropdownMenuItem<String>>[
+                DropdownMenuItem(
+                  value: 'v1',
+                  child: Text('v1', overflow: TextOverflow.ellipsis),
+                ),
+                DropdownMenuItem(
+                  value: 'v2c',
+                  child: Text('v2c', overflow: TextOverflow.ellipsis),
+                ),
+                DropdownMenuItem(
+                  value: 'v3',
+                  child: Text('v3', overflow: TextOverflow.ellipsis),
+                ),
+              ],
+              onChanged: (v) => setState(() => _version = v ?? 'v2c'),
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              flex: 2,
-              child: TextField(
-                controller: _communityCtrl,
-                decoration: const InputDecoration(labelText: 'Community'),
-              ),
+            TextField(
+              controller: _communityCtrl,
+              decoration: const InputDecoration(labelText: 'Community'),
             ),
           ],
         ),
@@ -1335,7 +1372,8 @@ Future<void> showSnmpScanDialog(
   return showAdaptiveFormSheet<void>(
     context: context,
     title: 'Escanear SNMP · $deviceName',
-    subtitle: 'Descubra CPU, memória, interfaces e sensores e aplique monitores em lote',
+    subtitle:
+        'Descubra CPU, memória, interfaces e sensores e aplique monitores em lote',
     maxWidth: 680,
     builder: (ctx) => _SnmpScanBody(
       deviceId: deviceId,
@@ -1630,8 +1668,11 @@ class _SnmpProfilesBodyState extends ConsumerState<_SnmpProfilesBody> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        Wrap(
+          alignment: WrapAlignment.spaceBetween,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 8,
+          runSpacing: 8,
           children: <Widget>[
             Text(
               '${profiles.length} perfis disponíveis',
@@ -1648,44 +1689,35 @@ class _SnmpProfilesBodyState extends ConsumerState<_SnmpProfilesBody> {
           const SizedBox(height: 10),
           NestedPanel(
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
-                Row(
+                ResponsiveFieldRow(
+                  breakpoint: 480,
                   children: <Widget>[
-                    Expanded(
-                      child: TextField(
-                        controller: _idCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'ID (slug)',
-                        ),
-                      ),
+                    TextField(
+                      controller: _idCtrl,
+                      decoration: const InputDecoration(labelText: 'ID (slug)'),
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: TextField(
-                        controller: _nameCtrl,
-                        decoration: const InputDecoration(labelText: 'Nome'),
-                      ),
+                    TextField(
+                      controller: _nameCtrl,
+                      decoration: const InputDecoration(labelText: 'Nome'),
                     ),
                   ],
                 ),
-                const SizedBox(height: 8),
-                Row(
+                const SizedBox(height: 10),
+                ResponsiveFieldRow(
+                  breakpoint: 480,
                   children: <Widget>[
-                    Expanded(
-                      child: TextField(
-                        controller: _vendorCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'Fabricante',
-                        ),
+                    TextField(
+                      controller: _vendorCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Fabricante',
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: TextField(
-                        controller: _oidPrefixCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'Prefixo sysObjectID',
-                        ),
+                    TextField(
+                      controller: _oidPrefixCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Prefixo sysObjectID',
                       ),
                     ),
                   ],
@@ -1720,6 +1752,8 @@ class _SnmpProfilesBodyState extends ConsumerState<_SnmpProfilesBody> {
                       children: <Widget>[
                         Text(
                           p.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: context.textTheme.titleSmall?.copyWith(
                             fontWeight: FontWeight.w700,
                           ),
@@ -1727,11 +1761,14 @@ class _SnmpProfilesBodyState extends ConsumerState<_SnmpProfilesBody> {
                         Text(
                           '${p.vendor} · ${countNoun(p.sensorCount, 'sensor', 'sensores')}'
                           '${p.sysObjectIdPrefix != null ? ' · ${p.sysObjectIdPrefix}' : ''}',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
                           style: context.textTheme.bodySmall,
                         ),
                       ],
                     ),
                   ),
+                  const SizedBox(width: 8),
                   SemanticChip(
                     label: p.isBuiltin ? 'Embutido' : 'Personalizado',
                     tone: p.isBuiltin

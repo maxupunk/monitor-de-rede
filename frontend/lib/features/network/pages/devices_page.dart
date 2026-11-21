@@ -61,16 +61,22 @@ class _DevicesPageState extends ConsumerState<DevicesPage> {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              DropdownButtonFormField<int?>(
+              AppDropdownFormField<int?>(
                 initialValue: chosenParentId,
                 decoration: const InputDecoration(labelText: 'Dispositivo pai'),
                 items: <DropdownMenuItem<int?>>[
                   const DropdownMenuItem<int?>(
                     value: null,
-                    child: Text('Nenhum (raiz)'),
+                    child: Text(
+                      'Nenhum (raiz)',
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
                   for (final d in candidates)
-                    DropdownMenuItem<int?>(value: d.id, child: Text(d.name)),
+                    DropdownMenuItem<int?>(
+                      value: d.id,
+                      child: Text(d.name, overflow: TextOverflow.ellipsis),
+                    ),
                 ],
                 onChanged: (v) => setModal(() => chosenParentId = v),
               ),
@@ -115,8 +121,9 @@ class _DevicesPageState extends ConsumerState<DevicesPage> {
         .deleteDevice(device.id);
     if (deleted && mounted) {
       _selectedIds.remove(device.id);
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('"${device.name}" removido.')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('"${device.name}" removido.')));
     }
   }
 
@@ -166,232 +173,448 @@ class _DevicesPageState extends ConsumerState<DevicesPage> {
       };
     });
 
-    return RefreshIndicator(
-      onRefresh: () => ref.read(devicesProvider.notifier).fetchDevices(),
-      child: ListView(
-        children: <Widget>[
-          SearchFilterHeader(
-            title: 'Dispositivos',
-            subtitle: 'Inventário de equipamentos monitorados com status ao vivo via SSE',
-            searchController: _searchCtrl,
-            searchHint: 'Buscar por nome, IP, MAC, fabricante ou modelo...',
-            onSearchChanged: (_) => setState(() {}),
-            actions: <Widget>[
-              OutlinedButton.icon(
-                onPressed: () => showSnmpProfilesDialog(context),
-                icon: const Icon(Icons.tune, size: 18),
-                label: const Text('Perfis SNMP'),
-              ),
-              if (canWrite)
-                FilledButton.icon(
-                  onPressed: () => showDeviceFormSheet(context: context),
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Novo Dispositivo'),
-                ),
-            ],
-            filters: <Widget>[
-              _DropdownFilterChip<String>(
-                label: 'Status',
-                value: _statusFilter,
-                items: const <(String, String)>[
-                  ('all', 'Todos os status'),
-                  ('online', 'Online'),
-                  ('offline', 'Offline'),
-                  ('warning', 'Atenção'),
-                  ('unknown', 'Desconhecido'),
-                ],
-                onChanged: (v) => setState(() => _statusFilter = v),
-              ),
-              _DropdownFilterChip<String>(
-                label: 'Tipo',
-                value: _typeFilter,
-                items: <(String, String)>[
-                  ('all', 'Todos os tipos'),
-                  ...deviceTypeOptions,
-                ],
-                onChanged: (v) => setState(() => _typeFilter = v),
-              ),
-              if (sites.isNotEmpty)
-                _DropdownFilterChip<int?>(
-                  label: 'Site',
-                  value: _siteFilter,
-                  items: <(int?, String)>[
-                    (null, 'Todos os sites'),
-                    for (final s in sites) (s.id, s.name),
-                  ],
-                  onChanged: (v) => setState(() => _siteFilter = v),
-                ),
-              if (networks.isNotEmpty)
-                _DropdownFilterChip<int?>(
-                  label: 'Rede',
-                  value: _networkFilter,
-                  items: <(int?, String)>[
-                    (null, 'Todas as redes'),
-                    for (final n in networks) (n.id, n.name),
-                  ],
-                  onChanged: (v) => setState(() => _networkFilter = v),
-                ),
-              if (vendors.isNotEmpty)
-                _DropdownFilterChip<String>(
-                  label: 'Fabricante',
-                  value: _vendorFilter,
-                  items: <(String, String)>[
-                    ('all', 'Todos os fabricantes'),
-                    for (final v in vendors) (v, v),
-                  ],
-                  onChanged: (v) => setState(() => _vendorFilter = v),
-                ),
-              _DropdownFilterChip<String>(
-                label: 'Ordenar',
-                value: _sortBy,
-                items: const <(String, String)>[
-                  ('name', 'Ordenar: Nome'),
-                  ('status', 'Ordenar: Status'),
-                  ('ip', 'Ordenar: IP'),
-                  ('type', 'Ordenar: Tipo'),
-                ],
-                onChanged: (v) => setState(() => _sortBy = v),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          ResponsiveGrid(
-            xs: 2,
-            sm: 2,
-            md: 4,
-            lg: 4,
-            xl: 4,
+    final activeSecondaryFilters =
+        (_typeFilter != 'all' ? 1 : 0) +
+        (_siteFilter != null ? 1 : 0) +
+        (_networkFilter != null ? 1 : 0) +
+        (_vendorFilter != 'all' ? 1 : 0);
+
+    final statusChips = <(String, String)>[
+      ('all', 'Todos (${state.totalCount})'),
+      ('online', 'Online (${state.onlineCount})'),
+      ('offline', 'Offline (${state.offlineCount})'),
+      ('warning', 'Atenção (${state.warningCount})'),
+      if (state.unknownCount > 0) ('unknown', 'Desc. (${state.unknownCount})'),
+    ];
+
+    final activeSiteName = _siteFilter != null
+        ? sites.where((s) => s.id == _siteFilter).firstOrNull?.name
+        : null;
+    final activeNetName = _networkFilter != null
+        ? networks.where((n) => n.id == _networkFilter).firstOrNull?.name
+        : null;
+
+    final activeChips = <ActiveFilterChipData>[
+      if (_typeFilter != 'all')
+        ActiveFilterChipData(
+          label: deviceTypeLabel(_typeFilter),
+          onDeleted: () => setState(() => _typeFilter = 'all'),
+        ),
+      if (activeSiteName != null)
+        ActiveFilterChipData(
+          label: 'Site: $activeSiteName',
+          onDeleted: () => setState(() => _siteFilter = null),
+        ),
+      if (activeNetName != null)
+        ActiveFilterChipData(
+          label: 'Rede: $activeNetName',
+          onDeleted: () => setState(() => _networkFilter = null),
+        ),
+      if (_vendorFilter != 'all')
+        ActiveFilterChipData(
+          label: _vendorFilter,
+          onDeleted: () => setState(() => _vendorFilter = 'all'),
+        ),
+    ];
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isCompact = constraints.maxWidth < 680;
+        return RefreshIndicator(
+          onRefresh: () => ref.read(devicesProvider.notifier).fetchDevices(),
+          child: ListView(
             children: <Widget>[
-              KpiCard(
-                label: 'Total',
-                value: formatInteger(state.totalCount),
-                icon: Icons.devices_outlined,
-                tone: SemanticTone.primary,
-                onTap: () => setState(() => _statusFilter = 'all'),
-              ),
-              KpiCard(
-                label: 'Online',
-                value: formatInteger(state.onlineCount),
-                icon: Icons.check_circle_outline,
-                tone: SemanticTone.success,
-                onTap: () => setState(() => _statusFilter = 'online'),
-              ),
-              KpiCard(
-                label: 'Offline',
-                value: formatInteger(state.offlineCount),
-                icon: Icons.error_outline,
-                tone: SemanticTone.error,
-                onTap: () => setState(() => _statusFilter = 'offline'),
-              ),
-              KpiCard(
-                label: 'Atenção / Desc.',
-                value: formatInteger(state.warningCount + state.unknownCount),
-                icon: Icons.warning_amber_outlined,
-                tone: SemanticTone.warning,
-                onTap: () => setState(() => _statusFilter = 'warning'),
-              ),
-            ],
-          ),
-          if (_selectedIds.isNotEmpty && canWrite) ...<Widget>[
-            const SizedBox(height: 12),
-            NestedPanel(
-              tone: SemanticTone.primary,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              child: Wrap(
-                spacing: 10,
-                runSpacing: 8,
-                alignment: WrapAlignment.spaceBetween,
-                crossAxisAlignment: WrapCrossAlignment.center,
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: <Widget>[
-                  Text(
-                    countNoun(
-                      _selectedIds.length,
-                      'dispositivo selecionado',
-                      'dispositivos selecionados',
-                    ),
-                    style: context.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          'Dispositivos',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style:
+                              (isCompact
+                                      ? context.textTheme.titleLarge
+                                      : context.textTheme.headlineSmall)
+                                  ?.copyWith(fontWeight: FontWeight.w800),
+                        ),
+                        if (!isCompact) ...<Widget>[
+                          const SizedBox(height: 2),
+                          Text(
+                            'Inventário de equipamentos monitorados com status ao vivo via SSE',
+                            style: context.textTheme.bodySmall?.copyWith(
+                              color: context.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
-                  Wrap(
-                    spacing: 8,
-                    children: <Widget>[
+                  if (!isCompact) ...<Widget>[
+                    OutlinedButton.icon(
+                      onPressed: () => showSnmpProfilesDialog(context),
+                      icon: const Icon(Icons.tune, size: 18),
+                      label: const Text('Perfis SNMP'),
+                    ),
+                    if (canWrite) ...<Widget>[
+                      const SizedBox(width: 8),
                       FilledButton.icon(
-                        onPressed: () => _openBatchParentSheet(state.items),
-                        icon: const Icon(Icons.account_tree_outlined, size: 18),
-                        label: const Text('Definir pai em lote'),
+                        onPressed: () => showDeviceFormSheet(context: context),
+                        icon: const Icon(Icons.add, size: 18),
+                        label: const Text('Novo Dispositivo'),
                       ),
-                      TextButton(
-                        onPressed: () => setState(() => _selectedIds.clear()),
-                        child: const Text('Limpar seleção'),
+                    ],
+                  ] else ...<Widget>[
+                    if (canWrite) ...<Widget>[
+                      const SizedBox(width: 8),
+                      FilledButton.icon(
+                        onPressed: () => showDeviceFormSheet(context: context),
+                        icon: const Icon(Icons.add, size: 18),
+                        label: const Text('Novo'),
+                      ),
+                    ],
+                    PopupMenuButton<String>(
+                      tooltip: 'Mais ações',
+                      icon: const Icon(Icons.more_vert),
+                      onSelected: (value) {
+                        if (value == 'snmp_profiles') {
+                          showSnmpProfilesDialog(context);
+                        }
+                      },
+                      itemBuilder: (_) => const <PopupMenuEntry<String>>[
+                        PopupMenuItem<String>(
+                          value: 'snmp_profiles',
+                          child: ListTile(
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            leading: Icon(Icons.tune),
+                            title: Text('Perfis SNMP'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+              const SizedBox(height: 10),
+              UnifiedFilterBar(
+                searchController: _searchCtrl,
+                searchHint: 'Buscar nome, IP, MAC, fabricante ou modelo...',
+                onSearchChanged: (_) => setState(() {}),
+                activeFilterCount: activeSecondaryFilters,
+                filterSheetTitle: 'Filtrar Dispositivos',
+                filterSheetBuilder: (sheetCtx, setSheet) => Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    AppDropdownFormField<String>(
+                      initialValue: _typeFilter,
+                      decoration: const InputDecoration(labelText: 'Tipo'),
+                      items: <DropdownMenuItem<String>>[
+                        const DropdownMenuItem<String>(
+                          value: 'all',
+                          child: Text(
+                            'Todos os tipos',
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        for (final opt in deviceTypeOptions)
+                          DropdownMenuItem<String>(
+                            value: opt.$1,
+                            child: Text(
+                              opt.$2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                      ],
+                      onChanged: (v) {
+                        setState(() => _typeFilter = v ?? 'all');
+                        setSheet(() {});
+                      },
+                    ),
+                    if (sites.isNotEmpty || networks.isNotEmpty) ...<Widget>[
+                      const SizedBox(height: 12),
+                      ResponsiveFieldRow(
+                        breakpoint: 480,
+                        children: <Widget>[
+                          if (sites.isNotEmpty)
+                            AppDropdownFormField<int?>(
+                              initialValue:
+                                  sites.any((s) => s.id == _siteFilter)
+                                  ? _siteFilter
+                                  : null,
+                              decoration: const InputDecoration(
+                                labelText: 'Site',
+                              ),
+                              items: <DropdownMenuItem<int?>>[
+                                const DropdownMenuItem<int?>(
+                                  value: null,
+                                  child: Text(
+                                    'Todos os sites',
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                for (final s in sites)
+                                  DropdownMenuItem<int?>(
+                                    value: s.id,
+                                    child: Text(
+                                      s.name,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                              ],
+                              onChanged: (v) {
+                                setState(() => _siteFilter = v);
+                                setSheet(() {});
+                              },
+                            ),
+                          if (networks.isNotEmpty)
+                            AppDropdownFormField<int?>(
+                              initialValue:
+                                  networks.any((n) => n.id == _networkFilter)
+                                  ? _networkFilter
+                                  : null,
+                              decoration: const InputDecoration(
+                                labelText: 'Rede IP',
+                              ),
+                              items: <DropdownMenuItem<int?>>[
+                                const DropdownMenuItem<int?>(
+                                  value: null,
+                                  child: Text(
+                                    'Todas as redes',
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                for (final n in networks)
+                                  DropdownMenuItem<int?>(
+                                    value: n.id,
+                                    child: Text(
+                                      n.name,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                              ],
+                              onChanged: (v) {
+                                setState(() => _networkFilter = v);
+                                setSheet(() {});
+                              },
+                            ),
+                        ],
+                      ),
+                    ],
+                    if (vendors.isNotEmpty) ...<Widget>[
+                      const SizedBox(height: 12),
+                      AppDropdownFormField<String>(
+                        initialValue: vendors.contains(_vendorFilter)
+                            ? _vendorFilter
+                            : 'all',
+                        decoration: const InputDecoration(
+                          labelText: 'Fabricante',
+                        ),
+                        items: <DropdownMenuItem<String>>[
+                          const DropdownMenuItem<String>(
+                            value: 'all',
+                            child: Text(
+                              'Todos os fabricantes',
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          for (final v in vendors)
+                            DropdownMenuItem<String>(
+                              value: v,
+                              child: Text(v, overflow: TextOverflow.ellipsis),
+                            ),
+                        ],
+                        onChanged: (v) {
+                          setState(() => _vendorFilter = v ?? 'all');
+                          setSheet(() {});
+                        },
+                      ),
+                    ],
+                  ],
+                ),
+                onClearFilters: () => setState(() {
+                  _typeFilter = 'all';
+                  _siteFilter = null;
+                  _networkFilter = null;
+                  _vendorFilter = 'all';
+                }),
+                sortOptions: const <FilterSortOption>[
+                  FilterSortOption(value: 'name', label: 'Nome'),
+                  FilterSortOption(value: 'status', label: 'Status'),
+                  FilterSortOption(value: 'ip', label: 'Endereço IP'),
+                  FilterSortOption(value: 'type', label: 'Tipo'),
+                ],
+                activeSort: _sortBy,
+                onSortChanged: (v) => setState(() => _sortBy = v),
+                quickChips: statusChips
+                    .map(
+                      (opt) => ChoiceChip(
+                        label: Text(opt.$2),
+                        selected: _statusFilter == opt.$1,
+                        onSelected: (_) =>
+                            setState(() => _statusFilter = opt.$1),
+                      ),
+                    )
+                    .toList(growable: false),
+                activeChips: activeChips,
+              ),
+              if (!isCompact) ...<Widget>[
+                const SizedBox(height: 14),
+                ResponsiveGrid(
+                  xs: 2,
+                  sm: 2,
+                  md: 4,
+                  lg: 4,
+                  xl: 4,
+                  children: <Widget>[
+                    KpiCard(
+                      label: 'Total',
+                      value: formatInteger(state.totalCount),
+                      icon: Icons.devices_outlined,
+                      tone: SemanticTone.primary,
+                      onTap: () => setState(() => _statusFilter = 'all'),
+                    ),
+                    KpiCard(
+                      label: 'Online',
+                      value: formatInteger(state.onlineCount),
+                      icon: Icons.check_circle_outline,
+                      tone: SemanticTone.success,
+                      onTap: () => setState(() => _statusFilter = 'online'),
+                    ),
+                    KpiCard(
+                      label: 'Offline',
+                      value: formatInteger(state.offlineCount),
+                      icon: Icons.error_outline,
+                      tone: SemanticTone.error,
+                      onTap: () => setState(() => _statusFilter = 'offline'),
+                    ),
+                    KpiCard(
+                      label: 'Atenção / Desc.',
+                      value: formatInteger(
+                        state.warningCount + state.unknownCount,
+                      ),
+                      icon: Icons.warning_amber_outlined,
+                      tone: SemanticTone.warning,
+                      onTap: () => setState(() => _statusFilter = 'warning'),
+                    ),
+                  ],
+                ),
+              ],
+              if (_selectedIds.isNotEmpty && canWrite) ...<Widget>[
+                const SizedBox(height: 12),
+                NestedPanel(
+                  tone: SemanticTone.primary,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                  child: Wrap(
+                    spacing: 10,
+                    runSpacing: 8,
+                    alignment: WrapAlignment.spaceBetween,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: <Widget>[
+                      Text(
+                        countNoun(
+                          _selectedIds.length,
+                          'dispositivo selecionado',
+                          'dispositivos selecionados',
+                        ),
+                        style: context.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
+                        children: <Widget>[
+                          FilledButton.icon(
+                            onPressed: () => _openBatchParentSheet(state.items),
+                            icon: const Icon(
+                              Icons.account_tree_outlined,
+                              size: 18,
+                            ),
+                            label: const Text('Definir pai em lote'),
+                          ),
+                          TextButton(
+                            onPressed: () =>
+                                setState(() => _selectedIds.clear()),
+                            child: const Text('Limpar seleção'),
+                          ),
+                        ],
                       ),
                     ],
                   ),
-                ],
-              ),
-            ),
-          ],
-          const SizedBox(height: 14),
-          if (state.loading && state.items.isEmpty)
-            const LoadingStateView(message: 'Carregando dispositivos...')
-          else if (state.error != null && state.items.isEmpty)
-            ErrorStateView(
-              message: state.error!,
-              onRetry: () => ref.read(devicesProvider.notifier).fetchDevices(),
-            )
-          else if (filtered.isEmpty)
-            EmptyStateView(
-              title: 'Nenhum dispositivo encontrado',
-              description: state.items.isEmpty
-                  ? 'Cadastre seu primeiro equipamento ou execute uma descoberta de rede.'
-                  : 'Ajuste os filtros para visualizar outros dispositivos.',
-              icon: Icons.devices_other_outlined,
-              action: canWrite
-                  ? FilledButton.icon(
-                      onPressed: () => showDeviceFormSheet(context: context),
-                      icon: const Icon(Icons.add),
-                      label: const Text('Novo Dispositivo'),
-                    )
-                  : null,
-            )
-          else
-            ResponsiveGrid(
-              xs: 1,
-              sm: 1,
-              md: 2,
-              lg: 3,
-              xl: 3,
-              children: filtered
-                  .map((device) {
-                    final selected = _selectedIds.contains(device.id);
-                    return _DeviceCard(
-                      device: device,
-                      canWrite: canWrite,
-                      selected: selected,
-                      onToggleSelect: canWrite
-                          ? (v) {
-                              setState(() {
-                                if (v == true) {
-                                  _selectedIds.add(device.id);
-                                } else {
-                                  _selectedIds.remove(device.id);
+                ),
+              ],
+              const SizedBox(height: 12),
+              if (state.loading && state.items.isEmpty)
+                const LoadingStateView(message: 'Carregando dispositivos...')
+              else if (state.error != null && state.items.isEmpty)
+                ErrorStateView(
+                  message: state.error!,
+                  onRetry: () =>
+                      ref.read(devicesProvider.notifier).fetchDevices(),
+                )
+              else if (filtered.isEmpty)
+                EmptyStateView(
+                  title: 'Nenhum dispositivo encontrado',
+                  description: state.items.isEmpty
+                      ? 'Cadastre seu primeiro equipamento ou execute uma descoberta de rede.'
+                      : 'Ajuste os filtros para visualizar outros dispositivos.',
+                  icon: Icons.devices_other_outlined,
+                  action: canWrite
+                      ? FilledButton.icon(
+                          onPressed: () =>
+                              showDeviceFormSheet(context: context),
+                          icon: const Icon(Icons.add),
+                          label: const Text('Novo Dispositivo'),
+                        )
+                      : null,
+                )
+              else
+                ResponsiveGrid(
+                  xs: 1,
+                  sm: 1,
+                  md: 2,
+                  lg: 3,
+                  xl: 3,
+                  children: filtered
+                      .map((device) {
+                        final selected = _selectedIds.contains(device.id);
+                        return _DeviceCard(
+                          device: device,
+                          canWrite: canWrite,
+                          selected: selected,
+                          onToggleSelect: canWrite
+                              ? (v) {
+                                  setState(() {
+                                    if (v == true) {
+                                      _selectedIds.add(device.id);
+                                    } else {
+                                      _selectedIds.remove(device.id);
+                                    }
+                                  });
                                 }
-                              });
-                            }
-                          : null,
-                      onOpen: () => context.go('/devices/${device.id}'),
-                      onEdit: () => showDeviceFormSheet(
-                        context: context,
-                        existing: device,
-                      ),
-                      onDelete: () => _confirmDelete(device),
-                    );
-                  })
-                  .toList(growable: false),
-            ),
-          const SizedBox(height: 24),
-        ],
-      ),
+                              : null,
+                          onOpen: () => context.go('/devices/${device.id}'),
+                          onEdit: () => showDeviceFormSheet(
+                            context: context,
+                            existing: device,
+                          ),
+                          onDelete: () => _confirmDelete(device),
+                        );
+                      })
+                      .toList(growable: false),
+                ),
+              const SizedBox(height: 24),
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -484,6 +707,7 @@ class _DeviceCard extends StatelessWidget {
                       ],
                     ),
                   ),
+                  const SizedBox(width: 8),
                   StatusIndicator.fromStatus(device.status, compact: true),
                 ],
               ),
@@ -539,56 +763,57 @@ class _DeviceCard extends StatelessWidget {
               const Divider(height: 1),
               const SizedBox(height: 6),
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: <Widget>[
-                  Wrap(
-                    spacing: 2,
-                    children: <Widget>[
-                      if (device.hasIp && !device.isSystem)
-                        IconButton(
-                          tooltip: 'Ping rápido',
-                          visualDensity: VisualDensity.compact,
-                          icon: const Icon(Icons.network_ping, size: 18),
-                          onPressed: () => showQuickPingDialog(
-                            context,
-                            deviceId: device.id,
-                            deviceName: device.name,
+                  Expanded(
+                    child: Wrap(
+                      spacing: 2,
+                      children: <Widget>[
+                        if (device.hasIp && !device.isSystem)
+                          IconButton(
+                            tooltip: 'Ping rápido',
+                            visualDensity: VisualDensity.compact,
+                            icon: const Icon(Icons.network_ping, size: 18),
+                            onPressed: () => showQuickPingDialog(
+                              context,
+                              deviceId: device.id,
+                              deviceName: device.name,
+                            ),
                           ),
-                        ),
-                      if (device.hasIp) ...<Widget>[
-                        IconButton(
-                          tooltip: 'Traceroute',
-                          visualDensity: VisualDensity.compact,
-                          icon: const Icon(Icons.alt_route, size: 18),
-                          onPressed: () => showTracerouteDialog(
-                            context,
-                            initialHost: device.ipAddress,
+                        if (device.hasIp) ...<Widget>[
+                          IconButton(
+                            tooltip: 'Traceroute',
+                            visualDensity: VisualDensity.compact,
+                            icon: const Icon(Icons.alt_route, size: 18),
+                            onPressed: () => showTracerouteDialog(
+                              context,
+                              initialHost: device.ipAddress,
+                            ),
                           ),
-                        ),
+                          IconButton(
+                            tooltip: 'Port Scan',
+                            visualDensity: VisualDensity.compact,
+                            icon: const Icon(Icons.radar, size: 18),
+                            onPressed: () => showPortScanDialog(
+                              context,
+                              initialHost: device.ipAddress,
+                            ),
+                          ),
+                        ],
                         IconButton(
-                          tooltip: 'Port Scan',
+                          tooltip: 'Playbook de diagnóstico',
                           visualDensity: VisualDensity.compact,
-                          icon: const Icon(Icons.radar, size: 18),
-                          onPressed: () => showPortScanDialog(
+                          icon: const Icon(Icons.playlist_play, size: 18),
+                          onPressed: () => showDiagnosticPlaybookDialog(
                             context,
-                            initialHost: device.ipAddress,
+                            device: device,
                           ),
                         ),
                       ],
-                      IconButton(
-                        tooltip: 'Playbook de diagnóstico',
-                        visualDensity: VisualDensity.compact,
-                        icon: const Icon(Icons.playlist_play, size: 18),
-                        onPressed: () => showDiagnosticPlaybookDialog(
-                          context,
-                          device: device,
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                   if (canWrite)
-                    Wrap(
-                      spacing: 2,
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
                       children: <Widget>[
                         IconButton(
                           tooltip: 'Editar',
@@ -614,50 +839,6 @@ class _DeviceCard extends StatelessWidget {
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _DropdownFilterChip<T> extends StatelessWidget {
-  const _DropdownFilterChip({
-    required this.label,
-    required this.value,
-    required this.items,
-    required this.onChanged,
-  });
-
-  final String label;
-  final T value;
-  final List<(T, String)> items;
-  final ValueChanged<T> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return ConstrainedBox(
-      constraints: const BoxConstraints(minWidth: 130, maxWidth: 210),
-      child: DropdownButtonFormField<T>(
-        initialValue: items.any((i) => i.$1 == value) ? value : items.first.$1,
-        isDense: true,
-        isExpanded: true,
-        decoration: InputDecoration(
-          labelText: label,
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 10,
-            vertical: 8,
-          ),
-        ),
-        items: items
-            .map(
-              (e) => DropdownMenuItem<T>(
-                value: e.$1,
-                child: Text(e.$2, overflow: TextOverflow.ellipsis),
-              ),
-            )
-            .toList(growable: false),
-        onChanged: (v) {
-          if (v != null || null is T) onChanged(v as T);
-        },
       ),
     );
   }

@@ -70,7 +70,8 @@ class _DeviceVpnTabState extends ConsumerState<DeviceVpnTab> {
     final confirmed = await showConfirmActionDialog(
       context: context,
       title: 'Rotacionar chaves de ${peer.displayName}?',
-      message: 'A chave atual será revogada na hora e o dispositivo só volta a conectar após aplicar a nova configuração.',
+      message:
+          'A chave atual será revogada na hora e o dispositivo só volta a conectar após aplicar a nova configuração.',
       confirmLabel: 'Rotacionar',
       tone: SemanticTone.warning,
       icon: Icons.key_outlined,
@@ -134,7 +135,8 @@ class _DeviceVpnTabState extends ConsumerState<DeviceVpnTab> {
     if (peer == null) {
       return EmptyStateView(
         title: 'Este dispositivo não possui túnel VPN',
-        description: 'Crie um peer na tela VPN WireGuard para conectar este equipamento pelo túnel.',
+        description:
+            'Crie um peer na tela VPN WireGuard para conectar este equipamento pelo túnel.',
         icon: Icons.vpn_lock_outlined,
         action: FilledButton.icon(
           onPressed: () => context.go('/vpn/devices'),

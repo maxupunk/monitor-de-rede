@@ -52,3 +52,53 @@ class ResponsiveGrid extends StatelessWidget {
     );
   }
 }
+
+/// Linha de campos de formulário mobile-first:
+/// empilha verticalmente abaixo de [breakpoint] e distribui lado a lado em
+/// colunas iguais acima dele, evitando campos espremidos em telas estreitas.
+class ResponsiveFieldRow extends StatelessWidget {
+  const ResponsiveFieldRow({
+    super.key,
+    required this.children,
+    this.breakpoint = 480,
+    this.spacing = 10,
+    this.runSpacing = 12,
+  });
+
+  final List<Widget> children;
+  final double breakpoint;
+  final double spacing;
+  final double runSpacing;
+
+  @override
+  Widget build(BuildContext context) {
+    if (children.isEmpty) return const SizedBox.shrink();
+    if (children.length == 1) return children.first;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < breakpoint) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              for (var i = 0; i < children.length; i++) ...<Widget>[
+                if (i > 0) SizedBox(height: runSpacing),
+                children[i],
+              ],
+            ],
+          );
+        }
+
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            for (var i = 0; i < children.length; i++) ...<Widget>[
+              if (i > 0) SizedBox(width: spacing),
+              Expanded(child: children[i]),
+            ],
+          ],
+        );
+      },
+    );
+  }
+}

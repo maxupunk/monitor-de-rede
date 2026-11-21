@@ -35,10 +35,12 @@ class _PluginAppPageState extends ConsumerState<PluginAppPage> {
   bool _hydratedSettings = false;
   bool _autoReadTriggered = false;
   PluginDetail? _detailForAbout;
+  PluginAppsNotifier? _appsNotifier;
 
   @override
   void initState() {
     super.initState();
+    _appsNotifier = ref.read(pluginAppsProvider.notifier);
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
   }
 
@@ -46,7 +48,7 @@ class _PluginAppPageState extends ConsumerState<PluginAppPage> {
   void didUpdateWidget(covariant PluginAppPage oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.pluginId != widget.pluginId) {
-      ref.read(pluginAppsProvider.notifier).forgetLaunched(oldWidget.pluginId);
+      _appsNotifier?.forgetLaunched(oldWidget.pluginId);
       _hydratedSettings = false;
       _autoReadTriggered = false;
       _detailForAbout = null;
@@ -56,7 +58,7 @@ class _PluginAppPageState extends ConsumerState<PluginAppPage> {
 
   @override
   void dispose() {
-    ref.read(pluginAppsProvider.notifier).forgetLaunched(widget.pluginId);
+    _appsNotifier?.forgetLaunched(widget.pluginId);
     super.dispose();
   }
 
@@ -190,165 +192,276 @@ class _PluginAppPageState extends ConsumerState<PluginAppPage> {
       (id: 'about', label: 'Como usar', icon: Icons.help_outline),
     ];
 
+    final isCompact = MediaQuery.sizeOf(context).width < 680;
+    final hasOverflowActions = plugin.wifi || isAdmin;
+
     return DefaultTabController(
       key: ValueKey<String>('plugin-app-${widget.pluginId}-${tabs.length}'),
       length: tabs.length,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          Wrap(
-            spacing: 12,
-            runSpacing: 10,
-            alignment: WrapAlignment.spaceBetween,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: <Widget>[
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: context.semanticColors.pluginContainer,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Icon(
-                      Icons.apps,
-                      color: context.semanticColors.onPluginContainer,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+      child: NestedScrollView(
+        headerSliverBuilder: (context, innerBoxIsScrolled) => <Widget>[
+          SliverToBoxAdapter(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                if (isCompact)
+                  Row(
                     children: <Widget>[
-                      Text(
-                        fleetSpec?.title ?? plugin.name,
-                        style: context.textTheme.headlineSmall?.copyWith(
-                          fontWeight: FontWeight.w800,
+                      Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: context.semanticColors.pluginContainer,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Icon(
+                          Icons.apps,
+                          size: 20,
+                          color: context.semanticColors.onPluginContainer,
                         ),
                       ),
-                      if (plugin.description != null)
-                        Text(
-                          plugin.description!,
-                          style: context.textTheme.bodySmall?.copyWith(
-                            color: context.colorScheme.onSurfaceVariant,
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          fleetSpec?.title ?? plugin.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: context.textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w800,
                           ),
                         ),
+                      ),
+                      if (isAdmin && statusAction != null)
+                        IconButton(
+                          tooltip: 'Atualizar',
+                          style: IconButton.styleFrom(
+                            backgroundColor: context.semanticColors.plugin,
+                            foregroundColor: context.semanticColors.onPlugin,
+                          ),
+                          onPressed: () => _refreshFleetStatus(fleet),
+                          icon: const Icon(Icons.refresh, size: 20),
+                        ),
+                      if (hasOverflowActions)
+                        PopupMenuButton<String>(
+                          tooltip: 'Mais ações',
+                          onSelected: (cmd) {
+                            if (cmd == 'wifi') {
+                              context.go('/wifi');
+                            } else if (cmd == 'plugins') {
+                              context.go('/plugins');
+                            }
+                          },
+                          itemBuilder: (_) => <PopupMenuEntry<String>>[
+                            if (plugin.wifi)
+                              const PopupMenuItem<String>(
+                                value: 'wifi',
+                                child: ListTile(
+                                  dense: true,
+                                  leading: Icon(Icons.wifi),
+                                  title: Text('Sinais e clientes'),
+                                ),
+                              ),
+                            if (isAdmin)
+                              const PopupMenuItem<String>(
+                                value: 'plugins',
+                                child: ListTile(
+                                  dense: true,
+                                  leading: Icon(Icons.extension_outlined),
+                                  title: Text('Biblioteca de plugins'),
+                                ),
+                              ),
+                          ],
+                        ),
+                    ],
+                  )
+                else
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: <Widget>[
+                      Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: context.semanticColors.pluginContainer,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Icon(
+                          Icons.apps,
+                          color: context.semanticColors.onPluginContainer,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Text(
+                              fleetSpec?.title ?? plugin.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: context.textTheme.headlineSmall?.copyWith(
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            if (plugin.description != null)
+                              Text(
+                                plugin.description!,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: context.textTheme.bodySmall?.copyWith(
+                                  color: context.colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: <Widget>[
+                          if (plugin.wifi)
+                            OutlinedButton.icon(
+                              onPressed: () => context.go('/wifi'),
+                              icon: const Icon(Icons.wifi, size: 18),
+                              label: const Text('Sinais e clientes'),
+                            ),
+                          if (isAdmin && statusAction != null)
+                            FilledButton.icon(
+                              style: FilledButton.styleFrom(
+                                backgroundColor: context.semanticColors.plugin,
+                                foregroundColor:
+                                    context.semanticColors.onPlugin,
+                              ),
+                              onPressed: () => _refreshFleetStatus(fleet),
+                              icon: const Icon(Icons.refresh, size: 18),
+                              label: const Text('Atualizar'),
+                            ),
+                          if (isAdmin)
+                            OutlinedButton.icon(
+                              onPressed: () => context.go('/plugins'),
+                              icon: const Icon(
+                                Icons.extension_outlined,
+                                size: 18,
+                              ),
+                              label: const Text('Plugins'),
+                            ),
+                        ],
+                      ),
                     ],
                   ),
-                ],
-              ),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: <Widget>[
-                  if (plugin.wifi)
-                    OutlinedButton.icon(
-                      onPressed: () => context.go('/wifi'),
-                      icon: const Icon(Icons.wifi, size: 18),
-                      label: const Text('Sinais e clientes'),
-                    ),
-                  if (isAdmin && statusAction != null)
-                    FilledButton.icon(
-                      style: FilledButton.styleFrom(
-                        backgroundColor: context.semanticColors.plugin,
-                        foregroundColor: context.semanticColors.onPlugin,
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: <Widget>[
+                    SemanticChip(
+                      label: countNoun(
+                        fleet.members.length,
+                        'equipamento',
+                        'equipamentos',
                       ),
-                      onPressed: () => _refreshFleetStatus(fleet),
-                      icon: const Icon(Icons.refresh, size: 18),
-                      label: const Text('Atualizar'),
+                      tone: SemanticTone.plugin,
+                      compact: true,
                     ),
-                  if (isAdmin)
-                    OutlinedButton.icon(
-                      onPressed: () => context.go('/plugins'),
-                      icon: const Icon(Icons.extension_outlined, size: 18),
-                      label: const Text('Plugins'),
+                    if (latestStatus?.finishedAt != null)
+                      SemanticChip(
+                        label:
+                            'Última leitura ${formatRelativeTime(latestStatus!.finishedAt)}',
+                        tone: SemanticTone.info,
+                        compact: true,
+                      ),
+                  ],
+                ),
+                if (plugin.status != 'active') ...<Widget>[
+                  const SizedBox(height: 10),
+                  NestedPanel(
+                    tone: SemanticTone.warning,
+                    child: Text(
+                      'Este plugin está "${pluginStatusPresentation(plugin.status).label}". Ative-o na biblioteca para uso completo.',
                     ),
+                  ),
                 ],
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 6,
-            children: <Widget>[
-              SemanticChip(
-                label: countNoun(
-                  fleet.members.length,
-                  'equipamento',
-                  'equipamentos',
-                ),
-                tone: SemanticTone.plugin,
-                compact: true,
-              ),
-              if (latestStatus?.finishedAt != null)
-                SemanticChip(
-                  label:
-                      'Última leitura ${formatRelativeTime(latestStatus!.finishedAt)}',
-                  tone: SemanticTone.info,
-                  compact: true,
-                ),
-            ],
-          ),
-          if (plugin.status != 'active') ...<Widget>[
-            const SizedBox(height: 10),
-            NestedPanel(
-              tone: SemanticTone.warning,
-              child: Text(
-                'Este plugin está "${pluginStatusPresentation(plugin.status).label}". Ative-o na biblioteca para uso completo.',
-              ),
+                const SizedBox(height: 8),
+              ],
             ),
-          ],
-          const SizedBox(height: 10),
-          TabBar(
-            isScrollable: true,
-            indicatorColor: pluginColor,
-            labelColor: pluginColor,
-            tabs: tabs
-                .map((t) => Tab(icon: Icon(t.icon, size: 18), text: t.label))
-                .toList(growable: false),
           ),
-          const SizedBox(height: 12),
-          Expanded(
-            child: TabBarView(
-              children: tabs
-                  .map((t) {
-                    switch (t.id) {
-                      case 'items':
-                        return _buildItemsTab(
-                          context,
-                          fleet,
-                          listSpec!,
-                          latestStatus,
-                          isAdmin,
-                        );
-                      case 'members':
-                        return _buildMembersTab(
-                          context,
-                          fleet,
-                          appsState,
-                          isAdmin,
-                        );
-                      case 'tools':
-                        return _buildToolsTab(context, fleet, isAdmin);
-                      case 'settings':
-                        return _buildSettingsTab(context, fleet, isAdmin);
-                      case 'history':
-                        return _buildHistoryTab(
-                          context,
-                          fleet,
-                          appsState,
-                          isAdmin,
-                        );
-                      default:
-                        return _buildAboutTab(context, fleet);
-                    }
-                  })
-                  .toList(growable: false),
+          SliverPersistentHeader(
+            pinned: true,
+            delegate: _PluginAppTabBarDelegate(
+              height: 48,
+              child: Material(
+                color: context.colorScheme.surface,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: <Widget>[
+                    Expanded(
+                      child: TabBar(
+                        isScrollable: true,
+                        tabAlignment: TabAlignment.start,
+                        indicatorColor: pluginColor,
+                        labelColor: pluginColor,
+                        tabs: tabs
+                            .map(
+                              (t) => Tab(
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: <Widget>[
+                                    Icon(t.icon, size: 17),
+                                    const SizedBox(width: 6),
+                                    Text(t.label),
+                                  ],
+                                ),
+                              ),
+                            )
+                            .toList(growable: false),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ),
         ],
+        body: Padding(
+          padding: const EdgeInsets.only(top: 12),
+          child: TabBarView(
+            children: tabs
+                .map((t) {
+                  switch (t.id) {
+                    case 'items':
+                      return _buildItemsTab(
+                        context,
+                        fleet,
+                        listSpec!,
+                        latestStatus,
+                        isAdmin,
+                      );
+                    case 'members':
+                      return _buildMembersTab(
+                        context,
+                        fleet,
+                        appsState,
+                        isAdmin,
+                      );
+                    case 'tools':
+                      return _buildToolsTab(context, fleet, isAdmin);
+                    case 'settings':
+                      return _buildSettingsTab(context, fleet, isAdmin);
+                    case 'history':
+                      return _buildHistoryTab(
+                        context,
+                        fleet,
+                        appsState,
+                        isAdmin,
+                      );
+                    default:
+                      return _buildAboutTab(context, fleet);
+                  }
+                })
+                .toList(growable: false),
+          ),
+        ),
       ),
     );
   }
@@ -402,7 +515,8 @@ class _PluginAppPageState extends ConsumerState<PluginAppPage> {
           if (items.isEmpty)
             EmptyStateView(
               title: 'Nenhum item lido da frota ainda',
-              description: 'Clique em "Atualizar" para consultar o estado atual nos equipamentos.',
+              description:
+                  'Clique em "Atualizar" para consultar o estado atual nos equipamentos.',
               icon: Icons.view_list_outlined,
               tone: SemanticTone.plugin,
             )
@@ -760,7 +874,8 @@ class _PluginAppPageState extends ConsumerState<PluginAppPage> {
     return SingleChildScrollView(
       child: SectionCard(
         title: 'Configuração desejada da frota',
-        subtitle: 'Salvar guarda os valores desejados no NetMonitor sem alterar os equipamentos imediatamente.',
+        subtitle:
+            'Salvar guarda os valores desejados no NetMonitor sem alterar os equipamentos imediatamente.',
         icon: Icons.tune,
         iconTone: SemanticTone.plugin,
         child: Column(
@@ -858,12 +973,14 @@ class _PluginAppPageState extends ConsumerState<PluginAppPage> {
               if (batch.hasPatch && isAdmin) ...<Widget>[
                 NestedPanel(
                   tone: SemanticTone.plugin,
-                  child: Row(
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    alignment: WrapAlignment.spaceBetween,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: <Widget>[
-                      const Expanded(
-                        child: Text(
-                          'Este lote propõe ajustes para os equipamentos.',
-                        ),
+                      const Text(
+                        'Este lote propõe ajustes para os equipamentos.',
                       ),
                       FilledButton.tonal(
                         onPressed: () => ref
@@ -884,19 +1001,29 @@ class _PluginAppPageState extends ConsumerState<PluginAppPage> {
                 ListTile(
                   dense: true,
                   contentPadding: EdgeInsets.zero,
-                  title: Text(d.deviceName),
+                  title: Text(
+                    d.deviceName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                   subtitle: Text(
                     d.error ??
                         (d.runId != null &&
                                 appsState.lastSteps[d.runId!] != null
                             ? appsState.lastSteps[d.runId!]!.request
                             : d.status),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                   ),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: <Widget>[
                       if (d.missingTransport != null && isAdmin)
                         TextButton(
+                          style: TextButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                          ),
                           onPressed: () async {
                             final ok = await showDeviceAccessDialog(
                               context: context,
@@ -951,4 +1078,30 @@ class _PluginAppPageState extends ConsumerState<PluginAppPage> {
       ),
     );
   }
+}
+
+class _PluginAppTabBarDelegate extends SliverPersistentHeaderDelegate {
+  const _PluginAppTabBarDelegate({required this.height, required this.child});
+
+  final double height;
+  final Widget child;
+
+  @override
+  double get minExtent => height;
+
+  @override
+  double get maxExtent => height;
+
+  @override
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
+    return SizedBox.expand(child: child);
+  }
+
+  @override
+  bool shouldRebuild(covariant _PluginAppTabBarDelegate oldDelegate) =>
+      oldDelegate.height != height || oldDelegate.child != child;
 }

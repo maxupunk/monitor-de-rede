@@ -200,7 +200,7 @@ class _RegistryPageState extends ConsumerState<RegistryPage> {
                   .toList(growable: false),
             ),
             const SizedBox(height: 10),
-            DropdownButtonFormField<int>(
+            AppDropdownFormField<int>(
               initialValue: days,
               decoration: const InputDecoration(labelText: 'Validade'),
               items: const <DropdownMenuItem<int>>[
@@ -279,7 +279,7 @@ class _RegistryPageState extends ConsumerState<RegistryPage> {
               ),
             ),
             const SizedBox(height: 10),
-            DropdownButtonFormField<int>(
+            AppDropdownFormField<int>(
               initialValue: days,
               decoration: const InputDecoration(labelText: 'Prazo'),
               items: const <DropdownMenuItem<int>>[
@@ -348,8 +348,9 @@ class _RegistryPageState extends ConsumerState<RegistryPage> {
     } catch (err) {
       if (!mounted) return;
       setState(() => _savingSettings = false);
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Erro: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Erro: $err')));
     }
   }
 
@@ -357,7 +358,8 @@ class _RegistryPageState extends ConsumerState<RegistryPage> {
     final confirmed = await showConfirmActionDialog(
       context: context,
       title: 'Executar limpeza (garbage collection)?',
-      message: 'Remove versões antigas fora da retenção e camadas órfãs não usadas por deploys.',
+      message:
+          'Remove versões antigas fora da retenção e camadas órfãs não usadas por deploys.',
       confirmLabel: 'Limpar agora',
       tone: SemanticTone.warning,
     );
@@ -377,6 +379,7 @@ class _RegistryPageState extends ConsumerState<RegistryPage> {
     final canAdmin =
         ref.watch(authProvider).roleIn(ProductArea.servers) == UserRole.admin;
     final overview = reg.overview;
+    final isCompact = MediaQuery.sizeOf(context).width < 680;
     if (overview != null && !_settingsDirty && _keepVersionsCtrl.text.isEmpty) {
       _syncSettingsFields();
     }
@@ -386,47 +389,90 @@ class _RegistryPageState extends ConsumerState<RegistryPage> {
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: <Widget>[
-          SearchFilterHeader(
-            title: 'Registry de imagens',
-            subtitle: 'Imagens compiladas com tags imutáveis, SBOM e análise de vulnerabilidades OSV.',
-            actions: <Widget>[
-              OutlinedButton.icon(
-                onPressed: _openDockerHelp,
-                icon: const Icon(Icons.terminal, size: 18),
-                label: const Text('Usar pelo Docker'),
-              ),
-              OutlinedButton.icon(
-                onPressed: reg.loading ? null : _bootstrap,
-                icon: const Icon(Icons.refresh, size: 18),
-                label: const Text('Atualizar'),
-              ),
-            ],
-          ),
+          if (isCompact)
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: Text(
+                    'Registry de imagens',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: context.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Atualizar',
+                  onPressed: reg.loading ? null : _bootstrap,
+                  icon: const Icon(Icons.refresh, size: 20),
+                ),
+                PopupMenuButton<String>(
+                  tooltip: 'Mais ações',
+                  onSelected: (cmd) {
+                    if (cmd == 'docker_help') _openDockerHelp();
+                  },
+                  itemBuilder: (_) => const <PopupMenuEntry<String>>[
+                    PopupMenuItem<String>(
+                      value: 'docker_help',
+                      child: ListTile(
+                        dense: true,
+                        leading: Icon(Icons.terminal),
+                        title: Text('Usar pelo Docker'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            )
+          else
+            SearchFilterHeader(
+              title: 'Registry de imagens',
+              subtitle:
+                  'Imagens compiladas com tags imutáveis, SBOM e análise de vulnerabilidades OSV.',
+              actions: <Widget>[
+                OutlinedButton.icon(
+                  onPressed: _openDockerHelp,
+                  icon: const Icon(Icons.terminal, size: 18),
+                  label: const Text('Usar pelo Docker'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: reg.loading ? null : _bootstrap,
+                  icon: const Icon(Icons.refresh, size: 18),
+                  label: const Text('Atualizar'),
+                ),
+              ],
+            ),
           const SizedBox(height: 12),
 
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: SegmentedButton<int>(
+              showSelectedIcon: false,
+              style: SegmentedButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+              ),
               segments: <ButtonSegment<int>>[
                 const ButtonSegment(
                   value: 0,
-                  label: Text('Imagens'),
+                  label: Text('Imagens', maxLines: 1, softWrap: false),
                   icon: Icon(Icons.inventory_2_outlined),
                 ),
                 const ButtonSegment(
                   value: 1,
-                  label: Text('Tokens'),
+                  label: Text('Tokens', maxLines: 1, softWrap: false),
                   icon: Icon(Icons.vpn_key_outlined),
                 ),
                 const ButtonSegment(
                   value: 2,
-                  label: Text('Vulnerabilidades'),
+                  label: Text('Vulnerabilidades', maxLines: 1, softWrap: false),
                   icon: Icon(Icons.shield_outlined),
                 ),
                 if (canAdmin)
                   const ButtonSegment(
                     value: 3,
-                    label: Text('Configurações'),
+                    label: Text('Configurações', maxLines: 1, softWrap: false),
                     icon: Icon(Icons.tune),
                   ),
               ],
@@ -493,7 +539,8 @@ class _RegistryPageState extends ConsumerState<RegistryPage> {
         if (overview.repositories.isEmpty)
           const EmptyStateView(
             title: 'Nenhuma imagem armazenada ainda',
-            description: 'Compile uma aplicação pelo Deploy Contínuo ou envie via docker push.',
+            description:
+                'Compile uma aplicação pelo Deploy Contínuo ou envie via docker push.',
             icon: Icons.inventory_2_outlined,
           )
         else
@@ -673,36 +720,47 @@ class _RegistryPageState extends ConsumerState<RegistryPage> {
 
   Widget _buildVulnerabilitiesTab(RegistryOverview? overview, bool canAdmin) {
     final feeds = overview?.feeds ?? const <RegistryFeedView>[];
+    final isCompact = MediaQuery.sizeOf(context).width < 560;
+    final syncBtn = canAdmin
+        ? FilledButton.tonalIcon(
+            onPressed: () async {
+              try {
+                await ref.read(registryProvider.notifier).syncAdvisories();
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Sincronização OSV iniciada.')),
+                );
+              } catch (err) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(SnackBar(content: Text('Aviso: $err')));
+              }
+            },
+            icon: const Icon(Icons.sync, size: 16),
+            label: const Text('Atualizar agora'),
+          )
+        : null;
+    final newExceptionBtn = canAdmin
+        ? FilledButton.tonalIcon(
+            onPressed: _openCreateExceptionDialog,
+            icon: const Icon(Icons.add, size: 16),
+            label: const Text('Nova exceção'),
+          )
+        : null;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
         SectionCard(
           title: 'Bases locais de vulnerabilidades (OSV.dev)',
-          subtitle: 'Varredura offline por SBOM — nunca executa o conteúdo da imagem.',
+          subtitle:
+              'Varredura offline por SBOM — nunca executa o conteúdo da imagem.',
           icon: Icons.shield_outlined,
           iconTone: SemanticTone.info,
-          trailing: canAdmin
-              ? FilledButton.tonalIcon(
-                  onPressed: () async {
-                    try {
-                      await ref
-                          .read(registryProvider.notifier)
-                          .syncAdvisories();
-                      if (!mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Sincronização OSV iniciada.'),
-                        ),
-                      );
-                    } catch (err) {
-                      if (!mounted) return;
-                      ScaffoldMessenger.of(context)
-                          .showSnackBar(SnackBar(content: Text('Aviso: $err')));
-                    }
-                  },
-                  icon: const Icon(Icons.sync, size: 16),
-                  label: const Text('Atualizar agora'),
-                )
+          trailing: isCompact ? null : syncBtn,
+          footer: isCompact && syncBtn != null
+              ? Align(alignment: Alignment.centerRight, child: syncBtn)
               : null,
           child: feeds.isEmpty
               ? const EmptyStateView(title: 'Nenhuma base sincronizada ainda')
@@ -727,12 +785,9 @@ class _RegistryPageState extends ConsumerState<RegistryPage> {
           title: 'Exceções de risco aceitas',
           icon: Icons.rule_outlined,
           iconTone: SemanticTone.warning,
-          trailing: canAdmin
-              ? FilledButton.tonalIcon(
-                  onPressed: _openCreateExceptionDialog,
-                  icon: const Icon(Icons.add, size: 16),
-                  label: const Text('Nova exceção'),
-                )
+          trailing: isCompact ? null : newExceptionBtn,
+          footer: isCompact && newExceptionBtn != null
+              ? Align(alignment: Alignment.centerRight, child: newExceptionBtn)
               : null,
           child: _loadingExceptions
               ? const LoadingStateView(message: 'Carregando exceções...')
@@ -824,26 +879,24 @@ class _RegistryPageState extends ConsumerState<RegistryPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          Row(
+          ResponsiveFieldRow(
+            breakpoint: 480,
+            spacing: 12,
+            runSpacing: 12,
             children: <Widget>[
-              Expanded(
-                child: TextField(
-                  controller: _keepVersionsCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: 'Versões mantidas (1–200)',
-                  ),
-                  onChanged: (_) => setState(() => _settingsDirty = true),
+              TextField(
+                controller: _keepVersionsCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Versões mantidas (1–200)',
                 ),
+                onChanged: (_) => setState(() => _settingsDirty = true),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: TextField(
-                  controller: _quotaGibCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'Cota (GiB)'),
-                  onChanged: (_) => setState(() => _settingsDirty = true),
-                ),
+              TextField(
+                controller: _quotaGibCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Cota (GiB)'),
+                onChanged: (_) => setState(() => _settingsDirty = true),
               ),
             ],
           ),
@@ -1024,7 +1077,9 @@ class _RepositoryDetailBodyState extends ConsumerState<_RepositoryDetailBody> {
                         ),
                         if (widget.canAdmin)
                           Tooltip(
-                            message: v.canDelete ? 'Apagar versão' : 'Versões em uso, protegidas ou fixadas não podem ser apagadas.',
+                            message: v.canDelete
+                                ? 'Apagar versão'
+                                : 'Versões em uso, protegidas ou fixadas não podem ser apagadas.',
                             child: TextButton.icon(
                               onPressed: v.canDelete
                                   ? () async {
@@ -1032,7 +1087,8 @@ class _RepositoryDetailBodyState extends ConsumerState<_RepositoryDetailBody> {
                                         context: context,
                                         title:
                                             'Apagar versão ${shortRegistryDigest(v.digest)}?',
-                                        message: 'Esta versão será removida do catálogo.',
+                                        message:
+                                            'Esta versão será removida do catálogo.',
                                         confirmLabel: 'Apagar',
                                         tone: SemanticTone.error,
                                       );

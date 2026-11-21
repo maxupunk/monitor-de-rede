@@ -89,8 +89,10 @@ class _WifiClientsPageState extends ConsumerState<WifiClientsPage>
             decoration: const InputDecoration(labelText: 'Apelido do aparelho'),
           ),
           const SizedBox(height: 14),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
+          Wrap(
+            alignment: WrapAlignment.end,
+            spacing: 8,
+            runSpacing: 8,
             children: <Widget>[
               if (existing != null)
                 TextButton(
@@ -102,7 +104,6 @@ class _WifiClientsPageState extends ConsumerState<WifiClientsPage>
                   },
                   child: const Text('Deixar de vigiar'),
                 ),
-              const SizedBox(width: 8),
               FilledButton.icon(
                 onPressed: () async {
                   if (nameCtrl.text.trim().isEmpty) return;
@@ -333,252 +334,592 @@ class _WifiClientsPageState extends ConsumerState<WifiClientsPage>
         })
         .toList(growable: false);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        SearchFilterHeader(
-          title: 'Sinais Wi-Fi',
-          subtitle: 'Estações conectadas, roaming ao vivo e mapa radial de sinal via SSE',
-          searchController: _searchCtrl,
-          searchHint: 'Buscar por MAC, IP, hostname, SSID ou apelido...',
-          onSearchChanged: (_) => setState(() {}),
-          actions: <Widget>[
-            OutlinedButton.icon(
-              onPressed: () => showWifiQrSheet(
-                context,
-                initialSsid: ssids.firstOrNull ?? '',
-              ),
-              icon: const Icon(Icons.qr_code_2, size: 18),
-              label: const Text('QR Wi-Fi'),
-            ),
-            OutlinedButton.icon(
-              onPressed: () => context.go('/settings?tab=wifi'),
-              icon: const Icon(Icons.tune, size: 18),
-              label: const Text('Config.'),
-            ),
-            if (canWrite)
-              FilledButton.icon(
-                onPressed: wifi.requesting
-                    ? null
-                    : () => ref.read(wifiClientsProvider.notifier).refresh(),
-                icon: wifi.requesting || wifi.isReading
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.refresh, size: 18),
-                label: const Text('Atualizar APs'),
-              ),
-          ],
-          filters: <Widget>[
-            if (wifi.devices.isNotEmpty)
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 180),
-                child: DropdownButtonFormField<int?>(
-                  initialValue: _apFilter,
-                  isDense: true,
-                  decoration: const InputDecoration(labelText: 'AP'),
-                  items: <DropdownMenuItem<int?>>[
-                    const DropdownMenuItem<int?>(
-                      value: null,
-                      child: Text('Todos os APs'),
+    final activeFilterCount =
+        (_apFilter != null ? 1 : 0) +
+        (_ssidFilter != 'all' ? 1 : 0) +
+        (_bandFilter != 'all' ? 1 : 0) +
+        (_gradeFilter != 'all' ? 1 : 0) +
+        (_watchedOnly ? 1 : 0);
+
+    final activeApName = _apFilter != null
+        ? wifi.devices
+              .where((d) => d.deviceId == _apFilter)
+              .firstOrNull
+              ?.deviceName
+        : null;
+
+    final activeChips = <ActiveFilterChipData>[
+      if (activeApName != null)
+        ActiveFilterChipData(
+          label: 'AP: $activeApName',
+          onDeleted: () => setState(() => _apFilter = null),
+        ),
+      if (_ssidFilter != 'all')
+        ActiveFilterChipData(
+          label: 'SSID: $_ssidFilter',
+          onDeleted: () => setState(() => _ssidFilter = 'all'),
+        ),
+      if (_bandFilter != 'all')
+        ActiveFilterChipData(
+          label: _bandFilter,
+          onDeleted: () => setState(() => _bandFilter = 'all'),
+        ),
+      if (_gradeFilter != 'all')
+        ActiveFilterChipData(
+          label: 'Sinal: $_gradeFilter',
+          onDeleted: () => setState(() => _gradeFilter = 'all'),
+        ),
+      if (_watchedOnly)
+        ActiveFilterChipData(
+          label: 'Vigiados',
+          onDeleted: () => setState(() => _watchedOnly = false),
+        ),
+    ];
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isCompact = constraints.maxWidth < 680;
+        final pluginColor = context.semanticColors.plugin;
+
+        return NestedScrollView(
+          headerSliverBuilder: (context, innerBoxIsScrolled) => <Widget>[
+            SliverToBoxAdapter(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  if (isCompact)
+                    Row(
+                      children: <Widget>[
+                        Expanded(
+                          child: Text(
+                            'Sinais Wi-Fi',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: context.textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                        if (canWrite)
+                          IconButton(
+                            tooltip: 'Atualizar APs',
+                            onPressed: wifi.requesting
+                                ? null
+                                : () => ref
+                                      .read(wifiClientsProvider.notifier)
+                                      .refresh(),
+                            icon: wifi.requesting || wifi.isReading
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.refresh),
+                          ),
+                        PopupMenuButton<String>(
+                          tooltip: 'Mais ações',
+                          icon: const Icon(Icons.more_vert),
+                          onSelected: (value) {
+                            if (value == 'qr') {
+                              showWifiQrSheet(
+                                context,
+                                initialSsid: ssids.firstOrNull ?? '',
+                              );
+                            } else if (value == 'settings') {
+                              context.go('/settings?tab=wifi');
+                            }
+                          },
+                          itemBuilder: (_) => const <PopupMenuEntry<String>>[
+                            PopupMenuItem<String>(
+                              value: 'qr',
+                              child: ListTile(
+                                dense: true,
+                                contentPadding: EdgeInsets.zero,
+                                leading: Icon(Icons.qr_code_2),
+                                title: Text('QR Wi-Fi'),
+                              ),
+                            ),
+                            PopupMenuItem<String>(
+                              value: 'settings',
+                              child: ListTile(
+                                dense: true,
+                                contentPadding: EdgeInsets.zero,
+                                leading: Icon(Icons.tune),
+                                title: Text('Configurações Wi-Fi'),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    )
+                  else
+                    SearchFilterHeader(
+                      title: 'Sinais Wi-Fi',
+                      subtitle:
+                          'Estações conectadas, roaming ao vivo e mapa radial de sinal via SSE',
+                      actions: <Widget>[
+                        OutlinedButton.icon(
+                          onPressed: () => showWifiQrSheet(
+                            context,
+                            initialSsid: ssids.firstOrNull ?? '',
+                          ),
+                          icon: const Icon(Icons.qr_code_2, size: 18),
+                          label: const Text('QR Wi-Fi'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: () => context.go('/settings?tab=wifi'),
+                          icon: const Icon(Icons.tune, size: 18),
+                          label: const Text('Config.'),
+                        ),
+                        if (canWrite)
+                          FilledButton.icon(
+                            onPressed: wifi.requesting
+                                ? null
+                                : () => ref
+                                      .read(wifiClientsProvider.notifier)
+                                      .refresh(),
+                            icon: wifi.requesting || wifi.isReading
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.refresh, size: 18),
+                            label: const Text('Atualizar APs'),
+                          ),
+                      ],
                     ),
-                    for (final ap in wifi.devices)
-                      DropdownMenuItem<int?>(
-                        value: ap.deviceId,
-                        child: Text(ap.deviceName),
+                  if (wifi.watched.isNotEmpty) ...<Widget>[
+                    const SizedBox(height: 8),
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: wifi.watched
+                            .map((w) {
+                              final online =
+                                  w.state == 'online' || w.state == 'connected';
+                              return Padding(
+                                padding: const EdgeInsets.only(right: 8),
+                                child: SemanticChip(
+                                  label:
+                                      '${w.name}${w.deviceName != null ? ' · ${w.deviceName}' : ''}',
+                                  tone: online
+                                      ? SemanticTone.success
+                                      : SemanticTone.error,
+                                  icon: Icons.star,
+                                  compact: true,
+                                ),
+                              );
+                            })
+                            .toList(growable: false),
                       ),
-                  ],
-                  onChanged: (v) => setState(() => _apFilter = v),
-                ),
-              ),
-            if (ssids.isNotEmpty)
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 160),
-                child: DropdownButtonFormField<String>(
-                  initialValue: _ssidFilter,
-                  isDense: true,
-                  decoration: const InputDecoration(labelText: 'SSID'),
-                  items: <DropdownMenuItem<String>>[
-                    const DropdownMenuItem(
-                      value: 'all',
-                      child: Text('Todos SSIDs'),
                     ),
-                    for (final s in ssids)
-                      DropdownMenuItem(value: s, child: Text(s)),
                   ],
-                  onChanged: (v) => setState(() => _ssidFilter = v ?? 'all'),
-                ),
-              ),
-            ChoiceChip(
-              label: const Text('Vigiados'),
-              selected: _watchedOnly,
-              onSelected: (v) => setState(() => _watchedOnly = v),
-            ),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 150),
-              child: DropdownButtonFormField<String>(
-                initialValue: _gradeFilter,
-                isDense: true,
-                decoration: const InputDecoration(labelText: 'Sinal'),
-                items: const <DropdownMenuItem<String>>[
-                  DropdownMenuItem(value: 'all', child: Text('Todos')),
-                  DropdownMenuItem(
-                    value: 'excellent',
-                    child: Text('Excelente'),
-                  ),
-                  DropdownMenuItem(value: 'good', child: Text('Bom')),
-                  DropdownMenuItem(value: 'fair', child: Text('Regular')),
-                  DropdownMenuItem(value: 'poor', child: Text('Fraco')),
+                  const SizedBox(height: 8),
                 ],
-                onChanged: (v) => setState(() => _gradeFilter = v ?? 'all'),
               ),
             ),
-            for (final b in const <String>['all', '2.4GHz', '5GHz', '6GHz'])
-              ChoiceChip(
-                label: Text(b == 'all' ? 'Todas bandas' : b),
-                selected: _bandFilter == b,
-                onSelected: (_) => setState(() => _bandFilter = b),
-              ),
-          ],
-        ),
-        if (wifi.watched.isNotEmpty) ...<Widget>[
-          const SizedBox(height: 10),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: wifi.watched
-                  .map((w) {
-                    final online =
-                        w.state == 'online' || w.state == 'connected';
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: SemanticChip(
-                        label:
-                            '${w.name}${w.deviceName != null ? ' · ${w.deviceName}' : ''}',
-                        tone: online
-                            ? SemanticTone.success
-                            : SemanticTone.error,
-                        icon: Icons.star,
-                        compact: true,
+            SliverPersistentHeader(
+              pinned: true,
+              delegate: _WifiTabBarDelegate(
+                backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+                tabBar: TabBar(
+                  controller: _tabController,
+                  isScrollable: isCompact,
+                  tabAlignment: isCompact
+                      ? TabAlignment.start
+                      : TabAlignment.fill,
+                  indicatorColor: pluginColor,
+                  labelColor: pluginColor,
+                  labelPadding: const EdgeInsets.symmetric(horizontal: 14),
+                  tabs: <Widget>[
+                    Tab(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          const Icon(Icons.list, size: 18),
+                          const SizedBox(width: 6),
+                          Text('Lista (${filtered.length})'),
+                        ],
                       ),
-                    );
-                  })
-                  .toList(growable: false),
+                    ),
+                    const Tab(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          Icon(Icons.radar, size: 18),
+                          SizedBox(width: 6),
+                          Text('Mapa de Sinal'),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
-          ),
-        ],
-        const SizedBox(height: 10),
-        TabBar(
-          controller: _tabController,
-          tabs: <Widget>[
-            Tab(
-              icon: const Icon(Icons.list),
-              text: 'Lista (${filtered.length})',
-            ),
-            const Tab(icon: Icon(Icons.radar), text: 'Mapa de Sinal (Ao vivo)'),
           ],
-        ),
-        const SizedBox(height: 10),
-        Expanded(
-          child: TabBarView(
+          body: TabBarView(
             controller: _tabController,
             children: <Widget>[
               // ── Tab 1: Lista ──
-              filtered.isEmpty
-                  ? EmptyStateView(
-                      title: 'Nenhum cliente Wi-Fi conectado',
-                      description: 'Os dados chegam automaticamente via SSE (wifi:snapshot) dos APs com plugin Wi-Fi.',
-                      icon: Icons.wifi_find,
-                      tone: SemanticTone.plugin,
-                      action: canWrite
-                          ? FilledButton.icon(
-                              onPressed: () => ref
-                                  .read(wifiClientsProvider.notifier)
-                                  .refresh(),
-                              icon: const Icon(Icons.refresh),
-                              label: const Text('Solicitar leitura agora'),
-                            )
-                          : null,
-                    )
-                  : ListView.builder(
-                      itemCount: filtered.length,
-                      itemBuilder: (context, index) {
-                        final row = filtered[index];
-                        final st = row.station;
-                        final watched = watchedByMac[st.mac.toLowerCase()];
-                        return Card(
-                          elevation: 2,
-                          margin: const EdgeInsets.only(bottom: 8),
-                          child: ListTile(
-                            onTap: () => _openStationInspector(row),
-                            leading: SemanticChip(
-                              label: '${st.signalDbm} dBm',
-                              tone: _signalTone(st.signalDbm),
-                              compact: true,
-                            ),
-                            title: Row(
-                              children: <Widget>[
-                                if (watched != null) ...<Widget>[
-                                  Icon(
-                                    Icons.star,
-                                    size: 16,
-                                    color: context.semanticColors.warning,
-                                  ),
-                                  const SizedBox(width: 4),
-                                ],
-                                Expanded(
-                                  child: Text(
-                                    watched?.name ?? row.displayName,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w700,
+              CustomScrollView(
+                slivers: <Widget>[
+                  SliverPadding(
+                    padding: const EdgeInsets.only(top: 10, bottom: 10),
+                    sliver: SliverToBoxAdapter(
+                      child: UnifiedFilterBar(
+                        searchController: _searchCtrl,
+                        searchHint: 'Buscar MAC, IP, hostname ou SSID...',
+                        onSearchChanged: (_) => setState(() {}),
+                        activeFilterCount: activeFilterCount,
+                        filterSheetTitle: 'Filtros de Sinais Wi-Fi',
+                        filterSheetBuilder: (sheetCtx, setSheet) => Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: <Widget>[
+                            if (wifi.devices.isNotEmpty ||
+                                ssids.isNotEmpty) ...<Widget>[
+                              ResponsiveFieldRow(
+                                breakpoint: 480,
+                                children: <Widget>[
+                                  if (wifi.devices.isNotEmpty)
+                                    AppDropdownFormField<int?>(
+                                      initialValue:
+                                          wifi.devices.any(
+                                            (ap) => ap.deviceId == _apFilter,
+                                          )
+                                          ? _apFilter
+                                          : null,
+                                      decoration: const InputDecoration(
+                                        labelText: 'AP',
+                                      ),
+                                      items: <DropdownMenuItem<int?>>[
+                                        const DropdownMenuItem<int?>(
+                                          value: null,
+                                          child: Text(
+                                            'Todos os APs',
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                        for (final ap in wifi.devices)
+                                          DropdownMenuItem<int?>(
+                                            value: ap.deviceId,
+                                            child: Text(
+                                              ap.deviceName,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                      ],
+                                      onChanged: (v) {
+                                        setState(() => _apFilter = v);
+                                        setSheet(() {});
+                                      },
                                     ),
+                                  if (ssids.isNotEmpty)
+                                    AppDropdownFormField<String>(
+                                      initialValue: ssids.contains(_ssidFilter)
+                                          ? _ssidFilter
+                                          : 'all',
+                                      decoration: const InputDecoration(
+                                        labelText: 'SSID',
+                                      ),
+                                      items: <DropdownMenuItem<String>>[
+                                        const DropdownMenuItem<String>(
+                                          value: 'all',
+                                          child: Text(
+                                            'Todos SSIDs',
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                        for (final s in ssids)
+                                          DropdownMenuItem<String>(
+                                            value: s,
+                                            child: Text(
+                                              s,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                      ],
+                                      onChanged: (v) {
+                                        setState(
+                                          () => _ssidFilter = v ?? 'all',
+                                        );
+                                        setSheet(() {});
+                                      },
+                                    ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                            ],
+                            ResponsiveFieldRow(
+                              breakpoint: 480,
+                              children: <Widget>[
+                                AppDropdownFormField<String>(
+                                  initialValue: _gradeFilter,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Sinal',
                                   ),
+                                  items: const <DropdownMenuItem<String>>[
+                                    DropdownMenuItem(
+                                      value: 'all',
+                                      child: Text(
+                                        'Todos',
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    DropdownMenuItem(
+                                      value: 'excellent',
+                                      child: Text(
+                                        'Excelente',
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    DropdownMenuItem(
+                                      value: 'good',
+                                      child: Text(
+                                        'Bom',
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    DropdownMenuItem(
+                                      value: 'fair',
+                                      child: Text(
+                                        'Regular',
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    DropdownMenuItem(
+                                      value: 'poor',
+                                      child: Text(
+                                        'Fraco',
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                  onChanged: (v) {
+                                    setState(() => _gradeFilter = v ?? 'all');
+                                    setSheet(() {});
+                                  },
+                                ),
+                                AppDropdownFormField<String>(
+                                  initialValue: _bandFilter,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Banda',
+                                  ),
+                                  items: const <DropdownMenuItem<String>>[
+                                    DropdownMenuItem(
+                                      value: 'all',
+                                      child: Text(
+                                        'Todas bandas',
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    DropdownMenuItem(
+                                      value: '2.4GHz',
+                                      child: Text(
+                                        '2.4GHz',
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    DropdownMenuItem(
+                                      value: '5GHz',
+                                      child: Text(
+                                        '5GHz',
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    DropdownMenuItem(
+                                      value: '6GHz',
+                                      child: Text(
+                                        '6GHz',
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                  onChanged: (v) {
+                                    setState(() => _bandFilter = v ?? 'all');
+                                    setSheet(() {});
+                                  },
                                 ),
                               ],
                             ),
-                            subtitle: Text(
-                              '${row.deviceName} · ${st.ssid ?? '—'}'
-                              '${st.band != null ? ' (${st.band})' : ''}'
-                              '${st.ip != null ? ' · ${st.ip}' : ''}',
+                            const SizedBox(height: 8),
+                            SwitchListTile(
+                              contentPadding: EdgeInsets.zero,
+                              title: const Text('Apenas aparelhos vigiados'),
+                              value: _watchedOnly,
+                              onChanged: (v) {
+                                setState(() => _watchedOnly = v);
+                                setSheet(() {});
+                              },
                             ),
-                            trailing: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: <Widget>[
-                                if (st.txRateBps != null)
-                                  Text(
-                                    formatBps(st.txRateBps),
-                                    style: context.textTheme.labelMedium
-                                        ?.copyWith(fontWeight: FontWeight.w700),
-                                  ),
-                                if (st.distance != null)
-                                  Text(
-                                    formatDistanceRange(
-                                      st.distance!.minM,
-                                      st.distance!.maxM,
-                                    ),
-                                    style: context.textTheme.labelSmall,
-                                  ),
-                              ],
-                            ),
-                          ),
-                        );
-                      },
+                          ],
+                        ),
+                        onClearFilters: () => setState(() {
+                          _apFilter = null;
+                          _ssidFilter = 'all';
+                          _bandFilter = 'all';
+                          _gradeFilter = 'all';
+                          _watchedOnly = false;
+                        }),
+                        activeChips: activeChips,
+                      ),
                     ),
+                  ),
+                  if (filtered.isEmpty)
+                    SliverFillRemaining(
+                      hasScrollBody: false,
+                      child: EmptyStateView(
+                        title: 'Nenhum cliente Wi-Fi conectado',
+                        description:
+                            'Os dados chegam automaticamente via SSE (wifi:snapshot) dos APs com plugin Wi-Fi.',
+                        icon: Icons.wifi_find,
+                        tone: SemanticTone.plugin,
+                        action: canWrite
+                            ? FilledButton.icon(
+                                onPressed: () => ref
+                                    .read(wifiClientsProvider.notifier)
+                                    .refresh(),
+                                icon: const Icon(Icons.refresh),
+                                label: const Text('Solicitar leitura agora'),
+                              )
+                            : null,
+                      ),
+                    )
+                  else
+                    SliverPadding(
+                      padding: const EdgeInsets.only(bottom: 16),
+                      sliver: SliverList.separated(
+                        itemCount: filtered.length,
+                        separatorBuilder: (_, _) => const SizedBox(height: 8),
+                        itemBuilder: (context, index) {
+                          final row = filtered[index];
+                          final st = row.station;
+                          final watched = watchedByMac[st.mac.toLowerCase()];
+                          return Card(
+                            elevation: 2,
+                            child: ListTile(
+                              onTap: () => _openStationInspector(row),
+                              leading: SemanticChip(
+                                label: '${st.signalDbm} dBm',
+                                tone: _signalTone(st.signalDbm),
+                                compact: true,
+                              ),
+                              title: Row(
+                                children: <Widget>[
+                                  if (watched != null) ...<Widget>[
+                                    Icon(
+                                      Icons.star,
+                                      size: 16,
+                                      color: context.semanticColors.warning,
+                                    ),
+                                    const SizedBox(width: 4),
+                                  ],
+                                  Expanded(
+                                    child: Text(
+                                      watched?.name ?? row.displayName,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              subtitle: Text(
+                                '${row.deviceName} · ${st.ssid ?? '—'}'
+                                '${st.band != null ? ' (${st.band})' : ''}'
+                                '${st.ip != null ? ' · ${st.ip}' : ''}',
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              trailing:
+                                  (st.txRateBps != null || st.distance != null)
+                                  ? Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.end,
+                                      children: <Widget>[
+                                        if (st.txRateBps != null)
+                                          Text(
+                                            formatBps(st.txRateBps),
+                                            style: context.textTheme.labelMedium
+                                                ?.copyWith(
+                                                  fontWeight: FontWeight.w700,
+                                                ),
+                                          ),
+                                        if (st.distance != null)
+                                          Text(
+                                            formatDistanceRange(
+                                              st.distance!.minM,
+                                              st.distance!.maxM,
+                                            ),
+                                            style: context.textTheme.labelSmall,
+                                          ),
+                                      ],
+                                    )
+                                  : null,
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                ],
+              ),
               // ── Tab 2: Mapa Radial Interativo (com `interest=wifi`) ──
-              _WifiSignalMapView(
-                snapshots: wifi.devices,
-                recentRoams: wifi.roams,
-                onTapStation: _openStationInspector,
+              Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: _WifiSignalMapView(
+                  snapshots: wifi.devices,
+                  recentRoams: wifi.roams,
+                  onTapStation: _openStationInspector,
+                ),
               ),
             ],
           ),
-        ),
-      ],
+        );
+      },
     );
+  }
+}
+
+class _WifiTabBarDelegate extends SliverPersistentHeaderDelegate {
+  const _WifiTabBarDelegate({
+    required this.tabBar,
+    required this.backgroundColor,
+  });
+
+  final TabBar tabBar;
+  final Color backgroundColor;
+
+  @override
+  double get minExtent => tabBar.preferredSize.height + 1;
+
+  @override
+  double get maxExtent => tabBar.preferredSize.height + 1;
+
+  @override
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
+    return ColoredBox(
+      color: backgroundColor,
+      child: Column(children: <Widget>[tabBar, const Divider(height: 1)]),
+    );
+  }
+
+  @override
+  bool shouldRebuild(covariant _WifiTabBarDelegate oldDelegate) {
+    return oldDelegate.tabBar != tabBar ||
+        oldDelegate.backgroundColor != backgroundColor;
   }
 }
 

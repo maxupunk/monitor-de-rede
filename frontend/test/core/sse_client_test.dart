@@ -71,65 +71,62 @@ void main() {
   });
 
   group('SseClient', () {
-    test(
-      'emits parsed events and reconnects after error with backoff',
-      () async {
-        final transports = <_FakeSseTransport>[];
-        final client = SseClient(
-          transportFactory: () {
-            final t = _FakeSseTransport();
-            transports.add(t);
-            return t;
-          },
-          backoffCalculator: (_) => const Duration(milliseconds: 15),
-        );
+    test('emits parsed events and reconnects after error with backoff', () async {
+      final transports = <_FakeSseTransport>[];
+      final client = SseClient(
+        transportFactory: () {
+          final t = _FakeSseTransport();
+          transports.add(t);
+          return t;
+        },
+        backoffCalculator: (_) => const Duration(milliseconds: 15),
+      );
 
-        final received = <SseEvent>[];
-        final states = <SseConnectionState>[];
-        final sub1 = client.events.listen(received.add);
-        final sub2 = client.connectionStates.listen(states.add);
+      final received = <SseEvent>[];
+      final states = <SseConnectionState>[];
+      final sub1 = client.events.listen(received.add);
+      final sub2 = client.connectionStates.listen(states.add);
 
-        client.connect(
-          urlBuilder: () =>
-              Uri.parse('http://127.0.0.1:3333/api/events/stream?token=abc'),
-        );
+      client.connect(
+        urlBuilder: () =>
+            Uri.parse('http://127.0.0.1:3333/api/events/stream?token=abc'),
+      );
 
-        expect(transports.length, 1);
-        transports.first.simulateOpen();
-        expect(client.isConnected, isTrue);
+      expect(transports.length, 1);
+      transports.first.simulateOpen();
+      expect(client.isConnected, isTrue);
 
-        transports.first.simulateMessage(
-          '{"type":"alert:triggered","data":{"id":42},"timestamp":"2026-11-20T22:00:00Z"}',
-        );
-        // Ignora payload malformado sem quebrar o stream.
-        transports.first.simulateMessage('not-json');
+      transports.first.simulateMessage(
+        '{"type":"alert:triggered","data":{"id":42},"timestamp":"2026-11-20T22:00:00Z"}',
+      );
+      // Ignora payload malformado sem quebrar o stream.
+      transports.first.simulateMessage('not-json');
 
-        await Future<void>.delayed(Duration.zero);
-        expect(received.length, 1);
-        expect(received.first.type, 'alert:triggered');
-        expect(received.first.data['id'], 42);
+      await Future<void>.delayed(Duration.zero);
+      expect(received.length, 1);
+      expect(received.first.type, 'alert:triggered');
+      expect(received.first.data['id'], 42);
 
-        // Simula queda de rede -> agenda reconexão one-shot.
-        transports.first.simulateError(Exception('drop'));
-        expect(client.state, SseConnectionState.reconnecting);
-        expect(client.reconnectAttempts, 1);
+      // Simula queda de rede -> agenda reconexão one-shot.
+      transports.first.simulateError(Exception('drop'));
+      expect(client.state, SseConnectionState.reconnecting);
+      expect(client.reconnectAttempts, 1);
 
-        await Future<void>.delayed(const Duration(milliseconds: 40));
-        expect(transports.length, 2);
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+      expect(transports.length, 2);
 
-        transports[1].simulateOpen();
-        expect(client.isConnected, isTrue);
-        expect(client.reconnectAttempts, 0);
+      transports[1].simulateOpen();
+      expect(client.isConnected, isTrue);
+      expect(client.reconnectAttempts, 0);
 
-        client.disconnect();
-        expect(transports[1].closed, isTrue);
-        expect(client.state, SseConnectionState.disconnected);
+      client.disconnect();
+      expect(transports[1].closed, isTrue);
+      expect(client.state, SseConnectionState.disconnected);
 
-        await sub1.cancel();
-        await sub2.cancel();
-        client.dispose();
-        expect(states, contains(SseConnectionState.connected));
-      },
-    );
+      await sub1.cancel();
+      await sub2.cancel();
+      client.dispose();
+      expect(states, contains(SseConnectionState.connected));
+    });
   });
 }

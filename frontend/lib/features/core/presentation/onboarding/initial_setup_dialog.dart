@@ -90,7 +90,8 @@ Future<void> showInitialSetupWizard(BuildContext context, WidgetRef ref) async {
   await showAdaptiveFormSheet<void>(
     context: context,
     title: 'Assistente de configuração inicial',
-    subtitle: 'Configure áreas, rede, endereços, agentes, VPN e notificações passo a passo.',
+    subtitle:
+        'Configure áreas, rede, endereços, agentes, VPN e notificações passo a passo.',
     maxWidth: 720,
     isDismissible: false,
     builder: (_) => const _OnboardingWizardBody(),
@@ -396,17 +397,23 @@ class _OnboardingWizardBodyState extends ConsumerState<_OnboardingWizardBody> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: <Widget>[
-            Text(
-              'Etapa: ${_step.label}',
-              style: context.textTheme.labelLarge?.copyWith(
-                fontWeight: FontWeight.w700,
+            Expanded(
+              child: Text(
+                'Etapa: ${_step.label}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: context.textTheme.labelLarge?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
-            if (stepIdx >= 0)
+            if (stepIdx >= 0) ...<Widget>[
+              const SizedBox(width: 8),
               Text(
                 '${stepIdx + 1} / ${flow.length}',
                 style: context.textTheme.labelSmall,
               ),
+            ],
           ],
         ),
         const SizedBox(height: 14),
@@ -417,8 +424,11 @@ class _OnboardingWizardBodyState extends ConsumerState<_OnboardingWizardBody> {
         _buildStepBody(context),
         const SizedBox(height: 18),
         if (_step != _WizardStep.start && _step != _WizardStep.done)
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: <Widget>[
               TextButton.icon(
                 onPressed: _applying ? null : _goBack,
@@ -456,7 +466,8 @@ class _OnboardingWizardBodyState extends ConsumerState<_OnboardingWizardBody> {
         children: <Widget>[
           ChoiceCard(
             title: 'Começar do zero',
-            subtitle: 'Escolha quais áreas ativar e configure rede, servidores e alertas.',
+            subtitle:
+                'Escolha quais áreas ativar e configure rede, servidores e alertas.',
             icon: Icons.rocket_launch_outlined,
             tone: SemanticTone.primary,
             onTap: () => setState(() => _step = _WizardStep.intent),
@@ -464,7 +475,8 @@ class _OnboardingWizardBodyState extends ConsumerState<_OnboardingWizardBody> {
           const SizedBox(height: 10),
           ChoiceCard(
             title: 'Restaurar de um backup',
-            subtitle: 'Envie um arquivo .json ou .json.gz de outra instalação do NetMonitor.',
+            subtitle:
+                'Envie um arquivo .json ou .json.gz de outra instalação do NetMonitor.',
             icon: Icons.settings_backup_restore,
             tone: SemanticTone.info,
             onTap: () => setState(() => _step = _WizardStep.restore),

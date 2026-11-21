@@ -385,7 +385,8 @@ class _AiChatComposerState extends ConsumerState<AiChatComposer> {
                     onChanged: (_) => _syncMentionsAndQuery(),
                     onSubmitted: (_) => _submit(),
                     decoration: const InputDecoration(
-                      hintText: 'Pergunte sobre alertas, dispositivos, logs... (use @ para marcar)',
+                      hintText:
+                          'Pergunte sobre alertas, dispositivos, logs... (use @ para marcar)',
                       isDense: true,
                     ),
                   ),

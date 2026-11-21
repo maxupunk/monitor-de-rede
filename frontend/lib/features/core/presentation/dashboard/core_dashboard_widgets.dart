@@ -82,7 +82,7 @@ class _StatCardsWidget extends ConsumerWidget {
         .length;
 
     return ResponsiveGrid(
-      xs: 1,
+      xs: 2,
       sm: 2,
       md: 4,
       lg: 4,
@@ -175,18 +175,20 @@ class _HealthGaugeWidget extends ConsumerWidget {
               description: 'Crie monitores para acompanhar a saúde da rede.',
               icon: Icons.monitor_heart_outlined,
             )
-          : Row(
-              children: <Widget>[
-                SizedBox(
-                  width: 140,
-                  height: 140,
+          : LayoutBuilder(
+              builder: (context, constraints) {
+                final narrow = constraints.maxWidth < 330;
+                final gaugeSize = narrow ? 124.0 : 140.0;
+                final gauge = SizedBox(
+                  width: gaugeSize,
+                  height: gaugeSize,
                   child: Stack(
                     alignment: Alignment.center,
                     children: <Widget>[
                       PieChart(
                         PieChartData(
                           sectionsSpace: 2,
-                          centerSpaceRadius: 42,
+                          centerSpaceRadius: narrow ? 36 : 42,
                           sections: <PieChartSectionData>[
                             if (up > 0)
                               PieChartSectionData(
@@ -239,41 +241,55 @@ class _HealthGaugeWidget extends ConsumerWidget {
                       ),
                     ],
                   ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      _LegendRow(
-                        label: 'Online',
-                        count: up,
-                        tone: SemanticTone.success,
-                      ),
+                );
+                final legend = Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    _LegendRow(
+                      label: 'Online',
+                      count: up,
+                      tone: SemanticTone.success,
+                    ),
+                    const SizedBox(height: 8),
+                    _LegendRow(
+                      label: 'Atenção',
+                      count: warning,
+                      tone: SemanticTone.warning,
+                    ),
+                    const SizedBox(height: 8),
+                    _LegendRow(
+                      label: 'Indisponível',
+                      count: down,
+                      tone: SemanticTone.error,
+                    ),
+                    if (unknown > 0) ...<Widget>[
                       const SizedBox(height: 8),
                       _LegendRow(
-                        label: 'Atenção',
-                        count: warning,
-                        tone: SemanticTone.warning,
+                        label: 'Desconhecido',
+                        count: unknown,
+                        tone: SemanticTone.secondary,
                       ),
-                      const SizedBox(height: 8),
-                      _LegendRow(
-                        label: 'Indisponível',
-                        count: down,
-                        tone: SemanticTone.error,
-                      ),
-                      if (unknown > 0) ...<Widget>[
-                        const SizedBox(height: 8),
-                        _LegendRow(
-                          label: 'Desconhecido',
-                          count: unknown,
-                          tone: SemanticTone.secondary,
-                        ),
-                      ],
                     ],
-                  ),
-                ),
-              ],
+                  ],
+                );
+                if (narrow) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      Center(child: gauge),
+                      const SizedBox(height: 12),
+                      legend,
+                    ],
+                  );
+                }
+                return Row(
+                  children: <Widget>[
+                    gauge,
+                    const SizedBox(width: 16),
+                    Expanded(child: legend),
+                  ],
+                );
+              },
             ),
     );
   }
@@ -484,26 +500,34 @@ class _LatencyTimeSeriesWidgetState
           ? 'Média ${formatLatency(_data!.avgLatency)} · Perda ${formatPercent(_data!.packetLossPct)}'
           : 'Tendência de resposta dos monitores',
       icon: Icons.show_chart,
-      trailing: SegmentedButton<String>(
-        showSelectedIcon: false,
-        style: const ButtonStyle(visualDensity: VisualDensity.compact),
-        segments: const <ButtonSegment<String>>[
-          ButtonSegment<String>(value: '15m', label: Text('15m')),
-          ButtonSegment<String>(value: '1h', label: Text('1h')),
-          ButtonSegment<String>(value: '24h', label: Text('24h')),
-        ],
-        selected: <String>{_timeframe},
-        onSelectionChanged: (next) {
-          setState(() => _timeframe = next.first);
-          _load();
-        },
-      ),
-      child: _loading && _data == null
-          ? const SizedBox(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Align(
+            alignment: Alignment.centerRight,
+            child: SegmentedButton<String>(
+              showSelectedIcon: false,
+              style: const ButtonStyle(visualDensity: VisualDensity.compact),
+              segments: const <ButtonSegment<String>>[
+                ButtonSegment<String>(value: '15m', label: Text('15m')),
+                ButtonSegment<String>(value: '1h', label: Text('1h')),
+                ButtonSegment<String>(value: '24h', label: Text('24h')),
+              ],
+              selected: <String>{_timeframe},
+              onSelectionChanged: (next) {
+                setState(() => _timeframe = next.first);
+                _load();
+              },
+            ),
+          ),
+          const SizedBox(height: 10),
+          if (_loading && _data == null)
+            const SizedBox(
               height: 180,
               child: LoadingStateView(message: 'Carregando série...'),
             )
-          : MetricLineChart(
+          else
+            MetricLineChart(
               height: 190,
               series: <MetricLineSeries>[
                 MetricLineSeries(
@@ -522,6 +546,8 @@ class _LatencyTimeSeriesWidgetState
                 return samples[idx].time;
               },
             ),
+        ],
+      ),
     );
   }
 }
@@ -591,7 +617,8 @@ class _EventDistributionWidgetState
           : _buckets.isEmpty
           ? const EmptyStateView(
               title: 'Sem eventos no período',
-              description: 'A distribuição horária aparecerá conforme eventos forem gravados.',
+              description:
+                  'A distribuição horária aparecerá conforme eventos forem gravados.',
               icon: Icons.bar_chart,
             )
           : SizedBox(
@@ -783,7 +810,8 @@ class _EventsFeedWidget extends ConsumerWidget {
       child: recent.isEmpty
           ? const EmptyStateView(
               title: 'Aguardando eventos',
-              description: 'Novos eventos em tempo real aparecerão aqui automaticamente.',
+              description:
+                  'Novos eventos em tempo real aparecerão aqui automaticamente.',
               icon: Icons.history,
             )
           : Column(
@@ -1049,7 +1077,8 @@ class _ResourceUsageWidgetState extends ConsumerState<_ResourceUsageWidget> {
       child: _deviceId == null
           ? const EmptyStateView(
               title: 'Dispositivo não configurado',
-              description: 'Use o modo Personalizar para escolher o dispositivo monitorado.',
+              description:
+                  'Use o modo Personalizar para escolher o dispositivo monitorado.',
               icon: Icons.tune,
             )
           : _loading
@@ -1127,7 +1156,8 @@ class _BinaryStatusWidget extends ConsumerWidget {
                     ],
                   ),
                 ),
-                if (auth.canWrite)
+                if (auth.canWrite) ...<Widget>[
+                  const SizedBox(width: 8),
                   FilledButton.tonalIcon(
                     onPressed: monitors.runningId == monitor.id
                         ? null
@@ -1137,6 +1167,7 @@ class _BinaryStatusWidget extends ConsumerWidget {
                     icon: const Icon(Icons.play_arrow, size: 18),
                     label: const Text('Testar'),
                   ),
+                ],
               ],
             ),
     );

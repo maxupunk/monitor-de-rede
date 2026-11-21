@@ -307,9 +307,9 @@ class DnsServersNotifier extends Notifier<DnsServersState> {
           .read(apiClientProvider)
           .get<dynamic>('/dns/servers');
       state = state.copyWith(
-        items: asJsonMapList(raw)
-            .map(DnsServerModel.fromJson)
-            .toList(growable: false),
+        items: asJsonMapList(
+          raw,
+        ).map(DnsServerModel.fromJson).toList(growable: false),
         loading: false,
       );
     } catch (err) {
@@ -464,12 +464,12 @@ class DnsPerformanceNotifier extends Notifier<DnsPerformanceState> {
           );
       final map = asJsonMap(raw);
       state = state.copyWith(
-        ranking: asJsonMapList(map['ranking'])
-            .map(DnsRankingEntry.fromJson)
-            .toList(growable: false),
-        series: asJsonMapList(map['series'])
-            .map(DnsSeriesItem.fromJson)
-            .toList(growable: false),
+        ranking: asJsonMapList(
+          map['ranking'],
+        ).map(DnsRankingEntry.fromJson).toList(growable: false),
+        series: asJsonMapList(
+          map['series'],
+        ).map(DnsSeriesItem.fromJson).toList(growable: false),
         windowHours: parseIntOrNull(map['windowHours']) ?? hours,
         monitorCount: parseIntOrNull(map['monitorCount']) ?? 0,
         source: 'history',
@@ -495,9 +495,9 @@ class DnsPerformanceNotifier extends Notifier<DnsPerformanceState> {
           );
       final map = asJsonMap(raw);
       state = state.copyWith(
-        ranking: asJsonMapList(map['ranking'])
-            .map(DnsRankingEntry.fromJson)
-            .toList(growable: false),
+        ranking: asJsonMapList(
+          map['ranking'],
+        ).map(DnsRankingEntry.fromJson).toList(growable: false),
         measuredAt: map['measuredAt'] as String?,
         source: 'benchmark',
         benchmarking: false,

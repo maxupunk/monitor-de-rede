@@ -5,6 +5,7 @@ import 'package:netmonitor_app/core/auth/auth_state.dart';
 import 'package:netmonitor_app/core/config/server_config.dart';
 import 'package:netmonitor_app/core/utils/form_validators.dart';
 import 'package:netmonitor_app/shared/widgets/nested_panel.dart';
+import 'package:netmonitor_app/shared/widgets/responsive_grid.dart';
 import 'package:netmonitor_app/shared/widgets/section_card.dart';
 import 'package:netmonitor_app/shared/widgets/semantic_chip.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
@@ -106,22 +107,22 @@ class _ServerConfigPageState extends ConsumerState<ServerConfigPage> {
                         autocorrect: false,
                         decoration: const InputDecoration(
                           labelText: 'Endereço do servidor',
-                          hintText: 'https://netmonitor.empresa.local ou http://10.8.0.1:3333',
+                          hintText:
+                              'https://netmonitor.empresa.local ou http://10.8.0.1:3333',
                           prefixIcon: Icon(Icons.link),
                         ),
-                        validator: FormValidators.compose(
-                          <FormFieldValidator<String>>[
-                            FormValidators.required(
-                              'Informe o endereço do servidor.',
-                            ),
-                            (value) {
-                              final normalized = normalizeServerUrl(
-                                value ?? '',
-                              );
-                              return FormValidators.url()(normalized);
-                            },
-                          ],
-                        ),
+                        validator:
+                            FormValidators.compose(<FormFieldValidator<String>>[
+                              FormValidators.required(
+                                'Informe o endereço do servidor.',
+                              ),
+                              (value) {
+                                final normalized = normalizeServerUrl(
+                                  value ?? '',
+                                );
+                                return FormValidators.url()(normalized);
+                              },
+                            ]),
                       ),
                       const SizedBox(height: 14),
                       if (_probeResult != null) ...<Widget>[
@@ -161,33 +162,30 @@ class _ServerConfigPageState extends ConsumerState<ServerConfigPage> {
                         ),
                         const SizedBox(height: 14),
                       ],
-                      Row(
+                      ResponsiveFieldRow(
+                        breakpoint: 400,
+                        spacing: 10,
+                        runSpacing: 10,
                         children: <Widget>[
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: _testing ? null : _testConnection,
-                              icon: const Icon(Icons.network_ping),
-                              label: const Text('Testar'),
-                            ),
+                          OutlinedButton.icon(
+                            onPressed: _testing ? null : _testConnection,
+                            icon: const Icon(Icons.network_ping),
+                            label: const Text('Testar'),
                           ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            flex: 2,
-                            child: FilledButton.icon(
-                              onPressed: _testing
-                                  ? null
-                                  : () => _saveAndContinue(),
-                              icon: _testing
-                                  ? const SizedBox(
-                                      width: 16,
-                                      height: 16,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
-                                    )
-                                  : const Icon(Icons.arrow_forward),
-                              label: const Text('Conectar'),
-                            ),
+                          FilledButton.icon(
+                            onPressed: _testing
+                                ? null
+                                : () => _saveAndContinue(),
+                            icon: _testing
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.arrow_forward),
+                            label: const Text('Conectar'),
                           ),
                         ],
                       ),
@@ -236,12 +234,14 @@ class _ServerConfigPageState extends ConsumerState<ServerConfigPage> {
                                       ),
                                     ),
                                   ),
-                                  if (server == config.baseUrl)
+                                  if (server == config.baseUrl) ...<Widget>[
+                                    const SizedBox(width: 6),
                                     const SemanticChip(
                                       label: 'Atual',
                                       tone: SemanticTone.primary,
                                       compact: true,
                                     ),
+                                  ],
                                   IconButton(
                                     tooltip: 'Remover',
                                     visualDensity: VisualDensity.compact,

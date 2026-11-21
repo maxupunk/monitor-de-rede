@@ -124,7 +124,8 @@ class _StoragesBackupTabState extends ConsumerState<StoragesBackupTab> {
         children: <Widget>[
           SearchFilterHeader(
             title: 'Destinos de armazenamento',
-            subtitle: 'Onde as cópias de backup do NetMonitor e dos bancos ficam salvas.',
+            subtitle:
+                'Onde as cópias de backup do NetMonitor e dos bancos ficam salvas.',
             actions: <Widget>[
               OutlinedButton.icon(
                 onPressed: state.loading
@@ -152,7 +153,8 @@ class _StoragesBackupTabState extends ConsumerState<StoragesBackupTab> {
           else if (state.storages.isEmpty)
             EmptyStateView(
               title: 'Nenhum destino configurado',
-              description: 'Adicione uma pasta local, servidor SFTP, Amazon S3, Cloudflare R2, MinIO, GCS ou Azure Blob.',
+              description:
+                  'Adicione uma pasta local, servidor SFTP, Amazon S3, Cloudflare R2, MinIO, GCS ou Azure Blob.',
               icon: Icons.cloud_upload_outlined,
               action: FilledButton.icon(
                 onPressed: () => _openForm(),
@@ -528,24 +530,19 @@ class _StorageFormBodyState extends ConsumerState<_StorageFormBody> {
             ),
           ),
         ] else if (configType == 'sftp') ...<Widget>[
-          Row(
+          ResponsiveFieldRow(
+            breakpoint: 480,
+            spacing: 10,
+            runSpacing: 10,
             children: <Widget>[
-              Expanded(
-                flex: 3,
-                child: TextField(
-                  controller: _hostCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Host SFTP / SSH',
-                  ),
-                ),
+              TextField(
+                controller: _hostCtrl,
+                decoration: const InputDecoration(labelText: 'Host SFTP / SSH'),
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: TextField(
-                  controller: _portCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'Porta'),
-                ),
+              TextField(
+                controller: _portCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Porta'),
               ),
             ],
           ),
@@ -556,9 +553,20 @@ class _StorageFormBodyState extends ConsumerState<_StorageFormBody> {
           ),
           const SizedBox(height: 10),
           SegmentedButton<String>(
+            showSelectedIcon: false,
+            style: SegmentedButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+            ),
             segments: const <ButtonSegment<String>>[
-              ButtonSegment(value: 'password', label: Text('Senha')),
-              ButtonSegment(value: 'key', label: Text('Chave SSH')),
+              ButtonSegment(
+                value: 'password',
+                label: Text('Senha', maxLines: 1, softWrap: false),
+              ),
+              ButtonSegment(
+                value: 'key',
+                label: Text('Chave SSH', maxLines: 1, softWrap: false),
+              ),
             ],
             selected: <String>{_sftpAuthMode},
             onSelectionChanged: (set) =>
@@ -603,15 +611,17 @@ class _StorageFormBodyState extends ConsumerState<_StorageFormBody> {
             const SizedBox(height: 10),
             NestedPanel(
               tone: SemanticTone.info,
-              child: Row(
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                alignment: WrapAlignment.spaceBetween,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: <Widget>[
-                  Expanded(
-                    child: Text(
-                      'Host key SSH fixada (TOFU): $_hostKeyFingerprint',
-                      style: const TextStyle(
-                        fontFamily: 'monospace',
-                        fontSize: 12,
-                      ),
+                  Text(
+                    'Host key SSH fixada (TOFU): $_hostKeyFingerprint',
+                    style: const TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 12,
                     ),
                   ),
                   TextButton(

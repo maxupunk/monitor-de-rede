@@ -71,7 +71,8 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
       await showAdaptiveFormSheet<void>(
         context: context,
         title: 'Layout encontrado no servidor',
-        subtitle: 'Existe um layout salvo no servidor. Escolha como deseja sincronizar o Dashboard.',
+        subtitle:
+            'Existe um layout salvo no servidor. Escolha como deseja sincronizar o Dashboard.',
         isDismissible: false,
         builder: (sheetCtx) {
           return Column(
@@ -79,7 +80,8 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
             children: <Widget>[
               ChoiceCard(
                 title: 'Usar layout do servidor (Recomendado)',
-                subtitle: 'Mantém todos os seus dispositivos sincronizados automaticamente.',
+                subtitle:
+                    'Mantém todos os seus dispositivos sincronizados automaticamente.',
                 icon: Icons.cloud_sync_outlined,
                 tone: SemanticTone.primary,
                 onTap: () async {
@@ -92,7 +94,8 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
               const SizedBox(height: 10),
               ChoiceCard(
                 title: 'Enviar layout local para o servidor',
-                subtitle: 'Substitui o layout do servidor pela configuração deste aparelho.',
+                subtitle:
+                    'Substitui o layout do servidor pela configuração deste aparelho.',
                 icon: Icons.cloud_upload_outlined,
                 tone: SemanticTone.info,
                 onTap: () async {
@@ -108,7 +111,8 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
               const SizedBox(height: 10),
               ChoiceCard(
                 title: 'Manter somente neste dispositivo',
-                subtitle: 'Desativa a sincronização automática neste navegador/aparelho.',
+                subtitle:
+                    'Desativa a sincronização automática neste navegador/aparelho.',
                 icon: Icons.devices_outlined,
                 tone: SemanticTone.secondary,
                 onTap: () async {
@@ -140,7 +144,8 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     await showAdaptiveFormSheet<void>(
       context: context,
       title: 'Adicionar widget ao Dashboard',
-      subtitle: 'Reative cards ocultos ou adicione widgets configuráveis do catálogo.',
+      subtitle:
+          'Reative cards ocultos ou adicione widgets configuráveis do catálogo.',
       maxWidth: 640,
       builder: (sheetCtx) {
         return Column(
@@ -149,8 +154,9 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
             if (hiddenDefaults.isNotEmpty) ...<Widget>[
               Text(
                 'Cards ocultos',
-                style: Theme.of(sheetCtx).textTheme.titleSmall
-                    ?.copyWith(fontWeight: FontWeight.w700),
+                style: Theme.of(
+                  sheetCtx,
+                ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 8),
               for (final w in hiddenDefaults) ...<Widget>[
@@ -173,8 +179,9 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
             if (multiTemplates.isNotEmpty) ...<Widget>[
               Text(
                 'Widgets configuráveis',
-                style: Theme.of(sheetCtx).textTheme.titleSmall
-                    ?.copyWith(fontWeight: FontWeight.w700),
+                style: Theme.of(
+                  sheetCtx,
+                ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 8),
               for (final entry in multiTemplates) ...<Widget>[
@@ -196,7 +203,8 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
             if (hiddenDefaults.isEmpty && multiTemplates.isEmpty)
               const EmptyStateView(
                 title: 'Todos os widgets já estão visíveis',
-                description: 'Não há widgets ocultos ou modelos disponíveis para adicionar.',
+                description:
+                    'Não há widgets ocultos ou modelos disponíveis para adicionar.',
                 icon: Icons.check_circle_outline,
                 tone: SemanticTone.success,
               ),
@@ -252,18 +260,21 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                 ),
                 if (keys.contains('deviceId')) ...<Widget>[
                   const SizedBox(height: 12),
-                  DropdownButtonFormField<int?>(
+                  AppDropdownFormField<int?>(
                     initialValue: selectedDeviceId,
                     decoration: const InputDecoration(labelText: 'Dispositivo'),
                     items: <DropdownMenuItem<int?>>[
                       const DropdownMenuItem<int?>(
                         value: null,
-                        child: Text('Selecione...'),
+                        child: Text(
+                          'Selecione...',
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                       for (final d in monitorsState.devices)
                         DropdownMenuItem<int?>(
                           value: d.id,
-                          child: Text(d.name),
+                          child: Text(d.name, overflow: TextOverflow.ellipsis),
                         ),
                     ],
                     onChanged: (v) => setModalState(() => selectedDeviceId = v),
@@ -271,18 +282,21 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                 ],
                 if (keys.contains('monitorId')) ...<Widget>[
                   const SizedBox(height: 12),
-                  DropdownButtonFormField<int?>(
+                  AppDropdownFormField<int?>(
                     initialValue: selectedMonitorId,
                     decoration: const InputDecoration(labelText: 'Monitor'),
                     items: <DropdownMenuItem<int?>>[
                       const DropdownMenuItem<int?>(
                         value: null,
-                        child: Text('Todos / Selecione'),
+                        child: Text(
+                          'Todos / Selecione',
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                       for (final m in monitorsState.monitors)
                         DropdownMenuItem<int?>(
                           value: m.id,
-                          child: Text(m.name),
+                          child: Text(m.name, overflow: TextOverflow.ellipsis),
                         ),
                     ],
                     onChanged: (v) =>
@@ -291,7 +305,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                 ],
                 if (keys.contains('timeframe')) ...<Widget>[
                   const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
+                  AppDropdownFormField<String>(
                     initialValue: timeframe,
                     decoration: const InputDecoration(
                       labelText: 'Janela padrão',
@@ -299,19 +313,28 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                     items: const <DropdownMenuItem<String>>[
                       DropdownMenuItem<String>(
                         value: '5m',
-                        child: Text('5 minutos'),
+                        child: Text(
+                          '5 minutos',
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                       DropdownMenuItem<String>(
                         value: '15m',
-                        child: Text('15 minutos'),
+                        child: Text(
+                          '15 minutos',
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                       DropdownMenuItem<String>(
                         value: '1h',
-                        child: Text('1 hora'),
+                        child: Text('1 hora', overflow: TextOverflow.ellipsis),
                       ),
                       DropdownMenuItem<String>(
                         value: '24h',
-                        child: Text('24 horas'),
+                        child: Text(
+                          '24 horas',
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                     ],
                     onChanged: (v) {
@@ -321,25 +344,21 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                 ],
                 if (keys.contains('warningThreshold')) ...<Widget>[
                   const SizedBox(height: 12),
-                  Row(
+                  ResponsiveFieldRow(
+                    breakpoint: 480,
                     children: <Widget>[
-                      Expanded(
-                        child: TextField(
-                          controller: warnCtrl,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Alerta (%)',
-                          ),
+                      TextField(
+                        controller: warnCtrl,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'Alerta (%)',
                         ),
                       ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: TextField(
-                          controller: critCtrl,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Crítico (%)',
-                          ),
+                      TextField(
+                        controller: critCtrl,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'Crítico (%)',
                         ),
                       ),
                     ],
@@ -414,186 +433,268 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
         )
         .toList(growable: false);
 
-    return RefreshIndicator(
-      onRefresh: _refresh,
-      child: ListView(
-        children: <Widget>[
-          SearchFilterHeader(
-            title: 'Dashboard',
-            subtitle: dash.syncMode == DashboardSyncMode.server
-                ? 'Sincronizado com o servidor em tempo real'
-                : 'Layout local neste dispositivo',
-            actions: <Widget>[
-              if (dash.isEditMode) ...<Widget>[
-                OutlinedButton.icon(
-                  onPressed: _openAddWidgetSheet,
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Adicionar widget'),
-                ),
-                TextButton.icon(
-                  onPressed: () async {
-                    final ok = await showConfirmActionDialog(
-                      context: context,
-                      title: 'Restaurar layout padrão?',
-                      message: 'Os cards personalizados serão substituídos pelo layout inicial.',
-                      confirmLabel: 'Restaurar',
-                      tone: SemanticTone.warning,
-                    );
-                    if (ok) {
-                      await ref
-                          .read(dashboardProvider.notifier)
-                          .resetToDefaultLayout();
-                    }
-                  },
-                  icon: const Icon(Icons.restart_alt, size: 18),
-                  label: const Text('Restaurar padrão'),
-                ),
-              ],
-              FilledButton.tonalIcon(
-                onPressed: () =>
-                    ref.read(dashboardProvider.notifier).toggleEditMode(),
-                icon: Icon(
-                  dash.isEditMode
-                      ? Icons.check
-                      : Icons.dashboard_customize_outlined,
-                  size: 18,
-                ),
-                label: Text(dash.isEditMode ? 'Concluir' : 'Personalizar'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          if (auth.isAdmin && suggestedAreas.isNotEmpty) ...<Widget>[
-            for (final suggestion in suggestedAreas) ...<Widget>[
-              NestedPanel(
-                tone: SemanticTone.info,
-                child: Wrap(
-                  spacing: 12,
-                  runSpacing: 8,
-                  alignment: WrapAlignment.spaceBetween,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: <Widget>[
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: <Widget>[
-                        Icon(suggestion.area.defaultIcon),
-                        const SizedBox(width: 10),
-                        Flexible(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: <Widget>[
-                              Text(
-                                'Sugestão: ligar área ${suggestion.title}',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                              if (suggestion.evidence?.reason != null)
-                                Text(
-                                  suggestion.evidence!.reason!,
-                                  style: context.textTheme.bodySmall,
-                                ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                    Wrap(
-                      spacing: 8,
-                      children: <Widget>[
-                        FilledButton(
-                          onPressed: () => ref
-                              .read(areasProvider.notifier)
-                              .setEnabled(suggestion.area, true),
-                          child: const Text('Ligar área'),
-                        ),
-                        TextButton(
-                          onPressed: () => ref
-                              .read(dashboardProvider.notifier)
-                              .dismissAreaSuggestion(suggestion.area),
-                          child: const Text('Agora não'),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 12),
-            ],
-          ],
-          if (!dash.ready)
-            const LoadingStateView(
-              message: 'Carregando catálogo do Dashboard...',
-            )
-          else if (visibleWidgets.isEmpty)
-            EmptyStateView(
-              title: 'Nenhum widget visível',
-              description:
-                  'Ative widgets em Personalizar para montar seu painel.',
-              icon: Icons.dashboard_outlined,
-              action: FilledButton.icon(
-                onPressed: _openAddWidgetSheet,
-                icon: const Icon(Icons.add),
-                label: const Text('Adicionar widget'),
-              ),
-            )
-          else
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final width = constraints.maxWidth;
-                const spacing = 12.0;
+    return LayoutBuilder(
+      builder: (context, pageConstraints) {
+        final isCompact = pageConstraints.maxWidth < 680;
+        final scheme = context.colorScheme;
 
-                double spanWidth(DashboardWidgetConfig w) {
-                  if (width < 700) return width;
-                  final cols = width >= 1100 ? w.lg : w.md;
-                  final fraction = (cols.clamp(4, 12)) / 12.0;
-                  if (fraction >= 0.99) return width;
-                  final itemsPerRow = (1 / fraction).round();
-                  return (width - spacing * (itemsPerRow - 1)) / itemsPerRow;
-                }
-
-                return Wrap(
-                  spacing: spacing,
-                  runSpacing: spacing,
+        return RefreshIndicator(
+          onRefresh: _refresh,
+          child: ListView(
+            children: <Widget>[
+              if (isCompact) ...<Widget>[
+                Row(
                   children: <Widget>[
-                    for (var i = 0; i < visibleWidgets.length; i++)
-                      SizedBox(
-                        width: spanWidth(visibleWidgets[i]),
-                        child: _DashboardWidgetFrame(
-                          widgetConfig: visibleWidgets[i],
-                          editMode: dash.isEditMode,
-                          canMoveUp: i > 0,
-                          canMoveDown: i < visibleWidgets.length - 1,
-                          hasConfig:
-                              (dash.catalog
-                                  ?.findByType(visibleWidgets[i].type)
-                                  ?.configKeys
-                                  .isNotEmpty ??
-                              false),
-                          onMoveUp: () => ref
-                              .read(dashboardProvider.notifier)
-                              .moveWidget(visibleWidgets[i].id, up: true),
-                          onMoveDown: () => ref
-                              .read(dashboardProvider.notifier)
-                              .moveWidget(visibleWidgets[i].id, up: false),
-                          onResize: (size) => ref
-                              .read(dashboardProvider.notifier)
-                              .resizeWidget(visibleWidgets[i].id, size),
-                          onConfigure: () => _openWidgetConfigSheet(
-                            existing: visibleWidgets[i],
-                          ),
-                          onRemove: () => ref
-                              .read(dashboardProvider.notifier)
-                              .removeWidget(visibleWidgets[i].id),
+                    Expanded(
+                      child: Text(
+                        'Dashboard',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: context.textTheme.headlineSmall?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          color: scheme.onSurface,
                         ),
                       ),
+                    ),
+                    const SizedBox(width: 8),
+                    FilledButton.tonalIcon(
+                      style: FilledButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                      ),
+                      onPressed: () =>
+                          ref.read(dashboardProvider.notifier).toggleEditMode(),
+                      icon: Icon(
+                        dash.isEditMode
+                            ? Icons.check
+                            : Icons.dashboard_customize_outlined,
+                        size: 16,
+                      ),
+                      label: Text(
+                        dash.isEditMode ? 'Concluir' : 'Personalizar',
+                      ),
+                    ),
                   ],
-                );
-              },
-            ),
-          const SizedBox(height: 24),
-        ],
-      ),
+                ),
+                if (dash.isEditMode) ...<Widget>[
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: <Widget>[
+                      OutlinedButton.icon(
+                        onPressed: _openAddWidgetSheet,
+                        icon: const Icon(Icons.add, size: 18),
+                        label: const Text('Adicionar widget'),
+                      ),
+                      TextButton.icon(
+                        onPressed: () async {
+                          final ok = await showConfirmActionDialog(
+                            context: context,
+                            title: 'Restaurar layout padrão?',
+                            message:
+                                'Os cards personalizados serão substituídos pelo layout inicial.',
+                            confirmLabel: 'Restaurar',
+                            tone: SemanticTone.warning,
+                          );
+                          if (ok) {
+                            await ref
+                                .read(dashboardProvider.notifier)
+                                .resetToDefaultLayout();
+                          }
+                        },
+                        icon: const Icon(Icons.restart_alt, size: 18),
+                        label: const Text('Restaurar padrão'),
+                      ),
+                    ],
+                  ),
+                ],
+              ] else
+                SearchFilterHeader(
+                  title: 'Dashboard',
+                  subtitle: dash.syncMode == DashboardSyncMode.server
+                      ? 'Sincronizado com o servidor em tempo real'
+                      : 'Layout local neste dispositivo',
+                  actions: <Widget>[
+                    if (dash.isEditMode) ...<Widget>[
+                      OutlinedButton.icon(
+                        onPressed: _openAddWidgetSheet,
+                        icon: const Icon(Icons.add, size: 18),
+                        label: const Text('Adicionar widget'),
+                      ),
+                      TextButton.icon(
+                        onPressed: () async {
+                          final ok = await showConfirmActionDialog(
+                            context: context,
+                            title: 'Restaurar layout padrão?',
+                            message:
+                                'Os cards personalizados serão substituídos pelo layout inicial.',
+                            confirmLabel: 'Restaurar',
+                            tone: SemanticTone.warning,
+                          );
+                          if (ok) {
+                            await ref
+                                .read(dashboardProvider.notifier)
+                                .resetToDefaultLayout();
+                          }
+                        },
+                        icon: const Icon(Icons.restart_alt, size: 18),
+                        label: const Text('Restaurar padrão'),
+                      ),
+                    ],
+                    FilledButton.tonalIcon(
+                      onPressed: () =>
+                          ref.read(dashboardProvider.notifier).toggleEditMode(),
+                      icon: Icon(
+                        dash.isEditMode
+                            ? Icons.check
+                            : Icons.dashboard_customize_outlined,
+                        size: 18,
+                      ),
+                      label: Text(
+                        dash.isEditMode ? 'Concluir' : 'Personalizar',
+                      ),
+                    ),
+                  ],
+                ),
+              const SizedBox(height: 12),
+              if (auth.isAdmin && suggestedAreas.isNotEmpty) ...<Widget>[
+                for (final suggestion in suggestedAreas) ...<Widget>[
+                  NestedPanel(
+                    tone: SemanticTone.info,
+                    child: Wrap(
+                      spacing: 12,
+                      runSpacing: 8,
+                      alignment: WrapAlignment.spaceBetween,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: <Widget>[
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: <Widget>[
+                            Icon(suggestion.area.defaultIcon),
+                            const SizedBox(width: 10),
+                            Flexible(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: <Widget>[
+                                  Text(
+                                    'Sugestão: ligar área ${suggestion.title}',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  if (suggestion.evidence?.reason != null)
+                                    Text(
+                                      suggestion.evidence!.reason!,
+                                      style: context.textTheme.bodySmall,
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        Wrap(
+                          spacing: 8,
+                          children: <Widget>[
+                            FilledButton(
+                              onPressed: () => ref
+                                  .read(areasProvider.notifier)
+                                  .setEnabled(suggestion.area, true),
+                              child: const Text('Ligar área'),
+                            ),
+                            TextButton(
+                              onPressed: () => ref
+                                  .read(dashboardProvider.notifier)
+                                  .dismissAreaSuggestion(suggestion.area),
+                              child: const Text('Agora não'),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+              ],
+              if (!dash.ready)
+                const LoadingStateView(
+                  message: 'Carregando catálogo do Dashboard...',
+                )
+              else if (visibleWidgets.isEmpty)
+                EmptyStateView(
+                  title: 'Nenhum widget visível',
+                  description:
+                      'Ative widgets em Personalizar para montar seu painel.',
+                  icon: Icons.dashboard_outlined,
+                  action: FilledButton.icon(
+                    onPressed: _openAddWidgetSheet,
+                    icon: const Icon(Icons.add),
+                    label: const Text('Adicionar widget'),
+                  ),
+                )
+              else
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final width = constraints.maxWidth;
+                    const spacing = 12.0;
+
+                    double spanWidth(DashboardWidgetConfig w) {
+                      if (width < 700) return width;
+                      final cols = width >= 1100 ? w.lg : w.md;
+                      final fraction = (cols.clamp(4, 12)) / 12.0;
+                      if (fraction >= 0.99) return width;
+                      final itemsPerRow = (1 / fraction).round();
+                      return (width - spacing * (itemsPerRow - 1)) /
+                          itemsPerRow;
+                    }
+
+                    return Wrap(
+                      spacing: spacing,
+                      runSpacing: spacing,
+                      children: <Widget>[
+                        for (var i = 0; i < visibleWidgets.length; i++)
+                          SizedBox(
+                            width: spanWidth(visibleWidgets[i]),
+                            child: _DashboardWidgetFrame(
+                              widgetConfig: visibleWidgets[i],
+                              editMode: dash.isEditMode,
+                              canMoveUp: i > 0,
+                              canMoveDown: i < visibleWidgets.length - 1,
+                              hasConfig:
+                                  (dash.catalog
+                                      ?.findByType(visibleWidgets[i].type)
+                                      ?.configKeys
+                                      .isNotEmpty ??
+                                  false),
+                              onMoveUp: () => ref
+                                  .read(dashboardProvider.notifier)
+                                  .moveWidget(visibleWidgets[i].id, up: true),
+                              onMoveDown: () => ref
+                                  .read(dashboardProvider.notifier)
+                                  .moveWidget(visibleWidgets[i].id, up: false),
+                              onResize: (size) => ref
+                                  .read(dashboardProvider.notifier)
+                                  .resizeWidget(visibleWidgets[i].id, size),
+                              onConfigure: () => _openWidgetConfigSheet(
+                                existing: visibleWidgets[i],
+                              ),
+                              onRemove: () => ref
+                                  .read(dashboardProvider.notifier)
+                                  .removeWidget(visibleWidgets[i].id),
+                            ),
+                          ),
+                      ],
+                    );
+                  },
+                ),
+              const SizedBox(height: 24),
+            ],
+          ),
+        );
+      },
     );
   }
 }

@@ -53,7 +53,8 @@ class _DockerVolumesPageState extends ConsumerState<DockerVolumesPage> {
     final confirmed = await showConfirmActionDialog(
       context: context,
       title: 'Remover volume ${volume.name}?',
-      message: 'Todos os arquivos gravados neste volume serão apagados permanentemente.',
+      message:
+          'Todos os arquivos gravados neste volume serão apagados permanentemente.',
       confirmLabel: 'Remover volume',
       tone: SemanticTone.error,
     );
@@ -109,7 +110,7 @@ class _DockerVolumesPageState extends ConsumerState<DockerVolumesPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        SearchFilterHeader(
+        UnifiedFilterBar(
           searchController: _searchController,
           searchHint: 'Buscar volume por nome, driver ou projeto...',
           onSearchChanged: (v) => setState(() => _search = v),

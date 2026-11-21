@@ -223,9 +223,9 @@ class LinkTestsNotifier extends Notifier<LinkTestsState> {
       final raw = await ref
           .read(apiClientProvider)
           .get<dynamic>('/link-test-schedules');
-      final list = asJsonMapList(raw)
-          .map(LinkTestScheduleModel.fromJson)
-          .toList(growable: false);
+      final list = asJsonMapList(
+        raw,
+      ).map(LinkTestScheduleModel.fromJson).toList(growable: false);
       state = state.copyWith(
         schedules: list,
         schedulesLoaded: true,

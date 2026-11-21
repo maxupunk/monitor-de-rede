@@ -215,14 +215,13 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
               if (canWrite && !edge.isVirtualHierarchy && !edge.confirmed)
                 OutlinedButton.icon(
                   onPressed: () async {
-                    await ref.read(topologyProvider.notifier).updateLink(
-                      edge.id,
-                      <String, dynamic>{
-                        'sourceInterfaceId': edge.sourceInterfaceId,
-                        'targetInterfaceId': edge.targetInterfaceId,
-                        'linkType': edge.linkType,
-                      },
-                    );
+                    await ref
+                        .read(topologyProvider.notifier)
+                        .updateLink(edge.id, <String, dynamic>{
+                          'sourceInterfaceId': edge.sourceInterfaceId,
+                          'targetInterfaceId': edge.targetInterfaceId,
+                          'linkType': edge.linkType,
+                        });
                     if (ctx.mounted) Navigator.of(ctx).pop();
                   },
                   icon: const Icon(Icons.verified_outlined, size: 18),
@@ -274,8 +273,9 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
       }
     } catch (err) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(err.toString())));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(err.toString())));
       }
     }
   }
@@ -293,45 +293,57 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
         builder: (context, setModal) => Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            DropdownButtonFormField<int?>(
+            AppDropdownFormField<int?>(
               initialValue: srcId,
               decoration: const InputDecoration(labelText: 'Equipamento A'),
               items: nodes
                   .map(
                     (n) => DropdownMenuItem<int?>(
                       value: n.id,
-                      child: Text(n.name),
+                      child: Text(n.name, overflow: TextOverflow.ellipsis),
                     ),
                   )
                   .toList(growable: false),
               onChanged: (v) => setModal(() => srcId = v),
             ),
             const SizedBox(height: 10),
-            DropdownButtonFormField<int?>(
+            AppDropdownFormField<int?>(
               initialValue: tgtId,
               decoration: const InputDecoration(labelText: 'Equipamento B'),
               items: nodes
                   .map(
                     (n) => DropdownMenuItem<int?>(
                       value: n.id,
-                      child: Text(n.name),
+                      child: Text(n.name, overflow: TextOverflow.ellipsis),
                     ),
                   )
                   .toList(growable: false),
               onChanged: (v) => setModal(() => tgtId = v),
             ),
             const SizedBox(height: 10),
-            DropdownButtonFormField<String>(
+            AppDropdownFormField<String>(
               initialValue: linkType,
               decoration: const InputDecoration(labelText: 'Tipo de enlace'),
               items: const <DropdownMenuItem<String>>[
-                DropdownMenuItem(value: 'ethernet', child: Text('Ethernet')),
-                DropdownMenuItem(value: 'fiber', child: Text('Fibra óptica')),
+                DropdownMenuItem(
+                  value: 'ethernet',
+                  child: Text('Ethernet', overflow: TextOverflow.ellipsis),
+                ),
+                DropdownMenuItem(
+                  value: 'fiber',
+                  child: Text('Fibra óptica', overflow: TextOverflow.ellipsis),
+                ),
                 DropdownMenuItem(
                   value: 'wireless',
-                  child: Text('Wireless / Rádio'),
+                  child: Text(
+                    'Wireless / Rádio',
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
-                DropdownMenuItem(value: 'vpn', child: Text('Túnel VPN')),
+                DropdownMenuItem(
+                  value: 'vpn',
+                  child: Text('Túnel VPN', overflow: TextOverflow.ellipsis),
+                ),
               ],
               onChanged: (v) => setModal(() => linkType = v ?? 'ethernet'),
             ),
@@ -376,21 +388,17 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
             decoration: const InputDecoration(labelText: 'Nome do switch *'),
           ),
           const SizedBox(height: 10),
-          Row(
+          ResponsiveFieldRow(
+            breakpoint: 480,
             children: <Widget>[
-              Expanded(
-                child: TextField(
-                  controller: vendorCtrl,
-                  decoration: const InputDecoration(labelText: 'Fabricante'),
-                ),
+              TextField(
+                controller: vendorCtrl,
+                decoration: const InputDecoration(labelText: 'Fabricante'),
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: TextField(
-                  controller: portsCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'Portas'),
-                ),
+              TextField(
+                controller: portsCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Portas'),
               ),
             ],
           ),
@@ -429,31 +437,75 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
       title: 'Filtros e Camadas da Topologia',
       builder: (_) => Consumer(
         builder: (context, ref, _) {
-          final prefs = ref.watch(topologyProvider).viewPrefs;
+          final topo = ref.watch(topologyProvider);
+          final prefs = topo.viewPrefs;
+          final sites = ref.watch(sitesProvider).items;
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              DropdownButtonFormField<String>(
+              if (sites.isNotEmpty) ...<Widget>[
+                AppDropdownFormField<int?>(
+                  initialValue: topo.siteId,
+                  decoration: const InputDecoration(labelText: 'Site'),
+                  items: <DropdownMenuItem<int?>>[
+                    const DropdownMenuItem<int?>(
+                      value: null,
+                      child: Text(
+                        'Todos os sites',
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    for (final s in sites)
+                      DropdownMenuItem<int?>(
+                        value: s.id,
+                        child: Text(s.name, overflow: TextOverflow.ellipsis),
+                      ),
+                  ],
+                  onChanged: (v) => ref
+                      .read(topologyProvider.notifier)
+                      .fetchTopology(siteId: v, updateSiteFilter: true),
+                ),
+                const SizedBox(height: 10),
+              ],
+              AppDropdownFormField<String>(
                 initialValue: _statusFilter,
                 decoration: const InputDecoration(labelText: 'Status dos nós'),
                 items: const <DropdownMenuItem<String>>[
-                  DropdownMenuItem(value: 'all', child: Text('Todos')),
-                  DropdownMenuItem(value: 'online', child: Text('Online')),
-                  DropdownMenuItem(value: 'offline', child: Text('Offline')),
-                  DropdownMenuItem(value: 'warning', child: Text('Atenção')),
+                  DropdownMenuItem(
+                    value: 'all',
+                    child: Text('Todos', overflow: TextOverflow.ellipsis),
+                  ),
+                  DropdownMenuItem(
+                    value: 'online',
+                    child: Text('Online', overflow: TextOverflow.ellipsis),
+                  ),
+                  DropdownMenuItem(
+                    value: 'offline',
+                    child: Text('Offline', overflow: TextOverflow.ellipsis),
+                  ),
+                  DropdownMenuItem(
+                    value: 'warning',
+                    child: Text('Atenção', overflow: TextOverflow.ellipsis),
+                  ),
                 ],
                 onChanged: (v) => setState(() => _statusFilter = v ?? 'all'),
               ),
               const SizedBox(height: 10),
-              DropdownButtonFormField<String>(
+              AppDropdownFormField<String>(
                 initialValue: _typeFilter,
                 decoration: const InputDecoration(
                   labelText: 'Tipo de equipamento',
                 ),
                 items: <DropdownMenuItem<String>>[
-                  const DropdownMenuItem(value: 'all', child: Text('Todos')),
+                  const DropdownMenuItem(
+                    value: 'all',
+                    child: Text('Todos', overflow: TextOverflow.ellipsis),
+                  ),
                   for (final opt in deviceTypeOptions)
-                    DropdownMenuItem(value: opt.$1, child: Text(opt.$2)),
+                    DropdownMenuItem(
+                      value: opt.$1,
+                      child: Text(opt.$2, overflow: TextOverflow.ellipsis),
+                    ),
                 ],
                 onChanged: (v) => setState(() => _typeFilter = v ?? 'all'),
               ),
@@ -540,6 +592,31 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
     final selectedNode = _selectedNodeId != null
         ? topo.nodes.where((n) => n.id == _selectedNodeId).firstOrNull
         : null;
+
+    final isCompact = MediaQuery.sizeOf(context).width < 680;
+    final activeFilterCount =
+        (_statusFilter != 'all' ? 1 : 0) +
+        (_typeFilter != 'all' ? 1 : 0) +
+        (topo.siteId != null ? 1 : 0);
+
+    Future<void> saveLayoutWithFeedback() async {
+      final ok = await ref.read(topologyProvider.notifier).saveLayout();
+      if (ok && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Posições da topologia salvas.')),
+        );
+      }
+    }
+
+    void togglePathFinder() {
+      setState(() {
+        _pathFinderMode = !_pathFinderMode;
+        _pathStartId = null;
+      });
+      if (!_pathFinderMode) {
+        ref.read(topologyProvider.notifier).clearHighlightedPath();
+      }
+    }
 
     return Stack(
       children: <Widget>[
@@ -640,7 +717,7 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
             ),
           ),
 
-        // ── Barra superior flutuante (mobile-friendly Wrap) ──
+        // ── Barra superior flutuante (compacta em 1 linha no mobile para liberar o canvas) ──
         Positioned(
           top: 12,
           left: 12,
@@ -648,172 +725,337 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
           child: Card(
             elevation: 3,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: <Widget>[
-                  if (sites.isNotEmpty)
-                    SizedBox(
-                      width: 150,
-                      child: DropdownButtonFormField<int?>(
-                        initialValue: topo.siteId,
-                        isDense: true,
-                        decoration: const InputDecoration(
-                          contentPadding: EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 6,
-                          ),
-                        ),
-                        items: <DropdownMenuItem<int?>>[
-                          const DropdownMenuItem<int?>(
-                            value: null,
-                            child: Text('Todos sites'),
-                          ),
-                          for (final s in sites)
-                            DropdownMenuItem<int?>(
-                              value: s.id,
-                              child: Text(s.name),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              child: isCompact
+                  ? Row(
+                      children: <Widget>[
+                        Expanded(
+                          child: TextField(
+                            controller: _searchCtrl,
+                            decoration: const InputDecoration(
+                              hintText: 'Localizar nó...',
+                              prefixIcon: Icon(Icons.search, size: 18),
+                              isDense: true,
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 8,
+                              ),
                             ),
-                        ],
-                        onChanged: (v) => ref
-                            .read(topologyProvider.notifier)
-                            .fetchTopology(siteId: v, updateSiteFilter: true),
-                      ),
-                    ),
-                  SizedBox(
-                    width: 170,
-                    child: TextField(
-                      controller: _searchCtrl,
-                      decoration: const InputDecoration(
-                        hintText: 'Localizar nó...',
-                        prefixIcon: Icon(Icons.search, size: 18),
-                        isDense: true,
-                        contentPadding: EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 8,
+                            onSubmitted: (q) {
+                              final lower = q.trim().toLowerCase();
+                              final match = topo.nodes
+                                  .where(
+                                    (n) =>
+                                        n.name.toLowerCase().contains(lower) ||
+                                        (n.ipAddress ?? '').contains(lower),
+                                  )
+                                  .firstOrNull;
+                              if (match != null) _jumpToNode(match);
+                            },
+                          ),
                         ),
-                      ),
-                      onSubmitted: (q) {
-                        final lower = q.trim().toLowerCase();
-                        final match = topo.nodes
-                            .where(
-                              (n) =>
-                                  n.name.toLowerCase().contains(lower) ||
-                                  (n.ipAddress ?? '').contains(lower),
-                            )
-                            .firstOrNull;
-                        if (match != null) _jumpToNode(match);
-                      },
-                    ),
-                  ),
-                  PopupMenuButton<TopologyLayoutMode>(
-                    tooltip: 'Layout do grafo',
-                    onSelected: (mode) {
-                      ref.read(topologyProvider.notifier).applyLayoutMode(mode);
-                      _fitToScreen();
-                    },
-                    itemBuilder: (_) =>
-                        const <PopupMenuEntry<TopologyLayoutMode>>[
-                          PopupMenuItem(
-                            value: TopologyLayoutMode.hierarchical,
-                            child: Text('Hierárquico (Árvore)'),
+                        const SizedBox(width: 4),
+                        Badge.count(
+                          isLabelVisible: activeFilterCount > 0,
+                          count: activeFilterCount,
+                          child: IconButton(
+                            visualDensity: VisualDensity.compact,
+                            tooltip: 'Filtros e camadas',
+                            icon: const Icon(Icons.tune),
+                            onPressed: _openFilterAndViewSheet,
                           ),
-                          PopupMenuItem(
-                            value: TopologyLayoutMode.force,
-                            child: Text('Força (Automático)'),
-                          ),
-                          PopupMenuItem(
-                            value: TopologyLayoutMode.radial,
-                            child: Text('Radial'),
-                          ),
-                          PopupMenuItem(
-                            value: TopologyLayoutMode.grid,
-                            child: Text('Grade'),
-                          ),
-                        ],
-                    child: Chip(
-                      avatar: const Icon(Icons.auto_graph, size: 16),
-                      label: Text(topo.layoutMode.name),
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: 'Filtros e camadas',
-                    icon: const Icon(Icons.tune),
-                    onPressed: _openFilterAndViewSheet,
-                  ),
-                  IconButton(
-                    tooltip: _pathFinderMode
-                        ? 'Cancelar caminho'
-                        : 'Traçar caminho A → B',
-                    icon: Icon(
-                      Icons.route,
-                      color: _pathFinderMode
-                          ? context.colorScheme.primary
-                          : null,
-                    ),
-                    onPressed: () {
-                      setState(() {
-                        _pathFinderMode = !_pathFinderMode;
-                        _pathStartId = null;
-                      });
-                      if (!_pathFinderMode) {
-                        ref
-                            .read(topologyProvider.notifier)
-                            .clearHighlightedPath();
-                      }
-                    },
-                  ),
-                  if (canWrite) ...<Widget>[
-                    IconButton(
-                      tooltip: 'Adicionar enlace',
-                      icon: const Icon(Icons.add_link),
-                      onPressed: _openAddLinkSheet,
-                    ),
-                    IconButton(
-                      tooltip: 'Switch não gerenciável',
-                      icon: const Icon(Icons.hub_outlined),
-                      onPressed: _openUnmanagedSwitchSheet,
-                    ),
-                    IconButton(
-                      tooltip: 'Recalcular LLDP/CDP/ARP',
-                      icon: topo.recalculating
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.sync),
-                      onPressed: topo.recalculating
-                          ? null
-                          : () => ref
-                                .read(topologyProvider.notifier)
-                                .recalculateTopology(),
-                    ),
-                    IconButton(
-                      tooltip: 'Salvar layout',
-                      icon: const Icon(Icons.save_outlined),
-                      onPressed: topo.savingLayout
-                          ? null
-                          : () async {
-                              final ok = await ref
-                                  .read(topologyProvider.notifier)
-                                  .saveLayout();
-                              if (ok && context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text(
-                                      'Posições da topologia salvas.',
+                        ),
+                        PopupMenuButton<String>(
+                          tooltip: 'Mais ações da topologia',
+                          icon: const Icon(Icons.more_vert),
+                          onSelected: (action) {
+                            switch (action) {
+                              case 'layout_hierarchical':
+                                ref
+                                    .read(topologyProvider.notifier)
+                                    .applyLayoutMode(
+                                      TopologyLayoutMode.hierarchical,
+                                    );
+                                _fitToScreen();
+                              case 'layout_force':
+                                ref
+                                    .read(topologyProvider.notifier)
+                                    .applyLayoutMode(TopologyLayoutMode.force);
+                                _fitToScreen();
+                              case 'layout_radial':
+                                ref
+                                    .read(topologyProvider.notifier)
+                                    .applyLayoutMode(TopologyLayoutMode.radial);
+                                _fitToScreen();
+                              case 'layout_grid':
+                                ref
+                                    .read(topologyProvider.notifier)
+                                    .applyLayoutMode(TopologyLayoutMode.grid);
+                                _fitToScreen();
+                              case 'path':
+                                togglePathFinder();
+                              case 'add_link':
+                                _openAddLinkSheet();
+                              case 'unmanaged_switch':
+                                _openUnmanagedSwitchSheet();
+                              case 'recalculate':
+                                ref
+                                    .read(topologyProvider.notifier)
+                                    .recalculateTopology();
+                              case 'save_layout':
+                                saveLayoutWithFeedback();
+                            }
+                          },
+                          itemBuilder: (_) => <PopupMenuEntry<String>>[
+                            const PopupMenuItem<String>(
+                              value: 'layout_hierarchical',
+                              child: ListTile(
+                                dense: true,
+                                contentPadding: EdgeInsets.zero,
+                                leading: Icon(Icons.account_tree_outlined),
+                                title: Text('Layout: Hierárquico'),
+                              ),
+                            ),
+                            const PopupMenuItem<String>(
+                              value: 'layout_force',
+                              child: ListTile(
+                                dense: true,
+                                contentPadding: EdgeInsets.zero,
+                                leading: Icon(Icons.auto_graph),
+                                title: Text('Layout: Força'),
+                              ),
+                            ),
+                            const PopupMenuItem<String>(
+                              value: 'layout_radial',
+                              child: ListTile(
+                                dense: true,
+                                contentPadding: EdgeInsets.zero,
+                                leading: Icon(Icons.radar),
+                                title: Text('Layout: Radial'),
+                              ),
+                            ),
+                            const PopupMenuItem<String>(
+                              value: 'layout_grid',
+                              child: ListTile(
+                                dense: true,
+                                contentPadding: EdgeInsets.zero,
+                                leading: Icon(Icons.grid_view),
+                                title: Text('Layout: Grade'),
+                              ),
+                            ),
+                            const PopupMenuDivider(),
+                            PopupMenuItem<String>(
+                              value: 'path',
+                              child: ListTile(
+                                dense: true,
+                                contentPadding: EdgeInsets.zero,
+                                leading: const Icon(Icons.route),
+                                title: Text(
+                                  _pathFinderMode
+                                      ? 'Cancelar caminho'
+                                      : 'Traçar caminho A → B',
+                                ),
+                              ),
+                            ),
+                            if (canWrite) ...<PopupMenuEntry<String>>[
+                              const PopupMenuItem<String>(
+                                value: 'add_link',
+                                child: ListTile(
+                                  dense: true,
+                                  contentPadding: EdgeInsets.zero,
+                                  leading: Icon(Icons.add_link),
+                                  title: Text('Adicionar enlace'),
+                                ),
+                              ),
+                              const PopupMenuItem<String>(
+                                value: 'unmanaged_switch',
+                                child: ListTile(
+                                  dense: true,
+                                  contentPadding: EdgeInsets.zero,
+                                  leading: Icon(Icons.hub_outlined),
+                                  title: Text('Switch não gerenciável'),
+                                ),
+                              ),
+                              PopupMenuItem<String>(
+                                value: 'recalculate',
+                                enabled: !topo.recalculating,
+                                child: const ListTile(
+                                  dense: true,
+                                  contentPadding: EdgeInsets.zero,
+                                  leading: Icon(Icons.sync),
+                                  title: Text('Recalcular LLDP/CDP/ARP'),
+                                ),
+                              ),
+                              PopupMenuItem<String>(
+                                value: 'save_layout',
+                                enabled: !topo.savingLayout,
+                                child: const ListTile(
+                                  dense: true,
+                                  contentPadding: EdgeInsets.zero,
+                                  leading: Icon(Icons.save_outlined),
+                                  title: Text('Salvar layout'),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ],
+                    )
+                  : Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: <Widget>[
+                        if (sites.isNotEmpty)
+                          SizedBox(
+                            width: 150,
+                            child: AppDropdownFormField<int?>(
+                              initialValue: topo.siteId,
+                              isDense: true,
+                              decoration: const InputDecoration(
+                                contentPadding: EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 6,
+                                ),
+                              ),
+                              items: <DropdownMenuItem<int?>>[
+                                const DropdownMenuItem<int?>(
+                                  value: null,
+                                  child: Text(
+                                    'Todos sites',
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                for (final s in sites)
+                                  DropdownMenuItem<int?>(
+                                    value: s.id,
+                                    child: Text(
+                                      s.name,
+                                      overflow: TextOverflow.ellipsis,
                                     ),
                                   ),
-                                );
-                              }
+                              ],
+                              onChanged: (v) => ref
+                                  .read(topologyProvider.notifier)
+                                  .fetchTopology(
+                                    siteId: v,
+                                    updateSiteFilter: true,
+                                  ),
+                            ),
+                          ),
+                        SizedBox(
+                          width: 170,
+                          child: TextField(
+                            controller: _searchCtrl,
+                            decoration: const InputDecoration(
+                              hintText: 'Localizar nó...',
+                              prefixIcon: Icon(Icons.search, size: 18),
+                              isDense: true,
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 8,
+                              ),
+                            ),
+                            onSubmitted: (q) {
+                              final lower = q.trim().toLowerCase();
+                              final match = topo.nodes
+                                  .where(
+                                    (n) =>
+                                        n.name.toLowerCase().contains(lower) ||
+                                        (n.ipAddress ?? '').contains(lower),
+                                  )
+                                  .firstOrNull;
+                              if (match != null) _jumpToNode(match);
                             },
+                          ),
+                        ),
+                        PopupMenuButton<TopologyLayoutMode>(
+                          tooltip: 'Layout do grafo',
+                          onSelected: (mode) {
+                            ref
+                                .read(topologyProvider.notifier)
+                                .applyLayoutMode(mode);
+                            _fitToScreen();
+                          },
+                          itemBuilder: (_) =>
+                              const <PopupMenuEntry<TopologyLayoutMode>>[
+                                PopupMenuItem(
+                                  value: TopologyLayoutMode.hierarchical,
+                                  child: Text('Hierárquico (Árvore)'),
+                                ),
+                                PopupMenuItem(
+                                  value: TopologyLayoutMode.force,
+                                  child: Text('Força (Automático)'),
+                                ),
+                                PopupMenuItem(
+                                  value: TopologyLayoutMode.radial,
+                                  child: Text('Radial'),
+                                ),
+                                PopupMenuItem(
+                                  value: TopologyLayoutMode.grid,
+                                  child: Text('Grade'),
+                                ),
+                              ],
+                          child: Chip(
+                            avatar: const Icon(Icons.auto_graph, size: 16),
+                            label: Text(topo.layoutMode.name),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Filtros e camadas',
+                          icon: const Icon(Icons.tune),
+                          onPressed: _openFilterAndViewSheet,
+                        ),
+                        IconButton(
+                          tooltip: _pathFinderMode
+                              ? 'Cancelar caminho'
+                              : 'Traçar caminho A → B',
+                          icon: Icon(
+                            Icons.route,
+                            color: _pathFinderMode
+                                ? context.colorScheme.primary
+                                : null,
+                          ),
+                          onPressed: togglePathFinder,
+                        ),
+                        if (canWrite) ...<Widget>[
+                          IconButton(
+                            tooltip: 'Adicionar enlace',
+                            icon: const Icon(Icons.add_link),
+                            onPressed: _openAddLinkSheet,
+                          ),
+                          IconButton(
+                            tooltip: 'Switch não gerenciável',
+                            icon: const Icon(Icons.hub_outlined),
+                            onPressed: _openUnmanagedSwitchSheet,
+                          ),
+                          IconButton(
+                            tooltip: 'Recalcular LLDP/CDP/ARP',
+                            icon: topo.recalculating
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.sync),
+                            onPressed: topo.recalculating
+                                ? null
+                                : () => ref
+                                      .read(topologyProvider.notifier)
+                                      .recalculateTopology(),
+                          ),
+                          IconButton(
+                            tooltip: 'Salvar layout',
+                            icon: const Icon(Icons.save_outlined),
+                            onPressed: topo.savingLayout
+                                ? null
+                                : saveLayoutWithFeedback,
+                          ),
+                        ],
+                      ],
                     ),
-                  ],
-                ],
-              ),
             ),
           ),
         ),
@@ -850,8 +1092,9 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
         // ── Overlay flutuante de Quick Ping ──
         if (_quickPingOverlay != null)
           Positioned(
+            left: isCompact ? 12 : null,
             right: isWide && selectedNode != null ? 364 : 12,
-            bottom: 12,
+            bottom: isCompact ? 72 : 12,
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 320),
               child: Card(
@@ -869,6 +1112,8 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
                           Expanded(
                             child: Text(
                               'Quick Ping · $_quickPingTargetName',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                               style: context.textTheme.titleSmall?.copyWith(
                                 fontWeight: FontWeight.w700,
                               ),

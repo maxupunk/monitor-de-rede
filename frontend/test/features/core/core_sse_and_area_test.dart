@@ -97,111 +97,114 @@ void main() {
       },
     );
 
-    test('alert lifecycle, log templates and scheduled_task SSE events mutate stores', () {
-      final container = ProviderContainer();
-      addTearDown(container.dispose);
+    test(
+      'alert lifecycle, log templates and scheduled_task SSE events mutate stores',
+      () {
+        final container = ProviderContainer();
+        addTearDown(container.dispose);
 
-      final sse = container.read(sseServiceProvider.notifier);
-      final unregister = sse.registerRoutes(
-        coreArea.sseBuilder!(container.read(Provider<Ref>((ref) => ref))),
-      );
-      addTearDown(unregister);
+        final sse = container.read(sseServiceProvider.notifier);
+        final unregister = sse.registerRoutes(
+          coreArea.sseBuilder!(container.read(Provider<Ref>((ref) => ref))),
+        );
+        addTearDown(unregister);
 
-      // Alert triggered -> acknowledged -> resolved
-      sse.dispatchForTest(
-        const SseEvent(
-          type: 'alert:updated',
-          timestamp: '2026-06-01T10:00:00Z',
-          data: <String, dynamic>{
-            'id': 99,
-            'severity': 'critical',
-            'status': 'active',
-            'title': 'Link principal fora',
-            'message': 'Sem resposta ICMP',
-            'createdAt': '2026-06-01T10:00:00Z',
-          },
-        ),
-      );
-      expect(container.read(alertsProvider).activeAlerts.length, 1);
+        // Alert triggered -> acknowledged -> resolved
+        sse.dispatchForTest(
+          const SseEvent(
+            type: 'alert:updated',
+            timestamp: '2026-06-01T10:00:00Z',
+            data: <String, dynamic>{
+              'id': 99,
+              'severity': 'critical',
+              'status': 'active',
+              'title': 'Link principal fora',
+              'message': 'Sem resposta ICMP',
+              'createdAt': '2026-06-01T10:00:00Z',
+            },
+          ),
+        );
+        expect(container.read(alertsProvider).activeAlerts.length, 1);
 
-      sse.dispatchForTest(
-        const SseEvent(
-          type: 'alert:acknowledged',
-          timestamp: '2026-06-01T10:01:00Z',
-          data: <String, dynamic>{'id': 99},
-        ),
-      );
-      expect(
-        container.read(alertsProvider).alertEvents.first.status,
-        'acknowledged',
-      );
+        sse.dispatchForTest(
+          const SseEvent(
+            type: 'alert:acknowledged',
+            timestamp: '2026-06-01T10:01:00Z',
+            data: <String, dynamic>{'id': 99},
+          ),
+        );
+        expect(
+          container.read(alertsProvider).alertEvents.first.status,
+          'acknowledged',
+        );
 
-      sse.dispatchForTest(
-        const SseEvent(
-          type: 'alert:resolved',
-          timestamp: '2026-06-01T10:02:00Z',
-          data: <String, dynamic>{
-            'id': 99,
-            'resolvedAt': '2026-06-01T10:02:00Z',
-          },
-        ),
-      );
-      expect(container.read(alertsProvider).activeAlerts, isEmpty);
-      expect(container.read(alertsProvider).resolvedAlerts.length, 1);
+        sse.dispatchForTest(
+          const SseEvent(
+            type: 'alert:resolved',
+            timestamp: '2026-06-01T10:02:00Z',
+            data: <String, dynamic>{
+              'id': 99,
+              'resolvedAt': '2026-06-01T10:02:00Z',
+            },
+          ),
+        );
+        expect(container.read(alertsProvider).activeAlerts, isEmpty);
+        expect(container.read(alertsProvider).resolvedAlerts.length, 1);
 
-      // Log template classified
-      sse.dispatchForTest(
-        const SseEvent(
-          type: 'logs:template_classified',
-          timestamp: '2026-06-01T10:03:00Z',
-          data: <String, dynamic>{
-            'templateHash': 'abc123',
-            'template': 'login failure for user *',
-            'example': 'login failure for user admin',
-            'category': 'auth_failure',
-            'confirmed': true,
-            'alertRegex': 'login failure',
-          },
-        ),
-      );
-      expect(
-        container.read(logsProvider).templates['abc123']?.category,
-        'auth_failure',
-      );
+        // Log template classified
+        sse.dispatchForTest(
+          const SseEvent(
+            type: 'logs:template_classified',
+            timestamp: '2026-06-01T10:03:00Z',
+            data: <String, dynamic>{
+              'templateHash': 'abc123',
+              'template': 'login failure for user *',
+              'example': 'login failure for user admin',
+              'category': 'auth_failure',
+              'confirmed': true,
+              'alertRegex': 'login failure',
+            },
+          ),
+        );
+        expect(
+          container.read(logsProvider).templates['abc123']?.category,
+          'auth_failure',
+        );
 
-      // Scheduled task dynamic ephemeral check
-      sse.dispatchForTest(
-        const SseEvent(
-          type: 'scheduled_task:updated',
-          timestamp: '2026-06-01T10:04:00Z',
-          data: <String, dynamic>{'id': 5, 'status': 'success'},
-        ),
-      );
-      expect(container.read(scheduledTasksProvider).lastEventTaskId, 5);
-      // Success is ephemeral -> not pushed into recentEvents feed
-      expect(
-        container
-            .read(sseServiceProvider)
-            .recentEvents
-            .where((e) => e.type == 'scheduled_task:updated'),
-        isEmpty,
-      );
+        // Scheduled task dynamic ephemeral check
+        sse.dispatchForTest(
+          const SseEvent(
+            type: 'scheduled_task:updated',
+            timestamp: '2026-06-01T10:04:00Z',
+            data: <String, dynamic>{'id': 5, 'status': 'success'},
+          ),
+        );
+        expect(container.read(scheduledTasksProvider).lastEventTaskId, 5);
+        // Success is ephemeral -> not pushed into recentEvents feed
+        expect(
+          container
+              .read(sseServiceProvider)
+              .recentEvents
+              .where((e) => e.type == 'scheduled_task:updated'),
+          isEmpty,
+        );
 
-      sse.dispatchForTest(
-        const SseEvent(
-          type: 'scheduled_task:updated',
-          timestamp: '2026-06-01T10:05:00Z',
-          data: <String, dynamic>{'id': 5, 'status': 'failed'},
-        ),
-      );
-      expect(
-        container
-            .read(sseServiceProvider)
-            .recentEvents
-            .where((e) => e.type == 'scheduled_task:updated')
-            .length,
-        1,
-      );
-    });
+        sse.dispatchForTest(
+          const SseEvent(
+            type: 'scheduled_task:updated',
+            timestamp: '2026-06-01T10:05:00Z',
+            data: <String, dynamic>{'id': 5, 'status': 'failed'},
+          ),
+        );
+        expect(
+          container
+              .read(sseServiceProvider)
+              .recentEvents
+              .where((e) => e.type == 'scheduled_task:updated')
+              .length,
+          1,
+        );
+      },
+    );
   });
 }

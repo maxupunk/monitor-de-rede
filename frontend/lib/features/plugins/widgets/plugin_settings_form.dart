@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:netmonitor_app/features/plugins/utils/plugin_settings_logic.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
@@ -151,7 +151,7 @@ class _PluginSettingsFormState extends State<PluginSettingsForm> {
 
     if (field.options != null && field.options!.isNotEmpty) {
       final hasMatch = field.options!.contains(current);
-      return DropdownButtonFormField<Object?>(
+      return AppDropdownFormField<Object?>(
         initialValue: hasMatch ? current : null,
         decoration: InputDecoration(
           labelText: '${field.label}${field.required ? ' *' : ''}',
@@ -167,6 +167,7 @@ class _PluginSettingsFormState extends State<PluginSettingsForm> {
                     : (field.options![i] == ''
                           ? '(manter o atual)'
                           : '${field.options![i]}'),
+                overflow: TextOverflow.ellipsis,
               ),
             ),
         ],

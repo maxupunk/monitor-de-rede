@@ -388,7 +388,8 @@ dockerActionCatalog = <DockerContainerActionKey, DockerContainerActionMeta>{
   DockerContainerActionKey.update: DockerContainerActionMeta(
     key: DockerContainerActionKey.update,
     label: 'Atualizar imagem',
-    hint: 'Baixa a versão atual da imagem e recria o container com a mesma configuração.',
+    hint:
+        'Baixa a versão atual da imagem e recria o container com a mesma configuração.',
     tone: SemanticTone.primary,
     icon: Icons.system_update_alt,
     requiresConfirm: true,

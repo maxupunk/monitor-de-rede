@@ -654,6 +654,8 @@ class DedicatedAccess {
     this.hostKey,
     this.platform,
     this.rotatedAt,
+    this.publicKey,
+    this.keyComment,
   });
 
   final String username;
@@ -661,14 +663,18 @@ class DedicatedAccess {
   final String? hostKey;
   final String? platform;
   final String? rotatedAt;
+  final String? publicKey;
+  final String? keyComment;
 
   factory DedicatedAccess.fromJson(Map<String, dynamic> json) {
     return DedicatedAccess(
       username: (json['username'] as String?) ?? '',
-      fingerprint: json['fingerprint'] as String?,
+      fingerprint: (json['keyFingerprint'] ?? json['fingerprint']) as String?,
       hostKey: json['hostKey'] as String?,
       platform: json['platform'] as String?,
-      rotatedAt: json['rotatedAt'] as String?,
+      rotatedAt: (json['provisionedAt'] ?? json['rotatedAt']) as String?,
+      publicKey: json['publicKey'] as String?,
+      keyComment: json['keyComment'] as String?,
     );
   }
 }
@@ -734,8 +740,11 @@ class AgentRouteOption {
     return AgentRouteOption(
       probeId: (json['probeId'] ?? json['id'] as num?)?.toInt() ?? 0,
       name: (json['name'] as String?) ?? 'Agente',
-      online: json['online'] != false,
-      hasDeviceIo: json['hasDeviceIo'] != false && json['deviceIo'] != false,
+      online: json['online'] != false && json['connected'] != false,
+      hasDeviceIo:
+          json['hasDeviceIo'] != false &&
+          json['deviceIo'] != false &&
+          json['allowed'] != false,
     );
   }
 }

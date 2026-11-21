@@ -46,6 +46,8 @@ class CodeViewer extends StatelessWidget {
                   Expanded(
                     child: Text(
                       title ?? 'Código',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: context.textTheme.labelMedium?.copyWith(
                         color: scheme.onSurfaceVariant,
                         fontWeight: FontWeight.w700,

@@ -587,19 +587,22 @@ class AiSuggestion {
 const List<AiSuggestion> generalAiSuggestions = <AiSuggestion>[
   AiSuggestion(
     title: 'Saúde geral da rede',
-    prompt: 'Faça um resumo da saúde atual da rede, alertas ativos e dispositivos fora do ar.',
+    prompt:
+        'Faça um resumo da saúde atual da rede, alertas ativos e dispositivos fora do ar.',
     icon: Icons.monitor_heart_outlined,
     tone: SemanticTone.primary,
   ),
   AiSuggestion(
     title: 'Alertas críticos',
-    prompt: 'Quais são os alertas críticos ativos agora e qual a provável causa raiz?',
+    prompt:
+        'Quais são os alertas críticos ativos agora e qual a provável causa raiz?',
     icon: Icons.notifications_active_outlined,
     tone: SemanticTone.error,
   ),
   AiSuggestion(
     title: 'Latência e enlaces',
-    prompt: 'Quais monitores ou enlaces estão com maior latência ou instabilidade hoje?',
+    prompt:
+        'Quais monitores ou enlaces estão com maior latência ou instabilidade hoje?',
     icon: Icons.speed,
     tone: SemanticTone.warning,
   ),
@@ -618,7 +621,8 @@ const List<AiSuggestion> generalAiSuggestions = <AiSuggestion>[
   ),
   AiSuggestion(
     title: 'Containers e servidores',
-    prompt: 'Algum servidor remoto ou container Docker está com uso alto de recursos ou parado?',
+    prompt:
+        'Algum servidor remoto ou container Docker está com uso alto de recursos ou parado?',
     icon: Icons.dns_outlined,
     tone: SemanticTone.secondary,
   ),
@@ -774,7 +778,8 @@ double? chatDomainScoreOf(ChatBenchmarkSplitView? split, String domainId) {
       passed: true,
       label: 'Atende ao portão',
       tone: SemanticTone.success,
-      reason: 'Aprovado em todos os critérios de precisão, ferramentas, segurança e latência.',
+      reason:
+          'Aprovado em todos os critérios de precisão, ferramentas, segurança e latência.',
     );
   }
   final reasons = <String>[];
