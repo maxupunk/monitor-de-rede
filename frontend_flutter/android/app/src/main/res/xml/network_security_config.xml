@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!--
+      NetMonitor frequentemente opera em LAN privada ou sobre VPN WireGuard
+      (10.8.0.x, 192.168.x.x, 10.x.x.x) sem certificado público.
+      Permite tráfego cleartext e confia nos certificados de sistema e usuário.
+    -->
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
