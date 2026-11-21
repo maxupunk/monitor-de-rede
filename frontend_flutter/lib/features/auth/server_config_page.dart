@@ -57,7 +57,9 @@ class _ServerConfigPageState extends ConsumerState<ServerConfigPage> {
     final raw = explicitUrl ?? _urlController.text;
     if (explicitUrl == null && !_formKey.currentState!.validate()) return;
     setState(() => _testing = true);
-    final result = await ref.read(serverConfigProvider.notifier).probeServer(raw);
+    final result = await ref
+        .read(serverConfigProvider.notifier)
+        .probeServer(raw);
     if (!mounted) return;
     setState(() {
       _testing = false;
@@ -65,7 +67,9 @@ class _ServerConfigPageState extends ConsumerState<ServerConfigPage> {
     });
     if (!result.ok) return;
 
-    await ref.read(serverConfigProvider.notifier).setServerUrl(result.normalizedUrl);
+    await ref
+        .read(serverConfigProvider.notifier)
+        .setServerUrl(result.normalizedUrl);
     await ref.read(authProvider.notifier).refreshSetupStatus();
     if (!mounted) return;
     if (result.needsSetup == true) {
@@ -105,13 +109,19 @@ class _ServerConfigPageState extends ConsumerState<ServerConfigPage> {
                           hintText: 'https://netmonitor.empresa.local ou http://10.8.0.1:3333',
                           prefixIcon: Icon(Icons.link),
                         ),
-                        validator: FormValidators.compose(<FormFieldValidator<String>>[
-                          FormValidators.required('Informe o endereço do servidor.'),
-                          (value) {
-                            final normalized = normalizeServerUrl(value ?? '');
-                            return FormValidators.url()(normalized);
-                          },
-                        ]),
+                        validator: FormValidators.compose(
+                          <FormFieldValidator<String>>[
+                            FormValidators.required(
+                              'Informe o endereço do servidor.',
+                            ),
+                            (value) {
+                              final normalized = normalizeServerUrl(
+                                value ?? '',
+                              );
+                              return FormValidators.url()(normalized);
+                            },
+                          ],
+                        ),
                       ),
                       const SizedBox(height: 14),
                       if (_probeResult != null) ...<Widget>[
@@ -139,7 +149,8 @@ class _ServerConfigPageState extends ConsumerState<ServerConfigPage> {
                                 child: Text(
                                   _probeResult!.ok
                                       ? 'Servidor acessível (${_probeResult!.latencyMs ?? 0} ms).'
-                                      : (_probeResult!.error ?? 'Falha ao conectar.'),
+                                      : (_probeResult!.error ??
+                                            'Falha ao conectar.'),
                                   style: context.textTheme.bodySmall?.copyWith(
                                     fontWeight: FontWeight.w600,
                                   ),
@@ -163,12 +174,16 @@ class _ServerConfigPageState extends ConsumerState<ServerConfigPage> {
                           Expanded(
                             flex: 2,
                             child: FilledButton.icon(
-                              onPressed: _testing ? null : () => _saveAndContinue(),
+                              onPressed: _testing
+                                  ? null
+                                  : () => _saveAndContinue(),
                               icon: _testing
                                   ? const SizedBox(
                                       width: 16,
                                       height: 16,
-                                      child: CircularProgressIndicator(strokeWidth: 2),
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
                                     )
                                   : const Icon(Icons.arrow_forward),
                               label: const Text('Conectar'),

@@ -1,0 +1,297 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:netmonitor_app/core/network/api_client.dart';
+import 'package:netmonitor_app/features/servers/models/agent_models.dart';
+
+@immutable
+class AgentsState {
+  const AgentsState({
+    this.agents = const <AgentView>[],
+    this.addresses = const <ServerAddressOption>[],
+    this.loading = false,
+    this.saving = false,
+    this.loaded = false,
+    this.error,
+  });
+
+  final List<AgentView> agents;
+  final List<ServerAddressOption> addresses;
+  final bool loading;
+  final bool saving;
+  final bool loaded;
+  final String? error;
+
+  AgentView? byId(int id) {
+    for (final agent in agents) {
+      if (agent.id == id) return agent;
+    }
+    return null;
+  }
+
+  AgentsState copyWith({
+    List<AgentView>? agents,
+    List<ServerAddressOption>? addresses,
+    bool? loading,
+    bool? saving,
+    bool? loaded,
+    String? error,
+    bool clearError = false,
+  }) {
+    return AgentsState(
+      agents: agents ?? this.agents,
+      addresses: addresses ?? this.addresses,
+      loading: loading ?? this.loading,
+      saving: saving ?? this.saving,
+      loaded: loaded ?? this.loaded,
+      error: clearError ? null : (error ?? this.error),
+    );
+  }
+}
+
+/// Estado dos servidores remotos/agentes (ADR 011).
+/// Carrega sob demanda; atualizações de conexão/host chegam por SSE (`probe:status`).
+class AgentsNotifier extends Notifier<AgentsState> {
+  @override
+  AgentsState build() => const AgentsState();
+
+  ApiClient get _api => ref.read(apiClientProvider);
+
+  String _describe(Object err, String fallback) {
+    if (err is ApiException && err.message.isNotEmpty) return err.message;
+    if (err is NetworkException && err.message.isNotEmpty) return err.message;
+    return fallback;
+  }
+
+  List<AgentView> _upsertSorted(List<AgentView> list, AgentView agent) {
+    final next = List<AgentView>.from(list);
+    final idx = next.indexWhere((a) => a.id == agent.id);
+    if (idx == -1) {
+      next.add(agent);
+      next.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    } else {
+      next[idx] = agent;
+    }
+    return List<AgentView>.unmodifiable(next);
+  }
+
+  Future<void> fetchAgents() async {
+    state = state.copyWith(loading: true, clearError: true);
+    try {
+      final raw = await _api.get<List<dynamic>>('/agents');
+      final parsed = raw
+          .whereType<Map>()
+          .map((e) => AgentView.fromJson(Map<String, dynamic>.from(e)))
+          .toList(growable: false);
+      state = state.copyWith(
+        agents: List<AgentView>.unmodifiable(parsed),
+        loading: false,
+        loaded: true,
+      );
+    } catch (err) {
+      state = state.copyWith(
+        loading: false,
+        error: _describe(err, 'Erro ao carregar os servidores remotos'),
+      );
+    }
+  }
+
+  Future<void> fetchServerAddresses() async {
+    try {
+      final raw = await _api.get<dynamic>('/server-addresses');
+      final list = raw is List
+          ? raw
+          : (raw is Map && raw['addresses'] is List
+                ? raw['addresses'] as List
+                : const <dynamic>[]);
+      final parsed = list
+          .whereType<Map>()
+          .map(
+            (e) => ServerAddressOption.fromJson(Map<String, dynamic>.from(e)),
+          )
+          .toList(growable: false);
+      state = state.copyWith(
+        addresses: List<ServerAddressOption>.unmodifiable(parsed),
+      );
+    } catch (_) {
+      // Opcional para o seletor de endereço no diálogo de instalação.
+    }
+  }
+
+  Future<AgentWithEnrollment?> createAgent(AgentCreateInput input) async {
+    state = state.copyWith(saving: true, clearError: true);
+    try {
+      final raw = await _api.post<Map<String, dynamic>>(
+        '/agents',
+        data: input.toJson(),
+      );
+      final created = AgentWithEnrollment.fromJson(raw);
+      state = state.copyWith(
+        agents: _upsertSorted(state.agents, created.agent),
+        saving: false,
+      );
+      return created;
+    } catch (err) {
+      state = state.copyWith(
+        saving: false,
+        error: _describe(err, 'Erro ao conectar o servidor'),
+      );
+      return null;
+    }
+  }
+
+  Future<bool> updateAgent(int id, AgentUpdateInput input) async {
+    state = state.copyWith(saving: true, clearError: true);
+    try {
+      final raw = await _api.put<Map<String, dynamic>>(
+        '/agents/$id',
+        data: input.toJson(),
+      );
+      final updated = AgentView.fromJson(raw);
+      state = state.copyWith(
+        agents: _upsertSorted(state.agents, updated),
+        saving: false,
+      );
+      return true;
+    } catch (err) {
+      state = state.copyWith(
+        saving: false,
+        error: _describe(err, 'Erro ao alterar o servidor'),
+      );
+      return false;
+    }
+  }
+
+  Future<AgentEnrollmentView?> reissueEnrollment(int id) async {
+    state = state.copyWith(saving: true, clearError: true);
+    try {
+      final raw = await _api.post<Map<String, dynamic>>(
+        '/agents/$id/enrollment',
+      );
+      state = state.copyWith(saving: false);
+      return AgentEnrollmentView.fromJson(raw);
+    } catch (err) {
+      state = state.copyWith(
+        saving: false,
+        error: _describe(err, 'Erro ao gerar o código de instalação'),
+      );
+      return null;
+    }
+  }
+
+  Future<AgentInstallCommands?> installCommands({
+    required String code,
+    String? addressId,
+    InstallPolicyView? policy,
+  }) async {
+    state = state.copyWith(clearError: true);
+    try {
+      final payload = <String, dynamic>{
+        'code': code,
+        'addressId': addressId,
+        if (policy != null) 'policy': policy.toJson(),
+      };
+      final raw = await _api.post<Map<String, dynamic>>(
+        '/agents/install-commands',
+        data: payload,
+      );
+      return AgentInstallCommands.fromJson(raw);
+    } catch (err) {
+      state = state.copyWith(
+        error: _describe(err, 'Erro ao gerar os comandos para este endereço'),
+      );
+      return null;
+    }
+  }
+
+  Future<InstallPolicyView?> suggestedPolicy() async {
+    try {
+      final raw = await _api.get<Map<String, dynamic>>(
+        '/agents/install-policy',
+      );
+      return InstallPolicyView.fromJson(raw);
+    } catch (err) {
+      state = state.copyWith(
+        error: _describe(err, 'Erro ao carregar as permissões sugeridas'),
+      );
+      return null;
+    }
+  }
+
+  Future<bool> revokeAgent(int id) async {
+    state = state.copyWith(saving: true, clearError: true);
+    try {
+      final raw = await _api.post<Map<String, dynamic>>('/agents/$id/revoke');
+      final updated = AgentView.fromJson(raw);
+      state = state.copyWith(
+        agents: _upsertSorted(state.agents, updated),
+        saving: false,
+      );
+      return true;
+    } catch (err) {
+      state = state.copyWith(
+        saving: false,
+        error: _describe(err, 'Erro ao revogar o acesso do servidor'),
+      );
+      return false;
+    }
+  }
+
+  Future<bool> removeAgent(int id) async {
+    state = state.copyWith(saving: true, clearError: true);
+    try {
+      await _api.delete<dynamic>('/agents/$id');
+      state = state.copyWith(
+        agents: List<AgentView>.unmodifiable(
+          state.agents.where((a) => a.id != id),
+        ),
+        saving: false,
+      );
+      return true;
+    } catch (err) {
+      state = state.copyWith(
+        saving: false,
+        error: _describe(err, 'Erro ao remover o servidor'),
+      );
+      return false;
+    }
+  }
+
+  /// Aplica `probe:status` via SSE sem polling.
+  void applyRealtimeStatus(Map<String, dynamic> data) {
+    final rawId = data['id'] ?? data['probeId'];
+    final id = rawId is num
+        ? rawId.toInt()
+        : int.tryParse(rawId?.toString() ?? '');
+    if (id == null) return;
+    final idx = state.agents.indexWhere((a) => a.id == id);
+    if (idx == -1) return;
+
+    final current = state.agents[idx];
+    final nextStatus = data['status'] is String
+        ? data['status'] as String
+        : current.status;
+    final nextConnected = data['status'] is String
+        ? nextStatus == 'online'
+        : current.connected;
+    final nextHost = AgentHostInfo.tryFromDynamic(data['host']) ?? current.host;
+
+    final updated = current.copyWith(
+      status: nextStatus,
+      connected: nextConnected,
+      version: data['version'] is String
+          ? data['version'] as String
+          : current.version,
+      lastSeenAt: data['lastSeenAt'] is String
+          ? data['lastSeenAt'] as String
+          : current.lastSeenAt,
+      host: nextHost,
+    );
+    final nextList = List<AgentView>.from(state.agents);
+    nextList[idx] = updated;
+    state = state.copyWith(agents: List<AgentView>.unmodifiable(nextList));
+  }
+}
+
+final agentsProvider = NotifierProvider<AgentsNotifier, AgentsState>(
+  AgentsNotifier.new,
+);

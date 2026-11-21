@@ -1,0 +1,305 @@
+import 'package:flutter/foundation.dart';
+
+/// Valor retornado pelo backend no lugar de um segredo salvo.
+const String pluginSecretMask = '********';
+
+@immutable
+class PluginVisibleWhen {
+  const PluginVisibleWhen({
+    required this.field,
+    this.equals,
+    this.inValues,
+    this.notInValues,
+  });
+
+  final String field;
+  final Object? equals;
+  final List<Object?>? inValues;
+  final List<Object?>? notInValues;
+
+  static PluginVisibleWhen? tryParse(Object? raw) {
+    if (raw is! Map) return null;
+    final field = raw['field'];
+    if (field is! String || field.isEmpty) return null;
+    return PluginVisibleWhen(
+      field: field,
+      equals: raw['equals'],
+      inValues: raw['in'] is List
+          ? List<Object?>.from(raw['in'] as List)
+          : null,
+      notInValues: raw['notIn'] is List
+          ? List<Object?>.from(raw['notIn'] as List)
+          : null,
+    );
+  }
+
+  bool holds(Map<String, dynamic> values) {
+    final current = values[field];
+    if (inValues != null) return inValues!.contains(current);
+    if (notInValues != null) return !notInValues!.contains(current);
+    return current == equals;
+  }
+}
+
+@immutable
+class PluginSchemaField {
+  const PluginSchemaField({
+    required this.name,
+    required this.kind,
+    required this.label,
+    this.hint,
+    this.options,
+    this.titles,
+    this.advanced = false,
+    this.hidden = false,
+    this.widget,
+    this.group,
+    this.visibleWhen,
+    this.reveal,
+    this.secret = false,
+    this.required = false,
+    this.items,
+    this.schema = const <String, dynamic>{},
+  });
+
+  final String name;
+  final String
+  kind; // 'string' | 'integer' | 'number' | 'boolean' | 'list' | 'objects'
+  final String label;
+  final String? hint;
+  final List<Object?>? options;
+  final List<String>? titles;
+  final bool advanced;
+  final bool hidden;
+  final String? widget; // ip|cidr|mac|port|hostname|url|textarea|slider|tags
+  final String? group;
+  final PluginVisibleWhen? visibleWhen;
+  final String? reveal;
+  final bool secret;
+  final bool required;
+  final Map<String, dynamic>? items;
+  final Map<String, dynamic> schema;
+}
+
+final RegExp _ipv4Re = RegExp(
+  r'^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$',
+);
+final RegExp _macColonRe = RegExp(r'^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$');
+final RegExp _macDashRe = RegExp(r'^([0-9a-fA-F]{2}-){5}[0-9a-fA-F]{2}$');
+final RegExp _hostLabelRe = RegExp(
+  r'^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$',
+);
+
+bool _isIpv6(String text) {
+  if (!RegExp(r'^[0-9a-fA-F:.]+$').hasMatch(text) || !text.contains(':')) {
+    return false;
+  }
+  if (text.split('::').length - 1 > 1) return false;
+  final groups = text.split(':').where((g) => g.isNotEmpty).toList();
+  return groups.length <= 8 &&
+      groups.every(
+        (g) => _ipv4Re.hasMatch(g) || RegExp(r'^[0-9a-fA-F]{1,4}$').hasMatch(g),
+      );
+}
+
+String? validatePluginWidget(String? widget, String raw) {
+  if (widget == null || raw.isEmpty || raw == pluginSecretMask) return null;
+  switch (widget) {
+    case 'ip':
+      return (_ipv4Re.hasMatch(raw) || _isIpv6(raw))
+          ? null
+          : 'Precisa ser um endereço IP (ex.: 192.168.1.1)';
+    case 'cidr':
+      final parts = raw.split('/');
+      if (parts.length != 2) {
+        return 'Precisa ser uma rede no formato 192.168.1.0/24';
+      }
+      final bits = int.tryParse(parts[1]);
+      if (bits == null) return 'Precisa ser uma rede no formato 192.168.1.0/24';
+      if (_ipv4Re.hasMatch(parts[0]) && bits >= 0 && bits <= 32) return null;
+      if (_isIpv6(parts[0]) && bits >= 0 && bits <= 128) return null;
+      return 'Precisa ser uma rede no formato 192.168.1.0/24';
+    case 'mac':
+      return (_macColonRe.hasMatch(raw) || _macDashRe.hasMatch(raw))
+          ? null
+          : 'Precisa ser um MAC (ex.: AA:BB:CC:DD:EE:FF)';
+    case 'port':
+      final port = int.tryParse(raw);
+      return (port != null && port >= 1 && port <= 65535)
+          ? null
+          : 'Precisa ser uma porta de 1 a 65535';
+    case 'hostname':
+      final ok =
+          raw.isNotEmpty &&
+          raw.length <= 253 &&
+          raw.split('.').every((label) => _hostLabelRe.hasMatch(label));
+      return ok
+          ? null
+          : 'Precisa ser um nome de host (letras, números, hífen e ponto)';
+    case 'url':
+      final uri = Uri.tryParse(raw);
+      final ok =
+          uri != null &&
+          (uri.scheme == 'http' || uri.scheme == 'https') &&
+          uri.host.isNotEmpty;
+      return ok ? null : 'Precisa ser um endereço http:// ou https://';
+    default:
+      return null;
+  }
+}
+
+String? validatePluginField(PluginSchemaField field, Object? value) {
+  final text = value?.toString() ?? '';
+  if (field.required && (value == null || text.isEmpty)) {
+    return 'Obrigatório';
+  }
+  if (text.isEmpty || text == pluginSecretMask) return null;
+
+  final pattern = field.schema['pattern'];
+  if (pattern is String && pattern.isNotEmpty) {
+    if (!RegExp('^(?:$pattern)\$').hasMatch(text)) {
+      return 'Formato inválido';
+    }
+  }
+  final minLen = field.schema['minLength'];
+  if (minLen is num && text.length < minLen.toInt()) {
+    return 'Ao menos ${minLen.toInt()} caracteres';
+  }
+  final maxLen = field.schema['maxLength'];
+  if (maxLen is num && text.length > maxLen.toInt()) {
+    return 'No máximo ${maxLen.toInt()} caracteres';
+  }
+  final minVal = field.schema['minimum'];
+  if (minVal is num) {
+    final parsed = num.tryParse(text);
+    if (parsed == null || parsed < minVal) return 'Mínimo $minVal';
+  }
+  final maxVal = field.schema['maximum'];
+  if (maxVal is num) {
+    final parsed = num.tryParse(text);
+    if (parsed == null || parsed > maxVal) return 'Máximo $maxVal';
+  }
+  return validatePluginWidget(field.widget, text);
+}
+
+List<PluginSchemaField> parsePluginSchemaFields(Map<String, dynamic>? schema) {
+  if (schema == null) return const <PluginSchemaField>[];
+  final rawProps = schema['properties'];
+  if (rawProps is! Map) return const <PluginSchemaField>[];
+  final requiredSet = schema['required'] is List
+      ? (schema['required'] as List).whereType<String>().toSet()
+      : <String>{};
+
+  final fields = <PluginSchemaField>[];
+  rawProps.forEach((key, rawProp) {
+    if (rawProp is! Map) return;
+    final prop = Map<String, dynamic>.from(rawProp);
+    final name = key.toString();
+    final type = (prop['type'] ?? 'string').toString();
+    final items = prop['items'] is Map
+        ? Map<String, dynamic>.from(prop['items'] as Map)
+        : null;
+    final kind = type == 'array'
+        ? (items?['type'] == 'object' ? 'objects' : 'list')
+        : (const <String>['integer', 'number', 'boolean'].contains(type)
+              ? type
+              : 'string');
+    fields.add(
+      PluginSchemaField(
+        name: name,
+        kind: kind,
+        label: prop['title'] is String ? prop['title'] as String : name,
+        hint: prop['description'] as String?,
+        options: prop['enum'] is List
+            ? List<Object?>.from(prop['enum'] as List)
+            : null,
+        titles: prop['enumTitles'] is List
+            ? (prop['enumTitles'] as List)
+                  .map((e) => e.toString())
+                  .toList(growable: false)
+            : null,
+        advanced: prop['advanced'] == true,
+        hidden: prop['hidden'] == true,
+        widget: prop['widget'] as String?,
+        group: prop['group'] as String?,
+        visibleWhen: PluginVisibleWhen.tryParse(prop['visibleWhen']),
+        reveal: prop['reveal'] as String?,
+        secret: prop['secret'] == true,
+        required: requiredSet.contains(name),
+        items: items,
+        schema: prop,
+      ),
+    );
+  });
+
+  final order = schema['order'];
+  if (order is List) {
+    final orderNames = order.map((e) => e.toString()).toList();
+    fields.sort((a, b) {
+      final ia = orderNames.indexOf(a.name);
+      final ib = orderNames.indexOf(b.name);
+      final pa = ia < 0 ? orderNames.length : ia;
+      final pb = ib < 0 ? orderNames.length : ib;
+      return pa.compareTo(pb);
+    });
+  }
+  return fields;
+}
+
+Map<String, dynamic> pluginSchemaDefaults(Map<String, dynamic>? schema) {
+  final result = <String, dynamic>{};
+  for (final field in parsePluginSchemaFields(schema)) {
+    if (field.schema.containsKey('default')) {
+      result[field.name] = field.schema['default'];
+    } else if (field.kind == 'boolean') {
+      result[field.name] = false;
+    } else if (field.kind == 'list' || field.kind == 'objects') {
+      result[field.name] = <dynamic>[];
+    } else if (field.kind == 'string') {
+      result[field.name] = '';
+    }
+  }
+  return result;
+}
+
+bool isPluginFieldVisible(
+  PluginSchemaField field,
+  Map<String, dynamic>? schema,
+  Map<String, dynamic> values,
+) {
+  if (field.visibleWhen == null) return true;
+  final effective = <String, dynamic>{
+    ...pluginSchemaDefaults(schema),
+    ...values,
+  };
+  return field.visibleWhen!.holds(effective);
+}
+
+Map<String, dynamic> normalizePluginFormParams(
+  Map<String, dynamic>? schema,
+  Map<String, dynamic> values, {
+  bool omitEmpty = true,
+}) {
+  final out = Map<String, dynamic>.from(values);
+  for (final field in parsePluginSchemaFields(schema)) {
+    if (!isPluginFieldVisible(field, schema, values)) {
+      out.remove(field.name);
+      continue;
+    }
+    final current = out[field.name];
+    if (field.kind == 'integer' || field.kind == 'number') {
+      if (current == null || current.toString().trim().isEmpty) {
+        out.remove(field.name);
+      } else {
+        final parsed = field.kind == 'integer'
+            ? int.tryParse(current.toString())
+            : double.tryParse(current.toString());
+        if (parsed != null) out[field.name] = parsed;
+      }
+    }
+    if (omitEmpty && (out[field.name] == null || out[field.name] == '')) {
+      out.remove(field.name);
+    }
+  }
+  return out;
+}

@@ -7,6 +7,7 @@ import 'package:netmonitor_app/core/areas/areas_provider.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
 import 'package:netmonitor_app/shared/widgets/nested_panel.dart';
 import 'package:netmonitor_app/shared/widgets/section_card.dart';
+import 'package:netmonitor_app/shared/widgets/semantic_chip.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
 
 /// Página exibida quando o usuário navega para uma rota de área desligada ou sem acesso.
@@ -31,12 +32,16 @@ class AreaOffPage extends ConsumerStatefulWidget {
 class _AreaOffPageState extends ConsumerState<AreaOffPage> {
   String? _error;
 
-  ProductArea get _area => ProductArea.tryParse(widget.areaId) ?? ProductArea.core;
+  ProductArea get _area =>
+      ProductArea.tryParse(widget.areaId) ?? ProductArea.core;
   bool get _noAccess => widget.reason == 'acesso';
 
   void _goBack() {
     final target = widget.fromPath;
-    if (target != null && target.startsWith('/') && !target.startsWith('/area-desligada')) {
+    if (target != null &&
+        target.startsWith('/') &&
+        !target.startsWith('//') &&
+        !target.startsWith('/area-desligada')) {
       context.go(target);
     } else {
       context.go('/');
@@ -84,7 +89,7 @@ class _AreaOffPageState extends ConsumerState<AreaOffPage> {
                 ? 'Você não tem acesso a esta área'
                 : 'Esta área está desligada',
             subtitle: _noAccess ? 'Sem acesso' : 'Área desligada',
-            icon: _noAccess ? Icons.lock_outline : Icons.power_off_outlined,
+            icon: _noAccess ? Icons.lock_outline : area.defaultIcon,
             iconTone: _noAccess ? SemanticTone.error : SemanticTone.warning,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -102,6 +107,20 @@ class _AreaOffPageState extends ConsumerState<AreaOffPage> {
                   ),
                   style: context.textTheme.bodyLarge,
                 ),
+                if (state?.evidence?.present == true &&
+                    state?.evidence?.reason != null &&
+                    state!.evidence!.reason!.isNotEmpty &&
+                    !_noAccess) ...<Widget>[
+                  const SizedBox(height: 10),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: SemanticChip(
+                      label: state.evidence!.reason!,
+                      tone: SemanticTone.info,
+                      icon: Icons.info_outline,
+                    ),
+                  ),
+                ],
                 if (contents.isNotEmpty && !_noAccess) ...<Widget>[
                   const SizedBox(height: 10),
                   Text(
@@ -115,10 +134,7 @@ class _AreaOffPageState extends ConsumerState<AreaOffPage> {
                 ],
                 if (_error != null) ...<Widget>[
                   const SizedBox(height: 12),
-                  NestedPanel(
-                    tone: SemanticTone.error,
-                    child: Text(_error!),
-                  ),
+                  NestedPanel(tone: SemanticTone.error, child: Text(_error!)),
                 ],
                 const SizedBox(height: 16),
                 if (_noAccess) ...<Widget>[
@@ -135,7 +151,7 @@ class _AreaOffPageState extends ConsumerState<AreaOffPage> {
                     alignment: Alignment.centerLeft,
                     child: FilledButton.tonal(
                       onPressed: () => context.go('/'),
-                      child: const Text('Ir para o Dashboard'),
+                      child: const Text('Voltar ao início'),
                     ),
                   ),
                 ] else if (auth.isAdmin) ...<Widget>[
@@ -149,14 +165,21 @@ class _AreaOffPageState extends ConsumerState<AreaOffPage> {
                             ? const SizedBox(
                                 width: 16,
                                 height: 16,
-                                child: CircularProgressIndicator(strokeWidth: 2),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
                               )
                             : const Icon(Icons.power_settings_new),
                         label: const Text('Ligar área'),
                       ),
+                      OutlinedButton.icon(
+                        onPressed: () => context.go('/settings?tab=geral'),
+                        icon: const Icon(Icons.settings_outlined, size: 18),
+                        label: const Text('Ir para Configurações'),
+                      ),
                       FilledButton.tonal(
                         onPressed: () => context.go('/'),
-                        child: const Text('Ir para o Dashboard'),
+                        child: const Text('Voltar ao início'),
                       ),
                     ],
                   ),
@@ -173,7 +196,7 @@ class _AreaOffPageState extends ConsumerState<AreaOffPage> {
                     alignment: Alignment.centerLeft,
                     child: FilledButton.tonal(
                       onPressed: () => context.go('/'),
-                      child: const Text('Ir para o Dashboard'),
+                      child: const Text('Voltar ao início'),
                     ),
                   ),
                 ],

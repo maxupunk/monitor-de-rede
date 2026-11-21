@@ -48,12 +48,16 @@ class SettingsTabContribution {
     required this.title,
     required this.icon,
     required this.order,
+    this.area,
   });
 
   final String value;
   final String title;
   final IconData icon;
   final int order;
+
+  /// Área de visibilidade ADR 017/019; se `null`, herda `AreaContribution.id`.
+  final ProductArea? area;
 }
 
 /// Cartão de Configurações dentro de uma aba (inclusive de outra área).
@@ -65,6 +69,7 @@ class SettingsCardContribution {
     required this.builder,
     this.mdCols = 12,
     this.lgCols = 12,
+    this.area,
   });
 
   final String tab;
@@ -72,6 +77,9 @@ class SettingsCardContribution {
   final WidgetBuilder builder;
   final int mdCols;
   final int lgCols;
+
+  /// Área de visibilidade ADR 017/019; se `null`, herda `AreaContribution.id`.
+  final ProductArea? area;
 }
 
 /// Aba de Configurações pronta para renderização, já filtrada e ordenada.
@@ -190,6 +198,7 @@ class AreaContribution {
     this.nav = const <NavEntry>[],
     this.navActions = const <NavAction, NavActionHandler>{},
     this.sseBuilder,
+    this.extraSseBuilders = const <ProductArea, AreaSseRoutesBuilder>{},
     this.widgets = const <String, DashboardWidgetContribution>{},
     this.aiScreens = const <String, AiScreenContribution>{},
     this.settingsTabs = const <SettingsTabContribution>[],
@@ -198,6 +207,7 @@ class AreaContribution {
     this.backupTabs = const <BackupTabContribution>[],
     this.deviceDetailTabs = const <DeviceDetailTabContribution>[],
     this.shellOverlays = const <WidgetBuilder>[],
+    this.extraShellOverlays = const <ProductArea, List<WidgetBuilder>>{},
   });
 
   final ProductArea id;
@@ -208,6 +218,11 @@ class AreaContribution {
   final List<NavEntry> nav;
   final Map<NavAction, NavActionHandler> navActions;
   final AreaSseRoutesBuilder? sseBuilder;
+
+  /// Builders SSE extras com gating independente por área ADR 017
+  /// (ex.: rotas SSE de IA sob `ProductArea.core` ou Plugins sob `ProductArea.network`
+  /// declaradas a partir de `vpn_area.dart`).
+  final Map<ProductArea, AreaSseRoutesBuilder> extraSseBuilders;
   final Map<String, DashboardWidgetContribution> widgets;
   final Map<String, AiScreenContribution> aiScreens;
   final List<SettingsTabContribution> settingsTabs;
@@ -216,8 +231,12 @@ class AreaContribution {
   final List<BackupTabContribution> backupTabs;
   final List<DeviceDetailTabContribution> deviceDetailTabs;
 
-  /// Widgets globais montados dentro do shell (ex.: `DeviceAccessHost`, `PluginApprovalDialog`, `AiApprovalNotice`).
+  /// Widgets globais montados dentro do shell sob gating de `this.id`.
   final List<WidgetBuilder> shellOverlays;
+
+  /// Widgets globais extras com gating independente por área ADR 017
+  /// (ex.: `DeviceAccessHost` ou `AiApprovalNotice` sob `ProductArea.core`).
+  final Map<ProductArea, List<WidgetBuilder>> extraShellOverlays;
 }
 
 /// Plugins de frota exibidos no grupo dinâmico "Aplicativos" do menu.

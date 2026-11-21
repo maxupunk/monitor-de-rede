@@ -106,10 +106,25 @@ class ServerConnectSlot {
       visibleServerConnectPaths(visibleAreas);
 }
 
-/// Overlays globais declarados pelas áreas visíveis (ex.: `DeviceAccessHost`, `PluginApprovalDialog`).
-List<WidgetBuilder> visibleShellOverlays(Set<ProductArea> visibleAreas) {
-  return registeredAreas
-      .where((area) => visibleAreas.contains(area.id))
-      .expand((area) => area.shellOverlays)
-      .toList(growable: false);
+/// Overlays globais declarados pelas áreas visíveis (inclui `shellOverlays` sob
+/// `area.id` e `extraShellOverlays` com gating independente por área ADR 017).
+List<WidgetBuilder> visibleShellOverlaysFrom(
+  Iterable<AreaContribution> modules,
+  Set<ProductArea> visibleAreas,
+) {
+  final overlays = <WidgetBuilder>[];
+  for (final area in modules) {
+    if (visibleAreas.contains(area.id)) {
+      overlays.addAll(area.shellOverlays);
+    }
+    area.extraShellOverlays.forEach((targetArea, builders) {
+      if (visibleAreas.contains(targetArea)) {
+        overlays.addAll(builders);
+      }
+    });
+  }
+  return List<WidgetBuilder>.unmodifiable(overlays);
 }
+
+List<WidgetBuilder> visibleShellOverlays(Set<ProductArea> visibleAreas) =>
+    visibleShellOverlaysFrom(registeredAreas, visibleAreas);

@@ -1,0 +1,496 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:netmonitor_app/core/auth/auth_state.dart';
+import 'package:netmonitor_app/core/utils/form_validators.dart';
+import 'package:netmonitor_app/core/utils/formatters.dart';
+import 'package:netmonitor_app/features/network/models/site_network_models.dart';
+import 'package:netmonitor_app/features/network/providers/devices_provider.dart';
+import 'package:netmonitor_app/features/network/providers/sites_networks_provider.dart';
+import 'package:netmonitor_app/shared/widgets/widgets.dart';
+import 'package:netmonitor_app/theme/app_theme.dart';
+
+class NetworksPage extends ConsumerStatefulWidget {
+  const NetworksPage({super.key});
+
+  @override
+  ConsumerState<NetworksPage> createState() => _NetworksPageState();
+}
+
+class _NetworksPageState extends ConsumerState<NetworksPage> {
+  final TextEditingController _searchCtrl = TextEditingController();
+  int? _siteFilter;
+
+  @override
+  void initState() {
+    super.initState();
+    Future<void>.microtask(() {
+      ref.read(networksProvider.notifier).fetchNetworks();
+      ref.read(sitesProvider.notifier).fetchSites();
+      ref.read(probesProvider.notifier).fetchProbes();
+      ref.read(devicesProvider.notifier).fetchDevices();
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _openNetworkSheet({NetworkModel? existing}) async {
+    final formKey = GlobalKey<FormState>();
+    final nameCtrl = TextEditingController(text: existing?.name ?? '');
+    final cidrCtrl = TextEditingController(text: existing?.cidr ?? '');
+    final gatewayCtrl = TextEditingController(text: existing?.gateway ?? '');
+    final vlanCtrl = TextEditingController(
+      text: existing?.vlanId?.toString() ?? '',
+    );
+    final intervalCtrl = TextEditingController(
+      text: (existing?.scanInterval ?? 3600).toString(),
+    );
+    final descCtrl = TextEditingController(text: existing?.description ?? '');
+    int? siteId = existing?.siteId;
+    int? probeId = existing?.probeId;
+    bool scanEnabled = existing?.scanEnabled ?? false;
+    bool saving = false;
+
+    final sites = ref.read(sitesProvider).items;
+    final probes = ref.read(probesProvider).items;
+
+    await showAdaptiveFormSheet<void>(
+      context: context,
+      title: existing != null ? 'Editar Rede IP' : 'Nova Rede IP',
+      subtitle: 'Defina sub-rede CIDR, VLAN, gateway e descoberta automática',
+      maxWidth: 620,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setModal) => Form(
+          key: formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              TextFormField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(labelText: 'Nome da rede *'),
+                validator: FormValidators.required('Informe o nome da rede.'),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: <Widget>[
+                  Expanded(
+                    flex: 2,
+                    child: TextFormField(
+                      controller: cidrCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Bloco CIDR *',
+                        hintText: '192.168.1.0/24',
+                      ),
+                      validator: FormValidators.compose(
+                        <FormFieldValidator<String>>[
+                          FormValidators.required('Informe o bloco CIDR.'),
+                          FormValidators.cidr(),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: TextFormField(
+                      controller: vlanCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(labelText: 'VLAN ID'),
+                      validator: FormValidators.integerRange(1, 4094),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: gatewayCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Gateway padrão',
+                  hintText: '192.168.1.1',
+                ),
+                validator: FormValidators.ipv4(),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: <Widget>[
+                  Expanded(
+                    child: DropdownButtonFormField<int?>(
+                      initialValue: sites.any((s) => s.id == siteId)
+                          ? siteId
+                          : null,
+                      decoration: const InputDecoration(labelText: 'Site'),
+                      items: <DropdownMenuItem<int?>>[
+                        const DropdownMenuItem<int?>(
+                          value: null,
+                          child: Text('Nenhum'),
+                        ),
+                        for (final s in sites)
+                          DropdownMenuItem<int?>(
+                            value: s.id,
+                            child: Text(s.name),
+                          ),
+                      ],
+                      onChanged: (v) => setModal(() => siteId = v),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: DropdownButtonFormField<int?>(
+                      initialValue: probes.any((p) => p.id == probeId)
+                          ? probeId
+                          : null,
+                      decoration: const InputDecoration(
+                        labelText: 'Sonda remota',
+                      ),
+                      items: <DropdownMenuItem<int?>>[
+                        const DropdownMenuItem<int?>(
+                          value: null,
+                          child: Text('Central local'),
+                        ),
+                        for (final p in probes)
+                          DropdownMenuItem<int?>(
+                            value: p.id,
+                            child: Text(p.name),
+                          ),
+                      ],
+                      onChanged: (v) => setModal(() => probeId = v),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Descoberta periódica automática'),
+                value: scanEnabled,
+                onChanged: (v) => setModal(() => scanEnabled = v),
+              ),
+              if (scanEnabled)
+                TextFormField(
+                  controller: intervalCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Intervalo de varredura (segundos)',
+                  ),
+                ),
+              const SizedBox(height: 10),
+              TextFormField(
+                controller: descCtrl,
+                maxLines: 2,
+                decoration: const InputDecoration(labelText: 'Descrição'),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: <Widget>[
+                  TextButton(
+                    onPressed: saving ? null : () => Navigator.of(ctx).pop(),
+                    child: const Text('Cancelar'),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton.icon(
+                    onPressed: saving
+                        ? null
+                        : () async {
+                            if (!formKey.currentState!.validate()) return;
+                            setModal(() => saving = true);
+                            final payload = <String, dynamic>{
+                              'name': nameCtrl.text.trim(),
+                              'cidr': cidrCtrl.text.trim(),
+                              'siteId': siteId,
+                              'probeId': probeId,
+                              if (gatewayCtrl.text.trim().isNotEmpty)
+                                'gateway': gatewayCtrl.text.trim(),
+                              if (vlanCtrl.text.trim().isNotEmpty)
+                                'vlanId': int.tryParse(vlanCtrl.text.trim()),
+                              'scanEnabled': scanEnabled,
+                              if (scanEnabled)
+                                'scanInterval':
+                                    int.tryParse(intervalCtrl.text.trim()) ??
+                                    3600,
+                              if (descCtrl.text.trim().isNotEmpty)
+                                'description': descCtrl.text.trim(),
+                            };
+                            final ok = existing != null
+                                ? await ref
+                                      .read(networksProvider.notifier)
+                                      .updateNetwork(existing.id, payload)
+                                : await ref
+                                      .read(networksProvider.notifier)
+                                      .createNetwork(payload);
+                            if (ctx.mounted && ok) Navigator.of(ctx).pop();
+                            if (context.mounted) setModal(() => saving = false);
+                          },
+                    icon: const Icon(Icons.check),
+                    label: Text(existing != null ? 'Salvar' : 'Criar rede'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    nameCtrl.dispose();
+    cidrCtrl.dispose();
+    gatewayCtrl.dispose();
+    vlanCtrl.dispose();
+    intervalCtrl.dispose();
+    descCtrl.dispose();
+  }
+
+  Future<void> _confirmDelete(NetworkModel network) async {
+    final ok = await showConfirmActionDialog(
+      context: context,
+      title: 'Excluir rede IP',
+      message: 'Remover a rede "${network.name}" (${network.cidr})?',
+      confirmLabel: 'Excluir',
+    );
+    if (ok) {
+      await ref.read(networksProvider.notifier).deleteNetwork(network.id);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final state = ref.watch(networksProvider);
+    final sites = ref.watch(sitesProvider).items;
+    final devices = ref.watch(devicesProvider).items;
+    final canWrite = ref.watch(authProvider).canWrite;
+
+    final query = _searchCtrl.text.trim().toLowerCase();
+    final filtered = state.items
+        .where((n) {
+          if (_siteFilter != null && n.siteId != _siteFilter) return false;
+          if (query.isEmpty) return true;
+          return '${n.name} ${n.cidr} ${n.gateway ?? ''} ${n.description ?? ''} ${n.vlanId ?? ''}'
+              .toLowerCase()
+              .contains(query);
+        })
+        .toList(growable: false);
+
+    return RefreshIndicator(
+      onRefresh: () => ref.read(networksProvider.notifier).fetchNetworks(),
+      child: ListView(
+        children: <Widget>[
+          SearchFilterHeader(
+            title: 'Redes IP',
+            subtitle:
+                'Sub-redes CIDR, utilização IPAM e gatilhos de descoberta',
+            searchController: _searchCtrl,
+            searchHint: 'Buscar por nome, CIDR, VLAN ou gateway...',
+            onSearchChanged: (_) => setState(() {}),
+            actions: <Widget>[
+              if (canWrite)
+                FilledButton.icon(
+                  onPressed: () => _openNetworkSheet(),
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('Nova Rede'),
+                ),
+            ],
+            filters: <Widget>[
+              if (sites.isNotEmpty)
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 220),
+                  child: DropdownButtonFormField<int?>(
+                    initialValue: _siteFilter,
+                    isDense: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Filtrar por Site',
+                    ),
+                    items: <DropdownMenuItem<int?>>[
+                      const DropdownMenuItem<int?>(
+                        value: null,
+                        child: Text('Todos os sites'),
+                      ),
+                      for (final s in sites)
+                        DropdownMenuItem<int?>(
+                          value: s.id,
+                          child: Text(s.name),
+                        ),
+                    ],
+                    onChanged: (v) => setState(() => _siteFilter = v),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          if (state.loading && state.items.isEmpty)
+            const LoadingStateView(message: 'Carregando redes IP...')
+          else if (state.error != null && state.items.isEmpty)
+            ErrorStateView(
+              message: state.error!,
+              onRetry: () =>
+                  ref.read(networksProvider.notifier).fetchNetworks(),
+            )
+          else if (filtered.isEmpty)
+            EmptyStateView(
+              title: 'Nenhuma rede IP cadastrada',
+              description:
+                  'Adicione suas faixas CIDR para habilitar descoberta e IPAM.',
+              icon: Icons.lan_outlined,
+              action: canWrite
+                  ? FilledButton.icon(
+                      onPressed: () => _openNetworkSheet(),
+                      icon: const Icon(Icons.add),
+                      label: const Text('Nova Rede'),
+                    )
+                  : null,
+            )
+          else
+            ResponsiveGrid(
+              xs: 1,
+              sm: 1,
+              md: 2,
+              lg: 3,
+              xl: 3,
+              children: filtered
+                  .map((network) {
+                    final usedCount = devices
+                        .where((d) => d.networkId == network.id)
+                        .length;
+                    final usable = network.usableHosts ?? 254;
+                    final util = usable > 0
+                        ? (usedCount / usable).clamp(0.0, 1.0)
+                        : 0.0;
+                    final utilColor = util > 0.85
+                        ? context.semanticColors.error
+                        : util > 0.65
+                        ? context.semanticColors.warning
+                        : context.semanticColors.success;
+
+                    return SectionCard(
+                      title: network.name,
+                      subtitle: network.cidr,
+                      icon: Icons.lan_outlined,
+                      trailing: canWrite
+                          ? Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: <Widget>[
+                                IconButton(
+                                  tooltip: 'Editar rede',
+                                  icon: const Icon(
+                                    Icons.edit_outlined,
+                                    size: 18,
+                                  ),
+                                  onPressed: () =>
+                                      _openNetworkSheet(existing: network),
+                                ),
+                                IconButton(
+                                  tooltip: 'Excluir rede',
+                                  icon: Icon(
+                                    Icons.delete_outline,
+                                    size: 18,
+                                    color: context.colorScheme.error,
+                                  ),
+                                  onPressed: () => _confirmDelete(network),
+                                ),
+                              ],
+                            )
+                          : null,
+                      footer: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: <Widget>[
+                          Text(
+                            'Última varredura: ${formatRelativeTime(network.lastScanAt)}',
+                            style: context.textTheme.bodySmall,
+                          ),
+                          if (canWrite && network.scannable)
+                            FilledButton.tonalIcon(
+                              onPressed: state.scanningId == network.id
+                                  ? null
+                                  : () => context.go(
+                                      '/discovery?networkId=${network.id}&scan=1',
+                                    ),
+                              icon: const Icon(Icons.radar, size: 16),
+                              label: const Text('Varrer'),
+                            ),
+                        ],
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: <Widget>[
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            children: <Widget>[
+                              if (network.site != null)
+                                SemanticChip(
+                                  label: network.site!.name,
+                                  tone: SemanticTone.primary,
+                                  icon: Icons.domain_outlined,
+                                  compact: true,
+                                ),
+                              if (network.vlanId != null)
+                                SemanticChip(
+                                  label: 'VLAN ${network.vlanId}',
+                                  tone: SemanticTone.info,
+                                  compact: true,
+                                ),
+                              if (network.gateway != null)
+                                SemanticChip(
+                                  label: 'GW ${network.gateway}',
+                                  tone: SemanticTone.secondary,
+                                  compact: true,
+                                ),
+                              SemanticChip(
+                                label: network.scanEnabled
+                                    ? 'Auto-descoberta'
+                                    : 'Manual',
+                                tone: network.scanEnabled
+                                    ? SemanticTone.success
+                                    : SemanticTone.warning,
+                                compact: true,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: <Widget>[
+                              Text(
+                                'Utilização IPAM',
+                                style: context.textTheme.labelMedium,
+                              ),
+                              Text(
+                                '$usedCount / ${formatInteger(usable)} hosts (${formatPercent(util * 100)})',
+                                style: context.textTheme.labelMedium?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(6),
+                            child: LinearProgressIndicator(
+                              value: util,
+                              minHeight: 8,
+                              color: utilColor,
+                              backgroundColor:
+                                  context.colorScheme.surfaceContainerHighest,
+                            ),
+                          ),
+                          if (network.description != null &&
+                              network.description!.isNotEmpty) ...<Widget>[
+                            const SizedBox(height: 8),
+                            Text(
+                              network.description!,
+                              style: context.textTheme.bodySmall,
+                            ),
+                          ],
+                        ],
+                      ),
+                    );
+                  })
+                  .toList(growable: false),
+            ),
+          const SizedBox(height: 24),
+        ],
+      ),
+    );
+  }
+}
