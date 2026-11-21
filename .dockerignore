@@ -11,6 +11,12 @@ docs/
 node_modules/
 frontend/node_modules/
 frontend/dist/
+frontend/build/
+frontend/.dart_tool/
+frontend/.flutter-plugins
+frontend/.flutter-plugins-dependencies
+frontend/android/.gradle/
+frontend/android/local.properties
 backend/target/
 *.sqlite
 *.sqlite-shm
