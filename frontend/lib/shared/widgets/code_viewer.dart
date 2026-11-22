@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:netmonitor_app/core/utils/clipboard_utils.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
 
 /// Bloco de código / comandos / logs com rolagem horizontal e botão de cópia.
@@ -56,15 +56,11 @@ class CodeViewer extends StatelessWidget {
                   ),
                   if (copyable)
                     TextButton.icon(
-                      onPressed: () {
-                        Clipboard.setData(ClipboardData(text: code));
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Conteúdo copiado.'),
-                            duration: Duration(seconds: 2),
-                          ),
-                        );
-                      },
+                      onPressed: () => copyToClipboardWithFeedback(
+                        context,
+                        code,
+                        message: 'Conteúdo copiado.',
+                      ),
                       icon: const Icon(Icons.copy, size: 15),
                       label: const Text('Copiar'),
                       style: TextButton.styleFrom(

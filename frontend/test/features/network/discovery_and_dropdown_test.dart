@@ -44,7 +44,7 @@ class _StubDevicesNotifier extends DevicesNotifier {
   DevicesState build() => const DevicesState();
 
   @override
-  Future<void> fetchDevices() async {}
+  Future<void> fetchDevices({int? siteId, int? networkId}) async {}
 }
 
 class _StubDiscoveryNotifier extends DiscoveryNotifier {

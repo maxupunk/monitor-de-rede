@@ -307,3 +307,15 @@ List<TopologyNodeModel> rankTopologyEndpointCandidates({
     });
   return List<TopologyNodeModel>.unmodifiable(sorted);
 }
+
+/// Resolve os nomes legíveis dos nós de um caminho para exibir no banner do HUD.
+List<String> resolvePathNodeNames(
+  TopologyPathResult? path,
+  List<TopologyNodeModel> nodes,
+) {
+  if (path == null || path.nodeIds.isEmpty) return const <String>[];
+  final byId = <int, TopologyNodeModel>{for (final n in nodes) n.id: n};
+  return path.nodeIds
+      .map((id) => byId[id]?.name ?? '#$id')
+      .toList(growable: false);
+}

@@ -1,6 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/network/api_client.dart';
+import 'package:netmonitor_app/core/realtime/sse_service.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
 import 'package:netmonitor_app/features/network/models/device_models.dart';
 import 'package:netmonitor_app/features/network/models/link_test_models.dart';
 
@@ -8,21 +12,30 @@ const int linkTestSampleLimit = 120;
 const int linkTestHealthLimit = 480;
 const int linkTestHistoryPerPage = 20;
 
-String formatLinkTestApiError(Object err) {
-  if (err is ApiException && err.message.trim().isNotEmpty) {
-    return err.message.trim();
+String formatLinkTestApiError(Object err) => describeError(err);
+
+@immutable
+class LinkTestPluginRunResult {
+  const LinkTestPluginRunResult({
+    required this.id,
+    required this.status,
+    this.error,
+  });
+
+  final int id;
+  final String status;
+  final String? error;
+
+  bool get isFinished =>
+      status == 'succeeded' || status == 'failed' || status == 'cancelled';
+
+  factory LinkTestPluginRunResult.fromJson(Map<String, dynamic> json) {
+    return LinkTestPluginRunResult(
+      id: parseIntOrNull(json['id'] ?? json['runId']) ?? 0,
+      status: (json['status'] as String?) ?? 'running',
+      error: json['error'] as String?,
+    );
   }
-  if (err is NetworkException && err.message.trim().isNotEmpty) {
-    return err.message.trim();
-  }
-  final raw = err.toString().trim();
-  if (raw.startsWith('Bad state: ')) {
-    return raw.substring('Bad state: '.length).trim();
-  }
-  if (raw.startsWith('Exception: ')) {
-    return raw.substring('Exception: '.length).trim();
-  }
-  return raw;
 }
 
 String linkTestSampleKey(int testId, int legSeq, String flow) =>
@@ -478,6 +491,67 @@ class LinkTestsNotifier extends Notifier<LinkTestsState> {
   void applyScheduleUpdated(Map<String, dynamic> _) {
     if (!state.schedulesLoaded) return;
     fetchSchedules();
+  }
+
+  /// Instala plugin de preparação no equipamento sem acoplar `features/plugins` (ADR 017).
+  Future<void> installDevicePlugin(int deviceId, int pluginId) async {
+    await ref
+        .read(apiClientProvider)
+        .post<dynamic>(
+          '/devices/$deviceId/plugins/$pluginId/install',
+          timeout: const Duration(seconds: 60),
+          data: const <String, dynamic>{},
+        );
+  }
+
+  /// Dispara ação de preparação de plugin no equipamento e devolve o `runId`.
+  Future<int> runDevicePluginAction({
+    required int deviceId,
+    required int pluginId,
+    required String action,
+    Map<String, dynamic> params = const <String, dynamic>{},
+    bool confirmWrite = false,
+  }) async {
+    final raw = await ref
+        .read(apiClientProvider)
+        .post<dynamic>(
+          '/devices/$deviceId/plugins/$pluginId/actions/$action',
+          timeout: const Duration(seconds: 45),
+          data: <String, dynamic>{
+            'params': params,
+            'confirmWrite': confirmWrite,
+          },
+        );
+    final map = asJsonMap(raw);
+    return parseIntOrNull(map['runId'] ?? map['id']) ?? 0;
+  }
+
+  /// Aguarda conclusão de execução de plugin via SSE (`plugin:run` / `plugin:run_updated`)
+  /// + leitura única sob demanda (zero polling — AGENTS.md §9).
+  Future<LinkTestPluginRunResult> waitForPluginRun(int runId) async {
+    final completer = Completer<LinkTestPluginRunResult>();
+    late final VoidCallback unsub;
+    unsub = ref.read(sseServiceProvider.notifier).onEvent(
+      const <String>['plugin:run', 'plugin:run_updated'],
+      (data, _) {
+        final parsed = LinkTestPluginRunResult.fromJson(data);
+        if (parsed.id == runId && parsed.isFinished && !completer.isCompleted) {
+          completer.complete(parsed);
+        }
+      },
+    );
+    try {
+      final raw = await ref
+          .read(apiClientProvider)
+          .get<dynamic>('/plugin-runs/$runId');
+      final current = LinkTestPluginRunResult.fromJson(asJsonMap(raw));
+      if (current.isFinished && !completer.isCompleted) {
+        completer.complete(current);
+      }
+      return await completer.future;
+    } finally {
+      unsub();
+    }
   }
 }
 

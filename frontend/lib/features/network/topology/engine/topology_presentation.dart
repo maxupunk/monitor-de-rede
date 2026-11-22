@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart' show IconData, Icons, immutable;
+import 'package:netmonitor_app/core/utils/device_presentation.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/network/models/topology_models.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
@@ -230,8 +231,6 @@ const double kTopologyHealthWarningPercent = 70.0;
 /// Limiar crítico de CPU/memória (%).
 const double kTopologyHealthCriticalPercent = 90.0;
 
-const Set<String> _unmanagedSwitchTypes = <String>{'unmanaged_switch', 'hub'};
-
 /// Classifica a string bruta de status de um nó.
 TopologyNodeStatus classifyNodeStatus(String? status) {
   switch ((status ?? '').trim().toLowerCase()) {
@@ -288,7 +287,7 @@ TopologyLinkKind classifyLinkKind(String? linkType) {
 
 /// Indica se o nó representa um switch não gerenciável ou hub.
 bool isUnmanagedSwitchNode(TopologyNodeModel node) {
-  return _unmanagedSwitchTypes.contains(node.type.trim().toLowerCase());
+  return isUnmanagedSwitchType(node.type);
 }
 
 /// Indica se o enlace é virtual (derivado da hierarquia pai → filho).
@@ -334,56 +333,12 @@ String formatDiscoveryMethodLabel(String? method) {
 
 /// Rótulo legível em PT-BR do tipo do equipamento na topologia.
 String topologyNodeTypeLabel(TopologyNodeModel node) {
-  if (node.isSystem) return 'Servidor NetMonitor';
-  final raw = node.type.trim().toLowerCase();
-  if (_unmanagedSwitchTypes.contains(raw)) return 'Switch não gerenciável';
-  return switch (raw) {
-    'router' || 'gateway' => 'Roteador',
-    'firewall' => 'Firewall',
-    'switch' => 'Switch',
-    'access_point' || 'ap' => 'Access Point',
-    'server' => 'Servidor',
-    'nas' => 'NAS / Storage',
-    'workstation' || 'desktop' || 'pc' => 'Estação de trabalho',
-    'mobile' || 'phone' => 'Dispositivo móvel',
-    'printer' => 'Impressora',
-    'camera' || 'cctv' => 'Câmera',
-    'voip' => 'Telefone VoIP',
-    'iot' => 'IoT',
-    'media' || 'tv' => 'Mídia',
-    'ups' => 'Nobreak (UPS)',
-    'vm' => 'Máquina Virtual',
-    'web_device' => 'Dispositivo web',
-    'other' => 'Outro',
-    'unknown' || '' => 'Desconhecido',
-    _ => node.type,
-  };
+  return deviceTypeLabel(node.type, isSystem: node.isSystem);
 }
 
 /// Ícone Material correspondente ao nó na topologia.
 IconData topologyNodeIcon(TopologyNodeModel node) {
-  if (node.isSystem) return Icons.monitor_heart_outlined;
-  final raw = node.type.trim().toLowerCase();
-  if (_unmanagedSwitchTypes.contains(raw)) return Icons.hub_outlined;
-  return switch (raw) {
-    'router' || 'gateway' => Icons.router_outlined,
-    'firewall' => Icons.security_outlined,
-    'switch' => Icons.lan_outlined,
-    'access_point' || 'ap' => Icons.wifi_tethering,
-    'server' => Icons.dns_outlined,
-    'nas' => Icons.storage_outlined,
-    'workstation' || 'desktop' || 'pc' => Icons.computer_outlined,
-    'mobile' || 'phone' => Icons.smartphone_outlined,
-    'printer' => Icons.print_outlined,
-    'camera' || 'cctv' => Icons.videocam_outlined,
-    'voip' => Icons.phone_in_talk_outlined,
-    'iot' => Icons.sensors_outlined,
-    'media' || 'tv' => Icons.tv_outlined,
-    'ups' => Icons.battery_charging_full_outlined,
-    'vm' => Icons.cloud_queue_outlined,
-    'web_device' => Icons.language_outlined,
-    _ => Icons.devices_other_outlined,
-  };
+  return deviceTypeIcon(node.type, isSystem: node.isSystem);
 }
 
 /// Velocidade nominal efetiva em bps (a do enlace ou a menor das duas portas).
@@ -743,12 +698,12 @@ String? formatNodeHealthSummary(TopologyNodeModel node) {
   if (node.cpuPercent != null && node.cpuPercent!.isFinite) {
     final level = classifyHealthPercent(node.cpuPercent!);
     if (level == TopologyHealthLevel.critical) critical = true;
-    parts.add('CPU ${node.cpuPercent!.round()}%');
+    parts.add('CPU ${formatPercent(node.cpuPercent, digits: 0)}');
   }
   if (node.memoryPercent != null && node.memoryPercent!.isFinite) {
     final level = classifyHealthPercent(node.memoryPercent!);
     if (level == TopologyHealthLevel.critical) critical = true;
-    parts.add('RAM ${node.memoryPercent!.round()}%');
+    parts.add('RAM ${formatPercent(node.memoryPercent, digits: 0)}');
   }
   if (parts.isEmpty) return null;
   final prefix = critical ? '⚠ ' : '';

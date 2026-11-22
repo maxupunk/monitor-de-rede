@@ -2,9 +2,10 @@ import 'dart:ui';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/network/api_client.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 import 'package:netmonitor_app/features/ai/models/ai_models.dart';
 
-/// Repositório completo dos 29 endpoints REST e SSE-over-POST do Assistente IA & Decisor.
+/// Repositório completo dos endpoints REST e SSE-over-POST do Assistente IA & Decisor.
 class AiRepository {
   const AiRepository(this._api);
 
@@ -53,29 +54,19 @@ class AiRepository {
     );
     final items = <AiProviderModelItem>[];
     final seen = <String>{};
-    final installed = json['installed'];
-    if (installed is List) {
-      for (final raw in installed.whereType<Map>()) {
-        final item = AiProviderModelItem.fromOllamaInstalled(
-          Map<String, dynamic>.from(raw),
-        );
-        seen.add(item.id);
-        items.add(item);
-      }
+    for (final raw in asJsonMapList(json['installed'])) {
+      final item = AiProviderModelItem.fromOllamaInstalled(raw);
+      seen.add(item.id);
+      items.add(item);
     }
-    final recommended = json['recommended'];
-    if (recommended is List) {
-      for (final raw in recommended.whereType<Map>()) {
-        final item = AiProviderModelItem.fromOllamaRecommended(
-          Map<String, dynamic>.from(raw),
-        );
-        if (seen.contains(item.id)) continue;
-        items.add(item);
-      }
+    for (final raw in asJsonMapList(json['recommended'])) {
+      final item = AiProviderModelItem.fromOllamaRecommended(raw);
+      if (seen.contains(item.id)) continue;
+      items.add(item);
     }
     return AiProviderModelsCatalog(
       models: List<AiProviderModelItem>.unmodifiable(items),
-      isOnline: json['isOnline'] == true,
+      isOnline: parseBool(json['isOnline']),
       errorMessage: json['errorMessage'] as String?,
     );
   }
@@ -91,20 +82,12 @@ class AiRepository {
       '/ai/openrouter/models',
       queryParameters: params.isEmpty ? null : params,
     );
-    final raw = json['models'];
-    final items = raw is List
-        ? raw
-              .whereType<Map>()
-              .map(
-                (e) => AiProviderModelItem.fromRemote(
-                  Map<String, dynamic>.from(e),
-                ),
-              )
-              .toList(growable: false)
-        : const <AiProviderModelItem>[];
     return AiProviderModelsCatalog(
-      models: items,
-      isOnline: json['isOnline'] == true,
+      models: asJsonList<AiProviderModelItem>(
+        json['models'],
+        AiProviderModelItem.fromRemote,
+      ),
+      isOnline: parseBool(json['isOnline']),
       errorMessage: json['errorMessage'] as String?,
     );
   }
@@ -124,20 +107,12 @@ class AiRepository {
       '/ai/opencode/models',
       queryParameters: params.isEmpty ? null : params,
     );
-    final raw = json['models'];
-    final items = raw is List
-        ? raw
-              .whereType<Map>()
-              .map(
-                (e) => AiProviderModelItem.fromRemote(
-                  Map<String, dynamic>.from(e),
-                ),
-              )
-              .toList(growable: false)
-        : const <AiProviderModelItem>[];
     return AiProviderModelsCatalog(
-      models: items,
-      isOnline: json['isOnline'] == true,
+      models: asJsonList<AiProviderModelItem>(
+        json['models'],
+        AiProviderModelItem.fromRemote,
+      ),
+      isOnline: parseBool(json['isOnline']),
       errorMessage: json['errorMessage'] as String?,
     );
   }
@@ -180,10 +155,7 @@ class AiRepository {
       '/ai/mentions',
       queryParameters: <String, dynamic>{'q': query},
     );
-    return raw
-        .whereType<Map>()
-        .map((e) => AiMention.fromJson(Map<String, dynamic>.from(e)))
-        .toList(growable: false);
+    return asJsonList<AiMention>(raw, AiMention.fromJson);
   }
 
   Future<({Map<String, dynamic> result, AiChart? chart})> executeTool({
@@ -203,11 +175,9 @@ class AiRepository {
       timeout: const Duration(minutes: 15),
     );
     return (
-      result: json['result'] is Map
-          ? Map<String, dynamic>.from(json['result'] as Map)
-          : <String, dynamic>{},
+      result: asJsonMap(json['result']),
       chart: json['chart'] is Map
-          ? AiChart.fromJson(Map<String, dynamic>.from(json['chart'] as Map))
+          ? AiChart.fromJson(asJsonMap(json['chart']))
           : null,
     );
   }
@@ -221,11 +191,9 @@ class AiRepository {
       timeout: const Duration(minutes: 15),
     );
     return (
-      result: json['result'] is Map
-          ? Map<String, dynamic>.from(json['result'] as Map)
-          : <String, dynamic>{},
+      result: asJsonMap(json['result']),
       chart: json['chart'] is Map
-          ? AiChart.fromJson(Map<String, dynamic>.from(json['chart'] as Map))
+          ? AiChart.fromJson(asJsonMap(json['chart']))
           : null,
     );
   }
@@ -241,12 +209,10 @@ class AiRepository {
 
   Future<List<AiConversationSummary>> fetchConversations() async {
     final raw = await _api.get<List<dynamic>>('/ai/conversations');
-    return raw
-        .whereType<Map>()
-        .map(
-          (e) => AiConversationSummary.fromJson(Map<String, dynamic>.from(e)),
-        )
-        .toList(growable: false);
+    return asJsonList<AiConversationSummary>(
+      raw,
+      AiConversationSummary.fromJson,
+    );
   }
 
   Future<AiConversationSummary> createConversation({
@@ -323,10 +289,7 @@ class AiRepository {
 
   Future<List<DeciderProviderView>> fetchDeciderProviders() async {
     final raw = await _api.get<List<dynamic>>('/ai/decider/providers');
-    return raw
-        .whereType<Map>()
-        .map((e) => DeciderProviderView.fromJson(Map<String, dynamic>.from(e)))
-        .toList(growable: false);
+    return asJsonList<DeciderProviderView>(raw, DeciderProviderView.fromJson);
   }
 
   Future<DeciderModelsResponse> fetchDeciderModels(
@@ -397,12 +360,12 @@ class AiRepository {
     );
     final raw = json['summary'];
     if (raw is Map) {
-      return AiIncidentSummary.fromJson(Map<String, dynamic>.from(raw));
+      return AiIncidentSummary.fromJson(asJsonMap(raw));
     }
     return null;
   }
 
-  // --- Auto-accept for DeviceAccess ---
+  // --- Auto-accept for DeviceAccess (ADR 012 — desacoplado de `features/plugins/`) ---
 
   Future<AutoAcceptState> fetchAutoAccept({
     required String conversationKey,
@@ -445,6 +408,26 @@ class AiRepository {
       },
     );
     return AutoAcceptState.fromJson(json);
+  }
+
+  /// Cancela imediatamente quaisquer execuções em andamento no equipamento ao desligar
+  /// o modo "Aceitar automaticamente", sem importar `features/plugins/` (ADR 012 / ADR 017).
+  Future<void> cancelRunningDeviceRuns(int deviceId) async {
+    try {
+      final raw = await _api.get<dynamic>('/devices/$deviceId/plugins');
+      final runs = asJsonMapList(asJsonMap(raw)['runs']);
+      for (final run in runs) {
+        if (run['status'] != 'running') continue;
+        final runId = parseIntOrNull(run['id']);
+        if (runId == null || runId <= 0) continue;
+        try {
+          await _api.post<dynamic>(
+            '/plugin-runs/$runId/cancel',
+            data: const <String, dynamic>{},
+          );
+        } catch (_) {}
+      }
+    } catch (_) {}
   }
 }
 

@@ -44,12 +44,6 @@ class _RemoteServersPageState extends ConsumerState<RemoteServersPage> {
     final paths = ServerConnectSlot.resolve(visibleAreas);
     if (paths.isEmpty) return;
 
-    final nameController = TextEditingController();
-    var selectedPath = paths.firstWhere(
-      (p) => p.recommended,
-      orElse: () => paths.first,
-    );
-
     final result =
         await showAdaptiveFormSheet<
           ({String name, ServerConnectPathContribution path})
@@ -59,75 +53,9 @@ class _RemoteServersPageState extends ConsumerState<RemoteServersPage> {
           subtitle:
               'O agente só disca para fora — nenhuma porta é aberta no servidor.',
           maxWidth: 620,
-          builder: (sheetCtx) {
-            return StatefulBuilder(
-              builder: (ctx, setModalState) {
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: <Widget>[
-                    TextField(
-                      controller: nameController,
-                      autofocus: true,
-                      decoration: const InputDecoration(
-                        labelText: 'Nome do servidor',
-                        hintText: 'Ex.: srv-producao-01',
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Como este servidor chega à central?',
-                      style: ctx.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    ...paths.map(
-                      (path) => Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: ChoiceCard(
-                          title: path.title,
-                          subtitle: path.description,
-                          icon: path.icon,
-                          selected: selectedPath.id == path.id,
-                          badge: path.recommended ? 'Recomendado' : null,
-                          badgeTone: SemanticTone.success,
-                          tone: path.recommended
-                              ? SemanticTone.success
-                              : SemanticTone.primary,
-                          onTap: () => setModalState(() => selectedPath = path),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: FilledButton.icon(
-                        onPressed: () {
-                          final name = nameController.text.trim();
-                          if (name.isEmpty) {
-                            ScaffoldMessenger.of(ctx).showSnackBar(
-                              const SnackBar(
-                                content: Text('Informe o nome do servidor.'),
-                              ),
-                            );
-                            return;
-                          }
-                          Navigator.of(
-                            ctx,
-                          ).pop((name: name, path: selectedPath));
-                        },
-                        icon: const Icon(Icons.arrow_forward),
-                        label: const Text('Continuar'),
-                      ),
-                    ),
-                  ],
-                );
-              },
-            );
-          },
+          builder: (_) => _CreateRemoteServerWizardForm(paths: paths),
         );
 
-    nameController.dispose();
     if (!mounted || result == null) return;
 
     // Caminho com diálogo próprio (ex.: VpnServerConnect da área VPN).
@@ -173,62 +101,11 @@ class _RemoteServersPageState extends ConsumerState<RemoteServersPage> {
   }
 
   Future<void> _openEditAgent(AgentView agent) async {
-    final nameController = TextEditingController(text: agent.name);
-    var enforceTunnelIp = agent.enforceTunnelIp;
     final saved = await showAdaptiveFormSheet<bool>(
       context: context,
       title: 'Editar ${agent.name}',
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (innerCtx, setModalState) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                TextField(
-                  controller: nameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Nome do servidor',
-                  ),
-                ),
-                if (agent.deviceId != null) ...<Widget>[
-                  const SizedBox(height: 12),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    value: enforceTunnelIp,
-                    title: const Text('Exigir conexão pelo túnel VPN'),
-                    subtitle: const Text(
-                      'Recusa conexões que não venham do IP do túnel associado.',
-                    ),
-                    onChanged: (v) => setModalState(() => enforceTunnelIp = v),
-                  ),
-                ],
-                const SizedBox(height: 16),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: FilledButton(
-                    onPressed: () async {
-                      final ok = await ref
-                          .read(agentsProvider.notifier)
-                          .updateAgent(
-                            agent.id,
-                            AgentUpdateInput(
-                              name: nameController.text.trim(),
-                              deviceId: agent.deviceId,
-                              enforceTunnelIp: enforceTunnelIp,
-                            ),
-                          );
-                      if (innerCtx.mounted) Navigator.of(innerCtx).pop(ok);
-                    },
-                    child: const Text('Salvar alterações'),
-                  ),
-                ),
-              ],
-            );
-          },
-        );
-      },
+      builder: (_) => _EditRemoteServerForm(agent: agent),
     );
-    nameController.dispose();
     if (saved == true && mounted) {
       ScaffoldMessenger.of(
         context,
@@ -357,7 +234,6 @@ class _RemoteServersPageState extends ConsumerState<RemoteServersPage> {
               onSearchChanged: (v) => setState(() => _search = v),
             ),
             const SizedBox(height: 10),
-            // Faixa simétrica compacta de 3 contadores (evita card órfão em 2 colunas)
             Wrap(
               spacing: 8,
               runSpacing: 6,
@@ -497,6 +373,182 @@ class _RemoteServersPageState extends ConsumerState<RemoteServersPage> {
   }
 }
 
+class _CreateRemoteServerWizardForm extends StatefulWidget {
+  const _CreateRemoteServerWizardForm({required this.paths});
+
+  final List<ServerConnectPathContribution> paths;
+
+  @override
+  State<_CreateRemoteServerWizardForm> createState() =>
+      _CreateRemoteServerWizardFormState();
+}
+
+class _CreateRemoteServerWizardFormState
+    extends State<_CreateRemoteServerWizardForm> {
+  final TextEditingController _nameController = TextEditingController();
+  late ServerConnectPathContribution _selectedPath;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedPath = widget.paths.firstWhere(
+      (p) => p.recommended,
+      orElse: () => widget.paths.first,
+    );
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  void _continue() {
+    final name = _nameController.text.trim();
+    if (name.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Informe o nome do servidor.')),
+      );
+      return;
+    }
+    Navigator.of(context).pop((name: name, path: _selectedPath));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        TextField(
+          controller: _nameController,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Nome do servidor',
+            hintText: 'Ex.: srv-producao-01',
+          ),
+          onSubmitted: (_) => _continue(),
+        ),
+        const SizedBox(height: 16),
+        Text(
+          'Como este servidor chega à central?',
+          style: context.textTheme.titleSmall?.copyWith(
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 10),
+        ...widget.paths.map(
+          (path) => Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: ChoiceCard(
+              title: path.title,
+              subtitle: path.description,
+              icon: path.icon,
+              selected: _selectedPath.id == path.id,
+              badge: path.recommended ? 'Recomendado' : null,
+              badgeTone: SemanticTone.success,
+              tone: path.recommended
+                  ? SemanticTone.success
+                  : SemanticTone.primary,
+              onTap: () => setState(() => _selectedPath = path),
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Align(
+          alignment: Alignment.centerRight,
+          child: FilledButton.icon(
+            onPressed: _continue,
+            icon: const Icon(Icons.arrow_forward),
+            label: const Text('Continuar'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _EditRemoteServerForm extends ConsumerStatefulWidget {
+  const _EditRemoteServerForm({required this.agent});
+
+  final AgentView agent;
+
+  @override
+  ConsumerState<_EditRemoteServerForm> createState() =>
+      _EditRemoteServerFormState();
+}
+
+class _EditRemoteServerFormState extends ConsumerState<_EditRemoteServerForm> {
+  late final TextEditingController _nameController;
+  late bool _enforceTunnelIp;
+  bool _submitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(text: widget.agent.name);
+    _enforceTunnelIp = widget.agent.enforceTunnelIp;
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (_submitting) return;
+    setState(() => _submitting = true);
+    final ok = await ref
+        .read(agentsProvider.notifier)
+        .updateAgent(
+          widget.agent.id,
+          AgentUpdateInput(
+            name: _nameController.text.trim(),
+            deviceId: widget.agent.deviceId,
+            enforceTunnelIp: _enforceTunnelIp,
+          ),
+        );
+    if (!mounted) return;
+    setState(() => _submitting = false);
+    Navigator.of(context).pop(ok);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        TextField(
+          controller: _nameController,
+          decoration: const InputDecoration(labelText: 'Nome do servidor'),
+        ),
+        if (widget.agent.deviceId != null) ...<Widget>[
+          const SizedBox(height: 12),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            value: _enforceTunnelIp,
+            title: const Text('Exigir conexão pelo túnel VPN'),
+            subtitle: const Text(
+              'Recusa conexões que não venham do IP do túnel associado.',
+            ),
+            onChanged: (v) => setState(() => _enforceTunnelIp = v),
+          ),
+        ],
+        const SizedBox(height: 16),
+        Align(
+          alignment: Alignment.centerRight,
+          child: FilledButton(
+            onPressed: _submitting ? null : _save,
+            child: const Text('Salvar alterações'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _AgentCard extends StatelessWidget {
   const _AgentCard({
     required this.agent,
@@ -518,24 +570,9 @@ class _AgentCard extends StatelessWidget {
   final VoidCallback onRemove;
   final ValueChanged<ServerConnectPathContribution> onMove;
 
-  (String, SemanticTone, IconData) _statusVisual() {
-    if (agent.connected || agent.status == 'online') {
-      return ('Conectado', SemanticTone.success, Icons.check_circle_outline);
-    }
-    return switch (agent.status) {
-      'pending' => (
-        'Aguardando instalação',
-        SemanticTone.info,
-        Icons.hourglass_top,
-      ),
-      'revoked' => ('Revogado', SemanticTone.secondary, Icons.block),
-      _ => ('Desconectado', SemanticTone.error, Icons.cloud_off),
-    };
-  }
-
   @override
   Widget build(BuildContext context) {
-    final (statusLabel, statusTone, statusIcon) = _statusVisual();
+    final statusVisual = agentStatusVisual(agent);
     final hostSubtitle = <String>[
       if (agent.host.hostname != null && agent.host.hostname!.isNotEmpty)
         agent.host.hostname!,
@@ -579,11 +616,11 @@ class _AgentCard extends StatelessWidget {
           ? hostSubtitle
           : 'Ainda não se conectou',
       icon: agent.local ? Icons.hub_outlined : Icons.dns_outlined,
-      iconTone: statusTone,
+      iconTone: statusVisual.tone,
       trailing: SemanticChip(
-        label: statusLabel,
-        tone: statusTone,
-        icon: statusIcon,
+        label: statusVisual.label,
+        tone: statusVisual.tone,
+        icon: statusVisual.icon,
         compact: true,
       ),
       footer: Row(

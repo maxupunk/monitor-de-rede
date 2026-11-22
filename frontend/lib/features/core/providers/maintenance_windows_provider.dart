@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/network/api_client.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 import 'package:netmonitor_app/features/core/models/operations_models.dart';
 
 @immutable
@@ -39,18 +41,12 @@ class MaintenanceWindowsNotifier extends Notifier<MaintenanceWindowsState> {
       final raw = await ref
           .read(apiClientProvider)
           .get<dynamic>('/maintenance-windows');
-      final list = raw is List
-          ? raw
-                .whereType<Map>()
-                .map(
-                  (e) =>
-                      MaintenanceWindow.fromJson(Map<String, dynamic>.from(e)),
-                )
-                .toList(growable: false)
-          : const <MaintenanceWindow>[];
-      state = state.copyWith(windows: list, loading: false);
+      state = state.copyWith(
+        windows: asJsonList<MaintenanceWindow>(raw, MaintenanceWindow.fromJson),
+        loading: false,
+      );
     } catch (err) {
-      state = state.copyWith(loading: false, error: err.toString());
+      state = state.copyWith(loading: false, error: describeError(err));
     }
   }
 
@@ -68,7 +64,7 @@ class MaintenanceWindowsNotifier extends Notifier<MaintenanceWindowsState> {
       );
       return true;
     } catch (err) {
-      state = state.copyWith(error: err.toString());
+      state = state.copyWith(error: describeError(err));
       return false;
     }
   }
@@ -87,7 +83,7 @@ class MaintenanceWindowsNotifier extends Notifier<MaintenanceWindowsState> {
       );
       return true;
     } catch (err) {
-      state = state.copyWith(error: err.toString());
+      state = state.copyWith(error: describeError(err));
       return false;
     }
   }
@@ -103,7 +99,7 @@ class MaintenanceWindowsNotifier extends Notifier<MaintenanceWindowsState> {
       );
       return true;
     } catch (err) {
-      state = state.copyWith(error: err.toString());
+      state = state.copyWith(error: describeError(err));
       return false;
     }
   }

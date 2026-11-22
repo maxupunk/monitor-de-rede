@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/servers/models/docker_models.dart';
 import 'package:netmonitor_app/features/servers/providers/docker_provider.dart';
@@ -27,46 +28,11 @@ class _DockerImagesPageState extends ConsumerState<DockerImagesPage> {
   }
 
   Future<void> _openPullDialog() async {
-    final controller = TextEditingController();
     final pulled = await showAdaptiveFormSheet<bool>(
       context: context,
       title: 'Baixar imagem (docker pull)',
-      builder: (ctx) => Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          TextField(
-            controller: controller,
-            autofocus: true,
-            decoration: const InputDecoration(
-              labelText: 'Referência da imagem',
-              hintText: 'ex.: nginx:alpine ou postgres:16',
-            ),
-          ),
-          const SizedBox(height: 16),
-          Align(
-            alignment: Alignment.centerRight,
-            child: FilledButton.icon(
-              onPressed: () async {
-                final image = controller.text.trim();
-                if (image.isEmpty) return;
-                final ok = await ref
-                    .read(dockerProvider.notifier)
-                    .runAction(
-                      () => ref
-                          .read(dockerProvider.notifier)
-                          .apiFor()
-                          .pullImage(image),
-                    );
-                if (ctx.mounted) Navigator.of(ctx).pop(ok);
-              },
-              icon: const Icon(Icons.download_outlined),
-              label: const Text('Baixar imagem'),
-            ),
-          ),
-        ],
-      ),
+      builder: (_) => const _PullDockerImageForm(),
     );
-    controller.dispose();
     if (pulled == true && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -89,11 +55,7 @@ class _DockerImagesPageState extends ConsumerState<DockerImagesPage> {
     );
     if (!confirmed || !mounted) return;
     try {
-      final result = await ref
-          .read(dockerProvider.notifier)
-          .apiFor()
-          .pruneImages();
-      await ref.read(dockerProvider.notifier).refreshAll();
+      final result = await ref.read(dockerProvider.notifier).pruneImages();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -105,9 +67,11 @@ class _DockerImagesPageState extends ConsumerState<DockerImagesPage> {
       );
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Erro ao limpar imagens: $err')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Erro ao limpar imagens: ${describeError(err)}'),
+        ),
+      );
     }
   }
 
@@ -121,13 +85,7 @@ class _DockerImagesPageState extends ConsumerState<DockerImagesPage> {
       tone: SemanticTone.error,
     );
     if (!confirmed || !mounted) return;
-    final ok = await ref
-        .read(dockerProvider.notifier)
-        .runAction(
-          () =>
-              ref.read(dockerProvider.notifier).apiFor().removeImage(image.id),
-          refresh: ref.read(dockerProvider.notifier).refreshAll,
-        );
+    final ok = await ref.read(dockerProvider.notifier).removeImage(image.id);
     if (ok && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Imagem ${image.primaryTag} removida.')),
@@ -263,6 +221,63 @@ class _DockerImagesPageState extends ConsumerState<DockerImagesPage> {
   }
 }
 
+class _PullDockerImageForm extends ConsumerStatefulWidget {
+  const _PullDockerImageForm();
+
+  @override
+  ConsumerState<_PullDockerImageForm> createState() =>
+      _PullDockerImageFormState();
+}
+
+class _PullDockerImageFormState extends ConsumerState<_PullDockerImageForm> {
+  final TextEditingController _controller = TextEditingController();
+  bool _submitting = false;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final image = _controller.text.trim();
+    if (image.isEmpty || _submitting) return;
+    setState(() => _submitting = true);
+    final ok = await ref.read(dockerProvider.notifier).pullImage(image);
+    if (!mounted) return;
+    setState(() => _submitting = false);
+    Navigator.of(context).pop(ok);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        TextField(
+          controller: _controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Referência da imagem',
+            hintText: 'ex.: nginx:alpine ou postgres:16',
+          ),
+          onSubmitted: (_) => _submit(),
+        ),
+        const SizedBox(height: 16),
+        Align(
+          alignment: Alignment.centerRight,
+          child: FilledButton.icon(
+            onPressed: _submitting ? null : _submit,
+            icon: const Icon(Icons.download_outlined),
+            label: const Text('Baixar imagem'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _ImageDetailBody extends ConsumerStatefulWidget {
   const _ImageDetailBody({required this.imageId});
   final String imageId;
@@ -286,8 +301,7 @@ class _ImageDetailBodyState extends ConsumerState<_ImageDetailBody> {
     try {
       final d = await ref
           .read(dockerProvider.notifier)
-          .apiFor()
-          .imageDetail(widget.imageId);
+          .fetchImageDetail(widget.imageId);
       if (!mounted) return;
       setState(() {
         _detail = d;
@@ -296,7 +310,7 @@ class _ImageDetailBodyState extends ConsumerState<_ImageDetailBody> {
     } catch (err) {
       if (!mounted) return;
       setState(() {
-        _error = err.toString();
+        _error = describeError(err, fallback: 'Erro ao inspecionar imagem.');
         _loading = false;
       });
     }

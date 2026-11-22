@@ -4,7 +4,6 @@ import 'package:go_router/go_router.dart';
 import 'package:netmonitor_app/core/areas/area_models.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
-import 'package:netmonitor_app/features/vpn/data/vpn_repository.dart';
 import 'package:netmonitor_app/features/vpn/models/vpn_models.dart';
 import 'package:netmonitor_app/features/vpn/providers/vpn_provider.dart';
 import 'package:netmonitor_app/features/vpn/widgets/vpn_firewall_hints_dialog.dart';
@@ -42,9 +41,7 @@ class _DeviceVpnTabState extends ConsumerState<DeviceVpnTab> {
     }
     if (!mounted) return;
     setState(() => _loadingMetrics = true);
-    final metrics = await ref
-        .read(vpnRepositoryProvider)
-        .fetchDeviceVpnMetrics(widget.deviceId);
+    final metrics = await notifier.fetchDeviceMetrics(widget.deviceId);
     if (mounted) {
       setState(() {
         _metrics = metrics;

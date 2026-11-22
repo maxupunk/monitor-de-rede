@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:netmonitor_app/core/utils/clipboard_utils.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
 
 /// Linha chave-valor responsiva com suporte opcional a fonte monoespaçada e cópia.
@@ -55,15 +55,7 @@ class KeyValueRow extends StatelessWidget {
                     minHeight: 28,
                   ),
                   icon: const Icon(Icons.copy, size: 15),
-                  onPressed: () {
-                    Clipboard.setData(ClipboardData(text: value));
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Copiado para a área de transferência.'),
-                        duration: Duration(seconds: 2),
-                      ),
-                    );
-                  },
+                  onPressed: () => copyToClipboardWithFeedback(context, value),
                 )
               : null;
 

@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:netmonitor_app/core/utils/clipboard_utils.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
 import 'package:netmonitor_app/features/plugins/providers/plugins_provider.dart';
 import 'package:netmonitor_app/features/plugins/utils/wifi_qr_logic.dart';
-import 'package:netmonitor_app/features/plugins/widgets/device_access_dialog.dart';
+import 'package:netmonitor_app/shared/device_access/device_access.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 
 /// Visualizador efêmero de segredo (`reveals: true`) com QR Code Wi-Fi opcional (ADR 012).
 ///
@@ -145,7 +145,7 @@ class _WifiQrBodyState extends ConsumerState<_WifiQrBody> {
       if (mounted) {
         setState(() {
           _loading = false;
-          _error = err.toString();
+          _error = describeError(err);
         });
       }
     }
@@ -174,44 +174,7 @@ class _WifiQrBodyState extends ConsumerState<_WifiQrBody> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
-        Center(
-          child: Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: AppTheme.borderRadius,
-              border: Border.all(color: context.colorScheme.outlineVariant),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                QrImageView(
-                  data: payload,
-                  version: QrVersions.auto,
-                  size: 220,
-                  backgroundColor: Colors.white,
-                  eyeStyle: const QrEyeStyle(
-                    eyeShape: QrEyeShape.square,
-                    color: Colors.black,
-                  ),
-                  dataModuleStyle: const QrDataModuleStyle(
-                    dataModuleShape: QrDataModuleShape.square,
-                    color: Colors.black,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Wi-Fi: ${widget.ssid}',
-                  style: const TextStyle(
-                    color: Color(0xFF0F172A),
-                    fontWeight: FontWeight.w700,
-                    fontSize: 13,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
+        QrCodeCard(data: payload, size: 220, caption: 'Wi-Fi: ${widget.ssid}'),
         if (widget.hidden) ...<Widget>[
           const SizedBox(height: 10),
           const NestedPanel(
@@ -257,12 +220,11 @@ class _WifiQrBodyState extends ConsumerState<_WifiQrBody> {
                 IconButton(
                   tooltip: 'Copiar senha',
                   icon: const Icon(Icons.copy),
-                  onPressed: () {
-                    Clipboard.setData(ClipboardData(text: _password!));
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Senha copiada.')),
-                    );
-                  },
+                  onPressed: () => copyToClipboardWithFeedback(
+                    context,
+                    _password!,
+                    message: 'Senha copiada.',
+                  ),
                 ),
               ],
             ),
@@ -344,7 +306,7 @@ class _EphemeralRevealBodyState extends ConsumerState<_EphemeralRevealBody> {
       if (mounted) {
         setState(() {
           _loading = false;
-          _error = err.toString();
+          _error = describeError(err);
         });
       }
     }
@@ -401,12 +363,11 @@ class _EphemeralRevealBodyState extends ConsumerState<_EphemeralRevealBody> {
                 IconButton(
                   tooltip: 'Copiar',
                   icon: const Icon(Icons.copy),
-                  onPressed: () {
-                    Clipboard.setData(ClipboardData(text: '${entry.value}'));
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Valor copiado.')),
-                    );
-                  },
+                  onPressed: () => copyToClipboardWithFeedback(
+                    context,
+                    '${entry.value}',
+                    message: 'Valor copiado.',
+                  ),
                 ),
               ],
             ),

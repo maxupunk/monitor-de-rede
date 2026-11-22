@@ -5,6 +5,7 @@ import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/ai/models/ai_models.dart';
 import 'package:netmonitor_app/features/ai/providers/ai_providers.dart';
 import 'package:netmonitor_app/features/ai/utils/ai_chat_logic.dart';
+import 'package:netmonitor_app/features/ai/widgets/ai_model_pull_panel.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
 
@@ -408,19 +409,7 @@ class _DeciderSettingsCardState extends ConsumerState<DeciderSettingsCard> {
                 ),
                 if (state.pullProgress != null) ...<Widget>[
                   const SizedBox(height: 8),
-                  LinearProgressIndicator(
-                    value: state.pullProgress!.percentage != null
-                        ? (state.pullProgress!.percentage! / 100).clamp(
-                            0.0,
-                            1.0,
-                          )
-                        : null,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    state.pullProgress!.error ?? state.pullProgress!.status,
-                    style: context.textTheme.labelSmall,
-                  ),
+                  AiModelPullProgressBar(progress: state.pullProgress!),
                 ],
 
                 // Onde usar (6 switches)

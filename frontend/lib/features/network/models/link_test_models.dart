@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:netmonitor_app/core/utils/device_presentation.dart';
 import 'package:netmonitor_app/features/network/models/device_models.dart';
 
 bool isLinkTestActiveStatus(String status) =>
@@ -21,8 +22,7 @@ String humanizeLinkTestText(String text) {
 }
 
 bool _isIneligibleLinkTestDevice(DeviceModel device) =>
-    device.type.trim().toLowerCase() == 'unmanaged_switch' ||
-    (!device.isSystem && !device.hasIp);
+    isUnmanagedSwitchType(device.type) || (!device.isSystem && !device.hasIp);
 
 /// Filtra equipamentos elegíveis como origem nos modos `end_to_end` e `path`
 /// (exclui switches não gerenciáveis e equipamentos sem IP).

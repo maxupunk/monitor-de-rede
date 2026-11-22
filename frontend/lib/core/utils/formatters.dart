@@ -290,13 +290,108 @@ String formatMeasuredValue(Object? value, {String? unit}) {
   return '$numeric${unit != null && unit.isNotEmpty ? ' $unit' : ''}';
 }
 
-DateTime? _toDate(Object? value) {
+/// Converte `DateTime` ou string ISO 8601 para `DateTime` no fuso local, ou `null`.
+DateTime? parseDateOrNull(Object? value) {
   if (value == null) return null;
   if (value is DateTime) return value.toLocal();
   if (value is String && value.trim().isNotEmpty) {
-    return DateTime.tryParse(value)?.toLocal();
+    return DateTime.tryParse(value.trim())?.toLocal();
   }
   return null;
+}
+
+DateTime? _toDate(Object? value) => parseDateOrNull(value);
+
+/// Número decimal formatado em pt-BR sem zeros finais desnecessários (ou com `minDigits`).
+String formatDecimal(
+  num? value, {
+  int maxDigits = 1,
+  int minDigits = 0,
+  String fallback = '—',
+}) {
+  if (value == null || !value.isFinite) return fallback;
+  final safeMin = math.max(0, minDigits);
+  final safeMax = math.max(safeMin, maxDigits);
+  return _formatPtBrNumber(
+    value,
+    minimumFractionDigits: safeMin,
+    maximumFractionDigits: safeMax,
+  );
+}
+
+/// Duração em segundos legível em pt-BR: `"45 s"`, `"12 min"`, `"3 h 20 min"`, `"5 dias e 4 h"`.
+String formatDurationSeconds(num? seconds, {String fallback = '—'}) {
+  if (seconds == null || !seconds.isFinite || seconds < 0) return fallback;
+  final total = seconds.round();
+  if (total < 60) return '$total s';
+  if (total < 3600) {
+    final mins = total ~/ 60;
+    final secs = total % 60;
+    return secs == 0 ? '$mins min' : '$mins min $secs s';
+  }
+  if (total < 86400) {
+    final hours = total ~/ 3600;
+    final mins = (total % 3600) ~/ 60;
+    return mins == 0 ? '$hours h' : '$hours h $mins min';
+  }
+  final days = total ~/ 86400;
+  final hours = (total % 86400) ~/ 3600;
+  final daysLabel = '$days ${days == 1 ? 'dia' : 'dias'}';
+  return hours == 0 ? daysLabel : '$daysLabel e $hours h';
+}
+
+/// Intensidade de sinal sem fio em dBm: `"-63 dBm"`.
+String formatSignalDbm(num? dbm, {String fallback = '—'}) {
+  if (dbm == null || !dbm.isFinite) return fallback;
+  return '${dbm.round()} dBm';
+}
+
+/// Carimbo compacto para nomes de arquivos exportados: `"20260805-143207"`.
+String formatFileTimestamp([DateTime? dt]) {
+  final date = (dt ?? DateTime.now()).toLocal();
+  return '${date.year}${_two(date.month)}${_two(date.day)}-'
+      '${_two(date.hour)}${_two(date.minute)}${_two(date.second)}';
+}
+
+/// Normaliza uma string arbitrária em identificador seguro para nome de arquivo.
+String sanitizeFileSlug(String raw, {String fallback = 'arquivo'}) {
+  const diacritics = <String, String>{
+    'á': 'a',
+    'à': 'a',
+    'â': 'a',
+    'ã': 'a',
+    'ä': 'a',
+    'é': 'e',
+    'è': 'e',
+    'ê': 'e',
+    'ë': 'e',
+    'í': 'i',
+    'ì': 'i',
+    'î': 'i',
+    'ï': 'i',
+    'ó': 'o',
+    'ò': 'o',
+    'ô': 'o',
+    'õ': 'o',
+    'ö': 'o',
+    'ú': 'u',
+    'ù': 'u',
+    'û': 'u',
+    'ü': 'u',
+    'ç': 'c',
+    'ñ': 'n',
+  };
+  final buffer = StringBuffer();
+  for (final rune in raw.trim().toLowerCase().runes) {
+    final ch = String.fromCharCode(rune);
+    buffer.write(diacritics[ch] ?? ch);
+  }
+  final slug = buffer
+      .toString()
+      .replaceAll(RegExp(r'[^a-z0-9._-]+'), '-')
+      .replaceAll(RegExp(r'-{2,}'), '-')
+      .replaceAll(RegExp(r'^[-.]+|[-.]+$'), '');
+  return slug.isEmpty ? fallback : slug;
 }
 
 String _two(int n) => n.toString().padLeft(2, '0');

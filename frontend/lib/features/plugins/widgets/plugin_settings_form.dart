@@ -1,4 +1,5 @@
 ﻿import 'package:flutter/material.dart';
+import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/plugins/utils/plugin_settings_logic.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
@@ -186,7 +187,7 @@ class _PluginSettingsFormState extends State<PluginSettingsForm> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Text(
-            '${field.label}: ${field.kind == 'integer' ? val.round() : val.toStringAsFixed(1)}',
+            '${field.label}: ${field.kind == 'integer' ? val.round() : formatDecimal(val, maxDigits: 1, minDigits: 1)}',
             style: context.textTheme.labelMedium,
           ),
           Slider(

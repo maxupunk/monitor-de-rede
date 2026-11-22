@@ -3,8 +3,10 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
 import 'package:netmonitor_app/core/utils/form_validators.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 import 'package:netmonitor_app/features/core/models/event_models.dart';
 import 'package:netmonitor_app/features/core/models/operations_models.dart';
 import 'package:netmonitor_app/features/core/providers/scheduled_tasks_provider.dart';
@@ -55,61 +57,6 @@ class _ScheduledTasksPageState extends ConsumerState<ScheduledTasksPage> {
     await ref.read(scheduledTasksProvider.notifier).fetchCatalog();
     if (!mounted) return;
 
-    final auth = ref.read(authProvider);
-    final allTools = ref
-        .read(scheduledTasksProvider)
-        .catalog
-        .where((t) => auth.isAdmin || !t.adminOnly)
-        .toList(growable: false);
-
-    final nameCtrl = TextEditingController(
-      text: existing?.name ?? presetName ?? '',
-    );
-    final descCtrl = TextEditingController(text: existing?.description ?? '');
-    final cronCtrl = TextEditingController(
-      text: existing?.cron ?? presetCron ?? '0 3 * * *',
-    );
-    String selectedTool =
-        existing?.tool ??
-        (presetTool != null && allTools.any((t) => t.name == presetTool)
-            ? presetTool
-            : (allTools.isNotEmpty ? allTools.first.name : ''));
-    final Map<String, dynamic> args = Map<String, dynamic>.from(
-      existing?.arguments ?? const <String, dynamic>{},
-    );
-    bool enabled = existing?.enabled ?? true;
-    ScheduledTaskPreview? preview;
-    bool previewLoading = false;
-    bool saving = false;
-    String? error;
-    final formKey = GlobalKey<FormState>();
-
-    Future<void> runPreview(StateSetter setModalState) async {
-      if (selectedTool.isEmpty || cronCtrl.text.trim().isEmpty) return;
-      setModalState(() {
-        previewLoading = true;
-        error = null;
-      });
-      try {
-        final res = await ref
-            .read(scheduledTasksProvider.notifier)
-            .preview(
-              tool: selectedTool,
-              arguments: args,
-              cron: cronCtrl.text.trim(),
-            );
-        setModalState(() {
-          preview = res;
-          previewLoading = false;
-        });
-      } catch (err) {
-        setModalState(() {
-          error = err.toString();
-          previewLoading = false;
-        });
-      }
-    }
-
     await showAdaptiveFormSheet<void>(
       context: context,
       title: existing == null
@@ -118,305 +65,13 @@ class _ScheduledTasksPageState extends ConsumerState<ScheduledTasksPage> {
       subtitle:
           'Configure a ferramenta, parâmetros JSON Schema e agendamento Cron.',
       maxWidth: 660,
-      builder: (sheetCtx) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            final toolObj = allTools.cast<SchedulableTool?>().firstWhere(
-              (t) => t?.name == selectedTool,
-              orElse: () => null,
-            );
-            final propsRaw = toolObj?.parameters['properties'];
-            final props = propsRaw is Map
-                ? Map<String, dynamic>.from(propsRaw)
-                : const <String, dynamic>{};
-
-            return Form(
-              key: formKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  if (error != null) ...<Widget>[
-                    NestedPanel(tone: SemanticTone.error, child: Text(error!)),
-                    const SizedBox(height: 10),
-                  ],
-                  TextFormField(
-                    controller: nameCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Nome da tarefa',
-                    ),
-                    validator: FormValidators.required('Informe um nome.'),
-                  ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: descCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Descrição (opcional)',
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  if (allTools.isNotEmpty)
-                    AppDropdownFormField<String>(
-                      initialValue: allTools.any((t) => t.name == selectedTool)
-                          ? selectedTool
-                          : allTools.first.name,
-                      decoration: const InputDecoration(
-                        labelText: 'Ferramenta / Ação',
-                      ),
-                      items: <DropdownMenuItem<String>>[
-                        for (final t in allTools)
-                          DropdownMenuItem<String>(
-                            value: t.name,
-                            child: Text(
-                              '${t.groupLabel} · ${t.name}',
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                      ],
-                      onChanged: (v) {
-                        if (v != null) {
-                          setModalState(() {
-                            selectedTool = v;
-                            args.clear();
-                            preview = null;
-                          });
-                        }
-                      },
-                    ),
-                  if (toolObj != null &&
-                      toolObj.description.isNotEmpty) ...<Widget>[
-                    const SizedBox(height: 6),
-                    Text(
-                      toolObj.description,
-                      style: context.textTheme.bodySmall?.copyWith(
-                        color: context.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                  if (props.isNotEmpty) ...<Widget>[
-                    const SizedBox(height: 12),
-                    NestedPanel(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: <Widget>[
-                          Text(
-                            'Parâmetros da ferramenta',
-                            style: context.textTheme.labelLarge?.copyWith(
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          for (final entry in props.entries) ...<Widget>[
-                            _SchemaFieldInput(
-                              fieldName: entry.key,
-                              schema: entry.value is Map
-                                  ? Map<String, dynamic>.from(
-                                      entry.value as Map,
-                                    )
-                                  : const <String, dynamic>{},
-                              value: args[entry.key],
-                              onChanged: (val) {
-                                setModalState(() {
-                                  if (val == null ||
-                                      (val is String && val.isEmpty)) {
-                                    args.remove(entry.key);
-                                  } else {
-                                    args[entry.key] = val;
-                                  }
-                                });
-                              },
-                            ),
-                            const SizedBox(height: 8),
-                          ],
-                        ],
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 12),
-                  Text(
-                    'Agenda (Cron de 5 campos)',
-                    style: context.textTheme.labelLarge?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: <Widget>[
-                      for (final (expr, label) in _cronPresets)
-                        ChoiceChip(
-                          selected: cronCtrl.text.trim() == expr,
-                          label: Text(label),
-                          onSelected: (_) {
-                            setModalState(() {
-                              cronCtrl.text = expr;
-                              preview = null;
-                            });
-                          },
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  LayoutBuilder(
-                    builder: (context, constraints) {
-                      final cronField = TextFormField(
-                        controller: cronCtrl,
-                        style: const TextStyle(fontFamily: 'monospace'),
-                        decoration: const InputDecoration(
-                          labelText: 'Expressão Cron',
-                          hintText: '0 3 * * *',
-                        ),
-                        validator: FormValidators.required(
-                          'Informe a expressão Cron.',
-                        ),
-                      );
-                      final previewBtn = OutlinedButton.icon(
-                        onPressed: previewLoading
-                            ? null
-                            : () => runPreview(setModalState),
-                        icon: previewLoading
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(Icons.preview_outlined, size: 18),
-                        label: const Text('Conferir'),
-                      );
-                      if (constraints.maxWidth < 440) {
-                        return Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: <Widget>[
-                            cronField,
-                            const SizedBox(height: 8),
-                            previewBtn,
-                          ],
-                        );
-                      }
-                      return Row(
-                        children: <Widget>[
-                          Expanded(child: cronField),
-                          const SizedBox(width: 8),
-                          previewBtn,
-                        ],
-                      );
-                    },
-                  ),
-                  if (preview != null) ...<Widget>[
-                    const SizedBox(height: 12),
-                    NestedPanel(
-                      tone: preview!.valid
-                          ? SemanticTone.success
-                          : SemanticTone.error,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          Text(
-                            preview!.valid
-                                ? (preview!.scheduleLabel ?? 'Agenda válida')
-                                : 'Existem pendências na configuração:',
-                            style: const TextStyle(fontWeight: FontWeight.w700),
-                          ),
-                          if (preview!.summary != null) ...<Widget>[
-                            const SizedBox(height: 4),
-                            Text(preview!.summary!),
-                          ],
-                          if (preview!.riskReason != null) ...<Widget>[
-                            const SizedBox(height: 6),
-                            SemanticChip(
-                              label: 'Risco: ${preview!.riskReason!}',
-                              tone: SemanticTone.warning,
-                              compact: true,
-                            ),
-                          ],
-                          for (final errMsg in preview!.errors)
-                            Text(
-                              '• $errMsg',
-                              style: TextStyle(
-                                color: context.colorScheme.error,
-                              ),
-                            ),
-                          if (preview!.nextRuns.isNotEmpty) ...<Widget>[
-                            const SizedBox(height: 6),
-                            Text(
-                              'Próximas execuções: ${preview!.nextRuns.take(3).map(formatShortDateTime).join(' · ')}',
-                              style: context.textTheme.bodySmall,
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 8),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    value: enabled,
-                    onChanged: (v) => setModalState(() => enabled = v),
-                    title: const Text('Tarefa ativa'),
-                  ),
-                  const SizedBox(height: 14),
-                  FilledButton.icon(
-                    onPressed: saving
-                        ? null
-                        : () async {
-                            if (!formKey.currentState!.validate()) return;
-                            setModalState(() {
-                              saving = true;
-                              error = null;
-                            });
-                            try {
-                              final input = <String, dynamic>{
-                                'name': nameCtrl.text.trim(),
-                                'description': descCtrl.text.trim().isEmpty
-                                    ? null
-                                    : descCtrl.text.trim(),
-                                'tool': selectedTool,
-                                'arguments': args,
-                                'cron': cronCtrl.text.trim(),
-                                'enabled': enabled,
-                              };
-                              final notifier = ref.read(
-                                scheduledTasksProvider.notifier,
-                              );
-                              if (existing == null) {
-                                await notifier.create(input);
-                              } else {
-                                await notifier.update(existing.id, input);
-                              }
-                              if (sheetCtx.mounted) {
-                                Navigator.of(sheetCtx).pop();
-                              }
-                            } catch (err) {
-                              setModalState(() {
-                                saving = false;
-                                error = err.toString();
-                              });
-                            }
-                          },
-                    icon: saving
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.save_outlined),
-                    label: Text(
-                      existing == null ? 'Criar tarefa' : 'Salvar alterações',
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
+      builder: (_) => _ScheduledTaskFormSheetBody(
+        existing: existing,
+        presetName: presetName,
+        presetTool: presetTool,
+        presetCron: presetCron,
+      ),
     );
-
-    nameCtrl.dispose();
-    descCtrl.dispose();
-    cronCtrl.dispose();
   }
 
   Future<void> _openRunsSheet(ScheduledTask task) async {
@@ -749,6 +404,381 @@ class _ScheduledTasksPageState extends ConsumerState<ScheduledTasksPage> {
           ),
         );
       },
+    );
+  }
+}
+
+class _ScheduledTaskFormSheetBody extends ConsumerStatefulWidget {
+  const _ScheduledTaskFormSheetBody({
+    this.existing,
+    this.presetName,
+    this.presetTool,
+    this.presetCron,
+  });
+
+  final ScheduledTask? existing;
+  final String? presetName;
+  final String? presetTool;
+  final String? presetCron;
+
+  @override
+  ConsumerState<_ScheduledTaskFormSheetBody> createState() =>
+      _ScheduledTaskFormSheetBodyState();
+}
+
+class _ScheduledTaskFormSheetBodyState
+    extends ConsumerState<_ScheduledTaskFormSheetBody> {
+  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+  late final TextEditingController _nameCtrl;
+  late final TextEditingController _descCtrl;
+  late final TextEditingController _cronCtrl;
+  late String _selectedTool;
+  late final Map<String, dynamic> _args;
+  late bool _enabled;
+  ScheduledTaskPreview? _preview;
+  bool _previewLoading = false;
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    final existing = widget.existing;
+    final auth = ref.read(authProvider);
+    final allTools = ref
+        .read(scheduledTasksProvider)
+        .catalog
+        .where((t) => auth.isAdmin || !t.adminOnly)
+        .toList(growable: false);
+
+    _nameCtrl = TextEditingController(
+      text: existing?.name ?? widget.presetName ?? '',
+    );
+    _descCtrl = TextEditingController(text: existing?.description ?? '');
+    _cronCtrl = TextEditingController(
+      text: existing?.cron ?? widget.presetCron ?? '0 3 * * *',
+    );
+    _selectedTool =
+        existing?.tool ??
+        (widget.presetTool != null &&
+                allTools.any((t) => t.name == widget.presetTool)
+            ? widget.presetTool!
+            : (allTools.isNotEmpty ? allTools.first.name : ''));
+    _args = Map<String, dynamic>.from(
+      existing?.arguments ?? const <String, dynamic>{},
+    );
+    _enabled = existing?.enabled ?? true;
+  }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _descCtrl.dispose();
+    _cronCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _runPreview() async {
+    if (_selectedTool.isEmpty || _cronCtrl.text.trim().isEmpty) return;
+    setState(() {
+      _previewLoading = true;
+      _error = null;
+    });
+    try {
+      final res = await ref
+          .read(scheduledTasksProvider.notifier)
+          .preview(
+            tool: _selectedTool,
+            arguments: _args,
+            cron: _cronCtrl.text.trim(),
+          );
+      if (!mounted) return;
+      setState(() {
+        _preview = res;
+        _previewLoading = false;
+      });
+    } catch (err) {
+      if (!mounted) return;
+      setState(() {
+        _error = describeError(err);
+        _previewLoading = false;
+      });
+    }
+  }
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      final input = <String, dynamic>{
+        'name': _nameCtrl.text.trim(),
+        'description': _descCtrl.text.trim().isEmpty
+            ? null
+            : _descCtrl.text.trim(),
+        'tool': _selectedTool,
+        'arguments': _args,
+        'cron': _cronCtrl.text.trim(),
+        'enabled': _enabled,
+      };
+      final notifier = ref.read(scheduledTasksProvider.notifier);
+      final existing = widget.existing;
+      if (existing == null) {
+        await notifier.create(input);
+      } else {
+        await notifier.update(existing.id, input);
+      }
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+    } catch (err) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _error = describeError(err);
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final auth = ref.watch(authProvider);
+    final allTools = ref
+        .watch(scheduledTasksProvider)
+        .catalog
+        .where((t) => auth.isAdmin || !t.adminOnly)
+        .toList(growable: false);
+
+    final toolObj = allTools.cast<SchedulableTool?>().firstWhere(
+      (t) => t?.name == _selectedTool,
+      orElse: () => null,
+    );
+    final props = asJsonMap(toolObj?.parameters['properties']);
+
+    return Form(
+      key: _formKey,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          if (_error != null) ...<Widget>[
+            NestedPanel(tone: SemanticTone.error, child: Text(_error!)),
+            const SizedBox(height: 10),
+          ],
+          TextFormField(
+            controller: _nameCtrl,
+            decoration: const InputDecoration(labelText: 'Nome da tarefa'),
+            validator: FormValidators.required('Informe um nome.'),
+          ),
+          const SizedBox(height: 12),
+          TextFormField(
+            controller: _descCtrl,
+            decoration: const InputDecoration(
+              labelText: 'Descrição (opcional)',
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (allTools.isNotEmpty)
+            AppDropdownFormField<String>(
+              initialValue: allTools.any((t) => t.name == _selectedTool)
+                  ? _selectedTool
+                  : allTools.first.name,
+              decoration: const InputDecoration(labelText: 'Ferramenta / Ação'),
+              items: <DropdownMenuItem<String>>[
+                for (final t in allTools)
+                  DropdownMenuItem<String>(
+                    value: t.name,
+                    child: Text(
+                      '${t.groupLabel} · ${t.name}',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+              ],
+              onChanged: (v) {
+                if (v != null) {
+                  setState(() {
+                    _selectedTool = v;
+                    _args.clear();
+                    _preview = null;
+                  });
+                }
+              },
+            ),
+          if (toolObj != null && toolObj.description.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 6),
+            Text(
+              toolObj.description,
+              style: context.textTheme.bodySmall?.copyWith(
+                color: context.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+          if (props.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 12),
+            NestedPanel(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  Text(
+                    'Parâmetros da ferramenta',
+                    style: context.textTheme.labelLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  for (final entry in props.entries) ...<Widget>[
+                    _SchemaFieldInput(
+                      fieldName: entry.key,
+                      schema: asJsonMap(entry.value),
+                      value: _args[entry.key],
+                      onChanged: (val) {
+                        setState(() {
+                          if (val == null || (val is String && val.isEmpty)) {
+                            _args.remove(entry.key);
+                          } else {
+                            _args[entry.key] = val;
+                          }
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                ],
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
+          Text(
+            'Agenda (Cron de 5 campos)',
+            style: context.textTheme.labelLarge?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: <Widget>[
+              for (final (expr, label) in _cronPresets)
+                ChoiceChip(
+                  selected: _cronCtrl.text.trim() == expr,
+                  label: Text(label),
+                  onSelected: (_) {
+                    setState(() {
+                      _cronCtrl.text = expr;
+                      _preview = null;
+                    });
+                  },
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final cronField = TextFormField(
+                controller: _cronCtrl,
+                style: const TextStyle(fontFamily: 'monospace'),
+                decoration: const InputDecoration(
+                  labelText: 'Expressão Cron',
+                  hintText: '0 3 * * *',
+                ),
+                validator: FormValidators.required('Informe a expressão Cron.'),
+              );
+              final previewBtn = OutlinedButton.icon(
+                onPressed: _previewLoading ? null : _runPreview,
+                icon: _previewLoading
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.preview_outlined, size: 18),
+                label: const Text('Conferir'),
+              );
+              if (constraints.maxWidth < 440) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    cronField,
+                    const SizedBox(height: 8),
+                    previewBtn,
+                  ],
+                );
+              }
+              return Row(
+                children: <Widget>[
+                  Expanded(child: cronField),
+                  const SizedBox(width: 8),
+                  previewBtn,
+                ],
+              );
+            },
+          ),
+          if (_preview != null) ...<Widget>[
+            const SizedBox(height: 12),
+            NestedPanel(
+              tone: _preview!.valid ? SemanticTone.success : SemanticTone.error,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    _preview!.valid
+                        ? (_preview!.scheduleLabel ?? 'Agenda válida')
+                        : 'Existem pendências na configuração:',
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  if (_preview!.summary != null) ...<Widget>[
+                    const SizedBox(height: 4),
+                    Text(_preview!.summary!),
+                  ],
+                  if (_preview!.riskReason != null) ...<Widget>[
+                    const SizedBox(height: 6),
+                    SemanticChip(
+                      label: 'Risco: ${_preview!.riskReason!}',
+                      tone: SemanticTone.warning,
+                      compact: true,
+                    ),
+                  ],
+                  for (final errMsg in _preview!.errors)
+                    Text(
+                      '• $errMsg',
+                      style: TextStyle(color: context.colorScheme.error),
+                    ),
+                  if (_preview!.nextRuns.isNotEmpty) ...<Widget>[
+                    const SizedBox(height: 6),
+                    Text(
+                      'Próximas execuções: ${_preview!.nextRuns.take(3).map(formatShortDateTime).join(' · ')}',
+                      style: context.textTheme.bodySmall,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+          const SizedBox(height: 8),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            value: _enabled,
+            onChanged: (v) => setState(() => _enabled = v),
+            title: const Text('Tarefa ativa'),
+          ),
+          const SizedBox(height: 14),
+          FilledButton.icon(
+            onPressed: _saving ? null : _save,
+            icon: _saving
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.save_outlined),
+            label: Text(
+              widget.existing == null ? 'Criar tarefa' : 'Salvar alterações',
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

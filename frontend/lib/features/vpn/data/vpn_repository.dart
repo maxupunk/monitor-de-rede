@@ -1,5 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/network/api_client.dart';
+import 'package:netmonitor_app/core/utils/formatters.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 import 'package:netmonitor_app/features/vpn/models/vpn_models.dart';
 
 /// Repositório REST do domínio VPN WireGuard (13 endpoints dedicados + leituras auxiliares).
@@ -62,10 +64,7 @@ class VpnRepository {
 
   Future<List<VpnPeer>> fetchPeers() async {
     final raw = await _api.get<List<dynamic>>('/vpn/peers');
-    return raw
-        .whereType<Map>()
-        .map((item) => VpnPeer.fromJson(Map<String, dynamic>.from(item)))
-        .toList(growable: false);
+    return asJsonList<VpnPeer>(raw, VpnPeer.fromJson);
   }
 
   Future<String> suggestNextIp() async {
@@ -80,7 +79,7 @@ class VpnRepository {
     );
     final rawArtifact = json['artifact'];
     if (rawArtifact is Map) {
-      return VpnArtifact.fromJson(Map<String, dynamic>.from(rawArtifact));
+      return VpnArtifact.fromJson(asJsonMap(rawArtifact));
     }
     return VpnArtifact.fromJson(json);
   }
@@ -112,7 +111,7 @@ class VpnRepository {
     );
     final rawArtifact = json['artifact'];
     if (rawArtifact is Map) {
-      return VpnArtifact.fromJson(Map<String, dynamic>.from(rawArtifact));
+      return VpnArtifact.fromJson(asJsonMap(rawArtifact));
     }
     return VpnArtifact.fromJson(json);
   }
@@ -135,22 +134,14 @@ class VpnRepository {
       },
     );
     final rawInstall = json['agentInstall'];
-    final rawVariants = json['variants'];
     return (
       agentInstall: rawInstall is Map
-          ? VpnArtifactAgentInstall.fromJson(
-              Map<String, dynamic>.from(rawInstall),
-            )
+          ? VpnArtifactAgentInstall.fromJson(asJsonMap(rawInstall))
           : VpnArtifactAgentInstall(enrollCode: enrollCode, policy: policy),
-      variants: rawVariants is List
-          ? rawVariants
-                .whereType<Map>()
-                .map(
-                  (e) =>
-                      VpnArtifactVariant.fromJson(Map<String, dynamic>.from(e)),
-                )
-                .toList(growable: false)
-          : const <VpnArtifactVariant>[],
+      variants: asJsonList<VpnArtifactVariant>(
+        json['variants'],
+        VpnArtifactVariant.fromJson,
+      ),
     );
   }
 
@@ -171,14 +162,10 @@ class VpnRepository {
     try {
       final raw = await _api.get<dynamic>('/server-addresses');
       final list = raw is List ? raw : (raw is Map ? raw['addresses'] : null);
-      if (list is! List) return const <VpnServerAddressHint>[];
-      return list
-          .whereType<Map>()
-          .map(
-            (e) => VpnServerAddressHint.fromJson(Map<String, dynamic>.from(e)),
-          )
-          .where((item) => item.address.trim().isNotEmpty)
-          .toList(growable: false);
+      return asJsonList<VpnServerAddressHint>(
+        list,
+        VpnServerAddressHint.fromJson,
+      ).where((item) => item.address.trim().isNotEmpty).toList(growable: false);
     } catch (_) {
       return const <VpnServerAddressHint>[];
     }
@@ -187,9 +174,7 @@ class VpnRepository {
   Future<List<String>> fetchExistingNetworkCidrs() async {
     try {
       final raw = await _api.get<dynamic>('/networks');
-      if (raw is! List) return const <String>[];
-      return raw
-          .whereType<Map>()
+      return asJsonMapList(raw)
           .map((e) => e['cidr']?.toString() ?? '')
           .where((c) => c.trim().isNotEmpty)
           .toList(growable: false);
@@ -201,12 +186,10 @@ class VpnRepository {
   Future<List<VpnSiteOption>> fetchSites() async {
     try {
       final raw = await _api.get<dynamic>('/sites');
-      if (raw is! List) return const <VpnSiteOption>[];
-      return raw
-          .whereType<Map>()
-          .map((e) => VpnSiteOption.fromJson(Map<String, dynamic>.from(e)))
-          .where((s) => s.id > 0)
-          .toList(growable: false);
+      return asJsonList<VpnSiteOption>(
+        raw,
+        VpnSiteOption.fromJson,
+      ).where((s) => s.id > 0).toList(growable: false);
     } catch (_) {
       return const <VpnSiteOption>[];
     }
@@ -226,23 +209,15 @@ class VpnRepository {
   Future<List<VpnMetricSample>> fetchDeviceVpnMetrics(int deviceId) async {
     try {
       final raw = await _api.get<dynamic>('/devices/$deviceId/metrics');
-      if (raw is! List) return const <VpnMetricSample>[];
       final samples = <VpnMetricSample>[];
-      for (final item in raw) {
-        if (item is! Map) continue;
+      for (final item in asJsonMapList(raw)) {
         final name = (item['metricName'] ?? item['name'])?.toString() ?? '';
         if (name != 'vpn_rx_bps' && name != 'vpn_tx_bps') continue;
-        final val = item['value'];
-        final ts = DateTime.tryParse(
-          (item['recordedAt'] ?? item['createdAt'])?.toString() ?? '',
-        );
-        if (val is num && ts != null) {
+        final val = parseDoubleOrNull(item['value']);
+        final ts = parseDateOrNull(item['recordedAt'] ?? item['createdAt']);
+        if (val != null && ts != null) {
           samples.add(
-            VpnMetricSample(
-              metricName: name,
-              value: val.toDouble(),
-              recordedAt: ts.toLocal(),
-            ),
+            VpnMetricSample(metricName: name, value: val, recordedAt: ts),
           );
         }
       }

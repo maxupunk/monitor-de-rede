@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/network/api_client.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 import 'package:netmonitor_app/features/core/models/admin_models.dart';
 
 @immutable
@@ -49,15 +51,12 @@ class UsersNotifier extends Notifier<UsersState> {
     state = state.copyWith(loading: true, clearError: true);
     try {
       final raw = await ref.read(apiClientProvider).get<dynamic>('/users');
-      final list = raw is List
-          ? raw
-                .whereType<Map>()
-                .map((e) => ManagedUser.fromJson(Map<String, dynamic>.from(e)))
-                .toList(growable: false)
-          : const <ManagedUser>[];
-      state = state.copyWith(users: _sorted(list), loading: false);
+      state = state.copyWith(
+        users: _sorted(asJsonList<ManagedUser>(raw, ManagedUser.fromJson)),
+        loading: false,
+      );
     } catch (err) {
-      state = state.copyWith(loading: false, error: err.toString());
+      state = state.copyWith(loading: false, error: describeError(err));
     }
   }
 
@@ -74,7 +73,7 @@ class UsersNotifier extends Notifier<UsersState> {
       );
       return true;
     } catch (err) {
-      state = state.copyWith(saving: false, error: err.toString());
+      state = state.copyWith(saving: false, error: describeError(err));
       return false;
     }
   }
@@ -94,7 +93,7 @@ class UsersNotifier extends Notifier<UsersState> {
       );
       return true;
     } catch (err) {
-      state = state.copyWith(saving: false, error: err.toString());
+      state = state.copyWith(saving: false, error: describeError(err));
       return false;
     }
   }
@@ -109,7 +108,7 @@ class UsersNotifier extends Notifier<UsersState> {
       );
       return true;
     } catch (err) {
-      state = state.copyWith(saving: false, error: err.toString());
+      state = state.copyWith(saving: false, error: describeError(err));
       return false;
     }
   }

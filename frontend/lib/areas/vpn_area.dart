@@ -10,6 +10,7 @@ import 'package:netmonitor_app/features/ai/providers/ai_providers.dart';
 import 'package:netmonitor_app/features/ai/widgets/ai_approval_notice.dart';
 import 'package:netmonitor_app/features/ai/widgets/ai_chat_drawer.dart';
 import 'package:netmonitor_app/features/ai/widgets/ai_data_export_card.dart';
+import 'package:netmonitor_app/features/ai/widgets/ai_proactive_widgets.dart';
 import 'package:netmonitor_app/features/ai/widgets/ai_settings_card.dart';
 import 'package:netmonitor_app/features/ai/widgets/decider_settings_card.dart';
 import 'package:netmonitor_app/features/plugins/pages/plugin_app_page.dart';
@@ -250,7 +251,21 @@ final AreaContribution vpnArea = AreaContribution(
       order: 80,
       area: ProductArea.network,
       tone: SemanticTone.plugin,
-      builder: (_, deviceId) => DevicePluginsTab(deviceId: deviceId),
+      builder: (_, deviceId) => DevicePluginsTab(
+        deviceId: deviceId,
+        aiActionBuilder: (_, ref, id, platform) {
+          final aiEnabled =
+              ref.watch(aiSettingsProvider).settings?.enabled ?? true;
+          if (!aiEnabled) return null;
+          return AiAskButton(
+            label: 'Criar ou usar com IA',
+            prompt:
+                'Quero consultar ou criar um plugin para o equipamento #$id ($platform).',
+            contextData: AiChatContext(deviceId: id),
+            compact: true,
+          );
+        },
+      ),
     ),
   ],
   // 5. Caminho recomendado de conexão de servidor remoto pela VPN
@@ -279,6 +294,9 @@ final AreaContribution vpnArea = AreaContribution(
       (_) => const AiAndAppsShellBootstrapOverlay(),
       (_) => const AiApprovalNoticeOverlay(),
     ],
-    ProductArea.network: <WidgetBuilder>[(_) => const PluginApprovalOverlay()],
+    ProductArea.network: <WidgetBuilder>[
+      (_) => const PluginAppsBootstrapOverlay(),
+      (_) => const PluginApprovalOverlay(),
+    ],
   },
 );

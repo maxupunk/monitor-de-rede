@@ -1,8 +1,10 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/network/api_client.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
 import 'package:netmonitor_app/features/network/models/device_models.dart';
 import 'package:netmonitor_app/features/network/models/site_network_models.dart';
+import 'package:netmonitor_app/features/network/providers/devices_provider.dart';
 
 // ── Sites ─────────────────────────────────────────────────────────────────────
 
@@ -47,7 +49,7 @@ class SitesNotifier extends Notifier<SitesState> {
         loading: false,
       );
     } catch (err) {
-      state = state.copyWith(loading: false, error: err.toString());
+      state = state.copyWith(loading: false, error: describeError(err));
     }
   }
 
@@ -60,7 +62,7 @@ class SitesNotifier extends Notifier<SitesState> {
       state = state.copyWith(items: <SiteModel>[...state.items, created]);
       return true;
     } catch (err) {
-      state = state.copyWith(error: err.toString());
+      state = state.copyWith(error: describeError(err));
       return false;
     }
   }
@@ -78,7 +80,7 @@ class SitesNotifier extends Notifier<SitesState> {
       );
       return true;
     } catch (err) {
-      state = state.copyWith(error: err.toString());
+      state = state.copyWith(error: describeError(err));
       return false;
     }
   }
@@ -91,7 +93,7 @@ class SitesNotifier extends Notifier<SitesState> {
       );
       return true;
     } catch (err) {
-      state = state.copyWith(error: err.toString());
+      state = state.copyWith(error: describeError(err));
       return false;
     }
   }
@@ -149,7 +151,7 @@ class NetworksNotifier extends Notifier<NetworksState> {
         loading: false,
       );
     } catch (err) {
-      state = state.copyWith(loading: false, error: err.toString());
+      state = state.copyWith(loading: false, error: describeError(err));
     }
   }
 
@@ -162,7 +164,7 @@ class NetworksNotifier extends Notifier<NetworksState> {
       state = state.copyWith(items: <NetworkModel>[...state.items, created]);
       return true;
     } catch (err) {
-      state = state.copyWith(error: err.toString());
+      state = state.copyWith(error: describeError(err));
       return false;
     }
   }
@@ -180,7 +182,7 @@ class NetworksNotifier extends Notifier<NetworksState> {
       );
       return true;
     } catch (err) {
-      state = state.copyWith(error: err.toString());
+      state = state.copyWith(error: describeError(err));
       return false;
     }
   }
@@ -193,7 +195,7 @@ class NetworksNotifier extends Notifier<NetworksState> {
       );
       return true;
     } catch (err) {
-      state = state.copyWith(error: err.toString());
+      state = state.copyWith(error: describeError(err));
       return false;
     }
   }
@@ -206,7 +208,7 @@ class NetworksNotifier extends Notifier<NetworksState> {
           .post<dynamic>('/networks/$id/scan');
       return NetworkScanResult.fromJson(asJsonMap(raw));
     } catch (err) {
-      state = state.copyWith(error: err.toString());
+      state = state.copyWith(error: describeError(err));
       return null;
     } finally {
       state = state.copyWith(clearScanningId: true);
@@ -270,7 +272,7 @@ class ProbesNotifier extends Notifier<ProbesState> {
         loading: false,
       );
     } catch (err) {
-      state = state.copyWith(loading: false, error: err.toString());
+      state = state.copyWith(loading: false, error: describeError(err));
     }
   }
 
@@ -280,7 +282,7 @@ class ProbesNotifier extends Notifier<ProbesState> {
       await ref.read(apiClientProvider).post<dynamic>('/probes/$probeId/test');
       return true;
     } catch (err) {
-      state = state.copyWith(error: err.toString());
+      state = state.copyWith(error: describeError(err));
       return false;
     } finally {
       state = state.copyWith(clearTestingId: true);
@@ -299,7 +301,7 @@ class ProbesNotifier extends Notifier<ProbesState> {
       );
       return true;
     } catch (err) {
-      state = state.copyWith(error: err.toString());
+      state = state.copyWith(error: describeError(err));
       return false;
     }
   }
@@ -395,7 +397,7 @@ class DiscoveryNotifier extends Notifier<DiscoveryState> {
         loading: false,
       );
     } catch (err) {
-      state = state.copyWith(loading: false, error: err.toString());
+      state = state.copyWith(loading: false, error: describeError(err));
     }
   }
 
@@ -440,7 +442,10 @@ class DiscoveryNotifier extends Notifier<DiscoveryState> {
       state = state.copyWith(conflicts: parsed, loadingConflicts: false);
       return parsed.length;
     } catch (err) {
-      state = state.copyWith(loadingConflicts: false, error: err.toString());
+      state = state.copyWith(
+        loadingConflicts: false,
+        error: describeError(err),
+      );
       return 0;
     }
   }
@@ -456,9 +461,35 @@ class DiscoveryNotifier extends Notifier<DiscoveryState> {
           );
       return parseIntOrNull(asJsonMap(raw)['runId']);
     } catch (err) {
-      state = state.copyWith(starting: false, error: err.toString());
+      state = state.copyWith(starting: false, error: describeError(err));
       return null;
     }
+  }
+
+  Future<int> adoptHostsBatch({
+    required List<StreamedDiscoveryHost> hosts,
+    required Set<String> selectedIps,
+    int? networkId,
+    int? siteId,
+  }) async {
+    if (selectedIps.isEmpty) return 0;
+    var created = 0;
+    final devicesNotifier = ref.read(devicesProvider.notifier);
+    for (final host in hosts) {
+      if (!selectedIps.contains(host.ipAddress)) continue;
+      final res = await devicesNotifier.createDevice(<String, dynamic>{
+        'name': host.bestName,
+        'ipAddress': host.ipAddress,
+        if (host.macAddress != null) 'macAddress': host.macAddress,
+        if (host.vendor != null) 'vendor': host.vendor,
+        'type': host.deviceType ?? 'other',
+        'networkId': networkId,
+        'siteId': siteId,
+        'isMonitored': true,
+      });
+      if (res != null) created++;
+    }
+    return created;
   }
 
   Future<bool> cancelScan() async {
@@ -467,7 +498,7 @@ class DiscoveryNotifier extends Notifier<DiscoveryState> {
       state = state.copyWith(starting: false);
       return true;
     } catch (err) {
-      state = state.copyWith(error: err.toString());
+      state = state.copyWith(error: describeError(err));
       return false;
     }
   }
@@ -483,7 +514,7 @@ class DiscoveryNotifier extends Notifier<DiscoveryState> {
       await fetchDiscoveryRuns();
       return parseIntOrNull(asJsonMap(raw)['removedRuns']);
     } catch (err) {
-      state = state.copyWith(error: err.toString());
+      state = state.copyWith(error: describeError(err));
       return null;
     }
   }

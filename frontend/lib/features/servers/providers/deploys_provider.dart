@@ -1,8 +1,11 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/network/api_client.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 import 'package:netmonitor_app/features/servers/models/deploy_models.dart';
-import 'package:netmonitor_app/features/servers/utils/server_utils.dart';
+import 'package:netmonitor_app/features/servers/utils/collection_helpers.dart';
+import 'package:netmonitor_app/features/servers/utils/deploy_presentation.dart';
 
 const int _maxConsoleLines = 4000;
 
@@ -105,12 +108,6 @@ class DeploysNotifier extends Notifier<DeploysState> {
 
   ApiClient get _api => ref.read(apiClientProvider);
 
-  String _describe(Object err, String fallback) {
-    if (err is ApiException && err.message.isNotEmpty) return err.message;
-    if (err is NetworkException && err.message.isNotEmpty) return err.message;
-    return fallback;
-  }
-
   Future<bool> fetchOverview() async {
     state = state.copyWith(loading: true, clearError: true);
     try {
@@ -123,7 +120,7 @@ class DeploysNotifier extends Notifier<DeploysState> {
     } catch (err) {
       state = state.copyWith(
         loading: false,
-        error: _describe(err, 'Erro ao carregar os deploys'),
+        error: describeError(err, fallback: 'Erro ao carregar os deploys'),
       );
       return false;
     }
@@ -138,10 +135,7 @@ class DeploysNotifier extends Notifier<DeploysState> {
   Future<void> fetchAgents() async {
     try {
       final raw = await _api.get<List<dynamic>>('/deploys/agents');
-      final parsed = raw
-          .whereType<Map>()
-          .map((e) => DeployAgentView.fromJson(Map<String, dynamic>.from(e)))
-          .toList(growable: false);
+      final parsed = asJsonList(raw, DeployAgentView.fromJson);
       state = state.copyWith(
         agents: List<DeployAgentView>.unmodifiable(parsed),
       );
@@ -207,19 +201,19 @@ class DeploysNotifier extends Notifier<DeploysState> {
   }
 
   void applyRunLinesPayload(Map<String, dynamic> data) {
-    final runId = (data['runId'] as num?)?.toInt();
-    final rawLines = data['lines'];
-    if (runId == null || rawLines is! List) return;
+    final runId = parseIntOrNull(data['runId']);
+    if (runId == null || data['lines'] is! List) return;
     final current = state.runConsoles[runId];
     if (current == null) return;
-    final appended = <String>[...current, ...rawLines.whereType<String>()];
-    final trimmed = appended.length > _maxConsoleLines
-        ? appended.sublist(appended.length - _maxConsoleLines)
-        : appended;
+    final nextLines = appendBounded<String>(
+      current,
+      asStringList(data['lines']),
+      _maxConsoleLines,
+    );
     state = state.copyWith(
       runConsoles: Map<int, List<String>>.unmodifiable(<int, List<String>>{
         ...state.runConsoles,
-        runId: List<String>.unmodifiable(trimmed),
+        runId: nextLines,
       }),
     );
   }
@@ -244,19 +238,19 @@ class DeploysNotifier extends Notifier<DeploysState> {
   }
 
   void applyBuildLinesPayload(Map<String, dynamic> data) {
-    final buildId = (data['buildId'] as num?)?.toInt();
-    final rawLines = data['lines'];
-    if (buildId == null || rawLines is! List) return;
+    final buildId = parseIntOrNull(data['buildId']);
+    if (buildId == null || data['lines'] is! List) return;
     final current = state.buildConsoles[buildId];
     if (current == null) return;
-    final appended = <String>[...current, ...rawLines.whereType<String>()];
-    final trimmed = appended.length > _maxConsoleLines
-        ? appended.sublist(appended.length - _maxConsoleLines)
-        : appended;
+    final nextLines = appendBounded<String>(
+      current,
+      asStringList(data['lines']),
+      _maxConsoleLines,
+    );
     state = state.copyWith(
       buildConsoles: Map<int, List<String>>.unmodifiable(<int, List<String>>{
         ...state.buildConsoles,
-        buildId: List<String>.unmodifiable(trimmed),
+        buildId: nextLines,
       }),
     );
   }
@@ -299,12 +293,12 @@ class DeploysNotifier extends Notifier<DeploysState> {
     );
   }
 
-  // ── CRUD & Setup ────────────────────────────────────────────────────────
+  // ── CRUD & Setup (DTOs tipados — ISP) ───────────────────────────────────
 
-  Future<Map<String, dynamic>> setup(Map<String, dynamic> input) async {
+  Future<Map<String, dynamic>> setup(DeploySetupInput input) async {
     final raw = await _api.post<Map<String, dynamic>>(
       '/deploys/setup',
-      data: input,
+      data: input.toJson(),
     );
     await fetchOverview();
     return raw;
@@ -312,16 +306,16 @@ class DeploysNotifier extends Notifier<DeploysState> {
 
   Future<Map<String, dynamic>> saveApplication(
     int? id,
-    Map<String, dynamic> input,
+    DeployApplicationInput input,
   ) async {
     final raw = id == null
         ? await _api.post<Map<String, dynamic>>(
             '/deploys/applications',
-            data: input,
+            data: input.toJson(),
           )
         : await _api.put<Map<String, dynamic>>(
             '/deploys/applications/$id',
-            data: input,
+            data: input.toJson(),
           );
     await fetchOverview();
     return raw;
@@ -335,16 +329,16 @@ class DeploysNotifier extends Notifier<DeploysState> {
   Future<Map<String, dynamic>> saveTarget(
     int applicationId,
     int? targetId,
-    Map<String, dynamic> input,
+    DeployTargetInput input,
   ) async {
     final raw = targetId == null
         ? await _api.post<Map<String, dynamic>>(
             '/deploys/applications/$applicationId/targets',
-            data: input,
+            data: input.toJson(),
           )
         : await _api.put<Map<String, dynamic>>(
             '/deploys/targets/$targetId',
-            data: input,
+            data: input.toJson(),
           );
     await fetchOverview();
     return raw;
@@ -357,16 +351,16 @@ class DeploysNotifier extends Notifier<DeploysState> {
 
   Future<DeployCredentialView> saveCredential(
     int? id,
-    Map<String, dynamic> input,
+    DeployCredentialInput input,
   ) async {
     final raw = id == null
         ? await _api.post<Map<String, dynamic>>(
             '/deploys/credentials',
-            data: input,
+            data: input.toJson(),
           )
         : await _api.put<Map<String, dynamic>>(
             '/deploys/credentials/$id',
-            data: input,
+            data: input.toJson(),
           );
     await fetchOverview();
     return DeployCredentialView.fromJson(raw);
@@ -445,9 +439,7 @@ class DeploysNotifier extends Notifier<DeploysState> {
       },
     );
     return List<DeployRepositoryView>.unmodifiable(
-      raw.whereType<Map>().map(
-        (e) => DeployRepositoryView.fromJson(Map<String, dynamic>.from(e)),
-      ),
+      asJsonList(raw, DeployRepositoryView.fromJson),
     );
   }
 
@@ -540,9 +532,7 @@ class DeploysNotifier extends Notifier<DeploysState> {
       '/deploys/targets/$targetId/runs',
     );
     return List<DeployRunView>.unmodifiable(
-      raw.whereType<Map>().map(
-        (e) => DeployRunView.fromJson(Map<String, dynamic>.from(e)),
-      ),
+      asJsonList(raw, DeployRunView.fromJson),
     );
   }
 
@@ -556,9 +546,7 @@ class DeploysNotifier extends Notifier<DeploysState> {
   Future<List<DeployBackupView>> runBackups(int runId) async {
     final raw = await _api.get<List<dynamic>>('/deploys/runs/$runId/backups');
     return List<DeployBackupView>.unmodifiable(
-      raw.whereType<Map>().map(
-        (e) => DeployBackupView.fromJson(Map<String, dynamic>.from(e)),
-      ),
+      asJsonList(raw, DeployBackupView.fromJson),
     );
   }
 
@@ -615,9 +603,7 @@ class DeploysNotifier extends Notifier<DeploysState> {
       '/deploys/targets/$targetId/env/versions',
     );
     return List<DeployEnvVersionView>.unmodifiable(
-      raw.whereType<Map>().map(
-        (e) => DeployEnvVersionView.fromJson(Map<String, dynamic>.from(e)),
-      ),
+      asJsonList(raw, DeployEnvVersionView.fromJson),
     );
   }
 
@@ -661,10 +647,7 @@ class DeploysNotifier extends Notifier<DeploysState> {
     try {
       final raw = await _api.get<List<dynamic>>('/deploys/builds');
       final next = Map<int, DeployServerBuildView>.from(state.builds);
-      for (final item in raw.whereType<Map>()) {
-        final b = DeployServerBuildView.fromJson(
-          Map<String, dynamic>.from(item),
-        );
+      for (final b in asJsonList(raw, DeployServerBuildView.fromJson)) {
         next[b.id] = b;
       }
       state = state.copyWith(
@@ -747,9 +730,7 @@ class DeploysNotifier extends Notifier<DeploysState> {
       '/deploys/applications/$applicationId/build-secrets',
     );
     return List<DeployBuildSecretView>.unmodifiable(
-      raw.whereType<Map>().map(
-        (e) => DeployBuildSecretView.fromJson(Map<String, dynamic>.from(e)),
-      ),
+      asJsonList(raw, DeployBuildSecretView.fromJson),
     );
   }
 
@@ -763,9 +744,7 @@ class DeploysNotifier extends Notifier<DeploysState> {
       data: <String, dynamic>{'name': name, 'value': value},
     );
     return List<DeployBuildSecretView>.unmodifiable(
-      raw.whereType<Map>().map(
-        (e) => DeployBuildSecretView.fromJson(Map<String, dynamic>.from(e)),
-      ),
+      asJsonList(raw, DeployBuildSecretView.fromJson),
     );
   }
 

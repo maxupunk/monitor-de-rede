@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:netmonitor_app/core/auth/auth_state.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/core/utils/plugin_presentation.dart';
+import 'package:netmonitor_app/features/plugins/providers/plugin_apps_provider.dart';
 import 'package:netmonitor_app/features/plugins/providers/plugins_provider.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
@@ -221,5 +223,35 @@ class _PluginApprovalOverlayState extends ConsumerState<PluginApprovalOverlay> {
         ),
       ),
     );
+  }
+}
+
+/// Overlay invisível da área `ProductArea.network` que sincroniza os Aplicativos
+/// de Frota no menu lateral após autenticação, sem acoplar `features/ai/`.
+class PluginAppsBootstrapOverlay extends ConsumerStatefulWidget {
+  const PluginAppsBootstrapOverlay({super.key});
+
+  @override
+  ConsumerState<PluginAppsBootstrapOverlay> createState() =>
+      _PluginAppsBootstrapOverlayState();
+}
+
+class _PluginAppsBootstrapOverlayState
+    extends ConsumerState<PluginAppsBootstrapOverlay> {
+  bool _bootstrapped = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final isAuthenticated = ref.watch(authProvider).isAuthenticated;
+    if (isAuthenticated && !_bootstrapped) {
+      _bootstrapped = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ref.read(pluginAppsProvider.notifier).fetchApps();
+      });
+    } else if (!isAuthenticated && _bootstrapped) {
+      _bootstrapped = false;
+    }
+    return const SizedBox.shrink();
   }
 }

@@ -4,11 +4,13 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
+import 'package:netmonitor_app/core/utils/file_download.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/servers/models/docker_models.dart';
 import 'package:netmonitor_app/features/servers/providers/docker_provider.dart';
-import 'package:netmonitor_app/features/servers/utils/download_helper.dart';
 import 'package:netmonitor_app/features/servers/utils/server_utils.dart';
+import 'package:netmonitor_app/features/servers/widgets/docker_history_widgets.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
 
@@ -100,8 +102,7 @@ class _ContainerDetailBodyState extends ConsumerState<_ContainerDetailBody>
     try {
       final detail = await ref
           .read(dockerProvider.notifier)
-          .apiFor()
-          .containerDetail(widget.initialContainer.id);
+          .fetchContainerDetail(widget.initialContainer.id);
       if (!mounted) return;
       setState(() {
         _detail = detail;
@@ -110,7 +111,10 @@ class _ContainerDetailBodyState extends ConsumerState<_ContainerDetailBody>
     } catch (err) {
       if (!mounted) return;
       setState(() {
-        _detailError = err.toString();
+        _detailError = describeError(
+          err,
+          fallback: 'Erro ao inspecionar container.',
+        );
         _loadingDetail = false;
       });
     }
@@ -121,8 +125,7 @@ class _ContainerDetailBodyState extends ConsumerState<_ContainerDetailBody>
     try {
       final resp = await ref
           .read(dockerProvider.notifier)
-          .apiFor()
-          .containerHistory(
+          .fetchContainerHistory(
             containerDisplayName(widget.initialContainer),
             _historyRange,
           );
@@ -142,8 +145,7 @@ class _ContainerDetailBodyState extends ConsumerState<_ContainerDetailBody>
     try {
       final entries = await ref
           .read(dockerProvider.notifier)
-          .apiFor()
-          .containerLogs(
+          .fetchContainerLogs(
             widget.initialContainer.id,
             tail: _tail,
             timestamps: true,
@@ -156,9 +158,9 @@ class _ContainerDetailBodyState extends ConsumerState<_ContainerDetailBody>
     } catch (err) {
       if (!mounted) return;
       setState(() => _loadingLogs = false);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Erro ao carregar logs: $err')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao carregar logs: ${describeError(err)}')),
+      );
     }
   }
 
@@ -178,7 +180,11 @@ class _ContainerDetailBodyState extends ConsumerState<_ContainerDetailBody>
     } catch (err) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Falha ao acompanhar logs ao vivo: $err')),
+        SnackBar(
+          content: Text(
+            'Falha ao acompanhar logs ao vivo: ${describeError(err)}',
+          ),
+        ),
       );
     }
   }
@@ -187,26 +193,26 @@ class _ContainerDetailBodyState extends ConsumerState<_ContainerDetailBody>
     try {
       final all = await ref
           .read(dockerProvider.notifier)
-          .apiFor()
-          .containerLogs(
+          .fetchContainerLogs(
             widget.initialContainer.id,
             tail: 'all',
             timestamps: true,
           );
       if (!mounted) return;
-      final name = containerDisplayName(
-        widget.initialContainer,
-      ).replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
-      await shareTextFile(
-        context,
+      final name = sanitizeFileSlug(
+        containerDisplayName(widget.initialContainer),
+        fallback: 'container',
+      );
+      await saveOrShareText(
+        context: context,
         content: all.map((e) => e.formattedLine).join('\n'),
         filename: '$name-logs.txt',
       );
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Erro ao baixar logs: $err')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao baixar logs: ${describeError(err)}')),
+      );
     }
   }
 
@@ -223,8 +229,7 @@ class _ContainerDetailBodyState extends ConsumerState<_ContainerDetailBody>
     try {
       await ref
           .read(dockerProvider.notifier)
-          .apiFor()
-          .clearLogs(widget.initialContainer.id);
+          .clearContainerLogs(widget.initialContainer.id);
       if (!mounted) return;
       setState(() => _logs = const <DockerLogEntry>[]);
       ScaffoldMessenger.of(
@@ -232,9 +237,9 @@ class _ContainerDetailBodyState extends ConsumerState<_ContainerDetailBody>
       ).showSnackBar(const SnackBar(content: Text('Logs limpos com sucesso.')));
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Erro ao limpar logs: $err')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao limpar logs: ${describeError(err)}')),
+      );
     }
   }
 
@@ -243,12 +248,7 @@ class _ContainerDetailBodyState extends ConsumerState<_ContainerDetailBody>
     final netId = _selectedConnectNetworkId!;
     final ok = await ref
         .read(dockerProvider.notifier)
-        .runAction(
-          () => ref
-              .read(dockerProvider.notifier)
-              .apiFor()
-              .connectNetwork(netId, widget.initialContainer.id),
-        );
+        .connectNetwork(netId, widget.initialContainer.id);
     if (ok && mounted) {
       setState(() => _selectedConnectNetworkId = null);
       await _loadDetail();
@@ -277,12 +277,7 @@ class _ContainerDetailBodyState extends ConsumerState<_ContainerDetailBody>
     if (!confirmed || !mounted) return;
     final ok = await ref
         .read(dockerProvider.notifier)
-        .runAction(
-          () => ref
-              .read(dockerProvider.notifier)
-              .apiFor()
-              .disconnectNetwork(networkId!, widget.initialContainer.id),
-        );
+        .disconnectNetwork(networkId, widget.initialContainer.id);
     if (ok && mounted) await _loadDetail();
   }
 
@@ -365,15 +360,10 @@ class _ContainerDetailBodyState extends ConsumerState<_ContainerDetailBody>
           child: TabBarView(
             controller: _tabController,
             children: <Widget>[
-              // 1. Consumo
               _buildUsageTab(metric),
-              // 2. Detalhes
               _buildOverviewTab(),
-              // 3. Volumes / Mounts
               _buildMountsTab(),
-              // 4. Redes
               _buildNetworksTab(isAdmin, docker.current.networks),
-              // 5. Logs
               _buildLogsTab(isAdmin, displayLogs, activeStream?.ended),
             ],
           ),
@@ -386,7 +376,7 @@ class _ContainerDetailBodyState extends ConsumerState<_ContainerDetailBody>
     final points = _history?.points ?? const <ContainerHistoryPoint>[];
     return ListView(
       children: <Widget>[
-        if (metric != null)
+        if (metric != null) ...<Widget>[
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -407,101 +397,25 @@ class _ContainerDetailBodyState extends ConsumerState<_ContainerDetailBody>
               ),
             ],
           ),
-        const SizedBox(height: 12),
-        SegmentedButton<String>(
-          showSelectedIcon: false,
-          style: SegmentedButton.styleFrom(
-            visualDensity: VisualDensity.compact,
-            padding: const EdgeInsets.symmetric(horizontal: 6),
-          ),
-          segments: const <ButtonSegment<String>>[
-            ButtonSegment(
-              value: '1h',
-              label: Text('1h', maxLines: 1, softWrap: false),
-            ),
-            ButtonSegment(
-              value: '6h',
-              label: Text('6h', maxLines: 1, softWrap: false),
-            ),
-            ButtonSegment(
-              value: '24h',
-              label: Text('24h', maxLines: 1, softWrap: false),
-            ),
-            ButtonSegment(
-              value: '7d',
-              label: Text('7d', maxLines: 1, softWrap: false),
-            ),
-            ButtonSegment(
-              value: '30d',
-              label: Text('30d', maxLines: 1, softWrap: false),
-            ),
-          ],
-          selected: <String>{_historyRange},
-          onSelectionChanged: (set) {
-            setState(() => _historyRange = set.first);
+          const SizedBox(height: 12),
+        ],
+        DockerHistoryRangeSelector(
+          selectedRange: _historyRange,
+          onChanged: (nextRange) {
+            setState(() => _historyRange = nextRange);
             _loadHistory();
           },
         ),
         const SizedBox(height: 12),
         if (_loadingHistory)
           const LoadingStateView(message: 'Carregando histórico...')
-        else ...<Widget>[
-          Text(
-            'CPU (%)',
-            style: context.textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w700,
-            ),
+        else
+          ContainerHistoryCharts(
+            points: points,
+            showNetworkAndDisk: false,
+            chartHeight: 150,
+            useGrid: false,
           ),
-          const SizedBox(height: 6),
-          MetricLineChart(
-            height: 150,
-            series: <MetricLineSeries>[
-              MetricLineSeries(
-                name: 'Média',
-                tone: SemanticTone.primary,
-                points: <MetricSeriesPoint>[
-                  for (var i = 0; i < points.length; i++)
-                    MetricSeriesPoint(x: i.toDouble(), y: points[i].cpuAvg),
-                ],
-              ),
-              MetricLineSeries(
-                name: 'Pico',
-                tone: SemanticTone.warning,
-                showArea: false,
-                points: <MetricSeriesPoint>[
-                  for (var i = 0; i < points.length; i++)
-                    MetricSeriesPoint(x: i.toDouble(), y: points[i].cpuMax),
-                ],
-              ),
-            ],
-            yFormatter: (v) => formatPercent(v, digits: 0),
-          ),
-          const SizedBox(height: 14),
-          Text(
-            'Memória (pico)',
-            style: context.textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 6),
-          MetricLineChart(
-            height: 150,
-            series: <MetricLineSeries>[
-              MetricLineSeries(
-                name: 'RAM pico',
-                tone: SemanticTone.info,
-                points: <MetricSeriesPoint>[
-                  for (var i = 0; i < points.length; i++)
-                    MetricSeriesPoint(
-                      x: i.toDouble(),
-                      y: points[i].memoryMax.toDouble(),
-                    ),
-                ],
-              ),
-            ],
-            yFormatter: (v) => formatBinaryBytes(v, fractionDigits: 0),
-          ),
-        ],
       ],
     );
   }
@@ -622,53 +536,34 @@ class _ContainerDetailBodyState extends ConsumerState<_ContainerDetailBody>
     return ListView(
       children: <Widget>[
         if (isAdmin && availableToConnect.isNotEmpty) ...<Widget>[
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final dropdown = AppDropdownFormField<String>(
-                initialValue:
-                    availableToConnect.any(
-                      (n) => n.id == _selectedConnectNetworkId,
-                    )
-                    ? _selectedConnectNetworkId
-                    : null,
-                decoration: const InputDecoration(
-                  labelText: 'Conectar a uma rede',
-                  isDense: true,
-                ),
-                items: availableToConnect
-                    .map(
-                      (n) => DropdownMenuItem<String>(
-                        value: n.id,
-                        child: Text(n.name, overflow: TextOverflow.ellipsis),
-                      ),
-                    )
-                    .toList(growable: false),
-                onChanged: (v) => setState(() => _selectedConnectNetworkId = v),
-              );
-              final addBtn = FilledButton(
-                onPressed: _selectedConnectNetworkId == null
-                    ? null
-                    : _connectNetwork,
-                child: const Text('Adicionar'),
-              );
-              if (constraints.maxWidth < 420) {
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: <Widget>[
-                    dropdown,
-                    const SizedBox(height: 8),
-                    Align(alignment: Alignment.centerRight, child: addBtn),
-                  ],
-                );
-              }
-              return Row(
-                children: <Widget>[
-                  Expanded(child: dropdown),
-                  const SizedBox(width: 8),
-                  addBtn,
-                ],
-              );
-            },
+          InlineFieldActionRow(
+            field: AppDropdownFormField<String>(
+              initialValue:
+                  availableToConnect.any(
+                    (n) => n.id == _selectedConnectNetworkId,
+                  )
+                  ? _selectedConnectNetworkId
+                  : null,
+              decoration: const InputDecoration(
+                labelText: 'Conectar a uma rede',
+                isDense: true,
+              ),
+              items: availableToConnect
+                  .map(
+                    (n) => DropdownMenuItem<String>(
+                      value: n.id,
+                      child: Text(n.name, overflow: TextOverflow.ellipsis),
+                    ),
+                  )
+                  .toList(growable: false),
+              onChanged: (v) => setState(() => _selectedConnectNetworkId = v),
+            ),
+            action: FilledButton(
+              onPressed: _selectedConnectNetworkId == null
+                  ? null
+                  : _connectNetwork,
+              child: const Text('Adicionar'),
+            ),
           ),
           const SizedBox(height: 12),
         ],

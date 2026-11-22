@@ -4,6 +4,9 @@ import 'package:go_router/go_router.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/ai/models/ai_models.dart';
 import 'package:netmonitor_app/features/ai/providers/ai_providers.dart';
+import 'package:netmonitor_app/features/ai/widgets/ai_model_catalog_sheet.dart';
+import 'package:netmonitor_app/features/ai/widgets/ai_model_pull_panel.dart';
+import 'package:netmonitor_app/features/ai/widgets/ai_proactive_settings_section.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
 
@@ -106,139 +109,12 @@ class _AiSettingsCardState extends ConsumerState<AiSettingsCard> {
   }
 
   Future<void> _openModelSearchDialog(List<AiProviderModelItem> items) async {
-    final searchCtrl = TextEditingController();
-    var filter = 'all';
-
-    final chosen = await showAdaptiveFormSheet<String>(
+    final chosen = await showAiModelCatalogSheet(
       context: context,
-      title: 'Selecionar modelo (${_form.activeDriver})',
-      maxWidth: 640,
-      builder: (sheetCtx) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            final q = searchCtrl.text.trim().toLowerCase();
-            final filtered = items
-                .where((m) {
-                  if (filter == 'free' && !m.isFree) return false;
-                  if (filter == 'tools' && !m.supportsTools) return false;
-                  if (filter == 'installed' && !m.installed) return false;
-                  if (filter == 'recommended' && !m.recommended) return false;
-                  if (q.isNotEmpty) {
-                    return m.id.toLowerCase().contains(q) ||
-                        m.name.toLowerCase().contains(q) ||
-                        (m.description?.toLowerCase().contains(q) ?? false);
-                  }
-                  return true;
-                })
-                .take(40)
-                .toList(growable: false);
-
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                TextField(
-                  controller: searchCtrl,
-                  onChanged: (_) => setModalState(() {}),
-                  decoration: const InputDecoration(
-                    hintText: 'Buscar modelo por nome ou slug...',
-                    prefixIcon: Icon(Icons.search, size: 18),
-                    isDense: true,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: <Widget>[
-                    for (final entry in const <(String, String)>[
-                      ('all', 'Todos'),
-                      ('free', 'Gratuitos'),
-                      ('tools', 'Com ferramentas'),
-                      ('installed', 'Instalados'),
-                      ('recommended', 'Recomendados'),
-                    ])
-                      ChoiceChip(
-                        label: Text(entry.$2),
-                        selected: filter == entry.$1,
-                        onSelected: (_) =>
-                            setModalState(() => filter = entry.$1),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                if (filtered.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 20),
-                    child: Column(
-                      children: <Widget>[
-                        const Text('Nenhum modelo encontrado na lista.'),
-                        if (q.isNotEmpty) ...<Widget>[
-                          const SizedBox(height: 8),
-                          FilledButton.tonal(
-                            onPressed: () => Navigator.of(
-                              sheetCtx,
-                            ).pop(searchCtrl.text.trim()),
-                            child: Text('Usar "${searchCtrl.text.trim()}"'),
-                          ),
-                        ],
-                      ],
-                    ),
-                  )
-                else
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxHeight: 340),
-                    child: ListView.separated(
-                      shrinkWrap: true,
-                      itemCount: filtered.length,
-                      separatorBuilder: (_, _) => const Divider(height: 1),
-                      itemBuilder: (context, index) {
-                        final m = filtered[index];
-                        return ListTile(
-                          dense: true,
-                          title: Text(
-                            m.name,
-                            style: const TextStyle(fontWeight: FontWeight.w600),
-                          ),
-                          subtitle: Text(
-                            <String>[
-                              m.id,
-                              if (m.contextLength != null)
-                                'ctx ${formatContextWindow(m.contextLength)}',
-                              if (m.sizeBytes != null) formatBytes(m.sizeBytes),
-                            ].join(' · '),
-                          ),
-                          trailing: Wrap(
-                            spacing: 4,
-                            children: <Widget>[
-                              if (m.installed)
-                                const SemanticChip(
-                                  label: 'Instalado',
-                                  tone: SemanticTone.success,
-                                  compact: true,
-                                ),
-                              if (m.recommended)
-                                const SemanticChip(
-                                  label: 'Recomendado',
-                                  tone: SemanticTone.ai,
-                                  compact: true,
-                                ),
-                            ],
-                          ),
-                          onTap: () => Navigator.of(sheetCtx).pop(m.id),
-                        );
-                      },
-                    ),
-                  ),
-              ],
-            );
-          },
-        );
-      },
+      driver: _form.activeDriver,
+      items: items,
     );
-    searchCtrl.dispose();
-
-    if (chosen == null || chosen.isEmpty) return;
+    if (chosen == null || chosen.isEmpty || !mounted) return;
     setState(() {
       if (_form.activeDriver == 'ollama') {
         _ollamaModelCtrl.text = chosen;
@@ -300,7 +176,6 @@ class _AiSettingsCardState extends ConsumerState<AiSettingsCard> {
       });
     }
 
-    final scheme = context.colorScheme;
     final catalog = switch (_form.activeDriver) {
       'openrouter' => state.openRouterCatalog,
       'opencode' => state.openCodeCatalog,
@@ -364,7 +239,6 @@ class _AiSettingsCardState extends ConsumerState<AiSettingsCard> {
                 ),
                 const SizedBox(height: 12),
 
-                // Campos específicos por provedor
                 if (_form.activeDriver == 'ollama') ...<Widget>[
                   TextField(
                     controller: _ollamaUrlCtrl,
@@ -485,97 +359,21 @@ class _AiSettingsCardState extends ConsumerState<AiSettingsCard> {
                       () => _form = _form.copyWith(ollamaNetmonitorTrained: v),
                     ),
                   ),
-                  // Instalador Ollama (stream SSE-over-POST)
                   const SizedBox(height: 8),
-                  NestedPanel(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: <Widget>[
-                        Text(
-                          'Baixar modelo no Ollama',
-                          style: context.textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        LayoutBuilder(
-                          builder: (context, constraints) {
-                            final field = TextField(
-                              controller: _pullModelCtrl,
-                              enabled: !state.pulling,
-                              decoration: const InputDecoration(
-                                hintText: 'Ex.: qwen2.5:7b-instruct',
-                                isDense: true,
-                              ),
-                            );
-                            final actionBtn = state.pulling
-                                ? OutlinedButton.icon(
-                                    onPressed: () => ref
-                                        .read(aiSettingsProvider.notifier)
-                                        .cancelPull(),
-                                    icon: const Icon(Icons.close, size: 18),
-                                    label: const Text('Cancelar'),
-                                  )
-                                : FilledButton.tonalIcon(
-                                    onPressed: () {
-                                      final m = _pullModelCtrl.text.trim();
-                                      if (m.isEmpty) return;
-                                      ref
-                                          .read(aiSettingsProvider.notifier)
-                                          .pullOllamaModel(
-                                            m,
-                                            baseUrl: _ollamaUrlCtrl.text,
-                                          );
-                                    },
-                                    icon: const Icon(Icons.download, size: 18),
-                                    label: const Text('Baixar'),
-                                  );
-                            if (constraints.maxWidth < 400) {
-                              return Column(
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: <Widget>[
-                                  field,
-                                  const SizedBox(height: 8),
-                                  Align(
-                                    alignment: Alignment.centerRight,
-                                    child: actionBtn,
-                                  ),
-                                ],
-                              );
-                            }
-                            return Row(
-                              children: <Widget>[
-                                Expanded(child: field),
-                                const SizedBox(width: 8),
-                                actionBtn,
-                              ],
-                            );
-                          },
-                        ),
-                        if (state.pullProgress != null) ...<Widget>[
-                          const SizedBox(height: 10),
-                          LinearProgressIndicator(
-                            value: state.pullProgress!.percentage != null
-                                ? (state.pullProgress!.percentage! / 100).clamp(
-                                    0.0,
-                                    1.0,
-                                  )
-                                : null,
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            state.pullProgress!.error ??
-                                '${state.pullProgress!.status}'
-                                    '${state.pullProgress!.completed != null && state.pullProgress!.total != null ? ' · ${formatBytes(state.pullProgress!.completed)} / ${formatBytes(state.pullProgress!.total)}' : ''}',
-                            style: context.textTheme.labelSmall?.copyWith(
-                              color: state.pullProgress!.error != null
-                                  ? scheme.error
-                                  : scheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
+                  AiModelPullPanel(
+                    title: 'Baixar modelo no Ollama',
+                    controller: _pullModelCtrl,
+                    pulling: state.pulling,
+                    progress: state.pullProgress,
+                    onCancel: () =>
+                        ref.read(aiSettingsProvider.notifier).cancelPull(),
+                    onPull: () {
+                      final m = _pullModelCtrl.text.trim();
+                      if (m.isEmpty) return;
+                      ref
+                          .read(aiSettingsProvider.notifier)
+                          .pullOllamaModel(m, baseUrl: _ollamaUrlCtrl.text);
+                    },
                   ),
                 ] else if (_form.activeDriver == 'openrouter') ...<Widget>[
                   TextField(
@@ -774,196 +572,11 @@ class _AiSettingsCardState extends ConsumerState<AiSettingsCard> {
                 ),
 
                 const Divider(height: 28),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: <Widget>[
-                    Text(
-                      'IA Proativa (resumos e digests)',
-                      style: context.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SemanticChip(
-                      label: 'consome tokens',
-                      tone: SemanticTone.warning,
-                      compact: true,
-                    ),
-                  ],
+                AiProactiveSettingsSection(
+                  proactive: _form.proactive,
+                  onChanged: (next) =>
+                      setState(() => _form = _form.copyWith(proactive: next)),
                 ),
-                const SizedBox(height: 8),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Resumo automático de incidentes'),
-                  subtitle: const Text(
-                    'Explica causa provável e próximos passos quando alertas disparam.',
-                  ),
-                  value: _form.proactive.incidentSummaries,
-                  onChanged: (v) => setState(
-                    () => _form = _form.copyWith(
-                      proactive: _form.proactive.copyWith(incidentSummaries: v),
-                    ),
-                  ),
-                ),
-                if (_form.proactive.incidentSummaries) ...<Widget>[
-                  ResponsiveFieldRow(
-                    breakpoint: 480,
-                    spacing: 12,
-                    runSpacing: 12,
-                    children: <Widget>[
-                      AppDropdownFormField<String>(
-                        initialValue: _form.proactive.incidentMinSeverity,
-                        decoration: const InputDecoration(
-                          labelText: 'Severidade mínima',
-                        ),
-                        items: const <DropdownMenuItem<String>>[
-                          DropdownMenuItem<String>(
-                            value: 'critical',
-                            child: Text(
-                              'Crítico',
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          DropdownMenuItem<String>(
-                            value: 'warning',
-                            child: Text(
-                              'Aviso ou maior',
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                        onChanged: (v) {
-                          if (v != null) {
-                            setState(
-                              () => _form = _form.copyWith(
-                                proactive: _form.proactive.copyWith(
-                                  incidentMinSeverity: v,
-                                ),
-                              ),
-                            );
-                          }
-                        },
-                      ),
-                      AppDropdownFormField<int>(
-                        initialValue: _form.proactive.maxSummariesPerHour.clamp(
-                          1,
-                          60,
-                        ),
-                        decoration: const InputDecoration(
-                          labelText: 'Máx. resumos por hora',
-                        ),
-                        items: const <int>[2, 4, 6, 10, 20, 30, 60]
-                            .map(
-                              (n) => DropdownMenuItem<int>(
-                                value: n,
-                                child: Text(
-                                  '$n / hora',
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            )
-                            .toList(growable: false),
-                        onChanged: (v) {
-                          if (v != null) {
-                            setState(
-                              () => _form = _form.copyWith(
-                                proactive: _form.proactive.copyWith(
-                                  maxSummariesPerHour: v,
-                                ),
-                              ),
-                            );
-                          }
-                        },
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                ],
-                ResponsiveFieldRow(
-                  breakpoint: 480,
-                  spacing: 12,
-                  runSpacing: 12,
-                  children: <Widget>[
-                    AppDropdownFormField<String>(
-                      initialValue: _form.proactive.digest,
-                      decoration: const InputDecoration(
-                        labelText: 'Resumo periódico (Digest)',
-                      ),
-                      items: const <DropdownMenuItem<String>>[
-                        DropdownMenuItem<String>(
-                          value: 'off',
-                          child: Text(
-                            'Desligado',
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        DropdownMenuItem<String>(
-                          value: 'daily',
-                          child: Text(
-                            'Diário',
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        DropdownMenuItem<String>(
-                          value: 'weekly',
-                          child: Text(
-                            'Semanal',
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                      onChanged: (v) {
-                        if (v != null) {
-                          setState(
-                            () => _form = _form.copyWith(
-                              proactive: _form.proactive.copyWith(digest: v),
-                            ),
-                          );
-                        }
-                      },
-                    ),
-                    if (_form.proactive.digest != 'off')
-                      AppDropdownFormField<int>(
-                        initialValue: _form.proactive.digestHour.clamp(0, 23),
-                        decoration: const InputDecoration(
-                          labelText: 'Horário do servidor',
-                        ),
-                        items: List<DropdownMenuItem<int>>.generate(
-                          24,
-                          (h) => DropdownMenuItem<int>(
-                            value: h,
-                            child: Text(
-                              formatHourOfDay(h),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ),
-                        onChanged: (v) {
-                          if (v != null) {
-                            setState(
-                              () => _form = _form.copyWith(
-                                proactive: _form.proactive.copyWith(
-                                  digestHour: v,
-                                ),
-                              ),
-                            );
-                          }
-                        },
-                      ),
-                  ],
-                ),
-                if (_form.proactive.digest != 'off')
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Pular digest quando tudo estiver calmo'),
-                    value: _form.proactive.skipQuietDigest,
-                    onChanged: (v) => setState(
-                      () => _form = _form.copyWith(
-                        proactive: _form.proactive.copyWith(skipQuietDigest: v),
-                      ),
-                    ),
-                  ),
 
                 const SizedBox(height: 12),
                 TextField(

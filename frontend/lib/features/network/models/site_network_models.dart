@@ -1,5 +1,9 @@
 import 'package:flutter/foundation.dart';
+import 'package:netmonitor_app/core/utils/network_address_utils.dart';
 import 'package:netmonitor_app/features/network/models/device_models.dart';
+
+export 'package:netmonitor_app/core/utils/network_address_utils.dart'
+    show compareIpAddresses;
 
 @immutable
 class SiteModel {
@@ -453,21 +457,4 @@ class ScanSessionState {
       finishedAt: json['finishedAt'] as String?,
     );
   }
-}
-
-/// Ordenação numérica de endereços IPv4 (ex.: `.2` antes de `.10`).
-int compareIpAddresses(String a, String b) {
-  final partsA = a.split('.').map(int.tryParse).toList();
-  final partsB = b.split('.').map(int.tryParse).toList();
-  if (partsA.length == 4 &&
-      partsB.length == 4 &&
-      partsA.every((e) => e != null) &&
-      partsB.every((e) => e != null)) {
-    for (var i = 0; i < 4; i++) {
-      final diff = partsA[i]! - partsB[i]!;
-      if (diff != 0) return diff;
-    }
-    return 0;
-  }
-  return a.compareTo(b);
 }

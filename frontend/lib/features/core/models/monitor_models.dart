@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 
 @immutable
 class MonitorResult {
@@ -28,20 +29,16 @@ class MonitorResult {
 
   factory MonitorResult.fromJson(Map<String, dynamic> json) {
     return MonitorResult(
-      id:
-          (json['id'] as num?)?.toInt() ??
-          DateTime.now().millisecondsSinceEpoch,
-      monitorId: (json['monitorId'] as num?)?.toInt() ?? 0,
-      probeId: (json['probeId'] as num?)?.toInt(),
+      id: parseIntOrNull(json['id']) ?? DateTime.now().millisecondsSinceEpoch,
+      monitorId: parseIntOrNull(json['monitorId']) ?? 0,
+      probeId: parseIntOrNull(json['probeId']),
       status: (json['status'] ?? 'unknown').toString(),
       startedAt: (json['startedAt'] ?? json['finishedAt'] ?? '').toString(),
       finishedAt: (json['finishedAt'] ?? json['startedAt'] ?? '').toString(),
-      durationMs: (json['durationMs'] as num?)?.toInt() ?? 0,
-      latencyMs: (json['latencyMs'] as num?)?.toDouble(),
+      durationMs: parseIntOrNull(json['durationMs']) ?? 0,
+      latencyMs: parseDoubleOrNull(json['latencyMs']),
       message: json['message'] as String?,
-      data: json['data'] is Map
-          ? Map<String, dynamic>.from(json['data'] as Map)
-          : null,
+      data: json['data'] is Map ? asJsonMap(json['data']) : null,
     );
   }
 }
@@ -68,13 +65,13 @@ class MonitorStats {
 
   factory MonitorStats.fromJson(Map<String, dynamic> json) {
     return MonitorStats(
-      avgLatency: (json['avgLatency'] as num?)?.toDouble(),
-      minLatency: (json['minLatency'] as num?)?.toDouble(),
-      maxLatency: (json['maxLatency'] as num?)?.toDouble(),
-      lastLatency: (json['lastLatency'] as num?)?.toDouble(),
-      uptimePercentage: (json['uptimePercentage'] as num?)?.toDouble() ?? 100.0,
-      totalChecks: (json['totalChecks'] as num?)?.toInt() ?? 0,
-      upChecks: (json['upChecks'] as num?)?.toInt() ?? 0,
+      avgLatency: parseDoubleOrNull(json['avgLatency']),
+      minLatency: parseDoubleOrNull(json['minLatency']),
+      maxLatency: parseDoubleOrNull(json['maxLatency']),
+      lastLatency: parseDoubleOrNull(json['lastLatency']),
+      uptimePercentage: parseDoubleOrNull(json['uptimePercentage']) ?? 100.0,
+      totalChecks: parseIntOrNull(json['totalChecks']) ?? 0,
+      upChecks: parseIntOrNull(json['upChecks']) ?? 0,
     );
   }
 
@@ -106,7 +103,7 @@ class MonitorStats {
       maxLatency: max,
       lastLatency: latencies.isNotEmpty ? latencies.last : null,
       uptimePercentage: total > 0
-          ? double.parse(((up / total) * 100).toStringAsFixed(1))
+          ? (((up / total) * 1000).roundToDouble() / 10.0)
           : 100.0,
       totalChecks: total,
       upChecks: up,
@@ -123,7 +120,7 @@ class MonitorGaugeSample {
 
   factory MonitorGaugeSample.fromJson(Map<String, dynamic> json) {
     return MonitorGaugeSample(
-      value: (json['value'] as num?)?.toDouble() ?? 0,
+      value: parseDoubleOrNull(json['value']) ?? 0,
       recordedAt: (json['recordedAt'] ?? '').toString(),
     );
   }
@@ -150,11 +147,11 @@ class MonitorGaugeMetric {
   factory MonitorGaugeMetric.fromJson(Map<String, dynamic> json) {
     return MonitorGaugeMetric(
       name: (json['name'] ?? '').toString(),
-      value: (json['value'] as num?)?.toDouble() ?? 0,
+      value: parseDoubleOrNull(json['value']) ?? 0,
       unit: (json['unit'] ?? '').toString(),
       recordedAt: (json['recordedAt'] ?? '').toString(),
-      usagePercent: (json['usagePercent'] as num?)?.toDouble(),
-      totalBytes: (json['totalBytes'] as num?)?.toDouble(),
+      usagePercent: parseDoubleOrNull(json['usagePercent']),
+      totalBytes: parseDoubleOrNull(json['totalBytes']),
     );
   }
 }
@@ -311,74 +308,53 @@ class MonitorModel {
   factory MonitorModel.fromJson(Map<String, dynamic> json) {
     final enabled =
         (json['isEnabled'] as bool?) ?? (json['enabled'] as bool?) ?? true;
-    final deviceMap = json['device'] is Map
-        ? Map<String, dynamic>.from(json['device'] as Map)
-        : null;
-    final probeMap = json['probe'] is Map
-        ? Map<String, dynamic>.from(json['probe'] as Map)
-        : null;
-    final rawResults = json['recentResults'] is List
-        ? json['recentResults'] as List
-        : const [];
-    final rawGaugeHistory = json['gaugeHistory'] is List
-        ? json['gaugeHistory'] as List
-        : const [];
-    final rawInHistory = json['inHistory'] is List
-        ? json['inHistory'] as List
-        : const [];
-    final rawOutHistory = json['outHistory'] is List
-        ? json['outHistory'] as List
-        : const [];
+    final deviceMap = json['device'] is Map ? asJsonMap(json['device']) : null;
+    final probeMap = json['probe'] is Map ? asJsonMap(json['probe']) : null;
 
     return MonitorModel(
-      id: (json['id'] as num?)?.toInt() ?? 0,
-      deviceId: (json['deviceId'] as num?)?.toInt() ?? 0,
-      probeId: (json['probeId'] as num?)?.toInt(),
+      id: parseIntOrNull(json['id']) ?? 0,
+      deviceId: parseIntOrNull(json['deviceId']) ?? 0,
+      probeId: parseIntOrNull(json['probeId']),
       name: (json['name'] ?? '').toString(),
       type: (json['type'] ?? 'ping').toString(),
       target: (json['target'] ?? '').toString(),
-      port: (json['port'] as num?)?.toInt(),
-      configuration: json['configuration'] is Map
-          ? Map<String, dynamic>.from(json['configuration'] as Map)
-          : const <String, dynamic>{},
-      intervalSeconds: (json['intervalSeconds'] as num?)?.toInt() ?? 60,
-      timeoutSeconds: (json['timeoutSeconds'] as num?)?.toInt() ?? 5,
-      retryCount: (json['retryCount'] as num?)?.toInt(),
+      port: parseIntOrNull(json['port']),
+      configuration: asJsonMap(json['configuration']),
+      intervalSeconds: parseIntOrNull(json['intervalSeconds']) ?? 60,
+      timeoutSeconds: parseIntOrNull(json['timeoutSeconds']) ?? 5,
+      retryCount: parseIntOrNull(json['retryCount']),
       status: (json['status'] ?? json['currentStatus'] ?? 'unknown').toString(),
       isEnabled: enabled,
       lastCheckedAt: json['lastCheckedAt'] as String?,
-      lastLatencyMs: ((json['lastLatencyMs'] ?? json['latencyMs']) as num?)
-          ?.toDouble(),
-      deviceName: deviceMap?['name'] as String?,
-      probeName: probeMap?['name'] as String?,
-      recentResults: rawResults
-          .whereType<Map>()
-          .map((e) => MonitorResult.fromJson(Map<String, dynamic>.from(e)))
-          .toList(growable: false),
+      lastLatencyMs: parseDoubleOrNull(
+        json['lastLatencyMs'] ?? json['latencyMs'],
+      ),
+      deviceName: (json['deviceName'] ?? deviceMap?['name']) as String?,
+      probeName: (json['probeName'] ?? probeMap?['name']) as String?,
+      recentResults: asJsonList<MonitorResult>(
+        json['recentResults'],
+        MonitorResult.fromJson,
+      ),
       stats: json['stats'] is Map
-          ? MonitorStats.fromJson(
-              Map<String, dynamic>.from(json['stats'] as Map),
-            )
+          ? MonitorStats.fromJson(asJsonMap(json['stats']))
           : null,
       gaugeMetric: json['gaugeMetric'] is Map
-          ? MonitorGaugeMetric.fromJson(
-              Map<String, dynamic>.from(json['gaugeMetric'] as Map),
-            )
+          ? MonitorGaugeMetric.fromJson(asJsonMap(json['gaugeMetric']))
           : null,
-      gaugeHistory: rawGaugeHistory
-          .whereType<Map>()
-          .map((e) => MonitorGaugeSample.fromJson(Map<String, dynamic>.from(e)))
-          .toList(growable: false),
-      inHistory: rawInHistory
-          .whereType<Map>()
-          .map((e) => MonitorGaugeSample.fromJson(Map<String, dynamic>.from(e)))
-          .toList(growable: false),
-      outHistory: rawOutHistory
-          .whereType<Map>()
-          .map((e) => MonitorGaugeSample.fromJson(Map<String, dynamic>.from(e)))
-          .toList(growable: false),
-      inBps: (json['inBps'] as num?)?.toDouble(),
-      outBps: (json['outBps'] as num?)?.toDouble(),
+      gaugeHistory: asJsonList<MonitorGaugeSample>(
+        json['gaugeHistory'],
+        MonitorGaugeSample.fromJson,
+      ),
+      inHistory: asJsonList<MonitorGaugeSample>(
+        json['inHistory'],
+        MonitorGaugeSample.fromJson,
+      ),
+      outHistory: asJsonList<MonitorGaugeSample>(
+        json['outHistory'],
+        MonitorGaugeSample.fromJson,
+      ),
+      inBps: parseDoubleOrNull(json['inBps']),
+      outBps: parseDoubleOrNull(json['outBps']),
       inMaintenance: json['inMaintenance'] == true,
     );
   }
@@ -408,14 +384,14 @@ class MonitorUptimeResponse {
 
   factory MonitorUptimeResponse.fromJson(Map<String, dynamic> json) {
     return MonitorUptimeResponse(
-      monitorId: (json['monitorId'] as num?)?.toInt() ?? 0,
-      hours: (json['hours'] as num?)?.toInt() ?? 24,
-      uptimePercentage: (json['uptimePercentage'] as num?)?.toDouble() ?? 0,
-      totalChecks: (json['totalChecks'] as num?)?.toInt() ?? 0,
-      upChecks: (json['upChecks'] as num?)?.toInt() ?? 0,
-      downChecks: (json['downChecks'] as num?)?.toInt() ?? 0,
-      unknownChecks: (json['unknownChecks'] as num?)?.toInt() ?? 0,
-      avgLatencyMs: (json['avgLatencyMs'] as num?)?.toDouble(),
+      monitorId: parseIntOrNull(json['monitorId']) ?? 0,
+      hours: parseIntOrNull(json['hours']) ?? 24,
+      uptimePercentage: parseDoubleOrNull(json['uptimePercentage']) ?? 0,
+      totalChecks: parseIntOrNull(json['totalChecks']) ?? 0,
+      upChecks: parseIntOrNull(json['upChecks']) ?? 0,
+      downChecks: parseIntOrNull(json['downChecks']) ?? 0,
+      unknownChecks: parseIntOrNull(json['unknownChecks']) ?? 0,
+      avgLatencyMs: parseDoubleOrNull(json['avgLatencyMs']),
     );
   }
 }
@@ -469,7 +445,7 @@ class DeviceRefOption {
 
   factory DeviceRefOption.fromJson(Map<String, dynamic> json) {
     return DeviceRefOption(
-      id: (json['id'] as num?)?.toInt() ?? 0,
+      id: parseIntOrNull(json['id']) ?? 0,
       name: (json['name'] ?? '').toString(),
       ipAddress: json['ipAddress'] as String?,
       status: json['status'] as String?,
@@ -487,7 +463,7 @@ class ProbeRefOption {
 
   factory ProbeRefOption.fromJson(Map<String, dynamic> json) {
     return ProbeRefOption(
-      id: (json['id'] as num?)?.toInt() ?? 0,
+      id: parseIntOrNull(json['id']) ?? 0,
       name: (json['name'] ?? '').toString(),
       status: json['status'] as String?,
     );
@@ -503,7 +479,7 @@ class SiteRefOption {
 
   factory SiteRefOption.fromJson(Map<String, dynamic> json) {
     return SiteRefOption(
-      id: (json['id'] as num?)?.toInt() ?? 0,
+      id: parseIntOrNull(json['id']) ?? 0,
       name: (json['name'] ?? '').toString(),
     );
   }
@@ -525,9 +501,9 @@ class DeviceInterfaceRef {
 
   factory DeviceInterfaceRef.fromJson(Map<String, dynamic> json) {
     return DeviceInterfaceRef(
-      id: (json['id'] as num?)?.toInt() ?? 0,
+      id: parseIntOrNull(json['id']) ?? 0,
       name: (json['name'] ?? json['ifName'] ?? '').toString(),
-      ifIndex: (json['ifIndex'] as num?)?.toInt(),
+      ifIndex: parseIntOrNull(json['ifIndex']),
       operStatus: json['operStatus'] as String?,
     );
   }

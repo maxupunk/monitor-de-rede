@@ -1,4 +1,7 @@
 import 'package:flutter/foundation.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
+
+export 'docker_history_models.dart';
 
 /// Host Docker retornado por `GET /api/docker/hosts`.
 /// Todo host é um agente (`HostKey = agent-<id>`, ADR 014).
@@ -40,18 +43,15 @@ class DockerHostView {
   }
 
   factory DockerHostView.fromJson(Map<String, dynamic> json) {
-    final rawPolicy = json['policy'];
     return DockerHostView(
       key: (json['key'] as String?) ?? '',
       name: (json['name'] as String?) ?? '',
       kind: (json['kind'] as String?) ?? 'agent',
-      online: json['online'] == true,
-      agentId: (json['agentId'] as num?)?.toInt() ?? 0,
-      dockerAvailable: json['dockerAvailable'] == true,
-      composeAvailable: json['composeAvailable'] == true,
-      policy: rawPolicy is List
-          ? List<String>.unmodifiable(rawPolicy.whereType<String>())
-          : const <String>[],
+      online: parseBool(json['online']),
+      agentId: parseIntOrNull(json['agentId']) ?? 0,
+      dockerAvailable: parseBool(json['dockerAvailable']),
+      composeAvailable: parseBool(json['composeAvailable']),
+      policy: List<String>.unmodifiable(asStringList(json['policy'])),
     );
   }
 }
@@ -90,19 +90,19 @@ class DockerStatusResponse {
 
   factory DockerStatusResponse.fromJson(Map<String, dynamic> json) {
     return DockerStatusResponse(
-      available: json['available'] == true,
+      available: parseBool(json['available']),
       reason: json['reason'] as String?,
       engineVersion: json['engineVersion'] as String?,
       apiVersion: json['apiVersion'] as String?,
       name: json['name'] as String?,
       operatingSystem: json['operatingSystem'] as String?,
       architecture: json['architecture'] as String?,
-      cpus: (json['cpus'] as num?)?.toInt() ?? 0,
-      memoryTotalBytes: (json['memoryTotalBytes'] as num?)?.toInt() ?? 0,
-      containers: (json['containers'] as num?)?.toInt() ?? 0,
-      containersRunning: (json['containersRunning'] as num?)?.toInt() ?? 0,
-      containersStopped: (json['containersStopped'] as num?)?.toInt() ?? 0,
-      images: (json['images'] as num?)?.toInt() ?? 0,
+      cpus: parseIntOrNull(json['cpus']) ?? 0,
+      memoryTotalBytes: parseIntOrNull(json['memoryTotalBytes']) ?? 0,
+      containers: parseIntOrNull(json['containers']) ?? 0,
+      containersRunning: parseIntOrNull(json['containersRunning']) ?? 0,
+      containersStopped: parseIntOrNull(json['containersStopped']) ?? 0,
+      images: parseIntOrNull(json['images']) ?? 0,
     );
   }
 }
@@ -132,8 +132,8 @@ class DockerPortBinding {
   factory DockerPortBinding.fromJson(Map<String, dynamic> json) {
     return DockerPortBinding(
       ip: json['ip'] as String?,
-      privatePort: (json['privatePort'] as num?)?.toInt() ?? 0,
-      publicPort: (json['publicPort'] as num?)?.toInt(),
+      privatePort: parseIntOrNull(json['privatePort']) ?? 0,
+      publicPort: parseIntOrNull(json['publicPort']),
       type: (json['type'] as String?) ?? 'tcp',
     );
   }
@@ -172,35 +172,20 @@ class DockerContainerSummary {
       protected || labels['com.netmonitor.protected']?.toLowerCase() == 'true';
 
   factory DockerContainerSummary.fromJson(Map<String, dynamic> json) {
-    final rawNames = json['names'];
-    final rawLabels = json['labels'];
-    final rawPorts = json['ports'];
-    final labelsMap = <String, String>{};
-    if (rawLabels is Map) {
-      rawLabels.forEach((k, v) {
-        if (k != null && v != null) labelsMap[k.toString()] = v.toString();
-      });
-    }
     return DockerContainerSummary(
       id: (json['id'] as String?) ?? '',
-      names: rawNames is List
-          ? List<String>.unmodifiable(rawNames.whereType<String>())
-          : const <String>[],
+      names: List<String>.unmodifiable(asStringList(json['names'])),
       image: (json['image'] as String?) ?? '',
       imageId: (json['imageId'] as String?) ?? '',
       state: (json['state'] as String?) ?? 'unknown',
       status: (json['status'] as String?) ?? '',
-      labels: Map<String, String>.unmodifiable(labelsMap),
-      ports: rawPorts is List
-          ? List<DockerPortBinding>.unmodifiable(
-              rawPorts.whereType<Map>().map(
-                (e) => DockerPortBinding.fromJson(Map<String, dynamic>.from(e)),
-              ),
-            )
-          : const <DockerPortBinding>[],
-      created: (json['created'] as num?)?.toInt() ?? 0,
+      labels: asStringMap(json['labels']),
+      ports: List<DockerPortBinding>.unmodifiable(
+        asJsonList(json['ports'], DockerPortBinding.fromJson),
+      ),
+      created: parseIntOrNull(json['created']) ?? 0,
       projectName: json['projectName'] as String?,
-      protected: json['protected'] == true,
+      protected: parseBool(json['protected']),
     );
   }
 }
@@ -212,7 +197,7 @@ class DockerCpuMetrics {
 
   factory DockerCpuMetrics.fromJson(Map<String, dynamic> json) {
     return DockerCpuMetrics(
-      usagePercent: (json['usagePercent'] as num?)?.toDouble() ?? 0,
+      usagePercent: parseDoubleOrNull(json['usagePercent']) ?? 0,
     );
   }
 }
@@ -231,9 +216,9 @@ class DockerMemoryMetrics {
 
   factory DockerMemoryMetrics.fromJson(Map<String, dynamic> json) {
     return DockerMemoryMetrics(
-      usageBytes: (json['usageBytes'] as num?)?.toInt() ?? 0,
-      limitBytes: (json['limitBytes'] as num?)?.toInt() ?? 0,
-      usagePercent: (json['usagePercent'] as num?)?.toDouble() ?? 0,
+      usageBytes: parseIntOrNull(json['usageBytes']) ?? 0,
+      limitBytes: parseIntOrNull(json['limitBytes']) ?? 0,
+      usagePercent: parseDoubleOrNull(json['usagePercent']) ?? 0,
     );
   }
 }
@@ -250,8 +235,8 @@ class DockerNetworkMetrics {
 
   factory DockerNetworkMetrics.fromJson(Map<String, dynamic> json) {
     return DockerNetworkMetrics(
-      receivedBytes: (json['receivedBytes'] as num?)?.toInt() ?? 0,
-      transmittedBytes: (json['transmittedBytes'] as num?)?.toInt() ?? 0,
+      receivedBytes: parseIntOrNull(json['receivedBytes']) ?? 0,
+      transmittedBytes: parseIntOrNull(json['transmittedBytes']) ?? 0,
     );
   }
 }
@@ -265,8 +250,8 @@ class DockerIoMetrics {
 
   factory DockerIoMetrics.fromJson(Map<String, dynamic> json) {
     return DockerIoMetrics(
-      readBytes: (json['readBytes'] as num?)?.toInt() ?? 0,
-      writeBytes: (json['writeBytes'] as num?)?.toInt() ?? 0,
+      readBytes: parseIntOrNull(json['readBytes']) ?? 0,
+      writeBytes: parseIntOrNull(json['writeBytes']) ?? 0,
     );
   }
 }
@@ -305,30 +290,22 @@ class DockerContainerMetrics {
       imageName: (json['imageName'] as String?) ?? '',
       status: (json['status'] as String?) ?? '',
       cpu: json['cpu'] is Map
-          ? DockerCpuMetrics.fromJson(
-              Map<String, dynamic>.from(json['cpu'] as Map),
-            )
+          ? DockerCpuMetrics.fromJson(asJsonMap(json['cpu']))
           : const DockerCpuMetrics(usagePercent: 0),
       memory: json['memory'] is Map
-          ? DockerMemoryMetrics.fromJson(
-              Map<String, dynamic>.from(json['memory'] as Map),
-            )
+          ? DockerMemoryMetrics.fromJson(asJsonMap(json['memory']))
           : const DockerMemoryMetrics(
               usageBytes: 0,
               limitBytes: 0,
               usagePercent: 0,
             ),
       network: json['network'] is Map
-          ? DockerNetworkMetrics.fromJson(
-              Map<String, dynamic>.from(json['network'] as Map),
-            )
+          ? DockerNetworkMetrics.fromJson(asJsonMap(json['network']))
           : const DockerNetworkMetrics(receivedBytes: 0, transmittedBytes: 0),
       blockIo: json['blockIo'] is Map
-          ? DockerIoMetrics.fromJson(
-              Map<String, dynamic>.from(json['blockIo'] as Map),
-            )
+          ? DockerIoMetrics.fromJson(asJsonMap(json['blockIo']))
           : const DockerIoMetrics(readBytes: 0, writeBytes: 0),
-      pids: (json['pids'] as num?)?.toInt(),
+      pids: parseIntOrNull(json['pids']),
     );
   }
 }
@@ -350,22 +327,14 @@ class DockerMetricsResponse {
   final List<DockerContainerMetrics> containers;
 
   factory DockerMetricsResponse.fromJson(Map<String, dynamic> json) {
-    final rawList = json['containers'];
     return DockerMetricsResponse(
-      dockerAvailable: json['dockerAvailable'] == true,
+      dockerAvailable: parseBool(json['dockerAvailable']),
       unavailableReason: json['unavailableReason'] as String?,
-      failedContainerCount:
-          (json['failedContainerCount'] as num?)?.toInt() ?? 0,
+      failedContainerCount: parseIntOrNull(json['failedContainerCount']) ?? 0,
       collectedAt: (json['collectedAt'] as String?) ?? '',
-      containers: rawList is List
-          ? List<DockerContainerMetrics>.unmodifiable(
-              rawList.whereType<Map>().map(
-                (e) => DockerContainerMetrics.fromJson(
-                  Map<String, dynamic>.from(e),
-                ),
-              ),
-            )
-          : const <DockerContainerMetrics>[],
+      containers: List<DockerContainerMetrics>.unmodifiable(
+        asJsonList(json['containers'], DockerContainerMetrics.fromJson),
+      ),
     );
   }
 }
@@ -393,7 +362,7 @@ class DockerMount {
       name: json['name'] as String?,
       source: (json['source'] as String?) ?? '',
       destination: (json['destination'] as String?) ?? '',
-      rw: json['rw'] != false,
+      rw: parseBool(json['rw'], fallback: true),
     );
   }
 }
@@ -466,26 +435,9 @@ class DockerContainerDetail {
   final List<DockerNetworkEndpoint> networks;
 
   factory DockerContainerDetail.fromJson(Map<String, dynamic> json) {
-    final state = json['state'] is Map
-        ? Map<String, dynamic>.from(json['state'] as Map)
-        : const <String, dynamic>{};
-    final config = json['config'] is Map
-        ? Map<String, dynamic>.from(json['config'] as Map)
-        : const <String, dynamic>{};
-    final hostConfig = json['hostConfig'] is Map
-        ? Map<String, dynamic>.from(json['hostConfig'] as Map)
-        : const <String, dynamic>{};
-    final rawCmd = config['cmd'] ?? config['command'];
-    final rawEnv = config['env'] ?? config['environment'];
-    final rawLabels = config['labels'];
-    final labelsMap = <String, String>{};
-    if (rawLabels is Map) {
-      rawLabels.forEach((k, v) {
-        if (k != null && v != null) labelsMap[k.toString()] = v.toString();
-      });
-    }
-    final rawMounts = json['mounts'];
-    final rawNetworks = json['networks'];
+    final state = asJsonMap(json['state']);
+    final config = asJsonMap(json['config']);
+    final hostConfig = asJsonMap(json['hostConfig']);
     return DockerContainerDetail(
       id: (json['id'] as String?) ?? '',
       name: ((json['name'] as String?) ?? '').replaceFirst(RegExp(r'^/'), ''),
@@ -493,35 +445,25 @@ class DockerContainerDetail {
       imageId: (json['imageId'] as String?) ?? '',
       created: (json['created'] as String?) ?? '',
       status: (state['status'] as String?) ?? '',
-      running: state['running'] == true,
-      pid: (state['pid'] as num?)?.toInt(),
+      running: parseBool(state['running']),
+      pid: parseIntOrNull(state['pid']),
       hostname: config['hostname'] as String?,
       user: config['user'] as String?,
       restartPolicy: hostConfig['restartPolicy'] as String?,
       networkMode: hostConfig['networkMode'] as String?,
-      command: rawCmd is List
-          ? List<String>.unmodifiable(rawCmd.whereType<String>())
-          : const <String>[],
-      environment: rawEnv is List
-          ? List<String>.unmodifiable(rawEnv.whereType<String>())
-          : const <String>[],
-      labels: Map<String, String>.unmodifiable(labelsMap),
-      mounts: rawMounts is List
-          ? List<DockerMount>.unmodifiable(
-              rawMounts.whereType<Map>().map(
-                (e) => DockerMount.fromJson(Map<String, dynamic>.from(e)),
-              ),
-            )
-          : const <DockerMount>[],
-      networks: rawNetworks is List
-          ? List<DockerNetworkEndpoint>.unmodifiable(
-              rawNetworks.whereType<Map>().map(
-                (e) => DockerNetworkEndpoint.fromJson(
-                  Map<String, dynamic>.from(e),
-                ),
-              ),
-            )
-          : const <DockerNetworkEndpoint>[],
+      command: List<String>.unmodifiable(
+        asStringList(config['cmd'] ?? config['command']),
+      ),
+      environment: List<String>.unmodifiable(
+        asStringList(config['env'] ?? config['environment']),
+      ),
+      labels: asStringMap(config['labels']),
+      mounts: List<DockerMount>.unmodifiable(
+        asJsonList(json['mounts'], DockerMount.fromJson),
+      ),
+      networks: List<DockerNetworkEndpoint>.unmodifiable(
+        asJsonList(json['networks'], DockerNetworkEndpoint.fromJson),
+      ),
     );
   }
 }
@@ -575,18 +517,11 @@ class DockerVolumeSummary {
   }
 
   factory DockerVolumeSummary.fromJson(Map<String, dynamic> json) {
-    final rawLabels = json['labels'];
-    final labelsMap = <String, String>{};
-    if (rawLabels is Map) {
-      rawLabels.forEach((k, v) {
-        if (k != null && v != null) labelsMap[k.toString()] = v.toString();
-      });
-    }
     return DockerVolumeSummary(
       name: (json['name'] as String?) ?? '',
       driver: (json['driver'] as String?) ?? 'local',
       mountpoint: (json['mountpoint'] as String?) ?? '',
-      labels: Map<String, String>.unmodifiable(labelsMap),
+      labels: asStringMap(json['labels']),
       scope: (json['scope'] as String?) ?? 'local',
       createdAt: json['createdAt'] as String?,
     );
@@ -614,24 +549,14 @@ class DockerVolumeDetail {
   final Map<String, String> options;
 
   factory DockerVolumeDetail.fromJson(Map<String, dynamic> json) {
-    Map<String, String> parseMap(Object? raw) {
-      final result = <String, String>{};
-      if (raw is Map) {
-        raw.forEach((k, v) {
-          if (k != null && v != null) result[k.toString()] = v.toString();
-        });
-      }
-      return Map<String, String>.unmodifiable(result);
-    }
-
     return DockerVolumeDetail(
       name: (json['name'] as String?) ?? '',
       driver: (json['driver'] as String?) ?? 'local',
       mountpoint: (json['mountpoint'] as String?) ?? '',
-      labels: parseMap(json['labels']),
+      labels: asStringMap(json['labels']),
       scope: (json['scope'] as String?) ?? 'local',
       createdAt: json['createdAt'] as String?,
-      options: parseMap(json['options']),
+      options: asStringMap(json['options']),
     );
   }
 }
@@ -679,30 +604,18 @@ class DockerNetworkSummary {
   bool get isBuiltIn => name == 'bridge' || name == 'host' || name == 'none';
 
   factory DockerNetworkSummary.fromJson(Map<String, dynamic> json) {
-    final rawIpam = json['ipamConfig'];
-    final rawLabels = json['labels'];
-    final labelsMap = <String, String>{};
-    if (rawLabels is Map) {
-      rawLabels.forEach((k, v) {
-        if (k != null && v != null) labelsMap[k.toString()] = v.toString();
-      });
-    }
     return DockerNetworkSummary(
       id: (json['id'] as String?) ?? '',
       name: (json['name'] as String?) ?? '',
       driver: (json['driver'] as String?) ?? '',
       scope: (json['scope'] as String?) ?? '',
       ipamDriver: json['ipamDriver'] as String?,
-      ipamConfig: rawIpam is List
-          ? List<DockerIpamEntry>.unmodifiable(
-              rawIpam.whereType<Map>().map(
-                (e) => DockerIpamEntry.fromJson(Map<String, dynamic>.from(e)),
-              ),
-            )
-          : const <DockerIpamEntry>[],
-      internal: json['internal'] == true,
-      connectedContainers: (json['connectedContainers'] as num?)?.toInt() ?? 0,
-      labels: Map<String, String>.unmodifiable(labelsMap),
+      ipamConfig: List<DockerIpamEntry>.unmodifiable(
+        asJsonList(json['ipamConfig'], DockerIpamEntry.fromJson),
+      ),
+      internal: parseBool(json['internal']),
+      connectedContainers: parseIntOrNull(json['connectedContainers']) ?? 0,
+      labels: asStringMap(json['labels']),
       created: json['created'] as String?,
     );
   }
@@ -748,26 +661,12 @@ class DockerNetworkDetail {
   final Map<String, String> options;
 
   factory DockerNetworkDetail.fromJson(Map<String, dynamic> json) {
-    final rawContainers = json['containers'];
-    final rawOptions = json['options'];
-    final opts = <String, String>{};
-    if (rawOptions is Map) {
-      rawOptions.forEach((k, v) {
-        if (k != null && v != null) opts[k.toString()] = v.toString();
-      });
-    }
     return DockerNetworkDetail(
       summary: DockerNetworkSummary.fromJson(json),
-      containers: rawContainers is List
-          ? List<DockerNetworkContainerRef>.unmodifiable(
-              rawContainers.whereType<Map>().map(
-                (e) => DockerNetworkContainerRef.fromJson(
-                  Map<String, dynamic>.from(e),
-                ),
-              ),
-            )
-          : const <DockerNetworkContainerRef>[],
-      options: Map<String, String>.unmodifiable(opts),
+      containers: List<DockerNetworkContainerRef>.unmodifiable(
+        asJsonList(json['containers'], DockerNetworkContainerRef.fromJson),
+      ),
+      options: asStringMap(json['options']),
     );
   }
 }
@@ -799,29 +698,16 @@ class DockerImageSummary {
   String get primaryTag => repoTags.isNotEmpty ? repoTags.first : '<sem tag>';
 
   factory DockerImageSummary.fromJson(Map<String, dynamic> json) {
-    final rawTags = json['repoTags'];
-    final rawDigests = json['repoDigests'];
-    final rawLabels = json['labels'];
-    final labelsMap = <String, String>{};
-    if (rawLabels is Map) {
-      rawLabels.forEach((k, v) {
-        if (k != null && v != null) labelsMap[k.toString()] = v.toString();
-      });
-    }
     return DockerImageSummary(
       id: (json['id'] as String?) ?? '',
       parentId: json['parentId'] as String?,
-      repoTags: rawTags is List
-          ? List<String>.unmodifiable(rawTags.whereType<String>())
-          : const <String>[],
-      repoDigests: rawDigests is List
-          ? List<String>.unmodifiable(rawDigests.whereType<String>())
-          : const <String>[],
-      created: (json['created'] as num?)?.toInt() ?? 0,
-      size: (json['size'] as num?)?.toInt() ?? 0,
-      sharedSize: (json['sharedSize'] as num?)?.toInt() ?? 0,
-      labels: Map<String, String>.unmodifiable(labelsMap),
-      containers: (json['containers'] as num?)?.toInt() ?? 0,
+      repoTags: List<String>.unmodifiable(asStringList(json['repoTags'])),
+      repoDigests: List<String>.unmodifiable(asStringList(json['repoDigests'])),
+      created: parseIntOrNull(json['created']) ?? 0,
+      size: parseIntOrNull(json['size']) ?? 0,
+      sharedSize: parseIntOrNull(json['sharedSize']) ?? 0,
+      labels: asStringMap(json['labels']),
+      containers: parseIntOrNull(json['containers']) ?? 0,
     );
   }
 }
@@ -857,28 +743,19 @@ class DockerImageDetail {
   final List<String> layers;
 
   factory DockerImageDetail.fromJson(Map<String, dynamic> json) {
-    List<String> strList(Object? raw) => raw is List
-        ? List<String>.unmodifiable(raw.whereType<String>())
-        : const <String>[];
-    final labelsMap = <String, String>{};
-    if (json['labels'] is Map) {
-      (json['labels'] as Map).forEach((k, v) {
-        if (k != null && v != null) labelsMap[k.toString()] = v.toString();
-      });
-    }
     return DockerImageDetail(
       id: (json['id'] as String?) ?? '',
-      repoTags: strList(json['repoTags']),
+      repoTags: List<String>.unmodifiable(asStringList(json['repoTags'])),
       created: (json['created'] ?? '').toString(),
-      size: (json['size'] as num?)?.toInt() ?? 0,
-      environment: strList(json['environment']),
-      command: strList(json['command']),
-      entrypoint: strList(json['entrypoint']),
-      labels: Map<String, String>.unmodifiable(labelsMap),
+      size: parseIntOrNull(json['size']) ?? 0,
+      environment: List<String>.unmodifiable(asStringList(json['environment'])),
+      command: List<String>.unmodifiable(asStringList(json['command'])),
+      entrypoint: List<String>.unmodifiable(asStringList(json['entrypoint'])),
+      labels: asStringMap(json['labels']),
       workingDir: json['workingDir'] as String?,
       user: json['user'] as String?,
       rootFsType: json['rootFsType'] as String?,
-      layers: strList(json['layers']),
+      layers: List<String>.unmodifiable(asStringList(json['layers'])),
     );
   }
 }
@@ -898,8 +775,8 @@ class ComposeService {
   factory ComposeService.fromJson(Map<String, dynamic> json) {
     return ComposeService(
       name: (json['name'] as String?) ?? '',
-      containers: (json['containers'] as num?)?.toInt() ?? 0,
-      running: (json['running'] as num?)?.toInt() ?? 0,
+      containers: parseIntOrNull(json['containers']) ?? 0,
+      running: parseIntOrNull(json['running']) ?? 0,
     );
   }
 }
@@ -925,24 +802,16 @@ class ComposeProject {
   final bool protected;
 
   factory ComposeProject.fromJson(Map<String, dynamic> json) {
-    final rawFiles = json['configFiles'];
-    final rawServices = json['services'];
     return ComposeProject(
       name: (json['name'] as String?) ?? '',
       workingDir: json['workingDir'] as String?,
-      configFiles: rawFiles is List
-          ? List<String>.unmodifiable(rawFiles.whereType<String>())
-          : const <String>[],
-      services: rawServices is List
-          ? List<ComposeService>.unmodifiable(
-              rawServices.whereType<Map>().map(
-                (e) => ComposeService.fromJson(Map<String, dynamic>.from(e)),
-              ),
-            )
-          : const <ComposeService>[],
-      containers: (json['containers'] as num?)?.toInt() ?? 0,
-      running: (json['running'] as num?)?.toInt() ?? 0,
-      protected: json['protected'] == true,
+      configFiles: List<String>.unmodifiable(asStringList(json['configFiles'])),
+      services: List<ComposeService>.unmodifiable(
+        asJsonList(json['services'], ComposeService.fromJson),
+      ),
+      containers: parseIntOrNull(json['containers']) ?? 0,
+      running: parseIntOrNull(json['running']) ?? 0,
+      protected: parseBool(json['protected']),
     );
   }
 }
@@ -998,269 +867,6 @@ class DockerLogStreamState {
       containerId: containerId,
       entries: entries ?? this.entries,
       ended: ended ?? this.ended,
-    );
-  }
-}
-
-@immutable
-class DockerAggregateSample {
-  const DockerAggregateSample({
-    required this.recordedAt,
-    required this.cpuPercent,
-    required this.memoryPercent,
-    required this.memoryUsageBytes,
-    required this.networkReceivedBytes,
-    required this.networkTransmittedBytes,
-    required this.cpuByContainer,
-    required this.memoryByContainer,
-    required this.containerNames,
-  });
-
-  final String recordedAt;
-  final double cpuPercent;
-  final double memoryPercent;
-  final int memoryUsageBytes;
-  final int networkReceivedBytes;
-  final int networkTransmittedBytes;
-  final Map<String, double> cpuByContainer;
-  final Map<String, int> memoryByContainer;
-  final Map<String, String> containerNames;
-}
-
-@immutable
-class HostDiskPoint {
-  const HostDiskPoint({
-    required this.mount,
-    required this.usedBytes,
-    required this.totalBytes,
-  });
-
-  final String mount;
-  final int usedBytes;
-  final int totalBytes;
-
-  double get usedPercent => totalBytes > 0 ? (usedBytes / totalBytes) * 100 : 0;
-
-  factory HostDiskPoint.fromJson(Map<String, dynamic> json) {
-    return HostDiskPoint(
-      mount: (json['mount'] as String?) ?? '/',
-      usedBytes: (json['usedBytes'] as num?)?.toInt() ?? 0,
-      totalBytes: (json['totalBytes'] as num?)?.toInt() ?? 0,
-    );
-  }
-}
-
-@immutable
-class HostHistoryPoint {
-  const HostHistoryPoint({
-    required this.at,
-    required this.cpuAvg,
-    required this.cpuMax,
-    required this.memoryUsed,
-    required this.memoryTotal,
-    required this.load1,
-    required this.netRxBps,
-    required this.netTxBps,
-    required this.disks,
-  });
-
-  final String at;
-  final double cpuAvg;
-  final double cpuMax;
-  final int memoryUsed;
-  final int memoryTotal;
-  final double load1;
-  final double netRxBps;
-  final double netTxBps;
-  final List<HostDiskPoint> disks;
-
-  factory HostHistoryPoint.fromJson(Map<String, dynamic> json) {
-    final rawDisks = json['disks'];
-    return HostHistoryPoint(
-      at: (json['at'] as String?) ?? '',
-      cpuAvg: (json['cpuAvg'] as num?)?.toDouble() ?? 0,
-      cpuMax: (json['cpuMax'] as num?)?.toDouble() ?? 0,
-      memoryUsed: (json['memoryUsed'] as num?)?.toInt() ?? 0,
-      memoryTotal: (json['memoryTotal'] as num?)?.toInt() ?? 0,
-      load1: (json['load1'] as num?)?.toDouble() ?? 0,
-      netRxBps: (json['netRxBps'] as num?)?.toDouble() ?? 0,
-      netTxBps: (json['netTxBps'] as num?)?.toDouble() ?? 0,
-      disks: rawDisks is List
-          ? List<HostDiskPoint>.unmodifiable(
-              rawDisks.whereType<Map>().map(
-                (e) => HostDiskPoint.fromJson(Map<String, dynamic>.from(e)),
-              ),
-            )
-          : const <HostDiskPoint>[],
-    );
-  }
-}
-
-@immutable
-class ContainerUsageSummary {
-  const ContainerUsageSummary({
-    required this.name,
-    this.project,
-    required this.cpuAvg,
-    required this.cpuMax,
-    required this.memoryMax,
-    required this.netRxBytes,
-    required this.netTxBytes,
-  });
-
-  final String name;
-  final String? project;
-  final double cpuAvg;
-  final double cpuMax;
-  final int memoryMax;
-  final int netRxBytes;
-  final int netTxBytes;
-
-  factory ContainerUsageSummary.fromJson(Map<String, dynamic> json) {
-    return ContainerUsageSummary(
-      name: (json['name'] as String?) ?? '',
-      project: json['project'] as String?,
-      cpuAvg: (json['cpuAvg'] as num?)?.toDouble() ?? 0,
-      cpuMax: (json['cpuMax'] as num?)?.toDouble() ?? 0,
-      memoryMax: (json['memoryMax'] as num?)?.toInt() ?? 0,
-      netRxBytes: (json['netRxBytes'] as num?)?.toInt() ?? 0,
-      netTxBytes: (json['netTxBytes'] as num?)?.toInt() ?? 0,
-    );
-  }
-}
-
-@immutable
-class HostHistoryResponse {
-  const HostHistoryResponse({
-    required this.hostKey,
-    required this.range,
-    required this.stepMinutes,
-    required this.host,
-    required this.containers,
-  });
-
-  final String hostKey;
-  final String range;
-  final int stepMinutes;
-  final List<HostHistoryPoint> host;
-  final List<ContainerUsageSummary> containers;
-
-  factory HostHistoryResponse.fromJson(Map<String, dynamic> json) {
-    final rawHost = json['host'];
-    final rawContainers = json['containers'];
-    return HostHistoryResponse(
-      hostKey: (json['hostKey'] as String?) ?? '',
-      range: (json['range'] as String?) ?? '24h',
-      stepMinutes: (json['stepMinutes'] as num?)?.toInt() ?? 5,
-      host: rawHost is List
-          ? List<HostHistoryPoint>.unmodifiable(
-              rawHost.whereType<Map>().map(
-                (e) => HostHistoryPoint.fromJson(Map<String, dynamic>.from(e)),
-              ),
-            )
-          : const <HostHistoryPoint>[],
-      containers: rawContainers is List
-          ? List<ContainerUsageSummary>.unmodifiable(
-              rawContainers.whereType<Map>().map(
-                (e) => ContainerUsageSummary.fromJson(
-                  Map<String, dynamic>.from(e),
-                ),
-              ),
-            )
-          : const <ContainerUsageSummary>[],
-    );
-  }
-}
-
-@immutable
-class ContainerHistoryPoint {
-  const ContainerHistoryPoint({
-    required this.at,
-    required this.cpuAvg,
-    required this.cpuMax,
-    required this.memoryAvg,
-    required this.memoryMax,
-    required this.netRxBytes,
-    required this.netTxBytes,
-    required this.blockReadBytes,
-    required this.blockWriteBytes,
-  });
-
-  final String at;
-  final double cpuAvg;
-  final double cpuMax;
-  final int memoryAvg;
-  final int memoryMax;
-  final int netRxBytes;
-  final int netTxBytes;
-  final int blockReadBytes;
-  final int blockWriteBytes;
-
-  factory ContainerHistoryPoint.fromJson(Map<String, dynamic> json) {
-    return ContainerHistoryPoint(
-      at: (json['at'] as String?) ?? '',
-      cpuAvg: (json['cpuAvg'] as num?)?.toDouble() ?? 0,
-      cpuMax: (json['cpuMax'] as num?)?.toDouble() ?? 0,
-      memoryAvg: (json['memoryAvg'] as num?)?.toInt() ?? 0,
-      memoryMax: (json['memoryMax'] as num?)?.toInt() ?? 0,
-      netRxBytes: (json['netRxBytes'] as num?)?.toInt() ?? 0,
-      netTxBytes: (json['netTxBytes'] as num?)?.toInt() ?? 0,
-      blockReadBytes: (json['blockReadBytes'] as num?)?.toInt() ?? 0,
-      blockWriteBytes: (json['blockWriteBytes'] as num?)?.toInt() ?? 0,
-    );
-  }
-}
-
-@immutable
-class ContainerHistoryResponse {
-  const ContainerHistoryResponse({
-    required this.hostKey,
-    required this.containerName,
-    required this.range,
-    required this.stepMinutes,
-    required this.points,
-  });
-
-  final String hostKey;
-  final String containerName;
-  final String range;
-  final int stepMinutes;
-  final List<ContainerHistoryPoint> points;
-
-  factory ContainerHistoryResponse.fromJson(Map<String, dynamic> json) {
-    final rawPoints = json['points'];
-    return ContainerHistoryResponse(
-      hostKey: (json['hostKey'] as String?) ?? '',
-      containerName: (json['containerName'] as String?) ?? '',
-      range: (json['range'] as String?) ?? '24h',
-      stepMinutes: (json['stepMinutes'] as num?)?.toInt() ?? 5,
-      points: rawPoints is List
-          ? List<ContainerHistoryPoint>.unmodifiable(
-              rawPoints.whereType<Map>().map(
-                (e) => ContainerHistoryPoint.fromJson(
-                  Map<String, dynamic>.from(e),
-                ),
-              ),
-            )
-          : const <ContainerHistoryPoint>[],
-    );
-  }
-}
-
-@immutable
-class DockerPruneResponse {
-  const DockerPruneResponse({
-    required this.imagesDeleted,
-    required this.spaceReclaimed,
-  });
-
-  final int imagesDeleted;
-  final int spaceReclaimed;
-
-  factory DockerPruneResponse.fromJson(Map<String, dynamic> json) {
-    return DockerPruneResponse(
-      imagesDeleted: (json['imagesDeleted'] as num?)?.toInt() ?? 0,
-      spaceReclaimed: (json['spaceReclaimed'] as num?)?.toInt() ?? 0,
     );
   }
 }

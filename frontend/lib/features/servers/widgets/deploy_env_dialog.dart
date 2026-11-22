@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/servers/models/deploy_models.dart';
 import 'package:netmonitor_app/features/servers/providers/deploys_provider.dart';
@@ -48,7 +49,7 @@ class _DeployEnvBodyState extends ConsumerState<_DeployEnvBody>
   String? _error;
   List<EnvLine> _lines = const <EnvLine>[];
   List<DeployEnvVersionView> _versions = const <DeployEnvVersionView>[];
-  final Set<int> _revealedIndexes = <int>{};
+  final Set<int> _revealedUids = <int>{};
   DeployEnvDiff? _previewDiff;
 
   @override
@@ -88,7 +89,10 @@ class _DeployEnvBodyState extends ConsumerState<_DeployEnvBody>
     } catch (err) {
       if (!mounted) return;
       setState(() {
-        _error = err.toString();
+        _error = describeError(
+          err,
+          fallback: 'Erro ao carregar variáveis .env.',
+        );
         _loading = false;
       });
     }
@@ -97,6 +101,7 @@ class _DeployEnvBodyState extends ConsumerState<_DeployEnvBody>
   void _setContent(String content) {
     _rawController.text = content;
     _lines = parseEnvFile(content);
+    _revealedUids.clear();
     _previewDiff = null;
   }
 
@@ -109,6 +114,7 @@ class _DeployEnvBodyState extends ConsumerState<_DeployEnvBody>
       _rawController.text = serializeEnvFile(_lines);
     } else {
       _lines = parseEnvFile(_rawController.text);
+      _revealedUids.clear();
     }
     setState(() {
       _rawMode = toRaw;
@@ -118,7 +124,7 @@ class _DeployEnvBodyState extends ConsumerState<_DeployEnvBody>
 
   void _addVariable() {
     final next = List<EnvLine>.from(_lines)
-      ..add(const EnvLine.variable(key: 'NOVA_VARIAVEL', value: ''));
+      ..add(EnvLine.variable(key: 'NOVA_VARIAVEL', value: ''));
     setState(() {
       _lines = next;
       _previewDiff = null;
@@ -128,11 +134,7 @@ class _DeployEnvBodyState extends ConsumerState<_DeployEnvBody>
   void _updateVariable(int index, {String? key, String? value}) {
     final next = List<EnvLine>.from(_lines);
     final old = next[index];
-    next[index] = EnvLine.variable(
-      key: key ?? old.key,
-      value: value ?? old.value,
-      exported: old.exported,
-    );
+    next[index] = old.copyWithVariable(key: key, value: value);
     setState(() {
       _lines = next;
       _previewDiff = null;
@@ -140,8 +142,10 @@ class _DeployEnvBodyState extends ConsumerState<_DeployEnvBody>
   }
 
   void _removeLine(int index) {
+    final removedUid = _lines[index].uid;
     final next = List<EnvLine>.from(_lines)..removeAt(index);
     setState(() {
+      _revealedUids.remove(removedUid);
       _lines = next;
       _previewDiff = null;
     });
@@ -164,7 +168,7 @@ class _DeployEnvBodyState extends ConsumerState<_DeployEnvBody>
     } catch (err) {
       if (!mounted) return;
       setState(() {
-        _error = err.toString();
+        _error = describeError(err, fallback: 'Erro ao revisar mudanças.');
         _saving = false;
       });
     }
@@ -198,7 +202,7 @@ class _DeployEnvBodyState extends ConsumerState<_DeployEnvBody>
     } catch (err) {
       if (!mounted) return;
       setState(() {
-        _error = err.toString();
+        _error = describeError(err, fallback: 'Erro ao salvar variáveis .env.');
         _saving = false;
       });
     }
@@ -219,9 +223,9 @@ class _DeployEnvBodyState extends ConsumerState<_DeployEnvBody>
       );
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Erro ao abrir versão: $err')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao abrir versão: ${describeError(err)}')),
+      );
     }
   }
 
@@ -255,7 +259,6 @@ class _DeployEnvBodyState extends ConsumerState<_DeployEnvBody>
           child: TabBarView(
             controller: _tabController,
             children: <Widget>[
-              // Aba 1: Editar
               ListView(
                 children: <Widget>[
                   Wrap(
@@ -271,7 +274,7 @@ class _DeployEnvBodyState extends ConsumerState<_DeployEnvBody>
                           padding: const EdgeInsets.symmetric(horizontal: 8),
                         ),
                         segments: const <ButtonSegment<bool>>[
-                          ButtonSegment(
+                          ButtonSegment<bool>(
                             value: false,
                             label: Text(
                               'Modo lista',
@@ -279,7 +282,7 @@ class _DeployEnvBodyState extends ConsumerState<_DeployEnvBody>
                               softWrap: false,
                             ),
                           ),
-                          ButtonSegment(
+                          ButtonSegment<bool>(
                             value: true,
                             label: Text(
                               'Texto .env',
@@ -335,6 +338,7 @@ class _DeployEnvBodyState extends ConsumerState<_DeployEnvBody>
                           (term.isEmpty ||
                               _lines[i].key.toLowerCase().contains(term)))
                         Padding(
+                          key: ValueKey<int>(_lines[i].uid),
                           padding: const EdgeInsets.only(bottom: 8),
                           child: _buildVarRow(i, _lines[i]),
                         ),
@@ -440,7 +444,6 @@ class _DeployEnvBodyState extends ConsumerState<_DeployEnvBody>
                   ],
                 ],
               ),
-              // Aba 2: Histórico
               _versions.isEmpty
                   ? const EmptyStateView(title: 'Nenhuma versão salva ainda')
                   : ListView.separated(
@@ -504,10 +507,11 @@ class _DeployEnvBodyState extends ConsumerState<_DeployEnvBody>
 
   Widget _buildVarRow(int index, EnvLine line) {
     final secret = looksLikeSecretKey(line.key);
-    final revealed = _revealedIndexes.contains(index);
+    final revealed = _revealedUids.contains(line.uid);
     final validKey = isValidEnvKey(line.key);
 
     final keyField = TextFormField(
+      key: ValueKey<String>('env-k-${line.uid}'),
       initialValue: line.key,
       readOnly: !widget.canAdmin,
       style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
@@ -520,6 +524,7 @@ class _DeployEnvBodyState extends ConsumerState<_DeployEnvBody>
     );
 
     final valueField = TextFormField(
+      key: ValueKey<String>('env-v-${line.uid}'),
       initialValue: line.value,
       readOnly: !widget.canAdmin,
       obscureText: secret && !revealed,
@@ -536,9 +541,9 @@ class _DeployEnvBodyState extends ConsumerState<_DeployEnvBody>
                 ),
                 onPressed: () => setState(() {
                   if (revealed) {
-                    _revealedIndexes.remove(index);
+                    _revealedUids.remove(line.uid);
                   } else {
-                    _revealedIndexes.add(index);
+                    _revealedUids.add(line.uid);
                   }
                 }),
               )

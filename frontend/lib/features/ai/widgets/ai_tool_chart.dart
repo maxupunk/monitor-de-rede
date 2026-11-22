@@ -7,36 +7,30 @@ import 'package:netmonitor_app/features/ai/models/ai_models.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
 
-const List<Color> _palette = <Color>[
-  Color(0xFF1976D2),
-  Color(0xFFFF9800),
-  Color(0xFF9C27B0),
-  Color(0xFF009688),
-  Color(0xFFE91E63),
-  Color(0xFF3F51B5),
-];
-
-Color _seriesColor(AiChartSeries series, int index) {
-  if (series.id == 'inBps') return const Color(0xFF4CAF50);
-  if (series.id == 'outBps') return const Color(0xFF2196F3);
-  return _palette[index % _palette.length];
+Color _seriesColor(BuildContext context, AiChartSeries series, int index) {
+  final semantics = context.semanticColors;
+  final scheme = context.colorScheme;
+  if (series.id == 'inBps') return semantics.success;
+  if (series.id == 'outBps') return semantics.info;
+  final palette = <Color>[
+    scheme.primary,
+    semantics.warning,
+    semantics.ai,
+    semantics.info,
+    semantics.error,
+    scheme.secondary,
+  ];
+  return palette[index % palette.length];
 }
 
 String _formatChartValue(double value, String unit) {
-  switch (unit) {
-    case 'latency':
-      return formatLatency(value);
-    case 'bandwidth':
-      return formatBps(value, fractionDigits: 1);
-    case 'percentage':
-      return formatPercent(value, digits: 1);
-    case 'bytes':
-      return formatBytes(value, fractionDigits: 1);
-    default:
-      return value.abs() >= 100
-          ? value.toStringAsFixed(0)
-          : value.toStringAsFixed(1);
-  }
+  return switch (unit) {
+    'latency' => formatLatency(value),
+    'bandwidth' => formatBps(value, fractionDigits: 1),
+    'percentage' => formatPercent(value, digits: 1),
+    'bytes' => formatBytes(value, fractionDigits: 1),
+    _ => formatDecimal(value, maxDigits: value.abs() >= 100 ? 0 : 1),
+  };
 }
 
 /// Gráfico `fl_chart` embutido em respostas da IA (`AiChart`), com suporte a linha/área e barras.
@@ -63,10 +57,9 @@ class _AiToolChartState extends State<AiToolChart> {
     final scheme = context.colorScheme;
     final fillArea = nonEmpty.length == 1;
 
-    // Calcula span temporal para rótulos do eixo X.
     final timestamps = <DateTime>[];
     for (final pt in nonEmpty.first.points) {
-      final parsed = DateTime.tryParse(pt.time);
+      final parsed = parseDateOrNull(pt.time);
       if (parsed != null) timestamps.add(parsed);
     }
     final spanMs = timestamps.length >= 2
@@ -128,7 +121,7 @@ class _AiToolChartState extends State<AiToolChart> {
                         width: 10,
                         height: 10,
                         decoration: BoxDecoration(
-                          color: _seriesColor(nonEmpty[i], i),
+                          color: _seriesColor(context, nonEmpty[i], i),
                           shape: BoxShape.circle,
                         ),
                       ),
@@ -258,7 +251,7 @@ class _AiToolChartState extends State<AiToolChart> {
                   return const SizedBox.shrink();
                 }
                 final raw = refPoints[idx].label ?? refPoints[idx].time;
-                final label = DateTime.tryParse(raw) != null
+                final label = parseDateOrNull(raw) != null
                     ? formatAxisTime(raw, spanMs)
                     : raw;
                 return Padding(
@@ -297,29 +290,39 @@ class _AiToolChartState extends State<AiToolChart> {
         ),
         lineBarsData: <LineChartBarData>[
           for (var i = 0; i < seriesList.length; i++)
-            LineChartBarData(
-              spots: <FlSpot>[
-                for (var j = 0; j < seriesList[i].points.length; j++)
-                  FlSpot(j.toDouble(), seriesList[i].points[j].value),
-              ],
-              isCurved: true,
-              preventCurveOverShooting: true,
-              barWidth: 2.2,
-              color: _seriesColor(seriesList[i], i),
-              dotData: FlDotData(show: seriesList[i].points.length <= 2),
-              belowBarData: BarAreaData(
-                show: fillArea,
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: <Color>[
-                    _seriesColor(seriesList[i], i).withValues(alpha: 0.25),
-                    _seriesColor(seriesList[i], i).withValues(alpha: 0.02),
-                  ],
-                ),
-              ),
-            ),
+            _buildLineBarData(context, seriesList[i], i, fillArea),
         ],
+      ),
+    );
+  }
+
+  LineChartBarData _buildLineBarData(
+    BuildContext context,
+    AiChartSeries series,
+    int index,
+    bool fillArea,
+  ) {
+    final color = _seriesColor(context, series, index);
+    return LineChartBarData(
+      spots: <FlSpot>[
+        for (var j = 0; j < series.points.length; j++)
+          FlSpot(j.toDouble(), series.points[j].value),
+      ],
+      isCurved: true,
+      preventCurveOverShooting: true,
+      barWidth: 2.2,
+      color: color,
+      dotData: FlDotData(show: series.points.length <= 2),
+      belowBarData: BarAreaData(
+        show: fillArea,
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: <Color>[
+            color.withValues(alpha: 0.25),
+            color.withValues(alpha: 0.02),
+          ],
+        ),
       ),
     );
   }
@@ -331,6 +334,7 @@ class _AiToolChartState extends State<AiToolChart> {
   ) {
     final scheme = context.colorScheme;
     final primary = seriesList.first;
+    final barColor = _seriesColor(context, primary, 0);
     final sampleCount = math.min(primary.points.length, 24);
     final step = primary.points.length > sampleCount
         ? (primary.points.length / sampleCount).ceil()
@@ -392,7 +396,7 @@ class _AiToolChartState extends State<AiToolChart> {
                   return const SizedBox.shrink();
                 }
                 final raw = sampled[idx].label ?? sampled[idx].time;
-                final label = DateTime.tryParse(raw) != null
+                final label = parseDateOrNull(raw) != null
                     ? formatAxisTime(raw, spanMs)
                     : raw;
                 return Text(
@@ -413,7 +417,7 @@ class _AiToolChartState extends State<AiToolChart> {
               barRods: <BarChartRodData>[
                 BarChartRodData(
                   toY: sampled[i].value,
-                  color: _seriesColor(primary, 0),
+                  color: barColor,
                   width: 10,
                   borderRadius: const BorderRadius.vertical(
                     top: Radius.circular(4),

@@ -1,18 +1,22 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
-import 'package:netmonitor_app/core/auth/auth_state.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
+import 'package:netmonitor_app/core/utils/file_download.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/core/models/log_models.dart';
 import 'package:netmonitor_app/features/core/models/monitor_models.dart';
+import 'package:netmonitor_app/features/core/presentation/syslog/log_detail_and_template_sheets.dart';
+import 'package:netmonitor_app/features/core/presentation/syslog/log_setup_and_provision_sheets.dart';
+import 'package:netmonitor_app/features/core/presentation/syslog/log_sources_sheet.dart';
 import 'package:netmonitor_app/features/core/providers/logs_provider.dart';
 import 'package:netmonitor_app/features/core/providers/monitors_provider.dart';
 import 'package:netmonitor_app/features/core/providers/settings_provider.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
+
+export 'package:netmonitor_app/features/core/presentation/syslog/log_detail_and_template_sheets.dart';
+export 'package:netmonitor_app/features/core/presentation/syslog/log_setup_and_provision_sheets.dart';
+export 'package:netmonitor_app/features/core/presentation/syslog/log_sources_sheet.dart';
 
 /// Central de Logs Syslog (paridade 100% com `LogsPage.vue`).
 class LogsPage extends ConsumerStatefulWidget {
@@ -85,730 +89,29 @@ class _LogsPageState extends ConsumerState<LogsPage> {
     }
   }
 
-  Future<void> _openLogDetailSheet(
-    LogEntry entry,
-    LogTemplateInfo? tmpl,
-  ) async {
-    await showAdaptiveFormSheet<void>(
-      context: context,
-      title: entry.deviceName ?? entry.hostname ?? entry.sourceIp,
-      subtitle: formatDateTime(entry.receivedAt),
-      maxWidth: 640,
-      builder: (sheetCtx) => Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: <Widget>[
-              SemanticChip(
-                label: (entry.severityLabel ?? 'SEV ${entry.severity ?? '-'}')
-                    .toUpperCase(),
-                tone: entry.severityTone,
-                compact: true,
-              ),
-              if (entry.appName != null && entry.appName!.isNotEmpty)
-                SemanticChip(
-                  label: entry.appName!,
-                  tone: SemanticTone.secondary,
-                  compact: true,
-                ),
-              if (tmpl != null)
-                SemanticChip(
-                  label: logCategoryLabel(tmpl.category),
-                  tone: tmpl.confirmed
-                      ? SemanticTone.primary
-                      : SemanticTone.info,
-                  compact: true,
-                  onTap: () {
-                    Navigator.of(sheetCtx).pop();
-                    _openTemplateSheet(entry, tmpl);
-                  },
-                ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          KeyValueRow(
-            label: 'IP de origem',
-            value: entry.sourceIp,
-            monospace: true,
-            copyable: true,
-          ),
-          if (entry.hostname != null && entry.hostname!.isNotEmpty)
-            KeyValueRow(
-              label: 'Hostname',
-              value: entry.hostname!,
-              monospace: true,
-            ),
-          if (entry.facility != null)
-            KeyValueRow(label: 'Facility', value: '${entry.facility}'),
-          if (entry.topics.isNotEmpty)
-            KeyValueRow(label: 'Tópicos', value: entry.topics.join(', ')),
-          const SizedBox(height: 12),
-          CodeViewer(title: 'Mensagem Syslog', code: entry.message),
-          if (tmpl != null) ...<Widget>[
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              onPressed: () {
-                Navigator.of(sheetCtx).pop();
-                _openTemplateSheet(entry, tmpl);
-              },
-              icon: const Icon(Icons.label_outline, size: 18),
-              label: const Text('Classificar padrão do log'),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Future<void> _openSourcesSheet() async {
-    await ref.read(logsProvider.notifier).fetchSources();
-    if (!mounted) return;
-
-    await showAdaptiveFormSheet<void>(
-      context: context,
-      title: 'Origens de Syslog',
-      subtitle:
-          'Vincule IPs ou hostnames desconhecidos aos dispositivos cadastrados.',
-      maxWidth: 680,
-      builder: (sheetCtx) {
-        return Consumer(
-          builder: (context, ref, _) {
-            final logs = ref.watch(logsProvider);
-            final devices = ref.watch(monitorsProvider).devices;
-            final auth = ref.watch(authProvider);
-
-            if (logs.sources.isEmpty) {
-              return const EmptyStateView(
-                title: 'Nenhuma origem recebida ainda',
-                description:
-                    'Configure o envio de syslog em um equipamento para visualizar aqui.',
-                icon: Icons.router_outlined,
-              );
-            }
-
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                for (final src in logs.sources) ...<Widget>[
-                  NestedPanel(
-                    tone: src.kind == 'unknown' ? SemanticTone.warning : null,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: <Widget>[
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 4,
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          children: <Widget>[
-                            Text(
-                              src.hostname != null && src.hostname!.isNotEmpty
-                                  ? '${src.hostname} (${src.sourceIp})'
-                                  : src.sourceIp,
-                              style: const TextStyle(
-                                fontFamily: 'monospace',
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            SemanticChip(
-                              label: src.kind,
-                              tone: src.kind == 'unknown'
-                                  ? SemanticTone.warning
-                                  : (src.kind == 'device'
-                                        ? SemanticTone.success
-                                        : SemanticTone.info),
-                              compact: true,
-                            ),
-                            if (src.masked)
-                              const SemanticChip(
-                                label: 'NAT mascarado',
-                                tone: SemanticTone.caution,
-                                compact: true,
-                              ),
-                            if (src.droppedCount > 0)
-                              SemanticChip(
-                                label: '${src.droppedCount} descartadas',
-                                tone: SemanticTone.error,
-                                compact: true,
-                              ),
-                          ],
-                        ),
-                        if (src.lastMessage != null &&
-                            src.lastMessage!.isNotEmpty) ...<Widget>[
-                          const SizedBox(height: 6),
-                          Text(
-                            src.lastMessage!,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: context.textTheme.bodySmall?.copyWith(
-                              fontFamily: 'monospace',
-                            ),
-                          ),
-                        ],
-                        if (auth.canWrite) ...<Widget>[
-                          const SizedBox(height: 10),
-                          AppDropdownFormField<int?>(
-                            initialValue: src.deviceId,
-                            decoration: const InputDecoration(
-                              labelText: 'Vincular ao dispositivo',
-                              isDense: true,
-                            ),
-                            items: <DropdownMenuItem<int?>>[
-                              const DropdownMenuItem<int?>(
-                                value: null,
-                                child: Text(
-                                  'Sem vínculo',
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                              for (final d in devices)
-                                DropdownMenuItem<int?>(
-                                  value: d.id,
-                                  child: Text(
-                                    d.name,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                            ],
-                            onChanged: (devId) async {
-                              try {
-                                await ref
-                                    .read(logsProvider.notifier)
-                                    .bindSource(src.bindKey, devId);
-                              } catch (err) {
-                                if (!context.mounted) return;
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text(err.toString())),
-                                );
-                              }
-                            },
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                ],
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Future<void> _openSetupGuideSheet() async {
-    await ref.read(coreSettingsProvider.notifier).fetchServerAddresses();
-    await ref.read(logsProvider.notifier).fetchSetupGuide();
-    if (!mounted) return;
-
-    String? selectedAddress;
-
-    await showAdaptiveFormSheet<void>(
-      context: context,
-      title: 'Configurar envio de Syslog',
-      subtitle:
-          'Comandos prontos por sistema operacional ou ativação automática.',
-      maxWidth: 700,
-      builder: (sheetCtx) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            final logs = ref.watch(logsProvider);
-            final settings = ref.watch(coreSettingsProvider);
-            final auth = ref.watch(authProvider);
-            final guide = logs.setupGuide;
-
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                if (settings.usableAddresses.isNotEmpty) ...<Widget>[
-                  AppDropdownFormField<String?>(
-                    initialValue: selectedAddress,
-                    decoration: const InputDecoration(
-                      labelText: 'Endereço deste servidor nos comandos',
-                    ),
-                    items: <DropdownMenuItem<String?>>[
-                      const DropdownMenuItem<String?>(
-                        value: null,
-                        child: Text(
-                          'Padrão do servidor',
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      for (final addr in settings.usableAddresses)
-                        DropdownMenuItem<String?>(
-                          value: addr.value,
-                          child: Text(
-                            '${addr.label} (${addr.value})',
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                    ],
-                    onChanged: (v) async {
-                      setModalState(() => selectedAddress = v);
-                      await ref
-                          .read(logsProvider.notifier)
-                          .fetchSetupGuide(address: v);
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                ],
-                if (auth.canWrite) ...<Widget>[
-                  OutlinedButton.icon(
-                    onPressed: () {
-                      Navigator.of(sheetCtx).pop();
-                      _openAutoProvisionSheet();
-                    },
-                    icon: const Icon(Icons.auto_fix_high, size: 18),
-                    label: const Text(
-                      'Ativar syslog automaticamente via SSH/Telnet',
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                ],
-                if (guide == null)
-                  const LoadingStateView(
-                    message: 'Carregando guia de configuração...',
-                  )
-                else ...<Widget>[
-                  KeyValueRow(
-                    label: 'Destino Syslog',
-                    value: '${guide.serverAddress}:${guide.port}',
-                    monospace: true,
-                    copyable: true,
-                  ),
-                  const SizedBox(height: 10),
-                  for (final snippet in guide.snippets) ...<Widget>[
-                    CodeViewer(title: snippet.label, code: snippet.commands),
-                    if (snippet.notes != null &&
-                        snippet.notes!.isNotEmpty) ...<Widget>[
-                      const SizedBox(height: 4),
-                      Text(
-                        snippet.notes!,
-                        style: context.textTheme.bodySmall?.copyWith(
-                          color: context.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 12),
-                  ],
-                ],
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Future<void> _openAutoProvisionSheet() async {
-    final devices = ref.read(monitorsProvider).devices;
-    final systems = ref.read(coreSettingsProvider).operatingSystems;
-    if (devices.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Cadastre ao menos um dispositivo antes de provisionar.',
-          ),
-        ),
-      );
-      return;
-    }
-
-    int selectedDeviceId = widget.deviceId ?? devices.first.id;
-    String protocol = 'ssh';
-    String? osId;
-    bool useSaved = false;
-    bool saveCred = false;
-    bool loadingHints = false;
-    bool running = false;
-    ProvisionHintsResponse? hints;
-    ProvisionLoggingResponse? result;
-    String? error;
-
-    final portCtrl = TextEditingController(text: '22');
-    final userCtrl = TextEditingController();
-    final passCtrl = TextEditingController();
-    final addrCtrl = TextEditingController();
-    final macCtrl = TextEditingController();
-
-    Future<void> loadHints(StateSetter setModalState, int devId) async {
-      setModalState(() => loadingHints = true);
-      final h = await ref
-          .read(logsProvider.notifier)
-          .fetchProvisionHints(devId);
-      setModalState(() {
-        hints = h;
-        loadingHints = false;
-        if (h != null) {
-          if (h.serverAddress != null) addrCtrl.text = h.serverAddress!;
-          if (h.macAddress != null) macCtrl.text = h.macAddress!;
-          if (h.operatingSystem != null) osId = h.operatingSystem;
-          if (h.sshOpen) {
-            protocol = 'ssh';
-            portCtrl.text = '22';
-          } else if (h.telnetOpen) {
-            protocol = 'telnet';
-            portCtrl.text = '23';
-          }
-          useSaved = h.savedCredentials.contains(protocol);
-        }
-      });
-    }
-
-    await showAdaptiveFormSheet<void>(
-      context: context,
-      title: 'Ativação automática de Syslog',
-      subtitle:
-          'A senha nunca é gravada nem exibida na transcrição (exceto se salvar credencial).',
-      maxWidth: 640,
-      builder: (sheetCtx) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            if (hints == null && !loadingHints) {
-              Future<void>.microtask(
-                () => loadHints(setModalState, selectedDeviceId),
-              );
-            }
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                AppDropdownFormField<int>(
-                  initialValue: selectedDeviceId,
-                  decoration: const InputDecoration(labelText: 'Dispositivo'),
-                  items: <DropdownMenuItem<int>>[
-                    for (final d in devices)
-                      DropdownMenuItem<int>(
-                        value: d.id,
-                        child: Text(d.name, overflow: TextOverflow.ellipsis),
-                      ),
-                  ],
-                  onChanged: (v) {
-                    if (v != null) {
-                      setModalState(() => selectedDeviceId = v);
-                      loadHints(setModalState, v);
-                    }
-                  },
-                ),
-                const SizedBox(height: 12),
-                ResponsiveFieldRow(
-                  breakpoint: 480,
-                  children: <Widget>[
-                    AppDropdownFormField<String>(
-                      initialValue: protocol,
-                      decoration: const InputDecoration(labelText: 'Protocolo'),
-                      items: <DropdownMenuItem<String>>[
-                        const DropdownMenuItem(
-                          value: 'ssh',
-                          child: Text('SSH', overflow: TextOverflow.ellipsis),
-                        ),
-                        const DropdownMenuItem(
-                          value: 'telnet',
-                          child: Text(
-                            'Telnet',
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        if (hints?.layer2Reachable == true)
-                          const DropdownMenuItem(
-                            value: 'mac_telnet',
-                            child: Text(
-                              'MAC-Telnet',
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                      ],
-                      onChanged: (v) {
-                        if (v != null) {
-                          setModalState(() {
-                            protocol = v;
-                            portCtrl.text = v == 'telnet' ? '23' : '22';
-                          });
-                        }
-                      },
-                    ),
-                    TextField(
-                      controller: portCtrl,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(labelText: 'Porta'),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                if (systems.isNotEmpty) ...<Widget>[
-                  AppDropdownFormField<String?>(
-                    initialValue: systems.any((s) => s.id == osId)
-                        ? osId
-                        : null,
-                    decoration: const InputDecoration(
-                      labelText: 'Sistema operacional',
-                    ),
-                    items: <DropdownMenuItem<String?>>[
-                      const DropdownMenuItem<String?>(
-                        value: null,
-                        child: Text(
-                          'Detectar automaticamente',
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      for (final s in systems.where((s) => s.supportsSyslog))
-                        DropdownMenuItem<String?>(
-                          value: s.id,
-                          child: Text(s.label, overflow: TextOverflow.ellipsis),
-                        ),
-                    ],
-                    onChanged: (v) => setModalState(() => osId = v),
-                  ),
-                  const SizedBox(height: 12),
-                ],
-                TextField(
-                  controller: addrCtrl,
-                  decoration: const InputDecoration(
-                    labelText:
-                        'Endereço deste servidor (que o equipamento alcança)',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                if (hints?.savedCredentials.isNotEmpty == true)
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    value: useSaved,
-                    onChanged: (v) => setModalState(() => useSaved = v),
-                    title: const Text('Usar credencial salva do equipamento'),
-                  ),
-                if (!useSaved) ...<Widget>[
-                  TextField(
-                    controller: userCtrl,
-                    decoration: const InputDecoration(labelText: 'Usuário'),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: passCtrl,
-                    obscureText: true,
-                    decoration: const InputDecoration(labelText: 'Senha'),
-                  ),
-                  CheckboxListTile(
-                    contentPadding: EdgeInsets.zero,
-                    controlAffinity: ListTileControlAffinity.leading,
-                    value: saveCred,
-                    onChanged: (v) =>
-                        setModalState(() => saveCred = v ?? false),
-                    title: const Text(
-                      'Salvar credencial no cofre do equipamento',
-                    ),
-                  ),
-                ],
-                if (error != null) ...<Widget>[
-                  const SizedBox(height: 8),
-                  NestedPanel(tone: SemanticTone.error, child: Text(error!)),
-                ],
-                if (result != null) ...<Widget>[
-                  const SizedBox(height: 12),
-                  NestedPanel(
-                    tone: result!.confirmed == true
-                        ? SemanticTone.success
-                        : SemanticTone.info,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Text(
-                          result!.confirmed == true
-                              ? 'Syslog configurado e confirmado!'
-                              : 'Comandos aplicados com sucesso.',
-                          style: const TextStyle(fontWeight: FontWeight.w700),
-                        ),
-                        if (result!.persistenceWarning != null) ...<Widget>[
-                          const SizedBox(height: 4),
-                          Text(result!.persistenceWarning!),
-                        ],
-                      ],
-                    ),
-                  ),
-                  if (result!.transcript.isNotEmpty) ...<Widget>[
-                    const SizedBox(height: 10),
-                    CodeViewer(
-                      title: 'Transcrição',
-                      code: result!.transcript,
-                      maxHeight: 220,
-                    ),
-                  ],
-                ],
-                const SizedBox(height: 16),
-                FilledButton.icon(
-                  onPressed: running
-                      ? null
-                      : () async {
-                          setModalState(() {
-                            running = true;
-                            error = null;
-                          });
-                          try {
-                            final res = await ref
-                                .read(logsProvider.notifier)
-                                .provisionDevice(selectedDeviceId, <
-                                  String,
-                                  dynamic
-                                >{
-                                  'protocol': protocol,
-                                  'port': int.tryParse(portCtrl.text.trim()),
-                                  'username': userCtrl.text.trim(),
-                                  'password': passCtrl.text,
-                                  'savedCredential': useSaved ? protocol : null,
-                                  'saveCredential': !useSaved && saveCred,
-                                  'operatingSystem': osId,
-                                  'serverAddress': addrCtrl.text.trim().isEmpty
-                                      ? null
-                                      : addrCtrl.text.trim(),
-                                  'macAddress': macCtrl.text.trim().isEmpty
-                                      ? null
-                                      : macCtrl.text.trim(),
-                                });
-                            setModalState(() {
-                              running = false;
-                              result = res;
-                            });
-                          } catch (err) {
-                            setModalState(() {
-                              running = false;
-                              error = err.toString();
-                            });
-                          }
-                        },
-                  icon: running
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.play_arrow),
-                  label: const Text('Aplicar configuração'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-
-    // Segurança: descarta a senha em memória ao fechar o modal.
-    passCtrl.clear();
-    portCtrl.dispose();
-    userCtrl.dispose();
-    passCtrl.dispose();
-    addrCtrl.dispose();
-    macCtrl.dispose();
-  }
-
-  Future<void> _openTemplateSheet(LogEntry entry, LogTemplateInfo info) async {
-    final auth = ref.read(authProvider);
-    var selectedCategory = info.category ?? 'system';
-
-    await showAdaptiveFormSheet<void>(
-      context: context,
-      title: 'Classificação do padrão de log',
-      subtitle: info.confirmed
-          ? 'Confirmada pelo operador'
-          : 'Sugestão automática do Decisor',
-      builder: (sheetCtx) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                CodeViewer(title: 'Padrão', code: info.template),
-                const SizedBox(height: 12),
-                AppDropdownFormField<String>(
-                  initialValue:
-                      kLogCategories.any((c) => c.$1 == selectedCategory)
-                      ? selectedCategory
-                      : 'system',
-                  decoration: const InputDecoration(labelText: 'Categoria'),
-                  items: <DropdownMenuItem<String>>[
-                    for (final (k, label) in kLogCategories)
-                      DropdownMenuItem<String>(
-                        value: k,
-                        child: Text(label, overflow: TextOverflow.ellipsis),
-                      ),
-                  ],
-                  onChanged: auth.canWrite
-                      ? (v) {
-                          if (v != null) {
-                            setModalState(() => selectedCategory = v);
-                          }
-                        }
-                      : null,
-                ),
-                const SizedBox(height: 14),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: <Widget>[
-                    if (auth.canWrite)
-                      FilledButton.icon(
-                        onPressed: () async {
-                          final err = await ref
-                              .read(logsProvider.notifier)
-                              .confirmTemplate(
-                                info.templateHash,
-                                selectedCategory,
-                              );
-                          if (!sheetCtx.mounted) return;
-                          Navigator.of(sheetCtx).pop();
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(err ?? 'Categoria confirmada.'),
-                            ),
-                          );
-                        },
-                        icon: const Icon(Icons.check, size: 18),
-                        label: const Text('Confirmar categoria'),
-                      ),
-                    if (info.alertTemplate != null &&
-                        info.alertTemplate!.isNotEmpty)
-                      OutlinedButton.icon(
-                        onPressed: () {
-                          Navigator.of(sheetCtx).pop();
-                          context.go(
-                            '/alerts?tab=rules&catalog=${info.alertTemplate}',
-                          );
-                        },
-                        icon: const Icon(
-                          Icons.notifications_active_outlined,
-                          size: 18,
-                        ),
-                        label: const Text('Criar regra de alerta'),
-                      ),
-                  ],
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
   Future<void> _exportLogs(String format) async {
     try {
       final result = await ref
           .read(logsProvider.notifier)
           .exportLogs(format: format);
-      final text = utf8.decode(result.bytes, allowMalformed: true);
-      await Clipboard.setData(ClipboardData(text: text));
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Exportação (${format.toUpperCase()}, ${formatBytes(result.bytes.length)}) copiada para a área de transferência.',
-          ),
-        ),
+      final filename =
+          result.filename ?? 'netmonitor-logs-${formatFileTimestamp()}.$format';
+      await saveOrShareBytes(
+        bytes: result.bytes,
+        filename: filename,
+        mimeType: format == 'csv'
+            ? 'text/csv; charset=utf-8'
+            : 'text/plain; charset=utf-8',
+        context: context,
+        successMessage:
+            'Exportação (${format.toUpperCase()}, ${formatBytes(result.bytes.length)}) pronta ($filename).',
       );
     } catch (err) {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text(err.toString())));
+      ).showSnackBar(SnackBar(content: Text(describeError(err))));
     }
   }
 
@@ -928,9 +231,13 @@ class _LogsPageState extends ConsumerState<LogsPage> {
       onSelected: (action) {
         switch (action) {
           case 'sources':
-            _openSourcesSheet();
+            showLogSourcesSheet(context, ref);
           case 'setup':
-            _openSetupGuideSheet();
+            showLogSetupGuideSheet(
+              context,
+              ref,
+              defaultDeviceId: widget.deviceId,
+            );
           case 'export_txt':
             _exportLogs('txt');
           case 'export_csv':
@@ -1073,7 +380,7 @@ class _LogsPageState extends ConsumerState<LogsPage> {
                   livePill,
                   if (!widget.embedded)
                     OutlinedButton.icon(
-                      onPressed: _openSourcesSheet,
+                      onPressed: () => showLogSourcesSheet(context, ref),
                       icon: const Icon(Icons.router_outlined, size: 18),
                       label: Text(
                         state.unknownCount > 0
@@ -1082,7 +389,11 @@ class _LogsPageState extends ConsumerState<LogsPage> {
                       ),
                     ),
                   OutlinedButton.icon(
-                    onPressed: _openSetupGuideSheet,
+                    onPressed: () => showLogSetupGuideSheet(
+                      context,
+                      ref,
+                      defaultDeviceId: widget.deviceId,
+                    ),
                     icon: const Icon(Icons.terminal, size: 18),
                     label: const Text('Configurar Syslog'),
                   ),
@@ -1468,7 +779,8 @@ class _LogsPageState extends ConsumerState<LogsPage> {
                               ),
                             ),
                             TextButton(
-                              onPressed: _openSourcesSheet,
+                              onPressed: () =>
+                                  showLogSourcesSheet(context, ref),
                               child: const Text('Vincular'),
                             ),
                           ],
@@ -1529,7 +841,12 @@ class _LogsPageState extends ConsumerState<LogsPage> {
                         entry.deviceName ?? entry.hostname ?? entry.sourceIp;
                     return InkWell(
                       borderRadius: AppTheme.borderRadius,
-                      onTap: () => _openLogDetailSheet(entry, tmpl),
+                      onTap: () => showLogDetailSheet(
+                        context,
+                        ref: ref,
+                        entry: entry,
+                        template: tmpl,
+                      ),
                       child: NestedPanel(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 12,
@@ -1601,8 +918,12 @@ class _LogsPageState extends ConsumerState<LogsPage> {
                                         ? SemanticTone.primary
                                         : SemanticTone.info,
                                     compact: true,
-                                    onTap: () =>
-                                        _openTemplateSheet(entry, tmpl),
+                                    onTap: () => showLogTemplateSheet(
+                                      context,
+                                      ref: ref,
+                                      entry: entry,
+                                      info: tmpl,
+                                    ),
                                   ),
                                 ],
                               ],

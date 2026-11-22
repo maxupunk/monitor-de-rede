@@ -5,11 +5,10 @@ import 'package:netmonitor_app/areas/area_contribution.dart';
 import 'package:netmonitor_app/core/areas/area_models.dart';
 import 'package:netmonitor_app/core/areas/areas_provider.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
-import 'package:netmonitor_app/core/network/api_client.dart';
 import 'package:netmonitor_app/core/realtime/sse_service.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
 import 'package:netmonitor_app/features/core/models/settings_models.dart';
 import 'package:netmonitor_app/features/core/presentation/backup/backup_page.dart';
-import 'package:netmonitor_app/features/core/providers/monitors_provider.dart';
 import 'package:netmonitor_app/features/core/providers/onboarding_provider.dart';
 import 'package:netmonitor_app/features/core/providers/settings_provider.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
@@ -235,7 +234,7 @@ class _OnboardingWizardBodyState extends ConsumerState<_OnboardingWizardBody> {
         if (!mounted) return;
         setState(() {
           _applying = false;
-          _error = err.toString();
+          _error = describeError(err);
         });
         return;
       }
@@ -267,12 +266,8 @@ class _OnboardingWizardBodyState extends ConsumerState<_OnboardingWizardBody> {
   }
 
   Future<void> _loadVpnPreflight() async {
-    try {
-      final raw = await ref
-          .read(apiClientProvider)
-          .get<Map<String, dynamic>>('/vpn/preflight');
-      if (mounted) setState(() => _vpnPreflight = raw);
-    } catch (_) {}
+    final raw = await ref.read(onboardingProvider.notifier).fetchVpnPreflight();
+    if (mounted && raw != null) setState(() => _vpnPreflight = raw);
   }
 
   Future<void> _commitAll() async {
@@ -280,14 +275,12 @@ class _OnboardingWizardBodyState extends ConsumerState<_OnboardingWizardBody> {
       _applying = true;
       _error = null;
     });
-    final api = ref.read(apiClientProvider);
 
     try {
-      // 1. General preferences
-      await ref
-          .read(coreSettingsProvider.notifier)
-          .savePreferences(
-            SystemPreferences(
+      final createdToken = await ref
+          .read(onboardingProvider.notifier)
+          .commitInitialSetup(
+            preferences: SystemPreferences(
               defaultPingIntervalSeconds:
                   (int.tryParse(_pingIntervalCtrl.text.trim()) ?? 60).clamp(
                     10,
@@ -298,86 +291,21 @@ class _OnboardingWizardBodyState extends ConsumerState<_OnboardingWizardBody> {
                   : _snmpCommCtrl.text.trim(),
               autoDiscoveryEnabled: _autoDiscovery,
             ),
+            lanAddressOverride: _lanAddrCtrl.text,
+            enableNetwork: _enableNetwork,
+            siteName: _siteNameCtrl.text,
+            networkName: _networkNameCtrl.text,
+            networkCidr: _networkCidrCtrl.text,
+            dnsName: _dnsNameCtrl.text,
+            dnsIp: _dnsIpCtrl.text,
+            selectedSaas: _selectedSaas.toList(growable: false),
+            enableServers: _enableServers,
+            agentName: _agentNameCtrl.text,
+            enableLocalNotifications: _enableLocalNotifs,
           );
-
-      // 2. Server LAN address override if provided
-      if (_lanAddrCtrl.text.trim().isNotEmpty) {
-        await ref
-            .read(coreSettingsProvider.notifier)
-            .saveServerAddresses(
-              overrides: <String, String>{'lan': _lanAddrCtrl.text.trim()},
-              custom: const <Map<String, dynamic>>[],
-              preferredId: 'lan',
-              domainHttps: false,
-            );
-      }
-
-      // 3. Optional Network items
-      if (_enableNetwork) {
-        int? createdSiteId;
-        if (_siteNameCtrl.text.trim().isNotEmpty) {
-          final siteRes = await api
-              .post<Map<String, dynamic>>(
-                '/sites',
-                data: <String, dynamic>{'name': _siteNameCtrl.text.trim()},
-              )
-              .catchError((_) => <String, dynamic>{});
-          createdSiteId = (siteRes['id'] as num?)?.toInt();
-        }
-        if (_networkNameCtrl.text.trim().isNotEmpty &&
-            _networkCidrCtrl.text.trim().isNotEmpty) {
-          await api
-              .post<dynamic>(
-                '/networks',
-                data: <String, dynamic>{
-                  'name': _networkNameCtrl.text.trim(),
-                  'cidr': _networkCidrCtrl.text.trim(),
-                  'siteId': ?createdSiteId,
-                },
-              )
-              .catchError((_) => null);
-        }
-        if (_dnsIpCtrl.text.trim().isNotEmpty) {
-          await api
-              .post<dynamic>(
-                '/dns/servers',
-                data: <String, dynamic>{
-                  'name': _dnsNameCtrl.text.trim().isEmpty
-                      ? _dnsIpCtrl.text.trim()
-                      : _dnsNameCtrl.text.trim(),
-                  'ipAddress': _dnsIpCtrl.text.trim(),
-                },
-              )
-              .catchError((_) => null);
-        }
-        if (_selectedSaas.isNotEmpty) {
-          await ref
-              .read(monitorsProvider.notifier)
-              .provisionSaasPresets(_selectedSaas.toList())
-              .catchError((_) => <String, dynamic>{});
-        }
-      }
-
-      // 4. Optional Remote Agent token
-      if (_enableServers && _agentNameCtrl.text.trim().isNotEmpty) {
-        final agentRes = await api
-            .post<Map<String, dynamic>>(
-              '/agents',
-              data: <String, dynamic>{'name': _agentNameCtrl.text.trim()},
-            )
-            .catchError((_) => <String, dynamic>{});
-        _createdAgentToken = agentRes['token'] as String?;
-      }
-
-      // 5. Local notifications pref
-      await ref
-          .read(coreSettingsProvider.notifier)
-          .setLocalNotificationsEnabled(_enableLocalNotifs);
-
-      // 6. Mark onboarding complete
-      await ref.read(onboardingProvider.notifier).completeOnboarding();
       if (!mounted) return;
       setState(() {
+        _createdAgentToken = createdToken;
         _applying = false;
         _step = _WizardStep.done;
       });
@@ -385,7 +313,7 @@ class _OnboardingWizardBodyState extends ConsumerState<_OnboardingWizardBody> {
       if (!mounted) return;
       setState(() {
         _applying = false;
-        _error = err.toString();
+        _error = describeError(err);
       });
     }
   }

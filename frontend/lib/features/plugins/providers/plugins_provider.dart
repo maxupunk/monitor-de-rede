@@ -3,9 +3,13 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/network/api_client.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 import 'package:netmonitor_app/features/plugins/data/plugins_repository.dart';
 import 'package:netmonitor_app/features/plugins/models/plugin_models.dart';
 import 'package:netmonitor_app/features/plugins/providers/plugin_apps_provider.dart';
+import 'package:netmonitor_app/shared/device_access/device_access.dart'
+    hide CredentialView;
 
 const int _runsLimit = 20;
 const int _progressLimit = 120;
@@ -74,7 +78,7 @@ class PluginsState {
   }
 }
 
-/// Store global de plugins, credenciais, execuções e aprovações (SSE-driven, zero polling).
+/// Store global de plugins, execuções e aprovações (SSE-driven, zero polling).
 class PluginsNotifier extends Notifier<PluginsState> {
   final Map<int, List<Completer<PluginRunView>>> _finishWaiters =
       <int, List<Completer<PluginRunView>>>{};
@@ -84,12 +88,6 @@ class PluginsNotifier extends Notifier<PluginsState> {
   PluginsState build() => const PluginsState();
 
   PluginsRepository get _repo => ref.read(pluginsRepositoryProvider);
-
-  String _describe(Object err, String fallback) {
-    if (err is ApiException && err.message.isNotEmpty) return err.message;
-    if (err is NetworkException && err.message.isNotEmpty) return err.message;
-    return fallback;
-  }
 
   // --- Biblioteca ---
 
@@ -101,12 +99,17 @@ class PluginsNotifier extends Notifier<PluginsState> {
     } catch (err) {
       state = state.copyWith(
         libraryLoading: false,
-        error: _describe(err, 'Falha ao carregar os plugins.'),
+        error: describeError(err, fallback: 'Falha ao carregar os plugins.'),
       );
     }
   }
 
   Future<PluginDetail> fetchDetail(int id) => _repo.fetchDetail(id);
+
+  Future<DownloadResult> exportPlugin(int id) => _repo.exportPlugin(id);
+
+  Future<PluginPreviewResult> previewPackage(PluginPackage pkg) =>
+      _repo.previewPackage(pkg);
 
   void _upsertSummary(PluginSummary summary) {
     final next = List<PluginSummary>.from(state.library);
@@ -209,7 +212,7 @@ class PluginsNotifier extends Notifier<PluginsState> {
     );
   }
 
-  // --- Dispositivo & Credenciais ---
+  // --- Dispositivo ---
 
   Future<void> loadDevice(int deviceId) async {
     state = state.copyWith(deviceLoading: true, clearError: true);
@@ -225,7 +228,10 @@ class PluginsNotifier extends Notifier<PluginsState> {
     } catch (err) {
       state = state.copyWith(
         deviceLoading: false,
-        error: _describe(err, 'Falha ao carregar os plugins do dispositivo.'),
+        error: describeError(
+          err,
+          fallback: 'Falha ao carregar os plugins do dispositivo.',
+        ),
       );
     }
   }
@@ -275,33 +281,11 @@ class PluginsNotifier extends Notifier<PluginsState> {
     return saved;
   }
 
-  void _replaceCredential(int deviceId, CredentialView credential) {
-    final view = state.deviceViews[deviceId];
-    if (view == null) return;
-    final others = view.credentials.where((c) => c.kind != credential.kind);
-    final next = <CredentialView>[...others, credential]
-      ..sort((a, b) => a.kind.compareTo(b.kind));
-    state = state.copyWith(
-      deviceViews: <int, DevicePluginsView>{
-        ...state.deviceViews,
-        deviceId: view.copyWith(
-          credentials: List<CredentialView>.unmodifiable(next),
-        ),
-      },
-    );
-  }
-
-  Future<CredentialView> saveCredential(
-    int deviceId,
-    Map<String, dynamic> input,
-  ) async {
-    final saved = await _repo.saveCredential(deviceId, input);
-    _replaceCredential(deviceId, saved);
-    return saved;
-  }
-
+  /// Delega remoção de credencial ao `deviceAccessProvider.notifier` unificado e sincroniza `deviceViews`.
   Future<void> deleteCredential(int deviceId, String kind) async {
-    await _repo.deleteCredential(deviceId, kind);
+    await ref
+        .read(deviceAccessProvider.notifier)
+        .deleteCredential(deviceId: deviceId, kind: kind);
     final view = state.deviceViews[deviceId];
     if (view == null) return;
     state = state.copyWith(
@@ -314,45 +298,6 @@ class PluginsNotifier extends Notifier<PluginsState> {
         ),
       },
     );
-  }
-
-  Future<CredentialView> provisionDedicated(
-    int deviceId,
-    Map<String, dynamic> input,
-  ) async {
-    final saved = await _repo.provisionDedicated(deviceId, input);
-    _replaceCredential(deviceId, saved);
-    return saved;
-  }
-
-  Future<CredentialView> rotateDedicated(int deviceId) async {
-    final saved = await _repo.rotateDedicated(deviceId);
-    _replaceCredential(deviceId, saved);
-    return saved;
-  }
-
-  Future<List<String>> revokeDedicated(
-    int deviceId, {
-    bool localOnly = false,
-  }) async {
-    final leftovers = await _repo.revokeDedicated(
-      deviceId,
-      localOnly: localOnly,
-    );
-    final view = state.deviceViews[deviceId];
-    if (view != null) {
-      state = state.copyWith(
-        deviceViews: <int, DevicePluginsView>{
-          ...state.deviceViews,
-          deviceId: view.copyWith(
-            credentials: view.credentials
-                .where((c) => c.kind != 'ssh')
-                .toList(growable: false),
-          ),
-        },
-      );
-    }
-    return leftovers;
   }
 
   Future<int> runAction({
@@ -460,15 +405,15 @@ class PluginsNotifier extends Notifier<PluginsState> {
   void applyRunStarted(Map<String, dynamic> data) {
     final raw = data['run'];
     if (raw is! Map) return;
-    _upsertRun(PluginRunView.fromJson(Map<String, dynamic>.from(raw)));
+    _upsertRun(PluginRunView.fromJson(asJsonMap(raw)));
   }
 
   void applyRunOutput(Map<String, dynamic> data) {
-    final runId = (data['runId'] as num?)?.toInt();
-    final deviceId = (data['deviceId'] as num?)?.toInt();
+    final runId = parseIntOrNull(data['runId']);
+    final deviceId = parseIntOrNull(data['deviceId']);
     final rawEntry = data['entry'];
     if (runId == null || deviceId == null || rawEntry is! Map) return;
-    final entry = TranscriptEntry.fromJson(Map<String, dynamic>.from(rawEntry));
+    final entry = TranscriptEntry.fromJson(asJsonMap(rawEntry));
 
     var nextLoose = state.looseRuns;
     final loose = nextLoose[runId];
@@ -506,7 +451,7 @@ class PluginsNotifier extends Notifier<PluginsState> {
   void applyRunFinished(Map<String, dynamic> data) {
     final raw = data['run'];
     if (raw is! Map) return;
-    var finished = PluginRunView.fromJson(Map<String, dynamic>.from(raw));
+    var finished = PluginRunView.fromJson(asJsonMap(raw));
     final prev = state.runById(finished.deviceId, finished.id);
     if (finished.pluginName == null && prev?.pluginName != null) {
       finished = finished.copyWith(pluginName: prev!.pluginName);
@@ -532,10 +477,10 @@ class PluginsNotifier extends Notifier<PluginsState> {
   }
 
   void applyRunProgress(Map<String, dynamic> data) {
-    final runId = (data['runId'] as num?)?.toInt();
+    final runId = parseIntOrNull(data['runId']);
     final flow = data['flow'] as String?;
-    final bps = (data['bps'] as num?)?.toDouble();
-    final tMs = (data['tMs'] as num?)?.toInt();
+    final bps = parseDoubleOrNull(data['bps']);
+    final tMs = parseIntOrNull(data['tMs']);
     if (runId == null ||
         (flow != 'tx' && flow != 'rx') ||
         bps == null ||

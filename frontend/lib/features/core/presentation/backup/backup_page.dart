@@ -4,13 +4,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:netmonitor_app/areas/composition_registries.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
+import 'package:netmonitor_app/core/utils/file_download.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/core/models/admin_models.dart';
-import 'package:netmonitor_app/features/core/presentation/widgets/pinned_sliver_header.dart';
 import 'package:netmonitor_app/features/core/providers/backup_provider.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
-import 'package:share_plus/share_plus.dart';
 
 /// Tela de Backup e Restauração com composição dinâmica via `BackupTabRegistry`
 /// (paridade com `BackupPage.vue`: Sistema + abas plugadas por `servers-dev`).
@@ -131,124 +131,14 @@ class _SystemBackupTab extends ConsumerWidget {
     WidgetRef ref,
     BackupState state,
   ) async {
-    final plan = state.plan;
-    int? storageId = plan?.storageDestinationId;
-    bool enabled = plan?.backupEnabled ?? false;
-    final intervalCtrl = TextEditingController(
-      text: '${plan?.backupIntervalHours ?? 24}',
-    );
-    final retentionCtrl = TextEditingController(
-      text: '${plan?.backupRetention ?? 7}',
-    );
-    var saving = false;
-
     await showAdaptiveFormSheet<void>(
       context: context,
       title: 'Plano de backup automático',
       subtitle:
           'Escolha o destino, frequência (horas) e retenção (1 a 365 cópias).',
-      builder: (sheetCtx) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                AppDropdownFormField<int?>(
-                  initialValue: state.storages.any((s) => s.id == storageId)
-                      ? storageId
-                      : null,
-                  decoration: const InputDecoration(
-                    labelText: 'Destino de armazenamento',
-                  ),
-                  items: <DropdownMenuItem<int?>>[
-                    const DropdownMenuItem<int?>(
-                      value: null,
-                      child: Text(
-                        'Nenhum destino',
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    for (final s in state.storages)
-                      DropdownMenuItem<int?>(
-                        value: s.id,
-                        child: Text(
-                          '${s.name} (${s.kind})',
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                  ],
-                  onChanged: (v) => setModalState(() => storageId = v),
-                ),
-                const SizedBox(height: 12),
-                ResponsiveFieldRow(
-                  breakpoint: 480,
-                  children: <Widget>[
-                    TextField(
-                      controller: intervalCtrl,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                        labelText: 'Intervalo (horas)',
-                      ),
-                    ),
-                    TextField(
-                      controller: retentionCtrl,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                        labelText: 'Retenção (1–365)',
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  value: enabled,
-                  onChanged: (v) => setModalState(() => enabled = v),
-                  title: const Text('Backup automático habilitado'),
-                ),
-                const SizedBox(height: 14),
-                FilledButton.icon(
-                  onPressed: saving
-                      ? null
-                      : () async {
-                          final interval =
-                              (int.tryParse(intervalCtrl.text.trim()) ?? 24)
-                                  .clamp(1, 720);
-                          final retention =
-                              (int.tryParse(retentionCtrl.text.trim()) ?? 7)
-                                  .clamp(1, 365);
-                          setModalState(() => saving = true);
-                          try {
-                            await ref
-                                .read(backupProvider.notifier)
-                                .savePlan(
-                                  storageDestinationId: storageId,
-                                  backupEnabled: enabled,
-                                  backupIntervalHours: interval,
-                                  backupRetention: retention,
-                                );
-                            if (sheetCtx.mounted) Navigator.of(sheetCtx).pop();
-                          } catch (err) {
-                            setModalState(() => saving = false);
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text(err.toString())),
-                              );
-                            }
-                          }
-                        },
-                  icon: const Icon(Icons.save_outlined),
-                  label: const Text('Salvar plano'),
-                ),
-              ],
-            );
-          },
-        );
-      },
+      builder: (_) =>
+          _BackupPlanSheetBody(plan: state.plan, storages: state.storages),
     );
-
-    intervalCtrl.dispose();
-    retentionCtrl.dispose();
   }
 
   Future<void> _openRestoreCopySheet(
@@ -436,7 +326,9 @@ class _SystemBackupTab extends ConsumerWidget {
                                       ScaffoldMessenger.of(
                                         context,
                                       ).showSnackBar(
-                                        SnackBar(content: Text(err.toString())),
+                                        SnackBar(
+                                          content: Text(describeError(err)),
+                                        ),
                                       );
                                     }
                                   },
@@ -518,13 +410,12 @@ class _SystemBackupTab extends ConsumerWidget {
                                   .read(backupProvider.notifier)
                                   .exportConfig();
                               if (res == null || !context.mounted) return;
-                              await Share.shareXFiles(<XFile>[
-                                XFile.fromData(
-                                  res.bytes,
-                                  name: res.filename,
-                                  mimeType: 'application/json',
-                                ),
-                              ]);
+                              await saveOrShareBytes(
+                                bytes: res.bytes,
+                                filename: res.filename,
+                                mimeType: 'application/json',
+                                context: context,
+                              );
                             },
                       icon: const Icon(Icons.description_outlined, size: 17),
                       label: Text(
@@ -547,15 +438,14 @@ class _SystemBackupTab extends ConsumerWidget {
                                   .read(backupProvider.notifier)
                                   .downloadFull();
                               if (res == null || !context.mounted) return;
-                              await Share.shareXFiles(<XFile>[
-                                XFile.fromData(
-                                  res.bytes,
-                                  name:
-                                      res.filename ??
-                                      'netmonitor-backup-completo.json.gz',
-                                  mimeType: res.contentType,
-                                ),
-                              ]);
+                              await saveOrShareBytes(
+                                bytes: res.bytes,
+                                filename:
+                                    res.filename ??
+                                    'netmonitor-backup-completo-${formatFileTimestamp()}.json.gz',
+                                mimeType: res.contentType,
+                                context: context,
+                              );
                             },
                       icon: const Icon(Icons.archive_outlined, size: 17),
                       label: const Text(
@@ -795,6 +685,135 @@ class BackupCountsSummaryWidget extends StatelessWidget {
             '+ ${counts.tables.length - 10} tabela(s) adicional(is)',
             style: context.textTheme.bodySmall,
           ),
+      ],
+    );
+  }
+}
+
+class _BackupPlanSheetBody extends ConsumerStatefulWidget {
+  const _BackupPlanSheetBody({required this.plan, required this.storages});
+
+  final SystemBackupPlan? plan;
+  final List<StorageOptionRef> storages;
+
+  @override
+  ConsumerState<_BackupPlanSheetBody> createState() =>
+      _BackupPlanSheetBodyState();
+}
+
+class _BackupPlanSheetBodyState extends ConsumerState<_BackupPlanSheetBody> {
+  int? _storageId;
+  bool _enabled = false;
+  late final TextEditingController _intervalCtrl;
+  late final TextEditingController _retentionCtrl;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _storageId = widget.plan?.storageDestinationId;
+    _enabled = widget.plan?.backupEnabled ?? false;
+    _intervalCtrl = TextEditingController(
+      text: '${widget.plan?.backupIntervalHours ?? 24}',
+    );
+    _retentionCtrl = TextEditingController(
+      text: '${widget.plan?.backupRetention ?? 7}',
+    );
+  }
+
+  @override
+  void dispose() {
+    _intervalCtrl.dispose();
+    _retentionCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final interval = (int.tryParse(_intervalCtrl.text.trim()) ?? 24).clamp(
+      1,
+      720,
+    );
+    final retention = (int.tryParse(_retentionCtrl.text.trim()) ?? 7).clamp(
+      1,
+      365,
+    );
+    setState(() => _saving = true);
+    try {
+      await ref
+          .read(backupProvider.notifier)
+          .savePlan(
+            storageDestinationId: _storageId,
+            backupEnabled: _enabled,
+            backupIntervalHours: interval,
+            backupRetention: retention,
+          );
+      if (mounted) Navigator.of(context).pop();
+    } catch (err) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(describeError(err))));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        AppDropdownFormField<int?>(
+          initialValue: widget.storages.any((s) => s.id == _storageId)
+              ? _storageId
+              : null,
+          decoration: const InputDecoration(
+            labelText: 'Destino de armazenamento',
+          ),
+          items: <DropdownMenuItem<int?>>[
+            const DropdownMenuItem<int?>(
+              value: null,
+              child: Text('Nenhum destino', overflow: TextOverflow.ellipsis),
+            ),
+            for (final s in widget.storages)
+              DropdownMenuItem<int?>(
+                value: s.id,
+                child: Text(
+                  '${s.name} (${s.kind})',
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+          ],
+          onChanged: (v) => setState(() => _storageId = v),
+        ),
+        const SizedBox(height: 12),
+        ResponsiveFieldRow(
+          breakpoint: 480,
+          children: <Widget>[
+            TextField(
+              controller: _intervalCtrl,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Intervalo (horas)'),
+            ),
+            TextField(
+              controller: _retentionCtrl,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Retenção (1–365)'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          value: _enabled,
+          onChanged: (v) => setState(() => _enabled = v),
+          title: const Text('Backup automático habilitado'),
+        ),
+        const SizedBox(height: 14),
+        FilledButton.icon(
+          onPressed: _saving ? null : _save,
+          icon: const Icon(Icons.save_outlined),
+          label: const Text('Salvar plano'),
+        ),
       ],
     );
   }

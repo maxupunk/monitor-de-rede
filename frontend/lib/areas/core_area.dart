@@ -6,6 +6,7 @@ import 'package:netmonitor_app/core/areas/areas_provider.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
 import 'package:netmonitor_app/core/navigation/nav_models.dart';
 import 'package:netmonitor_app/core/realtime/sse_service.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 import 'package:netmonitor_app/features/core/models/alert_models.dart';
 import 'package:netmonitor_app/features/core/presentation/alerts/alerts_page.dart';
 import 'package:netmonitor_app/features/core/presentation/audit/audit_page.dart';
@@ -31,7 +32,7 @@ import 'package:netmonitor_app/features/core/providers/monitors_provider.dart';
 import 'package:netmonitor_app/features/core/providers/scheduled_tasks_provider.dart';
 
 int _extractAlertId(Map<String, dynamic> data) =>
-    ((data['id'] ?? data['alertEventId']) as num?)?.toInt() ?? 0;
+    parseIntOrNull(data['id'] ?? data['alertEventId']) ?? 0;
 
 bool _isScheduledTaskNews(Map<String, dynamic> data) {
   final status = data['status']?.toString();
@@ -175,10 +176,13 @@ final AreaContribution coreArea = AreaContribution(
       area: ProductArea.core,
       aiScreen: _coreAiScreens['dashboard'],
     ),
-    '/devices': const AreaRouteMeta(area: ProductArea.core),
     '/monitors': AreaRouteMeta(
       area: ProductArea.core,
       aiScreen: _coreAiScreens['monitors'],
+    ),
+    '/monitors/:id': AreaRouteMeta(
+      area: ProductArea.core,
+      aiScreen: _coreAiScreens['monitor-detail'],
     ),
     '/alerts': AreaRouteMeta(
       area: ProductArea.core,
@@ -192,7 +196,6 @@ final AreaContribution coreArea = AreaContribution(
       area: ProductArea.core,
       aiScreen: _coreAiScreens['logs'],
     ),
-    '/remote-servers': const AreaRouteMeta(area: ProductArea.core),
     '/maintenance-windows': AreaRouteMeta(
       area: ProductArea.core,
       aiScreen: _coreAiScreens['maintenance-windows'],
@@ -201,8 +204,6 @@ final AreaContribution coreArea = AreaContribution(
       area: ProductArea.core,
       aiScreen: _coreAiScreens['scheduled-tasks'],
     ),
-    '/ai-chat': const AreaRouteMeta(area: ProductArea.core, fullBleed: true),
-    '/ai-benchmark': const AreaRouteMeta(area: ProductArea.core),
     '/settings': const AreaRouteMeta(area: ProductArea.core),
     '/users': const AreaRouteMeta(area: ProductArea.core, requiresAdmin: true),
     '/audit': AreaRouteMeta(
@@ -267,16 +268,6 @@ final AreaContribution coreArea = AreaContribution(
         title: 'Logs',
         icon: Icons.article_outlined,
         to: '/logs',
-      ),
-    ),
-    NavEntry(
-      area: ProductArea.core,
-      section: NavSectionId.servers,
-      order: 20,
-      item: NavItemSpec(
-        title: 'Servidores remotos',
-        icon: Icons.dns_outlined,
-        to: '/remote-servers',
       ),
     ),
     NavEntry(

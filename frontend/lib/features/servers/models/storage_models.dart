@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 
 /// Destino de backup listado em `GET /api/storages`.
 @immutable
@@ -23,7 +24,7 @@ class StorageDestinationResponse {
 
   factory StorageDestinationResponse.fromJson(Map<String, dynamic> json) {
     return StorageDestinationResponse(
-      id: (json['id'] as num?)?.toInt() ?? 0,
+      id: parseIntOrNull(json['id']) ?? 0,
       name: (json['name'] as String?) ?? '',
       provider: (json['provider'] as String?) ?? 'local',
       target: json['target'] as String?,
@@ -66,18 +67,13 @@ class StorageDestinationDetail {
   );
 
   factory StorageDestinationDetail.fromJson(Map<String, dynamic> json) {
-    final rawSecrets = json['secretsSet'];
     return StorageDestinationDetail(
-      id: (json['id'] as num?)?.toInt() ?? 0,
+      id: parseIntOrNull(json['id']) ?? 0,
       name: (json['name'] as String?) ?? '',
       provider: (json['provider'] as String?) ?? 'local',
       target: json['target'] as String?,
-      config: json['config'] is Map
-          ? Map<String, dynamic>.from(json['config'] as Map)
-          : const <String, dynamic>{},
-      secretsSet: rawSecrets is List
-          ? List<String>.unmodifiable(rawSecrets.whereType<String>())
-          : const <String>[],
+      config: asJsonMap(json['config']),
+      secretsSet: List<String>.unmodifiable(asStringList(json['secretsSet'])),
       createdAt: json['createdAt'] as String?,
       updatedAt: json['updatedAt'] as String?,
     );
@@ -129,7 +125,7 @@ class StorageTestResponse {
 
   factory StorageTestResponse.fromJson(Map<String, dynamic> json) {
     return StorageTestResponse(
-      ok: json['ok'] == true,
+      ok: parseBool(json['ok']),
       message: (json['message'] as String?) ?? '',
       hostKeyFingerprint: json['hostKeyFingerprint'] as String?,
     );
@@ -156,9 +152,9 @@ class StorageObject {
     return StorageObject(
       key: (json['key'] as String?) ?? '',
       name: (json['name'] as String?) ?? '',
-      size: (json['size'] as num?)?.toInt() ?? 0,
+      size: parseIntOrNull(json['size']) ?? 0,
       lastModified: json['lastModified'] as String?,
-      isDirectory: json['isDirectory'] == true,
+      isDirectory: parseBool(json['isDirectory']),
     );
   }
 }
@@ -176,16 +172,11 @@ class StorageBrowseResponse {
   final String? nextCursor;
 
   factory StorageBrowseResponse.fromJson(Map<String, dynamic> json) {
-    final rawObjs = json['objects'];
     return StorageBrowseResponse(
       path: (json['path'] as String?) ?? '',
-      objects: rawObjs is List
-          ? List<StorageObject>.unmodifiable(
-              rawObjs.whereType<Map>().map(
-                (e) => StorageObject.fromJson(Map<String, dynamic>.from(e)),
-              ),
-            )
-          : const <StorageObject>[],
+      objects: List<StorageObject>.unmodifiable(
+        asJsonList(json['objects'], StorageObject.fromJson),
+      ),
       nextCursor: json['nextCursor'] as String?,
     );
   }

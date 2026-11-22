@@ -15,7 +15,6 @@ import 'package:netmonitor_app/features/ai/widgets/ai_settings_card.dart';
 import 'package:netmonitor_app/features/ai/widgets/ai_tool_card.dart';
 import 'package:netmonitor_app/features/ai/widgets/ai_tool_chart.dart';
 import 'package:netmonitor_app/features/ai/widgets/decider_settings_card.dart';
-import 'package:netmonitor_app/features/plugins/data/plugins_repository.dart';
 import 'package:netmonitor_app/features/plugins/models/plugin_models.dart';
 import 'package:netmonitor_app/features/plugins/pages/plugin_app_page.dart';
 import 'package:netmonitor_app/features/plugins/pages/plugins_page.dart';
@@ -228,41 +227,41 @@ class _SeededPluginAppsNotifier extends PluginAppsNotifier {
   }) async => 1;
 }
 
-class _StubPluginsRepository extends PluginsRepository {
-  _StubPluginsRepository(super.api);
-
-  @override
-  Future<DeviceAccessView> fetchAccess(int deviceId) async =>
-      const DeviceAccessView(
-        deviceId: 5,
-        deviceName: 'Roteador-OpenWrt',
-        dedicatedPlatform: 'openwrt',
-      );
-}
-
-class _OpenWrtAuth401PluginsRepository extends PluginsRepository {
-  _OpenWrtAuth401PluginsRepository(super.api, {this.platform = 'openwrt'});
+class _StubDeviceAccessController extends DeviceAccessController {
+  _StubDeviceAccessController({
+    this.platform = 'openwrt',
+    this.rejectProvisionWith401 = false,
+  });
 
   final String platform;
+  final bool rejectProvisionWith401;
   int provisionAttempts = 0;
 
   @override
-  Future<DeviceAccessView> fetchAccess(int deviceId) async => DeviceAccessView(
-    deviceId: deviceId,
-    deviceName: 'AP-Escritorio',
-    dedicatedPlatform: platform,
-  );
+  Future<DeviceAccessViewModel> fetchAccess(int deviceId) async =>
+      DeviceAccessViewModel(
+        deviceId: deviceId,
+        deviceName: platform == 'mikrotik' ? 'RB-Borda' : 'AP-Escritorio',
+        dedicatedPlatform: platform,
+        platformHint: platform,
+      );
 
   @override
-  Future<CredentialView> provisionDedicated(
-    int deviceId,
-    Map<String, dynamic> input,
-  ) async {
+  Future<void> provisionDedicatedKey({
+    required int deviceId,
+    required String platform,
+    required String username,
+    required String password,
+    int port = 22,
+    int? viaProbeId,
+  }) async {
     provisionAttempts += 1;
-    throw const ApiException(
-      statusCode: 401,
-      message: 'Usuário ou senha recusados pelo equipamento.',
-    );
+    if (rejectProvisionWith401) {
+      throw const ApiException(
+        statusCode: 401,
+        message: 'Usuário ou senha recusados pelo equipamento.',
+      );
+    }
   }
 }
 
@@ -840,8 +839,9 @@ void main() {
               ),
             ),
             overrides: <Override>[
-              pluginsRepositoryProvider.overrideWith(
-                (ref) => _StubPluginsRepository(ref.read(apiClientProvider)),
+              authProvider.overrideWith(_AdminAuthStub.new),
+              deviceAccessProvider.overrideWith(
+                () => _StubDeviceAccessController(platform: 'openwrt'),
               ),
             ],
           ),
@@ -852,14 +852,14 @@ void main() {
 
         expect(tester.takeException(), isNull);
         expect(find.text('Chave SSH dedicada (openwrt)'), findsOneWidget);
-        expect(find.text('Usuário e senha (sessão 30 min)'), findsOneWidget);
+        expect(find.text('Usuário e senha'), findsOneWidget);
         expect(find.text('Cofre'), findsNothing);
-        expect(find.text('Provisionar chave dedicada'), findsOneWidget);
+        expect(find.text('Provisionar chave SSH'), findsOneWidget);
 
-        await tester.tap(find.text('Usuário e senha (sessão 30 min)'));
+        await tester.tap(find.text('Usuário e senha'));
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
-        expect(find.text('Salvar acesso'), findsOneWidget);
+        expect(find.text('Salvar credencial'), findsOneWidget);
       },
     );
 
@@ -1143,16 +1143,14 @@ void main() {
           tester.view.resetDevicePixelRatio();
         });
 
-        late _OpenWrtAuth401PluginsRepository repo;
+        final accessCtrl = _StubDeviceAccessController(
+          platform: 'openwrt',
+          rejectProvisionWith401: true,
+        );
         final container = ProviderContainer(
           overrides: <Override>[
             authProvider.overrideWith(_AdminAuthStub.new),
-            pluginsRepositoryProvider.overrideWith((ref) {
-              repo = _OpenWrtAuth401PluginsRepository(
-                ref.read(apiClientProvider),
-              );
-              return repo;
-            }),
+            deviceAccessProvider.overrideWith(() => accessCtrl),
           ],
         );
         addTearDown(container.dispose);
@@ -1184,22 +1182,22 @@ void main() {
 
         // OpenWrt dedicated SSH defaults username to 'root' (never 'admin')
         final userField = tester.widget<TextField>(
-          find.widgetWithText(TextField, 'Usuário admin atual *'),
+          find.widgetWithText(TextField, 'Usuário admin atual'),
         );
         expect(userField.controller?.text, 'root');
 
         // Enter wrong password and submit -> triggers 401 from device endpoint
         await tester.enterText(
-          find.widgetWithText(TextField, 'Senha admin (uso único) *'),
+          find.widgetWithText(TextField, 'Senha administrativa (uso único)'),
           'senha-errada',
         );
-        final provisionBtn = find.text('Provisionar chave dedicada');
+        final provisionBtn = find.text('Provisionar chave SSH');
         await tester.ensureVisible(provisionBtn);
         await tester.tap(provisionBtn);
         await tester.pumpAndSettle();
 
         expect(tester.takeException(), isNull);
-        expect(repo.provisionAttempts, 1);
+        expect(accessCtrl.provisionAttempts, 1);
 
         // Explicit AlertDialog explains the credential rejection + OpenWrt 'root' hint
         expect(find.byType(AlertDialog), findsOneWidget);
@@ -1221,7 +1219,7 @@ void main() {
 
         expect(find.byType(AlertDialog), findsNothing);
         expect(find.text('Acesso ao equipamento'), findsOneWidget);
-        expect(find.text('Provisionar chave dedicada'), findsOneWidget);
+        expect(find.text('Provisionar chave SSH'), findsOneWidget);
         expect(container.read(authProvider).isAuthenticated, isTrue);
         expect(container.read(authProvider).token, 'test-token');
 
@@ -1244,11 +1242,8 @@ void main() {
             ),
             overrides: <Override>[
               authProvider.overrideWith(_AdminAuthStub.new),
-              pluginsRepositoryProvider.overrideWith(
-                (ref) => _OpenWrtAuth401PluginsRepository(
-                  ref.read(apiClientProvider),
-                  platform: 'mikrotik',
-                ),
+              deviceAccessProvider.overrideWith(
+                () => _StubDeviceAccessController(platform: 'mikrotik'),
               ),
             ],
           ),
@@ -1257,7 +1252,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
         final mikrotikUserField = tester.widget<TextField>(
-          find.widgetWithText(TextField, 'Usuário admin atual *'),
+          find.widgetWithText(TextField, 'Usuário admin atual'),
         );
         expect(mikrotikUserField.controller?.text, 'admin');
       },

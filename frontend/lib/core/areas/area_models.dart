@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 
 /// Áreas do produto (ADR 017): Núcleo, Rede, Servidores e VPN.
 /// `core` nunca desliga.
@@ -71,7 +72,7 @@ class AreaStateModel {
 
   static AreaStateModel? tryFromJson(Object? raw) {
     if (raw is! Map) return null;
-    final json = Map<String, dynamic>.from(raw);
+    final json = asJsonMap(raw);
     final area = ProductArea.tryParse(json['area']);
     if (area == null || json['enabled'] is! bool) return null;
 
@@ -84,7 +85,7 @@ class AreaStateModel {
       enabled: json['enabled'] as bool,
       optional: (json['optional'] as bool?) ?? area.isOptional,
       evidence: rawEvidence is Map
-          ? AreaEvidence.fromJson(Map<String, dynamic>.from(rawEvidence))
+          ? AreaEvidence.fromJson(asJsonMap(rawEvidence))
           : null,
     );
   }

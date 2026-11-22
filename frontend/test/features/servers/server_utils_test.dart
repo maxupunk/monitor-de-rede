@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:netmonitor_app/features/servers/models/deploy_models.dart';
 import 'package:netmonitor_app/features/servers/models/docker_models.dart';
 import 'package:netmonitor_app/features/servers/models/registry_models.dart';
 import 'package:netmonitor_app/features/servers/utils/server_utils.dart';
@@ -109,8 +110,45 @@ void main() {
         expect(looksLikeSecretKey(parsed[2].key), isTrue);
         expect(looksLikeSecretKey(parsed[4].key), isFalse);
         expect(serializeEnvFile(parsed), equals(original));
+
+        // copyWithVariable preserves stable uid for ValueKey identity
+        final originalUid = parsed[1].uid;
+        final edited = parsed[1].copyWithVariable(value: '10.8.0.1');
+        expect(edited.uid, equals(originalUid));
+        expect(edited.exported, isTrue);
+        expect(edited.value, equals('10.8.0.1'));
       },
     );
+
+    test('DeploySetupInput and DeployCredentialInput serialize cleanly', () {
+      const cred = DeployCredentialInput(
+        name: 'ghcr-pat',
+        registry: 'ghcr.io',
+        username: 'bot',
+        secret: 'ghp_123',
+      );
+      expect(cred.toJson()['name'], 'ghcr-pat');
+      expect(cred.toJson()['registry'], 'ghcr.io');
+
+      const setup = DeploySetupInput(
+        application: DeployApplicationInput(
+          name: 'ERP',
+          slug: 'erp',
+          repository: 'org/erp',
+          composeFiles: <String>['docker-compose.yml'],
+          imageTagVariable: 'IMAGE_TAG',
+        ),
+        target: DeployTargetInput(
+          name: 'Prod',
+          probeId: 2,
+          project: 'erp',
+          reference: 'main',
+        ),
+      );
+      final json = setup.toJson();
+      expect((json['application'] as Map<String, dynamic>)['slug'], 'erp');
+      expect((json['target'] as Map<String, dynamic>)['probeId'], 2);
+    });
   });
 
   group('Deploy & Build stage transitions', () {

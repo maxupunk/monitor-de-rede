@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/areas/area_models.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
+import 'package:netmonitor_app/core/utils/form_validators.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/vpn/models/vpn_models.dart';
 import 'package:netmonitor_app/features/vpn/pages/vpn_layout.dart';
@@ -466,13 +467,14 @@ class _VpnServerPageState extends ConsumerState<VpnServerPage> {
                                 labelText: 'Porta UDP *',
                                 hintText: '51820',
                               ),
-                              validator: (v) {
-                                final port = int.tryParse(v?.trim() ?? '');
-                                if (port == null || port < 1 || port > 65535) {
-                                  return 'Porta entre 1 e 65535';
-                                }
-                                return null;
-                              },
+                              validator: FormValidators.compose(
+                                <FormFieldValidator<String>>[
+                                  FormValidators.required(
+                                    'Porta entre 1 e 65535',
+                                  ),
+                                  FormValidators.port('Porta entre 1 e 65535'),
+                                ],
+                              ),
                             ),
                             TextFormField(
                               controller: _cidrCtrl,
@@ -486,7 +488,10 @@ class _VpnServerPageState extends ConsumerState<VpnServerPage> {
                                     : null,
                               ),
                               validator: (v) {
-                                if (parseIpv4Cidr(v ?? '') == null) {
+                                final parsed = parseIpv4Cidr(v ?? '');
+                                if (parsed == null ||
+                                    parsed.prefix < 8 ||
+                                    parsed.prefix > 30) {
                                   return 'CIDR IPv4 inválido (ex.: 10.8.0.0/24)';
                                 }
                                 return null;
@@ -500,13 +505,18 @@ class _VpnServerPageState extends ConsumerState<VpnServerPage> {
                                 labelText: 'MTU',
                                 hintText: '1420',
                               ),
-                              validator: (v) {
-                                final mtu = int.tryParse(v?.trim() ?? '');
-                                if (mtu == null || mtu < 1280 || mtu > 1500) {
-                                  return 'MTU entre 1280 e 1500';
-                                }
-                                return null;
-                              },
+                              validator: FormValidators.compose(
+                                <FormFieldValidator<String>>[
+                                  FormValidators.required(
+                                    'MTU entre 1280 e 1500',
+                                  ),
+                                  FormValidators.integerRange(
+                                    1280,
+                                    1500,
+                                    message: 'MTU entre 1280 e 1500',
+                                  ),
+                                ],
+                              ),
                             ),
                           ],
                         ),

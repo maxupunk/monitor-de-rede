@@ -4,7 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:netmonitor_app/features/plugins/data/plugins_repository.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
 import 'package:netmonitor_app/features/plugins/models/plugin_models.dart';
 import 'package:netmonitor_app/features/plugins/providers/plugins_provider.dart';
 import 'package:netmonitor_app/features/plugins/widgets/plugin_output_view.dart';
@@ -135,7 +135,10 @@ class _PluginEditorBodyState extends ConsumerState<_PluginEditorBody>
         raw: widget.existing?.package.raw ?? const <String, dynamic>{},
       );
     } catch (err) {
-      setState(() => _error = 'JSON inválido no manifesto ou testes: $err');
+      setState(
+        () => _error =
+            'JSON inválido no manifesto ou testes: ${describeError(err)}',
+      );
       return null;
     }
   }
@@ -148,7 +151,7 @@ class _PluginEditorBodyState extends ConsumerState<_PluginEditorBody>
       _error = null;
     });
     try {
-      final res = await ref.read(pluginsRepositoryProvider).previewPackage(pkg);
+      final res = await ref.read(pluginsProvider.notifier).previewPackage(pkg);
       if (mounted) {
         setState(() {
           _preview = res;
@@ -159,7 +162,7 @@ class _PluginEditorBodyState extends ConsumerState<_PluginEditorBody>
       if (mounted) {
         setState(() {
           _previewing = false;
-          _error = err.toString();
+          _error = describeError(err);
         });
       }
     }
@@ -207,7 +210,7 @@ class _PluginEditorBodyState extends ConsumerState<_PluginEditorBody>
       if (mounted) {
         setState(() {
           _saving = false;
-          _error = err.toString();
+          _error = describeError(err);
         });
       }
     }
@@ -232,7 +235,7 @@ class _PluginEditorBodyState extends ConsumerState<_PluginEditorBody>
       if (mounted) {
         setState(() {
           _saving = false;
-          _error = err.toString();
+          _error = describeError(err);
         });
       }
     }

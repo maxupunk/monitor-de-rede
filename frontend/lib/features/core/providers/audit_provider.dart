@@ -1,8 +1,9 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:netmonitor_app/core/models/pagination.dart';
 import 'package:netmonitor_app/core/network/api_client.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
 import 'package:netmonitor_app/features/core/models/admin_models.dart';
-import 'package:netmonitor_app/features/core/models/event_models.dart';
 
 @immutable
 class AuditState {
@@ -60,20 +61,19 @@ class AuditNotifier extends Notifier<AuditState> {
       };
       final raw = await ref
           .read(apiClientProvider)
-          .get<Map<String, dynamic>>('/audit-logs', queryParameters: params);
-      final data = raw['data'] is List ? raw['data'] as List : const [];
-      final list = data
-          .whereType<Map>()
-          .map((e) => AuditLogEntry.fromJson(Map<String, dynamic>.from(e)))
-          .toList(growable: false);
-      final meta = raw['meta'] is Map
-          ? PaginationMeta.fromJson(
-              Map<String, dynamic>.from(raw['meta'] as Map),
-            )
-          : null;
-      state = state.copyWith(entries: list, meta: meta, loading: false);
+          .get<dynamic>('/audit-logs', queryParameters: params);
+      final paginated = PaginatedResult<AuditLogEntry>.fromDynamic(
+        raw,
+        AuditLogEntry.fromJson,
+        fallbackPerPage: limit,
+      );
+      state = state.copyWith(
+        entries: paginated.data,
+        meta: paginated.meta,
+        loading: false,
+      );
     } catch (err) {
-      state = state.copyWith(loading: false, error: err.toString());
+      state = state.copyWith(loading: false, error: describeError(err));
     }
   }
 

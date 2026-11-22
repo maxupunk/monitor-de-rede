@@ -3,7 +3,11 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/network/api_client.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 import 'package:netmonitor_app/features/servers/models/docker_models.dart';
+import 'package:netmonitor_app/features/servers/utils/collection_helpers.dart';
+import 'package:netmonitor_app/features/servers/utils/docker_presentation.dart';
 
 const int _historyLimit = 60;
 const int _operationLinesLimit = 50;
@@ -165,6 +169,7 @@ class DockerState {
 }
 
 /// Serviço REST dos 33 endpoints Docker por `HostKey = agent-<id>` (ADR 014).
+/// Encapsulado por `DockerNotifier` (nunca chamado diretamente pelas páginas/sheets).
 class DockerHostApi {
   const DockerHostApi(this._api, this.hostKey);
 
@@ -185,12 +190,8 @@ class DockerHostApi {
 
   Future<List<DockerContainerSummary>> containers() async {
     final raw = await _api.get<Map<String, dynamic>>('$_base/containers');
-    final list = raw['data'];
-    if (list is! List) return const <DockerContainerSummary>[];
     return List<DockerContainerSummary>.unmodifiable(
-      list.whereType<Map>().map(
-        (e) => DockerContainerSummary.fromJson(Map<String, dynamic>.from(e)),
-      ),
+      asJsonList(raw['data'], DockerContainerSummary.fromJson),
     );
   }
 
@@ -214,9 +215,7 @@ class DockerHostApi {
       },
     );
     return List<DockerLogEntry>.unmodifiable(
-      raw.whereType<Map>().map(
-        (e) => DockerLogEntry.fromJson(Map<String, dynamic>.from(e)),
-      ),
+      asJsonList(raw, DockerLogEntry.fromJson),
     );
   }
 
@@ -267,12 +266,8 @@ class DockerHostApi {
 
   Future<List<DockerVolumeSummary>> volumes() async {
     final raw = await _api.get<Map<String, dynamic>>('$_base/volumes');
-    final list = raw['data'];
-    if (list is! List) return const <DockerVolumeSummary>[];
     return List<DockerVolumeSummary>.unmodifiable(
-      list.whereType<Map>().map(
-        (e) => DockerVolumeSummary.fromJson(Map<String, dynamic>.from(e)),
-      ),
+      asJsonList(raw['data'], DockerVolumeSummary.fromJson),
     );
   }
 
@@ -298,12 +293,8 @@ class DockerHostApi {
 
   Future<List<DockerNetworkSummary>> networks() async {
     final raw = await _api.get<Map<String, dynamic>>('$_base/networks');
-    final list = raw['data'];
-    if (list is! List) return const <DockerNetworkSummary>[];
     return List<DockerNetworkSummary>.unmodifiable(
-      list.whereType<Map>().map(
-        (e) => DockerNetworkSummary.fromJson(Map<String, dynamic>.from(e)),
-      ),
+      asJsonList(raw['data'], DockerNetworkSummary.fromJson),
     );
   }
 
@@ -345,12 +336,8 @@ class DockerHostApi {
 
   Future<List<DockerImageSummary>> images() async {
     final raw = await _api.get<Map<String, dynamic>>('$_base/images');
-    final list = raw['data'];
-    if (list is! List) return const <DockerImageSummary>[];
     return List<DockerImageSummary>.unmodifiable(
-      list.whereType<Map>().map(
-        (e) => DockerImageSummary.fromJson(Map<String, dynamic>.from(e)),
-      ),
+      asJsonList(raw['data'], DockerImageSummary.fromJson),
     );
   }
 
@@ -382,12 +369,8 @@ class DockerHostApi {
 
   Future<List<ComposeProject>> composeProjects() async {
     final raw = await _api.get<Map<String, dynamic>>('$_base/compose');
-    final list = raw['data'];
-    if (list is! List) return const <ComposeProject>[];
     return List<ComposeProject>.unmodifiable(
-      list.whereType<Map>().map(
-        (e) => ComposeProject.fromJson(Map<String, dynamic>.from(e)),
-      ),
+      asJsonList(raw['data'], ComposeProject.fromJson),
     );
   }
 
@@ -429,14 +412,12 @@ class DockerNotifier extends Notifier<DockerState> {
 
   ApiClient get _apiClient => ref.read(apiClientProvider);
 
+  /// Ponto de extensão protegido para testes (ex.: `_FakeVisualDockerHostApi`).
+  /// As telas e modais invocam exclusivamente os métodos de domínio deste Notifier.
+  @protected
+  @visibleForTesting
   DockerHostApi apiFor([String? hostKey]) =>
       DockerHostApi(_apiClient, hostKey ?? state.selectedHostKey);
-
-  String _describe(Object err, String fallback) {
-    if (err is ApiException && err.message.isNotEmpty) return err.message;
-    if (err is NetworkException && err.message.isNotEmpty) return err.message;
-    return fallback;
-  }
 
   DockerHostState _appendAggregate(
     DockerHostState hostState,
@@ -483,17 +464,13 @@ class DockerNotifier extends Notifier<DockerState> {
       containerNames: Map<String, String>.unmodifiable(names),
     );
 
-    final nextHistory = <DockerAggregateSample>[
-      ...hostState.aggregateHistory,
-      sample,
-    ];
-    final trimmed = nextHistory.length > _historyLimit
-        ? nextHistory.sublist(nextHistory.length - _historyLimit)
-        : nextHistory;
-
     return hostState.copyWith(
       metrics: metrics,
-      aggregateHistory: List<DockerAggregateSample>.unmodifiable(trimmed),
+      aggregateHistory: appendBounded<DockerAggregateSample>(
+        hostState.aggregateHistory,
+        <DockerAggregateSample>[sample],
+        _historyLimit,
+      ),
       lastUpdatedAt: metrics.collectedAt,
     );
   }
@@ -514,10 +491,7 @@ class DockerNotifier extends Notifier<DockerState> {
   Future<void> fetchHosts({String? preferredHostKey}) async {
     try {
       final raw = await _apiClient.get<List<dynamic>>('/docker/hosts');
-      final list = raw
-          .whereType<Map>()
-          .map((e) => DockerHostView.fromJson(Map<String, dynamic>.from(e)))
-          .toList(growable: false);
+      final list = asJsonList(raw, DockerHostView.fromJson);
 
       var nextSelected = preferredHostKey ?? state.selectedHostKey;
       if (nextSelected.isEmpty || !list.any((h) => h.key == nextSelected)) {
@@ -540,7 +514,7 @@ class DockerNotifier extends Notifier<DockerState> {
     } catch (err) {
       state = state.copyWith(
         hostsLoaded: true,
-        error: _describe(err, 'Erro ao listar os hosts Docker'),
+        error: describeError(err, fallback: 'Erro ao listar os hosts Docker'),
       );
     }
   }
@@ -585,7 +559,10 @@ class DockerNotifier extends Notifier<DockerState> {
     } catch (err) {
       state = state.copyWith(
         loading: false,
-        error: _describe(err, 'Erro ao consultar a Docker Engine'),
+        error: describeError(
+          err,
+          fallback: 'Erro ao consultar a Docker Engine',
+        ),
       );
     }
   }
@@ -604,7 +581,7 @@ class DockerNotifier extends Notifier<DockerState> {
       });
     } catch (err) {
       state = state.copyWith(
-        error: _describe(err, 'Erro ao atualizar containers'),
+        error: describeError(err, fallback: 'Erro ao atualizar containers'),
       );
     }
   }
@@ -622,43 +599,148 @@ class DockerNotifier extends Notifier<DockerState> {
     } catch (err) {
       state = state.copyWith(
         actionLoading: false,
-        error: _describe(err, 'Operação Docker não concluída'),
+        error: describeError(err, fallback: 'Operação Docker não concluída'),
       );
       return false;
     }
   }
+
+  // ── Métodos de Domínio Docker (DIP / SRP — consumidos pelas telas) ──────
+
+  Future<bool> executeContainerAction(
+    String containerId,
+    DockerContainerActionKey actionKey,
+  ) {
+    return runAction(
+      () async {
+        final api = apiFor();
+        switch (actionKey) {
+          case DockerContainerActionKey.start:
+            await api.startContainer(containerId);
+          case DockerContainerActionKey.stop:
+            await api.stopContainer(containerId);
+          case DockerContainerActionKey.restart:
+            await api.restartContainer(containerId);
+          case DockerContainerActionKey.update:
+            await api.updateContainer(containerId);
+          case DockerContainerActionKey.remove:
+            await api.removeContainer(containerId);
+        }
+      },
+      refresh: actionKey == DockerContainerActionKey.update
+          ? null
+          : refreshContainers,
+    );
+  }
+
+  Future<DockerContainerDetail> fetchContainerDetail(String containerId) =>
+      apiFor().containerDetail(containerId);
+
+  Future<List<DockerLogEntry>> fetchContainerLogs(
+    String containerId, {
+    String tail = '100',
+    bool timestamps = true,
+  }) => apiFor().containerLogs(containerId, tail: tail, timestamps: timestamps);
+
+  Future<void> clearContainerLogs(String containerId) =>
+      apiFor().clearLogs(containerId);
+
+  Future<DockerVolumeDetail> fetchVolumeDetail(String volumeName) =>
+      apiFor().volumeDetail(volumeName);
+
+  Future<DownloadResult> exportVolume(String volumeName) =>
+      apiFor().exportVolume(volumeName);
+
+  Future<bool> removeVolume(String volumeName, {bool force = false}) =>
+      runAction(
+        () => apiFor().removeVolume(volumeName, force: force),
+        refresh: refreshAll,
+      );
+
+  Future<DockerNetworkDetail> fetchNetworkDetail(String networkId) =>
+      apiFor().networkDetail(networkId);
+
+  Future<bool> createNetwork(String name, {String driver = 'bridge'}) =>
+      runAction(
+        () => apiFor().createNetwork(name, driver: driver),
+        refresh: refreshAll,
+      );
+
+  Future<bool> connectNetwork(String networkId, String containerId) =>
+      runAction(() => apiFor().connectNetwork(networkId, containerId));
+
+  Future<bool> disconnectNetwork(
+    String networkId,
+    String containerId, {
+    bool force = false,
+  }) => runAction(
+    () => apiFor().disconnectNetwork(networkId, containerId, force: force),
+  );
+
+  Future<bool> removeNetwork(String networkId) =>
+      runAction(() => apiFor().removeNetwork(networkId), refresh: refreshAll);
+
+  Future<DockerImageDetail> fetchImageDetail(String imageId) =>
+      apiFor().imageDetail(imageId);
+
+  Future<bool> pullImage(String image) =>
+      runAction(() => apiFor().pullImage(image));
+
+  Future<DockerPruneResponse> pruneImages() async {
+    final result = await apiFor().pruneImages();
+    await refreshAll();
+    return result;
+  }
+
+  Future<bool> removeImage(String imageId, {bool force = false}) => runAction(
+    () => apiFor().removeImage(imageId, force: force),
+    refresh: refreshAll,
+  );
+
+  Future<List<ComposeProject>> fetchComposeProjects([String? hostKey]) =>
+      apiFor(hostKey).composeProjects();
+
+  Future<bool> runComposeAction(
+    String project,
+    String action, {
+    String? service,
+  }) => runAction(
+    () => apiFor().composeAction(project, action, service: service),
+  );
+
+  Future<HostHistoryResponse> fetchHostHistory(
+    String range, {
+    String? hostKey,
+  }) => apiFor(hostKey).hostHistory(range);
+
+  Future<ContainerHistoryResponse> fetchContainerHistory(
+    String containerName,
+    String range, {
+    String? hostKey,
+  }) => apiFor(hostKey).containerHistory(containerName, range);
 
   // ── Handlers SSE (`docker:*` e `probe:status`) ──────────────────────────
 
   void applyLiveSnapshot(Map<String, dynamic> data) {
     final hostKey = data['hostKey'] as String?;
     if (hostKey == null || hostKey.isEmpty) return;
-    final rawStatus = data['status'];
-    if (rawStatus is! Map) return;
-    final status = DockerStatusResponse.fromJson(
-      Map<String, dynamic>.from(rawStatus),
-    );
+    if (data['status'] is! Map) return;
+    final status = DockerStatusResponse.fromJson(asJsonMap(data['status']));
 
     _updateHostState(hostKey, (prev) {
       if (!status.available) {
         return DockerHostState(status: status);
       }
-      final rawContainers = data['containers'];
-      final containers = rawContainers is List
+      final containers = data['containers'] is List
           ? List<DockerContainerSummary>.unmodifiable(
-              rawContainers.whereType<Map>().map(
-                (e) => DockerContainerSummary.fromJson(
-                  Map<String, dynamic>.from(e),
-                ),
-              ),
+              asJsonList(data['containers'], DockerContainerSummary.fromJson),
             )
           : prev.containers;
-      final rawMetrics = data['metrics'];
       final nextState = prev.copyWith(status: status, containers: containers);
-      if (rawMetrics is Map) {
+      if (data['metrics'] is Map) {
         return _appendAggregate(
           nextState,
-          DockerMetricsResponse.fromJson(Map<String, dynamic>.from(rawMetrics)),
+          DockerMetricsResponse.fromJson(asJsonMap(data['metrics'])),
         );
       }
       return nextState;
@@ -673,18 +755,17 @@ class DockerNotifier extends Notifier<DockerState> {
     final hostKey = data['hostKey'] as String?;
     if (hostKey == null || hostKey.isEmpty) return;
 
-    List<T> parseList<T>(Object? raw, T Function(Map<String, dynamic>) fn) {
-      if (raw is! List) return const [];
-      return List<T>.unmodifiable(
-        raw.whereType<Map>().map((e) => fn(Map<String, dynamic>.from(e))),
-      );
-    }
-
     _updateHostState(hostKey, (prev) {
       return prev.copyWith(
-        volumes: parseList(data['volumes'], DockerVolumeSummary.fromJson),
-        networks: parseList(data['networks'], DockerNetworkSummary.fromJson),
-        images: parseList(data['images'], DockerImageSummary.fromJson),
+        volumes: List<DockerVolumeSummary>.unmodifiable(
+          asJsonList(data['volumes'], DockerVolumeSummary.fromJson),
+        ),
+        networks: List<DockerNetworkSummary>.unmodifiable(
+          asJsonList(data['networks'], DockerNetworkSummary.fromJson),
+        ),
+        images: List<DockerImageSummary>.unmodifiable(
+          asJsonList(data['images'], DockerImageSummary.fromJson),
+        ),
       );
     });
     if (hostKey == state.selectedHostKey) {
@@ -705,20 +786,18 @@ class DockerNotifier extends Notifier<DockerState> {
 
     if (idx != -1) {
       final prev = nextList[idx];
-      var lines = prev.lines;
-      if (line != null && line.isNotEmpty) {
-        final appended = <String>[...lines, line];
-        lines = appended.length > _operationLinesLimit
-            ? appended.sublist(appended.length - _operationLinesLimit)
-            : appended;
-      }
+      final lines = (line != null && line.isNotEmpty)
+          ? appendBounded<String>(prev.lines, <String>[
+              line,
+            ], _operationLinesLimit)
+          : prev.lines;
       nextList[idx] = DockerOperationState(
         operationId: opId,
         hostKey: hostKey,
         kind: prev.kind,
         target: prev.target,
         state: (data['state'] as String?) ?? prev.state,
-        lines: List<String>.unmodifiable(lines),
+        lines: lines,
         message: msg ?? prev.message,
         updatedAt: now,
       );
@@ -762,26 +841,20 @@ class DockerNotifier extends Notifier<DockerState> {
     if (current == null) return;
 
     final rawEntries = data['entries'];
-    var entries = current.entries;
-    if (rawEntries is List && rawEntries.isNotEmpty) {
-      final parsed = rawEntries.whereType<Map>().map(
-        (e) => DockerLogEntry.fromJson(Map<String, dynamic>.from(e)),
-      );
-      final merged = <DockerLogEntry>[...entries, ...parsed];
-      entries = merged.length > _logLinesKept
-          ? merged.sublist(merged.length - _logLinesKept)
-          : merged;
-    }
+    final entries = (rawEntries is List && rawEntries.isNotEmpty)
+        ? appendBounded<DockerLogEntry>(
+            current.entries,
+            asJsonList(rawEntries, DockerLogEntry.fromJson),
+            _logLinesKept,
+          )
+        : current.entries;
 
     final ended = data['ended'] as String? ?? current.ended;
     state = state.copyWith(
       logStreams: Map<String, DockerLogStreamState>.unmodifiable(
         <String, DockerLogStreamState>{
           ...state.logStreams,
-          streamId: current.copyWith(
-            entries: List<DockerLogEntry>.unmodifiable(entries),
-            ended: ended,
-          ),
+          streamId: current.copyWith(entries: entries, ended: ended),
         },
       ),
     );
@@ -824,10 +897,7 @@ class DockerNotifier extends Notifier<DockerState> {
   }
 
   void applyAgentStatus(Map<String, dynamic> data) {
-    final rawId = data['id'] ?? data['probeId'];
-    final id = rawId is num
-        ? rawId.toInt()
-        : int.tryParse(rawId?.toString() ?? '');
+    final id = parseIntOrNull(data['id'] ?? data['probeId']);
     if (id == null) return;
     final idx = state.hosts.indexWhere((h) => h.agentId == id);
     if (idx == -1) return;

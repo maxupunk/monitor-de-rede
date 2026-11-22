@@ -4,14 +4,14 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
+import 'package:netmonitor_app/core/utils/file_download.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/core/utils/plugin_presentation.dart';
-import 'package:netmonitor_app/features/plugins/data/plugins_repository.dart';
 import 'package:netmonitor_app/features/plugins/models/plugin_models.dart';
 import 'package:netmonitor_app/features/plugins/providers/plugins_provider.dart';
 import 'package:netmonitor_app/features/plugins/widgets/plugin_editor_dialog.dart';
 import 'package:netmonitor_app/features/plugins/widgets/plugin_review_dialog.dart';
-import 'package:netmonitor_app/features/vpn/utils/file_export_helper.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
 
@@ -69,32 +69,33 @@ class _PluginsPageState extends ConsumerState<PluginsPage> {
       }
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Erro ao importar plugin: $err')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Erro ao importar plugin: ${describeError(err)}'),
+        ),
+      );
     }
   }
 
   Future<void> _exportPlugin(PluginSummary summary) async {
     try {
       final res = await ref
-          .read(pluginsRepositoryProvider)
+          .read(pluginsProvider.notifier)
           .exportPlugin(summary.id);
-      await exportFileBytes(
+      if (!mounted) return;
+      await saveOrShareBytes(
         bytes: res.bytes,
-        fileName:
+        filename:
             res.filename ?? '${summary.slug}-${summary.version}.nmplugin.json',
         mimeType: 'application/json',
-      );
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Pacote ${summary.slug} exportado.')),
+        context: context,
+        successMessage: 'Pacote ${summary.slug} exportado.',
       );
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Erro ao exportar: $err')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao exportar: ${describeError(err)}')),
+      );
     }
   }
 

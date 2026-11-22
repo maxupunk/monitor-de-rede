@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/network/api_client.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
 import 'package:netmonitor_app/features/network/models/device_models.dart';
 import 'package:netmonitor_app/features/network/models/diagnostics_models.dart';
 
@@ -258,6 +259,58 @@ class DiagnosticsService {
     );
     return QuickPingReport.fromJson(asJsonMap(raw));
   }
+
+  Future<List<DeviceMonitorSummary>> fetchSaasMonitors() async {
+    final raw = await _api.get<dynamic>('/monitors');
+    final all = asJsonMapList(raw);
+    final saas = all
+        .where(
+          (m) =>
+              m['isSaas'] == true ||
+              (m['tags'] is List && (m['tags'] as List).contains('saas')),
+        )
+        .map(DeviceMonitorSummary.fromJson)
+        .toList(growable: false);
+    if (saas.isNotEmpty) return saas;
+    return all
+        .take(6)
+        .map(DeviceMonitorSummary.fromJson)
+        .toList(growable: false);
+  }
+
+  Future<List<SaasPresetItem>> fetchSaasPresets() async {
+    final raw = await _api.get<dynamic>('/monitors/saas/presets');
+    final listRaw = raw is Map ? (raw['presets'] ?? raw['items']) : raw;
+    return asJsonMapList(
+      listRaw,
+    ).map(SaasPresetItem.fromJson).toList(growable: false);
+  }
+
+  Future<void> provisionSaasPresets(List<String> presetIds) async {
+    if (presetIds.isEmpty) return;
+    await _api.post<dynamic>(
+      '/monitors/saas/provision',
+      data: <String, dynamic>{'presetIds': presetIds},
+    );
+  }
+
+  Future<List<HeatmapCell>> fetchHourlyHeatmap({
+    int? monitorId,
+    int days = 7,
+  }) async {
+    final raw = await _api.get<dynamic>(
+      '/monitors/hourly-heatmap',
+      queryParameters: <String, dynamic>{
+        if (monitorId != null) 'monitorId': monitorId else 'isSaas': true,
+        'days': days,
+      },
+    );
+    final map = asJsonMap(raw);
+    final cellsRaw = map['cells'] ?? map['buckets'] ?? map['data'] ?? raw;
+    return asJsonMapList(
+      cellsRaw,
+    ).map(HeatmapCell.fromJson).toList(growable: false);
+  }
 }
 
 final diagnosticsServiceProvider = Provider<DiagnosticsService>(
@@ -313,7 +366,7 @@ class DnsServersNotifier extends Notifier<DnsServersState> {
         loading: false,
       );
     } catch (err) {
-      state = state.copyWith(loading: false, error: err.toString());
+      state = state.copyWith(loading: false, error: describeError(err));
     }
   }
 
@@ -330,7 +383,7 @@ class DnsServersNotifier extends Notifier<DnsServersState> {
       );
       return true;
     } catch (err) {
-      state = state.copyWith(saving: false, error: err.toString());
+      state = state.copyWith(saving: false, error: describeError(err));
       return false;
     }
   }
@@ -350,7 +403,7 @@ class DnsServersNotifier extends Notifier<DnsServersState> {
       );
       return true;
     } catch (err) {
-      state = state.copyWith(saving: false, error: err.toString());
+      state = state.copyWith(saving: false, error: describeError(err));
       return false;
     }
   }
@@ -365,7 +418,7 @@ class DnsServersNotifier extends Notifier<DnsServersState> {
       );
       return true;
     } catch (err) {
-      state = state.copyWith(saving: false, error: err.toString());
+      state = state.copyWith(saving: false, error: describeError(err));
       return false;
     }
   }
@@ -477,7 +530,7 @@ class DnsPerformanceNotifier extends Notifier<DnsPerformanceState> {
         loading: false,
       );
     } catch (err) {
-      state = state.copyWith(loading: false, error: err.toString());
+      state = state.copyWith(loading: false, error: describeError(err));
     }
   }
 
@@ -503,7 +556,7 @@ class DnsPerformanceNotifier extends Notifier<DnsPerformanceState> {
         benchmarking: false,
       );
     } catch (err) {
-      state = state.copyWith(benchmarking: false, error: err.toString());
+      state = state.copyWith(benchmarking: false, error: describeError(err));
     }
   }
 
@@ -518,7 +571,7 @@ class DnsPerformanceNotifier extends Notifier<DnsPerformanceState> {
       state = state.copyWith(provisioning: false);
       return DnsBatchProvisionResponse.fromJson(asJsonMap(raw));
     } catch (err) {
-      state = state.copyWith(provisioning: false, error: err.toString());
+      state = state.copyWith(provisioning: false, error: describeError(err));
       return null;
     }
   }
@@ -541,7 +594,7 @@ class DnsPerformanceNotifier extends Notifier<DnsPerformanceState> {
       state = state.copyWith(provisioning: false);
       return DnsBatchProvisionResponse.fromJson(asJsonMap(raw));
     } catch (err) {
-      state = state.copyWith(provisioning: false, error: err.toString());
+      state = state.copyWith(provisioning: false, error: describeError(err));
       return null;
     }
   }

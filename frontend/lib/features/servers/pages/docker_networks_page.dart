@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
 import 'package:netmonitor_app/features/servers/models/docker_models.dart';
 import 'package:netmonitor_app/features/servers/providers/docker_provider.dart';
 import 'package:netmonitor_app/features/servers/utils/server_utils.dart';
+import 'package:netmonitor_app/features/servers/widgets/docker_history_widgets.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
 
@@ -26,63 +28,11 @@ class _DockerNetworksPageState extends ConsumerState<DockerNetworksPage> {
   }
 
   Future<void> _openCreateNetworkDialog() async {
-    final nameController = TextEditingController();
-    var driver = 'bridge';
     final created = await showAdaptiveFormSheet<bool>(
       context: context,
       title: 'Nova rede Docker',
-      builder: (ctx) => StatefulBuilder(
-        builder: (innerCtx, setModalState) => Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            TextField(
-              controller: nameController,
-              autofocus: true,
-              decoration: const InputDecoration(
-                labelText: 'Nome da rede',
-                hintText: 'ex.: app-internal',
-              ),
-            ),
-            const SizedBox(height: 12),
-            AppDropdownFormField<String>(
-              initialValue: driver,
-              decoration: const InputDecoration(labelText: 'Driver'),
-              items: const <DropdownMenuItem<String>>[
-                DropdownMenuItem(value: 'bridge', child: Text('bridge')),
-                DropdownMenuItem(value: 'overlay', child: Text('overlay')),
-                DropdownMenuItem(value: 'macvlan', child: Text('macvlan')),
-                DropdownMenuItem(value: 'ipvlan', child: Text('ipvlan')),
-              ],
-              onChanged: (v) {
-                if (v != null) setModalState(() => driver = v);
-              },
-            ),
-            const SizedBox(height: 16),
-            Align(
-              alignment: Alignment.centerRight,
-              child: FilledButton(
-                onPressed: () async {
-                  final name = nameController.text.trim();
-                  if (name.isEmpty) return;
-                  final ok = await ref
-                      .read(dockerProvider.notifier)
-                      .runAction(
-                        () => ref
-                            .read(dockerProvider.notifier)
-                            .apiFor()
-                            .createNetwork(name, driver: driver),
-                        refresh: ref.read(dockerProvider.notifier).refreshAll,
-                      );
-                  if (innerCtx.mounted) Navigator.of(innerCtx).pop(ok);
-                },
-                child: const Text('Criar rede'),
-              ),
-            ),
-          ],
-        ),
-      ),
+      builder: (_) => const _CreateDockerNetworkForm(),
     );
-    nameController.dispose();
     if (created == true && mounted) {
       ScaffoldMessenger.of(
         context,
@@ -101,13 +51,7 @@ class _DockerNetworksPageState extends ConsumerState<DockerNetworksPage> {
       tone: SemanticTone.error,
     );
     if (!confirmed || !mounted) return;
-    final ok = await ref
-        .read(dockerProvider.notifier)
-        .runAction(
-          () =>
-              ref.read(dockerProvider.notifier).apiFor().removeNetwork(net.id),
-          refresh: ref.read(dockerProvider.notifier).refreshAll,
-        );
+    final ok = await ref.read(dockerProvider.notifier).removeNetwork(net.id);
     if (ok && mounted) {
       ScaffoldMessenger.of(
         context,
@@ -272,6 +216,80 @@ class _DockerNetworksPageState extends ConsumerState<DockerNetworksPage> {
   }
 }
 
+class _CreateDockerNetworkForm extends ConsumerStatefulWidget {
+  const _CreateDockerNetworkForm();
+
+  @override
+  ConsumerState<_CreateDockerNetworkForm> createState() =>
+      _CreateDockerNetworkFormState();
+}
+
+class _CreateDockerNetworkFormState
+    extends ConsumerState<_CreateDockerNetworkForm> {
+  final TextEditingController _nameController = TextEditingController();
+  String _driver = 'bridge';
+  bool _submitting = false;
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final name = _nameController.text.trim();
+    if (name.isEmpty || _submitting) return;
+    setState(() => _submitting = true);
+    final ok = await ref
+        .read(dockerProvider.notifier)
+        .createNetwork(name, driver: _driver);
+    if (!mounted) return;
+    setState(() => _submitting = false);
+    Navigator.of(context).pop(ok);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        TextField(
+          controller: _nameController,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Nome da rede',
+            hintText: 'ex.: app-internal',
+          ),
+          onSubmitted: (_) => _submit(),
+        ),
+        const SizedBox(height: 12),
+        AppDropdownFormField<String>(
+          initialValue: _driver,
+          decoration: const InputDecoration(labelText: 'Driver'),
+          items: const <DropdownMenuItem<String>>[
+            DropdownMenuItem(value: 'bridge', child: Text('bridge')),
+            DropdownMenuItem(value: 'overlay', child: Text('overlay')),
+            DropdownMenuItem(value: 'macvlan', child: Text('macvlan')),
+            DropdownMenuItem(value: 'ipvlan', child: Text('ipvlan')),
+          ],
+          onChanged: (v) {
+            if (v != null) setState(() => _driver = v);
+          },
+        ),
+        const SizedBox(height: 16),
+        Align(
+          alignment: Alignment.centerRight,
+          child: FilledButton(
+            onPressed: _submitting ? null : _submit,
+            child: const Text('Criar rede'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _NetworkDetailBody extends ConsumerStatefulWidget {
   const _NetworkDetailBody({required this.networkId});
   final String networkId;
@@ -300,8 +318,7 @@ class _NetworkDetailBodyState extends ConsumerState<_NetworkDetailBody> {
     try {
       final d = await ref
           .read(dockerProvider.notifier)
-          .apiFor()
-          .networkDetail(widget.networkId);
+          .fetchNetworkDetail(widget.networkId);
       if (!mounted) return;
       setState(() {
         _detail = d;
@@ -310,7 +327,7 @@ class _NetworkDetailBodyState extends ConsumerState<_NetworkDetailBody> {
     } catch (err) {
       if (!mounted) return;
       setState(() {
-        _error = err.toString();
+        _error = describeError(err, fallback: 'Erro ao inspecionar rede.');
         _loading = false;
       });
     }
@@ -320,12 +337,7 @@ class _NetworkDetailBodyState extends ConsumerState<_NetworkDetailBody> {
     if (_selectedContainerId == null) return;
     final ok = await ref
         .read(dockerProvider.notifier)
-        .runAction(
-          () => ref
-              .read(dockerProvider.notifier)
-              .apiFor()
-              .connectNetwork(widget.networkId, _selectedContainerId!),
-        );
+        .connectNetwork(widget.networkId, _selectedContainerId!);
     if (ok && mounted) {
       setState(() => _selectedContainerId = null);
       await _load();
@@ -343,12 +355,7 @@ class _NetworkDetailBodyState extends ConsumerState<_NetworkDetailBody> {
     if (!confirmed || !mounted) return;
     final ok = await ref
         .read(dockerProvider.notifier)
-        .runAction(
-          () => ref
-              .read(dockerProvider.notifier)
-              .apiFor()
-              .disconnectNetwork(widget.networkId, c.containerId),
-        );
+        .disconnectNetwork(widget.networkId, c.containerId);
     if (ok && mounted) await _load();
   }
 
@@ -399,52 +406,32 @@ class _NetworkDetailBodyState extends ConsumerState<_NetworkDetailBody> {
         ],
         const SizedBox(height: 12),
         if (isAdmin && unconnected.isNotEmpty) ...<Widget>[
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final dropdown = AppDropdownFormField<String>(
-                initialValue:
-                    unconnected.any((c) => c.id == _selectedContainerId)
-                    ? _selectedContainerId
-                    : null,
-                decoration: const InputDecoration(
-                  labelText: 'Conectar container',
-                  isDense: true,
-                ),
-                items: unconnected
-                    .map(
-                      (c) => DropdownMenuItem<String>(
-                        value: c.id,
-                        child: Text(
-                          containerDisplayName(c),
-                          overflow: TextOverflow.ellipsis,
-                        ),
+          InlineFieldActionRow(
+            field: AppDropdownFormField<String>(
+              initialValue: unconnected.any((c) => c.id == _selectedContainerId)
+                  ? _selectedContainerId
+                  : null,
+              decoration: const InputDecoration(
+                labelText: 'Conectar container',
+                isDense: true,
+              ),
+              items: unconnected
+                  .map(
+                    (c) => DropdownMenuItem<String>(
+                      value: c.id,
+                      child: Text(
+                        containerDisplayName(c),
+                        overflow: TextOverflow.ellipsis,
                       ),
-                    )
-                    .toList(growable: false),
-                onChanged: (v) => setState(() => _selectedContainerId = v),
-              );
-              final connectBtn = FilledButton(
-                onPressed: _selectedContainerId == null ? null : _connect,
-                child: const Text('Conectar'),
-              );
-              if (constraints.maxWidth < 420) {
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: <Widget>[
-                    dropdown,
-                    const SizedBox(height: 8),
-                    Align(alignment: Alignment.centerRight, child: connectBtn),
-                  ],
-                );
-              }
-              return Row(
-                children: <Widget>[
-                  Expanded(child: dropdown),
-                  const SizedBox(width: 8),
-                  connectBtn,
-                ],
-              );
-            },
+                    ),
+                  )
+                  .toList(growable: false),
+              onChanged: (v) => setState(() => _selectedContainerId = v),
+            ),
+            action: FilledButton(
+              onPressed: _selectedContainerId == null ? null : _connect,
+              child: const Text('Conectar'),
+            ),
           ),
           const SizedBox(height: 12),
         ],

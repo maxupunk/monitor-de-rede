@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 
 @immutable
 class AlertRuleCondition {
@@ -69,30 +70,27 @@ class AlertRule {
     final enabled =
         (json['isEnabled'] as bool?) ?? (json['enabled'] as bool?) ?? true;
     return AlertRule(
-      id: (json['id'] as num?)?.toInt() ?? 0,
-      siteId: (json['siteId'] as num?)?.toInt(),
-      deviceId: (json['deviceId'] as num?)?.toInt(),
-      monitorId: (json['monitorId'] as num?)?.toInt(),
+      id: parseIntOrNull(json['id']) ?? 0,
+      siteId: parseIntOrNull(json['siteId']),
+      deviceId: parseIntOrNull(json['deviceId']),
+      monitorId: parseIntOrNull(json['monitorId']),
       name: (json['name'] ?? '').toString(),
       type: (json['type'] ?? 'custom').toString(),
       templateKey: json['templateKey'] as String?,
       condition: json['condition'] is Map
-          ? AlertRuleCondition.fromJson(
-              Map<String, dynamic>.from(json['condition'] as Map),
-            )
+          ? AlertRuleCondition.fromJson(asJsonMap(json['condition']))
           : const AlertRuleCondition(
               field: 'status',
               operator: '==',
               value: 'down',
             ),
       severity: (json['severity'] ?? 'warning').toString(),
-      durationSeconds: (json['durationSeconds'] as num?)?.toInt() ?? 60,
-      recoveryWindowSeconds:
-          (json['recoveryWindowSeconds'] as num?)?.toInt() ?? 0,
-      flapThreshold: (json['flapThreshold'] as num?)?.toInt() ?? 0,
-      flapWindowSeconds: (json['flapWindowSeconds'] as num?)?.toInt() ?? 300,
+      durationSeconds: parseIntOrNull(json['durationSeconds']) ?? 60,
+      recoveryWindowSeconds: parseIntOrNull(json['recoveryWindowSeconds']) ?? 0,
+      flapThreshold: parseIntOrNull(json['flapThreshold']) ?? 0,
+      flapWindowSeconds: parseIntOrNull(json['flapWindowSeconds']) ?? 300,
       notificationCooldownSeconds:
-          (json['notificationCooldownSeconds'] as num?)?.toInt() ?? 0,
+          parseIntOrNull(json['notificationCooldownSeconds']) ?? 0,
       inhibitWhenParentDown: json['inhibitWhenParentDown'] == true,
       isEnabled: enabled,
     );
@@ -140,19 +138,17 @@ class AlertRuleTemplate {
       area: json['area'] as String?,
       type: (json['type'] ?? 'custom').toString(),
       condition: json['condition'] is Map
-          ? AlertRuleCondition.fromJson(
-              Map<String, dynamic>.from(json['condition'] as Map),
-            )
+          ? AlertRuleCondition.fromJson(asJsonMap(json['condition']))
           : const AlertRuleCondition(
               field: 'status',
               operator: '==',
               value: 'down',
             ),
       severity: (json['severity'] ?? 'warning').toString(),
-      durationSeconds: (json['durationSeconds'] as num?)?.toInt() ?? 60,
+      durationSeconds: parseIntOrNull(json['durationSeconds']) ?? 60,
       recommended: json['recommended'] == true,
       applied: json['applied'] == true,
-      ruleId: (json['ruleId'] as num?)?.toInt(),
+      ruleId: parseIntOrNull(json['ruleId']),
       applicable: json['applicable'] != false,
     );
   }
@@ -198,13 +194,11 @@ class AlertEvent {
 
   bool get isResolved => status == 'resolved';
 
-  Map<String, dynamic>? get aiSummary => data?['aiSummary'] is Map
-      ? Map<String, dynamic>.from(data!['aiSummary'] as Map)
-      : null;
+  Map<String, dynamic>? get aiSummary =>
+      data?['aiSummary'] is Map ? asJsonMap(data!['aiSummary']) : null;
 
-  Map<String, dynamic>? get deciderTriage => data?['deciderTriage'] is Map
-      ? Map<String, dynamic>.from(data!['deciderTriage'] as Map)
-      : null;
+  Map<String, dynamic>? get deciderTriage =>
+      data?['deciderTriage'] is Map ? asJsonMap(data!['deciderTriage']) : null;
 
   AlertEvent copyWith({
     String? severity,
@@ -237,28 +231,22 @@ class AlertEvent {
   }
 
   factory AlertEvent.fromJson(Map<String, dynamic> json) {
-    final dev = json['device'] is Map
-        ? Map<String, dynamic>.from(json['device'] as Map)
-        : null;
-    final mon = json['monitor'] is Map
-        ? Map<String, dynamic>.from(json['monitor'] as Map)
-        : null;
+    final dev = json['device'] is Map ? asJsonMap(json['device']) : null;
+    final mon = json['monitor'] is Map ? asJsonMap(json['monitor']) : null;
     return AlertEvent(
-      id: ((json['id'] ?? json['alertEventId']) as num?)?.toInt() ?? 0,
-      alertRuleId: (json['alertRuleId'] as num?)?.toInt(),
-      deviceId: (json['deviceId'] as num?)?.toInt(),
-      monitorId: (json['monitorId'] as num?)?.toInt(),
+      id: parseIntOrNull(json['id'] ?? json['alertEventId']) ?? 0,
+      alertRuleId: parseIntOrNull(json['alertRuleId']),
+      deviceId: parseIntOrNull(json['deviceId']),
+      monitorId: parseIntOrNull(json['monitorId']),
       severity: (json['severity'] ?? 'warning').toString(),
       status: (json['status'] ?? 'active').toString(),
       title: (json['title'] ?? json['ruleName'] ?? 'Alerta').toString(),
       message: (json['message'] ?? '').toString(),
-      data: json['data'] is Map
-          ? Map<String, dynamic>.from(json['data'] as Map)
-          : null,
+      data: json['data'] is Map ? asJsonMap(json['data']) : null,
       acknowledgedBy: json['acknowledgedBy'] as String?,
       silencedUntil: json['silencedUntil'] as String?,
-      deviceName: dev?['name'] as String?,
-      monitorName: mon?['name'] as String?,
+      deviceName: (json['deviceName'] ?? dev?['name']) as String?,
+      monitorName: (json['monitorName'] ?? mon?['name']) as String?,
       startedAt: json['startedAt'] as String?,
       createdAt: (json['createdAt'] ?? json['startedAt'] ?? '').toString(),
       resolvedAt: json['resolvedAt'] as String?,
@@ -285,8 +273,8 @@ class ScopeInstability {
   factory ScopeInstability.fromJson(Map<String, dynamic> json) {
     return ScopeInstability(
       scopeKey: (json['scopeKey'] ?? '').toString(),
-      oscillations: (json['oscillations'] as num?)?.toInt() ?? 0,
-      episodes: (json['episodes'] as num?)?.toInt() ?? 0,
+      oscillations: parseIntOrNull(json['oscillations']) ?? 0,
+      episodes: parseIntOrNull(json['episodes']) ?? 0,
       flapping: json['flapping'] == true,
       lastProblemAt: json['lastProblemAt'] as String?,
     );
@@ -324,11 +312,10 @@ class IncidentCluster {
       causalCategoryLabel:
           (json['causalCategoryLabel'] ?? json['causalCategory'] ?? '')
               .toString(),
-      confidence: (json['confidence'] as num?)?.toDouble() ?? 0,
+      confidence: parseDoubleOrNull(json['confidence']) ?? 0,
       explanation: (json['explanation'] ?? '').toString(),
-      impactedDevicesCount:
-          (json['impactedDevicesCount'] as num?)?.toInt() ?? 0,
-      totalAlertsCount: (json['totalAlertsCount'] as num?)?.toInt() ?? 0,
+      impactedDevicesCount: parseIntOrNull(json['impactedDevicesCount']) ?? 0,
+      totalAlertsCount: parseIntOrNull(json['totalAlertsCount']) ?? 0,
       maxSeverity: (json['maxSeverity'] ?? 'warning').toString(),
       startedAt: json['startedAt'] as String?,
     );
@@ -348,18 +335,13 @@ class RootCauseAnalysisSummary {
   final int totalCorrelatedAlerts;
 
   factory RootCauseAnalysisSummary.fromJson(Map<String, dynamic> json) {
-    final raw = json['activeClusters'] is List
-        ? json['activeClusters'] as List
-        : const [];
     return RootCauseAnalysisSummary(
-      activeClusters: raw
-          .whereType<Map>()
-          .map((e) => IncidentCluster.fromJson(Map<String, dynamic>.from(e)))
-          .toList(growable: false),
-      totalActiveIncidents:
-          (json['totalActiveIncidents'] as num?)?.toInt() ?? 0,
-      totalCorrelatedAlerts:
-          (json['totalCorrelatedAlerts'] as num?)?.toInt() ?? 0,
+      activeClusters: asJsonList<IncidentCluster>(
+        json['activeClusters'],
+        IncidentCluster.fromJson,
+      ),
+      totalActiveIncidents: parseIntOrNull(json['totalActiveIncidents']) ?? 0,
+      totalCorrelatedAlerts: parseIntOrNull(json['totalCorrelatedAlerts']) ?? 0,
     );
   }
 }
@@ -392,31 +374,23 @@ class AlertCorrelation {
 
   factory AlertCorrelation.fromJson(Map<String, dynamic> json) {
     final primary = json['primaryCause'] is Map
-        ? Map<String, dynamic>.from(json['primaryCause'] as Map)
+        ? asJsonMap(json['primaryCause'])
         : null;
-    List<Map<String, dynamic>> parseList(Object? raw) => raw is List
-        ? raw
-              .whereType<Map>()
-              .map((e) => Map<String, dynamic>.from(e))
-              .toList(growable: false)
-        : const <Map<String, dynamic>>[];
-
     return AlertCorrelation(
-      windowSeconds: (json['windowSeconds'] as num?)?.toInt() ?? 300,
+      windowSeconds: parseIntOrNull(json['windowSeconds']) ?? 300,
       causalCategoryLabel:
           (json['causalCategoryLabel'] ??
                   json['causalCategory'] ??
                   'Correlação')
               .toString(),
-      confidence: (json['confidence'] as num?)?.toDouble() ?? 0,
+      confidence: parseDoubleOrNull(json['confidence']) ?? 0,
       explanation: (json['explanation'] ?? '').toString(),
-      impactedDevicesCount:
-          (json['impactedDevicesCount'] as num?)?.toInt() ?? 0,
-      correlationCount: (json['correlationCount'] as num?)?.toInt() ?? 0,
+      impactedDevicesCount: parseIntOrNull(json['impactedDevicesCount']) ?? 0,
+      correlationCount: parseIntOrNull(json['correlationCount']) ?? 0,
       primaryCauseTitle: primary?['title'] as String?,
-      dependencyChain: parseList(json['dependencyChain']),
-      impactedDevices: parseList(json['impactedDevices']),
-      relatedEvents: parseList(json['relatedEvents']),
+      dependencyChain: asJsonMapList(json['dependencyChain']),
+      impactedDevices: asJsonMapList(json['impactedDevices']),
+      relatedEvents: asJsonMapList(json['relatedEvents']),
     );
   }
 }

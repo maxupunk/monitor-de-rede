@@ -4,6 +4,7 @@ import 'package:netmonitor_app/areas/composition_registries.dart';
 import 'package:netmonitor_app/core/areas/areas_provider.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
 import 'package:netmonitor_app/core/realtime/sse_service.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 import 'package:netmonitor_app/features/core/models/dashboard_models.dart';
 import 'package:netmonitor_app/features/core/providers/alerts_provider.dart';
 import 'package:netmonitor_app/features/core/providers/dashboard_provider.dart';
@@ -218,7 +219,6 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     WidgetCatalogEntry? entry,
     DashboardWidgetConfig? existing,
   }) async {
-    final monitorsState = ref.read(monitorsProvider);
     final keys =
         entry?.configKeys ??
         ref
@@ -228,189 +228,17 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
             ?.configKeys ??
         const <String>[];
 
-    final titleCtrl = TextEditingController(
-      text: existing?.title ?? entry?.title ?? '',
-    );
-    int? selectedDeviceId = (existing?.config['deviceId'] as num?)?.toInt();
-    int? selectedMonitorId = (existing?.config['monitorId'] as num?)?.toInt();
-    String timeframe = (existing?.config['timeframe'] ?? '1h').toString();
-    final warnCtrl = TextEditingController(
-      text: (existing?.config['warningThreshold'] ?? 75).toString(),
-    );
-    final critCtrl = TextEditingController(
-      text: (existing?.config['criticalThreshold'] ?? 90).toString(),
-    );
-
     await showAdaptiveFormSheet<void>(
       context: context,
       title: existing != null
           ? 'Configurar widget'
           : 'Adicionar ${entry?.title ?? 'widget'}',
-      builder: (sheetCtx) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                TextField(
-                  controller: titleCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Título do card',
-                  ),
-                ),
-                if (keys.contains('deviceId')) ...<Widget>[
-                  const SizedBox(height: 12),
-                  AppDropdownFormField<int?>(
-                    initialValue: selectedDeviceId,
-                    decoration: const InputDecoration(labelText: 'Dispositivo'),
-                    items: <DropdownMenuItem<int?>>[
-                      const DropdownMenuItem<int?>(
-                        value: null,
-                        child: Text(
-                          'Selecione...',
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      for (final d in monitorsState.devices)
-                        DropdownMenuItem<int?>(
-                          value: d.id,
-                          child: Text(d.name, overflow: TextOverflow.ellipsis),
-                        ),
-                    ],
-                    onChanged: (v) => setModalState(() => selectedDeviceId = v),
-                  ),
-                ],
-                if (keys.contains('monitorId')) ...<Widget>[
-                  const SizedBox(height: 12),
-                  AppDropdownFormField<int?>(
-                    initialValue: selectedMonitorId,
-                    decoration: const InputDecoration(labelText: 'Monitor'),
-                    items: <DropdownMenuItem<int?>>[
-                      const DropdownMenuItem<int?>(
-                        value: null,
-                        child: Text(
-                          'Todos / Selecione',
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      for (final m in monitorsState.monitors)
-                        DropdownMenuItem<int?>(
-                          value: m.id,
-                          child: Text(m.name, overflow: TextOverflow.ellipsis),
-                        ),
-                    ],
-                    onChanged: (v) =>
-                        setModalState(() => selectedMonitorId = v),
-                  ),
-                ],
-                if (keys.contains('timeframe')) ...<Widget>[
-                  const SizedBox(height: 12),
-                  AppDropdownFormField<String>(
-                    initialValue: timeframe,
-                    decoration: const InputDecoration(
-                      labelText: 'Janela padrão',
-                    ),
-                    items: const <DropdownMenuItem<String>>[
-                      DropdownMenuItem<String>(
-                        value: '5m',
-                        child: Text(
-                          '5 minutos',
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      DropdownMenuItem<String>(
-                        value: '15m',
-                        child: Text(
-                          '15 minutos',
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      DropdownMenuItem<String>(
-                        value: '1h',
-                        child: Text('1 hora', overflow: TextOverflow.ellipsis),
-                      ),
-                      DropdownMenuItem<String>(
-                        value: '24h',
-                        child: Text(
-                          '24 horas',
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                    onChanged: (v) {
-                      if (v != null) setModalState(() => timeframe = v);
-                    },
-                  ),
-                ],
-                if (keys.contains('warningThreshold')) ...<Widget>[
-                  const SizedBox(height: 12),
-                  ResponsiveFieldRow(
-                    breakpoint: 480,
-                    children: <Widget>[
-                      TextField(
-                        controller: warnCtrl,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Alerta (%)',
-                        ),
-                      ),
-                      TextField(
-                        controller: critCtrl,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Crítico (%)',
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-                const SizedBox(height: 18),
-                FilledButton(
-                  onPressed: () async {
-                    final cfg = <String, dynamic>{
-                      'deviceId': ?selectedDeviceId,
-                      'monitorId': ?selectedMonitorId,
-                      if (keys.contains('timeframe')) 'timeframe': timeframe,
-                      if (keys.contains('warningThreshold'))
-                        'warningThreshold':
-                            double.tryParse(warnCtrl.text) ?? 75,
-                      if (keys.contains('criticalThreshold'))
-                        'criticalThreshold':
-                            double.tryParse(critCtrl.text) ?? 90,
-                    };
-                    if (existing != null) {
-                      await ref
-                          .read(dashboardProvider.notifier)
-                          .updateWidgetConfig(
-                            existing.id,
-                            title: titleCtrl.text,
-                            config: cfg,
-                          );
-                    } else if (entry != null) {
-                      await ref
-                          .read(dashboardProvider.notifier)
-                          .addCustomWidget(
-                            entry.type,
-                            title: titleCtrl.text,
-                            config: cfg,
-                          );
-                    }
-                    if (sheetCtx.mounted) Navigator.of(sheetCtx).pop();
-                  },
-                  child: Text(
-                    existing != null ? 'Salvar alterações' : 'Adicionar widget',
-                  ),
-                ),
-              ],
-            );
-          },
-        );
-      },
+      builder: (_) => _DashboardWidgetConfigSheetBody(
+        entry: entry,
+        existing: existing,
+        configKeys: keys,
+      ),
     );
-
-    titleCtrl.dispose();
-    warnCtrl.dispose();
-    critCtrl.dispose();
   }
 
   @override
@@ -812,6 +640,196 @@ class _DashboardWidgetFrame extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         child,
+      ],
+    );
+  }
+}
+
+class _DashboardWidgetConfigSheetBody extends ConsumerStatefulWidget {
+  const _DashboardWidgetConfigSheetBody({
+    required this.entry,
+    required this.existing,
+    required this.configKeys,
+  });
+
+  final WidgetCatalogEntry? entry;
+  final DashboardWidgetConfig? existing;
+  final List<String> configKeys;
+
+  @override
+  ConsumerState<_DashboardWidgetConfigSheetBody> createState() =>
+      _DashboardWidgetConfigSheetBodyState();
+}
+
+class _DashboardWidgetConfigSheetBodyState
+    extends ConsumerState<_DashboardWidgetConfigSheetBody> {
+  late final TextEditingController _titleCtrl;
+  late final TextEditingController _warnCtrl;
+  late final TextEditingController _critCtrl;
+  int? _selectedDeviceId;
+  int? _selectedMonitorId;
+  String _timeframe = '1h';
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final existing = widget.existing;
+    final entry = widget.entry;
+    _titleCtrl = TextEditingController(
+      text: existing?.title ?? entry?.title ?? '',
+    );
+    _selectedDeviceId = parseIntOrNull(existing?.config['deviceId']);
+    _selectedMonitorId = parseIntOrNull(existing?.config['monitorId']);
+    _timeframe = (existing?.config['timeframe'] ?? '1h').toString();
+    _warnCtrl = TextEditingController(
+      text: (existing?.config['warningThreshold'] ?? 75).toString(),
+    );
+    _critCtrl = TextEditingController(
+      text: (existing?.config['criticalThreshold'] ?? 90).toString(),
+    );
+  }
+
+  @override
+  void dispose() {
+    _titleCtrl.dispose();
+    _warnCtrl.dispose();
+    _critCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    setState(() => _saving = true);
+    final keys = widget.configKeys;
+    final cfg = <String, dynamic>{
+      'deviceId': ?_selectedDeviceId,
+      'monitorId': ?_selectedMonitorId,
+      if (keys.contains('timeframe')) 'timeframe': _timeframe,
+      if (keys.contains('warningThreshold'))
+        'warningThreshold': parseDoubleOrNull(_warnCtrl.text) ?? 75,
+      if (keys.contains('criticalThreshold'))
+        'criticalThreshold': parseDoubleOrNull(_critCtrl.text) ?? 90,
+    };
+    final existing = widget.existing;
+    final entry = widget.entry;
+    if (existing != null) {
+      await ref
+          .read(dashboardProvider.notifier)
+          .updateWidgetConfig(existing.id, title: _titleCtrl.text, config: cfg);
+    } else if (entry != null) {
+      await ref
+          .read(dashboardProvider.notifier)
+          .addCustomWidget(entry.type, title: _titleCtrl.text, config: cfg);
+    }
+    if (mounted) Navigator.of(context).pop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final monitorsState = ref.watch(monitorsProvider);
+    final keys = widget.configKeys;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        TextField(
+          controller: _titleCtrl,
+          decoration: const InputDecoration(labelText: 'Título do card'),
+        ),
+        if (keys.contains('deviceId')) ...<Widget>[
+          const SizedBox(height: 12),
+          AppDropdownFormField<int?>(
+            initialValue: _selectedDeviceId,
+            decoration: const InputDecoration(labelText: 'Dispositivo'),
+            items: <DropdownMenuItem<int?>>[
+              const DropdownMenuItem<int?>(
+                value: null,
+                child: Text('Selecione...', overflow: TextOverflow.ellipsis),
+              ),
+              for (final d in monitorsState.devices)
+                DropdownMenuItem<int?>(
+                  value: d.id,
+                  child: Text(d.name, overflow: TextOverflow.ellipsis),
+                ),
+            ],
+            onChanged: (v) => setState(() => _selectedDeviceId = v),
+          ),
+        ],
+        if (keys.contains('monitorId')) ...<Widget>[
+          const SizedBox(height: 12),
+          AppDropdownFormField<int?>(
+            initialValue: _selectedMonitorId,
+            decoration: const InputDecoration(labelText: 'Monitor'),
+            items: <DropdownMenuItem<int?>>[
+              const DropdownMenuItem<int?>(
+                value: null,
+                child: Text(
+                  'Todos / Selecione',
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              for (final m in monitorsState.monitors)
+                DropdownMenuItem<int?>(
+                  value: m.id,
+                  child: Text(m.name, overflow: TextOverflow.ellipsis),
+                ),
+            ],
+            onChanged: (v) => setState(() => _selectedMonitorId = v),
+          ),
+        ],
+        if (keys.contains('timeframe')) ...<Widget>[
+          const SizedBox(height: 12),
+          AppDropdownFormField<String>(
+            initialValue: _timeframe,
+            decoration: const InputDecoration(labelText: 'Janela padrão'),
+            items: const <DropdownMenuItem<String>>[
+              DropdownMenuItem<String>(
+                value: '5m',
+                child: Text('5 minutos', overflow: TextOverflow.ellipsis),
+              ),
+              DropdownMenuItem<String>(
+                value: '15m',
+                child: Text('15 minutos', overflow: TextOverflow.ellipsis),
+              ),
+              DropdownMenuItem<String>(
+                value: '1h',
+                child: Text('1 hora', overflow: TextOverflow.ellipsis),
+              ),
+              DropdownMenuItem<String>(
+                value: '24h',
+                child: Text('24 horas', overflow: TextOverflow.ellipsis),
+              ),
+            ],
+            onChanged: (v) {
+              if (v != null) setState(() => _timeframe = v);
+            },
+          ),
+        ],
+        if (keys.contains('warningThreshold')) ...<Widget>[
+          const SizedBox(height: 12),
+          ResponsiveFieldRow(
+            breakpoint: 480,
+            children: <Widget>[
+              TextField(
+                controller: _warnCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Alerta (%)'),
+              ),
+              TextField(
+                controller: _critCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Crítico (%)'),
+              ),
+            ],
+          ),
+        ],
+        const SizedBox(height: 18),
+        FilledButton(
+          onPressed: _saving ? null : _save,
+          child: Text(
+            widget.existing != null ? 'Salvar alterações' : 'Adicionar widget',
+          ),
+        ),
       ],
     );
   }

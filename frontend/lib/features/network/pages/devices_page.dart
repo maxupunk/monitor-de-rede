@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
+import 'package:netmonitor_app/core/utils/network_address_utils.dart';
 import 'package:netmonitor_app/features/network/models/device_models.dart';
 import 'package:netmonitor_app/features/network/providers/devices_provider.dart';
 import 'package:netmonitor_app/features/network/providers/sites_networks_provider.dart';
@@ -253,7 +254,7 @@ class _DevicesPageState extends ConsumerState<DevicesPage> {
     filtered.sort((a, b) {
       return switch (_sortBy) {
         'status' => a.status.compareTo(b.status),
-        'ip' => (a.ipAddress ?? '').compareTo(b.ipAddress ?? ''),
+        'ip' => compareIpAddresses(a.ipAddress ?? '', b.ipAddress ?? ''),
         'type' => a.type.compareTo(b.type),
         _ => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
       };

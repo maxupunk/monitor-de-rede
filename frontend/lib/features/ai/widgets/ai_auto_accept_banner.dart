@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/ai/providers/ai_providers.dart';
-import 'package:netmonitor_app/features/plugins/providers/plugins_provider.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
 
@@ -125,11 +124,6 @@ class AiAutoAcceptBanner extends ConsumerWidget {
 
   Future<void> _stopAutoAccept(WidgetRef ref, int deviceId) async {
     await ref.read(aiChatProvider.notifier).disableAutoAccept(deviceId);
-    // Cancela todas as execuções de plugin em andamento neste equipamento.
-    final running = ref.read(pluginsProvider).runningRuns(deviceId);
-    for (final run in running) {
-      await ref.read(pluginsProvider.notifier).cancelRun(run.id);
-    }
   }
 
   @override

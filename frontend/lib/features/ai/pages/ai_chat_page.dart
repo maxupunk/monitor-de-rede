@@ -38,29 +38,10 @@ class _AiChatPageState extends ConsumerState<AiChatPage> {
   }
 
   Future<void> _renameConversation(AiConversationSummary conv) async {
-    final ctrl = TextEditingController(text: conv.title);
     final next = await showDialog<String>(
       context: context,
-      builder: (dialogCtx) => AlertDialog(
-        title: const Text('Renomear conversa'),
-        content: TextField(
-          controller: ctrl,
-          autofocus: true,
-          decoration: const InputDecoration(labelText: 'Título'),
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(dialogCtx).pop(),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogCtx).pop(ctrl.text.trim()),
-            child: const Text('Salvar'),
-          ),
-        ],
-      ),
+      builder: (_) => _RenameConversationDialog(initialTitle: conv.title),
     );
-    ctrl.dispose();
     if (next == null || next.isEmpty || next == conv.title) return;
     await ref.read(aiConversationsProvider.notifier).rename(conv.id, next);
   }
@@ -476,6 +457,54 @@ class _AiChatPageState extends ConsumerState<AiChatPage> {
               const Expanded(child: AiChatThread()),
             ],
           ),
+        ),
+      ],
+    );
+  }
+}
+
+class _RenameConversationDialog extends StatefulWidget {
+  const _RenameConversationDialog({required this.initialTitle});
+
+  final String initialTitle;
+
+  @override
+  State<_RenameConversationDialog> createState() =>
+      _RenameConversationDialogState();
+}
+
+class _RenameConversationDialogState extends State<_RenameConversationDialog> {
+  late final TextEditingController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: widget.initialTitle);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Renomear conversa'),
+      content: TextField(
+        controller: _ctrl,
+        autofocus: true,
+        decoration: const InputDecoration(labelText: 'Título'),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(_ctrl.text.trim()),
+          child: const Text('Salvar'),
         ),
       ],
     );

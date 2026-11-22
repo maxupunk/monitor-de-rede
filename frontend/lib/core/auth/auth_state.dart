@@ -5,6 +5,8 @@ import 'package:netmonitor_app/core/auth/area_access.dart';
 import 'package:netmonitor_app/core/auth/auth_storage.dart';
 import 'package:netmonitor_app/core/navigation/nav_models.dart';
 import 'package:netmonitor_app/core/network/api_client.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 
 /// Usuário autenticado na sessão atual.
 @immutable
@@ -60,16 +62,14 @@ class AuthUser {
 
   static AuthUser? tryFromJson(Object? raw) {
     if (raw is! Map) return null;
-    final map = Map<String, dynamic>.from(raw);
-    final inner = map['user'] is Map
-        ? Map<String, dynamic>.from(map['user'] as Map)
-        : map;
-    final rawId = inner['id'];
+    final map = asJsonMap(raw);
+    final inner = map['user'] is Map ? asJsonMap(map['user']) : map;
+    final id = parseIntOrNull(inner['id']);
     final email = inner['email'];
-    if (rawId is! num || email is! String) return null;
+    if (id == null || email is! String) return null;
 
     return AuthUser(
-      id: rawId.toInt(),
+      id: id,
       email: email,
       fullName: (inner['fullName'] ?? inner['name']) as String?,
       role: UserRole.tryParse(inner['role']),
@@ -421,11 +421,8 @@ class AuthNotifier extends Notifier<AuthState> {
     );
   }
 
-  String _describeError(Object err, String fallback) {
-    if (err is ApiException && err.message.isNotEmpty) return err.message;
-    if (err is NetworkException && err.message.isNotEmpty) return err.message;
-    return fallback;
-  }
+  String _describeError(Object err, String fallback) =>
+      describeError(err, fallback: fallback);
 }
 
 final authProvider = NotifierProvider<AuthNotifier, AuthState>(

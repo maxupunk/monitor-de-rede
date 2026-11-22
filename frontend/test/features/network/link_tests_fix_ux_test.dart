@@ -7,7 +7,6 @@ import 'package:netmonitor_app/core/areas/areas_provider.dart';
 import 'package:netmonitor_app/core/auth/area_access.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
 import 'package:netmonitor_app/core/network/api_client.dart';
-import 'package:netmonitor_app/features/ai/providers/ai_providers.dart';
 import 'package:netmonitor_app/features/network/models/device_models.dart';
 import 'package:netmonitor_app/features/network/models/link_test_models.dart';
 import 'package:netmonitor_app/features/network/models/topology_models.dart';
@@ -37,11 +36,6 @@ class _AdminAuthNotifier extends AuthNotifier {
 class _StubAreasNotifier extends AreasNotifier {
   @override
   AreasState build() => const AreasState();
-}
-
-class _StubAiSettingsNotifier extends AiSettingsNotifier {
-  @override
-  AiSettingsState build() => const AiSettingsState();
 }
 
 class _ScenarioDevicesNotifier extends DevicesNotifier {
@@ -77,12 +71,20 @@ class _ScenarioTopologyNotifier extends TopologyNotifier {
 }
 
 class _ScenarioLinkTestsNotifier extends LinkTestsNotifier {
-  _ScenarioLinkTestsNotifier({required this.onPlan});
+  _ScenarioLinkTestsNotifier({
+    required this.onPlan,
+    this.onInstall,
+    this.onWaitForRun,
+  });
 
   final Future<LinkTestPlanModel> Function(Map<String, dynamic> req) onPlan;
+  final Future<void> Function(int deviceId, int pluginId)? onInstall;
+  final Future<LinkTestPluginRunResult> Function(int runId)? onWaitForRun;
 
   final List<Map<String, dynamic>> planRequests = <Map<String, dynamic>>[];
   final List<Map<String, dynamic>> startRequests = <Map<String, dynamic>>[];
+  final List<(int, int)> installedCalls = <(int, int)>[];
+  final List<Map<String, dynamic>> runActionCalls = <Map<String, dynamic>>[];
 
   @override
   LinkTestsState build() => const LinkTestsState();
@@ -99,6 +101,40 @@ class _ScenarioLinkTestsNotifier extends LinkTestsNotifier {
 
   @override
   Future<void> fetchSchedules() async {}
+
+  @override
+  Future<void> installDevicePlugin(int deviceId, int pluginId) async {
+    installedCalls.add((deviceId, pluginId));
+    if (onInstall != null) {
+      await onInstall!(deviceId, pluginId);
+    }
+  }
+
+  @override
+  Future<int> runDevicePluginAction({
+    required int deviceId,
+    required int pluginId,
+    required String action,
+    Map<String, dynamic> params = const <String, dynamic>{},
+    bool confirmWrite = false,
+  }) async {
+    runActionCalls.add(<String, dynamic>{
+      'deviceId': deviceId,
+      'pluginId': pluginId,
+      'action': action,
+      'params': Map<String, dynamic>.from(params),
+      'confirmWrite': confirmWrite,
+    });
+    return 501;
+  }
+
+  @override
+  Future<LinkTestPluginRunResult> waitForPluginRun(int runId) async {
+    if (onWaitForRun != null) {
+      return onWaitForRun!(runId);
+    }
+    return LinkTestPluginRunResult(id: runId, status: 'succeeded');
+  }
 
   @override
   Future<LinkTestPlanModel> plan(Map<String, dynamic> request) async {
@@ -166,16 +202,13 @@ class _ScenarioLinkTestsNotifier extends LinkTestsNotifier {
 class _ScenarioPluginsNotifier extends PluginsNotifier {
   _ScenarioPluginsNotifier({
     this.onInstall,
-    this.onWaitForRun,
     this.initialDeviceViews = const <int, DevicePluginsView>{},
   });
 
   final Future<void> Function(int deviceId, int pluginId)? onInstall;
-  final Future<PluginRunView> Function(int runId)? onWaitForRun;
   final Map<int, DevicePluginsView> initialDeviceViews;
 
   final List<(int, int)> installedCalls = <(int, int)>[];
-  final List<Map<String, dynamic>> runActionCalls = <Map<String, dynamic>>[];
 
   @override
   PluginsState build() => PluginsState(deviceViews: initialDeviceViews);
@@ -189,38 +222,6 @@ class _ScenarioPluginsNotifier extends PluginsNotifier {
     if (onInstall != null) {
       await onInstall!(deviceId, pluginId);
     }
-  }
-
-  @override
-  Future<int> runAction({
-    required int deviceId,
-    required int pluginId,
-    required String action,
-    Map<String, dynamic> params = const <String, dynamic>{},
-    bool confirmWrite = false,
-  }) async {
-    runActionCalls.add(<String, dynamic>{
-      'deviceId': deviceId,
-      'pluginId': pluginId,
-      'action': action,
-      'params': Map<String, dynamic>.from(params),
-      'confirmWrite': confirmWrite,
-    });
-    return 501;
-  }
-
-  @override
-  Future<PluginRunView> waitForRun(int runId) async {
-    if (onWaitForRun != null) {
-      return onWaitForRun!(runId);
-    }
-    return PluginRunView(
-      id: runId,
-      pluginId: 5,
-      deviceId: 10,
-      action: 'tp_prepare',
-      status: 'succeeded',
-    );
   }
 }
 
@@ -243,27 +244,36 @@ class _ScenarioDeviceAccessController extends DeviceAccessController {
   }
 
   @override
-  Future<DeviceCredentialView> provisionDedicatedKey(
-    int deviceId,
-    Map<String, dynamic> payload,
-  ) async {
+  Future<void> provisionDedicatedKey({
+    required int deviceId,
+    required String platform,
+    required String username,
+    required String password,
+    int port = 22,
+    int? viaProbeId,
+  }) async {
     if (nextProvisionError != null) {
       final err = nextProvisionError!;
       nextProvisionError = null;
       throw err;
     }
-    lastProvisionPayload = Map<String, dynamic>.from(payload);
+    lastProvisionPayload = <String, dynamic>{
+      'platform': platform,
+      'username': username,
+      'password': password,
+      'port': port,
+      'viaProbeId': ?viaProbeId,
+    };
     const view = DeviceCredentialView(
       kind: 'ssh',
       username: 'netmonitor',
       port: 22,
       storage: 'key',
-      dedicated: true,
+      dedicatedFlag: true,
     );
     _credentials
       ..removeWhere((c) => c.kind == 'ssh')
       ..add(view);
-    return view;
   }
 }
 
@@ -281,7 +291,6 @@ Widget _buildApp({required Widget child, required List<Override> overrides}) {
     overrides: <Override>[
       authProvider.overrideWith(_AdminAuthNotifier.new),
       areasProvider.overrideWith(_StubAreasNotifier.new),
-      aiSettingsProvider.overrideWith(_StubAiSettingsNotifier.new),
       ...overrides,
     ],
     child: MaterialApp(
@@ -436,7 +445,7 @@ void main() {
           dedicatedPlatform: 'openwrt',
         );
 
-        final pluginsNotifier = _ScenarioPluginsNotifier(
+        final linkTestsNotifier = _ScenarioLinkTestsNotifier(
           onInstall: (deviceId, pluginId) async {
             await installCompleter.future;
             pluginInstalled = true;
@@ -444,27 +453,15 @@ void main() {
           onWaitForRun: (runId) async {
             if (failNextPackageInstall) {
               failNextPackageInstall = false;
-              return PluginRunView(
+              return LinkTestPluginRunResult(
                 id: runId,
-                pluginId: 5,
-                deviceId: 10,
-                action: 'tp_prepare',
                 status: 'failed',
                 error: 'Falha no opkg update (repositório inacessível).',
               );
             }
             iperfInstalled = true;
-            return PluginRunView(
-              id: runId,
-              pluginId: 5,
-              deviceId: 10,
-              action: 'tp_prepare',
-              status: 'succeeded',
-            );
+            return LinkTestPluginRunResult(id: runId, status: 'succeeded');
           },
-        );
-
-        final linkTestsNotifier = _ScenarioLinkTestsNotifier(
           onPlan: (req) async {
             if (!pluginInstalled) {
               return LinkTestPlanModel.fromJson(const <String, dynamic>{
@@ -605,7 +602,6 @@ void main() {
               devicesProvider.overrideWith(() => devicesNotifier),
               topologyProvider.overrideWith(_ScenarioTopologyNotifier.new),
               linkTestsProvider.overrideWith(() => linkTestsNotifier),
-              pluginsProvider.overrideWith(() => pluginsNotifier),
               deviceAccessProvider.overrideWith(() => accessCtrl),
             ],
           ),
@@ -640,7 +636,7 @@ void main() {
         installCompleter.complete();
         await tester.pumpAndSettle();
 
-        expect(pluginsNotifier.installedCalls, <(int, int)>[(10, 5)]);
+        expect(linkTestsNotifier.installedCalls, <(int, int)>[(10, 5)]);
         expect(
           find.textContaining(
             'Plugin ativado com sucesso em Borda! Próximo passo: Borda está sem acesso SSH',
@@ -701,11 +697,11 @@ void main() {
         await tester.tap(find.text('Instalar iperf3'));
         await tester.pumpAndSettle();
 
-        expect(pluginsNotifier.runActionCalls.length, 1);
-        expect(pluginsNotifier.runActionCalls.single['action'], 'tp_prepare');
-        expect(pluginsNotifier.runActionCalls.single['confirmWrite'], isTrue);
+        expect(linkTestsNotifier.runActionCalls.length, 1);
+        expect(linkTestsNotifier.runActionCalls.single['action'], 'tp_prepare');
+        expect(linkTestsNotifier.runActionCalls.single['confirmWrite'], isTrue);
         expect(
-          pluginsNotifier.runActionCalls.single['params'],
+          linkTestsNotifier.runActionCalls.single['params'],
           <String, dynamic>{'engine': 'iperf3', 'role': 'serve'},
         );
         expect(
@@ -776,16 +772,13 @@ void main() {
         var showBlocking = false;
         final secondStepGate = Completer<void>();
 
-        final pluginsNotifier = _ScenarioPluginsNotifier(
+        final linkTestsNotifier = _ScenarioLinkTestsNotifier(
           onInstall: (deviceId, pluginId) async {
             if (deviceId == 20 && !secondStepGate.isCompleted) {
               await secondStepGate.future;
             }
             installedIds.add(deviceId);
           },
-        );
-
-        final linkTestsNotifier = _ScenarioLinkTestsNotifier(
           onPlan: (req) async {
             if (showBlocking) {
               return LinkTestPlanModel.fromJson(const <String, dynamic>{
@@ -853,7 +846,6 @@ void main() {
               ),
               topologyProvider.overrideWith(_ScenarioTopologyNotifier.new),
               linkTestsProvider.overrideWith(() => linkTestsNotifier),
-              pluginsProvider.overrideWith(() => pluginsNotifier),
               pendingLinkTestDraftProvider.overrideWith(
                 (ref) => const LinkTestRequestDraft(
                   kind: 'end_to_end',
@@ -881,7 +873,10 @@ void main() {
         secondStepGate.complete();
         await tester.pumpAndSettle();
 
-        expect(pluginsNotifier.installedCalls, <(int, int)>[(10, 5), (20, 5)]);
+        expect(linkTestsNotifier.installedCalls, <(int, int)>[
+          (10, 5),
+          (20, 5),
+        ]);
         expect(find.text('Pronto para iniciar medição'), findsOneWidget);
         expect(find.text('~24s'), findsOneWidget);
         expect(

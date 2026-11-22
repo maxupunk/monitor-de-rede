@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/servers/models/database_models.dart';
 import 'package:netmonitor_app/features/servers/providers/databases_provider.dart';
@@ -133,12 +134,12 @@ class _DatabaseRestoreBodyState extends ConsumerState<_DatabaseRestoreBody> {
   @override
   void initState() {
     super.initState();
-    final today = DateTime.now()
-        .toIso8601String()
-        .substring(0, 10)
-        .replaceAll('-', '');
-    final sanitized = '${widget.sourceDatabaseName}_restaurado_$today'
-        .replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
+    final today = formatFileTimestamp().substring(0, 8);
+    final baseSlug = sanitizeFileSlug(
+      widget.sourceDatabaseName,
+      fallback: 'banco',
+    ).replaceAll(RegExp(r'[^a-z0-9_]'), '_');
+    final sanitized = '${baseSlug}_restaurado_$today';
     _targetDbController = TextEditingController(
       text: sanitized.length > 63 ? sanitized.substring(0, 63) : sanitized,
     );
@@ -203,7 +204,10 @@ class _DatabaseRestoreBodyState extends ConsumerState<_DatabaseRestoreBody> {
       if (!mounted) return;
       setState(() {
         _submitting = false;
-        _error = err.toString();
+        _error = describeError(
+          err,
+          fallback: 'Falha ao iniciar a restauração do banco.',
+        );
       });
     }
   }

@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
-import 'package:netmonitor_app/features/network/models/device_models.dart';
+import 'package:netmonitor_app/core/utils/formatters.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 
 @immutable
 class TracerouteHop {
@@ -232,7 +233,8 @@ class QuickPingReport {
       final minM = parseDoubleOrNull(cap['minMbps']);
       final maxM = parseDoubleOrNull(cap['maxMbps']);
       if (minM != null && maxM != null) {
-        capLabel = '${minM.toStringAsFixed(0)}–${maxM.toStringAsFixed(0)} Mbps';
+        capLabel =
+            '${formatDecimal(minM, maxDigits: 0)}–${formatDecimal(maxM, maxDigits: 0)} Mbps';
       } else if (cap['label'] != null) {
         capLabel = cap['label'].toString();
       }

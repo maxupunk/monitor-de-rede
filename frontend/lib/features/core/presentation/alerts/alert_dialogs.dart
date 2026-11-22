@@ -24,89 +24,104 @@ Future<bool> showAlertSilenceSheet({
   required WidgetRef ref,
   required AlertEvent alert,
 }) async {
-  int selectedMinutes = 60;
-  final customCtrl = TextEditingController(text: '60');
-  var saving = false;
-
   final result = await showAdaptiveFormSheet<bool>(
     context: context,
     title: 'Silenciar alerta',
     subtitle: alert.title,
-    builder: (sheetCtx) {
-      return StatefulBuilder(
-        builder: (context, setModalState) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              Text(
-                'Escolha por quanto tempo suprimir notificações deste incidente:',
-                style: context.textTheme.bodyMedium,
-              ),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: <Widget>[
-                  for (final (mins, label) in _silencePresets)
-                    ChoiceChip(
-                      selected: selectedMinutes == mins,
-                      label: Text(label),
-                      onSelected: (_) {
-                        setModalState(() {
-                          selectedMinutes = mins;
-                          customCtrl.text = '$mins';
-                        });
-                      },
-                    ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              TextField(
-                controller: customCtrl,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: 'Duração personalizada (minutos)',
-                  prefixIcon: Icon(Icons.timer_outlined),
-                ),
-                onChanged: (v) {
-                  final parsed = int.tryParse(v.trim());
-                  if (parsed != null && parsed > 0) {
-                    setModalState(() => selectedMinutes = parsed);
-                  }
+    builder: (_) => _AlertSilenceSheetBody(alertId: alert.id),
+  );
+  return result == true;
+}
+
+class _AlertSilenceSheetBody extends ConsumerStatefulWidget {
+  const _AlertSilenceSheetBody({required this.alertId});
+
+  final int alertId;
+
+  @override
+  ConsumerState<_AlertSilenceSheetBody> createState() =>
+      _AlertSilenceSheetBodyState();
+}
+
+class _AlertSilenceSheetBodyState
+    extends ConsumerState<_AlertSilenceSheetBody> {
+  int _selectedMinutes = 60;
+  final TextEditingController _customCtrl = TextEditingController(text: '60');
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    _customCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final mins = int.tryParse(_customCtrl.text.trim()) ?? _selectedMinutes;
+    if (mins <= 0) return;
+    setState(() => _saving = true);
+    final ok = await ref
+        .read(alertsProvider.notifier)
+        .silenceAlert(widget.alertId, mins);
+    if (mounted) Navigator.of(context).pop(ok);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Text(
+          'Escolha por quanto tempo suprimir notificações deste incidente:',
+          style: context.textTheme.bodyMedium,
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: <Widget>[
+            for (final (mins, label) in _silencePresets)
+              ChoiceChip(
+                selected: _selectedMinutes == mins,
+                label: Text(label),
+                onSelected: (_) {
+                  setState(() {
+                    _selectedMinutes = mins;
+                    _customCtrl.text = '$mins';
+                  });
                 },
               ),
-              const SizedBox(height: 18),
-              FilledButton.icon(
-                onPressed: saving
-                    ? null
-                    : () async {
-                        final mins =
-                            int.tryParse(customCtrl.text.trim()) ??
-                            selectedMinutes;
-                        if (mins <= 0) return;
-                        setModalState(() => saving = true);
-                        final ok = await ref
-                            .read(alertsProvider.notifier)
-                            .silenceAlert(alert.id, mins);
-                        if (sheetCtx.mounted) Navigator.of(sheetCtx).pop(ok);
-                      },
-                icon: saving
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.notifications_off_outlined),
-                label: const Text('Silenciar'),
-              ),
-            ],
-          );
-        },
-      );
-    },
-  );
-  customCtrl.dispose();
-  return result == true;
+          ],
+        ),
+        const SizedBox(height: 14),
+        TextField(
+          controller: _customCtrl,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: 'Duração personalizada (minutos)',
+            prefixIcon: Icon(Icons.timer_outlined),
+          ),
+          onChanged: (v) {
+            final parsed = int.tryParse(v.trim());
+            if (parsed != null && parsed > 0) {
+              setState(() => _selectedMinutes = parsed);
+            }
+          },
+        ),
+        const SizedBox(height: 18),
+        FilledButton.icon(
+          onPressed: _saving ? null : _submit,
+          icon: _saving
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.notifications_off_outlined),
+          label: const Text('Silenciar'),
+        ),
+      ],
+    );
+  }
 }
 
 /// Diálogo de Correlação & Análise de Causa Raiz (`AlertCorrelationDialog`).

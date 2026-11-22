@@ -1,19 +1,12 @@
 import 'dart:typed_data';
 
-import 'package:netmonitor_app/features/vpn/utils/file_export_stub.dart'
-    if (dart.library.js_interop) 'package:netmonitor_app/features/vpn/utils/file_export_web.dart'
-    if (dart.library.io) 'package:netmonitor_app/features/vpn/utils/file_export_io.dart'
-    as impl;
+import 'package:netmonitor_app/core/utils/file_download.dart';
 
-/// Exporta ou compartilha bytes (download no Web PWA, share sheet no Android/IO).
+/// Exporta ou compartilha bytes delegando ao utilitário canônico `file_download.dart`.
 Future<void> exportFileBytes({
   required Uint8List bytes,
   required String fileName,
   String mimeType = 'application/octet-stream',
-}) {
-  return impl.exportFileBytes(
-    bytes: bytes,
-    fileName: fileName,
-    mimeType: mimeType,
-  );
+}) async {
+  await saveOrShareBytes(bytes: bytes, filename: fileName, mimeType: mimeType);
 }

@@ -1,31 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
 
-@immutable
-class PaginationMeta {
-  const PaginationMeta({
-    required this.total,
-    required this.perPage,
-    required this.currentPage,
-    required this.lastPage,
-  });
-
-  final int total;
-  final int perPage;
-  final int currentPage;
-  final int lastPage;
-
-  bool get hasNext => currentPage < lastPage;
-
-  factory PaginationMeta.fromJson(Map<String, dynamic> json) {
-    return PaginationMeta(
-      total: (json['total'] as num?)?.toInt() ?? 0,
-      perPage: (json['perPage'] as num?)?.toInt() ?? 20,
-      currentPage: (json['currentPage'] as num?)?.toInt() ?? 1,
-      lastPage: (json['lastPage'] as num?)?.toInt() ?? 1,
-    );
-  }
-}
+export 'package:netmonitor_app/core/models/pagination.dart';
 
 @immutable
 class HistoricalEventRecord {
@@ -49,12 +26,12 @@ class HistoricalEventRecord {
 
   factory HistoricalEventRecord.fromJson(Map<String, dynamic> json) {
     final payload = json['data'] is Map
-        ? Map<String, dynamic>.from(json['data'] as Map)
+        ? asJsonMap(json['data'])
         : (json['payload'] is Map
-              ? Map<String, dynamic>.from(json['payload'] as Map)
-              : <String, dynamic>{});
+              ? asJsonMap(json['payload'])
+              : const <String, dynamic>{});
     return HistoricalEventRecord(
-      id: (json['id'] as num?)?.toInt() ?? 0,
+      id: parseIntOrNull(json['id']) ?? 0,
       type: (json['type'] ?? json['eventType'] ?? 'event').toString(),
       timestamp: (json['timestamp'] ?? json['createdAt'] ?? '').toString(),
       data: payload,

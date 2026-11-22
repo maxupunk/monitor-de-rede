@@ -5,7 +5,6 @@ import 'package:netmonitor_app/areas/area_contribution.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/ai/providers/ai_providers.dart';
 import 'package:netmonitor_app/features/ai/widgets/ai_chat_thread.dart';
-import 'package:netmonitor_app/features/plugins/providers/plugin_apps_provider.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
 
@@ -29,7 +28,6 @@ class _AiAndAppsShellBootstrapOverlayState
       ref.read(aiDrawerBuilderProvider.notifier).state = (_) =>
           const AiChatDrawer();
       ref.read(aiSettingsProvider.notifier).load();
-      ref.read(pluginAppsProvider.notifier).fetchApps();
     });
   }
 

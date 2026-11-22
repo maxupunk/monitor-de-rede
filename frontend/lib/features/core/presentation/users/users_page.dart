@@ -37,310 +37,14 @@ class _UsersPageState extends ConsumerState<UsersPage> {
   }
 
   Future<void> _openUserForm([ManagedUser? existing]) async {
-    final nameCtrl = TextEditingController(text: existing?.fullName ?? '');
-    final emailCtrl = TextEditingController(text: existing?.email ?? '');
-    final passCtrl = TextEditingController();
-    UserRole role = existing?.role ?? UserRole.operator;
-    final Map<ProductArea, UserRole?> areaRoles = <ProductArea, UserRole?>{
-      for (final a in ProductArea.optionalAreas) a: existing?.areaRoles[a],
-    };
-    bool active = existing?.active ?? true;
-    final formKey = GlobalKey<FormState>();
-    var saving = false;
-    String? error;
-
     await showAdaptiveFormSheet<void>(
       context: context,
       title: existing == null ? 'Novo usuário' : 'Editar usuário',
       subtitle:
           'Defina o papel global e as permissões por área do sistema (ADR 019).',
       maxWidth: 620,
-      builder: (sheetCtx) {
-        final areasState = ref.watch(areasProvider);
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            return Form(
-              key: formKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  if (error != null) ...<Widget>[
-                    NestedPanel(tone: SemanticTone.error, child: Text(error!)),
-                    const SizedBox(height: 10),
-                  ],
-                  TextFormField(
-                    controller: nameCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Nome completo',
-                      prefixIcon: Icon(Icons.person_outline),
-                    ),
-                    validator: FormValidators.required(
-                      'Informe o nome completo.',
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: emailCtrl,
-                    keyboardType: TextInputType.emailAddress,
-                    decoration: const InputDecoration(
-                      labelText: 'E-mail',
-                      prefixIcon: Icon(Icons.email_outlined),
-                    ),
-                    validator:
-                        FormValidators.compose(<FormFieldValidator<String>>[
-                          FormValidators.required('Informe o e-mail.'),
-                          FormValidators.email(),
-                        ]),
-                  ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: passCtrl,
-                    obscureText: true,
-                    decoration: InputDecoration(
-                      labelText: existing == null
-                          ? 'Senha'
-                          : 'Nova senha (deixe em branco para manter)',
-                      prefixIcon: const Icon(Icons.lock_outline),
-                    ),
-                    validator: existing == null
-                        ? FormValidators.password()
-                        : (v) {
-                            if (v == null || v.isEmpty) return null;
-                            return FormValidators.password()(v);
-                          },
-                  ),
-                  const SizedBox(height: 12),
-                  AppDropdownFormField<UserRole>(
-                    initialValue: role,
-                    decoration: const InputDecoration(
-                      labelText: 'Papel global (Núcleo)',
-                    ),
-                    items: <DropdownMenuItem<UserRole>>[
-                      for (final r in UserRole.values)
-                        DropdownMenuItem<UserRole>(
-                          value: r,
-                          child: Text(
-                            '${r.label} — ${r.description}',
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                    ],
-                    onChanged: (v) {
-                      if (v != null) setModalState(() => role = v);
-                    },
-                  ),
-                  const SizedBox(height: 14),
-                  if (role == UserRole.admin)
-                    const NestedPanel(
-                      tone: SemanticTone.info,
-                      child: Text(
-                        'Administradores possuem acesso total de leitura e escrita em todas '
-                        'as áreas habilitadas do sistema.',
-                      ),
-                    )
-                  else
-                    NestedPanel(
-                      child: LayoutBuilder(
-                        builder: (context, panelConstraints) {
-                          final narrowPanel = panelConstraints.maxWidth < 420;
-                          return Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: <Widget>[
-                              Text(
-                                'Acesso por área opcional',
-                                style: context.textTheme.titleSmall?.copyWith(
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                'O Núcleo herda o papel global. Escolha o nível de acesso nas demais áreas:',
-                                style: context.textTheme.bodySmall?.copyWith(
-                                  color: context.colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-                              const SizedBox(height: 10),
-                              for (final area
-                                  in ProductArea.optionalAreas) ...<Widget>[
-                                Padding(
-                                  padding: const EdgeInsets.only(bottom: 10),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: <Widget>[
-                                      Row(
-                                        children: <Widget>[
-                                          Icon(area.defaultIcon, size: 18),
-                                          const SizedBox(width: 6),
-                                          Expanded(
-                                            child: Text(
-                                              area.defaultTitle,
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: const TextStyle(
-                                                fontWeight: FontWeight.w700,
-                                              ),
-                                            ),
-                                          ),
-                                          if (!areasState.isEnabled(
-                                            area,
-                                          )) ...<Widget>[
-                                            const SizedBox(width: 8),
-                                            const SemanticChip(
-                                              label: 'Desligada',
-                                              tone: SemanticTone.warning,
-                                              compact: true,
-                                            ),
-                                          ],
-                                        ],
-                                      ),
-                                      const SizedBox(height: 6),
-                                      if (narrowPanel)
-                                        Wrap(
-                                          spacing: 6,
-                                          runSpacing: 6,
-                                          children: <Widget>[
-                                            for (final (val, label)
-                                                in const <(UserRole?, String)>[
-                                                  (null, 'Sem acesso'),
-                                                  (
-                                                    UserRole.viewer,
-                                                    'Visualizador',
-                                                  ),
-                                                  (
-                                                    UserRole.operator,
-                                                    'Operador',
-                                                  ),
-                                                ])
-                                              ChoiceChip(
-                                                visualDensity:
-                                                    VisualDensity.compact,
-                                                selected:
-                                                    areaRoles[area] == val,
-                                                label: Text(label),
-                                                onSelected: (_) =>
-                                                    setModalState(
-                                                      () =>
-                                                          areaRoles[area] = val,
-                                                    ),
-                                              ),
-                                          ],
-                                        )
-                                      else
-                                        SegmentedButton<UserRole?>(
-                                          showSelectedIcon: false,
-                                          style: const ButtonStyle(
-                                            visualDensity:
-                                                VisualDensity.compact,
-                                          ),
-                                          segments:
-                                              const <ButtonSegment<UserRole?>>[
-                                                ButtonSegment<UserRole?>(
-                                                  value: null,
-                                                  label: Text('Sem acesso'),
-                                                ),
-                                                ButtonSegment<UserRole?>(
-                                                  value: UserRole.viewer,
-                                                  label: Text('Visualizador'),
-                                                ),
-                                                ButtonSegment<UserRole?>(
-                                                  value: UserRole.operator,
-                                                  label: Text('Operador'),
-                                                ),
-                                              ],
-                                          selected: <UserRole?>{
-                                            areaRoles[area],
-                                          },
-                                          onSelectionChanged: (s) =>
-                                              setModalState(
-                                                () => areaRoles[area] = s.first,
-                                              ),
-                                        ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ],
-                          );
-                        },
-                      ),
-                    ),
-                  const SizedBox(height: 8),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    value: active,
-                    onChanged: (v) => setModalState(() => active = v),
-                    title: const Text('Conta ativa'),
-                  ),
-                  const SizedBox(height: 14),
-                  FilledButton.icon(
-                    onPressed: saving
-                        ? null
-                        : () async {
-                            if (!formKey.currentState!.validate()) return;
-                            setModalState(() {
-                              saving = true;
-                              error = null;
-                            });
-                            final serializedAreas = <String, String>{};
-                            if (role != UserRole.admin) {
-                              for (final entry in areaRoles.entries) {
-                                if (entry.value != null) {
-                                  serializedAreas[entry.key.id] =
-                                      entry.value!.id;
-                                }
-                              }
-                            }
-                            final payload = <String, dynamic>{
-                              'name': nameCtrl.text.trim(),
-                              'fullName': nameCtrl.text.trim(),
-                              'email': emailCtrl.text.trim(),
-                              'password': passCtrl.text,
-                              'role': role.id,
-                              'areaRoles': serializedAreas,
-                              'active': active,
-                            };
-                            final notifier = ref.read(usersProvider.notifier);
-                            final ok = existing == null
-                                ? await notifier.createUser(payload)
-                                : await notifier.updateUser(
-                                    existing.id,
-                                    payload,
-                                  );
-                            if (!sheetCtx.mounted) return;
-                            if (ok) {
-                              Navigator.of(sheetCtx).pop();
-                            } else {
-                              setModalState(() {
-                                saving = false;
-                                error =
-                                    ref.read(usersProvider).error ??
-                                    'Erro ao salvar usuário.';
-                              });
-                            }
-                          },
-                    icon: saving
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.save_outlined),
-                    label: Text(
-                      existing == null ? 'Criar usuário' : 'Salvar alterações',
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
+      builder: (_) => _UserFormSheetBody(existing: existing),
     );
-
-    nameCtrl.dispose();
-    emailCtrl.dispose();
-    passCtrl.dispose();
   }
 
   @override
@@ -576,6 +280,301 @@ class _UsersPageState extends ConsumerState<UsersPage> {
           ),
         );
       },
+    );
+  }
+}
+
+class _UserFormSheetBody extends ConsumerStatefulWidget {
+  const _UserFormSheetBody({this.existing});
+
+  final ManagedUser? existing;
+
+  @override
+  ConsumerState<_UserFormSheetBody> createState() => _UserFormSheetBodyState();
+}
+
+class _UserFormSheetBodyState extends ConsumerState<_UserFormSheetBody> {
+  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+  late final TextEditingController _nameCtrl;
+  late final TextEditingController _emailCtrl;
+  final TextEditingController _passCtrl = TextEditingController();
+  late UserRole _role;
+  late final Map<ProductArea, UserRole?> _areaRoles;
+  late bool _active;
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    final existing = widget.existing;
+    _nameCtrl = TextEditingController(text: existing?.fullName ?? '');
+    _emailCtrl = TextEditingController(text: existing?.email ?? '');
+    _role = existing?.role ?? UserRole.operator;
+    _areaRoles = <ProductArea, UserRole?>{
+      for (final a in ProductArea.optionalAreas) a: existing?.areaRoles[a],
+    };
+    _active = existing?.active ?? true;
+  }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _emailCtrl.dispose();
+    _passCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    final serializedAreas = <String, String>{};
+    if (_role != UserRole.admin) {
+      for (final entry in _areaRoles.entries) {
+        if (entry.value != null) {
+          serializedAreas[entry.key.id] = entry.value!.id;
+        }
+      }
+    }
+    final payload = <String, dynamic>{
+      'name': _nameCtrl.text.trim(),
+      'fullName': _nameCtrl.text.trim(),
+      'email': _emailCtrl.text.trim(),
+      'password': _passCtrl.text,
+      'role': _role.id,
+      'areaRoles': serializedAreas,
+      'active': _active,
+    };
+    final notifier = ref.read(usersProvider.notifier);
+    final ok = widget.existing == null
+        ? await notifier.createUser(payload)
+        : await notifier.updateUser(widget.existing!.id, payload);
+    if (!mounted) return;
+    if (ok) {
+      Navigator.of(context).pop();
+    } else {
+      setState(() {
+        _saving = false;
+        _error = ref.read(usersProvider).error ?? 'Erro ao salvar usuário.';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final areasState = ref.watch(areasProvider);
+    final existing = widget.existing;
+
+    return Form(
+      key: _formKey,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          if (_error != null) ...<Widget>[
+            NestedPanel(tone: SemanticTone.error, child: Text(_error!)),
+            const SizedBox(height: 10),
+          ],
+          TextFormField(
+            controller: _nameCtrl,
+            decoration: const InputDecoration(
+              labelText: 'Nome completo',
+              prefixIcon: Icon(Icons.person_outline),
+            ),
+            validator: FormValidators.required('Informe o nome completo.'),
+          ),
+          const SizedBox(height: 12),
+          TextFormField(
+            controller: _emailCtrl,
+            keyboardType: TextInputType.emailAddress,
+            decoration: const InputDecoration(
+              labelText: 'E-mail',
+              prefixIcon: Icon(Icons.email_outlined),
+            ),
+            validator: FormValidators.compose(<FormFieldValidator<String>>[
+              FormValidators.required('Informe o e-mail.'),
+              FormValidators.email(),
+            ]),
+          ),
+          const SizedBox(height: 12),
+          TextFormField(
+            controller: _passCtrl,
+            obscureText: true,
+            decoration: InputDecoration(
+              labelText: existing == null
+                  ? 'Senha'
+                  : 'Nova senha (deixe em branco para manter)',
+              prefixIcon: const Icon(Icons.lock_outline),
+            ),
+            validator: existing == null
+                ? FormValidators.password()
+                : (v) {
+                    if (v == null || v.isEmpty) return null;
+                    return FormValidators.password()(v);
+                  },
+          ),
+          const SizedBox(height: 12),
+          AppDropdownFormField<UserRole>(
+            initialValue: _role,
+            decoration: const InputDecoration(
+              labelText: 'Papel global (Núcleo)',
+            ),
+            items: <DropdownMenuItem<UserRole>>[
+              for (final r in UserRole.values)
+                DropdownMenuItem<UserRole>(
+                  value: r,
+                  child: Text(
+                    '${r.label} — ${r.description}',
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+            ],
+            onChanged: (v) {
+              if (v != null) setState(() => _role = v);
+            },
+          ),
+          const SizedBox(height: 14),
+          if (_role == UserRole.admin)
+            const NestedPanel(
+              tone: SemanticTone.info,
+              child: Text(
+                'Administradores possuem acesso total de leitura e escrita em todas '
+                'as áreas habilitadas do sistema.',
+              ),
+            )
+          else
+            NestedPanel(
+              child: LayoutBuilder(
+                builder: (context, panelConstraints) {
+                  final narrowPanel = panelConstraints.maxWidth < 420;
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      Text(
+                        'Acesso por área opcional',
+                        style: context.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'O Núcleo herda o papel global. Escolha o nível de acesso nas demais áreas:',
+                        style: context.textTheme.bodySmall?.copyWith(
+                          color: context.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      for (final area in ProductArea.optionalAreas) ...<Widget>[
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: <Widget>[
+                              Row(
+                                children: <Widget>[
+                                  Icon(area.defaultIcon, size: 18),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text(
+                                      area.defaultTitle,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                  if (!areasState.isEnabled(area)) ...<Widget>[
+                                    const SizedBox(width: 8),
+                                    const SemanticChip(
+                                      label: 'Desligada',
+                                      tone: SemanticTone.warning,
+                                      compact: true,
+                                    ),
+                                  ],
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              if (narrowPanel)
+                                Wrap(
+                                  spacing: 6,
+                                  runSpacing: 6,
+                                  children: <Widget>[
+                                    for (final (val, label)
+                                        in const <(UserRole?, String)>[
+                                          (null, 'Sem acesso'),
+                                          (UserRole.viewer, 'Visualizador'),
+                                          (UserRole.operator, 'Operador'),
+                                        ])
+                                      ChoiceChip(
+                                        visualDensity: VisualDensity.compact,
+                                        selected: _areaRoles[area] == val,
+                                        label: Text(label),
+                                        onSelected: (_) => setState(
+                                          () => _areaRoles[area] = val,
+                                        ),
+                                      ),
+                                  ],
+                                )
+                              else
+                                SegmentedButton<UserRole?>(
+                                  showSelectedIcon: false,
+                                  style: const ButtonStyle(
+                                    visualDensity: VisualDensity.compact,
+                                  ),
+                                  segments: const <ButtonSegment<UserRole?>>[
+                                    ButtonSegment<UserRole?>(
+                                      value: null,
+                                      label: Text('Sem acesso'),
+                                    ),
+                                    ButtonSegment<UserRole?>(
+                                      value: UserRole.viewer,
+                                      label: Text('Visualizador'),
+                                    ),
+                                    ButtonSegment<UserRole?>(
+                                      value: UserRole.operator,
+                                      label: Text('Operador'),
+                                    ),
+                                  ],
+                                  selected: <UserRole?>{_areaRoles[area]},
+                                  onSelectionChanged: (s) => setState(
+                                    () => _areaRoles[area] = s.first,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
+                  );
+                },
+              ),
+            ),
+          const SizedBox(height: 8),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            value: _active,
+            onChanged: (v) => setState(() => _active = v),
+            title: const Text('Conta ativa'),
+          ),
+          const SizedBox(height: 14),
+          FilledButton.icon(
+            onPressed: _saving ? null : _submit,
+            icon: _saving
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.save_outlined),
+            label: Text(
+              existing == null ? 'Criar usuário' : 'Salvar alterações',
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

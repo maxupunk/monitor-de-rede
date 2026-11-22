@@ -74,7 +74,7 @@ class _RecordingDevicesNotifier extends DevicesNotifier {
   );
 
   @override
-  Future<void> fetchDevices() async {}
+  Future<void> fetchDevices({int? siteId, int? networkId}) async {}
 
   @override
   Future<DeviceModel?> createDevice(Map<String, dynamic> payload) async {

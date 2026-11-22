@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
 
 @immutable
@@ -153,7 +154,10 @@ class MetricLineChart extends StatelessWidget {
                   }
                   final text = yFormatter != null
                       ? yFormatter!(value)
-                      : value.toStringAsFixed(value.abs() >= 100 ? 0 : 1);
+                      : formatDecimal(
+                          value,
+                          maxDigits: value.abs() >= 100 ? 0 : 1,
+                        );
                   return Padding(
                     padding: const EdgeInsets.only(right: 6),
                     child: Text(
@@ -197,7 +201,7 @@ class MetricLineChart extends StatelessWidget {
                       final seriesItem = nonEmpty[spot.barIndex];
                       final formattedY = yFormatter != null
                           ? yFormatter!(spot.y)
-                          : spot.y.toStringAsFixed(1);
+                          : formatDecimal(spot.y, maxDigits: 1, minDigits: 1);
                       return LineTooltipItem(
                         '${seriesItem.name}: $formattedY',
                         TextStyle(

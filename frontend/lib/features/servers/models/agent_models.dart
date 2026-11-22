@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 
 /// Capacidade anunciada por um agente (Docker ou Compose).
 @immutable
@@ -15,7 +16,7 @@ class AgentCapabilityView {
 
   factory AgentCapabilityView.fromJson(Map<String, dynamic> json) {
     return AgentCapabilityView(
-      available: json['available'] == true,
+      available: parseBool(json['available']),
       version: json['version'] as String?,
       reason: json['reason'] as String?,
     );
@@ -44,29 +45,24 @@ class AgentHostInfo {
   final AgentCapabilityView compose;
 
   factory AgentHostInfo.fromJson(Map<String, dynamic> json) {
-    final rawPolicy = json['policy'];
-    final rawDocker = json['docker'];
-    final rawCompose = json['compose'];
     return AgentHostInfo(
       hostname: json['hostname'] as String?,
       os: json['os'] as String?,
       arch: json['arch'] as String?,
-      inContainer: json['inContainer'] == true,
-      policy: rawPolicy is List
-          ? List<String>.unmodifiable(rawPolicy.whereType<String>())
-          : const <String>[],
-      docker: rawDocker is Map
-          ? AgentCapabilityView.fromJson(Map<String, dynamic>.from(rawDocker))
+      inContainer: parseBool(json['inContainer']),
+      policy: List<String>.unmodifiable(asStringList(json['policy'])),
+      docker: json['docker'] is Map
+          ? AgentCapabilityView.fromJson(asJsonMap(json['docker']))
           : const AgentCapabilityView(available: false),
-      compose: rawCompose is Map
-          ? AgentCapabilityView.fromJson(Map<String, dynamic>.from(rawCompose))
+      compose: json['compose'] is Map
+          ? AgentCapabilityView.fromJson(asJsonMap(json['compose']))
           : const AgentCapabilityView(available: false),
     );
   }
 
   static AgentHostInfo? tryFromDynamic(Object? raw) {
     if (raw is! Map) return null;
-    final map = Map<String, dynamic>.from(raw);
+    final map = asJsonMap(raw);
     if (map['policy'] is! List || map['docker'] is! Map) return null;
     return AgentHostInfo.fromJson(map);
   }
@@ -147,24 +143,24 @@ class AgentView {
   }
 
   factory AgentView.fromJson(Map<String, dynamic> json) {
-    final rawHost = json['host'];
+    final id = parseIntOrNull(json['id']) ?? 0;
     return AgentView(
-      id: (json['id'] as num?)?.toInt() ?? 0,
+      id: id,
       name: (json['name'] as String?) ?? '',
-      hostKey: (json['hostKey'] as String?) ?? 'agent-${json['id']}',
-      siteId: (json['siteId'] as num?)?.toInt(),
-      deviceId: (json['deviceId'] as num?)?.toInt(),
+      hostKey: (json['hostKey'] as String?) ?? 'agent-$id',
+      siteId: parseIntOrNull(json['siteId']),
+      deviceId: parseIntOrNull(json['deviceId']),
       deviceName: json['deviceName'] as String?,
       deviceIp: json['deviceIp'] as String?,
       status: (json['status'] as String?) ?? 'offline',
-      connected: json['connected'] == true,
+      connected: parseBool(json['connected']),
       version: json['version'] as String?,
       lastSeenAt: json['lastSeenAt'] as String?,
       registeredAt: json['registeredAt'] as String?,
-      enforceTunnelIp: json['enforceTunnelIp'] == true,
-      local: json['local'] == true,
-      host: rawHost is Map
-          ? AgentHostInfo.fromJson(Map<String, dynamic>.from(rawHost))
+      enforceTunnelIp: parseBool(json['enforceTunnelIp']),
+      local: parseBool(json['local']),
+      host: json['host'] is Map
+          ? AgentHostInfo.fromJson(asJsonMap(json['host']))
           : const AgentHostInfo(),
       createdAt: json['createdAt'] as String?,
     );
@@ -192,10 +188,10 @@ class InstallPolicyView {
   };
 
   factory InstallPolicyView.fromJson(Map<String, dynamic> json) {
-    final rawAllow = json['allow'];
+    final parsedAllow = asStringList(json['allow']);
     return InstallPolicyView(
-      allow: rawAllow is List
-          ? List<String>.unmodifiable(rawAllow.whereType<String>())
+      allow: parsedAllow.isNotEmpty
+          ? List<String>.unmodifiable(parsedAllow)
           : const <String>['read'],
       databaseTargets: (json['databaseTargets'] as String?) ?? '',
     );
@@ -220,14 +216,13 @@ class AgentInstallCommands {
   final InstallPolicyView policy;
 
   factory AgentInstallCommands.fromJson(Map<String, dynamic> json) {
-    final rawPolicy = json['policy'];
     return AgentInstallCommands(
       addressId: json['addressId'] as String?,
       serverUrl: (json['serverUrl'] as String?) ?? '',
       dockerCommand: (json['dockerCommand'] as String?) ?? '',
       systemdCommand: (json['systemdCommand'] as String?) ?? '',
-      policy: rawPolicy is Map
-          ? InstallPolicyView.fromJson(Map<String, dynamic>.from(rawPolicy))
+      policy: json['policy'] is Map
+          ? InstallPolicyView.fromJson(asJsonMap(json['policy']))
           : const InstallPolicyView(
               allow: <String>['read'],
               databaseTargets: '',
@@ -250,12 +245,11 @@ class AgentEnrollmentView {
   final AgentInstallCommands commands;
 
   factory AgentEnrollmentView.fromJson(Map<String, dynamic> json) {
-    final rawCmd = json['commands'];
     return AgentEnrollmentView(
       code: (json['code'] as String?) ?? '',
-      expiresInSeconds: (json['expiresInSeconds'] as num?)?.toInt() ?? 1800,
-      commands: rawCmd is Map
-          ? AgentInstallCommands.fromJson(Map<String, dynamic>.from(rawCmd))
+      expiresInSeconds: parseIntOrNull(json['expiresInSeconds']) ?? 1800,
+      commands: json['commands'] is Map
+          ? AgentInstallCommands.fromJson(asJsonMap(json['commands']))
           : const AgentInstallCommands(
               serverUrl: '',
               dockerCommand: '',
@@ -278,12 +272,8 @@ class AgentWithEnrollment {
 
   factory AgentWithEnrollment.fromJson(Map<String, dynamic> json) {
     return AgentWithEnrollment(
-      agent: AgentView.fromJson(
-        Map<String, dynamic>.from(json['agent'] as Map),
-      ),
-      enrollment: AgentEnrollmentView.fromJson(
-        Map<String, dynamic>.from(json['enrollment'] as Map),
-      ),
+      agent: AgentView.fromJson(asJsonMap(json['agent'])),
+      enrollment: AgentEnrollmentView.fromJson(asJsonMap(json['enrollment'])),
     );
   }
 }
@@ -351,7 +341,7 @@ class ServerAddressOption {
       kind: (json['kind'] as String?) ?? 'lan',
       host: (json['host'] as String?) ?? '',
       url: json['url'] as String?,
-      isDefault: json['isDefault'] == true || json['default'] == true,
+      isDefault: parseBool(json['isDefault']) || parseBool(json['default']),
     );
   }
 }

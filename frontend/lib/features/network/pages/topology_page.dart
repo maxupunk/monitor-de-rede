@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
 import 'package:netmonitor_app/features/network/models/diagnostics_models.dart';
 import 'package:netmonitor_app/features/network/models/link_test_models.dart';
 import 'package:netmonitor_app/features/network/models/topology_models.dart';
@@ -405,7 +406,7 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
     } catch (err) {
       if (mounted && _selectedNodeId == node.id) {
         setState(() {
-          _pingError = err.toString();
+          _pingError = describeError(err);
           _pingLoading = false;
         });
       }

@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:netmonitor_app/core/areas/area_models.dart';
 import 'package:netmonitor_app/core/auth/area_access.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
 import 'package:netmonitor_app/features/servers/models/docker_models.dart';
 import 'package:netmonitor_app/features/servers/providers/docker_provider.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
@@ -40,8 +41,7 @@ class _DockerComposePageState extends ConsumerState<DockerComposePage> {
     try {
       final list = await ref
           .read(dockerProvider.notifier)
-          .apiFor(hostKey)
-          .composeProjects();
+          .fetchComposeProjects(hostKey);
       if (!mounted) return;
       setState(() {
         _projects = list;
@@ -50,7 +50,10 @@ class _DockerComposePageState extends ConsumerState<DockerComposePage> {
     } catch (err) {
       if (!mounted) return;
       setState(() {
-        _error = err.toString();
+        _error = describeError(
+          err,
+          fallback: 'Erro ao listar projetos Compose.',
+        );
         _loading = false;
       });
     }
@@ -88,12 +91,7 @@ class _DockerComposePageState extends ConsumerState<DockerComposePage> {
 
     final ok = await ref
         .read(dockerProvider.notifier)
-        .runAction(
-          () => ref
-              .read(dockerProvider.notifier)
-              .apiFor()
-              .composeAction(project.name, action, service: service),
-        );
+        .runComposeAction(project.name, action, service: service);
     if (ok && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Operação "$label" enviada para $targetLabel.')),

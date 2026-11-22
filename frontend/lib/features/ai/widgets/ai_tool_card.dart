@@ -7,7 +7,7 @@ import 'package:netmonitor_app/features/ai/models/ai_models.dart';
 import 'package:netmonitor_app/features/ai/providers/ai_providers.dart';
 import 'package:netmonitor_app/features/ai/utils/ai_chat_logic.dart';
 import 'package:netmonitor_app/features/ai/widgets/ai_tool_chart.dart';
-import 'package:netmonitor_app/features/plugins/widgets/device_access_dialog.dart';
+import 'package:netmonitor_app/shared/device_access/device_access.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
 

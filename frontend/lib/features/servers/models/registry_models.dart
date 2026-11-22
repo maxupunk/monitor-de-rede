@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 
 @immutable
 class RegistrySettings {
@@ -14,8 +15,8 @@ class RegistrySettings {
 
   factory RegistrySettings.fromJson(Map<String, dynamic> json) {
     return RegistrySettings(
-      keepVersions: (json['keepVersions'] as num?)?.toInt() ?? 10,
-      quotaGib: (json['quotaGib'] as num?)?.toInt() ?? 20,
+      keepVersions: parseIntOrNull(json['keepVersions']) ?? 10,
+      quotaGib: parseIntOrNull(json['quotaGib']) ?? 20,
     );
   }
 }
@@ -43,11 +44,11 @@ class RegistryScanSummary {
   factory RegistryScanSummary.fromJson(Map<String, dynamic> json) {
     return RegistryScanSummary(
       status: (json['status'] as String?) ?? 'pending',
-      critical: (json['critical'] as num?)?.toInt() ?? 0,
-      high: (json['high'] as num?)?.toInt() ?? 0,
-      medium: (json['medium'] as num?)?.toInt() ?? 0,
-      low: (json['low'] as num?)?.toInt() ?? 0,
-      unknown: (json['unknown'] as num?)?.toInt() ?? 0,
+      critical: parseIntOrNull(json['critical']) ?? 0,
+      high: parseIntOrNull(json['high']) ?? 0,
+      medium: parseIntOrNull(json['medium']) ?? 0,
+      low: parseIntOrNull(json['low']) ?? 0,
+      unknown: parseIntOrNull(json['unknown']) ?? 0,
       scannedAt: json['scannedAt'] as String?,
     );
   }
@@ -76,24 +77,19 @@ class RegistryRepositoryView {
   final RegistryScanSummary? latestScan;
 
   factory RegistryRepositoryView.fromJson(Map<String, dynamic> json) {
+    final rawScan = json['latestScan'] ?? json['scan'];
     return RegistryRepositoryView(
-      id: (json['id'] as num?)?.toInt() ?? 0,
+      id: parseIntOrNull(json['id']) ?? 0,
       name: (json['name'] as String?) ?? '',
-      applicationId: (json['applicationId'] as num?)?.toInt(),
+      applicationId: parseIntOrNull(json['applicationId']),
       applicationName:
           json['applicationName'] as String? ?? json['application'] as String?,
-      versions: (json['versions'] as num?)?.toInt() ?? 0,
-      bytes: (json['bytes'] as num?)?.toInt() ?? 0,
+      versions: parseIntOrNull(json['versions']) ?? 0,
+      bytes: parseIntOrNull(json['bytes']) ?? 0,
       lastPush: json['lastPush'] as String? ?? json['lastPushedAt'] as String?,
-      latestScan: json['latestScan'] is Map
-          ? RegistryScanSummary.fromJson(
-              Map<String, dynamic>.from(json['latestScan'] as Map),
-            )
-          : (json['scan'] is Map
-                ? RegistryScanSummary.fromJson(
-                    Map<String, dynamic>.from(json['scan'] as Map),
-                  )
-                : null),
+      latestScan: rawScan is Map
+          ? RegistryScanSummary.fromJson(asJsonMap(rawScan))
+          : null,
     );
   }
 }
@@ -135,30 +131,25 @@ class RegistryVersionView {
   bool get canDelete => !protected && !pinned && usedBy.isEmpty;
 
   factory RegistryVersionView.fromJson(Map<String, dynamic> json) {
-    List<String> strList(Object? raw) => raw is List
-        ? List<String>.unmodifiable(raw.whereType<String>())
-        : const <String>[];
     return RegistryVersionView(
-      id: (json['id'] as num?)?.toInt() ?? 0,
+      id: parseIntOrNull(json['id']) ?? 0,
       digest: (json['digest'] as String?) ?? '',
-      tags: strList(json['tags']),
-      immutable: json['immutable'] == true,
+      tags: List<String>.unmodifiable(asStringList(json['tags'])),
+      immutable: parseBool(json['immutable']),
       mediaType: (json['mediaType'] as String?) ?? '',
-      platforms: strList(json['platforms']),
-      bytes: (json['bytes'] as num?)?.toInt() ?? 0,
+      platforms: List<String>.unmodifiable(asStringList(json['platforms'])),
+      bytes: parseIntOrNull(json['bytes']) ?? 0,
       pushedBy: json['pushedBy'] as String?,
       provenance: json['provenance'] is Map
-          ? Map<String, dynamic>.from(json['provenance'] as Map)
+          ? asJsonMap(json['provenance'])
           : null,
-      pinned: json['pinned'] == true,
+      pinned: parseBool(json['pinned']),
       createdAt: (json['createdAt'] as String?) ?? '',
       scan: json['scan'] is Map
-          ? RegistryScanSummary.fromJson(
-              Map<String, dynamic>.from(json['scan'] as Map),
-            )
+          ? RegistryScanSummary.fromJson(asJsonMap(json['scan']))
           : null,
-      usedBy: strList(json['usedBy']),
-      protected: json['protected'] == true,
+      usedBy: List<String>.unmodifiable(asStringList(json['usedBy'])),
+      protected: parseBool(json['protected']),
     );
   }
 }
@@ -174,19 +165,13 @@ class RegistryRepositoryDetail {
   final List<RegistryVersionView> versions;
 
   factory RegistryRepositoryDetail.fromJson(Map<String, dynamic> json) {
-    final rawVersions = json['versions'];
     return RegistryRepositoryDetail(
       repository: RegistryRepositoryView.fromJson(
-        Map<String, dynamic>.from(json['repository'] as Map),
+        asJsonMap(json['repository']),
       ),
-      versions: rawVersions is List
-          ? List<RegistryVersionView>.unmodifiable(
-              rawVersions.whereType<Map>().map(
-                (e) =>
-                    RegistryVersionView.fromJson(Map<String, dynamic>.from(e)),
-              ),
-            )
-          : const <RegistryVersionView>[],
+      versions: List<RegistryVersionView>.unmodifiable(
+        asJsonList(json['versions'], RegistryVersionView.fromJson),
+      ),
     );
   }
 }
@@ -216,19 +201,16 @@ class RegistryFindingView {
   final bool excepted;
 
   factory RegistryFindingView.fromJson(Map<String, dynamic> json) {
-    final rawAliases = json['aliases'];
     return RegistryFindingView(
       advisory: (json['advisory'] as String?) ?? '',
-      aliases: rawAliases is List
-          ? List<String>.unmodifiable(rawAliases.whereType<String>())
-          : const <String>[],
+      aliases: List<String>.unmodifiable(asStringList(json['aliases'])),
       package: (json['package'] as String?) ?? '',
       ecosystem: (json['ecosystem'] as String?) ?? '',
       installed: (json['installed'] as String?) ?? '',
       fixed: json['fixed'] as String?,
       severity: (json['severity'] as String?) ?? 'unknown',
       summary: json['summary'] as String?,
-      excepted: json['excepted'] == true,
+      excepted: parseBool(json['excepted']),
     );
   }
 }
@@ -250,7 +232,7 @@ class RegistryFeedView {
   factory RegistryFeedView.fromJson(Map<String, dynamic> json) {
     return RegistryFeedView(
       ecosystem: (json['ecosystem'] as String?) ?? '',
-      entries: (json['entries'] as num?)?.toInt() ?? 0,
+      entries: parseIntOrNull(json['entries']) ?? 0,
       syncedAt: json['syncedAt'] as String?,
       error: json['error'] as String?,
     );
@@ -276,32 +258,18 @@ class RegistryOverview {
   double get usedPercent => quotaBytes > 0 ? (usedBytes / quotaBytes) * 100 : 0;
 
   factory RegistryOverview.fromJson(Map<String, dynamic> json) {
-    final rawRepos = json['repositories'];
-    final rawFeeds = json['feeds'];
     return RegistryOverview(
       settings: json['settings'] is Map
-          ? RegistrySettings.fromJson(
-              Map<String, dynamic>.from(json['settings'] as Map),
-            )
+          ? RegistrySettings.fromJson(asJsonMap(json['settings']))
           : const RegistrySettings(keepVersions: 10, quotaGib: 20),
-      usedBytes: (json['usedBytes'] as num?)?.toInt() ?? 0,
-      quotaBytes: (json['quotaBytes'] as num?)?.toInt() ?? 0,
-      repositories: rawRepos is List
-          ? List<RegistryRepositoryView>.unmodifiable(
-              rawRepos.whereType<Map>().map(
-                (e) => RegistryRepositoryView.fromJson(
-                  Map<String, dynamic>.from(e),
-                ),
-              ),
-            )
-          : const <RegistryRepositoryView>[],
-      feeds: rawFeeds is List
-          ? List<RegistryFeedView>.unmodifiable(
-              rawFeeds.whereType<Map>().map(
-                (e) => RegistryFeedView.fromJson(Map<String, dynamic>.from(e)),
-              ),
-            )
-          : const <RegistryFeedView>[],
+      usedBytes: parseIntOrNull(json['usedBytes']) ?? 0,
+      quotaBytes: parseIntOrNull(json['quotaBytes']) ?? 0,
+      repositories: List<RegistryRepositoryView>.unmodifiable(
+        asJsonList(json['repositories'], RegistryRepositoryView.fromJson),
+      ),
+      feeds: List<RegistryFeedView>.unmodifiable(
+        asJsonList(json['feeds'], RegistryFeedView.fromJson),
+      ),
     );
   }
 }
@@ -337,24 +305,21 @@ class RegistryTokenView {
   final String createdAt;
 
   factory RegistryTokenView.fromJson(Map<String, dynamic> json) {
-    final scope = json['scope'] is Map
-        ? Map<String, dynamic>.from(json['scope'] as Map)
-        : const <String, dynamic>{};
-    List<String> strList(Object? raw) => raw is List
-        ? List<String>.unmodifiable(raw.whereType<String>())
-        : const <String>[];
+    final scope = asJsonMap(json['scope']);
     return RegistryTokenView(
-      id: (json['id'] as num?)?.toInt() ?? 0,
+      id: parseIntOrNull(json['id']) ?? 0,
       name: (json['name'] as String?) ?? '',
       owner: (json['owner'] as String?) ?? '',
       hint: (json['hint'] as String?) ?? '',
-      repositories: strList(scope['repositories']),
-      actions: strList(scope['actions']),
+      repositories: List<String>.unmodifiable(
+        asStringList(scope['repositories']),
+      ),
+      actions: List<String>.unmodifiable(asStringList(scope['actions'])),
       expiresAt: json['expiresAt'] as String?,
       lastUsedAt: json['lastUsedAt'] as String?,
       lastUsedIp: json['lastUsedIp'] as String?,
-      revoked: json['revoked'] == true,
-      expired: json['expired'] == true,
+      revoked: parseBool(json['revoked']),
+      expired: parseBool(json['expired']),
       createdAt: (json['createdAt'] as String?) ?? '',
     );
   }
@@ -369,9 +334,7 @@ class RegistryTokenCreated {
 
   factory RegistryTokenCreated.fromJson(Map<String, dynamic> json) {
     return RegistryTokenCreated(
-      token: RegistryTokenView.fromJson(
-        Map<String, dynamic>.from(json['token'] as Map),
-      ),
+      token: RegistryTokenView.fromJson(asJsonMap(json['token'])),
       secret: (json['secret'] as String?) ?? '',
     );
   }
@@ -401,13 +364,13 @@ class RegistryExceptionView {
 
   factory RegistryExceptionView.fromJson(Map<String, dynamic> json) {
     return RegistryExceptionView(
-      id: (json['id'] as num?)?.toInt() ?? 0,
-      applicationId: (json['applicationId'] as num?)?.toInt(),
+      id: parseIntOrNull(json['id']) ?? 0,
+      applicationId: parseIntOrNull(json['applicationId']),
       application: json['application'] as String?,
       advisory: (json['advisory'] as String?) ?? '',
       reason: (json['reason'] as String?) ?? '',
       expiresAt: (json['expiresAt'] as String?) ?? '',
-      expired: json['expired'] == true,
+      expired: parseBool(json['expired']),
       createdBy: json['createdBy'] as String?,
     );
   }

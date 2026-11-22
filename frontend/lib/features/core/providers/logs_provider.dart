@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/network/api_client.dart';
 import 'package:netmonitor_app/core/network/sse_client.dart';
 import 'package:netmonitor_app/core/realtime/sse_service.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 import 'package:netmonitor_app/features/core/models/log_models.dart';
 
 const int _liveTailMaxLines = 5000;
@@ -128,11 +130,7 @@ class LogsNotifier extends Notifier<LogsState> {
               before: reset ? null : state.nextCursor,
             ),
           );
-      final rawData = raw['data'] is List ? raw['data'] as List : const [];
-      final newEntries = rawData
-          .whereType<Map>()
-          .map((e) => LogEntry.fromJson(Map<String, dynamic>.from(e)))
-          .toList(growable: false);
+      final newEntries = asJsonList<LogEntry>(raw['data'], LogEntry.fromJson);
       final rawTemplates = raw['templates'] is List
           ? raw['templates'] as List
           : const [];
@@ -157,7 +155,7 @@ class LogsNotifier extends Notifier<LogsState> {
       state = state.copyWith(
         loading: false,
         loadingMore: false,
-        error: err.toString(),
+        error: describeError(err),
       );
     }
   }
@@ -194,7 +192,7 @@ class LogsNotifier extends Notifier<LogsState> {
       applyTemplateClassified(raw);
       return null;
     } catch (err) {
-      return err.toString();
+      return describeError(err);
     }
   }
 
@@ -255,17 +253,14 @@ class LogsNotifier extends Notifier<LogsState> {
       final raw = await ref
           .read(apiClientProvider)
           .get<Map<String, dynamic>>('/logs/sources');
-      final list = raw['data'] is List ? raw['data'] as List : const [];
       state = state.copyWith(
-        sources: list
-            .whereType<Map>()
-            .map((e) => LogSourceEntry.fromJson(Map<String, dynamic>.from(e)))
-            .toList(growable: false),
-        unknownCount: (raw['unknownCount'] as num?)?.toInt() ?? 0,
+        sources: asJsonList<LogSourceEntry>(
+          raw['data'],
+          LogSourceEntry.fromJson,
+        ),
+        unknownCount: parseIntOrNull(raw['unknownCount']) ?? 0,
         nat: raw['nat'] is Map
-            ? LogNatDiagnostics.fromJson(
-                Map<String, dynamic>.from(raw['nat'] as Map),
-              )
+            ? LogNatDiagnostics.fromJson(asJsonMap(raw['nat']))
             : null,
       );
     } catch (_) {}

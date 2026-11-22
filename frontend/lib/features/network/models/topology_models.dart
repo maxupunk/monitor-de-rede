@@ -1,6 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
-import 'package:netmonitor_app/features/network/models/device_models.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 
 enum TopologyLayoutMode { hierarchical, force, radial, grid }
 

@@ -318,12 +318,7 @@ String formatPluginOutputValue(Object? value, String format) {
     case 'duration':
       return numeric ? formatElapsedMs(number) : '$value';
     case 'uptime':
-      if (!numeric) return '$value';
-      final now = DateTime.now();
-      return formatTimeSpan(
-        now.subtract(Duration(seconds: number.round())),
-        now,
-      );
+      return numeric ? formatDurationSeconds(number) : '$value';
     case 'count':
       return numeric ? formatCompactCount(number) : '$value';
     case 'datetime':
@@ -343,6 +338,5 @@ DateTime? _parsePluginDate(Object? value, num? number) {
   if (number != null && number.isFinite) {
     return DateTime.fromMillisecondsSinceEpoch((number * 1000).round());
   }
-  if (value is String) return DateTime.tryParse(value);
-  return null;
+  return parseDateOrNull(value);
 }

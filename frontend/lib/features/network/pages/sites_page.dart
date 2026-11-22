@@ -32,87 +32,17 @@ class _SitesPageState extends ConsumerState<SitesPage> {
   }
 
   Future<void> _openSiteSheet({SiteModel? existing}) async {
-    final formKey = GlobalKey<FormState>();
-    final nameCtrl = TextEditingController(text: existing?.name ?? '');
-    final locationCtrl = TextEditingController(text: existing?.location ?? '');
-    final descCtrl = TextEditingController(text: existing?.description ?? '');
-    var saving = false;
-
     await showAdaptiveFormSheet<void>(
       context: context,
       title: existing != null ? 'Editar Site' : 'Novo Site',
       subtitle:
           'Agrupe dispositivos, redes IP e topologia por unidade ou datacenter',
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setModal) => Form(
-          key: formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              TextFormField(
-                controller: nameCtrl,
-                decoration: const InputDecoration(labelText: 'Nome do site *'),
-                validator: FormValidators.required('Informe o nome do site.'),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: locationCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Localização / Endereço',
-                  hintText: 'Ex.: Matriz · São Paulo - SP',
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: descCtrl,
-                maxLines: 3,
-                decoration: const InputDecoration(
-                  labelText: 'Descrição / Contato',
-                ),
-              ),
-              const SizedBox(height: 16),
-              SymmetricalActionBar(
-                children: <Widget>[
-                  OutlinedButton(
-                    onPressed: saving ? null : () => Navigator.of(ctx).pop(),
-                    child: const Text('Cancelar'),
-                  ),
-                  FilledButton.icon(
-                    onPressed: saving
-                        ? null
-                        : () async {
-                            if (!formKey.currentState!.validate()) return;
-                            setModal(() => saving = true);
-                            final payload = <String, dynamic>{
-                              'name': nameCtrl.text.trim(),
-                              if (locationCtrl.text.trim().isNotEmpty)
-                                'location': locationCtrl.text.trim(),
-                              if (descCtrl.text.trim().isNotEmpty)
-                                'description': descCtrl.text.trim(),
-                            };
-                            final ok = existing != null
-                                ? await ref
-                                      .read(sitesProvider.notifier)
-                                      .updateSite(existing.id, payload)
-                                : await ref
-                                      .read(sitesProvider.notifier)
-                                      .createSite(payload);
-                            if (ctx.mounted && ok) Navigator.of(ctx).pop();
-                            if (context.mounted) setModal(() => saving = false);
-                          },
-                    icon: const Icon(Icons.check),
-                    label: Text(existing != null ? 'Salvar' : 'Criar site'),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
+      builder: (ctx) => _SiteFormBody(
+        existing: existing,
+        onCancel: () => Navigator.of(ctx).pop(),
+        onSaved: () => Navigator.of(ctx).pop(),
       ),
     );
-    nameCtrl.dispose();
-    locationCtrl.dispose();
-    descCtrl.dispose();
   }
 
   Future<void> _confirmDelete(SiteModel site) async {
@@ -437,6 +367,112 @@ class _CompactSiteStat extends StatelessWidget {
               fontWeight: FontWeight.w800,
               fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SiteFormBody extends ConsumerStatefulWidget {
+  const _SiteFormBody({
+    this.existing,
+    required this.onCancel,
+    required this.onSaved,
+  });
+
+  final SiteModel? existing;
+  final VoidCallback onCancel;
+  final VoidCallback onSaved;
+
+  @override
+  ConsumerState<_SiteFormBody> createState() => _SiteFormBodyState();
+}
+
+class _SiteFormBodyState extends ConsumerState<_SiteFormBody> {
+  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+  late final TextEditingController _nameCtrl;
+  late final TextEditingController _locationCtrl;
+  late final TextEditingController _descCtrl;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameCtrl = TextEditingController(text: widget.existing?.name ?? '');
+    _locationCtrl = TextEditingController(
+      text: widget.existing?.location ?? '',
+    );
+    _descCtrl = TextEditingController(text: widget.existing?.description ?? '');
+  }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _locationCtrl.dispose();
+    _descCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _saving = true);
+    final payload = <String, dynamic>{
+      'name': _nameCtrl.text.trim(),
+      if (_locationCtrl.text.trim().isNotEmpty)
+        'location': _locationCtrl.text.trim(),
+      if (_descCtrl.text.trim().isNotEmpty)
+        'description': _descCtrl.text.trim(),
+    };
+    final ok = widget.existing != null
+        ? await ref
+              .read(sitesProvider.notifier)
+              .updateSite(widget.existing!.id, payload)
+        : await ref.read(sitesProvider.notifier).createSite(payload);
+    if (!mounted) return;
+    setState(() => _saving = false);
+    if (ok) widget.onSaved();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Form(
+      key: _formKey,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          TextFormField(
+            controller: _nameCtrl,
+            decoration: const InputDecoration(labelText: 'Nome do site *'),
+            validator: FormValidators.required('Informe o nome do site.'),
+          ),
+          const SizedBox(height: 12),
+          TextFormField(
+            controller: _locationCtrl,
+            decoration: const InputDecoration(
+              labelText: 'Localização / Endereço',
+              hintText: 'Ex.: Matriz · São Paulo - SP',
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextFormField(
+            controller: _descCtrl,
+            maxLines: 3,
+            decoration: const InputDecoration(labelText: 'Descrição / Contato'),
+          ),
+          const SizedBox(height: 16),
+          SymmetricalActionBar(
+            children: <Widget>[
+              OutlinedButton(
+                onPressed: _saving ? null : widget.onCancel,
+                child: const Text('Cancelar'),
+              ),
+              FilledButton.icon(
+                onPressed: _saving ? null : _submit,
+                icon: const Icon(Icons.check),
+                label: Text(widget.existing != null ? 'Salvar' : 'Criar site'),
+              ),
+            ],
           ),
         ],
       ),

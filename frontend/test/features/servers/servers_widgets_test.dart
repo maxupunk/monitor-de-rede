@@ -19,6 +19,7 @@ import 'package:netmonitor_app/features/servers/providers/agents_provider.dart';
 import 'package:netmonitor_app/features/servers/providers/deploys_provider.dart';
 import 'package:netmonitor_app/features/servers/providers/docker_provider.dart';
 import 'package:netmonitor_app/features/servers/providers/registry_provider.dart';
+import 'package:netmonitor_app/features/servers/widgets/deploy_env_dialog.dart';
 import 'package:netmonitor_app/features/servers/widgets/stacked_container_usage_chart.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
@@ -535,7 +536,82 @@ void main() {
         expect(find.byType(AppDropdownFormField<String>), findsOneWidget);
       },
     );
+
+    testWidgets(
+      'DeployEnvDialog preserves ValueKey field values when removing an earlier .env variable',
+      (tester) async {
+        const target = DeployTargetView(
+          id: 7,
+          applicationId: 1,
+          name: 'Produção',
+          project: 'erp',
+          reference: 'main',
+          requiresApproval: false,
+          waitTimeoutSecs: 180,
+          autoRollback: true,
+          keepImages: 3,
+          enabled: true,
+          position: 0,
+          vulnerabilityPolicy: 'block_critical',
+          requireProvenance: false,
+        );
+
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: <Override>[
+              authProvider.overrideWith(_AdminAuthNotifier.new),
+              deploysProvider.overrideWith(_EnvSeededDeploysNotifier.new),
+            ],
+            child: MaterialApp(
+              theme: AppTheme.dark(),
+              home: Scaffold(
+                body: Builder(
+                  builder: (ctx) => FilledButton(
+                    onPressed: () => showDeployEnvDialog(
+                      ctx,
+                      target: target,
+                      canAdmin: true,
+                    ),
+                    child: const Text('Abrir env'),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+
+        await tester.tap(find.text('Abrir env'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('PRIMEIRA_CHAVE'), findsOneWidget);
+        expect(find.text('SEGUNDA_CHAVE'), findsOneWidget);
+        expect(find.text('valor_b'), findsOneWidget);
+
+        // Remove first variable -> second variable must keep its exact key/value (no stale initialValue shift)
+        final removeButtons = find.byTooltip('Remover variável');
+        expect(removeButtons, findsNWidgets(2));
+        await tester.tap(removeButtons.first);
+        await tester.pumpAndSettle();
+
+        expect(find.text('PRIMEIRA_CHAVE'), findsNothing);
+        expect(find.text('SEGUNDA_CHAVE'), findsOneWidget);
+        expect(find.text('valor_b'), findsOneWidget);
+      },
+    );
   });
+}
+
+class _EnvSeededDeploysNotifier extends _SeededDeploysNotifier {
+  @override
+  Future<DeployEnvContentView> envCurrent(int targetId) async =>
+      const DeployEnvContentView(
+        id: 1,
+        content: 'PRIMEIRA_CHAVE=valor_a\nSEGUNDA_CHAVE=valor_b\n',
+      );
+
+  @override
+  Future<List<DeployEnvVersionView>> envVersions(int targetId) async =>
+      const <DeployEnvVersionView>[];
 }
 
 class _StaticEmptyHostDockerNotifier extends DockerNotifier {

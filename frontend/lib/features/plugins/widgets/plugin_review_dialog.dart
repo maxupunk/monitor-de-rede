@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/core/utils/plugin_presentation.dart';
 import 'package:netmonitor_app/features/plugins/models/plugin_models.dart';
@@ -72,7 +73,7 @@ class _PluginReviewBodyState extends ConsumerState<_PluginReviewBody> {
         });
       }
     } catch (err) {
-      if (mounted) setState(() => _error = err.toString());
+      if (mounted) setState(() => _error = describeError(err));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -93,7 +94,7 @@ class _PluginReviewBodyState extends ConsumerState<_PluginReviewBody> {
           );
       if (mounted) Navigator.of(context).pop(updated);
     } catch (err) {
-      if (mounted) setState(() => _error = err.toString());
+      if (mounted) setState(() => _error = describeError(err));
     } finally {
       if (mounted) setState(() => _busy = false);
     }

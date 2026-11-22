@@ -2,7 +2,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
 import 'package:netmonitor_app/core/network/api_client.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 import 'package:netmonitor_app/features/core/models/settings_models.dart';
+import 'package:netmonitor_app/features/core/providers/monitors_provider.dart';
+import 'package:netmonitor_app/features/core/providers/settings_provider.dart';
 
 @immutable
 class OnboardingState {
@@ -58,6 +61,113 @@ class OnboardingNotifier extends Notifier<OnboardingState> {
       state = state.copyWith(loading: false);
       return null;
     }
+  }
+
+  Future<Map<String, dynamic>?> fetchVpnPreflight() async {
+    try {
+      return await ref
+          .read(apiClientProvider)
+          .get<Map<String, dynamic>>('/vpn/preflight');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Persiste todas as escolhas do assistente inicial de forma transacional por domínio.
+  /// Retorna o token do primeiro agente remoto criado (se solicitado).
+  Future<String?> commitInitialSetup({
+    required SystemPreferences preferences,
+    String? lanAddressOverride,
+    required bool enableNetwork,
+    String? siteName,
+    String? networkName,
+    String? networkCidr,
+    String? dnsName,
+    String? dnsIp,
+    List<String> selectedSaas = const <String>[],
+    required bool enableServers,
+    String? agentName,
+    required bool enableLocalNotifications,
+  }) async {
+    final api = ref.read(apiClientProvider);
+    final settingsNotifier = ref.read(coreSettingsProvider.notifier);
+
+    await settingsNotifier.savePreferences(preferences);
+
+    final lan = (lanAddressOverride ?? '').trim();
+    if (lan.isNotEmpty) {
+      await settingsNotifier.saveServerAddresses(
+        overrides: <String, String>{'lan': lan},
+        custom: const <Map<String, dynamic>>[],
+        preferredId: 'lan',
+        domainHttps: false,
+      );
+    }
+
+    if (enableNetwork) {
+      int? createdSiteId;
+      final cleanSite = (siteName ?? '').trim();
+      if (cleanSite.isNotEmpty) {
+        final siteRes = await api
+            .post<Map<String, dynamic>>(
+              '/sites',
+              data: <String, dynamic>{'name': cleanSite},
+            )
+            .catchError((_) => <String, dynamic>{});
+        createdSiteId = parseIntOrNull(siteRes['id']);
+      }
+      final cleanNet = (networkName ?? '').trim();
+      final cleanCidr = (networkCidr ?? '').trim();
+      if (cleanNet.isNotEmpty && cleanCidr.isNotEmpty) {
+        await api
+            .post<dynamic>(
+              '/networks',
+              data: <String, dynamic>{
+                'name': cleanNet,
+                'cidr': cleanCidr,
+                'siteId': ?createdSiteId,
+              },
+            )
+            .catchError((_) => null);
+      }
+      final cleanDnsIp = (dnsIp ?? '').trim();
+      final cleanDnsName = (dnsName ?? '').trim();
+      if (cleanDnsIp.isNotEmpty) {
+        await api
+            .post<dynamic>(
+              '/dns/servers',
+              data: <String, dynamic>{
+                'name': cleanDnsName.isEmpty ? cleanDnsIp : cleanDnsName,
+                'ipAddress': cleanDnsIp,
+              },
+            )
+            .catchError((_) => null);
+      }
+      if (selectedSaas.isNotEmpty) {
+        await ref
+            .read(monitorsProvider.notifier)
+            .provisionSaasPresets(selectedSaas)
+            .catchError((_) => <String, dynamic>{});
+      }
+    }
+
+    String? createdAgentToken;
+    final cleanAgent = (agentName ?? '').trim();
+    if (enableServers && cleanAgent.isNotEmpty) {
+      final agentRes = await api
+          .post<Map<String, dynamic>>(
+            '/agents',
+            data: <String, dynamic>{'name': cleanAgent},
+          )
+          .catchError((_) => <String, dynamic>{});
+      createdAgentToken = agentRes['token'] as String?;
+    }
+
+    await settingsNotifier.setLocalNotificationsEnabled(
+      enableLocalNotifications,
+    );
+    await completeOnboarding();
+    return createdAgentToken;
   }
 
   Future<bool> checkAndOpenIfNeeded() async {

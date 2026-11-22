@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/areas/area_contribution.dart';
 import 'package:netmonitor_app/areas/composition_registries.dart';
 import 'package:netmonitor_app/core/areas/areas_provider.dart';
-import 'package:netmonitor_app/features/core/presentation/widgets/pinned_sliver_header.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 
 /// Tela de Configurações com abas e cartões compostos dinamicamente por área

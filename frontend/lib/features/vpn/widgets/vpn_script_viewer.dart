@@ -1,14 +1,11 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:netmonitor_app/core/utils/clipboard_utils.dart';
+import 'package:netmonitor_app/core/utils/file_download.dart';
 import 'package:netmonitor_app/features/vpn/models/vpn_models.dart';
 import 'package:netmonitor_app/features/vpn/providers/vpn_provider.dart';
-import 'package:netmonitor_app/features/vpn/utils/file_export_helper.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 
 /// Abre o visualizador de artefato VPN (cofre de uso único da chave privada).
 /// Limpa `vpnProvider.lastArtifact` imediatamente ao fechar.
@@ -194,25 +191,20 @@ class _VpnScriptViewerBodyState extends ConsumerState<_VpnScriptViewerBody> {
 
   Future<void> _downloadCurrent() async {
     final doc = _currentDoc();
-    final bytes = Uint8List.fromList(utf8.encode(doc.content));
-    await exportFileBytes(
-      bytes: bytes,
-      fileName: doc.fileName,
-      mimeType: 'text/plain; charset=utf-8',
-    );
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Arquivo ${doc.fileName} preparado.')),
+    await saveOrShareText(
+      content: doc.content,
+      filename: doc.fileName,
+      context: context,
+      successMessage: 'Arquivo ${doc.fileName} preparado.',
     );
   }
 
   void _copyCurrent() {
     final doc = _currentDoc();
-    Clipboard.setData(ClipboardData(text: doc.content));
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Configuração copiada para a área de transferência.'),
-      ),
+    copyToClipboardWithFeedback(
+      context,
+      doc.content,
+      message: 'Configuração copiada para a área de transferência.',
     );
   }
 
@@ -300,41 +292,10 @@ class _VpnScriptViewerBodyState extends ConsumerState<_VpnScriptViewerBody> {
         if (hasKey && _artifact.supportsQrCode) ...<Widget>[
           const SizedBox(height: 16),
           Center(
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: AppTheme.borderRadius,
-                border: Border.all(color: scheme.outlineVariant),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  QrImageView(
-                    data: _artifact.content,
-                    version: QrVersions.auto,
-                    size: 220,
-                    backgroundColor: Colors.white,
-                    eyeStyle: const QrEyeStyle(
-                      eyeShape: QrEyeShape.square,
-                      color: Colors.black,
-                    ),
-                    dataModuleStyle: const QrDataModuleStyle(
-                      dataModuleShape: QrDataModuleShape.square,
-                      color: Colors.black,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Leia com o aplicativo WireGuard',
-                    style: TextStyle(
-                      color: Color(0xFF0F172A),
-                      fontWeight: FontWeight.w600,
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-              ),
+            child: QrCodeCard(
+              data: _artifact.content,
+              size: 220,
+              caption: 'Leia com o aplicativo WireGuard',
             ),
           ),
         ],

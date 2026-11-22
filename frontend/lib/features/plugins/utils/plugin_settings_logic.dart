@@ -1,4 +1,7 @@
 import 'package:flutter/foundation.dart';
+import 'package:netmonitor_app/core/utils/form_validators.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
+import 'package:netmonitor_app/features/plugins/models/plugin_fleet_models.dart';
 
 /// Valor retornado pelo backend no lugar de um segredo salvo.
 const String pluginSecretMask = '********';
@@ -81,14 +84,13 @@ class PluginSchemaField {
   final Map<String, dynamic> schema;
 }
 
-final RegExp _ipv4Re = RegExp(
-  r'^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$',
-);
 final RegExp _macColonRe = RegExp(r'^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$');
 final RegExp _macDashRe = RegExp(r'^([0-9a-fA-F]{2}-){5}[0-9a-fA-F]{2}$');
 final RegExp _hostLabelRe = RegExp(
   r'^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$',
 );
+
+bool _isIpv4(String text) => FormValidators.ipv4()(text) == null;
 
 bool _isIpv6(String text) {
   if (!RegExp(r'^[0-9a-fA-F:.]+$').hasMatch(text) || !text.contains(':')) {
@@ -98,7 +100,7 @@ bool _isIpv6(String text) {
   final groups = text.split(':').where((g) => g.isNotEmpty).toList();
   return groups.length <= 8 &&
       groups.every(
-        (g) => _ipv4Re.hasMatch(g) || RegExp(r'^[0-9a-fA-F]{1,4}$').hasMatch(g),
+        (g) => _isIpv4(g) || RegExp(r'^[0-9a-fA-F]{1,4}$').hasMatch(g),
       );
 }
 
@@ -106,28 +108,25 @@ String? validatePluginWidget(String? widget, String raw) {
   if (widget == null || raw.isEmpty || raw == pluginSecretMask) return null;
   switch (widget) {
     case 'ip':
-      return (_ipv4Re.hasMatch(raw) || _isIpv6(raw))
+      return (_isIpv4(raw) || _isIpv6(raw))
           ? null
           : 'Precisa ser um endereço IP (ex.: 192.168.1.1)';
     case 'cidr':
+      if (FormValidators.cidr()(raw) == null) return null;
       final parts = raw.split('/');
-      if (parts.length != 2) {
-        return 'Precisa ser uma rede no formato 192.168.1.0/24';
+      if (parts.length == 2) {
+        final bits = int.tryParse(parts[1]);
+        if (bits != null && _isIpv6(parts[0]) && bits >= 0 && bits <= 128) {
+          return null;
+        }
       }
-      final bits = int.tryParse(parts[1]);
-      if (bits == null) return 'Precisa ser uma rede no formato 192.168.1.0/24';
-      if (_ipv4Re.hasMatch(parts[0]) && bits >= 0 && bits <= 32) return null;
-      if (_isIpv6(parts[0]) && bits >= 0 && bits <= 128) return null;
       return 'Precisa ser uma rede no formato 192.168.1.0/24';
     case 'mac':
       return (_macColonRe.hasMatch(raw) || _macDashRe.hasMatch(raw))
           ? null
           : 'Precisa ser um MAC (ex.: AA:BB:CC:DD:EE:FF)';
     case 'port':
-      final port = int.tryParse(raw);
-      return (port != null && port >= 1 && port <= 65535)
-          ? null
-          : 'Precisa ser uma porta de 1 a 65535';
+      return FormValidators.port('Precisa ser uma porta de 1 a 65535')(raw);
     case 'hostname':
       final ok =
           raw.isNotEmpty &&
@@ -137,12 +136,9 @@ String? validatePluginWidget(String? widget, String raw) {
           ? null
           : 'Precisa ser um nome de host (letras, números, hífen e ponto)';
     case 'url':
-      final uri = Uri.tryParse(raw);
-      final ok =
-          uri != null &&
-          (uri.scheme == 'http' || uri.scheme == 'https') &&
-          uri.host.isNotEmpty;
-      return ok ? null : 'Precisa ser um endereço http:// ou https://';
+      return FormValidators.url('Precisa ser um endereço http:// ou https://')(
+        raw,
+      );
     default:
       return null;
   }
@@ -186,19 +182,15 @@ List<PluginSchemaField> parsePluginSchemaFields(Map<String, dynamic>? schema) {
   if (schema == null) return const <PluginSchemaField>[];
   final rawProps = schema['properties'];
   if (rawProps is! Map) return const <PluginSchemaField>[];
-  final requiredSet = schema['required'] is List
-      ? (schema['required'] as List).whereType<String>().toSet()
-      : <String>{};
+  final requiredSet = asStringList(schema['required']).toSet();
 
   final fields = <PluginSchemaField>[];
   rawProps.forEach((key, rawProp) {
     if (rawProp is! Map) return;
-    final prop = Map<String, dynamic>.from(rawProp);
+    final prop = asJsonMap(rawProp);
     final name = key.toString();
     final type = (prop['type'] ?? 'string').toString();
-    final items = prop['items'] is Map
-        ? Map<String, dynamic>.from(prop['items'] as Map)
-        : null;
+    final items = prop['items'] is Map ? asJsonMap(prop['items']) : null;
     final kind = type == 'array'
         ? (items?['type'] == 'object' ? 'objects' : 'list')
         : (const <String>['integer', 'number', 'boolean'].contains(type)
@@ -214,17 +206,15 @@ List<PluginSchemaField> parsePluginSchemaFields(Map<String, dynamic>? schema) {
             ? List<Object?>.from(prop['enum'] as List)
             : null,
         titles: prop['enumTitles'] is List
-            ? (prop['enumTitles'] as List)
-                  .map((e) => e.toString())
-                  .toList(growable: false)
+            ? asStringList(prop['enumTitles'])
             : null,
-        advanced: prop['advanced'] == true,
-        hidden: prop['hidden'] == true,
+        advanced: parseBool(prop['advanced']),
+        hidden: parseBool(prop['hidden']),
         widget: prop['widget'] as String?,
         group: prop['group'] as String?,
         visibleWhen: PluginVisibleWhen.tryParse(prop['visibleWhen']),
         reveal: prop['reveal'] as String?,
-        secret: prop['secret'] == true,
+        secret: parseBool(prop['secret']),
         required: requiredSet.contains(name),
         items: items,
         schema: prop,
@@ -234,7 +224,7 @@ List<PluginSchemaField> parsePluginSchemaFields(Map<String, dynamic>? schema) {
 
   final order = schema['order'];
   if (order is List) {
-    final orderNames = order.map((e) => e.toString()).toList();
+    final orderNames = asStringList(order);
     fields.sort((a, b) {
       final ia = orderNames.indexOf(a.name);
       final ib = orderNames.indexOf(b.name);
@@ -292,8 +282,8 @@ Map<String, dynamic> normalizePluginFormParams(
         out.remove(field.name);
       } else {
         final parsed = field.kind == 'integer'
-            ? int.tryParse(current.toString())
-            : double.tryParse(current.toString());
+            ? parseIntOrNull(current)
+            : parseDoubleOrNull(current);
         if (parsed != null) out[field.name] = parsed;
       }
     }
@@ -302,6 +292,38 @@ Map<String, dynamic> normalizePluginFormParams(
     }
   }
   return out;
+}
+
+/// Limpa prefixos pontuados redundantes e humaniza razões de compatibilidade.
+List<String> cleanPluginReasonMessages(List<String> rawReasons) {
+  final out = <String>[];
+  for (final raw in rawReasons) {
+    var cleaned = raw.replaceFirst(RegExp(r'^[\s·•\-;,]+'), '').trim();
+    if (cleaned.isEmpty) continue;
+    final lower = cleaned.toLowerCase();
+    if (lower.contains('firmware ainda não foi lido')) {
+      cleaned = 'Firmware ainda não identificado — toque em Detectar sistema.';
+    } else {
+      cleaned = '${cleaned[0].toUpperCase()}${cleaned.substring(1)}';
+    }
+    out.add(cleaned);
+  }
+  return out;
+}
+
+/// Mensagem amigável de status para candidatos de frota.
+String formatCandidateStatusMessage(FleetCandidate candidate) {
+  final cleaned = cleanPluginReasonMessages(candidate.reasons);
+  if (cleaned.isNotEmpty) {
+    return cleaned.join(' · ');
+  }
+  return switch (candidate.compatibility) {
+    'validated' ||
+    'likely' => 'Sistema compatível pronto para entrar na frota.',
+    'incompatible' =>
+      'Sistema incompatível com os requisitos deste aplicativo.',
+    _ => 'Firmware ainda não identificado — toque em Detectar sistema.',
+  };
 }
 
 const Map<String, String> _commonPluginKeyLabels = <String, String>{

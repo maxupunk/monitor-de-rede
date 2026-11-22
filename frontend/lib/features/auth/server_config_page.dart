@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
 import 'package:netmonitor_app/core/config/server_config.dart';
 import 'package:netmonitor_app/core/utils/form_validators.dart';
+import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
 
@@ -146,7 +147,7 @@ class _ServerConfigPageState extends ConsumerState<ServerConfigPage> {
                               Expanded(
                                 child: Text(
                                   _probeResult!.ok
-                                      ? 'Servidor acessível (${_probeResult!.latencyMs ?? 0} ms).'
+                                      ? 'Servidor acessível (${formatLatency(_probeResult!.latencyMs ?? 0)}).'
                                       : (_probeResult!.error ??
                                             'Falha ao conectar.'),
                                   style: context.textTheme.bodySmall?.copyWith(

@@ -142,25 +142,59 @@ List<SettingsTabView> buildVisibleSettingsTabsFrom(
 List<SettingsTabView> buildVisibleSettingsTabs(Set<ProductArea> visibleAreas) =>
     buildVisibleSettingsTabsFrom(registeredAreas, visibleAreas);
 
-/// Resolve os metadados da rota pelo caminho mais específico (em empate, último módulo vence).
+List<String> _splitRouteSegments(String rawPath) {
+  return rawPath
+      .split('/')
+      .where((segment) => segment.isNotEmpty)
+      .toList(growable: false);
+}
+
+int? _matchRoutePatternScore(
+  List<String> patternSegments,
+  List<String> pathSegments,
+) {
+  if (patternSegments.isEmpty) {
+    return pathSegments.isEmpty ? 0 : null;
+  }
+  if (patternSegments.length > pathSegments.length) {
+    return null;
+  }
+  var literalCount = 0;
+  for (var i = 0; i < patternSegments.length; i++) {
+    final pat = patternSegments[i];
+    if (pat.startsWith(':')) {
+      continue;
+    }
+    if (pat != pathSegments[i]) {
+      return null;
+    }
+    literalCount++;
+  }
+  return (patternSegments.length * 100) + literalCount;
+}
+
+/// Resolve os metadados da rota pelo caminho mais específico (suporta segmentos `:param`;
+/// em empate de especificidade, o último módulo registrado vence).
 AreaRouteMeta? resolveRouteMetaFrom(
   Iterable<AreaContribution> modules,
   String location,
 ) {
   final uri = Uri.tryParse(location);
   final path = uri?.path ?? location;
+  final pathSegments = _splitRouteSegments(path);
 
   AreaRouteMeta? best;
-  var bestLength = -1;
+  var bestScore = -1;
 
   for (final area in modules) {
-    area.routeMeta.forEach((prefix, meta) {
-      final matches = prefix == '/'
-          ? path == '/'
-          : (path == prefix || path.startsWith('$prefix/'));
-      if (matches && prefix.length >= bestLength) {
+    area.routeMeta.forEach((pattern, meta) {
+      final score = _matchRoutePatternScore(
+        _splitRouteSegments(pattern),
+        pathSegments,
+      );
+      if (score != null && score >= bestScore) {
         best = meta;
-        bestLength = prefix.length;
+        bestScore = score;
       }
     });
   }

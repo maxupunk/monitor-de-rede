@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/network/api_client.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 import 'package:netmonitor_app/features/core/models/settings_models.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -22,14 +24,9 @@ class CoreSettingsState {
     this.snmpLoading = false,
     this.operatingSystems = const <OperatingSystemOption>[],
     this.osLoaded = false,
-    this.vendorStatus,
-    this.vendorsRefreshing = false,
     this.pushStatus,
     this.vapidPublicKey,
     this.localNotificationsEnabled = false,
-    this.databaseSize,
-    this.databaseUsage,
-    this.databaseUsageLoading = false,
     this.error,
   });
 
@@ -46,14 +43,9 @@ class CoreSettingsState {
   final bool snmpLoading;
   final List<OperatingSystemOption> operatingSystems;
   final bool osLoaded;
-  final VendorRegistryStatus? vendorStatus;
-  final bool vendorsRefreshing;
   final PushStatusModel? pushStatus;
   final String? vapidPublicKey;
   final bool localNotificationsEnabled;
-  final DatabaseSizeInfo? databaseSize;
-  final DatabaseUsageModel? databaseUsage;
-  final bool databaseUsageLoading;
   final String? error;
 
   List<ServerAddressEntry> get usableAddresses => addresses
@@ -75,14 +67,9 @@ class CoreSettingsState {
     bool? snmpLoading,
     List<OperatingSystemOption>? operatingSystems,
     bool? osLoaded,
-    VendorRegistryStatus? vendorStatus,
-    bool? vendorsRefreshing,
     PushStatusModel? pushStatus,
     String? vapidPublicKey,
     bool? localNotificationsEnabled,
-    DatabaseSizeInfo? databaseSize,
-    DatabaseUsageModel? databaseUsage,
-    bool? databaseUsageLoading,
     String? error,
     bool clearError = false,
   }) {
@@ -102,15 +89,10 @@ class CoreSettingsState {
       snmpLoading: snmpLoading ?? this.snmpLoading,
       operatingSystems: operatingSystems ?? this.operatingSystems,
       osLoaded: osLoaded ?? this.osLoaded,
-      vendorStatus: vendorStatus ?? this.vendorStatus,
-      vendorsRefreshing: vendorsRefreshing ?? this.vendorsRefreshing,
       pushStatus: pushStatus ?? this.pushStatus,
       vapidPublicKey: vapidPublicKey ?? this.vapidPublicKey,
       localNotificationsEnabled:
           localNotificationsEnabled ?? this.localNotificationsEnabled,
-      databaseSize: databaseSize ?? this.databaseSize,
-      databaseUsage: databaseUsage ?? this.databaseUsage,
-      databaseUsageLoading: databaseUsageLoading ?? this.databaseUsageLoading,
       error: clearError ? null : (error ?? this.error),
     );
   }
@@ -154,7 +136,10 @@ class CoreSettingsNotifier extends Notifier<CoreSettingsState> {
         preferencesLoading: false,
       );
     } catch (err) {
-      state = state.copyWith(preferencesLoading: false, error: err.toString());
+      state = state.copyWith(
+        preferencesLoading: false,
+        error: describeError(err),
+      );
     }
   }
 
@@ -171,7 +156,10 @@ class CoreSettingsNotifier extends Notifier<CoreSettingsState> {
       );
       return true;
     } catch (err) {
-      state = state.copyWith(preferencesSaving: false, error: err.toString());
+      state = state.copyWith(
+        preferencesSaving: false,
+        error: describeError(err),
+      );
       return false;
     }
   }
@@ -187,21 +175,21 @@ class CoreSettingsNotifier extends Notifier<CoreSettingsState> {
       final raw = await ref
           .read(apiClientProvider)
           .get<Map<String, dynamic>>('/server-addresses');
-      final list = raw['data'] is List ? raw['data'] as List : const [];
       state = state.copyWith(
-        addresses: list
-            .whereType<Map>()
-            .map(
-              (e) => ServerAddressEntry.fromJson(Map<String, dynamic>.from(e)),
-            )
-            .toList(growable: false),
+        addresses: asJsonList<ServerAddressEntry>(
+          raw['data'],
+          ServerAddressEntry.fromJson,
+        ),
         preferredAddressId: raw['preferredId'] as String?,
         clearPreferredAddress: raw['preferredId'] == null,
         domainHttps: raw['domainHttps'] == true,
         addressesLoading: false,
       );
     } catch (err) {
-      state = state.copyWith(addressesLoading: false, error: err.toString());
+      state = state.copyWith(
+        addressesLoading: false,
+        error: describeError(err),
+      );
     }
   }
 
@@ -224,14 +212,11 @@ class CoreSettingsNotifier extends Notifier<CoreSettingsState> {
               'domainHttps': domainHttps,
             },
           );
-      final list = raw['data'] is List ? raw['data'] as List : const [];
       state = state.copyWith(
-        addresses: list
-            .whereType<Map>()
-            .map(
-              (e) => ServerAddressEntry.fromJson(Map<String, dynamic>.from(e)),
-            )
-            .toList(growable: false),
+        addresses: asJsonList<ServerAddressEntry>(
+          raw['data'],
+          ServerAddressEntry.fromJson,
+        ),
         preferredAddressId: raw['preferredId'] as String?,
         clearPreferredAddress: raw['preferredId'] == null,
         domainHttps: raw['domainHttps'] == true,
@@ -239,7 +224,7 @@ class CoreSettingsNotifier extends Notifier<CoreSettingsState> {
       );
       return true;
     } catch (err) {
-      state = state.copyWith(addressesSaving: false, error: err.toString());
+      state = state.copyWith(addressesSaving: false, error: describeError(err));
       return false;
     }
   }
@@ -252,18 +237,15 @@ class CoreSettingsNotifier extends Notifier<CoreSettingsState> {
       final raw = await ref
           .read(apiClientProvider)
           .get<dynamic>('/snmp/profiles');
-      final list = raw is List
-          ? raw
-                .whereType<Map>()
-                .map(
-                  (e) =>
-                      SnmpDeviceProfile.fromJson(Map<String, dynamic>.from(e)),
-                )
-                .toList(growable: false)
-          : const <SnmpDeviceProfile>[];
-      state = state.copyWith(snmpProfiles: list, snmpLoading: false);
+      state = state.copyWith(
+        snmpProfiles: asJsonList<SnmpDeviceProfile>(
+          raw,
+          SnmpDeviceProfile.fromJson,
+        ),
+        snmpLoading: false,
+      );
     } catch (err) {
-      state = state.copyWith(snmpLoading: false, error: err.toString());
+      state = state.copyWith(snmpLoading: false, error: describeError(err));
     }
   }
 
@@ -275,7 +257,7 @@ class CoreSettingsNotifier extends Notifier<CoreSettingsState> {
       await fetchSnmpProfiles();
       return true;
     } catch (err) {
-      state = state.copyWith(error: err.toString());
+      state = state.copyWith(error: describeError(err));
       return false;
     }
   }
@@ -288,7 +270,7 @@ class CoreSettingsNotifier extends Notifier<CoreSettingsState> {
       await fetchSnmpProfiles();
       return true;
     } catch (err) {
-      state = state.copyWith(error: err.toString());
+      state = state.copyWith(error: describeError(err));
       return false;
     }
   }
@@ -301,65 +283,14 @@ class CoreSettingsNotifier extends Notifier<CoreSettingsState> {
       final raw = await ref
           .read(apiClientProvider)
           .get<dynamic>('/devices/systems');
-      final list = raw is List
-          ? raw
-                .whereType<Map>()
-                .map(
-                  (e) => OperatingSystemOption.fromJson(
-                    Map<String, dynamic>.from(e),
-                  ),
-                )
-                .toList(growable: false)
-          : const <OperatingSystemOption>[];
-      state = state.copyWith(operatingSystems: list, osLoaded: true);
+      state = state.copyWith(
+        operatingSystems: asJsonList<OperatingSystemOption>(
+          raw,
+          OperatingSystemOption.fromJson,
+        ),
+        osLoaded: true,
+      );
     } catch (_) {}
-  }
-
-  // --- Vendors (/api/vendors/*) ---
-
-  Future<void> fetchVendorStatus() async {
-    try {
-      final raw = await ref
-          .read(apiClientProvider)
-          .get<Map<String, dynamic>>('/vendors/status');
-      state = state.copyWith(vendorStatus: VendorRegistryStatus.fromJson(raw));
-    } catch (_) {}
-  }
-
-  Future<bool> refreshVendors() async {
-    state = state.copyWith(vendorsRefreshing: true, clearError: true);
-    try {
-      await ref
-          .read(apiClientProvider)
-          .post<dynamic>(
-            '/vendors/refresh',
-            timeout: const Duration(minutes: 5),
-          );
-      await fetchVendorStatus();
-      state = state.copyWith(vendorsRefreshing: false);
-      return true;
-    } catch (err) {
-      state = state.copyWith(vendorsRefreshing: false, error: err.toString());
-      return false;
-    }
-  }
-
-  Future<MacVendorLookup?> lookupMacVendor(String mac) async {
-    final clean = mac.replaceAll(RegExp(r'[^0-9a-fA-F]'), '').toLowerCase();
-    if (clean.length < 6) return null;
-    try {
-      final raw = await ref
-          .read(apiClientProvider)
-          .get<Map<String, dynamic>>(
-            '/vendors/lookup',
-            queryParameters: <String, dynamic>{
-              'mac': clean.substring(0, clean.length.clamp(6, 12)),
-            },
-          );
-      return MacVendorLookup.fromJson(raw);
-    } catch (_) {
-      return null;
-    }
   }
 
   // --- Push Notifications (/api/push/*) ---
@@ -389,56 +320,8 @@ class CoreSettingsNotifier extends Notifier<CoreSettingsState> {
           .post<Map<String, dynamic>>('/push/test');
       return (res['message'] ?? 'Notificação de teste enviada.').toString();
     } catch (err) {
-      return err.toString();
+      return describeError(err);
     }
-  }
-
-  // --- Database Size & Maintenance (/api/settings/database-*) ---
-
-  Future<void> fetchDatabaseSize() async {
-    try {
-      final raw = await ref
-          .read(apiClientProvider)
-          .get<Map<String, dynamic>>('/settings/database-size');
-      state = state.copyWith(databaseSize: DatabaseSizeInfo.fromJson(raw));
-    } catch (_) {}
-  }
-
-  Future<DatabaseUsageModel?> fetchDatabaseUsage() async {
-    state = state.copyWith(databaseUsageLoading: true);
-    try {
-      final raw = await ref
-          .read(apiClientProvider)
-          .get<Map<String, dynamic>>(
-            '/settings/database-usage',
-            timeout: const Duration(minutes: 2),
-          );
-      final usage = DatabaseUsageModel.fromJson(raw);
-      state = state.copyWith(databaseUsage: usage, databaseUsageLoading: false);
-      return usage;
-    } catch (err) {
-      state = state.copyWith(
-        databaseUsageLoading: false,
-        error: err.toString(),
-      );
-      return null;
-    }
-  }
-
-  Future<String> clearHistory() async {
-    final res = await ref
-        .read(apiClientProvider)
-        .post<Map<String, dynamic>>('/settings/clear-history');
-    await fetchDatabaseSize();
-    return (res['message'] ?? 'Histórico limpo com sucesso.').toString();
-  }
-
-  Future<String> clearAllItems() async {
-    final res = await ref
-        .read(apiClientProvider)
-        .post<Map<String, dynamic>>('/settings/clear-all-items');
-    await fetchDatabaseSize();
-    return (res['message'] ?? 'Todos os itens foram removidos.').toString();
   }
 }
 

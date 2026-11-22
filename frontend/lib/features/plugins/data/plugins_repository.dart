@@ -1,9 +1,10 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/network/api_client.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 import 'package:netmonitor_app/features/plugins/models/plugin_models.dart';
 
-/// Repositório completo dos 43 endpoints de Plugins, Aplicativos de Frota,
-/// Credenciais, Acesso Dedicado, Execuções, Revelação Efêmera e Aprovações.
+/// Repositório de Plugins, Aplicativos de Frota, Execuções, Revelação Efêmera e Aprovações.
+/// (Credenciais e chave dedicada SSH foram unificadas em `DeviceAccessController` — ADR 016.)
 class PluginsRepository {
   const PluginsRepository(this._api);
 
@@ -13,10 +14,7 @@ class PluginsRepository {
 
   Future<List<PluginSummary>> fetchLibrary() async {
     final raw = await _api.get<List<dynamic>>('/plugins');
-    return raw
-        .whereType<Map>()
-        .map((e) => PluginSummary.fromJson(Map<String, dynamic>.from(e)))
-        .toList(growable: false);
+    return asJsonList<PluginSummary>(raw, PluginSummary.fromJson);
   }
 
   Future<PluginDetail> fetchDetail(int id) async {
@@ -106,17 +104,14 @@ class PluginsRepository {
     final result = <int, List<Map<String, dynamic>>>{};
     json.forEach((k, v) {
       final id = int.tryParse(k);
-      if (id != null && v is List) {
-        result[id] = v
-            .whereType<Map>()
-            .map((m) => Map<String, dynamic>.from(m))
-            .toList(growable: false);
+      if (id != null) {
+        result[id] = asJsonMapList(v);
       }
     });
     return result;
   }
 
-  // --- Aba do dispositivo, Credenciais, Acesso Dedicado, Runs & Reveal ---
+  // --- Aba do dispositivo, Runs & Reveal ---
 
   Future<DevicePluginsView> fetchDevicePlugins(int deviceId) async {
     final json = await _api.get<Map<String, dynamic>>(
@@ -166,7 +161,7 @@ class PluginsRepository {
       '/devices/$deviceId/plugins/$pluginId/actions/${Uri.encodeComponent(action)}',
       data: <String, dynamic>{'params': params, 'confirmWrite': confirmWrite},
     );
-    return (json['runId'] as num?)?.toInt() ?? 0;
+    return parseIntOrNull(json['runId']) ?? 0;
   }
 
   /// Ação `reveals: true` (ADR 012): chamada direta efêmera, somente admin.
@@ -182,8 +177,7 @@ class PluginsRepository {
       data: <String, dynamic>{'params': params},
       timeout: const Duration(seconds: 30),
     );
-    final raw = json['output'];
-    return raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
+    return asJsonMap(json['output']);
   }
 
   Future<int> validateOnDevice(int deviceId, int pluginId) async {
@@ -191,73 +185,15 @@ class PluginsRepository {
       '/devices/$deviceId/plugins/$pluginId/validate',
       data: const <String, dynamic>{},
     );
-    return (json['runId'] as num?)?.toInt() ?? 0;
+    return parseIntOrNull(json['runId']) ?? 0;
   }
 
-  Future<List<CredentialView>> fetchCredentials(int deviceId) async {
-    final raw = await _api.get<List<dynamic>>('/devices/$deviceId/credentials');
-    return raw
-        .whereType<Map>()
-        .map((c) => CredentialView.fromJson(Map<String, dynamic>.from(c)))
-        .toList(growable: false);
-  }
-
-  Future<CredentialView> saveCredential(
-    int deviceId,
-    Map<String, dynamic> input,
-  ) async {
-    final json = await _api.put<Map<String, dynamic>>(
-      '/devices/$deviceId/credentials',
-      data: input,
-    );
-    return CredentialView.fromJson(json);
-  }
-
-  Future<void> deleteCredential(int deviceId, String kind) async {
-    await _api.delete<dynamic>(
-      '/devices/$deviceId/credentials/${Uri.encodeComponent(kind)}',
-    );
-  }
-
+  /// Mantido por compatibilidade de contrato; o fluxo canônico usa `DeviceAccessController.fetchAccess`.
   Future<DeviceAccessView> fetchAccess(int deviceId) async {
     final json = await _api.get<Map<String, dynamic>>(
       '/devices/$deviceId/access',
     );
-    return DeviceAccessView.fromJson(json);
-  }
-
-  Future<CredentialView> provisionDedicated(
-    int deviceId,
-    Map<String, dynamic> input,
-  ) async {
-    final json = await _api.post<Map<String, dynamic>>(
-      '/devices/$deviceId/access/dedicated',
-      data: input,
-      timeout: const Duration(seconds: 45),
-    );
-    return CredentialView.fromJson(json);
-  }
-
-  Future<CredentialView> rotateDedicated(int deviceId) async {
-    final json = await _api.post<Map<String, dynamic>>(
-      '/devices/$deviceId/access/dedicated/rotate',
-      timeout: const Duration(seconds: 45),
-    );
-    return CredentialView.fromJson(json);
-  }
-
-  Future<List<String>> revokeDedicated(
-    int deviceId, {
-    bool localOnly = false,
-  }) async {
-    final json = await _api.delete<Map<String, dynamic>>(
-      '/devices/$deviceId/access/dedicated',
-      data: <String, dynamic>{'localOnly': localOnly},
-    );
-    final raw = json['leftovers'];
-    return raw is List
-        ? raw.map((e) => e.toString()).toList(growable: false)
-        : const <String>[];
+    return DeviceAccessViewModel.fromJson(json, fallbackDeviceId: deviceId);
   }
 
   Future<PluginRunView> fetchRun(int runId) async {
@@ -287,10 +223,7 @@ class PluginsRepository {
 
   Future<List<PluginApp>> fetchApps() async {
     final raw = await _api.get<List<dynamic>>('/plugins/apps');
-    return raw
-        .whereType<Map>()
-        .map((e) => PluginApp.fromJson(Map<String, dynamic>.from(e)))
-        .toList(growable: false);
+    return asJsonList<PluginApp>(raw, PluginApp.fromJson);
   }
 
   Future<FleetView> fetchFleet(int pluginId) async {
@@ -333,7 +266,7 @@ class PluginsRepository {
         'deviceParams': ?encodedDeviceParams,
       },
     );
-    return (json['batchId'] as num?)?.toInt() ?? 0;
+    return parseIntOrNull(json['batchId']) ?? 0;
   }
 
   Future<FleetView> identifyFleet(int pluginId, List<int> deviceIds) async {

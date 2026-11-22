@@ -1,24 +1,48 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/network/api_client.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 import 'package:netmonitor_app/features/servers/models/registry_models.dart';
 
 @immutable
 class RegistryState {
   const RegistryState({
     this.overview,
+    this.tokens = const <RegistryTokenView>[],
+    this.loadingTokens = false,
+    this.tokensLoaded = false,
+    this.justCreatedToken,
+    this.exceptions = const <RegistryExceptionView>[],
+    this.loadingExceptions = false,
+    this.exceptionsLoaded = false,
     this.loading = false,
     this.error,
     this.revision = 0,
   });
 
   final RegistryOverview? overview;
+  final List<RegistryTokenView> tokens;
+  final bool loadingTokens;
+  final bool tokensLoaded;
+  final RegistryTokenCreated? justCreatedToken;
+  final List<RegistryExceptionView> exceptions;
+  final bool loadingExceptions;
+  final bool exceptionsLoaded;
   final bool loading;
   final String? error;
   final int revision;
 
   RegistryState copyWith({
     RegistryOverview? overview,
+    List<RegistryTokenView>? tokens,
+    bool? loadingTokens,
+    bool? tokensLoaded,
+    RegistryTokenCreated? justCreatedToken,
+    bool clearJustCreatedToken = false,
+    List<RegistryExceptionView>? exceptions,
+    bool? loadingExceptions,
+    bool? exceptionsLoaded,
     bool? loading,
     String? error,
     bool clearError = false,
@@ -26,6 +50,15 @@ class RegistryState {
   }) {
     return RegistryState(
       overview: overview ?? this.overview,
+      tokens: tokens ?? this.tokens,
+      loadingTokens: loadingTokens ?? this.loadingTokens,
+      tokensLoaded: tokensLoaded ?? this.tokensLoaded,
+      justCreatedToken: clearJustCreatedToken
+          ? null
+          : (justCreatedToken ?? this.justCreatedToken),
+      exceptions: exceptions ?? this.exceptions,
+      loadingExceptions: loadingExceptions ?? this.loadingExceptions,
+      exceptionsLoaded: exceptionsLoaded ?? this.exceptionsLoaded,
       loading: loading ?? this.loading,
       error: clearError ? null : (error ?? this.error),
       revision: revision ?? this.revision,
@@ -41,12 +74,6 @@ class RegistryNotifier extends Notifier<RegistryState> {
 
   ApiClient get _api => ref.read(apiClientProvider);
 
-  String _describe(Object err, String fallback) {
-    if (err is ApiException && err.message.isNotEmpty) return err.message;
-    if (err is NetworkException && err.message.isNotEmpty) return err.message;
-    return fallback;
-  }
-
   Future<void> fetchOverview() async {
     state = state.copyWith(loading: true, clearError: true);
     try {
@@ -58,7 +85,7 @@ class RegistryNotifier extends Notifier<RegistryState> {
     } catch (err) {
       state = state.copyWith(
         loading: false,
-        error: _describe(err, 'Erro ao carregar o registry'),
+        error: describeError(err, fallback: 'Erro ao carregar o registry'),
       );
     }
   }
@@ -67,6 +94,12 @@ class RegistryNotifier extends Notifier<RegistryState> {
     state = state.copyWith(revision: state.revision + 1);
     if (state.overview != null) {
       fetchOverview();
+    }
+    if (state.tokensLoaded) {
+      fetchTokens();
+    }
+    if (state.exceptionsLoaded) {
+      fetchExceptions();
     }
   }
 
@@ -82,9 +115,7 @@ class RegistryNotifier extends Notifier<RegistryState> {
       '/registry/versions/$versionId/findings',
     );
     return List<RegistryFindingView>.unmodifiable(
-      raw.whereType<Map>().map(
-        (e) => RegistryFindingView.fromJson(Map<String, dynamic>.from(e)),
-      ),
+      asJsonList(raw, RegistryFindingView.fromJson),
     );
   }
 
@@ -94,9 +125,7 @@ class RegistryNotifier extends Notifier<RegistryState> {
       data: const <String, dynamic>{},
     );
     return List<RegistryFindingView>.unmodifiable(
-      raw.whereType<Map>().map(
-        (e) => RegistryFindingView.fromJson(Map<String, dynamic>.from(e)),
-      ),
+      asJsonList(raw, RegistryFindingView.fromJson),
     );
   }
 
@@ -125,7 +154,7 @@ class RegistryNotifier extends Notifier<RegistryState> {
       data: const <String, dynamic>{},
     );
     await fetchOverview();
-    return (raw['freedBytes'] as num?)?.toInt() ?? 0;
+    return parseIntOrNull(raw['freedBytes']) ?? 0;
   }
 
   Future<void> syncAdvisories() async {
@@ -136,12 +165,22 @@ class RegistryNotifier extends Notifier<RegistryState> {
   }
 
   Future<List<RegistryTokenView>> fetchTokens() async {
-    final raw = await _api.get<List<dynamic>>('/registry/tokens');
-    return List<RegistryTokenView>.unmodifiable(
-      raw.whereType<Map>().map(
-        (e) => RegistryTokenView.fromJson(Map<String, dynamic>.from(e)),
-      ),
-    );
+    state = state.copyWith(loadingTokens: true);
+    try {
+      final raw = await _api.get<List<dynamic>>('/registry/tokens');
+      final list = List<RegistryTokenView>.unmodifiable(
+        asJsonList(raw, RegistryTokenView.fromJson),
+      );
+      state = state.copyWith(
+        tokens: list,
+        loadingTokens: false,
+        tokensLoaded: true,
+      );
+      return list;
+    } catch (_) {
+      state = state.copyWith(loadingTokens: false);
+      return state.tokens;
+    }
   }
 
   Future<RegistryTokenCreated> createToken({
@@ -161,20 +200,38 @@ class RegistryNotifier extends Notifier<RegistryState> {
         'days': days,
       },
     );
-    return RegistryTokenCreated.fromJson(raw);
+    final created = RegistryTokenCreated.fromJson(raw);
+    state = state.copyWith(justCreatedToken: created);
+    await fetchTokens();
+    return created;
+  }
+
+  void clearJustCreatedToken() {
+    state = state.copyWith(clearJustCreatedToken: true);
   }
 
   Future<void> revokeToken(int id) async {
     await _api.delete<dynamic>('/registry/tokens/$id');
+    await fetchTokens();
   }
 
   Future<List<RegistryExceptionView>> fetchExceptions() async {
-    final raw = await _api.get<List<dynamic>>('/registry/exceptions');
-    return List<RegistryExceptionView>.unmodifiable(
-      raw.whereType<Map>().map(
-        (e) => RegistryExceptionView.fromJson(Map<String, dynamic>.from(e)),
-      ),
-    );
+    state = state.copyWith(loadingExceptions: true);
+    try {
+      final raw = await _api.get<List<dynamic>>('/registry/exceptions');
+      final list = List<RegistryExceptionView>.unmodifiable(
+        asJsonList(raw, RegistryExceptionView.fromJson),
+      );
+      state = state.copyWith(
+        exceptions: list,
+        loadingExceptions: false,
+        exceptionsLoaded: true,
+      );
+      return list;
+    } catch (_) {
+      state = state.copyWith(loadingExceptions: false);
+      return state.exceptions;
+    }
   }
 
   Future<void> addException({
@@ -192,10 +249,12 @@ class RegistryNotifier extends Notifier<RegistryState> {
         'days': days,
       },
     );
+    await fetchExceptions();
   }
 
   Future<void> removeException(int id) async {
     await _api.delete<dynamic>('/registry/exceptions/$id');
+    await fetchExceptions();
   }
 }
 

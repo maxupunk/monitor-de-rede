@@ -43,7 +43,7 @@ class _StubDevicesNotifier extends DevicesNotifier {
   DevicesState build() => const DevicesState();
 
   @override
-  Future<void> fetchDevices() async {}
+  Future<void> fetchDevices({int? siteId, int? networkId}) async {}
 
   @override
   Future<DeviceModel?> createDevice(Map<String, dynamic> payload) async {
@@ -123,20 +123,30 @@ class _StubDeviceAccessController extends DeviceAccessController {
   }
 
   @override
-  Future<DeviceCredentialView> provisionDedicatedKey(
-    int deviceId,
-    Map<String, dynamic> payload,
-  ) async {
+  Future<void> provisionDedicatedKey({
+    required int deviceId,
+    required String platform,
+    required String username,
+    required String password,
+    int port = 22,
+    int? viaProbeId,
+  }) async {
     provisionDedicatedCalls++;
     lastDedicatedDeviceId = deviceId;
-    lastDedicatedPayload = payload;
+    lastDedicatedPayload = <String, dynamic>{
+      'platform': platform,
+      'username': username,
+      'password': password,
+      'port': port,
+      'viaProbeId': ?viaProbeId,
+    };
     if (provisionError != null) throw provisionError!;
     const cred = DeviceCredentialView(
       kind: 'ssh',
       username: 'netmonitor',
       port: 22,
       storage: 'key',
-      dedicated: true,
+      dedicatedFlag: true,
       hasSecret: true,
     );
     accessView = DeviceAccessViewModel(
@@ -145,7 +155,6 @@ class _StubDeviceAccessController extends DeviceAccessController {
       credentials: const <DeviceCredentialView>[cred],
       dedicatedPlatform: 'mikrotik',
     );
-    return cred;
   }
 }
 
@@ -1227,7 +1236,7 @@ void main() {
                 username: 'netmonitor',
                 port: 22,
                 storage: 'key',
-                dedicated: true,
+                dedicatedFlag: true,
                 hasSecret: true,
               ),
             ],

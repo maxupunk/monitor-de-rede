@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/network/api_client.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
 import 'package:netmonitor_app/features/network/models/device_models.dart';
 import 'package:netmonitor_app/features/network/models/diagnostics_models.dart';
 
@@ -43,17 +44,47 @@ class DevicesNotifier extends Notifier<DevicesState> {
   @override
   DevicesState build() => const DevicesState();
 
-  Future<void> fetchDevices() async {
+  Future<void> fetchDevices({int? siteId, int? networkId}) async {
     state = state.copyWith(loading: true, clearError: true);
     try {
-      final raw = await ref.read(apiClientProvider).get<dynamic>('/devices');
+      final query = <String, dynamic>{
+        'siteId': ?siteId,
+        'networkId': ?networkId,
+      };
+      final raw = await ref
+          .read(apiClientProvider)
+          .get<dynamic>(
+            '/devices',
+            queryParameters: query.isEmpty ? null : query,
+          );
       final list = asJsonMapList(
         raw,
       ).map(DeviceModel.fromJson).toList(growable: false);
       state = state.copyWith(items: list, loading: false);
     } catch (err) {
-      state = state.copyWith(loading: false, error: err.toString());
+      state = state.copyWith(loading: false, error: describeError(err));
     }
+  }
+
+  Future<List<DeviceInterfaceModel>> fetchDeviceInterfaces(int deviceId) async {
+    final raw = await ref
+        .read(apiClientProvider)
+        .get<dynamic>('/devices/$deviceId/interfaces');
+    final list = raw is Map
+        ? asJsonMapList(raw['interfaces'] ?? raw['data'] ?? raw['items'])
+        : asJsonMapList(raw);
+    final parsed = list.map(DeviceInterfaceModel.fromJson).toList();
+    return DeviceInterfaceModel.sortForUplinkSelection(parsed);
+  }
+
+  Future<List<DeviceMetricModel>> fetchDeviceMetrics(int deviceId) async {
+    final raw = await ref
+        .read(apiClientProvider)
+        .get<dynamic>('/devices/$deviceId/metrics');
+    final listRaw = raw is Map ? raw['data'] : raw;
+    return asJsonMapList(
+      listRaw,
+    ).map(DeviceMetricModel.fromJson).toList(growable: false);
   }
 
   Future<DeviceModel?> createDevice(Map<String, dynamic> payload) async {
@@ -66,7 +97,7 @@ class DevicesNotifier extends Notifier<DevicesState> {
       state = state.copyWith(items: <DeviceModel>[...state.items, created]);
       return created;
     } catch (err) {
-      state = state.copyWith(error: err.toString());
+      state = state.copyWith(error: describeError(err));
       return null;
     }
   }
@@ -88,7 +119,7 @@ class DevicesNotifier extends Notifier<DevicesState> {
       );
       return updated;
     } catch (err) {
-      state = state.copyWith(error: err.toString());
+      state = state.copyWith(error: describeError(err));
       return null;
     }
   }
@@ -102,7 +133,7 @@ class DevicesNotifier extends Notifier<DevicesState> {
       );
       return true;
     } catch (err) {
-      state = state.copyWith(error: err.toString());
+      state = state.copyWith(error: describeError(err));
       return false;
     }
   }
@@ -121,7 +152,7 @@ class DevicesNotifier extends Notifier<DevicesState> {
       await fetchDevices();
       return true;
     } catch (err) {
-      state = state.copyWith(error: err.toString());
+      state = state.copyWith(error: describeError(err));
       return false;
     }
   }
@@ -174,6 +205,13 @@ class DevicesNotifier extends Notifier<DevicesState> {
 final devicesProvider = NotifierProvider<DevicesNotifier, DevicesState>(
   DevicesNotifier.new,
 );
+
+/// Carrega sob demanda (sem polling) as interfaces reais de um equipamento
+/// para uso no inspetor e formulários da topologia.
+final topologyNodeInterfacesProvider = FutureProvider.autoDispose
+    .family<List<DeviceInterfaceModel>, int>((ref, deviceId) {
+      return ref.read(devicesProvider.notifier).fetchDeviceInterfaces(deviceId);
+    });
 
 @immutable
 class DeviceDetailState {
@@ -327,7 +365,7 @@ class DeviceDetailNotifier extends Notifier<DeviceDetailState> {
         }
       }
     } catch (err) {
-      state = state.copyWith(loading: false, error: err.toString());
+      state = state.copyWith(loading: false, error: describeError(err));
     }
   }
 
@@ -340,7 +378,7 @@ class DeviceDetailNotifier extends Notifier<DeviceDetailState> {
       await loadDeviceDetails(deviceId);
       return true;
     } catch (err) {
-      state = state.copyWith(error: err.toString());
+      state = state.copyWith(error: describeError(err));
       return false;
     } finally {
       state = state.copyWith(pollingSnmp: false);
@@ -357,7 +395,7 @@ class DeviceDetailNotifier extends Notifier<DeviceDetailState> {
       state = state.copyWith(scanResult: parsed);
       return parsed;
     } catch (err) {
-      state = state.copyWith(error: err.toString());
+      state = state.copyWith(error: describeError(err));
       return null;
     } finally {
       state = state.copyWith(scanningSnmp: false);
@@ -390,7 +428,7 @@ class DeviceDetailNotifier extends Notifier<DeviceDetailState> {
       await loadDeviceDetails(deviceId);
       return true;
     } catch (err) {
-      state = state.copyWith(loading: false, error: err.toString());
+      state = state.copyWith(loading: false, error: describeError(err));
       return false;
     }
   }
@@ -412,7 +450,7 @@ class DeviceDetailNotifier extends Notifier<DeviceDetailState> {
       await loadDeviceDetails(deviceId);
       return true;
     } catch (err) {
-      state = state.copyWith(error: err.toString());
+      state = state.copyWith(error: describeError(err));
       return false;
     } finally {
       state = state.copyWith(clearUpdatingInterface: true);
@@ -781,7 +819,7 @@ class VendorsNotifier extends Notifier<VendorsState> {
         loading: false,
       );
     } catch (err) {
-      state = state.copyWith(loading: false, error: err.toString());
+      state = state.copyWith(loading: false, error: describeError(err));
     }
   }
 
@@ -799,7 +837,7 @@ class VendorsNotifier extends Notifier<VendorsState> {
       state = state.copyWith(refreshing: false);
       return true;
     } catch (err) {
-      state = state.copyWith(refreshing: false, error: err.toString());
+      state = state.copyWith(refreshing: false, error: describeError(err));
       return false;
     }
   }

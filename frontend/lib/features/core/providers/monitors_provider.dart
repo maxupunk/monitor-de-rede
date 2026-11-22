@@ -1,6 +1,10 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:netmonitor_app/core/models/pagination.dart';
 import 'package:netmonitor_app/core/network/api_client.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
+import 'package:netmonitor_app/features/core/models/alert_models.dart';
 import 'package:netmonitor_app/features/core/models/dashboard_models.dart';
 import 'package:netmonitor_app/features/core/models/monitor_models.dart';
 
@@ -89,12 +93,10 @@ class MonitorsNotifier extends Notifier<MonitorsState> {
             '/monitors',
             queryParameters: params.isEmpty ? null : params,
           );
-      final list = raw is List
-          ? raw
-                .whereType<Map>()
-                .map((e) => MonitorModel.fromJson(Map<String, dynamic>.from(e)))
-                .toList(growable: false)
-          : const <MonitorModel>[];
+      final list = PaginatedResult<MonitorModel>.fromDynamic(
+        raw,
+        MonitorModel.fromJson,
+      ).data;
       if (params.isEmpty) {
         state = state.copyWith(monitors: list, loading: false);
       } else {
@@ -102,7 +104,7 @@ class MonitorsNotifier extends Notifier<MonitorsState> {
       }
       return list;
     } catch (err) {
-      state = state.copyWith(loading: false, error: err.toString());
+      state = state.copyWith(loading: false, error: describeError(err));
       return const <MonitorModel>[];
     }
   }
@@ -114,22 +116,19 @@ class MonitorsNotifier extends Notifier<MonitorsState> {
       api.get<dynamic>('/probes').catchError((_) => const <dynamic>[]),
       api.get<dynamic>('/sites').catchError((_) => const <dynamic>[]),
     ]);
-    List<T> parseList<T>(dynamic raw, T Function(Map<String, dynamic>) mapper) {
-      final list = raw is List
-          ? raw
-          : (raw is Map && raw['data'] is List
-                ? raw['data'] as List
-                : const []);
-      return list
-          .whereType<Map>()
-          .map((e) => mapper(Map<String, dynamic>.from(e)))
-          .toList(growable: false);
-    }
-
     state = state.copyWith(
-      devices: parseList(results[0], DeviceRefOption.fromJson),
-      probes: parseList(results[1], ProbeRefOption.fromJson),
-      sites: parseList(results[2], SiteRefOption.fromJson),
+      devices: PaginatedResult<DeviceRefOption>.fromDynamic(
+        results[0],
+        DeviceRefOption.fromJson,
+      ).data,
+      probes: PaginatedResult<ProbeRefOption>.fromDynamic(
+        results[1],
+        ProbeRefOption.fromJson,
+      ).data,
+      sites: PaginatedResult<SiteRefOption>.fromDynamic(
+        results[2],
+        SiteRefOption.fromJson,
+      ).data,
     );
   }
 
@@ -143,7 +142,7 @@ class MonitorsNotifier extends Notifier<MonitorsState> {
       state = state.copyWith(currentMonitor: monitor, loading: false);
       return monitor;
     } catch (err) {
-      state = state.copyWith(loading: false, error: err.toString());
+      state = state.copyWith(loading: false, error: describeError(err));
       return null;
     }
   }
@@ -160,7 +159,7 @@ class MonitorsNotifier extends Notifier<MonitorsState> {
       );
       return true;
     } catch (err) {
-      state = state.copyWith(error: err.toString());
+      state = state.copyWith(error: describeError(err));
       return false;
     }
   }
@@ -182,7 +181,7 @@ class MonitorsNotifier extends Notifier<MonitorsState> {
       );
       return true;
     } catch (err) {
-      state = state.copyWith(error: err.toString());
+      state = state.copyWith(error: describeError(err));
       return false;
     }
   }
@@ -199,7 +198,7 @@ class MonitorsNotifier extends Notifier<MonitorsState> {
       );
       return true;
     } catch (err) {
-      state = state.copyWith(error: err.toString());
+      state = state.copyWith(error: describeError(err));
       return false;
     }
   }
@@ -215,7 +214,7 @@ class MonitorsNotifier extends Notifier<MonitorsState> {
       }
       return true;
     } catch (err) {
-      state = state.copyWith(error: err.toString());
+      state = state.copyWith(error: describeError(err));
       return false;
     } finally {
       state = state.copyWith(clearRunningId: true);
@@ -240,7 +239,7 @@ class MonitorsNotifier extends Notifier<MonitorsState> {
       );
       return true;
     } catch (err) {
-      state = state.copyWith(error: err.toString());
+      state = state.copyWith(error: describeError(err));
       return false;
     }
   }
@@ -269,20 +268,79 @@ class MonitorsNotifier extends Notifier<MonitorsState> {
     }
   }
 
+  /// Consulta paginada de resultados históricos de um monitor (`/monitors/:id/results`).
+  Future<({List<MonitorResult> data, PaginationMeta? meta})>
+  fetchMonitorResultsPage(int monitorId, {int page = 1, int limit = 30}) async {
+    final raw = await ref
+        .read(apiClientProvider)
+        .get<dynamic>(
+          '/monitors/$monitorId/results',
+          queryParameters: <String, dynamic>{'page': page, 'limit': limit},
+        );
+    final paginated = PaginatedResult<MonitorResult>.fromDynamic(
+      raw,
+      MonitorResult.fromJson,
+      fallbackPerPage: limit,
+    );
+    return (
+      data: paginated.data,
+      meta: raw is Map && raw['meta'] is Map ? paginated.meta : null,
+    );
+  }
+
+  /// Consulta paginada de alertas associados a um monitor (`/monitors/:id/alerts`).
+  Future<({List<AlertEvent> data, PaginationMeta? meta})>
+  fetchMonitorAlertsPage(int monitorId, {int page = 1, int limit = 25}) async {
+    final raw = await ref
+        .read(apiClientProvider)
+        .get<dynamic>(
+          '/monitors/$monitorId/alerts',
+          queryParameters: <String, dynamic>{'page': page, 'limit': limit},
+        );
+    final paginated = PaginatedResult<AlertEvent>.fromDynamic(
+      raw,
+      AlertEvent.fromJson,
+      fallbackPerPage: limit,
+    );
+    return (
+      data: paginated.data,
+      meta: raw is Map && raw['meta'] is Map ? paginated.meta : null,
+    );
+  }
+
+  /// Consulta série histórica de métrica de dispositivo (`/devices/:id/metrics`).
+  Future<List<double>> fetchDeviceMetricSeries(
+    int deviceId,
+    String metricName,
+  ) async {
+    try {
+      final raw = await ref
+          .read(apiClientProvider)
+          .get<dynamic>(
+            '/devices/$deviceId/metrics',
+            queryParameters: <String, dynamic>{'name': metricName},
+          );
+      final list = raw is List
+          ? raw
+          : (raw is Map ? raw['data'] : const <dynamic>[]);
+      return asJsonMapList(list)
+          .map((item) => parseDoubleOrNull(item['value']))
+          .whereType<double>()
+          .toList(growable: false);
+    } catch (_) {
+      return const <double>[];
+    }
+  }
+
   Future<List<DeviceInterfaceRef>> fetchDeviceInterfaces(int deviceId) async {
     try {
       final raw = await ref
           .read(apiClientProvider)
           .get<dynamic>('/devices/$deviceId/interfaces');
-      final list = raw is List
-          ? raw
-          : (raw is Map && raw['data'] is List
-                ? raw['data'] as List
-                : const []);
-      return list
-          .whereType<Map>()
-          .map((e) => DeviceInterfaceRef.fromJson(Map<String, dynamic>.from(e)))
-          .toList(growable: false);
+      return PaginatedResult<DeviceInterfaceRef>.fromDynamic(
+        raw,
+        DeviceInterfaceRef.fromJson,
+      ).data;
     } catch (_) {
       return const <DeviceInterfaceRef>[];
     }
@@ -303,13 +361,10 @@ class MonitorsNotifier extends Notifier<MonitorsState> {
     final raw = await ref
         .read(apiClientProvider)
         .get<Map<String, dynamic>>('/monitors/saas/presets');
-    final list = raw['presets'] is List
-        ? raw['presets'] as List
-        : (raw['data'] is List ? raw['data'] as List : const []);
-    return list
-        .whereType<Map>()
-        .map((e) => SaasPresetItem.fromJson(Map<String, dynamic>.from(e)))
-        .toList(growable: false);
+    return asJsonList<SaasPresetItem>(
+      raw['presets'] ?? raw['data'],
+      SaasPresetItem.fromJson,
+    );
   }
 
   Future<Map<String, dynamic>> provisionSaasPresets(
@@ -353,10 +408,10 @@ class MonitorsNotifier extends Notifier<MonitorsState> {
 
   /// Aplica `monitor:result` vindo do SSE em memória (zero polling).
   void applyRealtimeResult(Map<String, dynamic> data) {
-    final id = ((data['monitorId'] ?? data['id']) as num?)?.toInt();
+    final id = parseIntOrNull(data['monitorId'] ?? data['id']);
     if (id == null) return;
     final status = data['status']?.toString();
-    final latency = (data['latencyMs'] as num?)?.toDouble();
+    final latency = parseDoubleOrNull(data['latencyMs']);
     final finishedAt =
         data['finishedAt']?.toString() ??
         DateTime.now().toUtc().toIso8601String();
@@ -366,7 +421,7 @@ class MonitorsNotifier extends Notifier<MonitorsState> {
       status: status ?? 'unknown',
       startedAt: data['startedAt']?.toString() ?? finishedAt,
       finishedAt: finishedAt,
-      durationMs: (data['durationMs'] as num?)?.toInt() ?? 0,
+      durationMs: parseIntOrNull(data['durationMs']) ?? 0,
       latencyMs: latency,
       message: data['message'] as String?,
     );
@@ -397,13 +452,9 @@ class MonitorsNotifier extends Notifier<MonitorsState> {
 
   /// Aplica `metric:recorded` nos monitores SNMP gauge/tráfego.
   void applyRealtimeMetrics(Map<String, dynamic> data) {
-    final deviceId = (data['deviceId'] as num?)?.toInt();
-    final rawMetrics = data['metrics'];
-    if (deviceId == null || rawMetrics is! List || rawMetrics.isEmpty) return;
-    final metrics = rawMetrics
-        .whereType<Map>()
-        .map((e) => Map<String, dynamic>.from(e))
-        .toList(growable: false);
+    final deviceId = parseIntOrNull(data['deviceId']);
+    final metrics = asJsonMapList(data['metrics']);
+    if (deviceId == null || metrics.isEmpty) return;
 
     MonitorModel patch(MonitorModel target) {
       if (target.deviceId != deviceId || !target.isSnmpGauge) return target;
@@ -430,8 +481,8 @@ class MonitorsNotifier extends Notifier<MonitorsState> {
                     outSample?['recordedAt'] ??
                     DateTime.now().toUtc().toIso8601String())
                 .toString();
-        final inVal = (inSample?['value'] as num?)?.toDouble();
-        final outVal = (outSample?['value'] as num?)?.toDouble();
+        final inVal = parseDoubleOrNull(inSample?['value']);
+        final outVal = parseDoubleOrNull(outSample?['value']);
         List<MonitorGaugeSample> append(
           List<MonitorGaugeSample> list,
           double? val,
@@ -466,7 +517,7 @@ class MonitorsNotifier extends Notifier<MonitorsState> {
         orElse: () => null,
       );
       if (match == null) return target;
-      final val = (match['value'] as num?)?.toDouble();
+      final val = parseDoubleOrNull(match['value']);
       if (val == null) return target;
       final recordedAt =
           (match['recordedAt'] ?? DateTime.now().toUtc().toIso8601String())
@@ -498,24 +549,20 @@ class MonitorsNotifier extends Notifier<MonitorsState> {
 
   /// Aplica `interface:traffic` efêmero em memória.
   void applyInterfaceTraffic(Map<String, dynamic> data) {
-    final deviceId = (data['deviceId'] as num?)?.toInt();
-    final rawIfs = data['interfaces'];
-    if (deviceId == null || rawIfs is! List || rawIfs.isEmpty) return;
-    final interfaces = rawIfs
-        .whereType<Map>()
-        .map((e) => Map<String, dynamic>.from(e))
-        .toList(growable: false);
+    final deviceId = parseIntOrNull(data['deviceId']);
+    final interfaces = asJsonMapList(data['interfaces']);
+    if (deviceId == null || interfaces.isEmpty) return;
 
     MonitorModel patch(MonitorModel target) {
       if (target.deviceId != deviceId || !target.isTrafficMonitor) {
         return target;
       }
-      final ifIndex = (target.configuration['ifIndex'] as num?)?.toInt();
+      final ifIndex = parseIntOrNull(target.configuration['ifIndex']);
       final ifName = target.configuration['ifName']?.toString().toLowerCase();
       final match = interfaces.cast<Map<String, dynamic>?>().firstWhere((intf) {
         if (intf == null) return false;
-        if (ifIndex != null && intf['ifIndex'] is num) {
-          return (intf['ifIndex'] as num).toInt() == ifIndex;
+        if (ifIndex != null && parseIntOrNull(intf['ifIndex']) == ifIndex) {
+          return true;
         }
         if (ifName != null && intf['name'] != null) {
           return intf['name'].toString().toLowerCase() == ifName;
@@ -524,8 +571,8 @@ class MonitorsNotifier extends Notifier<MonitorsState> {
       }, orElse: () => null);
       if (match == null) return target;
       final nowIso = DateTime.now().toUtc().toIso8601String();
-      final inVal = (match['inBps'] as num?)?.toDouble();
-      final outVal = (match['outBps'] as num?)?.toDouble();
+      final inVal = parseDoubleOrNull(match['inBps']);
+      final outVal = parseDoubleOrNull(match['outBps']);
       List<MonitorGaugeSample> append(
         List<MonitorGaugeSample> list,
         double? val,

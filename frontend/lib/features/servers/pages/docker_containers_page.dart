@@ -75,27 +75,9 @@ class _DockerContainersPageState extends ConsumerState<DockerContainersPage> {
       if (!confirmed || !mounted) return;
     }
 
-    final notifier = ref.read(dockerProvider.notifier);
-    final api = notifier.apiFor();
-    final ok = await notifier.runAction(
-      () async {
-        switch (action.key) {
-          case DockerContainerActionKey.start:
-            await api.startContainer(container.id);
-          case DockerContainerActionKey.stop:
-            await api.stopContainer(container.id);
-          case DockerContainerActionKey.restart:
-            await api.restartContainer(container.id);
-          case DockerContainerActionKey.update:
-            await api.updateContainer(container.id);
-          case DockerContainerActionKey.remove:
-            await api.removeContainer(container.id);
-        }
-      },
-      refresh: action.key == DockerContainerActionKey.update
-          ? null
-          : notifier.refreshContainers,
-    );
+    final ok = await ref
+        .read(dockerProvider.notifier)
+        .executeContainerAction(container.id, action.key);
 
     if (ok && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(

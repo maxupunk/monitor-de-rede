@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:netmonitor_app/core/areas/area_models.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 
 /// Tamanho nomeado de widget no Dashboard (paridade com `WIDGET_SIZES` em `dashboard.ts`).
 enum WidgetSize {
@@ -86,16 +87,8 @@ class WidgetCatalogEntry {
       icon: (json['icon'] ?? '').toString(),
       allowMultiple: json['allowMultiple'] == true,
       defaultSize: WidgetSize.parse(json['defaultSize']),
-      configKeys: (json['configKeys'] is List)
-          ? (json['configKeys'] as List)
-                .map((e) => e.toString())
-                .toList(growable: false)
-          : const <String>[],
-      compatibleResources: (json['compatibleResources'] is List)
-          ? (json['compatibleResources'] as List)
-                .map((e) => e.toString())
-                .toList(growable: false)
-          : const <String>[],
+      configKeys: asStringList(json['configKeys']),
+      compatibleResources: asStringList(json['compatibleResources']),
       area: ProductArea.tryParse(json['area']) ?? ProductArea.core,
     );
   }
@@ -138,21 +131,15 @@ class DashboardCatalog {
   }
 
   factory DashboardCatalog.fromJson(Map<String, dynamic> json) {
-    final rawWidgets = json['widgets'] is List
-        ? json['widgets'] as List
-        : const [];
-    final rawDefaults = json['defaultLayout'] is List
-        ? json['defaultLayout'] as List
-        : const [];
     return DashboardCatalog(
-      widgets: rawWidgets
-          .whereType<Map>()
-          .map((e) => WidgetCatalogEntry.fromJson(Map<String, dynamic>.from(e)))
-          .toList(growable: false),
-      defaultLayout: rawDefaults
-          .whereType<Map>()
-          .map((e) => DefaultWidgetSpec.fromJson(Map<String, dynamic>.from(e)))
-          .toList(growable: false),
+      widgets: asJsonList<WidgetCatalogEntry>(
+        json['widgets'],
+        WidgetCatalogEntry.fromJson,
+      ),
+      defaultLayout: asJsonList<DefaultWidgetSpec>(
+        json['defaultLayout'],
+        DefaultWidgetSpec.fromJson,
+      ),
     );
   }
 }
@@ -244,7 +231,7 @@ class DashboardWidgetConfig {
     int fallbackOrder = 0,
   }) {
     if (raw is! Map) return null;
-    final json = Map<String, dynamic>.from(raw);
+    final json = asJsonMap(raw);
     final id = json['id']?.toString();
     if (id == null || id.isEmpty) return null;
     final type = json['type']?.toString().isNotEmpty == true
@@ -255,17 +242,15 @@ class DashboardWidgetConfig {
       type: type,
       title: (json['title'] ?? 'Widget').toString(),
       category: (json['category'] ?? 'charts').toString(),
-      cols: (json['cols'] as num?)?.toInt() ?? 12,
-      sm: (json['sm'] as num?)?.toInt() ?? 12,
-      md: (json['md'] as num?)?.toInt() ?? 6,
-      lg: (json['lg'] as num?)?.toInt() ?? 6,
+      cols: parseIntOrNull(json['cols']) ?? 12,
+      sm: parseIntOrNull(json['sm']) ?? 12,
+      md: parseIntOrNull(json['md']) ?? 6,
+      lg: parseIntOrNull(json['lg']) ?? 6,
       visible: json['visible'] != false,
-      order: (json['order'] as num?)?.toInt() ?? fallbackOrder,
+      order: parseIntOrNull(json['order']) ?? fallbackOrder,
       description: (json['description'] ?? '').toString(),
       icon: (json['icon'] ?? '').toString(),
-      config: json['config'] is Map
-          ? Map<String, dynamic>.from(json['config'] as Map)
-          : const <String, dynamic>{},
+      config: asJsonMap(json['config']),
     );
   }
 }
@@ -287,9 +272,9 @@ class MonitorTimeSeriesPoint {
   factory MonitorTimeSeriesPoint.fromJson(Map<String, dynamic> json) {
     return MonitorTimeSeriesPoint(
       time: (json['time'] ?? '').toString(),
-      timestamp: (json['timestamp'] as num?)?.toInt() ?? 0,
-      latency: (json['latency'] as num?)?.toDouble() ?? 0,
-      loss: (json['loss'] as num?)?.toDouble() ?? 0,
+      timestamp: parseIntOrNull(json['timestamp']) ?? 0,
+      latency: parseDoubleOrNull(json['latency']) ?? 0,
+      loss: parseDoubleOrNull(json['loss']) ?? 0,
     );
   }
 }
@@ -315,23 +300,17 @@ class MonitorTimeSeriesResponse {
   final int totalChecks;
 
   factory MonitorTimeSeriesResponse.fromJson(Map<String, dynamic> json) {
-    final rawSamples = json['samples'] is List
-        ? json['samples'] as List
-        : const [];
     return MonitorTimeSeriesResponse(
       timeframe: (json['timeframe'] ?? '1h').toString(),
-      samples: rawSamples
-          .whereType<Map>()
-          .map(
-            (e) =>
-                MonitorTimeSeriesPoint.fromJson(Map<String, dynamic>.from(e)),
-          )
-          .toList(growable: false),
-      avgLatency: (json['avgLatency'] as num?)?.toDouble() ?? 0,
-      maxLatency: (json['maxLatency'] as num?)?.toDouble() ?? 0,
-      minLatency: (json['minLatency'] as num?)?.toDouble() ?? 0,
-      packetLossPct: (json['packetLossPct'] as num?)?.toDouble() ?? 0,
-      totalChecks: (json['totalChecks'] as num?)?.toInt() ?? 0,
+      samples: asJsonList<MonitorTimeSeriesPoint>(
+        json['samples'],
+        MonitorTimeSeriesPoint.fromJson,
+      ),
+      avgLatency: parseDoubleOrNull(json['avgLatency']) ?? 0,
+      maxLatency: parseDoubleOrNull(json['maxLatency']) ?? 0,
+      minLatency: parseDoubleOrNull(json['minLatency']) ?? 0,
+      packetLossPct: parseDoubleOrNull(json['packetLossPct']) ?? 0,
+      totalChecks: parseIntOrNull(json['totalChecks']) ?? 0,
     );
   }
 }
@@ -354,14 +333,12 @@ class HourlyEventBucket {
 
   factory HourlyEventBucket.fromJson(Map<String, dynamic> json) {
     final crit =
-        (json['critical'] as num?)?.toInt() ??
-        (json['error'] as num?)?.toInt() ??
-        0;
-    final warn = (json['warning'] as num?)?.toInt() ?? 0;
-    final inf = (json['info'] as num?)?.toInt() ?? 0;
+        parseIntOrNull(json['critical']) ?? parseIntOrNull(json['error']) ?? 0;
+    final warn = parseIntOrNull(json['warning']) ?? 0;
+    final inf = parseIntOrNull(json['info']) ?? 0;
     final tot =
-        (json['total'] as num?)?.toInt() ??
-        (json['count'] as num?)?.toInt() ??
+        parseIntOrNull(json['total']) ??
+        parseIntOrNull(json['count']) ??
         (crit + warn + inf);
     return HourlyEventBucket(
       hour: (json['hour'] ?? json['label'] ?? json['bucket'] ?? '').toString(),

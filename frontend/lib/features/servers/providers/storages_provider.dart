@@ -1,7 +1,10 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/network/api_client.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 import 'package:netmonitor_app/features/servers/models/storage_models.dart';
+import 'package:netmonitor_app/features/servers/utils/collection_helpers.dart';
 
 @immutable
 class StoragesState {
@@ -45,24 +48,11 @@ class StoragesNotifier extends Notifier<StoragesState> {
 
   ApiClient get _api => ref.read(apiClientProvider);
 
-  String _describe(Object err, String fallback) {
-    if (err is ApiException && err.message.isNotEmpty) return err.message;
-    if (err is NetworkException && err.message.isNotEmpty) return err.message;
-    return fallback;
-  }
-
   Future<bool> fetchStorages() async {
     state = state.copyWith(loading: true, clearError: true);
     try {
       final raw = await _api.get<List<dynamic>>('/storages');
-      final parsed = raw
-          .whereType<Map>()
-          .map(
-            (e) => StorageDestinationResponse.fromJson(
-              Map<String, dynamic>.from(e),
-            ),
-          )
-          .toList(growable: false);
+      final parsed = asJsonList(raw, StorageDestinationResponse.fromJson);
       state = state.copyWith(
         storages: List<StorageDestinationResponse>.unmodifiable(parsed),
         loading: false,
@@ -72,7 +62,10 @@ class StoragesNotifier extends Notifier<StoragesState> {
     } catch (err) {
       state = state.copyWith(
         loading: false,
-        error: _describe(err, 'Erro ao carregar os destinos de armazenamento'),
+        error: describeError(
+          err,
+          fallback: 'Erro ao carregar os destinos de armazenamento',
+        ),
       );
       return false;
     }
@@ -116,16 +109,13 @@ class StoragesNotifier extends Notifier<StoragesState> {
           );
     final saved = StorageDestinationDetail.fromJson(raw);
     final summary = saved.toSummary();
-    final next = List<StorageDestinationResponse>.from(state.storages);
-    final idx = next.indexWhere((s) => s.id == summary.id);
-    if (idx == -1) {
-      next.add(summary);
-      next.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-    } else {
-      next[idx] = summary;
-    }
     state = state.copyWith(
-      storages: List<StorageDestinationResponse>.unmodifiable(next),
+      storages: upsertSortedByName<StorageDestinationResponse>(
+        state.storages,
+        summary,
+        idOf: (s) => s.id,
+        nameOf: (s) => s.name,
+      ),
     );
     return saved;
   }
@@ -142,7 +132,7 @@ class StoragesNotifier extends Notifier<StoragesState> {
       return true;
     } catch (err) {
       state = state.copyWith(
-        error: _describe(err, 'Erro ao excluir o destino'),
+        error: describeError(err, fallback: 'Erro ao excluir o destino'),
       );
       return false;
     }

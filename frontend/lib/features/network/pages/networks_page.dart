@@ -39,198 +39,17 @@ class _NetworksPageState extends ConsumerState<NetworksPage> {
   }
 
   Future<void> _openNetworkSheet({NetworkModel? existing}) async {
-    final formKey = GlobalKey<FormState>();
-    final nameCtrl = TextEditingController(text: existing?.name ?? '');
-    final cidrCtrl = TextEditingController(text: existing?.cidr ?? '');
-    final gatewayCtrl = TextEditingController(text: existing?.gateway ?? '');
-    final vlanCtrl = TextEditingController(
-      text: existing?.vlanId?.toString() ?? '',
-    );
-    final intervalCtrl = TextEditingController(
-      text: (existing?.scanInterval ?? 3600).toString(),
-    );
-    final descCtrl = TextEditingController(text: existing?.description ?? '');
-    int? siteId = existing?.siteId;
-    int? probeId = existing?.probeId;
-    bool scanEnabled = existing?.scanEnabled ?? false;
-    bool saving = false;
-
-    final sites = ref.read(sitesProvider).items;
-    final probes = ref.read(probesProvider).items;
-
     await showAdaptiveFormSheet<void>(
       context: context,
       title: existing != null ? 'Editar Rede IP' : 'Nova Rede IP',
       subtitle: 'Defina sub-rede CIDR, VLAN, gateway e descoberta automática',
       maxWidth: 620,
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setModal) => Form(
-          key: formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              TextFormField(
-                controller: nameCtrl,
-                decoration: const InputDecoration(labelText: 'Nome da rede *'),
-                validator: FormValidators.required('Informe o nome da rede.'),
-              ),
-              const SizedBox(height: 12),
-              ResponsiveFieldRow(
-                breakpoint: 480,
-                children: <Widget>[
-                  TextFormField(
-                    controller: cidrCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Bloco CIDR *',
-                      hintText: '192.168.1.0/24',
-                    ),
-                    validator:
-                        FormValidators.compose(<FormFieldValidator<String>>[
-                          FormValidators.required('Informe o bloco CIDR.'),
-                          FormValidators.cidr(),
-                        ]),
-                  ),
-                  TextFormField(
-                    controller: vlanCtrl,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: 'VLAN ID'),
-                    validator: FormValidators.integerRange(1, 4094),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: gatewayCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Gateway padrão',
-                  hintText: '192.168.1.1',
-                ),
-                validator: FormValidators.ipv4(),
-              ),
-              const SizedBox(height: 12),
-              ResponsiveFieldRow(
-                breakpoint: 480,
-                children: <Widget>[
-                  AppDropdownFormField<int?>(
-                    initialValue: sites.any((s) => s.id == siteId)
-                        ? siteId
-                        : null,
-                    decoration: const InputDecoration(labelText: 'Site'),
-                    items: <DropdownMenuItem<int?>>[
-                      const DropdownMenuItem<int?>(
-                        value: null,
-                        child: Text('Nenhum', overflow: TextOverflow.ellipsis),
-                      ),
-                      for (final s in sites)
-                        DropdownMenuItem<int?>(
-                          value: s.id,
-                          child: Text(s.name, overflow: TextOverflow.ellipsis),
-                        ),
-                    ],
-                    onChanged: (v) => setModal(() => siteId = v),
-                  ),
-                  AppDropdownFormField<int?>(
-                    initialValue: probes.any((p) => p.id == probeId)
-                        ? probeId
-                        : null,
-                    decoration: const InputDecoration(
-                      labelText: 'Sonda remota',
-                    ),
-                    items: <DropdownMenuItem<int?>>[
-                      const DropdownMenuItem<int?>(
-                        value: null,
-                        child: Text(
-                          'Central local',
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      for (final p in probes)
-                        DropdownMenuItem<int?>(
-                          value: p.id,
-                          child: Text(p.name, overflow: TextOverflow.ellipsis),
-                        ),
-                    ],
-                    onChanged: (v) => setModal(() => probeId = v),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Descoberta periódica automática'),
-                value: scanEnabled,
-                onChanged: (v) => setModal(() => scanEnabled = v),
-              ),
-              if (scanEnabled)
-                TextFormField(
-                  controller: intervalCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: 'Intervalo de varredura (segundos)',
-                  ),
-                ),
-              const SizedBox(height: 10),
-              TextFormField(
-                controller: descCtrl,
-                maxLines: 2,
-                decoration: const InputDecoration(labelText: 'Descrição'),
-              ),
-              const SizedBox(height: 16),
-              SymmetricalActionBar(
-                children: <Widget>[
-                  OutlinedButton(
-                    onPressed: saving ? null : () => Navigator.of(ctx).pop(),
-                    child: const Text('Cancelar'),
-                  ),
-                  FilledButton.icon(
-                    onPressed: saving
-                        ? null
-                        : () async {
-                            if (!formKey.currentState!.validate()) return;
-                            setModal(() => saving = true);
-                            final payload = <String, dynamic>{
-                              'name': nameCtrl.text.trim(),
-                              'cidr': cidrCtrl.text.trim(),
-                              'siteId': siteId,
-                              'probeId': probeId,
-                              if (gatewayCtrl.text.trim().isNotEmpty)
-                                'gateway': gatewayCtrl.text.trim(),
-                              if (vlanCtrl.text.trim().isNotEmpty)
-                                'vlanId': int.tryParse(vlanCtrl.text.trim()),
-                              'scanEnabled': scanEnabled,
-                              if (scanEnabled)
-                                'scanInterval':
-                                    int.tryParse(intervalCtrl.text.trim()) ??
-                                    3600,
-                              if (descCtrl.text.trim().isNotEmpty)
-                                'description': descCtrl.text.trim(),
-                            };
-                            final ok = existing != null
-                                ? await ref
-                                      .read(networksProvider.notifier)
-                                      .updateNetwork(existing.id, payload)
-                                : await ref
-                                      .read(networksProvider.notifier)
-                                      .createNetwork(payload);
-                            if (ctx.mounted && ok) Navigator.of(ctx).pop();
-                            if (context.mounted) setModal(() => saving = false);
-                          },
-                    icon: const Icon(Icons.check),
-                    label: Text(existing != null ? 'Salvar' : 'Criar rede'),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
+      builder: (ctx) => _NetworkFormBody(
+        existing: existing,
+        onCancel: () => Navigator.of(ctx).pop(),
+        onSaved: () => Navigator.of(ctx).pop(),
       ),
     );
-    nameCtrl.dispose();
-    cidrCtrl.dispose();
-    gatewayCtrl.dispose();
-    vlanCtrl.dispose();
-    intervalCtrl.dispose();
-    descCtrl.dispose();
   }
 
   Future<void> _confirmDelete(NetworkModel network) async {
@@ -546,6 +365,223 @@ class _NetworksPageState extends ConsumerState<NetworksPage> {
           ),
         );
       },
+    );
+  }
+}
+
+class _NetworkFormBody extends ConsumerStatefulWidget {
+  const _NetworkFormBody({
+    this.existing,
+    required this.onCancel,
+    required this.onSaved,
+  });
+
+  final NetworkModel? existing;
+  final VoidCallback onCancel;
+  final VoidCallback onSaved;
+
+  @override
+  ConsumerState<_NetworkFormBody> createState() => _NetworkFormBodyState();
+}
+
+class _NetworkFormBodyState extends ConsumerState<_NetworkFormBody> {
+  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+  late final TextEditingController _nameCtrl;
+  late final TextEditingController _cidrCtrl;
+  late final TextEditingController _gatewayCtrl;
+  late final TextEditingController _vlanCtrl;
+  late final TextEditingController _intervalCtrl;
+  late final TextEditingController _descCtrl;
+  int? _siteId;
+  int? _probeId;
+  bool _scanEnabled = false;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final existing = widget.existing;
+    _nameCtrl = TextEditingController(text: existing?.name ?? '');
+    _cidrCtrl = TextEditingController(text: existing?.cidr ?? '');
+    _gatewayCtrl = TextEditingController(text: existing?.gateway ?? '');
+    _vlanCtrl = TextEditingController(text: existing?.vlanId?.toString() ?? '');
+    _intervalCtrl = TextEditingController(
+      text: (existing?.scanInterval ?? 3600).toString(),
+    );
+    _descCtrl = TextEditingController(text: existing?.description ?? '');
+    _siteId = existing?.siteId;
+    _probeId = existing?.probeId;
+    _scanEnabled = existing?.scanEnabled ?? false;
+  }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _cidrCtrl.dispose();
+    _gatewayCtrl.dispose();
+    _vlanCtrl.dispose();
+    _intervalCtrl.dispose();
+    _descCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _saving = true);
+    final payload = <String, dynamic>{
+      'name': _nameCtrl.text.trim(),
+      'cidr': _cidrCtrl.text.trim(),
+      'siteId': _siteId,
+      'probeId': _probeId,
+      if (_gatewayCtrl.text.trim().isNotEmpty)
+        'gateway': _gatewayCtrl.text.trim(),
+      if (_vlanCtrl.text.trim().isNotEmpty)
+        'vlanId': int.tryParse(_vlanCtrl.text.trim()),
+      'scanEnabled': _scanEnabled,
+      if (_scanEnabled)
+        'scanInterval': int.tryParse(_intervalCtrl.text.trim()) ?? 3600,
+      if (_descCtrl.text.trim().isNotEmpty)
+        'description': _descCtrl.text.trim(),
+    };
+    final ok = widget.existing != null
+        ? await ref
+              .read(networksProvider.notifier)
+              .updateNetwork(widget.existing!.id, payload)
+        : await ref.read(networksProvider.notifier).createNetwork(payload);
+    if (!mounted) return;
+    setState(() => _saving = false);
+    if (ok) widget.onSaved();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sites = ref.watch(sitesProvider).items;
+    final probes = ref.watch(probesProvider).items;
+
+    return Form(
+      key: _formKey,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          TextFormField(
+            controller: _nameCtrl,
+            decoration: const InputDecoration(labelText: 'Nome da rede *'),
+            validator: FormValidators.required('Informe o nome da rede.'),
+          ),
+          const SizedBox(height: 12),
+          ResponsiveFieldRow(
+            breakpoint: 480,
+            children: <Widget>[
+              TextFormField(
+                controller: _cidrCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Bloco CIDR *',
+                  hintText: '192.168.1.0/24',
+                ),
+                validator: FormValidators.compose(<FormFieldValidator<String>>[
+                  FormValidators.required('Informe o bloco CIDR.'),
+                  FormValidators.cidr(),
+                ]),
+              ),
+              TextFormField(
+                controller: _vlanCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'VLAN ID'),
+                validator: FormValidators.integerRange(1, 4094),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          TextFormField(
+            controller: _gatewayCtrl,
+            decoration: const InputDecoration(
+              labelText: 'Gateway padrão',
+              hintText: '192.168.1.1',
+            ),
+            validator: FormValidators.ipv4(),
+          ),
+          const SizedBox(height: 12),
+          ResponsiveFieldRow(
+            breakpoint: 480,
+            children: <Widget>[
+              AppDropdownFormField<int?>(
+                initialValue: sites.any((s) => s.id == _siteId)
+                    ? _siteId
+                    : null,
+                decoration: const InputDecoration(labelText: 'Site'),
+                items: <DropdownMenuItem<int?>>[
+                  const DropdownMenuItem<int?>(
+                    value: null,
+                    child: Text('Nenhum', overflow: TextOverflow.ellipsis),
+                  ),
+                  for (final s in sites)
+                    DropdownMenuItem<int?>(
+                      value: s.id,
+                      child: Text(s.name, overflow: TextOverflow.ellipsis),
+                    ),
+                ],
+                onChanged: (v) => setState(() => _siteId = v),
+              ),
+              AppDropdownFormField<int?>(
+                initialValue: probes.any((p) => p.id == _probeId)
+                    ? _probeId
+                    : null,
+                decoration: const InputDecoration(labelText: 'Sonda remota'),
+                items: <DropdownMenuItem<int?>>[
+                  const DropdownMenuItem<int?>(
+                    value: null,
+                    child: Text(
+                      'Central local',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  for (final p in probes)
+                    DropdownMenuItem<int?>(
+                      value: p.id,
+                      child: Text(p.name, overflow: TextOverflow.ellipsis),
+                    ),
+                ],
+                onChanged: (v) => setState(() => _probeId = v),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Descoberta periódica automática'),
+            value: _scanEnabled,
+            onChanged: (v) => setState(() => _scanEnabled = v),
+          ),
+          if (_scanEnabled)
+            TextFormField(
+              controller: _intervalCtrl,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Intervalo de varredura (segundos)',
+              ),
+            ),
+          const SizedBox(height: 10),
+          TextFormField(
+            controller: _descCtrl,
+            maxLines: 2,
+            decoration: const InputDecoration(labelText: 'Descrição'),
+          ),
+          const SizedBox(height: 16),
+          SymmetricalActionBar(
+            children: <Widget>[
+              OutlinedButton(
+                onPressed: _saving ? null : widget.onCancel,
+                child: const Text('Cancelar'),
+              ),
+              FilledButton.icon(
+                onPressed: _saving ? null : _submit,
+                icon: const Icon(Icons.check),
+                label: Text(widget.existing != null ? 'Salvar' : 'Criar rede'),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

@@ -1,12 +1,11 @@
 ﻿import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
-import 'package:netmonitor_app/core/network/api_client.dart';
-import 'package:netmonitor_app/features/network/models/device_models.dart';
+import 'package:netmonitor_app/core/utils/clipboard_utils.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
+import 'package:netmonitor_app/features/network/providers/wifi_provider.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 
 /// Monta a string padrão `WIFI:T:...;S:...;P:...;H:...;;` para QR Code Wi-Fi.
 String buildWifiQrPayload({
@@ -86,7 +85,6 @@ class _WifiQrBodyState extends ConsumerState<_WifiQrBody> {
     super.dispose();
   }
 
-  /// Revelação efêmera (`POST /api/devices/:id/plugins/:pluginId/reveal/:action`) — somente admin, nunca salva.
   Future<void> _revealPassword() async {
     if (widget.deviceId == null ||
         widget.pluginId == null ||
@@ -98,23 +96,19 @@ class _WifiQrBodyState extends ConsumerState<_WifiQrBody> {
       _revealError = null;
     });
     try {
-      final raw = await ref
-          .read(apiClientProvider)
-          .post<dynamic>(
-            '/devices/${widget.deviceId}/plugins/${widget.pluginId}/reveal/${widget.revealAction}',
-            timeout: const Duration(seconds: 30),
-            data: <String, dynamic>{
-              'params': <String, dynamic>{'ssid': _ssidCtrl.text.trim()},
-            },
+      final secret = await ref
+          .read(wifiClientsProvider.notifier)
+          .revealWifiPassword(
+            deviceId: widget.deviceId!,
+            pluginId: widget.pluginId!,
+            action: widget.revealAction!,
+            ssid: _ssidCtrl.text,
           );
-      final out = asJsonMap(asJsonMap(raw)['output']);
-      final secret = (out['password'] ?? out['psk'] ?? out['passphrase'])
-          ?.toString();
       if (mounted && secret != null) {
         setState(() => _passCtrl.text = secret);
       }
     } catch (err) {
-      if (mounted) setState(() => _revealError = err.toString());
+      if (mounted) setState(() => _revealError = describeError(err));
     } finally {
       if (mounted) setState(() => _revealing = false);
     }
@@ -233,30 +227,15 @@ class _WifiQrBodyState extends ConsumerState<_WifiQrBody> {
         ],
         const SizedBox(height: 16),
         if (qrData != null) ...<Widget>[
-          Center(
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: context.colorScheme.outlineVariant),
-              ),
-              child: QrImageView(
-                data: qrData,
-                size: 210,
-                backgroundColor: Colors.white,
-              ),
-            ),
-          ),
+          QrCodeCard(data: qrData, size: 210),
           const SizedBox(height: 10),
           Center(
             child: TextButton.icon(
-              onPressed: () {
-                Clipboard.setData(ClipboardData(text: qrData));
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Payload Wi-Fi copiado.')),
-                );
-              },
+              onPressed: () => copyToClipboardWithFeedback(
+                context,
+                qrData,
+                message: 'Payload Wi-Fi copiado.',
+              ),
               icon: const Icon(Icons.copy, size: 16),
               label: const Text('Copiar string Wi-Fi'),
             ),

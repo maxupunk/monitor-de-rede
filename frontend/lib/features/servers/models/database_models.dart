@@ -1,4 +1,7 @@
 import 'package:flutter/foundation.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
+
+export 'system_database_models.dart';
 
 /// Conexão de banco de dados gerenciada para backup/restauração (ADR 013).
 @immutable
@@ -61,26 +64,23 @@ class DatabaseConnectionResponse {
   };
 
   factory DatabaseConnectionResponse.fromJson(Map<String, dynamic> json) {
-    final rawDbs = json['databases'];
     return DatabaseConnectionResponse(
-      id: (json['id'] as num?)?.toInt() ?? 0,
+      id: parseIntOrNull(json['id']) ?? 0,
       name: (json['name'] as String?) ?? '',
       engine: (json['engine'] as String?) ?? 'postgres',
       host: (json['host'] as String?) ?? '',
-      port: (json['port'] as num?)?.toInt() ?? 5432,
+      port: parseIntOrNull(json['port']) ?? 5432,
       username: (json['username'] as String?) ?? '',
-      passwordSet: json['passwordSet'] == true,
+      passwordSet: parseBool(json['passwordSet']),
       sslMode: (json['sslMode'] as String?) ?? 'prefer',
-      databases: rawDbs is List
-          ? List<String>.unmodifiable(rawDbs.whereType<String>())
-          : const <String>[],
-      storageDestinationId: (json['storageDestinationId'] as num?)?.toInt(),
+      databases: List<String>.unmodifiable(asStringList(json['databases'])),
+      storageDestinationId: parseIntOrNull(json['storageDestinationId']),
       storageDestinationName: json['storageDestinationName'] as String?,
-      viaProbeId: (json['viaProbeId'] as num?)?.toInt(),
+      viaProbeId: parseIntOrNull(json['viaProbeId']),
       viaProbeName: json['viaProbeName'] as String?,
-      backupEnabled: json['backupEnabled'] == true,
-      backupIntervalHours: (json['backupIntervalHours'] as num?)?.toInt() ?? 24,
-      backupRetention: (json['backupRetention'] as num?)?.toInt() ?? 7,
+      backupEnabled: parseBool(json['backupEnabled']),
+      backupIntervalHours: parseIntOrNull(json['backupIntervalHours']) ?? 24,
+      backupRetention: parseIntOrNull(json['backupRetention']) ?? 7,
       lastBackupAt: json['lastBackupAt'] as String?,
       lastBackupStatus: json['lastBackupStatus'] as String?,
       lastBackupError: json['lastBackupError'] as String?,
@@ -156,10 +156,10 @@ class AgentRouteOption {
 
   factory AgentRouteOption.fromJson(Map<String, dynamic> json) {
     return AgentRouteOption(
-      id: (json['id'] as num?)?.toInt() ?? 0,
+      id: parseIntOrNull(json['id']) ?? 0,
       name: (json['name'] as String?) ?? '',
-      connected: json['connected'] == true,
-      allowed: json['allowed'] == true,
+      connected: parseBool(json['connected']),
+      allowed: parseBool(json['allowed']),
     );
   }
 }
@@ -194,14 +194,14 @@ class DatabaseContainer {
     return DatabaseContainer(
       hostKey: (json['hostKey'] as String?) ?? '',
       hostName: (json['hostName'] as String?) ?? '',
-      probeId: (json['probeId'] as num?)?.toInt(),
+      probeId: parseIntOrNull(json['probeId']),
       containerId: (json['containerId'] as String?) ?? '',
       containerName: (json['containerName'] as String?) ?? '',
       image: (json['image'] as String?) ?? '',
       engine: (json['engine'] as String?) ?? 'postgres',
-      running: json['running'] == true || json['state'] == 'running',
+      running: parseBool(json['running']) || json['state'] == 'running',
       project: json['project'] as String? ?? json['projectName'] as String?,
-      existingConnectionId: (json['existingConnectionId'] as num?)?.toInt(),
+      existingConnectionId: parseIntOrNull(json['existingConnectionId']),
     );
   }
 }
@@ -232,25 +232,13 @@ class DatabaseContainersResponse {
   final List<DatabaseContainerIssue> issues;
 
   factory DatabaseContainersResponse.fromJson(Map<String, dynamic> json) {
-    final rawContainers = json['containers'];
-    final rawIssues = json['issues'];
     return DatabaseContainersResponse(
-      containers: rawContainers is List
-          ? List<DatabaseContainer>.unmodifiable(
-              rawContainers.whereType<Map>().map(
-                (e) => DatabaseContainer.fromJson(Map<String, dynamic>.from(e)),
-              ),
-            )
-          : const <DatabaseContainer>[],
-      issues: rawIssues is List
-          ? List<DatabaseContainerIssue>.unmodifiable(
-              rawIssues.whereType<Map>().map(
-                (e) => DatabaseContainerIssue.fromJson(
-                  Map<String, dynamic>.from(e),
-                ),
-              ),
-            )
-          : const <DatabaseContainerIssue>[],
+      containers: List<DatabaseContainer>.unmodifiable(
+        asJsonList(json['containers'], DatabaseContainer.fromJson),
+      ),
+      issues: List<DatabaseContainerIssue>.unmodifiable(
+        asJsonList(json['issues'], DatabaseContainerIssue.fromJson),
+      ),
     );
   }
 }
@@ -274,9 +262,9 @@ class CandidateAddress {
   factory CandidateAddress.fromJson(Map<String, dynamic> json) {
     return CandidateAddress(
       host: (json['host'] as String?) ?? '',
-      port: (json['port'] as num?)?.toInt() ?? 5432,
+      port: parseIntOrNull(json['port']) ?? 5432,
       kind: (json['kind'] as String?) ?? '',
-      viaProbeId: (json['viaProbeId'] as num?)?.toInt(),
+      viaProbeId: parseIntOrNull(json['viaProbeId']),
       label: json['label'] as String?,
     );
   }
@@ -297,12 +285,11 @@ class AddressAttempt {
   final String? error;
 
   factory AddressAttempt.fromJson(Map<String, dynamic> json) {
-    final rawAddr = json['address'];
-    final addrMap = rawAddr is Map ? Map<String, dynamic>.from(rawAddr) : json;
+    final addrMap = json['address'] is Map ? asJsonMap(json['address']) : json;
     return AddressAttempt(
       host: (addrMap['host'] as String?) ?? '',
-      port: (addrMap['port'] as num?)?.toInt() ?? 0,
-      ok: json['ok'] == true || json['reachable'] == true,
+      port: parseIntOrNull(addrMap['port']) ?? 0,
+      ok: parseBool(json['ok']) || parseBool(json['reachable']),
       error: json['error'] as String? ?? json['reason'] as String?,
     );
   }
@@ -327,13 +314,9 @@ class DatabaseContainerResolution {
   final List<AddressAttempt> attempts;
 
   factory DatabaseContainerResolution.fromJson(Map<String, dynamic> json) {
-    final rawAddrs = json['addresses'];
-    final rawAttempts = json['attempts'];
     return DatabaseContainerResolution(
       container: json['container'] is Map
-          ? DatabaseContainer.fromJson(
-              Map<String, dynamic>.from(json['container'] as Map),
-            )
+          ? DatabaseContainer.fromJson(asJsonMap(json['container']))
           : const DatabaseContainer(
               hostKey: '',
               hostName: '',
@@ -345,25 +328,15 @@ class DatabaseContainerResolution {
             ),
       username: json['username'] as String?,
       database: json['database'] as String?,
-      addresses: rawAddrs is List
-          ? List<CandidateAddress>.unmodifiable(
-              rawAddrs.whereType<Map>().map(
-                (e) => CandidateAddress.fromJson(Map<String, dynamic>.from(e)),
-              ),
-            )
-          : const <CandidateAddress>[],
+      addresses: List<CandidateAddress>.unmodifiable(
+        asJsonList(json['addresses'], CandidateAddress.fromJson),
+      ),
       chosen: json['chosen'] is Map
-          ? CandidateAddress.fromJson(
-              Map<String, dynamic>.from(json['chosen'] as Map),
-            )
+          ? CandidateAddress.fromJson(asJsonMap(json['chosen']))
           : null,
-      attempts: rawAttempts is List
-          ? List<AddressAttempt>.unmodifiable(
-              rawAttempts.whereType<Map>().map(
-                (e) => AddressAttempt.fromJson(Map<String, dynamic>.from(e)),
-              ),
-            )
-          : const <AddressAttempt>[],
+      attempts: List<AddressAttempt>.unmodifiable(
+        asJsonList(json['attempts'], AddressAttempt.fromJson),
+      ),
     );
   }
 }
@@ -381,13 +354,10 @@ class DatabaseProbeResponse {
   final List<String> databases;
 
   factory DatabaseProbeResponse.fromJson(Map<String, dynamic> json) {
-    final rawDbs = json['databases'];
     return DatabaseProbeResponse(
-      latencyMs: (json['latencyMs'] as num?)?.toDouble() ?? 0,
+      latencyMs: parseDoubleOrNull(json['latencyMs']) ?? 0,
       version: (json['version'] as String?) ?? '',
-      databases: rawDbs is List
-          ? List<String>.unmodifiable(rawDbs.whereType<String>())
-          : const <String>[],
+      databases: List<String>.unmodifiable(asStringList(json['databases'])),
     );
   }
 }
@@ -431,23 +401,20 @@ class DatabaseBackupResponse {
   final String? finishedAt;
 
   factory DatabaseBackupResponse.fromJson(Map<String, dynamic> json) {
-    final rawWarn = json['warnings'];
     return DatabaseBackupResponse(
-      id: (json['id'] as num?)?.toInt() ?? 0,
-      connectionId: (json['connectionId'] as num?)?.toInt() ?? 0,
+      id: parseIntOrNull(json['id']) ?? 0,
+      connectionId: parseIntOrNull(json['connectionId']) ?? 0,
       databaseName: (json['databaseName'] as String?) ?? '',
-      storageDestinationId: (json['storageDestinationId'] as num?)?.toInt(),
+      storageDestinationId: parseIntOrNull(json['storageDestinationId']),
       objectKey: json['objectKey'] as String?,
-      sizeBytes: (json['sizeBytes'] as num?)?.toInt() ?? 0,
+      sizeBytes: parseIntOrNull(json['sizeBytes']) ?? 0,
       checksum: json['checksum'] as String?,
-      tables: (json['tables'] as num?)?.toInt() ?? 0,
-      rows: (json['rows'] as num?)?.toInt() ?? 0,
-      durationMs: (json['durationMs'] as num?)?.toInt() ?? 0,
+      tables: parseIntOrNull(json['tables']) ?? 0,
+      rows: parseIntOrNull(json['rows']) ?? 0,
+      durationMs: parseIntOrNull(json['durationMs']) ?? 0,
       status: (json['status'] as String?) ?? 'running',
       error: json['error'] as String?,
-      warnings: rawWarn is List
-          ? List<String>.unmodifiable(rawWarn.whereType<String>())
-          : const <String>[],
+      warnings: List<String>.unmodifiable(asStringList(json['warnings'])),
       trigger: (json['trigger'] as String?) ?? 'manual',
       startedAt: (json['startedAt'] as String?) ?? '',
       finishedAt: json['finishedAt'] as String?,
@@ -492,24 +459,24 @@ class DatabaseJobSnapshot {
   static DatabaseJobSnapshot? tryFromJson(Map<String, dynamic> json) {
     final id = json['id'];
     final kind = json['kind'];
-    final connId = json['connectionId'];
+    final connId = parseIntOrNull(json['connectionId']);
     final status = json['status'];
     if (id is! String ||
         (kind != 'backup' && kind != 'restore') ||
-        connId is! num ||
+        connId == null ||
         status is! String) {
       return null;
     }
     return DatabaseJobSnapshot(
       id: id,
       kind: kind as String,
-      connectionId: connId.toInt(),
+      connectionId: connId,
       database: json['database'] as String?,
       stage: (json['stage'] as String?) ?? '',
-      rows: (json['rows'] as num?)?.toInt() ?? 0,
-      bytes: (json['bytes'] as num?)?.toInt() ?? 0,
-      databasesDone: (json['databasesDone'] as num?)?.toInt() ?? 0,
-      databasesTotal: (json['databasesTotal'] as num?)?.toInt() ?? 0,
+      rows: parseIntOrNull(json['rows']) ?? 0,
+      bytes: parseIntOrNull(json['bytes']) ?? 0,
+      databasesDone: parseIntOrNull(json['databasesDone']) ?? 0,
+      databasesTotal: parseIntOrNull(json['databasesTotal']) ?? 0,
       status: status,
       message: json['message'] as String?,
       startedAt: (json['startedAt'] as String?) ?? '',
@@ -539,147 +506,4 @@ class DatabaseRestoreInput {
     if (confirmDatabase != null && confirmDatabase!.isNotEmpty)
       'confirmDatabase': confirmDatabase,
   };
-}
-
-/// Informações do banco de dados interno do NetMonitor (`GET /api/settings/database-size`).
-@immutable
-class DatabaseInfo {
-  const DatabaseInfo({
-    required this.dbType,
-    required this.sizeBytes,
-    this.earliestRecord,
-    this.latestRecord,
-  });
-
-  final String dbType; // 'sqlite' | 'postgres'
-  final int sizeBytes;
-  final String? earliestRecord;
-  final String? latestRecord;
-
-  String get displayType =>
-      dbType.toLowerCase() == 'postgres' ? 'PostgreSQL' : 'SQLite';
-
-  factory DatabaseInfo.fromJson(Map<String, dynamic> json) {
-    final rawSize = json['sizeBytes'];
-    final size = rawSize is num
-        ? rawSize.toInt()
-        : int.tryParse(rawSize?.toString() ?? '0') ?? 0;
-    return DatabaseInfo(
-      dbType: (json['dbType'] as String?) ?? 'sqlite',
-      sizeBytes: size,
-      earliestRecord: json['earliestRecord'] as String?,
-      latestRecord: json['latestRecord'] as String?,
-    );
-  }
-}
-
-@immutable
-class TableUsage {
-  const TableUsage({
-    required this.table,
-    required this.label,
-    required this.area,
-    required this.areaTitle,
-    required this.totalBytes,
-    required this.dataBytes,
-    required this.indexBytes,
-    required this.rows,
-    required this.rowsEstimated,
-    this.retentionDays,
-  });
-
-  final String table;
-  final String label;
-  final String area;
-  final String areaTitle;
-  final int totalBytes;
-  final int dataBytes;
-  final int indexBytes;
-  final int rows;
-  final bool rowsEstimated;
-  final int? retentionDays;
-
-  factory TableUsage.fromJson(Map<String, dynamic> json) {
-    return TableUsage(
-      table: (json['table'] as String?) ?? '',
-      label: (json['label'] as String?) ?? (json['table'] as String?) ?? '',
-      area: (json['area'] as String?) ?? 'core',
-      areaTitle: (json['areaTitle'] as String?) ?? 'Núcleo',
-      totalBytes: (json['totalBytes'] as num?)?.toInt() ?? 0,
-      dataBytes: (json['dataBytes'] as num?)?.toInt() ?? 0,
-      indexBytes: (json['indexBytes'] as num?)?.toInt() ?? 0,
-      rows: (json['rows'] as num?)?.toInt() ?? 0,
-      rowsEstimated: json['rowsEstimated'] == true,
-      retentionDays: (json['retentionDays'] as num?)?.toInt(),
-    );
-  }
-}
-
-@immutable
-class DatabaseUsageSection {
-  const DatabaseUsageSection({
-    required this.kind,
-    required this.title,
-    required this.name,
-    required this.sizeBytes,
-    required this.otherBytes,
-    required this.detailAvailable,
-    required this.tables,
-  });
-
-  final String kind; // 'main' | 'logs'
-  final String title;
-  final String name;
-  final int sizeBytes;
-  final int otherBytes;
-  final bool detailAvailable;
-  final List<TableUsage> tables;
-
-  factory DatabaseUsageSection.fromJson(Map<String, dynamic> json) {
-    final rawTables = json['tables'];
-    return DatabaseUsageSection(
-      kind: (json['kind'] as String?) ?? 'main',
-      title: (json['title'] as String?) ?? '',
-      name: (json['name'] as String?) ?? '',
-      sizeBytes: (json['sizeBytes'] as num?)?.toInt() ?? 0,
-      otherBytes: (json['otherBytes'] as num?)?.toInt() ?? 0,
-      detailAvailable: json['detailAvailable'] != false,
-      tables: rawTables is List
-          ? List<TableUsage>.unmodifiable(
-              rawTables.whereType<Map>().map(
-                (e) => TableUsage.fromJson(Map<String, dynamic>.from(e)),
-              ),
-            )
-          : const <TableUsage>[],
-    );
-  }
-}
-
-@immutable
-class DatabaseUsage {
-  const DatabaseUsage({
-    required this.dbType,
-    required this.totalBytes,
-    required this.databases,
-  });
-
-  final String dbType;
-  final int totalBytes;
-  final List<DatabaseUsageSection> databases;
-
-  factory DatabaseUsage.fromJson(Map<String, dynamic> json) {
-    final rawDbs = json['databases'];
-    return DatabaseUsage(
-      dbType: (json['dbType'] as String?) ?? 'sqlite',
-      totalBytes: (json['totalBytes'] as num?)?.toInt() ?? 0,
-      databases: rawDbs is List
-          ? List<DatabaseUsageSection>.unmodifiable(
-              rawDbs.whereType<Map>().map(
-                (e) =>
-                    DatabaseUsageSection.fromJson(Map<String, dynamic>.from(e)),
-              ),
-            )
-          : const <DatabaseUsageSection>[],
-    );
-  }
 }

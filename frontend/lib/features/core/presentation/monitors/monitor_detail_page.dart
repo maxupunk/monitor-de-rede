@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
-import 'package:netmonitor_app/core/network/api_client.dart';
 import 'package:netmonitor_app/core/realtime/sse_service.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 import 'package:netmonitor_app/features/core/models/alert_models.dart';
 import 'package:netmonitor_app/features/core/models/event_models.dart';
 import 'package:netmonitor_app/features/core/models/monitor_models.dart';
@@ -82,7 +82,7 @@ class _MonitorDetailViewState extends ConsumerState<MonitorDetailView> {
         'alert:silenced',
       ],
       (data, _) {
-        final monId = (data['monitorId'] as num?)?.toInt();
+        final monId = parseIntOrNull(data['monitorId']);
         if (monId == widget.monitorId && _alertsExpanded && mounted) {
           _loadAlerts(page: 1, append: false);
         }
@@ -126,37 +126,15 @@ class _MonitorDetailViewState extends ConsumerState<MonitorDetailView> {
   Future<void> _loadHistory({int page = 1, bool append = false}) async {
     setState(() => _historyLoading = true);
     try {
-      final raw = await ref
-          .read(apiClientProvider)
-          .get<dynamic>(
-            '/monitors/${widget.monitorId}/results',
-            queryParameters: <String, dynamic>{'page': page, 'limit': 30},
-          );
-      List<MonitorResult> items = const <MonitorResult>[];
-      PaginationMeta? meta;
-      if (raw is Map) {
-        final list = raw['data'] is List ? raw['data'] as List : const [];
-        items = list
-            .whereType<Map>()
-            .map((e) => MonitorResult.fromJson(Map<String, dynamic>.from(e)))
-            .toList(growable: false);
-        if (raw['meta'] is Map) {
-          meta = PaginationMeta.fromJson(
-            Map<String, dynamic>.from(raw['meta'] as Map),
-          );
-        }
-      } else if (raw is List) {
-        items = raw
-            .whereType<Map>()
-            .map((e) => MonitorResult.fromJson(Map<String, dynamic>.from(e)))
-            .toList(growable: false);
-      }
+      final res = await ref
+          .read(monitorsProvider.notifier)
+          .fetchMonitorResultsPage(widget.monitorId, page: page, limit: 30);
       if (!mounted) return;
       setState(() {
         _historyResults = append
-            ? <MonitorResult>[..._historyResults, ...items]
-            : items;
-        _historyMeta = meta;
+            ? <MonitorResult>[..._historyResults, ...res.data]
+            : res.data;
+        _historyMeta = res.meta;
         _historyLoading = false;
       });
     } catch (_) {
@@ -167,37 +145,15 @@ class _MonitorDetailViewState extends ConsumerState<MonitorDetailView> {
   Future<void> _loadAlerts({int page = 1, bool append = false}) async {
     setState(() => _alertsLoading = true);
     try {
-      final raw = await ref
-          .read(apiClientProvider)
-          .get<dynamic>(
-            '/monitors/${widget.monitorId}/alerts',
-            queryParameters: <String, dynamic>{'page': page, 'limit': 25},
-          );
-      List<AlertEvent> items = const <AlertEvent>[];
-      PaginationMeta? meta;
-      if (raw is Map) {
-        final list = raw['data'] is List ? raw['data'] as List : const [];
-        items = list
-            .whereType<Map>()
-            .map((e) => AlertEvent.fromJson(Map<String, dynamic>.from(e)))
-            .toList(growable: false);
-        if (raw['meta'] is Map) {
-          meta = PaginationMeta.fromJson(
-            Map<String, dynamic>.from(raw['meta'] as Map),
-          );
-        }
-      } else if (raw is List) {
-        items = raw
-            .whereType<Map>()
-            .map((e) => AlertEvent.fromJson(Map<String, dynamic>.from(e)))
-            .toList(growable: false);
-      }
+      final res = await ref
+          .read(monitorsProvider.notifier)
+          .fetchMonitorAlertsPage(widget.monitorId, page: page, limit: 25);
       if (!mounted) return;
       setState(() {
         _monitorAlerts = append
-            ? <AlertEvent>[..._monitorAlerts, ...items]
-            : items;
-        _alertsMeta = meta;
+            ? <AlertEvent>[..._monitorAlerts, ...res.data]
+            : res.data;
+        _alertsMeta = res.meta;
         _alertsLoading = false;
       });
     } catch (_) {

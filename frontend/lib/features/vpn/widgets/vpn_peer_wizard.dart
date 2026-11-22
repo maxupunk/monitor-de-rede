@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/utils/form_validators.dart';
-import 'package:netmonitor_app/features/vpn/data/vpn_repository.dart';
 import 'package:netmonitor_app/features/vpn/models/vpn_models.dart';
 import 'package:netmonitor_app/features/vpn/providers/vpn_provider.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
@@ -103,7 +102,7 @@ class _VpnPeerWizardBodyState extends ConsumerState<_VpnPeerWizardBody> {
 
   Future<void> _loadSuggestedPolicy() async {
     final policy = await ref
-        .read(vpnRepositoryProvider)
+        .read(vpnProvider.notifier)
         .fetchSuggestedAgentPolicy();
     if (!mounted) return;
     setState(() {

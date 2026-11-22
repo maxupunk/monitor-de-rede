@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 
 @immutable
 class OnboardingStatus {
@@ -52,9 +53,9 @@ class OnboardingStatus {
       completedAt: json['completedAt'] as String?,
       needsOnboarding: json['needsOnboarding'] == true,
       intentChosen: json['intentChosen'] == true,
-      sitesCount: (json['sitesCount'] as num?)?.toInt() ?? 0,
-      networksCount: (json['networksCount'] as num?)?.toInt() ?? 0,
-      dnsServersCount: (json['dnsServersCount'] as num?)?.toInt() ?? 0,
+      sitesCount: parseIntOrNull(json['sitesCount']) ?? 0,
+      networksCount: parseIntOrNull(json['networksCount']) ?? 0,
+      dnsServersCount: parseIntOrNull(json['dnsServersCount']) ?? 0,
       vpnConfigured: json['vpnConfigured'] == true,
       detectedLanIp: json['detectedLanIp'] as String?,
       detectedPublicIp: json['detectedPublicIp'] as String?,
@@ -83,7 +84,7 @@ class SystemPreferences {
   factory SystemPreferences.fromJson(Map<String, dynamic> json) {
     return SystemPreferences(
       defaultPingIntervalSeconds:
-          (json['defaultPingIntervalSeconds'] as num?)?.toInt() ?? 60,
+          parseIntOrNull(json['defaultPingIntervalSeconds']) ?? 60,
       defaultSnmpCommunity: (json['defaultSnmpCommunity'] ?? 'public')
           .toString(),
       autoDiscoveryEnabled: json['autoDiscoveryEnabled'] != false,
@@ -170,7 +171,7 @@ class SnmpProfileSensor {
       label: (json['label'] ?? '').toString(),
       oid: (json['oid'] ?? '').toString(),
       unit: json['unit'] as String?,
-      scale: (json['scale'] as num?)?.toDouble(),
+      scale: parseDoubleOrNull(json['scale']),
       category: json['category'] as String?,
       dataType: (json['dataType'] ?? 'float').toString(),
       description: json['description'] as String?,
@@ -213,9 +214,6 @@ class SnmpDeviceProfile {
   };
 
   factory SnmpDeviceProfile.fromJson(Map<String, dynamic> json) {
-    final rawSensors = json['sensors'] is List
-        ? json['sensors'] as List
-        : const [];
     return SnmpDeviceProfile(
       id: (json['id'] ?? '').toString(),
       name: (json['name'] ?? '').toString(),
@@ -223,10 +221,10 @@ class SnmpDeviceProfile {
       category: (json['category'] ?? '').toString(),
       sysObjectIdPrefix: json['sysObjectIdPrefix'] as String?,
       sysDescrPattern: json['sysDescrPattern'] as String?,
-      sensors: rawSensors
-          .whereType<Map>()
-          .map((e) => SnmpProfileSensor.fromJson(Map<String, dynamic>.from(e)))
-          .toList(growable: false),
+      sensors: asJsonList<SnmpProfileSensor>(
+        json['sensors'],
+        SnmpProfileSensor.fromJson,
+      ),
       isBuiltin: json['isBuiltin'] == true,
     );
   }
@@ -260,66 +258,6 @@ class OperatingSystemOption {
 }
 
 @immutable
-class VendorRegistryStatus {
-  const VendorRegistryStatus({
-    required this.entries,
-    this.updatedAt,
-    required this.builtinEntries,
-    required this.stale,
-    required this.autoUpdate,
-    required this.updating,
-    required this.sources,
-  });
-
-  final int entries;
-  final String? updatedAt;
-  final int builtinEntries;
-  final bool stale;
-  final bool autoUpdate;
-  final bool updating;
-  final List<String> sources;
-
-  factory VendorRegistryStatus.fromJson(Map<String, dynamic> json) {
-    final rawSources = json['sources'] is List
-        ? json['sources'] as List
-        : const [];
-    return VendorRegistryStatus(
-      entries: (json['entries'] as num?)?.toInt() ?? 0,
-      updatedAt: json['updatedAt'] as String?,
-      builtinEntries: (json['builtinEntries'] as num?)?.toInt() ?? 0,
-      stale: json['stale'] == true,
-      autoUpdate: json['autoUpdate'] == true,
-      updating: json['updating'] == true,
-      sources: rawSources.map((e) => e.toString()).toList(growable: false),
-    );
-  }
-}
-
-@immutable
-class MacVendorLookup {
-  const MacVendorLookup({
-    this.vendor,
-    this.organization,
-    required this.source,
-    required this.locallyAdministered,
-  });
-
-  final String? vendor;
-  final String? organization;
-  final String source;
-  final bool locallyAdministered;
-
-  factory MacVendorLookup.fromJson(Map<String, dynamic> json) {
-    return MacVendorLookup(
-      vendor: json['vendor'] as String?,
-      organization: json['organization'] as String?,
-      source: (json['source'] ?? 'none').toString(),
-      locallyAdministered: json['locallyAdministered'] == true,
-    );
-  }
-}
-
-@immutable
 class PushStatusModel {
   const PushStatusModel({
     required this.enabled,
@@ -335,102 +273,7 @@ class PushStatusModel {
     return PushStatusModel(
       enabled: json['enabled'] == true,
       configured: json['configured'] == true,
-      subscriptionCount: (json['subscriptionCount'] as num?)?.toInt() ?? 0,
-    );
-  }
-}
-
-@immutable
-class DatabaseSizeInfo {
-  const DatabaseSizeInfo({
-    required this.engine,
-    required this.totalBytes,
-    this.logsBytes,
-    this.path,
-  });
-
-  final String engine;
-  final int totalBytes;
-  final int? logsBytes;
-  final String? path;
-
-  factory DatabaseSizeInfo.fromJson(Map<String, dynamic> json) {
-    return DatabaseSizeInfo(
-      engine: (json['engine'] ?? json['driver'] ?? 'database').toString(),
-      totalBytes:
-          ((json['totalBytes'] ?? json['sizeBytes'] ?? json['size']) as num?)
-              ?.toInt() ??
-          0,
-      logsBytes: (json['logsBytes'] as num?)?.toInt(),
-      path: json['path'] as String?,
-    );
-  }
-}
-
-@immutable
-class DatabaseTableUsage {
-  const DatabaseTableUsage({
-    required this.name,
-    required this.rows,
-    required this.bytes,
-    this.database,
-  });
-
-  final String name;
-  final int rows;
-  final int bytes;
-  final String? database;
-
-  factory DatabaseTableUsage.fromJson(Map<String, dynamic> json) {
-    return DatabaseTableUsage(
-      name: (json['name'] ?? json['table'] ?? '').toString(),
-      rows: (json['rows'] as num?)?.toInt() ?? 0,
-      bytes:
-          ((json['bytes'] ?? json['totalBytes'] ?? json['sizeBytes']) as num?)
-              ?.toInt() ??
-          0,
-      database: json['database'] as String?,
-    );
-  }
-}
-
-@immutable
-class DatabaseUsageModel {
-  const DatabaseUsageModel({required this.totalBytes, required this.tables});
-
-  final int totalBytes;
-  final List<DatabaseTableUsage> tables;
-
-  factory DatabaseUsageModel.fromJson(Map<String, dynamic> json) {
-    final tables = <DatabaseTableUsage>[];
-    if (json['tables'] is List) {
-      for (final item in json['tables'] as List) {
-        if (item is Map) {
-          tables.add(
-            DatabaseTableUsage.fromJson(Map<String, dynamic>.from(item)),
-          );
-        }
-      }
-    } else if (json['databases'] is List) {
-      for (final db in json['databases'] as List) {
-        if (db is Map && db['tables'] is List) {
-          final dbName = db['name']?.toString();
-          for (final t in db['tables'] as List) {
-            if (t is Map) {
-              final map = Map<String, dynamic>.from(t);
-              if (dbName != null) map['database'] = dbName;
-              tables.add(DatabaseTableUsage.fromJson(map));
-            }
-          }
-        }
-      }
-    }
-    final total =
-        (json['totalBytes'] as num?)?.toInt() ??
-        tables.fold<int>(0, (acc, t) => acc + t.bytes);
-    return DatabaseUsageModel(
-      totalBytes: total,
-      tables: List.unmodifiable(tables),
+      subscriptionCount: parseIntOrNull(json['subscriptionCount']) ?? 0,
     );
   }
 }

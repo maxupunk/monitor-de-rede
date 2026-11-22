@@ -52,29 +52,10 @@ class _VpnDevicesPageState extends ConsumerState<VpnDevicesPage> {
   }
 
   Future<void> _renamePeer(VpnPeer peer) async {
-    final ctrl = TextEditingController(text: peer.displayName);
     final newName = await showDialog<String>(
       context: context,
-      builder: (dialogCtx) => AlertDialog(
-        title: const Text('Renomear dispositivo VPN'),
-        content: TextField(
-          controller: ctrl,
-          autofocus: true,
-          decoration: const InputDecoration(labelText: 'Nome'),
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(dialogCtx).pop(),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogCtx).pop(ctrl.text.trim()),
-            child: const Text('Salvar'),
-          ),
-        ],
-      ),
+      builder: (_) => _RenamePeerDialog(initialName: peer.displayName),
     );
-    ctrl.dispose();
     if (newName == null || newName.isEmpty || newName == peer.displayName) {
       return;
     }
@@ -527,6 +508,53 @@ class _VpnDevicesPageState extends ConsumerState<VpnDevicesPage> {
               );
             },
           ),
+      ],
+    );
+  }
+}
+
+class _RenamePeerDialog extends StatefulWidget {
+  const _RenamePeerDialog({required this.initialName});
+
+  final String initialName;
+
+  @override
+  State<_RenamePeerDialog> createState() => _RenamePeerDialogState();
+}
+
+class _RenamePeerDialogState extends State<_RenamePeerDialog> {
+  late final TextEditingController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: widget.initialName);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Renomear dispositivo VPN'),
+      content: TextField(
+        controller: _ctrl,
+        autofocus: true,
+        decoration: const InputDecoration(labelText: 'Nome'),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(_ctrl.text.trim()),
+          child: const Text('Salvar'),
+        ),
       ],
     );
   }

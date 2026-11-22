@@ -1,9 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/network/models/site_network_models.dart';
-import 'package:netmonitor_app/features/network/models/topology_models.dart';
 import 'package:netmonitor_app/features/network/topology/engine/topology_engine.dart';
+import 'package:netmonitor_app/features/network/topology/widgets/topology_hud_pills.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
+
+export 'package:netmonitor_app/features/network/topology/widgets/topology_helpers.dart'
+    show resolvePathNodeNames;
+export 'package:netmonitor_app/features/network/topology/widgets/topology_hud_pills.dart';
 
 /// Ações disponíveis no menu de contexto do HUD da topologia.
 enum TopologyHudAction {
@@ -114,7 +119,6 @@ class TopologyHud extends StatelessWidget {
 
     return Stack(
       children: <Widget>[
-        // ── Barra superior + pílulas informativas (deixa ~88%+ do mobile livre) ──
         Positioned(
           top: 10,
           left: 10,
@@ -161,7 +165,7 @@ class TopologyHud extends StatelessWidget {
                 runSpacing: 6,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: <Widget>[
-                  _LiveStatusPill(
+                  TopologyLiveStatusPill(
                     summary: healthSummary,
                     onlyProblemsActive: filterSpec.onlyProblems,
                     offlineFilterActive: filterSpec.statuses.contains(
@@ -171,39 +175,54 @@ class TopologyHud extends StatelessWidget {
                     onTapOffline: onTapOffline,
                   ),
                   if (filterSpec.overlayMode != TopologyOverlayMode.status)
-                    _ActiveOverlayChip(
+                    TopologyActiveOverlayChip(
                       mode: filterSpec.overlayMode,
                       onClear: () =>
                           onOverlayChanged(TopologyOverlayMode.status),
                     ),
                   if (hasRemoteLayoutUpdate)
-                    _RemoteLayoutNoticePill(onReload: onReloadRemoteLayout),
+                    TopologyRemoteLayoutNoticePill(
+                      onReload: onReloadRemoteLayout,
+                    ),
                 ],
               ),
               if (linkPickingActive) ...<Widget>[
                 const SizedBox(height: 6),
-                _LinkPickingBanner(
-                  sourceName: linkPickingSourceName,
-                  onCancel: onCancelLinkPicking,
+                TopologyFloatingBanner(
+                  key: const ValueKey<String>('topology-link-picking-banner'),
+                  icon: Icons.add_link,
+                  tone: SemanticTone.primary,
+                  label: linkPickingSourceName != null
+                      ? 'Conectando $linkPickingSourceName → toque no equipamento destino no mapa'
+                      : 'Conectar no mapa → toque no equipamento de origem',
+                  actionLabel: onCancelLinkPicking != null ? 'Cancelar' : null,
+                  onAction: onCancelLinkPicking,
                 ),
               ] else if (pathPickingSourceName != null) ...<Widget>[
                 const SizedBox(height: 6),
-                _PathPickingBanner(
-                  sourceName: pathPickingSourceName!,
-                  onCancel: onCancelPathPicking,
+                TopologyFloatingBanner(
+                  icon: Icons.route,
+                  tone: SemanticTone.info,
+                  label:
+                      'Origem: $pathPickingSourceName — toque no nó de destino',
+                  actionLabel: 'Cancelar',
+                  onAction: onCancelPathPicking,
                 ),
               ] else if (activePath != null &&
                   activePath!.nodeIds.length >= 2) ...<Widget>[
                 const SizedBox(height: 6),
-                _PathTraceBanner(
-                  path: activePath!,
-                  nodeNames: pathNodeNames,
-                  onClose: onClearPath,
+                TopologyFloatingBanner(
+                  icon: Icons.alt_route,
+                  tone: SemanticTone.warning,
+                  label:
+                      'Caminho: ${pathNodeNames.isNotEmpty ? pathNodeNames.join(' → ') : activePath!.nodeIds.map((id) => '#$id').join(' → ')} (${countNoun(activePath!.hopCount, 'salto', 'saltos')})',
+                  actionLabel: 'Fechar',
+                  onAction: onClearPath,
                 ),
               ],
               if (hasUnsavedLayoutChanges) ...<Widget>[
                 const SizedBox(height: 6),
-                _UnsavedLayoutPill(
+                TopologyUnsavedLayoutPill(
                   saving: savingLayout,
                   canUndo: canUndoLayout,
                   movedCount: draggedNodeCount,
@@ -215,7 +234,7 @@ class TopologyHud extends StatelessWidget {
                 ),
               ] else if (canWrite && editLayoutEnabled) ...<Widget>[
                 const SizedBox(height: 6),
-                _EditModeHelperPill(
+                TopologyEditModeHelperPill(
                   snapToGrid: filterSpec.snapToGrid,
                   onToggleSnapToGrid: onToggleSnapToGrid,
                   onDone: onToggleEditLayout,
@@ -224,12 +243,10 @@ class TopologyHud extends StatelessWidget {
             ],
           ),
         ),
-
-        // ── Controles ergonômicos na zona do polegar (canto inferior direito) ──
         Positioned(
           right: 12 + rightInset,
           bottom: 12,
-          child: _ThumbZoneControls(
+          child: TopologyThumbZoneControls(
             editLayoutEnabled: editLayoutEnabled,
             canWrite: canWrite,
             overlayMode: filterSpec.overlayMode,
@@ -798,688 +815,4 @@ class _HudActionsMenu extends StatelessWidget {
       ],
     );
   }
-}
-
-class _LiveStatusPill extends StatelessWidget {
-  const _LiveStatusPill({
-    required this.summary,
-    required this.onlyProblemsActive,
-    required this.offlineFilterActive,
-    required this.onTapProblems,
-    required this.onTapOffline,
-  });
-
-  final TopologyHealthSummary summary;
-  final bool onlyProblemsActive;
-  final bool offlineFilterActive;
-  final VoidCallback onTapProblems;
-  final VoidCallback onTapOffline;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = context.colorScheme;
-    final sem = context.semanticColors;
-
-    return Material(
-      elevation: 2,
-      color: scheme.surface.withValues(alpha: 0.94),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(20),
-        side: BorderSide(color: scheme.outlineVariant),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-        child: Wrap(
-          spacing: 8,
-          runSpacing: 4,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: <Widget>[
-            _StatusDotSegment(
-              color: sem.success,
-              label: '${summary.online} online',
-            ),
-            InkWell(
-              onTap: onTapProblems,
-              borderRadius: BorderRadius.circular(12),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                decoration: onlyProblemsActive
-                    ? BoxDecoration(
-                        color: sem.warningContainer,
-                        borderRadius: BorderRadius.circular(12),
-                      )
-                    : null,
-                child: _StatusDotSegment(
-                  color: sem.warning,
-                  label:
-                      '${summary.warning} ${summary.warning == 1 ? 'alerta' : 'alertas'}',
-                  highlighted: onlyProblemsActive || summary.warning > 0,
-                  textColor: onlyProblemsActive ? sem.onWarningContainer : null,
-                ),
-              ),
-            ),
-            InkWell(
-              onTap: onTapOffline,
-              borderRadius: BorderRadius.circular(12),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                decoration: offlineFilterActive
-                    ? BoxDecoration(
-                        color: sem.errorContainer,
-                        borderRadius: BorderRadius.circular(12),
-                      )
-                    : null,
-                child: _StatusDotSegment(
-                  color: sem.error,
-                  label: '${summary.offline} off',
-                  highlighted: offlineFilterActive || summary.offline > 0,
-                  textColor: offlineFilterActive ? sem.onErrorContainer : null,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _StatusDotSegment extends StatelessWidget {
-  const _StatusDotSegment({
-    required this.color,
-    required this.label,
-    this.highlighted = false,
-    this.textColor,
-  });
-
-  final Color color;
-  final String label;
-  final bool highlighted;
-  final Color? textColor;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        Container(
-          width: 7,
-          height: 7,
-          decoration: BoxDecoration(shape: BoxShape.circle, color: color),
-        ),
-        const SizedBox(width: 5),
-        Text(
-          label,
-          style: context.textTheme.labelSmall?.copyWith(
-            fontWeight: highlighted ? FontWeight.w800 : FontWeight.w600,
-            color: textColor ?? context.colorScheme.onSurface,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _ActiveOverlayChip extends StatelessWidget {
-  const _ActiveOverlayChip({required this.mode, required this.onClear});
-
-  final TopologyOverlayMode mode;
-  final VoidCallback onClear;
-
-  @override
-  Widget build(BuildContext context) {
-    return SemanticChip(
-      label: 'Camada: ${mode.shortLabel}',
-      tone: SemanticTone.primary,
-      icon: mode.icon,
-      compact: true,
-      onTap: onClear,
-    );
-  }
-}
-
-class _RemoteLayoutNoticePill extends StatelessWidget {
-  const _RemoteLayoutNoticePill({required this.onReload});
-
-  final VoidCallback onReload;
-
-  @override
-  Widget build(BuildContext context) {
-    return SemanticChip(
-      label: 'Layout atualizado · Recarregar',
-      tone: SemanticTone.info,
-      icon: Icons.sync,
-      compact: true,
-      onTap: onReload,
-    );
-  }
-}
-
-class _LinkPickingBanner extends StatelessWidget {
-  const _LinkPickingBanner({this.sourceName, this.onCancel});
-
-  final String? sourceName;
-  final VoidCallback? onCancel;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = context.colorScheme;
-    final colors = context.semanticColors.resolve(SemanticTone.primary, scheme);
-    final label = sourceName != null
-        ? 'Conectando $sourceName → toque no equipamento destino no mapa'
-        : 'Conectar no mapa → toque no equipamento de origem';
-
-    return Material(
-      key: const ValueKey<String>('topology-link-picking-banner'),
-      elevation: 3,
-      color: colors.container,
-      shape: RoundedRectangleBorder(
-        borderRadius: AppTheme.borderRadius,
-        side: BorderSide(color: colors.border),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Icon(Icons.add_link, size: 17, color: colors.onContainer),
-            const SizedBox(width: 8),
-            Flexible(
-              child: Text(
-                label,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: context.textTheme.labelMedium?.copyWith(
-                  color: colors.onContainer,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-            if (onCancel != null) ...<Widget>[
-              const SizedBox(width: 8),
-              TextButton(
-                style: TextButton.styleFrom(
-                  foregroundColor: colors.onContainer,
-                  visualDensity: VisualDensity.compact,
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                ),
-                onPressed: onCancel,
-                child: const Text('Cancelar'),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _PathPickingBanner extends StatelessWidget {
-  const _PathPickingBanner({required this.sourceName, required this.onCancel});
-
-  final String sourceName;
-  final VoidCallback onCancel;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = context.colorScheme;
-    final colors = context.semanticColors.resolve(SemanticTone.info, scheme);
-
-    return Material(
-      elevation: 3,
-      color: colors.container,
-      shape: RoundedRectangleBorder(
-        borderRadius: AppTheme.borderRadius,
-        side: BorderSide(color: colors.border),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Icon(Icons.route, size: 17, color: colors.onContainer),
-            const SizedBox(width: 8),
-            Flexible(
-              child: Text(
-                'Origem: $sourceName — toque no nó de destino',
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: context.textTheme.labelMedium?.copyWith(
-                  color: colors.onContainer,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            TextButton(
-              style: TextButton.styleFrom(
-                foregroundColor: colors.onContainer,
-                visualDensity: VisualDensity.compact,
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-              ),
-              onPressed: onCancel,
-              child: const Text('Cancelar'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _PathTraceBanner extends StatelessWidget {
-  const _PathTraceBanner({
-    required this.path,
-    required this.nodeNames,
-    required this.onClose,
-  });
-
-  final TopologyPathResult path;
-  final List<String> nodeNames;
-  final VoidCallback onClose;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = context.colorScheme;
-    final colors = context.semanticColors.resolve(SemanticTone.warning, scheme);
-    final hops = path.hopCount;
-    final hopsLabel = '$hops ${hops == 1 ? 'salto' : 'saltos'}';
-    final chain = nodeNames.isNotEmpty
-        ? nodeNames.join(' → ')
-        : path.nodeIds.map((id) => '#$id').join(' → ');
-
-    return Material(
-      elevation: 3,
-      color: colors.container,
-      shape: RoundedRectangleBorder(
-        borderRadius: AppTheme.borderRadius,
-        side: BorderSide(color: colors.border),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Icon(Icons.alt_route, size: 17, color: colors.onContainer),
-            const SizedBox(width: 8),
-            Flexible(
-              child: Text(
-                'Caminho: $chain ($hopsLabel)',
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: context.textTheme.labelMedium?.copyWith(
-                  color: colors.onContainer,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            TextButton(
-              style: TextButton.styleFrom(
-                foregroundColor: colors.onContainer,
-                visualDensity: VisualDensity.compact,
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-              ),
-              onPressed: onClose,
-              child: const Text('Fechar'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _EditModeHelperPill extends StatelessWidget {
-  const _EditModeHelperPill({
-    required this.snapToGrid,
-    this.onToggleSnapToGrid,
-    required this.onDone,
-  });
-
-  final bool snapToGrid;
-  final VoidCallback? onToggleSnapToGrid;
-  final VoidCallback onDone;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = context.colorScheme;
-    final colors = context.semanticColors.resolve(SemanticTone.primary, scheme);
-
-    return Material(
-      elevation: 3,
-      color: scheme.surface.withValues(alpha: 0.96),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(24),
-        side: BorderSide(color: colors.foreground, width: 1.4),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-        child: Wrap(
-          spacing: 8,
-          runSpacing: 4,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: <Widget>[
-            Icon(Icons.open_with, size: 16, color: colors.foreground),
-            Text(
-              'Arraste os nós para mover',
-              style: context.textTheme.labelMedium?.copyWith(
-                fontWeight: FontWeight.w700,
-                color: scheme.onSurface,
-              ),
-            ),
-            if (onToggleSnapToGrid != null)
-              FilterChip(
-                visualDensity: VisualDensity.compact,
-                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                avatar: const Icon(Icons.grid_4x4, size: 14),
-                label: const Text('Grade'),
-                selected: snapToGrid,
-                onSelected: (_) => onToggleSnapToGrid!(),
-              ),
-            TextButton(
-              style: TextButton.styleFrom(
-                minimumSize: const Size(0, 30),
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                visualDensity: VisualDensity.compact,
-              ),
-              onPressed: onDone,
-              child: const Text('Concluir'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _UnsavedLayoutPill extends StatelessWidget {
-  const _UnsavedLayoutPill({
-    required this.saving,
-    required this.canUndo,
-    required this.movedCount,
-    required this.snapToGrid,
-    this.onToggleSnapToGrid,
-    required this.onSave,
-    this.onUndo,
-    required this.onDiscard,
-  });
-
-  final bool saving;
-  final bool canUndo;
-  final int movedCount;
-  final bool snapToGrid;
-  final VoidCallback? onToggleSnapToGrid;
-  final VoidCallback onSave;
-  final VoidCallback? onUndo;
-  final VoidCallback onDiscard;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = context.colorScheme;
-    final colors = context.semanticColors.resolve(SemanticTone.primary, scheme);
-
-    return Material(
-      elevation: 3,
-      color: scheme.surface,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(24),
-        side: BorderSide(color: colors.foreground, width: 1.5),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-        child: Wrap(
-          spacing: 8,
-          runSpacing: 4,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: <Widget>[
-            Icon(Icons.open_with, size: 16, color: colors.foreground),
-            Text(
-              'Layout editado',
-              style: context.textTheme.labelMedium?.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            if (movedCount > 0)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: colors.container,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Text(
-                  '$movedCount',
-                  style: context.textTheme.labelSmall?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    color: colors.onContainer,
-                  ),
-                ),
-              ),
-            if (onToggleSnapToGrid != null)
-              FilterChip(
-                visualDensity: VisualDensity.compact,
-                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                avatar: const Icon(Icons.grid_4x4, size: 14),
-                label: const Text('Grade'),
-                selected: snapToGrid,
-                onSelected: saving ? null : (_) => onToggleSnapToGrid!(),
-              ),
-            FilledButton(
-              style: FilledButton.styleFrom(
-                minimumSize: const Size(0, 32),
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                visualDensity: VisualDensity.compact,
-              ),
-              onPressed: saving ? null : onSave,
-              child: saving
-                  ? const SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Text('Salvar'),
-            ),
-            if (canUndo && onUndo != null)
-              OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(
-                  minimumSize: const Size(0, 32),
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                  visualDensity: VisualDensity.compact,
-                ),
-                onPressed: saving ? null : onUndo,
-                icon: const Icon(Icons.undo, size: 15),
-                label: const Text('Desfazer'),
-              ),
-            TextButton(
-              style: TextButton.styleFrom(
-                minimumSize: const Size(0, 32),
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                visualDensity: VisualDensity.compact,
-              ),
-              onPressed: saving ? null : onDiscard,
-              child: const Text('Descartar'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ThumbZoneControls extends StatelessWidget {
-  const _ThumbZoneControls({
-    required this.editLayoutEnabled,
-    required this.canWrite,
-    required this.overlayMode,
-    this.zoomListenable,
-    this.readZoomScale,
-    required this.onZoomIn,
-    required this.onZoomOut,
-    required this.onFitToScreen,
-    required this.onToggleEditLayout,
-    required this.onOverlayChanged,
-  });
-
-  final bool editLayoutEnabled;
-  final bool canWrite;
-  final TopologyOverlayMode overlayMode;
-  final Listenable? zoomListenable;
-  final double Function()? readZoomScale;
-  final VoidCallback onZoomIn;
-  final VoidCallback onZoomOut;
-  final VoidCallback onFitToScreen;
-  final VoidCallback onToggleEditLayout;
-  final ValueChanged<TopologyOverlayMode> onOverlayChanged;
-
-  Widget _buildZoomPercentPill(BuildContext context, ColorScheme scheme) {
-    final percent = ((readZoomScale?.call() ?? 1.0) * 100).round();
-    return Tooltip(
-      message: 'Zoom atual ($percent%) — toque para ajustar à tela',
-      child: InkWell(
-        onTap: onFitToScreen,
-        child: SizedBox(
-          width: 44,
-          height: 22,
-          child: Center(
-            child: Text(
-              '$percent%',
-              maxLines: 1,
-              softWrap: false,
-              style: context.textTheme.labelSmall?.copyWith(
-                fontSize: 10,
-                fontWeight: FontWeight.w800,
-                color: scheme.onSurfaceVariant,
-                fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = context.colorScheme;
-    final hasCustomOverlay = overlayMode != TopologyOverlayMode.status;
-
-    return Material(
-      elevation: 3,
-      color: scheme.surface.withValues(alpha: 0.96),
-      shadowColor: scheme.shadow.withValues(alpha: 0.24),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: scheme.outlineVariant),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          IconButton(
-            tooltip: 'Aproximar zoom (+)',
-            visualDensity: VisualDensity.compact,
-            icon: const Icon(Icons.zoom_in, size: 20),
-            onPressed: onZoomIn,
-          ),
-          if (zoomListenable != null && readZoomScale != null)
-            ListenableBuilder(
-              listenable: zoomListenable!,
-              builder: (context, _) => _buildZoomPercentPill(context, scheme),
-            )
-          else if (readZoomScale != null)
-            _buildZoomPercentPill(context, scheme),
-          IconButton(
-            tooltip: 'Afastar zoom (-)',
-            visualDensity: VisualDensity.compact,
-            icon: const Icon(Icons.zoom_out, size: 20),
-            onPressed: onZoomOut,
-          ),
-          IconButton(
-            tooltip: 'Ajustar à tela (0)',
-            visualDensity: VisualDensity.compact,
-            icon: const Icon(Icons.fit_screen_outlined, size: 20),
-            onPressed: onFitToScreen,
-          ),
-          const SizedBox(width: 34, child: Divider(height: 1)),
-          if (canWrite)
-            Tooltip(
-              message: editLayoutEnabled
-                  ? 'Bloquear posições'
-                  : 'Editar posições',
-              child: InkWell(
-                onTap: onToggleEditLayout,
-                child: Container(
-                  width: 40,
-                  height: 40,
-                  color: editLayoutEnabled
-                      ? scheme.primaryContainer
-                      : Colors.transparent,
-                  child: Icon(
-                    editLayoutEnabled
-                        ? Icons.lock_open_outlined
-                        : Icons.lock_outline,
-                    size: 20,
-                    color: editLayoutEnabled
-                        ? scheme.onPrimaryContainer
-                        : scheme.onSurface,
-                  ),
-                ),
-              ),
-            ),
-          PopupMenuButton<TopologyOverlayMode>(
-            tooltip: 'Camadas da topologia',
-            onSelected: onOverlayChanged,
-            itemBuilder: (_) => <PopupMenuEntry<TopologyOverlayMode>>[
-              for (final mode in TopologyOverlayMode.values)
-                PopupMenuItem<TopologyOverlayMode>(
-                  value: mode,
-                  child: ListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    leading: Icon(
-                      mode.icon,
-                      color: overlayMode == mode ? scheme.primary : null,
-                    ),
-                    title: Text(
-                      mode.label,
-                      style: TextStyle(
-                        fontWeight: overlayMode == mode
-                            ? FontWeight.w700
-                            : FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                ),
-            ],
-            child: Container(
-              width: 40,
-              height: 40,
-              color: hasCustomOverlay
-                  ? scheme.secondaryContainer
-                  : Colors.transparent,
-              child: Icon(
-                Icons.layers_outlined,
-                size: 20,
-                color: hasCustomOverlay
-                    ? scheme.onSecondaryContainer
-                    : scheme.onSurface,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Helper que resolve os nomes dos nós de um caminho para exibir no banner.
-List<String> resolvePathNodeNames(
-  TopologyPathResult? path,
-  List<TopologyNodeModel> nodes,
-) {
-  if (path == null || path.nodeIds.isEmpty) return const <String>[];
-  final byId = <int, TopologyNodeModel>{for (final n in nodes) n.id: n};
-  return path.nodeIds
-      .map((id) => byId[id]?.name ?? '#$id')
-      .toList(growable: false);
 }

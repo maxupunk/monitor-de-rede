@@ -1,4 +1,6 @@
 import 'package:flutter/foundation.dart';
+import 'package:netmonitor_app/core/utils/formatters.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 
 @immutable
 class MaintenanceWindow {
@@ -27,8 +29,8 @@ class MaintenanceWindow {
   final String updatedAt;
 
   String statusAt(DateTime now) {
-    final start = DateTime.tryParse(startsAt)?.toLocal();
-    final end = DateTime.tryParse(endsAt)?.toLocal();
+    final start = parseDateOrNull(startsAt);
+    final end = parseDateOrNull(endsAt);
     if (start == null || end == null) return 'scheduled';
     if (now.isBefore(start)) return 'scheduled';
     if (now.isAfter(end)) return 'ended';
@@ -37,14 +39,14 @@ class MaintenanceWindow {
 
   factory MaintenanceWindow.fromJson(Map<String, dynamic> json) {
     return MaintenanceWindow(
-      id: (json['id'] as num?)?.toInt() ?? 0,
-      siteId: (json['siteId'] as num?)?.toInt(),
-      deviceId: (json['deviceId'] as num?)?.toInt(),
+      id: parseIntOrNull(json['id']) ?? 0,
+      siteId: parseIntOrNull(json['siteId']),
+      deviceId: parseIntOrNull(json['deviceId']),
       name: (json['name'] ?? '').toString(),
       description: json['description'] as String?,
       startsAt: (json['startsAt'] ?? json['startTime'] ?? '').toString(),
       endsAt: (json['endsAt'] ?? json['endTime'] ?? '').toString(),
-      createdBy: (json['createdBy'] as num?)?.toInt(),
+      createdBy: parseIntOrNull(json['createdBy']),
       createdAt: (json['createdAt'] ?? '').toString(),
       updatedAt: (json['updatedAt'] ?? '').toString(),
     );
@@ -95,13 +97,11 @@ class ScheduledTask {
 
   factory ScheduledTask.fromJson(Map<String, dynamic> json) {
     return ScheduledTask(
-      id: (json['id'] as num?)?.toInt() ?? 0,
+      id: parseIntOrNull(json['id']) ?? 0,
       name: (json['name'] ?? '').toString(),
       description: json['description'] as String?,
       tool: (json['tool'] ?? '').toString(),
-      arguments: json['arguments'] is Map
-          ? Map<String, dynamic>.from(json['arguments'] as Map)
-          : const <String, dynamic>{},
+      arguments: asJsonMap(json['arguments']),
       cron: (json['cron'] ?? '').toString(),
       scheduleLabel: (json['scheduleLabel'] ?? json['cron'] ?? '').toString(),
       enabled: json['enabled'] != false,
@@ -110,7 +110,7 @@ class ScheduledTask {
       lastRunAt: json['lastRunAt'] as String?,
       lastStatus: json['lastStatus'] as String?,
       lastMessage: json['lastMessage'] as String?,
-      ownerId: (json['ownerId'] as num?)?.toInt(),
+      ownerId: parseIntOrNull(json['ownerId']),
       ownerName: json['ownerName'] as String?,
       running: json['running'] == true,
       createdAt: (json['createdAt'] ?? '').toString(),
@@ -147,9 +147,7 @@ class SchedulableTool {
       groupLabel: (json['groupLabel'] ?? json['group'] ?? 'Geral').toString(),
       kind: (json['kind'] ?? 'read').toString(),
       adminOnly: json['adminOnly'] == true,
-      parameters: json['parameters'] is Map
-          ? Map<String, dynamic>.from(json['parameters'] as Map)
-          : const <String, dynamic>{},
+      parameters: asJsonMap(json['parameters']),
     );
   }
 }
@@ -175,17 +173,11 @@ class ScheduledTaskPreview {
   final String? riskReason;
 
   factory ScheduledTaskPreview.fromJson(Map<String, dynamic> json) {
-    final rawErrors = json['errors'] is List
-        ? json['errors'] as List
-        : const [];
-    final rawNext = json['nextRuns'] is List
-        ? json['nextRuns'] as List
-        : const [];
     return ScheduledTaskPreview(
       valid: json['valid'] == true,
-      errors: rawErrors.map((e) => e.toString()).toList(growable: false),
+      errors: asStringList(json['errors']),
       scheduleLabel: json['scheduleLabel'] as String?,
-      nextRuns: rawNext.map((e) => e.toString()).toList(growable: false),
+      nextRuns: asStringList(json['nextRuns']),
       summary: json['summary'] as String?,
       risk: json['risk'] as String?,
       riskReason: json['riskReason'] as String?,
@@ -219,13 +211,13 @@ class ScheduledTaskRun {
 
   factory ScheduledTaskRun.fromJson(Map<String, dynamic> json) {
     return ScheduledTaskRun(
-      id: (json['id'] as num?)?.toInt() ?? 0,
-      taskId: (json['taskId'] as num?)?.toInt() ?? 0,
+      id: parseIntOrNull(json['id']) ?? 0,
+      taskId: parseIntOrNull(json['taskId']) ?? 0,
       trigger: (json['trigger'] ?? 'schedule').toString(),
       status: (json['status'] ?? 'unknown').toString(),
       startedAt: (json['startedAt'] ?? '').toString(),
       finishedAt: json['finishedAt'] as String?,
-      durationMs: (json['durationMs'] as num?)?.toInt(),
+      durationMs: parseIntOrNull(json['durationMs']),
       message: json['message'] as String?,
       result: json['result'],
     );

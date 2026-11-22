@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
 import 'package:netmonitor_app/core/utils/form_validators.dart';
 import 'package:netmonitor_app/features/core/models/monitor_models.dart';
 import 'package:netmonitor_app/features/core/providers/monitors_provider.dart';
@@ -530,7 +531,7 @@ class _SaasPresetsBodyState extends ConsumerState<_SaasPresetsBody> {
     } catch (err) {
       if (!mounted) return;
       setState(() {
-        _error = err.toString();
+        _error = describeError(err);
         _loading = false;
       });
     }
@@ -557,7 +558,7 @@ class _SaasPresetsBodyState extends ConsumerState<_SaasPresetsBody> {
       if (!mounted) return;
       setState(() {
         _saving = false;
-        _error = err.toString();
+        _error = describeError(err);
       });
     }
   }

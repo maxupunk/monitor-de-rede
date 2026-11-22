@@ -1,12 +1,13 @@
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/areas/area_contribution.dart';
 import 'package:netmonitor_app/core/navigation/nav_models.dart';
-import 'package:netmonitor_app/core/network/api_client.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
+import 'package:netmonitor_app/core/utils/mdi_icons.dart';
 import 'package:netmonitor_app/features/plugins/data/plugins_repository.dart';
 import 'package:netmonitor_app/features/plugins/models/plugin_models.dart';
 import 'package:netmonitor_app/features/plugins/providers/plugins_provider.dart';
-import 'package:netmonitor_app/features/vpn/models/vpn_models.dart';
 
 const int _batchesLimit = 15;
 
@@ -94,12 +95,6 @@ class PluginAppsNotifier extends Notifier<PluginAppsState> {
 
   PluginsRepository get _repo => ref.read(pluginsRepositoryProvider);
 
-  String _describe(Object err, String fallback) {
-    if (err is ApiException && err.message.isNotEmpty) return err.message;
-    if (err is NetworkException && err.message.isNotEmpty) return err.message;
-    return fallback;
-  }
-
   Future<void> fetchApps() async {
     try {
       final list = await _repo.fetchApps();
@@ -109,7 +104,7 @@ class PluginAppsNotifier extends Notifier<PluginAppsState> {
             (app) => NavApp(
               id: app.id,
               title: app.title,
-              icon: iconFromMdiName(app.icon),
+              icon: iconFromMdiName(app.icon, fallback: Icons.apps),
             ),
           )
           .toList(growable: false);
@@ -130,7 +125,7 @@ class PluginAppsNotifier extends Notifier<PluginAppsState> {
     } catch (err) {
       state = state.copyWith(
         loading: false,
-        error: _describe(err, 'Falha ao carregar o aplicativo.'),
+        error: describeError(err, fallback: 'Falha ao carregar o aplicativo.'),
       );
     }
   }
@@ -255,7 +250,10 @@ class PluginAppsNotifier extends Notifier<PluginAppsState> {
     } catch (err) {
       state = state.copyWith(
         identifying: false,
-        error: _describe(err, 'Falha ao identificar equipamentos.'),
+        error: describeError(
+          err,
+          fallback: 'Falha ao identificar equipamentos.',
+        ),
       );
       rethrow;
     }
@@ -302,14 +300,14 @@ class PluginAppsNotifier extends Notifier<PluginAppsState> {
   void applyBatchUpdated(Map<String, dynamic> data) {
     final raw = data['batch'];
     if (raw is! Map) return;
-    _upsertBatch(PluginBatchView.fromJson(Map<String, dynamic>.from(raw)));
+    _upsertBatch(PluginBatchView.fromJson(asJsonMap(raw)));
   }
 
   void applyRunStep(Map<String, dynamic> data) {
-    final runId = (data['runId'] as num?)?.toInt();
+    final runId = parseIntOrNull(data['runId']);
     final rawEntry = data['entry'];
     if (runId == null || rawEntry is! Map) return;
-    final entry = TranscriptEntry.fromJson(Map<String, dynamic>.from(rawEntry));
+    final entry = TranscriptEntry.fromJson(asJsonMap(rawEntry));
     state = state.copyWith(
       lastSteps: <int, TranscriptEntry>{...state.lastSteps, runId: entry},
     );

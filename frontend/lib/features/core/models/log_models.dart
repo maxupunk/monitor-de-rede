@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
 
 @immutable
@@ -47,23 +48,20 @@ class LogEntry {
   }
 
   factory LogEntry.fromJson(Map<String, dynamic> json) {
-    final rawTopics = json['topics'] is List
-        ? json['topics'] as List
-        : const [];
     return LogEntry(
-      id: (json['id'] as num?)?.toInt() ?? 0,
-      deviceId: (json['deviceId'] as num?)?.toInt(),
+      id: parseIntOrNull(json['id']) ?? 0,
+      deviceId: parseIntOrNull(json['deviceId']),
       deviceName: json['deviceName'] as String?,
       sourceIp: (json['sourceIp'] ?? '').toString(),
       receivedAt: (json['receivedAt'] ?? '').toString(),
       deviceTime: json['deviceTime'] as String?,
-      facility: (json['facility'] as num?)?.toInt(),
-      severity: (json['severity'] as num?)?.toInt(),
+      facility: parseIntOrNull(json['facility']),
+      severity: parseIntOrNull(json['severity']),
       severityLabel: json['severityLabel'] as String?,
       hostname: json['hostname'] as String?,
       appName: json['appName'] as String?,
-      pid: (json['pid'] as num?)?.toInt(),
-      topics: rawTopics.map((e) => e.toString()).toList(growable: false),
+      pid: parseIntOrNull(json['pid']),
+      topics: asStringList(json['topics']),
       message: (json['message'] ?? '').toString(),
       templateHash: json['templateHash'] as String?,
     );
@@ -96,7 +94,7 @@ class LogTemplateInfo {
 
   static LogTemplateInfo? tryFromJson(Object? raw) {
     if (raw is! Map) return null;
-    final json = Map<String, dynamic>.from(raw);
+    final json = asJsonMap(raw);
     final hash = json['templateHash'] as String?;
     if (hash == null || hash.isEmpty) return null;
     return LogTemplateInfo(
@@ -104,7 +102,7 @@ class LogTemplateInfo {
       template: (json['template'] ?? '').toString(),
       example: (json['example'] ?? '').toString(),
       category: json['category'] as String?,
-      confidence: (json['confidence'] as num?)?.toInt(),
+      confidence: parseIntOrNull(json['confidence']),
       model: json['model'] as String?,
       confirmed: json['confirmed'] == true,
       alertTemplate: json['alertTemplate'] as String?,
@@ -144,29 +142,28 @@ class LogSourceEntry {
   final List<int> candidates;
 
   factory LogSourceEntry.fromJson(Map<String, dynamic> json) {
-    final rawCandidates = json['candidates'] is List
-        ? json['candidates'] as List
-        : const [];
+    final rawCandidates = json['candidates'];
+    final parsedCandidates = rawCandidates is List
+        ? rawCandidates
+              .map(
+                (e) => e is Map ? parseIntOrNull(e['id']) : parseIntOrNull(e),
+              )
+              .whereType<int>()
+              .toList(growable: false)
+        : const <int>[];
     return LogSourceEntry(
       bindKey: (json['bindKey'] ?? json['sourceIp'] ?? '').toString(),
       sourceIp: (json['sourceIp'] ?? '').toString(),
       hostname: json['hostname'] as String?,
       kind: (json['kind'] ?? 'unknown').toString(),
-      deviceId: (json['deviceId'] as num?)?.toInt(),
+      deviceId: parseIntOrNull(json['deviceId']),
       deviceName: json['deviceName'] as String?,
       masked: json['masked'] == true,
-      messageCount: (json['messageCount'] as num?)?.toInt() ?? 0,
-      droppedCount: (json['droppedCount'] as num?)?.toInt() ?? 0,
+      messageCount: parseIntOrNull(json['messageCount']) ?? 0,
+      droppedCount: parseIntOrNull(json['droppedCount']) ?? 0,
       lastMessage: json['lastMessage'] as String?,
       lastSeenAt: json['lastSeenAt'] as String?,
-      candidates: rawCandidates
-          .map(
-            (e) => e is num
-                ? e.toInt()
-                : (e is Map ? (e['id'] as num?)?.toInt() : null),
-          )
-          .whereType<int>()
-          .toList(growable: false),
+      candidates: parsedCandidates,
     );
   }
 }
@@ -184,13 +181,9 @@ class LogNatDiagnostics {
   final String? explanation;
 
   factory LogNatDiagnostics.fromJson(Map<String, dynamic> json) {
-    final rawIps = json['maskedIps'] is List
-        ? json['maskedIps'] as List
-        : const [];
     return LogNatDiagnostics(
-      unresolvedMaskedCount:
-          (json['unresolvedMaskedCount'] as num?)?.toInt() ?? 0,
-      maskedIps: rawIps.map((e) => e.toString()).toList(growable: false),
+      unresolvedMaskedCount: parseIntOrNull(json['unresolvedMaskedCount']) ?? 0,
+      maskedIps: asStringList(json['maskedIps']),
       explanation: json['explanation'] as String?,
     );
   }
@@ -213,7 +206,7 @@ class SetupSnippet {
   factory SetupSnippet.fromJson(Map<String, dynamic> json) {
     final rawCmds = json['commands'] ?? json['snippet'] ?? json['code'] ?? '';
     final commands = rawCmds is List
-        ? rawCmds.map((e) => e.toString()).join('\n')
+        ? asStringList(rawCmds).join('\n')
         : rawCmds.toString();
     return SetupSnippet(
       id: (json['id'] ?? json['os'] ?? '').toString(),
@@ -237,14 +230,13 @@ class SetupGuide {
   final List<SetupSnippet> snippets;
 
   factory SetupGuide.fromJson(Map<String, dynamic> json) {
-    final raw = json['snippets'] is List ? json['snippets'] as List : const [];
     return SetupGuide(
       serverAddress: (json['serverAddress'] ?? '').toString(),
-      port: (json['port'] as num?)?.toInt() ?? 514,
-      snippets: raw
-          .whereType<Map>()
-          .map((e) => SetupSnippet.fromJson(Map<String, dynamic>.from(e)))
-          .toList(growable: false),
+      port: parseIntOrNull(json['port']) ?? 514,
+      snippets: asJsonList<SetupSnippet>(
+        json['snippets'],
+        SetupSnippet.fromJson,
+      ),
     );
   }
 }
@@ -279,7 +271,7 @@ class ProvisionHintsResponse {
         : const [];
     return ProvisionHintsResponse(
       serverAddress: json['serverAddress'] as String?,
-      serverPort: (json['serverPort'] as num?)?.toInt() ?? 514,
+      serverPort: parseIntOrNull(json['serverPort']) ?? 514,
       accessMode: json['accessMode'] as String?,
       operatingSystem: json['operatingSystem'] as String?,
       sshOpen: json['sshOpen'] == true,
@@ -317,12 +309,9 @@ class ProvisionLoggingResponse {
   final String? persistenceWarning;
 
   factory ProvisionLoggingResponse.fromJson(Map<String, dynamic> json) {
-    final rawCmds = json['commands'] is List
-        ? json['commands'] as List
-        : const [];
     return ProvisionLoggingResponse(
       identifiedHostname: json['identifiedHostname'] as String?,
-      commands: rawCmds.map((e) => e.toString()).toList(growable: false),
+      commands: asStringList(json['commands']),
       transcript: (json['transcript'] ?? '').toString(),
       confirmed: json['confirmed'] as bool?,
       addressSaved: json['addressSaved'] == true,

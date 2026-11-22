@@ -10,6 +10,7 @@ import 'package:netmonitor_app/features/plugins/utils/plugin_settings_logic.dart
 import 'package:netmonitor_app/features/plugins/utils/wifi_qr_logic.dart';
 import 'package:netmonitor_app/features/vpn/models/vpn_models.dart';
 import 'package:netmonitor_app/features/vpn/providers/vpn_provider.dart';
+import 'package:netmonitor_app/theme/app_theme.dart';
 
 void main() {
   group('VPN models, CIDR helpers & SSE realtime', () {
@@ -48,7 +49,7 @@ void main() {
       final free = freeVpnCidrs(const <String>['10.8.0.0/24', '10.9.0.0/24']);
       expect(free, isNot(contains('10.8.0.0/24')));
       expect(free, isNot(contains('10.9.0.0/24')));
-      expect(free, contains('10.10.10.0/24'));
+      expect(free, contains('10.10.0.0/24'));
     });
 
     test('VpnNotifier applies vpn:peers_updated SSE payload in memory', () {
@@ -221,6 +222,9 @@ void main() {
       test(
         'mentions parser and ambiguous Portuguese screen disambiguation',
         () {
+          expect(AiMentionKind.source.tone, SemanticTone.info);
+          expect(AiMentionKind.source.tone, isNot(SemanticTone.plugin));
+
           final q = findMentionQuery('verifique @core-sw', 18);
           expect(q, isNotNull);
           expect(q!.query, 'core-sw');

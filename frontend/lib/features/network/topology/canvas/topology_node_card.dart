@@ -669,7 +669,7 @@ class TopologyNodeCard extends StatelessWidget {
       );
       addBadge(
         _NodeMicroBadge(
-          label: 'CPU ${node.cpuPercent!.round()}%',
+          label: 'CPU ${formatPercent(node.cpuPercent, digits: 0)}',
           background: pair.container,
           foreground: pair.onContainer,
         ),
@@ -709,7 +709,7 @@ class TopologyNodeCard extends StatelessWidget {
       );
       addBadge(
         _NodeMicroBadge(
-          label: 'RAM ${node.memoryPercent!.round()}%',
+          label: 'RAM ${formatPercent(node.memoryPercent, digits: 0)}',
           background: pair.container,
           foreground: pair.onContainer,
         ),

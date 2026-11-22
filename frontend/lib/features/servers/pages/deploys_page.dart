@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:netmonitor_app/core/areas/area_models.dart';
 import 'package:netmonitor_app/core/auth/area_access.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/servers/models/deploy_models.dart';
 import 'package:netmonitor_app/features/servers/providers/deploys_provider.dart';
@@ -78,7 +79,11 @@ class _DeploysPageState extends ConsumerState<DeploysPage> {
       } catch (err) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Erro ao conectar GitHub App: $err')),
+            SnackBar(
+              content: Text(
+                'Erro ao conectar GitHub App: ${describeError(err)}',
+              ),
+            ),
           );
         }
       } finally {
@@ -102,7 +107,11 @@ class _DeploysPageState extends ConsumerState<DeploysPage> {
       } catch (err) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Erro ao vincular instalação GitHub: $err')),
+            SnackBar(
+              content: Text(
+                'Erro ao vincular instalação GitHub: ${describeError(err)}',
+              ),
+            ),
           );
         }
       } finally {

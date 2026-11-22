@@ -1,7 +1,9 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:netmonitor_app/core/models/pagination.dart';
 import 'package:netmonitor_app/core/network/api_client.dart';
-import 'package:netmonitor_app/features/core/models/event_models.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 import 'package:netmonitor_app/features/core/models/operations_models.dart';
 
 @immutable
@@ -73,17 +75,13 @@ class ScheduledTasksNotifier extends Notifier<ScheduledTasksState> {
       final raw = await ref
           .read(apiClientProvider)
           .get<dynamic>('/scheduled-tasks');
-      final list = raw is List
-          ? raw
-                .whereType<Map>()
-                .map(
-                  (e) => ScheduledTask.fromJson(Map<String, dynamic>.from(e)),
-                )
-                .toList(growable: false)
-          : const <ScheduledTask>[];
-      state = state.copyWith(tasks: list, loaded: true, loading: false);
+      state = state.copyWith(
+        tasks: asJsonList<ScheduledTask>(raw, ScheduledTask.fromJson),
+        loaded: true,
+        loading: false,
+      );
     } catch (err) {
-      state = state.copyWith(loading: false, error: err.toString());
+      state = state.copyWith(loading: false, error: describeError(err));
     }
   }
 
@@ -94,17 +92,12 @@ class ScheduledTasksNotifier extends Notifier<ScheduledTasksState> {
       final raw = await ref
           .read(apiClientProvider)
           .get<dynamic>('/scheduled-tasks/catalog');
-      final list = raw is List
-          ? raw
-                .whereType<Map>()
-                .map(
-                  (e) => SchedulableTool.fromJson(Map<String, dynamic>.from(e)),
-                )
-                .toList(growable: false)
-          : const <SchedulableTool>[];
-      state = state.copyWith(catalog: list, catalogLoading: false);
+      state = state.copyWith(
+        catalog: asJsonList<SchedulableTool>(raw, SchedulableTool.fromJson),
+        catalogLoading: false,
+      );
     } catch (err) {
-      state = state.copyWith(catalogLoading: false, error: err.toString());
+      state = state.copyWith(catalogLoading: false, error: describeError(err));
     }
   }
 
@@ -183,7 +176,7 @@ class ScheduledTasksNotifier extends Notifier<ScheduledTasksState> {
           '/scheduled-tasks/$id/run',
           data: const <String, dynamic>{},
         );
-    return (raw['runId'] as num?)?.toInt();
+    return parseIntOrNull(raw['runId']);
   }
 
   Future<({List<ScheduledTaskRun> runs, PaginationMeta? meta})> fetchRuns(
@@ -197,34 +190,19 @@ class ScheduledTasksNotifier extends Notifier<ScheduledTasksState> {
           '/scheduled-tasks/$taskId/runs',
           queryParameters: <String, dynamic>{'page': page, 'limit': limit},
         );
-    if (raw is Map) {
-      final list = raw['data'] is List ? raw['data'] as List : const [];
-      return (
-        runs: list
-            .whereType<Map>()
-            .map((e) => ScheduledTaskRun.fromJson(Map<String, dynamic>.from(e)))
-            .toList(growable: false),
-        meta: raw['meta'] is Map
-            ? PaginationMeta.fromJson(
-                Map<String, dynamic>.from(raw['meta'] as Map),
-              )
-            : null,
-      );
-    }
-    if (raw is List) {
-      return (
-        runs: raw
-            .whereType<Map>()
-            .map((e) => ScheduledTaskRun.fromJson(Map<String, dynamic>.from(e)))
-            .toList(growable: false),
-        meta: null,
-      );
-    }
-    return (runs: const <ScheduledTaskRun>[], meta: null);
+    final paginated = PaginatedResult<ScheduledTaskRun>.fromDynamic(
+      raw,
+      ScheduledTaskRun.fromJson,
+      fallbackPerPage: limit,
+    );
+    return (
+      runs: paginated.data,
+      meta: raw is Map && raw['meta'] is Map ? paginated.meta : null,
+    );
   }
 
   void applyUpdated(Map<String, dynamic> data) {
-    final id = (data['id'] as num?)?.toInt();
+    final id = parseIntOrNull(data['id']);
     if (id == null) return;
     state = state.copyWith(
       lastEventTaskId: id,

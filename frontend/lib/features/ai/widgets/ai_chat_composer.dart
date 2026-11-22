@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
-import 'package:netmonitor_app/features/ai/data/ai_repository.dart';
 import 'package:netmonitor_app/features/ai/models/ai_models.dart';
 import 'package:netmonitor_app/features/ai/providers/ai_providers.dart';
 import 'package:netmonitor_app/features/ai/utils/ai_chat_logic.dart';
@@ -67,8 +66,8 @@ class _AiChatComposerState extends ConsumerState<AiChatComposer> {
     _debounce = Timer(const Duration(milliseconds: 150), () async {
       try {
         final list = await ref
-            .read(aiRepositoryProvider)
-            .fetchMentions(query.query);
+            .read(aiChatProvider.notifier)
+            .searchMentions(query.query);
         if (mounted && _activeQuery?.query == query.query) {
           setState(() => _suggestions = list);
         }

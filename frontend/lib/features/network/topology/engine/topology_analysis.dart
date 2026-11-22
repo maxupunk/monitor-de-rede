@@ -1,12 +1,13 @@
-import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 import 'package:netmonitor_app/features/network/models/topology_models.dart';
 import 'package:netmonitor_app/features/network/topology/engine/topology_geometry.dart';
 import 'package:netmonitor_app/features/network/topology/engine/topology_layouts.dart';
 import 'package:netmonitor_app/features/network/topology/engine/topology_presentation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+
+export 'package:netmonitor_app/features/network/providers/topology_prefs_storage.dart';
 
 // ── Caminhos e Vizinhança (paridade com `path.ts` e backend `path.rs`) ───────
 
@@ -493,10 +494,7 @@ class TopologyFilterSpec {
       }
     }
 
-    final rawSite = json['siteId'];
-    final siteId = rawSite is int
-        ? rawSite
-        : (rawSite is num ? rawSite.toInt() : null);
+    final siteId = parseIntOrNull(json['siteId']);
 
     return TopologyFilterSpec(
       siteId: siteId,
@@ -930,50 +928,4 @@ List<TopologySearchHit> searchTopologyNodes(
     return List<TopologySearchHit>.unmodifiable(hits.sublist(0, limit));
   }
   return List<TopologySearchHit>.unmodifiable(hits);
-}
-
-// ── Persistência local de preferências visuais (`SharedPreferences`) ────────
-
-/// Persistência resiliente das preferências visuais e filtros da topologia.
-class TopologyPrefsStorage {
-  const TopologyPrefsStorage._();
-
-  static const String storageKey = 'netmonitor.topology.prefs.v3';
-
-  /// Carrega as preferências salvas; devolve o padrão seguro em caso de erro.
-  static Future<TopologyFilterSpec> load({SharedPreferences? prefs}) async {
-    try {
-      final store = prefs ?? await SharedPreferences.getInstance();
-      final raw = store.getString(storageKey);
-      if (raw == null || raw.trim().isEmpty) {
-        return const TopologyFilterSpec();
-      }
-      final decoded = jsonDecode(raw);
-      if (decoded is! Map) return const TopologyFilterSpec();
-      return TopologyFilterSpec.fromJson(Map<String, dynamic>.from(decoded));
-    } catch (_) {
-      return const TopologyFilterSpec();
-    }
-  }
-
-  /// Salva as preferências no armazenamento local sem lançar exceções de I/O.
-  static Future<void> save(
-    TopologyFilterSpec spec, {
-    SharedPreferences? prefs,
-  }) async {
-    try {
-      final store = prefs ?? await SharedPreferences.getInstance();
-      await store.setString(storageKey, jsonEncode(spec.toJson()));
-    } catch (_) {
-      // Armazenamento indisponível (ex.: aba privada): segue em memória.
-    }
-  }
-
-  /// Remove as preferências persistidas.
-  static Future<void> clear({SharedPreferences? prefs}) async {
-    try {
-      final store = prefs ?? await SharedPreferences.getInstance();
-      await store.remove(storageKey);
-    } catch (_) {}
-  }
 }

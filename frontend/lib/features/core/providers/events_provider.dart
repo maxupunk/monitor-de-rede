@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/network/api_client.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 import 'package:netmonitor_app/features/core/models/dashboard_models.dart';
 import 'package:netmonitor_app/features/core/models/event_models.dart';
 
@@ -51,40 +53,20 @@ class EventsHistoryNotifier extends Notifier<EventsHistoryState> {
             '/events',
             queryParameters: <String, dynamic>{'page': page, 'limit': limit},
           );
-      List<HistoricalEventRecord> list;
-      PaginationMeta? meta;
-      if (raw is Map) {
-        final data = raw['data'] is List ? raw['data'] as List : const [];
-        list = data
-            .whereType<Map>()
-            .map(
-              (e) =>
-                  HistoricalEventRecord.fromJson(Map<String, dynamic>.from(e)),
-            )
-            .toList(growable: false);
-        if (raw['meta'] is Map) {
-          meta = PaginationMeta.fromJson(
-            Map<String, dynamic>.from(raw['meta'] as Map),
-          );
-        }
-      } else if (raw is List) {
-        list = raw
-            .whereType<Map>()
-            .map(
-              (e) =>
-                  HistoricalEventRecord.fromJson(Map<String, dynamic>.from(e)),
-            )
-            .toList(growable: false);
-      } else {
-        list = const <HistoricalEventRecord>[];
-      }
+      final paginated = PaginatedResult<HistoricalEventRecord>.fromDynamic(
+        raw,
+        HistoricalEventRecord.fromJson,
+        fallbackPerPage: limit,
+      );
       state = state.copyWith(
-        items: append ? <HistoricalEventRecord>[...state.items, ...list] : list,
-        meta: meta,
+        items: append
+            ? <HistoricalEventRecord>[...state.items, ...paginated.data]
+            : paginated.data,
+        meta: raw is Map && raw['meta'] is Map ? paginated.meta : null,
         loading: false,
       );
     } catch (err) {
-      state = state.copyWith(loading: false, error: err.toString());
+      state = state.copyWith(loading: false, error: describeError(err));
     }
   }
 
@@ -100,15 +82,8 @@ class EventsHistoryNotifier extends Notifier<EventsHistoryState> {
           );
       final list = raw is List
           ? raw
-          : (raw is Map && raw['buckets'] is List
-                ? raw['buckets'] as List
-                : (raw is Map && raw['data'] is List
-                      ? raw['data'] as List
-                      : const []));
-      return list
-          .whereType<Map>()
-          .map((e) => HourlyEventBucket.fromJson(Map<String, dynamic>.from(e)))
-          .toList(growable: false);
+          : (raw is Map ? (raw['buckets'] ?? raw['data']) : null);
+      return asJsonList<HourlyEventBucket>(list, HourlyEventBucket.fromJson);
     } catch (_) {
       return const <HourlyEventBucket>[];
     }

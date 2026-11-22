@@ -1,7 +1,10 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/network/api_client.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 import 'package:netmonitor_app/features/servers/models/agent_models.dart';
+import 'package:netmonitor_app/features/servers/utils/collection_helpers.dart';
 
 @immutable
 class AgentsState {
@@ -56,32 +59,20 @@ class AgentsNotifier extends Notifier<AgentsState> {
 
   ApiClient get _api => ref.read(apiClientProvider);
 
-  String _describe(Object err, String fallback) {
-    if (err is ApiException && err.message.isNotEmpty) return err.message;
-    if (err is NetworkException && err.message.isNotEmpty) return err.message;
-    return fallback;
-  }
-
   List<AgentView> _upsertSorted(List<AgentView> list, AgentView agent) {
-    final next = List<AgentView>.from(list);
-    final idx = next.indexWhere((a) => a.id == agent.id);
-    if (idx == -1) {
-      next.add(agent);
-      next.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-    } else {
-      next[idx] = agent;
-    }
-    return List<AgentView>.unmodifiable(next);
+    return upsertSortedByName<AgentView>(
+      list,
+      agent,
+      idOf: (a) => a.id,
+      nameOf: (a) => a.name,
+    );
   }
 
   Future<void> fetchAgents() async {
     state = state.copyWith(loading: true, clearError: true);
     try {
       final raw = await _api.get<List<dynamic>>('/agents');
-      final parsed = raw
-          .whereType<Map>()
-          .map((e) => AgentView.fromJson(Map<String, dynamic>.from(e)))
-          .toList(growable: false);
+      final parsed = asJsonList(raw, AgentView.fromJson);
       state = state.copyWith(
         agents: List<AgentView>.unmodifiable(parsed),
         loading: false,
@@ -90,7 +81,10 @@ class AgentsNotifier extends Notifier<AgentsState> {
     } catch (err) {
       state = state.copyWith(
         loading: false,
-        error: _describe(err, 'Erro ao carregar os servidores remotos'),
+        error: describeError(
+          err,
+          fallback: 'Erro ao carregar os servidores remotos',
+        ),
       );
     }
   }
@@ -101,14 +95,9 @@ class AgentsNotifier extends Notifier<AgentsState> {
       final list = raw is List
           ? raw
           : (raw is Map && raw['addresses'] is List
-                ? raw['addresses'] as List
+                ? raw['addresses']
                 : const <dynamic>[]);
-      final parsed = list
-          .whereType<Map>()
-          .map(
-            (e) => ServerAddressOption.fromJson(Map<String, dynamic>.from(e)),
-          )
-          .toList(growable: false);
+      final parsed = asJsonList(list, ServerAddressOption.fromJson);
       state = state.copyWith(
         addresses: List<ServerAddressOption>.unmodifiable(parsed),
       );
@@ -133,7 +122,7 @@ class AgentsNotifier extends Notifier<AgentsState> {
     } catch (err) {
       state = state.copyWith(
         saving: false,
-        error: _describe(err, 'Erro ao conectar o servidor'),
+        error: describeError(err, fallback: 'Erro ao conectar o servidor'),
       );
       return null;
     }
@@ -155,7 +144,7 @@ class AgentsNotifier extends Notifier<AgentsState> {
     } catch (err) {
       state = state.copyWith(
         saving: false,
-        error: _describe(err, 'Erro ao alterar o servidor'),
+        error: describeError(err, fallback: 'Erro ao alterar o servidor'),
       );
       return false;
     }
@@ -172,7 +161,10 @@ class AgentsNotifier extends Notifier<AgentsState> {
     } catch (err) {
       state = state.copyWith(
         saving: false,
-        error: _describe(err, 'Erro ao gerar o código de instalação'),
+        error: describeError(
+          err,
+          fallback: 'Erro ao gerar o código de instalação',
+        ),
       );
       return null;
     }
@@ -197,7 +189,10 @@ class AgentsNotifier extends Notifier<AgentsState> {
       return AgentInstallCommands.fromJson(raw);
     } catch (err) {
       state = state.copyWith(
-        error: _describe(err, 'Erro ao gerar os comandos para este endereço'),
+        error: describeError(
+          err,
+          fallback: 'Erro ao gerar os comandos para este endereço',
+        ),
       );
       return null;
     }
@@ -211,7 +206,10 @@ class AgentsNotifier extends Notifier<AgentsState> {
       return InstallPolicyView.fromJson(raw);
     } catch (err) {
       state = state.copyWith(
-        error: _describe(err, 'Erro ao carregar as permissões sugeridas'),
+        error: describeError(
+          err,
+          fallback: 'Erro ao carregar as permissões sugeridas',
+        ),
       );
       return null;
     }
@@ -230,7 +228,10 @@ class AgentsNotifier extends Notifier<AgentsState> {
     } catch (err) {
       state = state.copyWith(
         saving: false,
-        error: _describe(err, 'Erro ao revogar o acesso do servidor'),
+        error: describeError(
+          err,
+          fallback: 'Erro ao revogar o acesso do servidor',
+        ),
       );
       return false;
     }
@@ -250,7 +251,7 @@ class AgentsNotifier extends Notifier<AgentsState> {
     } catch (err) {
       state = state.copyWith(
         saving: false,
-        error: _describe(err, 'Erro ao remover o servidor'),
+        error: describeError(err, fallback: 'Erro ao remover o servidor'),
       );
       return false;
     }
@@ -258,10 +259,7 @@ class AgentsNotifier extends Notifier<AgentsState> {
 
   /// Aplica `probe:status` via SSE sem polling.
   void applyRealtimeStatus(Map<String, dynamic> data) {
-    final rawId = data['id'] ?? data['probeId'];
-    final id = rawId is num
-        ? rawId.toInt()
-        : int.tryParse(rawId?.toString() ?? '');
+    final id = parseIntOrNull(data['id'] ?? data['probeId']);
     if (id == null) return;
     final idx = state.agents.indexWhere((a) => a.id == id);
     if (idx == -1) return;

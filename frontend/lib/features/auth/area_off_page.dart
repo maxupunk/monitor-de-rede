@@ -5,6 +5,7 @@ import 'package:netmonitor_app/areas/area_registry.dart';
 import 'package:netmonitor_app/core/areas/area_models.dart';
 import 'package:netmonitor_app/core/areas/areas_provider.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
 
@@ -52,7 +53,7 @@ class _AreaOffPageState extends ConsumerState<AreaOffPage> {
       await ref.read(areasProvider.notifier).setEnabled(_area, true);
     } catch (err) {
       if (!mounted) return;
-      setState(() => _error = err.toString());
+      setState(() => _error = describeError(err));
     }
   }
 

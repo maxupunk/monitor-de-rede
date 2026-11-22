@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/network/api_client.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
 import 'package:netmonitor_app/features/network/models/device_models.dart';
 import 'package:netmonitor_app/features/network/models/wifi_models.dart';
 
@@ -175,7 +176,7 @@ class WifiClientsNotifier extends Notifier<WifiClientsState> {
       state = state.copyWith(requesting: false);
       return true;
     } catch (err) {
-      state = state.copyWith(requesting: false, error: err.toString());
+      state = state.copyWith(requesting: false, error: describeError(err));
       return false;
     }
   }
@@ -209,7 +210,7 @@ class WifiClientsNotifier extends Notifier<WifiClientsState> {
       state = state.copyWith(
         pings: <String, WifiPingState>{
           ...state.pings,
-          key: WifiPingState(error: err.toString()),
+          key: WifiPingState(error: describeError(err)),
         },
       );
     }
@@ -249,7 +250,7 @@ class WifiClientsNotifier extends Notifier<WifiClientsState> {
           ...state.roamHistory,
           mac: WifiRoamHistoryState(
             events: prev?.events ?? const <WifiRoamEventModel>[],
-            error: err.toString(),
+            error: describeError(err),
           ),
         },
       );
@@ -271,7 +272,7 @@ class WifiClientsNotifier extends Notifier<WifiClientsState> {
       state = state.copyWith(watched: next);
       return true;
     } catch (err) {
-      state = state.copyWith(error: err.toString());
+      state = state.copyWith(error: describeError(err));
       return false;
     }
   }
@@ -290,7 +291,7 @@ class WifiClientsNotifier extends Notifier<WifiClientsState> {
       state = state.copyWith(watched: next);
       return true;
     } catch (err) {
-      state = state.copyWith(error: err.toString());
+      state = state.copyWith(error: describeError(err));
       return false;
     }
   }
@@ -303,9 +304,29 @@ class WifiClientsNotifier extends Notifier<WifiClientsState> {
       );
       return true;
     } catch (err) {
-      state = state.copyWith(error: err.toString());
+      state = state.copyWith(error: describeError(err));
       return false;
     }
+  }
+
+  /// Revelação efêmera (`POST /api/devices/:id/plugins/:pluginId/reveal/:action`) — somente admin, nunca salva (ADR 012).
+  Future<String?> revealWifiPassword({
+    required int deviceId,
+    required int pluginId,
+    required String action,
+    required String ssid,
+  }) async {
+    final raw = await ref
+        .read(apiClientProvider)
+        .post<dynamic>(
+          '/devices/$deviceId/plugins/$pluginId/reveal/$action',
+          timeout: const Duration(seconds: 30),
+          data: <String, dynamic>{
+            'params': <String, dynamic>{'ssid': ssid.trim()},
+          },
+        );
+    final out = asJsonMap(asJsonMap(raw)['output']);
+    return (out['password'] ?? out['psk'] ?? out['passphrase'])?.toString();
   }
 }
 
@@ -361,7 +382,7 @@ class WifiSettingsNotifier extends Notifier<WifiSettingsState> {
         loading: false,
       );
     } catch (err) {
-      state = state.copyWith(loading: false, error: err.toString());
+      state = state.copyWith(loading: false, error: describeError(err));
     }
   }
 
@@ -377,7 +398,7 @@ class WifiSettingsNotifier extends Notifier<WifiSettingsState> {
       );
       return true;
     } catch (err) {
-      state = state.copyWith(saving: false, error: err.toString());
+      state = state.copyWith(saving: false, error: describeError(err));
       return false;
     }
   }

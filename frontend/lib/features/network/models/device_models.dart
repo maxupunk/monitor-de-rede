@@ -1,56 +1,20 @@
 import 'package:flutter/foundation.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 
-/// Helper defensivo para parsing seguro de números e mapas em JSON.
-int? parseIntOrNull(Object? value) {
-  if (value == null) return null;
-  if (value is int) return value;
-  if (value is num) return value.toInt();
-  if (value is String) return int.tryParse(value.trim());
-  return null;
-}
-
-double? parseDoubleOrNull(Object? value) {
-  if (value == null) return null;
-  if (value is double) return value.isFinite ? value : null;
-  if (value is num) {
-    final d = value.toDouble();
-    return d.isFinite ? d : null;
-  }
-  if (value is String) {
-    final parsed = double.tryParse(value.trim());
-    return parsed != null && parsed.isFinite ? parsed : null;
-  }
-  return null;
-}
-
-Map<String, dynamic> asJsonMap(Object? value) {
-  if (value is Map<String, dynamic>) return value;
-  if (value is Map) return Map<String, dynamic>.from(value);
-  return const <String, dynamic>{};
-}
-
-List<Map<String, dynamic>> asJsonMapList(Object? value) {
-  if (value is! List) return const <Map<String, dynamic>>[];
-  return value
-      .whereType<Map<dynamic, dynamic>>()
-      .map((e) => Map<String, dynamic>.from(e))
-      .toList(growable: false);
-}
-
-List<String> asStringList(Object? value) {
-  if (value is! List) return const <String>[];
-  return value.map((e) => e.toString()).toList(growable: false);
-}
-
-List<int> asIntList(Object? value) {
-  if (value is! List) return const <int>[];
-  final out = <int>[];
-  for (final item in value) {
-    final parsed = parseIntOrNull(item);
-    if (parsed != null) out.add(parsed);
-  }
-  return out;
-}
+export 'package:netmonitor_app/core/utils/json_parsers.dart'
+    show
+        asIntList,
+        asJsonMap,
+        asJsonMapList,
+        asStringList,
+        parseDoubleOrNull,
+        parseIntOrNull;
+export 'package:netmonitor_app/shared/device_access/device_access_models.dart'
+    show
+        AgentRouteOption,
+        DedicatedAccessInfo,
+        DeviceAccessViewModel,
+        DeviceCredentialView;
 
 @immutable
 class DeviceRef {
@@ -935,109 +899,6 @@ class BandwidthLatencyResponse {
       avgLatency: parseDoubleOrNull(json['avgLatency']) ?? 0,
       correlationScore: parseDoubleOrNull(json['correlationScore']) ?? 0,
       hasSaturationCorrelation: json['hasSaturationCorrelation'] == true,
-    );
-  }
-}
-
-@immutable
-class DeviceCredentialView {
-  const DeviceCredentialView({
-    required this.kind,
-    this.username,
-    this.port,
-    this.useHttps = false,
-    this.storage = 'persistent',
-    this.viaProbeId,
-    this.hasSecret = false,
-    this.dedicated = false,
-    this.fingerprint,
-    this.updatedAt,
-  });
-
-  final String kind;
-  final String? username;
-  final int? port;
-  final bool useHttps;
-  final String storage;
-  final int? viaProbeId;
-  final bool hasSecret;
-  final bool dedicated;
-  final String? fingerprint;
-  final String? updatedAt;
-
-  factory DeviceCredentialView.fromJson(Map<String, dynamic> json) {
-    return DeviceCredentialView(
-      kind: (json['kind'] ?? json['transport'] ?? 'ssh').toString(),
-      username: json['username'] as String?,
-      port: parseIntOrNull(json['port']),
-      useHttps: json['useHttps'] == true,
-      storage: (json['storage'] as String?) ?? 'persistent',
-      viaProbeId: parseIntOrNull(json['viaProbeId']),
-      hasSecret:
-          (json['hasSecret'] ??
-              json['hasPassword'] ??
-              json['configured'] ??
-              true) ==
-          true,
-      dedicated:
-          json['dedicated'] == true || json['authMode'] == 'dedicated_key',
-      fingerprint: json['fingerprint'] as String?,
-      updatedAt: json['updatedAt'] as String?,
-    );
-  }
-}
-
-@immutable
-class AgentRouteOption {
-  const AgentRouteOption({
-    required this.id,
-    required this.name,
-    this.online = false,
-  });
-
-  final int id;
-  final String name;
-  final bool online;
-
-  factory AgentRouteOption.fromJson(Map<String, dynamic> json) {
-    return AgentRouteOption(
-      id: parseIntOrNull(json['id'] ?? json['probeId']) ?? 0,
-      name: (json['name'] ?? 'Agente').toString(),
-      online: json['online'] == true || json['status'] == 'online',
-    );
-  }
-}
-
-@immutable
-class DeviceAccessViewModel {
-  const DeviceAccessViewModel({
-    required this.deviceId,
-    required this.deviceName,
-    this.credentials = const <DeviceCredentialView>[],
-    this.agents = const <AgentRouteOption>[],
-    this.dedicatedPlatform,
-  });
-
-  final int deviceId;
-  final String deviceName;
-  final List<DeviceCredentialView> credentials;
-  final List<AgentRouteOption> agents;
-  final String? dedicatedPlatform;
-
-  bool get supportsDedicatedKey =>
-      dedicatedPlatform != null && dedicatedPlatform!.isNotEmpty;
-
-  factory DeviceAccessViewModel.fromJson(Map<String, dynamic> json) {
-    return DeviceAccessViewModel(
-      deviceId: parseIntOrNull(json['deviceId']) ?? 0,
-      deviceName: (json['deviceName'] as String?) ?? '',
-      credentials: asJsonMapList(
-        json['credentials'],
-      ).map(DeviceCredentialView.fromJson).toList(growable: false),
-      agents: asJsonMapList(
-        json['agents'],
-      ).map(AgentRouteOption.fromJson).toList(growable: false),
-      dedicatedPlatform: json['dedicatedPlatform']?.toString(),
     );
   }
 }

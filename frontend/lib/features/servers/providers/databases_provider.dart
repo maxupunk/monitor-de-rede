@@ -1,7 +1,12 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/network/api_client.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 import 'package:netmonitor_app/features/servers/models/database_models.dart';
+import 'package:netmonitor_app/features/servers/utils/collection_helpers.dart';
+
+export 'system_database_provider.dart';
 
 String databaseJobKey(String kind, int connectionId) => '$kind:$connectionId';
 
@@ -69,24 +74,11 @@ class DatabasesNotifier extends Notifier<DatabasesState> {
 
   ApiClient get _api => ref.read(apiClientProvider);
 
-  String _describe(Object err, String fallback) {
-    if (err is ApiException && err.message.isNotEmpty) return err.message;
-    if (err is NetworkException && err.message.isNotEmpty) return err.message;
-    return fallback;
-  }
-
   Future<bool> fetchConnections() async {
     state = state.copyWith(loading: true, clearError: true);
     try {
       final raw = await _api.get<List<dynamic>>('/databases');
-      final parsed = raw
-          .whereType<Map>()
-          .map(
-            (e) => DatabaseConnectionResponse.fromJson(
-              Map<String, dynamic>.from(e),
-            ),
-          )
-          .toList(growable: false);
+      final parsed = asJsonList(raw, DatabaseConnectionResponse.fromJson);
       state = state.copyWith(
         connections: List<DatabaseConnectionResponse>.unmodifiable(parsed),
         loading: false,
@@ -96,7 +88,10 @@ class DatabasesNotifier extends Notifier<DatabasesState> {
     } catch (err) {
       state = state.copyWith(
         loading: false,
-        error: _describe(err, 'Erro ao carregar as conexões de banco'),
+        error: describeError(
+          err,
+          fallback: 'Erro ao carregar as conexões de banco',
+        ),
       );
       return false;
     }
@@ -111,10 +106,7 @@ class DatabasesNotifier extends Notifier<DatabasesState> {
   Future<void> fetchAgents() async {
     try {
       final raw = await _api.get<List<dynamic>>('/databases/agents');
-      final parsed = raw
-          .whereType<Map>()
-          .map((e) => AgentRouteOption.fromJson(Map<String, dynamic>.from(e)))
-          .toList(growable: false);
+      final parsed = asJsonList(raw, AgentRouteOption.fromJson);
       state = state.copyWith(
         agents: List<AgentRouteOption>.unmodifiable(parsed),
       );
@@ -135,9 +127,9 @@ class DatabasesNotifier extends Notifier<DatabasesState> {
       state = state.copyWith(
         containers: const DatabaseContainersResponse(),
         containersLoading: false,
-        containersError: _describe(
+        containersError: describeError(
           err,
-          'Não foi possível consultar os contêineres',
+          fallback: 'Não foi possível consultar os contêineres',
         ),
       );
     }
@@ -189,16 +181,13 @@ class DatabasesNotifier extends Notifier<DatabasesState> {
             data: input.toJson(),
           );
     final saved = DatabaseConnectionResponse.fromJson(raw);
-    final next = List<DatabaseConnectionResponse>.from(state.connections);
-    final idx = next.indexWhere((c) => c.id == saved.id);
-    if (idx == -1) {
-      next.add(saved);
-      next.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-    } else {
-      next[idx] = saved;
-    }
     state = state.copyWith(
-      connections: List<DatabaseConnectionResponse>.unmodifiable(next),
+      connections: upsertSortedByName<DatabaseConnectionResponse>(
+        state.connections,
+        saved,
+        idOf: (c) => c.id,
+        nameOf: (c) => c.name,
+      ),
     );
     return saved;
   }
@@ -215,7 +204,7 @@ class DatabasesNotifier extends Notifier<DatabasesState> {
       return true;
     } catch (err) {
       state = state.copyWith(
-        error: _describe(err, 'Erro ao excluir a conexão'),
+        error: describeError(err, fallback: 'Erro ao excluir a conexão'),
       );
       return false;
     }
@@ -257,9 +246,7 @@ class DatabasesNotifier extends Notifier<DatabasesState> {
   Future<List<DatabaseBackupResponse>> history(int id) async {
     final raw = await _api.get<List<dynamic>>('/databases/$id/backups');
     return List<DatabaseBackupResponse>.unmodifiable(
-      raw.whereType<Map>().map(
-        (e) => DatabaseBackupResponse.fromJson(Map<String, dynamic>.from(e)),
-      ),
+      asJsonList(raw, DatabaseBackupResponse.fromJson),
     );
   }
 
@@ -280,117 +267,3 @@ class DatabasesNotifier extends Notifier<DatabasesState> {
 final databasesProvider = NotifierProvider<DatabasesNotifier, DatabasesState>(
   DatabasesNotifier.new,
 );
-
-/// Estado do banco de dados interno do NetMonitor (`Settings -> Sistema -> DatabaseInfoCard`).
-@immutable
-class SystemDatabaseState {
-  const SystemDatabaseState({
-    this.info,
-    this.usage,
-    this.loadingInfo = false,
-    this.loadingUsage = false,
-    this.actionLoading = false,
-    this.error,
-  });
-
-  final DatabaseInfo? info;
-  final DatabaseUsage? usage;
-  final bool loadingInfo;
-  final bool loadingUsage;
-  final bool actionLoading;
-  final String? error;
-
-  SystemDatabaseState copyWith({
-    DatabaseInfo? info,
-    DatabaseUsage? usage,
-    bool? loadingInfo,
-    bool? loadingUsage,
-    bool? actionLoading,
-    String? error,
-    bool clearError = false,
-  }) {
-    return SystemDatabaseState(
-      info: info ?? this.info,
-      usage: usage ?? this.usage,
-      loadingInfo: loadingInfo ?? this.loadingInfo,
-      loadingUsage: loadingUsage ?? this.loadingUsage,
-      actionLoading: actionLoading ?? this.actionLoading,
-      error: clearError ? null : (error ?? this.error),
-    );
-  }
-}
-
-class SystemDatabaseNotifier extends Notifier<SystemDatabaseState> {
-  @override
-  SystemDatabaseState build() => const SystemDatabaseState();
-
-  ApiClient get _api => ref.read(apiClientProvider);
-
-  Future<void> fetchInfo() async {
-    state = state.copyWith(loadingInfo: true, clearError: true);
-    try {
-      final raw = await _api.get<Map<String, dynamic>>(
-        '/settings/database-size',
-      );
-      state = state.copyWith(
-        info: DatabaseInfo.fromJson(raw),
-        loadingInfo: false,
-      );
-    } catch (err) {
-      state = state.copyWith(loadingInfo: false, error: err.toString());
-    }
-  }
-
-  Future<DatabaseUsage?> fetchUsage() async {
-    state = state.copyWith(loadingUsage: true, clearError: true);
-    try {
-      final raw = await _api.get<Map<String, dynamic>>(
-        '/settings/database-usage',
-        timeout: const Duration(seconds: 120),
-      );
-      final usage = DatabaseUsage.fromJson(raw);
-      state = state.copyWith(usage: usage, loadingUsage: false);
-      return usage;
-    } catch (err) {
-      state = state.copyWith(loadingUsage: false, error: err.toString());
-      return null;
-    }
-  }
-
-  Future<Map<String, dynamic>> clearHistory() async {
-    state = state.copyWith(actionLoading: true, clearError: true);
-    try {
-      final raw = await _api.post<Map<String, dynamic>>(
-        '/settings/clear-history',
-        data: const <String, dynamic>{},
-      );
-      await fetchInfo();
-      state = state.copyWith(actionLoading: false);
-      return raw;
-    } catch (err) {
-      state = state.copyWith(actionLoading: false, error: err.toString());
-      rethrow;
-    }
-  }
-
-  Future<Map<String, dynamic>> clearAllItems() async {
-    state = state.copyWith(actionLoading: true, clearError: true);
-    try {
-      final raw = await _api.post<Map<String, dynamic>>(
-        '/settings/clear-all-items',
-        data: const <String, dynamic>{},
-      );
-      await fetchInfo();
-      state = state.copyWith(actionLoading: false);
-      return raw;
-    } catch (err) {
-      state = state.copyWith(actionLoading: false, error: err.toString());
-      rethrow;
-    }
-  }
-}
-
-final systemDatabaseProvider =
-    NotifierProvider<SystemDatabaseNotifier, SystemDatabaseState>(
-      SystemDatabaseNotifier.new,
-    );

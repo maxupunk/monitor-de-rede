@@ -1,10 +1,10 @@
-import 'dart:math' as math;
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/network/api_client.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
 import 'package:netmonitor_app/features/network/models/device_models.dart';
 import 'package:netmonitor_app/features/network/models/topology_models.dart';
+import 'package:netmonitor_app/features/network/topology/engine/topology_layouts.dart';
 
 @immutable
 class TopologyState {
@@ -173,7 +173,7 @@ class TopologyNotifier extends Notifier<TopologyState> {
         );
       }
     } catch (err) {
-      state = state.copyWith(loading: false, error: err.toString());
+      state = state.copyWith(loading: false, error: describeError(err));
     }
   }
 
@@ -300,7 +300,10 @@ class TopologyNotifier extends Notifier<TopologyState> {
       state = state.copyWith(savingLayout: false, actionError: err.message);
       return false;
     } catch (err) {
-      state = state.copyWith(savingLayout: false, actionError: err.toString());
+      state = state.copyWith(
+        savingLayout: false,
+        actionError: describeError(err),
+      );
       return false;
     }
   }
@@ -314,7 +317,7 @@ class TopologyNotifier extends Notifier<TopologyState> {
       await fetchTopology(showLoading: false);
       return true;
     } catch (err) {
-      state = state.copyWith(actionError: err.toString());
+      state = state.copyWith(actionError: describeError(err));
       return false;
     }
   }
@@ -328,7 +331,7 @@ class TopologyNotifier extends Notifier<TopologyState> {
       await fetchTopology(showLoading: false);
       return true;
     } catch (err) {
-      state = state.copyWith(actionError: err.toString());
+      state = state.copyWith(actionError: describeError(err));
       return false;
     }
   }
@@ -345,7 +348,7 @@ class TopologyNotifier extends Notifier<TopologyState> {
       await fetchTopology(showLoading: false);
       return true;
     } catch (err) {
-      state = state.copyWith(actionError: err.toString());
+      state = state.copyWith(actionError: describeError(err));
       return false;
     }
   }
@@ -359,7 +362,7 @@ class TopologyNotifier extends Notifier<TopologyState> {
       await fetchTopology(showLoading: false);
       return true;
     } catch (err) {
-      state = state.copyWith(actionError: err.toString());
+      state = state.copyWith(actionError: describeError(err));
       return false;
     }
   }
@@ -372,7 +375,10 @@ class TopologyNotifier extends Notifier<TopologyState> {
       state = state.copyWith(recalculating: false);
       return true;
     } catch (err) {
-      state = state.copyWith(recalculating: false, actionError: err.toString());
+      state = state.copyWith(
+        recalculating: false,
+        actionError: describeError(err),
+      );
       return false;
     }
   }
@@ -390,7 +396,7 @@ class TopologyNotifier extends Notifier<TopologyState> {
       state = state.copyWith(highlightedPath: parsed);
       return parsed;
     } catch (err) {
-      state = state.copyWith(actionError: err.toString());
+      state = state.copyWith(actionError: describeError(err));
       return null;
     }
   }
@@ -690,7 +696,8 @@ final topologyProvider = NotifierProvider<TopologyNotifier, TopologyState>(
   TopologyNotifier.new,
 );
 
-/// Calcula coordenadas determinísticas de layout para o grafo de topologia.
+/// Calcula coordenadas determinísticas de layout para o grafo de topologia
+/// delegando para o motor canônico em `topology/engine/topology_layouts.dart`.
 Map<int, TopologyPosition> computeTopologyLayout(
   List<TopologyNodeModel> nodes,
   List<TopologyEdgeModel> edges,
@@ -698,161 +705,14 @@ Map<int, TopologyPosition> computeTopologyLayout(
   Map<int, TopologyPosition> existing = const <int, TopologyPosition>{},
 }) {
   if (nodes.isEmpty) return const <int, TopologyPosition>{};
-  final result = <int, TopologyPosition>{};
-  const double canvasOriginX = 120;
-  const double canvasOriginY = 100;
-
-  if (existing.isNotEmpty) {
-    for (final n in nodes) {
-      if (existing.containsKey(n.id)) {
-        result[n.id] = existing[n.id]!;
-      }
-    }
-    if (result.length == nodes.length) return result;
-  }
-
-  switch (mode) {
-    case TopologyLayoutMode.grid:
-      final cols = math.max(1, math.sqrt(nodes.length).ceil());
-      for (var i = 0; i < nodes.length; i++) {
-        final col = i % cols;
-        final row = i ~/ cols;
-        result.putIfAbsent(
-          nodes[i].id,
-          () => TopologyPosition(
-            canvasOriginX + col * 240.0,
-            canvasOriginY + row * 170.0,
-          ),
-        );
-      }
-      return result;
-
-    case TopologyLayoutMode.radial:
-      const centerX = 700.0;
-      const centerY = 500.0;
-      final radius = math.max(220.0, nodes.length * 36.0);
-      for (var i = 0; i < nodes.length; i++) {
-        if (i == 0 && nodes.length > 2) {
-          result.putIfAbsent(
-            nodes[i].id,
-            () => const TopologyPosition(centerX, centerY),
-          );
-        } else {
-          final angle = (2 * math.pi * i) / math.max(1, nodes.length);
-          result.putIfAbsent(
-            nodes[i].id,
-            () => TopologyPosition(
-              centerX + radius * math.cos(angle),
-              centerY + radius * math.sin(angle),
-            ),
-          );
-        }
-      }
-      return result;
-
-    case TopologyLayoutMode.force:
-      // Inicialização circular + 40 iterações Fruchterman-Reingold determinísticas.
-      final pos = <int, List<double>>{};
-      final radius = math.max(200.0, nodes.length * 30.0);
-      for (var i = 0; i < nodes.length; i++) {
-        final angle = (2 * math.pi * i) / math.max(1, nodes.length);
-        pos[nodes[i].id] = <double>[
-          650 + radius * math.cos(angle),
-          450 + radius * math.sin(angle),
-        ];
-      }
-      const double k = 220.0;
-      for (var iter = 0; iter < 35; iter++) {
-        final disp = <int, List<double>>{
-          for (final n in nodes) n.id: <double>[0, 0],
-        };
-        for (var i = 0; i < nodes.length; i++) {
-          for (var j = i + 1; j < nodes.length; j++) {
-            final u = nodes[i].id;
-            final v = nodes[j].id;
-            final dx = pos[u]![0] - pos[v]![0];
-            final dy = pos[u]![1] - pos[v]![1];
-            final dist = math.max(1.0, math.sqrt(dx * dx + dy * dy));
-            final rep = (k * k) / dist;
-            final fx = (dx / dist) * rep;
-            final fy = (dy / dist) * rep;
-            disp[u]![0] += fx;
-            disp[u]![1] += fy;
-            disp[v]![0] -= fx;
-            disp[v]![1] -= fy;
-          }
-        }
-        for (final e in edges) {
-          if (!pos.containsKey(e.sourceDeviceId) ||
-              !pos.containsKey(e.targetDeviceId)) {
-            continue;
-          }
-          final dx = pos[e.sourceDeviceId]![0] - pos[e.targetDeviceId]![0];
-          final dy = pos[e.sourceDeviceId]![1] - pos[e.targetDeviceId]![1];
-          final dist = math.max(1.0, math.sqrt(dx * dx + dy * dy));
-          final attr = (dist * dist) / k;
-          final fx = (dx / dist) * attr * 0.4;
-          final fy = (dy / dist) * attr * 0.4;
-          disp[e.sourceDeviceId]![0] -= fx;
-          disp[e.sourceDeviceId]![1] -= fy;
-          disp[e.targetDeviceId]![0] += fx;
-          disp[e.targetDeviceId]![1] += fy;
-        }
-        final temp = 60.0 * (1.0 - iter / 36.0);
-        for (final n in nodes) {
-          final d = disp[n.id]!;
-          final len = math.max(1.0, math.sqrt(d[0] * d[0] + d[1] * d[1]));
-          pos[n.id]![0] = (pos[n.id]![0] + (d[0] / len) * math.min(len, temp))
-              .clamp(80, 1600);
-          pos[n.id]![1] = (pos[n.id]![1] + (d[1] / len) * math.min(len, temp))
-              .clamp(80, 1100);
-        }
-      }
-      for (final n in nodes) {
-        result.putIfAbsent(
-          n.id,
-          () => TopologyPosition(pos[n.id]![0], pos[n.id]![1]),
-        );
-      }
-      return result;
-
-    case TopologyLayoutMode.hierarchical:
-      int tierOf(TopologyNodeModel n) {
-        if (n.isSystem) return 0;
-        switch (n.type.toLowerCase()) {
-          case 'firewall':
-          case 'router':
-            return 0;
-          case 'switch':
-            return 1;
-          case 'access_point':
-          case 'server':
-          case 'nas':
-            return 2;
-          default:
-            return 3;
-        }
-      }
-
-      final layers = <int, List<TopologyNodeModel>>{};
-      for (final n in nodes) {
-        layers.putIfAbsent(tierOf(n), () => <TopologyNodeModel>[]).add(n);
-      }
-      final sortedKeys = layers.keys.toList()..sort();
-      for (var rowIdx = 0; rowIdx < sortedKeys.length; rowIdx++) {
-        final rowNodes = layers[sortedKeys[rowIdx]]!;
-        final totalWidth = (rowNodes.length - 1) * 240.0;
-        final startX = math.max(canvasOriginX, 680.0 - totalWidth / 2);
-        for (var col = 0; col < rowNodes.length; col++) {
-          result.putIfAbsent(
-            rowNodes[col].id,
-            () => TopologyPosition(
-              startX + col * 240.0,
-              canvasOriginY + rowIdx * 200.0,
-            ),
-          );
-        }
-      }
-      return result;
-  }
+  final output = computeTopologyLayoutOutput(
+    nodes: nodes,
+    edges: edges,
+    mode: TopologyLayoutKind.fromLegacy(mode),
+    savedPositions: existing.isEmpty
+        ? null
+        : offsetsFromTopologyPositions(existing),
+    respectSavedPositions: existing.isNotEmpty,
+  );
+  return Map<int, TopologyPosition>.from(output.toTopologyPositions());
 }

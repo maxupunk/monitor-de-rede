@@ -4,7 +4,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:netmonitor_app/core/auth/area_access.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
 import 'package:netmonitor_app/core/network/api_client.dart';
-import 'package:netmonitor_app/features/ai/providers/ai_providers.dart';
 import 'package:netmonitor_app/features/network/models/device_models.dart';
 import 'package:netmonitor_app/features/network/models/diagnostics_models.dart';
 import 'package:netmonitor_app/features/network/models/site_network_models.dart';
@@ -79,7 +78,7 @@ class _TestDevicesNotifier extends DevicesNotifier {
   );
 
   @override
-  Future<void> fetchDevices() async {}
+  Future<void> fetchDevices({int? siteId, int? networkId}) async {}
 }
 
 class _TestLinkTestsNotifier extends LinkTestsNotifier {
@@ -90,11 +89,6 @@ class _TestLinkTestsNotifier extends LinkTestsNotifier {
 class _TestWifiClientsNotifier extends WifiClientsNotifier {
   @override
   WifiClientsState build() => const WifiClientsState();
-}
-
-class _TestAiSettingsNotifier extends AiSettingsNotifier {
-  @override
-  AiSettingsState build() => const AiSettingsState();
 }
 
 class _FakeDiagnosticsService extends DiagnosticsService {
@@ -583,7 +577,6 @@ void main() {
               devicesProvider.overrideWith(_TestDevicesNotifier.new),
               linkTestsProvider.overrideWith(_TestLinkTestsNotifier.new),
               wifiClientsProvider.overrideWith(_TestWifiClientsNotifier.new),
-              aiSettingsProvider.overrideWith(_TestAiSettingsNotifier.new),
               diagnosticsServiceProvider.overrideWithValue(
                 _FakeDiagnosticsService(),
               ),

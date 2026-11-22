@@ -297,55 +297,43 @@ class _DockerLayoutScaffoldState extends ConsumerState<DockerLayoutScaffold> {
         // Barra compacta fixa apenas para as 7 abas Docker
         SliverPersistentHeader(
           pinned: true,
-          delegate: _DockerTabBarDelegate(
+          delegate: PinnedSliverHeaderDelegate(
             height: 44,
-            child: Material(
-              color: context.colorScheme.surface,
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: <Widget>[
-                  Expanded(
-                    child: SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      padding: EdgeInsets.zero,
-                      child: Row(
-                        children: DockerTab.values
-                            .map((tab) {
-                              final selected = tab == widget.activeTab;
-                              final badgeCount = !current.available
-                                  ? null
-                                  : switch (tab) {
-                                      DockerTab.containers =>
-                                        current.containers.length,
-                                      DockerTab.volumes =>
-                                        current.volumes.length,
-                                      DockerTab.networks =>
-                                        current.networks.length,
-                                      DockerTab.images => current.images.length,
-                                      _ => null,
-                                    };
-                              return Padding(
-                                padding: const EdgeInsets.only(right: 6),
-                                child: ChoiceChip(
-                                  selected: selected,
-                                  showCheckmark: false,
-                                  visualDensity: VisualDensity.compact,
-                                  avatar: Icon(tab.icon, size: 16),
-                                  label: Text(
-                                    badgeCount != null
-                                        ? '${tab.label} ($badgeCount)'
-                                        : tab.label,
-                                  ),
-                                  onSelected: (_) => _navigateTab(tab),
-                                ),
-                              );
-                            })
-                            .toList(growable: false),
-                      ),
-                    ),
-                  ),
-                  const Divider(height: 1),
-                ],
+            backgroundColor: context.colorScheme.surface,
+            bottomBorder: true,
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: EdgeInsets.zero,
+              child: Row(
+                children: DockerTab.values
+                    .map((tab) {
+                      final selected = tab == widget.activeTab;
+                      final badgeCount = !current.available
+                          ? null
+                          : switch (tab) {
+                              DockerTab.containers => current.containers.length,
+                              DockerTab.volumes => current.volumes.length,
+                              DockerTab.networks => current.networks.length,
+                              DockerTab.images => current.images.length,
+                              _ => null,
+                            };
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: ChoiceChip(
+                          selected: selected,
+                          showCheckmark: false,
+                          visualDensity: VisualDensity.compact,
+                          avatar: Icon(tab.icon, size: 16),
+                          label: Text(
+                            badgeCount != null
+                                ? '${tab.label} ($badgeCount)'
+                                : tab.label,
+                          ),
+                          onSelected: (_) => _navigateTab(tab),
+                        ),
+                      );
+                    })
+                    .toList(growable: false),
               ),
             ),
           ),
@@ -431,32 +419,6 @@ class _DockerLayoutScaffoldState extends ConsumerState<DockerLayoutScaffold> {
       ],
     );
   }
-}
-
-class _DockerTabBarDelegate extends SliverPersistentHeaderDelegate {
-  const _DockerTabBarDelegate({required this.height, required this.child});
-
-  final double height;
-  final Widget child;
-
-  @override
-  double get minExtent => height;
-
-  @override
-  double get maxExtent => height;
-
-  @override
-  Widget build(
-    BuildContext context,
-    double shrinkOffset,
-    bool overlapsContent,
-  ) {
-    return SizedBox.expand(child: child);
-  }
-
-  @override
-  bool shouldRebuild(covariant _DockerTabBarDelegate oldDelegate) =>
-      oldDelegate.height != height || oldDelegate.child != child;
 }
 
 class _DockerOperationsPanel extends StatelessWidget {

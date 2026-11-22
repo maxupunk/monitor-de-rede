@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:netmonitor_app/core/network/api_client.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 import 'package:netmonitor_app/features/vpn/data/vpn_repository.dart';
 import 'package:netmonitor_app/features/vpn/models/vpn_models.dart';
 
@@ -86,23 +87,16 @@ class VpnNotifier extends Notifier<VpnState> {
 
   VpnRepository get _repo => ref.read(vpnRepositoryProvider);
 
-  String _describe(Object err, String fallback) {
-    if (err is ApiException && err.message.isNotEmpty) return err.message;
-    if (err is NetworkException && err.message.isNotEmpty) return err.message;
-    return fallback;
-  }
-
   /// Aplica snapshot SSE `vpn:peers_updated` diretamente em memória (zero polling).
   void applyRealtimePeers(Map<String, dynamic> data) {
-    final raw = data['peers'];
-    if (raw is! List || raw.isEmpty) return;
+    final updates = asJsonMapList(data['peers']);
+    if (updates.isEmpty) return;
 
     final updatesById = <int, Map<String, dynamic>>{};
-    for (final item in raw) {
-      if (item is Map && item['id'] is num) {
-        updatesById[(item['id'] as num).toInt()] = Map<String, dynamic>.from(
-          item,
-        );
+    for (final item in updates) {
+      final id = parseIntOrNull(item['id']);
+      if (id != null) {
+        updatesById[id] = item;
       }
     }
     if (updatesById.isEmpty) return;
@@ -127,8 +121,8 @@ class VpnNotifier extends Notifier<VpnState> {
           final status = VpnConnectionStatus.fromRaw(
             update['connectionStatus'],
           );
-          final rx = (update['bytesRx'] as num?)?.toInt() ?? peer.bytesRx;
-          final tx = (update['bytesTx'] as num?)?.toInt() ?? peer.bytesTx;
+          final rx = parseIntOrNull(update['bytesRx']) ?? peer.bytesRx;
+          final tx = parseIntOrNull(update['bytesTx']) ?? peer.bytesTx;
           if (status == VpnConnectionStatus.connected) connectedCount++;
           totalRx += rx;
           totalTx += tx;
@@ -140,9 +134,9 @@ class VpnNotifier extends Notifier<VpnState> {
             clearLastSeenAt: update['lastSeenAt'] == null,
             bytesRx: rx,
             bytesTx: tx,
-            needsFirewallHint: update['needsFirewallHint'] == true,
-            pingOutsideTunnel: update['pingOutsideTunnel'] == true,
-            pingMonitorId: (update['pingMonitorId'] as num?)?.toInt(),
+            needsFirewallHint: parseBool(update['needsFirewallHint']),
+            pingOutsideTunnel: parseBool(update['pingOutsideTunnel']),
+            pingMonitorId: parseIntOrNull(update['pingMonitorId']),
             clearPingMonitorId: update['pingMonitorId'] == null,
           );
         })
@@ -202,7 +196,7 @@ class VpnNotifier extends Notifier<VpnState> {
     } catch (err) {
       state = state.copyWith(
         loading: false,
-        error: _describe(err, 'Erro ao carregar o servidor VPN.'),
+        error: describeError(err, fallback: 'Erro ao carregar o servidor VPN.'),
       );
     }
   }
@@ -231,7 +225,10 @@ class VpnNotifier extends Notifier<VpnState> {
     } catch (err) {
       state = state.copyWith(
         saving: false,
-        error: _describe(err, 'Erro ao salvar a configuração do servidor VPN.'),
+        error: describeError(
+          err,
+          fallback: 'Erro ao salvar a configuração do servidor VPN.',
+        ),
       );
       return false;
     }
@@ -254,7 +251,10 @@ class VpnNotifier extends Notifier<VpnState> {
     } catch (err) {
       state = state.copyWith(
         testing: false,
-        error: _describe(err, 'Erro ao executar o teste de acessibilidade.'),
+        error: describeError(
+          err,
+          fallback: 'Erro ao executar o teste de acessibilidade.',
+        ),
       );
       return null;
     }
@@ -269,7 +269,10 @@ class VpnNotifier extends Notifier<VpnState> {
     } catch (err) {
       state = state.copyWith(
         testing: false,
-        error: _describe(err, 'Erro ao detectar o endereço público.'),
+        error: describeError(
+          err,
+          fallback: 'Erro ao detectar o endereço público.',
+        ),
       );
       return null;
     }
@@ -283,7 +286,10 @@ class VpnNotifier extends Notifier<VpnState> {
     } catch (err) {
       state = state.copyWith(
         loading: false,
-        error: _describe(err, 'Erro ao carregar os dispositivos VPN.'),
+        error: describeError(
+          err,
+          fallback: 'Erro ao carregar os dispositivos VPN.',
+        ),
       );
     }
   }
@@ -293,12 +299,21 @@ class VpnNotifier extends Notifier<VpnState> {
     state = state.copyWith(sites: sites);
   }
 
+  Future<VpnInstallPolicy> fetchSuggestedAgentPolicy() =>
+      _repo.fetchSuggestedAgentPolicy();
+
+  Future<List<VpnMetricSample>> fetchDeviceMetrics(int deviceId) =>
+      _repo.fetchDeviceVpnMetrics(deviceId);
+
   Future<String?> suggestNextIp() async {
     try {
       return await _repo.suggestNextIp();
     } catch (err) {
       state = state.copyWith(
-        error: _describe(err, 'Erro ao sugerir o próximo IP livre.'),
+        error: describeError(
+          err,
+          fallback: 'Erro ao sugerir o próximo IP livre.',
+        ),
       );
       return null;
     }
@@ -318,7 +333,7 @@ class VpnNotifier extends Notifier<VpnState> {
     } catch (err) {
       state = state.copyWith(
         saving: false,
-        error: _describe(err, 'Erro ao criar o dispositivo VPN.'),
+        error: describeError(err, fallback: 'Erro ao criar o dispositivo VPN.'),
       );
       return null;
     }
@@ -339,7 +354,10 @@ class VpnNotifier extends Notifier<VpnState> {
     } catch (err) {
       state = state.copyWith(
         saving: false,
-        error: _describe(err, 'Erro ao renomear o dispositivo VPN.'),
+        error: describeError(
+          err,
+          fallback: 'Erro ao renomear o dispositivo VPN.',
+        ),
       );
       return false;
     }
@@ -353,7 +371,10 @@ class VpnNotifier extends Notifier<VpnState> {
       return artifact;
     } catch (err) {
       state = state.copyWith(
-        error: _describe(err, 'Erro ao obter a configuração do dispositivo.'),
+        error: describeError(
+          err,
+          fallback: 'Erro ao obter a configuração do dispositivo.',
+        ),
       );
       return null;
     }
@@ -376,7 +397,7 @@ class VpnNotifier extends Notifier<VpnState> {
     } catch (err) {
       state = state.copyWith(
         saving: false,
-        error: _describe(err, 'Erro ao rotacionar as chaves.'),
+        error: describeError(err, fallback: 'Erro ao rotacionar as chaves.'),
       );
       return null;
     }
@@ -408,7 +429,10 @@ class VpnNotifier extends Notifier<VpnState> {
       return true;
     } catch (err) {
       state = state.copyWith(
-        error: _describe(err, 'Erro ao atualizar as permissões do agente.'),
+        error: describeError(
+          err,
+          fallback: 'Erro ao atualizar as permissões do agente.',
+        ),
       );
       return false;
     }
@@ -420,7 +444,10 @@ class VpnNotifier extends Notifier<VpnState> {
       return await _repo.fetchFirewallHints(peerId);
     } catch (err) {
       state = state.copyWith(
-        error: _describe(err, 'Erro ao obter as regras de firewall.'),
+        error: describeError(
+          err,
+          fallback: 'Erro ao obter as regras de firewall.',
+        ),
       );
       return null;
     }
@@ -437,7 +464,10 @@ class VpnNotifier extends Notifier<VpnState> {
       return true;
     } catch (err) {
       state = state.copyWith(
-        error: _describe(err, 'Erro ao revogar o dispositivo VPN.'),
+        error: describeError(
+          err,
+          fallback: 'Erro ao revogar o dispositivo VPN.',
+        ),
       );
       return false;
     }

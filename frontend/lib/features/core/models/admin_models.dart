@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:netmonitor_app/core/auth/area_access.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 
 @immutable
 class ManagedUser {
@@ -27,7 +28,7 @@ class ManagedUser {
 
   factory ManagedUser.fromJson(Map<String, dynamic> json) {
     return ManagedUser(
-      id: (json['id'] as num?)?.toInt() ?? 0,
+      id: parseIntOrNull(json['id']) ?? 0,
       email: (json['email'] ?? '').toString(),
       fullName: (json['fullName'] ?? json['name'] ?? '').toString(),
       role: UserRole.tryParse(json['role']) ?? UserRole.viewer,
@@ -72,12 +73,12 @@ class AuditLogEntry {
 
   factory AuditLogEntry.fromJson(Map<String, dynamic> json) {
     return AuditLogEntry(
-      id: (json['id'] as num?)?.toInt() ?? 0,
-      userId: (json['userId'] as num?)?.toInt(),
+      id: parseIntOrNull(json['id']) ?? 0,
+      userId: parseIntOrNull(json['userId']),
       userEmail: json['userEmail'] as String?,
       action: (json['action'] ?? '').toString(),
       resourceType: (json['resourceType'] ?? '').toString(),
-      resourceId: (json['resourceId'] as num?)?.toInt(),
+      resourceId: parseIntOrNull(json['resourceId']),
       resourceLabel: json['resourceLabel'] as String?,
       description: json['description'] as String?,
       changes: json['changes'],
@@ -205,11 +206,11 @@ class SystemBackupPlan {
 
   factory SystemBackupPlan.fromJson(Map<String, dynamic> json) {
     return SystemBackupPlan(
-      storageDestinationId: (json['storageDestinationId'] as num?)?.toInt(),
+      storageDestinationId: parseIntOrNull(json['storageDestinationId']),
       storageDestinationName: json['storageDestinationName'] as String?,
       backupEnabled: json['backupEnabled'] == true,
-      backupIntervalHours: (json['backupIntervalHours'] as num?)?.toInt() ?? 24,
-      backupRetention: (json['backupRetention'] as num?)?.toInt() ?? 7,
+      backupIntervalHours: parseIntOrNull(json['backupIntervalHours']) ?? 24,
+      backupRetention: parseIntOrNull(json['backupRetention']) ?? 7,
       lastBackupAt: json['lastBackupAt'] as String?,
       lastBackupStatus: json['lastBackupStatus'] as String?,
       lastBackupError: json['lastBackupError'] as String?,
@@ -237,7 +238,7 @@ class SystemBackupCopy {
     return SystemBackupCopy(
       key: (json['key'] ?? '').toString(),
       name: (json['name'] ?? json['key'] ?? '').toString(),
-      size: (json['size'] as num?)?.toInt() ?? 0,
+      size: parseIntOrNull(json['size']) ?? 0,
       lastModified: json['lastModified'] as String?,
     );
   }
@@ -253,7 +254,7 @@ class BackupTableCount {
   factory BackupTableCount.fromJson(Map<String, dynamic> json) {
     return BackupTableCount(
       table: (json['table'] ?? '').toString(),
-      rows: (json['rows'] as num?)?.toInt() ?? 0,
+      rows: parseIntOrNull(json['rows']) ?? 0,
     );
   }
 }
@@ -273,14 +274,13 @@ class BackupCountsResponse {
   bool get isFull => scope == 'full';
 
   factory BackupCountsResponse.fromJson(Map<String, dynamic> json) {
-    final raw = json['tables'] is List ? json['tables'] as List : const [];
     return BackupCountsResponse(
       scope: (json['scope'] ?? 'config').toString(),
-      tables: raw
-          .whereType<Map>()
-          .map((e) => BackupTableCount.fromJson(Map<String, dynamic>.from(e)))
-          .toList(growable: false),
-      totalRows: (json['totalRows'] as num?)?.toInt() ?? 0,
+      tables: asJsonList<BackupTableCount>(
+        json['tables'],
+        BackupTableCount.fromJson,
+      ),
+      totalRows: parseIntOrNull(json['totalRows']) ?? 0,
     );
   }
 }
@@ -298,9 +298,7 @@ class BackupRestoreResponse {
   factory BackupRestoreResponse.fromJson(Map<String, dynamic> json) {
     return BackupRestoreResponse(
       counts: json['counts'] is Map
-          ? BackupCountsResponse.fromJson(
-              Map<String, dynamic>.from(json['counts'] as Map),
-            )
+          ? BackupCountsResponse.fromJson(asJsonMap(json['counts']))
           : BackupCountsResponse.fromJson(json),
       signInAgain: json['signInAgain'] == true,
     );
@@ -321,7 +319,7 @@ class StorageOptionRef {
 
   factory StorageOptionRef.fromJson(Map<String, dynamic> json) {
     return StorageOptionRef(
-      id: (json['id'] as num?)?.toInt() ?? 0,
+      id: parseIntOrNull(json['id']) ?? 0,
       name: (json['name'] ?? '').toString(),
       kind: (json['kind'] ?? 'local').toString(),
     );

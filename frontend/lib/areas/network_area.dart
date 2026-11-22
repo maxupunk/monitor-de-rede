@@ -48,6 +48,39 @@ void _scheduleDiscoveryRefresh(dynamic ref, SseBus bus) {
   });
 }
 
+const AiScreenContribution _aiDevices = AiScreenContribution(
+  id: 'devices',
+  title: 'Dispositivos',
+);
+const AiScreenContribution _aiDeviceDetail = AiScreenContribution(
+  id: 'device-detail',
+  title: 'Detalhe do Dispositivo',
+);
+const AiScreenContribution _aiTopology = AiScreenContribution(
+  id: 'topology',
+  title: 'Topologia',
+);
+const AiScreenContribution _aiDiscovery = AiScreenContribution(
+  id: 'discovery',
+  title: 'Descoberta',
+);
+const AiScreenContribution _aiNetworks = AiScreenContribution(
+  id: 'networks',
+  title: 'Redes IP',
+);
+const AiScreenContribution _aiSites = AiScreenContribution(
+  id: 'sites',
+  title: 'Sites',
+);
+const AiScreenContribution _aiLinkTests = AiScreenContribution(
+  id: 'link-tests',
+  title: 'Testes de velocidade',
+);
+const AiScreenContribution _aiWifi = AiScreenContribution(
+  id: 'wifi',
+  title: 'Clientes Wi-Fi',
+);
+
 /// Área Rede + Dispositivos (Bucket 2 — ADR 017/019).
 ///
 /// - `/devices` e `/devices/:id` declaram `area: ProductArea.core` em `routeMeta`
@@ -123,45 +156,30 @@ final AreaContribution networkArea = AreaContribution(
     ),
   ],
   routeMeta: const <String, AreaRouteMeta>{
-    '/devices': AreaRouteMeta(
-      area: ProductArea.core,
-      aiScreen: AiScreenContribution(id: 'devices', title: 'Dispositivos'),
-    ),
+    '/devices': AreaRouteMeta(area: ProductArea.core, aiScreen: _aiDevices),
     '/devices/:id': AreaRouteMeta(
       area: ProductArea.core,
-      aiScreen: AiScreenContribution(
-        id: 'device-detail',
-        title: 'Detalhe do Dispositivo',
-      ),
+      aiScreen: _aiDeviceDetail,
     ),
     '/topology': AreaRouteMeta(
       area: ProductArea.network,
       fullBleed: true,
-      aiScreen: AiScreenContribution(id: 'topology', title: 'Topologia'),
+      aiScreen: _aiTopology,
     ),
     '/discovery': AreaRouteMeta(
       area: ProductArea.network,
-      aiScreen: AiScreenContribution(id: 'discovery', title: 'Descoberta'),
+      aiScreen: _aiDiscovery,
     ),
     '/networks': AreaRouteMeta(
       area: ProductArea.network,
-      aiScreen: AiScreenContribution(id: 'networks', title: 'Redes IP'),
+      aiScreen: _aiNetworks,
     ),
-    '/sites': AreaRouteMeta(
-      area: ProductArea.network,
-      aiScreen: AiScreenContribution(id: 'sites', title: 'Sites'),
-    ),
+    '/sites': AreaRouteMeta(area: ProductArea.network, aiScreen: _aiSites),
     '/link-tests': AreaRouteMeta(
       area: ProductArea.network,
-      aiScreen: AiScreenContribution(
-        id: 'link-tests',
-        title: 'Testes de velocidade',
-      ),
+      aiScreen: _aiLinkTests,
     ),
-    '/wifi': AreaRouteMeta(
-      area: ProductArea.network,
-      aiScreen: AiScreenContribution(id: 'wifi', title: 'Clientes Wi-Fi'),
-    ),
+    '/wifi': AreaRouteMeta(area: ProductArea.network, aiScreen: _aiWifi),
     '/probes': AreaRouteMeta(area: ProductArea.network),
   },
   nav: <NavEntry>[
@@ -339,20 +357,14 @@ final AreaContribution networkArea = AreaContribution(
     ),
   ],
   aiScreens: const <String, AiScreenContribution>{
-    'devices': AiScreenContribution(id: 'devices', title: 'Dispositivos'),
-    'device-detail': AiScreenContribution(
-      id: 'device-detail',
-      title: 'Detalhe do Dispositivo',
-    ),
-    'sites': AiScreenContribution(id: 'sites', title: 'Sites'),
-    'networks': AiScreenContribution(id: 'networks', title: 'Redes IP'),
-    'discovery': AiScreenContribution(id: 'discovery', title: 'Descoberta'),
-    'link-tests': AiScreenContribution(
-      id: 'link-tests',
-      title: 'Testes de velocidade',
-    ),
-    'topology': AiScreenContribution(id: 'topology', title: 'Topologia'),
-    'wifi': AiScreenContribution(id: 'wifi', title: 'Clientes Wi-Fi'),
+    'devices': _aiDevices,
+    'device-detail': _aiDeviceDetail,
+    'sites': _aiSites,
+    'networks': _aiNetworks,
+    'discovery': _aiDiscovery,
+    'link-tests': _aiLinkTests,
+    'topology': _aiTopology,
+    'wifi': _aiWifi,
   },
   extraShellOverlays: <ProductArea, List<WidgetBuilder>>{
     ProductArea.core: <WidgetBuilder>[(_) => const DeviceAccessHost()],

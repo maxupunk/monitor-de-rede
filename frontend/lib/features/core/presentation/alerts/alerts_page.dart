@@ -5,7 +5,6 @@ import 'package:netmonitor_app/core/auth/auth_state.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/core/models/alert_models.dart';
 import 'package:netmonitor_app/features/core/presentation/alerts/alert_dialogs.dart';
-import 'package:netmonitor_app/features/core/presentation/widgets/pinned_sliver_header.dart';
 import 'package:netmonitor_app/features/core/providers/alerts_provider.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';

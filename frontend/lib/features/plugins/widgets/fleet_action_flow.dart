@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
 import 'package:netmonitor_app/core/utils/plugin_presentation.dart';
 import 'package:netmonitor_app/features/plugins/models/plugin_models.dart';
 import 'package:netmonitor_app/features/plugins/providers/plugin_apps_provider.dart';
 import 'package:netmonitor_app/features/plugins/providers/plugins_provider.dart';
 import 'package:netmonitor_app/features/plugins/utils/plugin_settings_logic.dart';
-import 'package:netmonitor_app/features/plugins/widgets/device_access_dialog.dart';
 import 'package:netmonitor_app/features/plugins/widgets/plugin_output_view.dart';
 import 'package:netmonitor_app/features/plugins/widgets/plugin_settings_form.dart';
+import 'package:netmonitor_app/shared/device_access/device_access.dart'
+    hide CredentialView;
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
 
@@ -123,7 +125,7 @@ class _FleetActionFlowBodyState extends ConsumerState<_FleetActionFlowBody> {
       if (mounted) {
         setState(() {
           _submitting = false;
-          _error = err.toString();
+          _error = describeError(err);
         });
       }
     }
@@ -158,7 +160,7 @@ class _FleetActionFlowBodyState extends ConsumerState<_FleetActionFlowBody> {
       if (mounted) {
         setState(() {
           _submitting = false;
-          _error = err.toString();
+          _error = describeError(err);
         });
       }
     }

@@ -1,8 +1,10 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:netmonitor_app/core/models/pagination.dart';
 import 'package:netmonitor_app/core/network/api_client.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 import 'package:netmonitor_app/features/core/models/alert_models.dart';
-import 'package:netmonitor_app/features/core/models/event_models.dart';
 
 @immutable
 class AlertsState {
@@ -84,23 +86,13 @@ class AlertsNotifier extends Notifier<AlertsState> {
     state = state.copyWith(loading: true, clearError: true);
     try {
       final raw = await ref.read(apiClientProvider).get<dynamic>('/alerts');
-      final list = raw is List
-          ? raw
-                .whereType<Map>()
-                .map((e) => AlertEvent.fromJson(Map<String, dynamic>.from(e)))
-                .toList(growable: false)
-          : (raw is Map && raw['data'] is List
-                ? (raw['data'] as List)
-                      .whereType<Map>()
-                      .map(
-                        (e) =>
-                            AlertEvent.fromJson(Map<String, dynamic>.from(e)),
-                      )
-                      .toList(growable: false)
-                : const <AlertEvent>[]);
-      state = state.copyWith(alertEvents: list, loading: false);
+      final paginated = PaginatedResult<AlertEvent>.fromDynamic(
+        raw,
+        AlertEvent.fromJson,
+      );
+      state = state.copyWith(alertEvents: paginated.data, loading: false);
     } catch (err) {
-      state = state.copyWith(loading: false, error: err.toString());
+      state = state.copyWith(loading: false, error: describeError(err));
     }
   }
 
@@ -113,37 +105,20 @@ class AlertsNotifier extends Notifier<AlertsState> {
             '/alerts',
             queryParameters: <String, dynamic>{'page': page, 'limit': 30},
           );
-      List<AlertEvent> items;
-      PaginationMeta? meta;
-      if (raw is Map) {
-        final data = raw['data'] is List ? raw['data'] as List : const [];
-        items = data
-            .whereType<Map>()
-            .map((e) => AlertEvent.fromJson(Map<String, dynamic>.from(e)))
-            .toList(growable: false);
-        if (raw['meta'] is Map) {
-          meta = PaginationMeta.fromJson(
-            Map<String, dynamic>.from(raw['meta'] as Map),
-          );
-        }
-      } else if (raw is List) {
-        items = raw
-            .whereType<Map>()
-            .map((e) => AlertEvent.fromJson(Map<String, dynamic>.from(e)))
-            .toList(growable: false);
-      } else {
-        items = const <AlertEvent>[];
-      }
-
+      final paginated = PaginatedResult<AlertEvent>.fromDynamic(
+        raw,
+        AlertEvent.fromJson,
+        fallbackPerPage: 30,
+      );
       state = state.copyWith(
         historyItems: append
-            ? <AlertEvent>[...state.historyItems, ...items]
-            : items,
-        historyMeta: meta,
+            ? <AlertEvent>[...state.historyItems, ...paginated.data]
+            : paginated.data,
+        historyMeta: raw is Map && raw['meta'] is Map ? paginated.meta : null,
         historyLoading: false,
       );
     } catch (err) {
-      state = state.copyWith(historyLoading: false, error: err.toString());
+      state = state.copyWith(historyLoading: false, error: describeError(err));
     }
   }
 
@@ -189,13 +164,7 @@ class AlertsNotifier extends Notifier<AlertsState> {
               'limit': ?limit,
             },
           );
-      if (raw is List) {
-        return raw
-            .whereType<Map>()
-            .map((e) => ScopeInstability.fromJson(Map<String, dynamic>.from(e)))
-            .toList(growable: false);
-      }
-      return const <ScopeInstability>[];
+      return asJsonList<ScopeInstability>(raw, ScopeInstability.fromJson);
     } catch (_) {
       return const <ScopeInstability>[];
     }
@@ -207,9 +176,7 @@ class AlertsNotifier extends Notifier<AlertsState> {
           .read(apiClientProvider)
           .post<Map<String, dynamic>>('/alerts/$alertId/acknowledge');
       if (res['event'] is Map) {
-        upsertAlertEvent(
-          AlertEvent.fromJson(Map<String, dynamic>.from(res['event'] as Map)),
-        );
+        upsertAlertEvent(AlertEvent.fromJson(asJsonMap(res['event'])));
       } else {
         patchAlertEvent(
           alertId,
@@ -218,7 +185,7 @@ class AlertsNotifier extends Notifier<AlertsState> {
       }
       return res['message'] as String?;
     } catch (err) {
-      state = state.copyWith(error: err.toString());
+      state = state.copyWith(error: describeError(err));
       return null;
     }
   }
@@ -231,9 +198,7 @@ class AlertsNotifier extends Notifier<AlertsState> {
           .read(apiClientProvider)
           .post<Map<String, dynamic>>('/alerts/$alertId/verify');
       if (res['event'] is Map) {
-        upsertAlertEvent(
-          AlertEvent.fromJson(Map<String, dynamic>.from(res['event'] as Map)),
-        );
+        upsertAlertEvent(AlertEvent.fromJson(asJsonMap(res['event'])));
       }
       return (
         ok: true,
@@ -241,7 +206,7 @@ class AlertsNotifier extends Notifier<AlertsState> {
         message: res['message'] as String?,
       );
     } catch (err) {
-      return (ok: false, resolved: false, message: err.toString());
+      return (ok: false, resolved: false, message: describeError(err));
     }
   }
 
@@ -255,12 +220,13 @@ class AlertsNotifier extends Notifier<AlertsState> {
       await fetchActiveAlerts();
       return (
         ok: true,
-        resolvedCount: (res['resolvedCount'] as num?)?.toInt() ?? 0,
+        resolvedCount: parseIntOrNull(res['resolvedCount']) ?? 0,
         message: res['message'] as String?,
       );
     } catch (err) {
-      state = state.copyWith(loading: false, error: err.toString());
-      return (ok: false, resolvedCount: 0, message: err.toString());
+      final msg = describeError(err);
+      state = state.copyWith(loading: false, error: msg);
+      return (ok: false, resolvedCount: 0, message: msg);
     }
   }
 
@@ -278,7 +244,7 @@ class AlertsNotifier extends Notifier<AlertsState> {
       patchAlertEvent(alertId, status: 'silenced');
       return true;
     } catch (err) {
-      state = state.copyWith(error: err.toString());
+      state = state.copyWith(error: describeError(err));
       return false;
     }
   }
@@ -289,14 +255,11 @@ class AlertsNotifier extends Notifier<AlertsState> {
           .read(apiClientProvider)
           .post<Map<String, dynamic>>('/ai/alerts/$alertId/summary');
       if (res['summary'] is Map) {
-        applyAiSummary(
-          alertId,
-          Map<String, dynamic>.from(res['summary'] as Map),
-        );
+        applyAiSummary(alertId, asJsonMap(res['summary']));
       }
       return null;
     } catch (err) {
-      return err.toString();
+      return describeError(err);
     }
   }
 
@@ -320,12 +283,7 @@ class AlertsNotifier extends Notifier<AlertsState> {
             '/alert-rules',
             queryParameters: params.isEmpty ? null : params,
           );
-      final rules = raw is List
-          ? raw
-                .whereType<Map>()
-                .map((e) => AlertRule.fromJson(Map<String, dynamic>.from(e)))
-                .toList(growable: false)
-          : const <AlertRule>[];
+      final rules = asJsonList<AlertRule>(raw, AlertRule.fromJson);
       if (params.isEmpty) {
         state = state.copyWith(alertRules: rules, loading: false);
       } else {
@@ -333,7 +291,7 @@ class AlertsNotifier extends Notifier<AlertsState> {
       }
       return rules;
     } catch (err) {
-      state = state.copyWith(loading: false, error: err.toString());
+      state = state.copyWith(loading: false, error: describeError(err));
       return const <AlertRule>[];
     }
   }
@@ -356,27 +314,16 @@ class AlertsNotifier extends Notifier<AlertsState> {
             '/alert-rules/catalog',
             queryParameters: params.isEmpty ? null : params,
           );
-      final rawTemplates = raw['templates'] is List
-          ? raw['templates'] as List
-          : const [];
-      final rawCats = raw['categories'] is Map
-          ? raw['categories'] as Map
-          : const {};
       state = state.copyWith(
-        ruleTemplates: rawTemplates
-            .whereType<Map>()
-            .map(
-              (e) => AlertRuleTemplate.fromJson(Map<String, dynamic>.from(e)),
-            )
-            .toList(growable: false),
-        ruleCategories: <String, String>{
-          for (final entry in rawCats.entries)
-            entry.key.toString(): entry.value.toString(),
-        },
+        ruleTemplates: asJsonList<AlertRuleTemplate>(
+          raw['templates'],
+          AlertRuleTemplate.fromJson,
+        ),
+        ruleCategories: asStringMap(raw['categories']),
         catalogLoading: false,
       );
     } catch (err) {
-      state = state.copyWith(catalogLoading: false, error: err.toString());
+      state = state.copyWith(catalogLoading: false, error: describeError(err));
     }
   }
 
@@ -399,13 +346,9 @@ class AlertsNotifier extends Notifier<AlertsState> {
               'monitorId': monitorId,
             },
           );
-      final created = res['created'] is List
-          ? res['created'] as List
-          : const [];
-      for (final item in created) {
-        if (item is Map) {
-          upsertAlertRule(AlertRule.fromJson(Map<String, dynamic>.from(item)));
-        }
+      final created = asJsonList<AlertRule>(res['created'], AlertRule.fromJson);
+      for (final rule in created) {
+        upsertAlertRule(rule);
       }
       await fetchRuleCatalog(
         siteId: siteId,
@@ -414,7 +357,7 @@ class AlertsNotifier extends Notifier<AlertsState> {
       );
       return created.length;
     } catch (err) {
-      state = state.copyWith(catalogLoading: false, error: err.toString());
+      state = state.copyWith(catalogLoading: false, error: describeError(err));
       return 0;
     }
   }
@@ -427,7 +370,7 @@ class AlertsNotifier extends Notifier<AlertsState> {
       upsertAlertRule(AlertRule.fromJson(raw));
       return true;
     } catch (err) {
-      state = state.copyWith(error: err.toString());
+      state = state.copyWith(error: describeError(err));
       return false;
     }
   }
@@ -440,7 +383,7 @@ class AlertsNotifier extends Notifier<AlertsState> {
       upsertAlertRule(AlertRule.fromJson(raw));
       return true;
     } catch (err) {
-      state = state.copyWith(error: err.toString());
+      state = state.copyWith(error: describeError(err));
       return false;
     }
   }
@@ -451,7 +394,7 @@ class AlertsNotifier extends Notifier<AlertsState> {
       removeAlertRule(id);
       return true;
     } catch (err) {
-      state = state.copyWith(error: err.toString());
+      state = state.copyWith(error: describeError(err));
       return false;
     }
   }

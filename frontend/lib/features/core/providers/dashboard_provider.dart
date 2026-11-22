@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/areas/area_models.dart';
 import 'package:netmonitor_app/core/areas/areas_provider.dart';
 import 'package:netmonitor_app/core/network/api_client.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
 import 'package:netmonitor_app/features/core/models/dashboard_models.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -246,7 +247,7 @@ class DashboardNotifier extends Notifier<DashboardState> {
           .get<Map<String, dynamic>>('/dashboard/catalog');
       catalog = DashboardCatalog.fromJson(res);
     } catch (e) {
-      err = e.toString();
+      err = describeError(e);
     }
 
     final initialWidgets = localSaved != null

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/servers/models/database_models.dart';
 import 'package:netmonitor_app/features/servers/providers/databases_provider.dart';
@@ -62,9 +63,11 @@ class _DatabaseInfoCardState extends ConsumerState<DatabaseInfoCard> {
       );
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Erro ao limpar histórico: $err')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Erro ao limpar histórico: ${describeError(err)}'),
+        ),
+      );
     }
   }
 
@@ -94,9 +97,9 @@ class _DatabaseInfoCardState extends ConsumerState<DatabaseInfoCard> {
       );
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Erro ao apagar itens: $err')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao apagar itens: ${describeError(err)}')),
+      );
     }
   }
 

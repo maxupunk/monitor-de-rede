@@ -4,6 +4,9 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/network/api_client.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
+import 'package:netmonitor_app/core/utils/formatters.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 import 'package:netmonitor_app/features/core/models/admin_models.dart';
 
 @immutable
@@ -114,22 +117,16 @@ class BackupNotifier extends Notifier<BackupState> {
       final storagesRaw = await api
           .get<dynamic>('/storages')
           .catchError((_) => const <dynamic>[]);
-      final storageList = storagesRaw is List
-          ? storagesRaw
-                .whereType<Map>()
-                .map(
-                  (e) =>
-                      StorageOptionRef.fromJson(Map<String, dynamic>.from(e)),
-                )
-                .toList(growable: false)
-          : const <StorageOptionRef>[];
       state = state.copyWith(
         plan: SystemBackupPlan.fromJson(planRaw),
-        storages: storageList,
+        storages: asJsonList<StorageOptionRef>(
+          storagesRaw,
+          StorageOptionRef.fromJson,
+        ),
         loading: false,
       );
     } catch (err) {
-      state = state.copyWith(loading: false, error: err.toString());
+      state = state.copyWith(loading: false, error: describeError(err));
     }
   }
 
@@ -183,13 +180,7 @@ class BackupNotifier extends Notifier<BackupState> {
               ? <String, dynamic>{'storageDestinationId': storageId}
               : null,
         );
-    if (raw is List) {
-      return raw
-          .whereType<Map>()
-          .map((e) => SystemBackupCopy.fromJson(Map<String, dynamic>.from(e)))
-          .toList(growable: false);
-    }
-    return const <SystemBackupCopy>[];
+    return asJsonList<SystemBackupCopy>(raw, SystemBackupCopy.fromJson);
   }
 
   Future<BackupCountsResponse> previewCopy(
@@ -232,18 +223,12 @@ class BackupNotifier extends Notifier<BackupState> {
           .read(apiClientProvider)
           .get<Map<String, dynamic>>('/backup/export');
       final encoded = const JsonEncoder.withIndent('  ').convert(raw);
-      final stamp = DateTime.now()
-          .toUtc()
-          .toIso8601String()
-          .substring(0, 19)
-          .replaceAll(RegExp(r'[-:]'), '')
-          .replaceAll('T', '-');
       return (
         bytes: Uint8List.fromList(utf8.encode(encoded)),
-        filename: 'netmonitor-backup-$stamp.json',
+        filename: 'netmonitor-backup-${formatFileTimestamp()}.json',
       );
     } catch (err) {
-      state = state.copyWith(error: err.toString());
+      state = state.copyWith(error: describeError(err));
       return null;
     } finally {
       state = state.copyWith(exporting: false);
@@ -272,7 +257,7 @@ class BackupNotifier extends Notifier<BackupState> {
       }
       return null;
     } catch (err) {
-      state = state.copyWith(error: err.toString());
+      state = state.copyWith(error: describeError(err));
       return null;
     } finally {
       _fullDownloadCancel = null;
@@ -319,7 +304,7 @@ class BackupNotifier extends Notifier<BackupState> {
       );
       return true;
     } catch (err) {
-      state = state.copyWith(clearUpload: true, error: err.toString());
+      state = state.copyWith(clearUpload: true, error: describeError(err));
       return false;
     }
   }
@@ -369,7 +354,7 @@ class BackupNotifier extends Notifier<BackupState> {
       state = state.copyWith(
         restoring: false,
         clearUpload: true,
-        error: err.toString(),
+        error: describeError(err),
       );
       return null;
     }

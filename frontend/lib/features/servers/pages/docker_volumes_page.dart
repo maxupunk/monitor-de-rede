@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
+import 'package:netmonitor_app/core/utils/file_download.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/servers/models/docker_models.dart';
 import 'package:netmonitor_app/features/servers/providers/docker_provider.dart';
-import 'package:netmonitor_app/features/servers/utils/download_helper.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
 
@@ -28,24 +29,23 @@ class _DockerVolumesPageState extends ConsumerState<DockerVolumesPage> {
 
   Future<void> _exportVolume(String name) async {
     try {
-      final result = await ref
-          .read(dockerProvider.notifier)
-          .apiFor()
-          .exportVolume(name);
+      final result = await ref.read(dockerProvider.notifier).exportVolume(name);
       if (!mounted) return;
-      final safe = name.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
-      final date = DateTime.now().toIso8601String().substring(0, 10);
-      await shareDownloadedBytes(
-        context,
+      final safe = sanitizeFileSlug(name, fallback: 'volume');
+      final stamp = formatFileTimestamp();
+      await saveOrShareBytes(
+        context: context,
         bytes: result.bytes,
-        filename: result.filename ?? 'volume-$safe-$date.tar.gz',
+        filename: result.filename ?? 'volume-$safe-$stamp.tar.gz',
         mimeType: 'application/gzip',
       );
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Erro ao exportar volume: $err')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Erro ao exportar volume: ${describeError(err)}'),
+        ),
+      );
     }
   }
 
@@ -61,13 +61,7 @@ class _DockerVolumesPageState extends ConsumerState<DockerVolumesPage> {
     if (!confirmed || !mounted) return;
     final ok = await ref
         .read(dockerProvider.notifier)
-        .runAction(
-          () => ref
-              .read(dockerProvider.notifier)
-              .apiFor()
-              .removeVolume(volume.name),
-          refresh: ref.read(dockerProvider.notifier).refreshAll,
-        );
+        .removeVolume(volume.name);
     if (ok && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Volume ${volume.name} removido.')),
@@ -198,8 +192,7 @@ class _VolumeDetailBodyState extends ConsumerState<_VolumeDetailBody> {
     try {
       final d = await ref
           .read(dockerProvider.notifier)
-          .apiFor()
-          .volumeDetail(widget.volumeName);
+          .fetchVolumeDetail(widget.volumeName);
       if (!mounted) return;
       setState(() {
         _detail = d;
@@ -208,7 +201,7 @@ class _VolumeDetailBodyState extends ConsumerState<_VolumeDetailBody> {
     } catch (err) {
       if (!mounted) return;
       setState(() {
-        _error = err.toString();
+        _error = describeError(err, fallback: 'Erro ao inspecionar volume.');
         _loading = false;
       });
     }

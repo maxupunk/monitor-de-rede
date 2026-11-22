@@ -1,35 +1,41 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
-import 'package:netmonitor_app/core/network/api_client.dart';
-import 'package:netmonitor_app/core/utils/device_defaults.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/core/utils/plugin_presentation.dart';
-import 'package:netmonitor_app/features/ai/providers/ai_providers.dart';
-import 'package:netmonitor_app/features/ai/widgets/ai_proactive_widgets.dart';
-import 'package:netmonitor_app/features/network/widgets/device_access_host.dart'
-    show showDeviceAuthFailureDialog;
 import 'package:netmonitor_app/features/plugins/models/plugin_models.dart';
 import 'package:netmonitor_app/features/plugins/providers/plugins_provider.dart';
 import 'package:netmonitor_app/features/plugins/utils/plugin_settings_logic.dart';
-import 'package:netmonitor_app/features/plugins/widgets/device_access_dialog.dart';
-import 'package:netmonitor_app/features/plugins/widgets/plugin_editor_dialog.dart';
+import 'package:netmonitor_app/features/plugins/widgets/device_plugin_installed_section.dart';
+import 'package:netmonitor_app/features/plugins/widgets/plugin_action_runner_sheet.dart';
 import 'package:netmonitor_app/features/plugins/widgets/plugin_output_view.dart';
-import 'package:netmonitor_app/features/plugins/widgets/plugin_review_dialog.dart';
-import 'package:netmonitor_app/features/plugins/widgets/plugin_settings_form.dart';
 import 'package:netmonitor_app/features/plugins/widgets/wifi_qr_dialog.dart';
+import 'package:netmonitor_app/shared/device_access/device_access.dart'
+    hide CredentialView;
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
+
+typedef PluginAiActionBuilder =
+    Widget? Function(
+      BuildContext context,
+      WidgetRef ref,
+      int deviceId,
+      String platform,
+    );
 
 /// Aba Plugins embutida em `/devices/:id` via `DeviceDetailTabRegistry`.
 ///
 /// TODOS os destaques, abas e badges de plugin usam obrigatoriamente
 /// `SemanticTone.plugin` (teal `#00796B` claro / `#1DE9B6` escuro — AGENTS.md §12).
 class DevicePluginsTab extends ConsumerStatefulWidget {
-  const DevicePluginsTab({super.key, required this.deviceId});
+  const DevicePluginsTab({
+    super.key,
+    required this.deviceId,
+    this.aiActionBuilder,
+  });
 
   final int deviceId;
+  final PluginAiActionBuilder? aiActionBuilder;
 
   @override
   ConsumerState<DevicePluginsTab> createState() => _DevicePluginsTabState();
@@ -63,11 +69,7 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
           .read(pluginsProvider)
           .deviceViews[widget.deviceId]
           ?.platform;
-      final msg = isDeviceAuthFailure(err)
-          ? formatDeviceAuthFailureMessage(err, platformOrOs: platform)
-          : (err is ApiException && err.message.trim().isNotEmpty
-                ? err.message.trim()
-                : err.toString());
+      final msg = formatDeviceAccessError(err, platformOrOs: platform);
       setState(() => _actionError = msg);
       if (isDeviceAuthFailure(err)) {
         await showDeviceAuthFailureDialog(context, err, platformOrOs: platform);
@@ -134,127 +136,58 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
       return;
     }
 
-    var values = pluginSchemaDefaults(action.paramsSchema);
-    var confirmWrite = false;
-    final formKey = GlobalKey<FormState>();
-
-    await showAdaptiveFormSheet<void>(
+    final normalized = await showPluginActionRunnerSheet(
       context: context,
-      title: action.title,
-      subtitle: plugin.name,
-      maxWidth: 560,
-      builder: (sheetCtx) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            return Form(
-              key: formKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  if (action.description != null) ...<Widget>[
-                    Text(action.description!),
-                    const SizedBox(height: 12),
-                  ],
-                  PluginSettingsForm(
-                    schema: action.paramsSchema,
-                    values: values,
-                    onChanged: (next) => setModalState(() => values = next),
-                    onRevealSecret: (fieldName, revealAction) async {
-                      Map<String, dynamic>? out;
-                      await _runPluginOp(() async {
-                        out = await withDeviceAccess<Map<String, dynamic>>(
-                          context: context,
-                          ref: ref,
-                          action: () => ref
-                              .read(pluginsProvider.notifier)
-                              .revealSecret(
-                                deviceId: widget.deviceId,
-                                pluginId: plugin.id,
-                                action: revealAction,
-                                params: values,
-                              ),
-                        );
-                      });
-                      return out?[fieldName]?.toString() ??
-                          out?['password']?.toString();
-                    },
-                  ),
-                  if (action.isWrite) ...<Widget>[
-                    const SizedBox(height: 10),
-                    NestedPanel(
-                      tone: SemanticTone.error,
-                      child: Material(
-                        type: MaterialType.transparency,
-                        child: CheckboxListTile(
-                          contentPadding: EdgeInsets.zero,
-                          value: confirmWrite,
-                          onChanged: (v) =>
-                              setModalState(() => confirmWrite = v == true),
-                          title: Text(
-                            action.confirmMessage ??
-                                'Confirmo que esta ação altera a configuração do equipamento.',
-                            style: const TextStyle(fontSize: 13),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 14),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: <Widget>[
-                      TextButton(
-                        onPressed: () => Navigator.of(sheetCtx).pop(),
-                        child: const Text('Cancelar'),
-                      ),
-                      const SizedBox(width: 8),
-                      FilledButton.icon(
-                        onPressed: action.isWrite && !confirmWrite
-                            ? null
-                            : () async {
-                                if (!(formKey.currentState?.validate() ??
-                                    false)) {
-                                  return;
-                                }
-                                final normalized = normalizePluginFormParams(
-                                  action.paramsSchema,
-                                  values,
-                                );
-                                Navigator.of(sheetCtx).pop();
-                                await _runPluginOp(() async {
-                                  final runId = await withDeviceAccess<int>(
-                                    context: context,
-                                    ref: ref,
-                                    retryAuto: !action.isWrite,
-                                    actionLabel: action.title,
-                                    action: () => ref
-                                        .read(pluginsProvider.notifier)
-                                        .runAction(
-                                          deviceId: widget.deviceId,
-                                          pluginId: plugin.id,
-                                          action: action.name,
-                                          params: normalized,
-                                          confirmWrite: action.isWrite,
-                                        ),
-                                  );
-                                  if (runId != null && mounted) {
-                                    setState(() => _activeRunId = runId);
-                                  }
-                                });
-                              },
-                        icon: const Icon(Icons.play_arrow, size: 18),
-                        label: const Text('Executar'),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            );
+      deviceId: widget.deviceId,
+      plugin: plugin,
+      action: action,
+      runProtectedOp: (op) => _runPluginOp(op),
+    );
+    if (normalized == null || !mounted) return;
+
+    await _runPluginOp(() async {
+      final runId = await withDeviceAccess<int>(
+        context: context,
+        ref: ref,
+        retryAuto: !action.isWrite,
+        actionLabel: action.title,
+        action: () => ref
+            .read(pluginsProvider.notifier)
+            .runAction(
+              deviceId: widget.deviceId,
+              pluginId: plugin.id,
+              action: action.name,
+              params: normalized,
+              confirmWrite: action.isWrite,
+            ),
+      );
+      if (runId != null && mounted) {
+        setState(() => _activeRunId = runId);
+      }
+    });
+  }
+
+  Future<void> _installPluginFromCatalog(int pluginId) async {
+    setState(() => _installingPluginId = pluginId);
+    try {
+      await _runPluginOp(() async {
+        final ok = await withDeviceAccess<bool>(
+          context: context,
+          ref: ref,
+          action: () async {
+            await ref
+                .read(pluginsProvider.notifier)
+                .installPlugin(widget.deviceId, pluginId);
+            return true;
           },
         );
-      },
-    );
+        if (ok == true && mounted) {
+          setState(() => _section = 'plugin-$pluginId');
+        }
+      });
+    } finally {
+      if (mounted) setState(() => _installingPluginId = null);
+    }
   }
 
   @override
@@ -295,11 +228,8 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          // Cabeçalho com plataforma, firmware e botão IA
           LayoutBuilder(
             builder: (context, constraints) {
-              final aiEnabled =
-                  ref.watch(aiSettingsProvider).settings?.enabled ?? true;
               final chipsWrap = Wrap(
                 spacing: 8,
                 runSpacing: 6,
@@ -318,14 +248,13 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
                     ),
                 ],
               );
-              final aiBtn = AiAskButton(
-                label: 'Criar ou usar com IA',
-                prompt:
-                    'Quero consultar ou criar um plugin para o equipamento #${widget.deviceId} (${view.platform}).',
-                contextData: AiChatContext(deviceId: widget.deviceId),
-                compact: true,
+              final aiBtn = widget.aiActionBuilder?.call(
+                context,
+                ref,
+                widget.deviceId,
+                view.platform,
               );
-              if (!aiEnabled) return chipsWrap;
+              if (aiBtn == null) return chipsWrap;
               if (constraints.maxWidth < 520) {
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -347,7 +276,6 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
           ),
           const SizedBox(height: 12),
 
-          // Navegação por chips (instalados em teal `plugin` + Gerenciar)
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(
@@ -422,550 +350,58 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
           ],
 
           if (_section.startsWith('plugin-'))
-            _buildInstalledPluginSection(
-              context,
-              view,
-              installed,
-              isAdmin,
-              state,
+            Builder(
+              builder: (context) {
+                final id = int.tryParse(_section.replaceFirst('plugin-', ''));
+                final item = installed
+                    .where((p) => p.plugin.id == id)
+                    .firstOrNull;
+                final draft = item == null
+                    ? const <String, dynamic>{}
+                    : (_settingsDrafts[item.plugin.id] ??
+                          Map<String, dynamic>.from(
+                            item.deviceSettings ??
+                                pluginSchemaDefaults(
+                                  item.plugin.settings?.device,
+                                ),
+                          ));
+                return DevicePluginInstalledSection(
+                  deviceId: widget.deviceId,
+                  item: item,
+                  isAdmin: isAdmin,
+                  activeRun: state.runById(widget.deviceId, _activeRunId),
+                  draft: draft,
+                  onDraftChanged: (next) {
+                    if (item == null) return;
+                    setState(() => _settingsDrafts[item.plugin.id] = next);
+                  },
+                  onRunAction: _executeAction,
+                  onActiveRunChanged: (runId) {
+                    if (mounted) setState(() => _activeRunId = runId);
+                  },
+                  onUninstalled: () {
+                    if (mounted) setState(() => _section = 'catalog');
+                  },
+                  runPluginOp: _runPluginOp,
+                );
+              },
             )
           else if (_section == 'catalog')
-            _buildCatalogSection(context, view, isAdmin)
+            DevicePluginCatalogSection(
+              deviceId: widget.deviceId,
+              view: view,
+              isAdmin: isAdmin,
+              installingPluginId: _installingPluginId,
+              onSelectPlugin: (pluginId) =>
+                  setState(() => _section = 'plugin-$pluginId'),
+              onInstallPlugin: _installPluginFromCatalog,
+            )
           else if (_section == 'credentials')
             _buildCredentialsSection(context, view, isAdmin)
           else
             _buildHistorySection(context, view),
         ],
       ),
-    );
-  }
-
-  Widget _buildInstalledPluginSection(
-    BuildContext context,
-    DevicePluginsView view,
-    List<DevicePluginItem> installed,
-    bool isAdmin,
-    PluginsState state,
-  ) {
-    final id = int.tryParse(_section.replaceFirst('plugin-', ''));
-    final item = installed.where((p) => p.plugin.id == id).firstOrNull;
-    if (item == null) {
-      return const EmptyStateView(
-        title: 'Plugin não encontrado neste equipamento',
-        icon: Icons.extension_off_outlined,
-        tone: SemanticTone.plugin,
-      );
-    }
-
-    final plugin = item.plugin;
-    final activeRun = state.runById(widget.deviceId, _activeRunId);
-
-    if (plugin.status == 'quarantine' || plugin.status == 'disabled') {
-      final isQuarantine = plugin.status == 'quarantine';
-      return SectionCard(
-        title: plugin.name,
-        subtitle: isQuarantine
-            ? 'Este plugin está em quarentena e precisa passar pela revisão de segurança.'
-            : 'Este plugin está desativado na biblioteca.',
-        icon: Icons.gpp_maybe_outlined,
-        iconTone: SemanticTone.warning,
-        child: SymmetricalActionBar(
-          children: <Widget>[
-            if (isAdmin && isQuarantine)
-              FilledButton.icon(
-                onPressed: () => _runPluginOp(() async {
-                  final detail = await ref
-                      .read(pluginsProvider.notifier)
-                      .fetchDetail(plugin.id);
-                  if (context.mounted) {
-                    await showPluginReviewDialog(
-                      context: context,
-                      detail: detail,
-                      refreshDeviceId: widget.deviceId,
-                    );
-                  }
-                }),
-                icon: const Icon(Icons.security_outlined, size: 18),
-                label: const Text(
-                  'Revisar segurança',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            if (isAdmin && !isQuarantine)
-              FilledButton.icon(
-                onPressed: () => _runPluginOp(
-                  () => ref
-                      .read(pluginsProvider.notifier)
-                      .lifecycle(
-                        plugin.id,
-                        'enable',
-                        refreshDeviceId: widget.deviceId,
-                      ),
-                  successMessage: 'Plugin "${plugin.name}" reativado.',
-                ),
-                icon: const Icon(Icons.power_settings_new, size: 18),
-                label: const Text(
-                  'Reativar plugin',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            if (isAdmin)
-              OutlinedButton(
-                onPressed: () => _runPluginOp(() async {
-                  await ref
-                      .read(pluginsProvider.notifier)
-                      .uninstallPlugin(widget.deviceId, plugin.id);
-                  if (mounted) setState(() => _section = 'catalog');
-                }, successMessage: 'Plugin desinstalado do equipamento.'),
-                child: const Text(
-                  'Desinstalar',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-          ],
-        ),
-      );
-    }
-
-    final draft =
-        _settingsDrafts[plugin.id] ??
-        Map<String, dynamic>.from(
-          item.deviceSettings ?? pluginSchemaDefaults(plugin.settings?.device),
-        );
-
-    final isCompact = MediaQuery.sizeOf(context).width < 520;
-    final openAppBtn = plugin.opensApp
-        ? OutlinedButton.icon(
-            onPressed: () => context.go('/apps/${plugin.id}'),
-            icon: const Icon(Icons.apps, size: 17),
-            label: const Text('Abrir aplicativo'),
-          )
-        : null;
-
-    final menuBtn = isAdmin
-        ? PopupMenuButton<String>(
-            tooltip: 'Opções do plugin',
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-            onSelected: (cmd) async {
-              if (cmd == 'validate') {
-                await _runPluginOp(() async {
-                  final runId = await withDeviceAccess<int>(
-                    context: context,
-                    ref: ref,
-                    action: () => ref
-                        .read(pluginsProvider.notifier)
-                        .validatePlugin(widget.deviceId, plugin.id),
-                  );
-                  if (runId != null && mounted) {
-                    setState(() => _activeRunId = runId);
-                  }
-                });
-              } else if (cmd == 'edit') {
-                await _runPluginOp(() async {
-                  final detail = await ref
-                      .read(pluginsProvider.notifier)
-                      .fetchDetail(plugin.id);
-                  if (context.mounted) {
-                    await showPluginEditorDialog(
-                      context: context,
-                      existing: detail,
-                      exclusiveDeviceId: widget.deviceId,
-                    );
-                  }
-                });
-              } else if (cmd == 'uninstall') {
-                await _runPluginOp(() async {
-                  await ref
-                      .read(pluginsProvider.notifier)
-                      .uninstallPlugin(widget.deviceId, plugin.id);
-                  if (mounted) setState(() => _section = 'catalog');
-                }, successMessage: 'Plugin desinstalado do equipamento.');
-              }
-            },
-            itemBuilder: (_) => const <PopupMenuEntry<String>>[
-              PopupMenuItem<String>(
-                value: 'validate',
-                child: Text('Validar neste equipamento'),
-              ),
-              PopupMenuItem<String>(
-                value: 'edit',
-                child: Text('Ver código / Editar'),
-              ),
-              PopupMenuItem<String>(
-                value: 'uninstall',
-                child: Text('Desinstalar'),
-              ),
-            ],
-          )
-        : null;
-
-    final Widget? headerTrailing = (isCompact || openAppBtn == null)
-        ? menuBtn
-        : (menuBtn != null
-              ? Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    openAppBtn,
-                    const SizedBox(width: 6),
-                    menuBtn,
-                  ],
-                )
-              : openAppBtn);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        SectionCard(
-          title: plugin.name,
-          subtitle: plugin.description ?? 'v${plugin.version}',
-          icon: Icons.extension_outlined,
-          iconTone: SemanticTone.plugin,
-          trailing: headerTrailing,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              if (isCompact && openAppBtn != null) ...<Widget>[
-                SymmetricalActionBar(children: <Widget>[openAppBtn]),
-                const SizedBox(height: 10),
-              ],
-              Text(
-                'Ações disponíveis',
-                style: context.textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 8),
-              SymmetricalActionBar(
-                children: plugin.actions
-                    .map((action) {
-                      final isWrite = action.isWrite;
-                      return FilledButton.tonalIcon(
-                        style: FilledButton.styleFrom(
-                          backgroundColor: isWrite
-                              ? context.semanticColors.errorContainer
-                              : context.semanticColors.pluginContainer,
-                          foregroundColor: isWrite
-                              ? context.semanticColors.onErrorContainer
-                              : context.semanticColors.onPluginContainer,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 10,
-                          ),
-                        ),
-                        onPressed: (isWrite || action.reveals) && !isAdmin
-                            ? null
-                            : () => _executeAction(plugin, action),
-                        icon: Icon(
-                          action.reveals
-                              ? Icons.vpn_key_outlined
-                              : (isWrite
-                                    ? Icons.edit_outlined
-                                    : Icons.play_arrow_outlined),
-                          size: 18,
-                        ),
-                        label: Text(
-                          action.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      );
-                    })
-                    .toList(growable: false),
-              ),
-              if (activeRun != null &&
-                  activeRun.pluginId == plugin.id) ...<Widget>[
-                const Divider(height: 24),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
-                  alignment: WrapAlignment.spaceBetween,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: <Widget>[
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 4,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: <Widget>[
-                        Text(
-                          'Execução #${activeRun.id} (${activeRun.action})',
-                          style: context.textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        SemanticChip(
-                          label: runStatusPresentation(activeRun.status).label,
-                          tone: runStatusPresentation(activeRun.status).tone,
-                          compact: true,
-                        ),
-                      ],
-                    ),
-                    if (!activeRun.isFinished)
-                      TextButton(
-                        onPressed: () => ref
-                            .read(pluginsProvider.notifier)
-                            .cancelRun(activeRun.id),
-                        child: const Text('Parar'),
-                      ),
-                  ],
-                ),
-                if (activeRun.error != null) ...<Widget>[
-                  const SizedBox(height: 8),
-                  NestedPanel(
-                    tone: SemanticTone.error,
-                    child: Text(activeRun.error!),
-                  ),
-                ],
-                if (activeRun.output != null) ...<Widget>[
-                  const SizedBox(height: 8),
-                  PluginOutputView(output: activeRun.output),
-                ],
-                if (activeRun.transcript.isNotEmpty) ...<Widget>[
-                  const SizedBox(height: 8),
-                  PluginTranscriptView(entries: activeRun.transcript),
-                ],
-              ],
-            ],
-          ),
-        ),
-        if (plugin.settings?.device != null) ...<Widget>[
-          const SizedBox(height: 14),
-          SectionCard(
-            title: 'Configuração deste equipamento',
-            icon: Icons.tune,
-            iconTone: SemanticTone.plugin,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                PluginSettingsForm(
-                  schema: plugin.settings!.device,
-                  values: draft,
-                  readOnly: !isAdmin,
-                  onChanged: (next) =>
-                      setState(() => _settingsDrafts[plugin.id] = next),
-                ),
-                if (isAdmin) ...<Widget>[
-                  const SizedBox(height: 10),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: FilledButton.icon(
-                      onPressed: () => _runPluginOp(
-                        () => ref
-                            .read(pluginsProvider.notifier)
-                            .saveDeviceSettings(
-                              widget.deviceId,
-                              plugin.id,
-                              normalizePluginFormParams(
-                                plugin.settings!.device,
-                                draft,
-                                omitEmpty: false,
-                              ),
-                            ),
-                        successMessage: 'Ajustes do equipamento salvos.',
-                      ),
-                      icon: const Icon(Icons.save_outlined, size: 18),
-                      label: const Text('Salvar ajustes'),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-
-  Widget _buildCatalogSection(
-    BuildContext context,
-    DevicePluginsView view,
-    bool isAdmin,
-  ) {
-    final compatible = view.plugins
-        .where((p) => p.compatibility != 'incompatible')
-        .toList(growable: false);
-    final incompatible = view.plugins
-        .where((p) => p.compatibility == 'incompatible')
-        .toList(growable: false);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        if (isAdmin)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: SymmetricalActionBar(
-              children: <Widget>[
-                FilledButton.icon(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: context.semanticColors.plugin,
-                    foregroundColor: context.semanticColors.onPlugin,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 10,
-                    ),
-                  ),
-                  onPressed: () => showPluginEditorDialog(
-                    context: context,
-                    exclusiveDeviceId: widget.deviceId,
-                  ),
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text(
-                    'Novo plugin',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 10,
-                    ),
-                  ),
-                  onPressed: () => context.go('/plugins'),
-                  icon: const Icon(Icons.extension_outlined, size: 18),
-                  label: const Text(
-                    'Biblioteca completa',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        if (compatible.isEmpty)
-          const EmptyStateView(
-            title: 'Nenhum plugin compatível encontrado',
-            icon: Icons.extension_outlined,
-            tone: SemanticTone.plugin,
-          )
-        else
-          ResponsiveGrid(
-            xs: 1,
-            sm: 2,
-            md: 2,
-            lg: 3,
-            xl: 3,
-            children: compatible
-                .map((item) {
-                  final compat = compatPresentation(item.compatibility);
-                  return SectionCard(
-                    title: item.plugin.name,
-                    subtitle:
-                        item.plugin.description ?? 'v${item.plugin.version}',
-                    icon: Icons.extension_outlined,
-                    iconTone: SemanticTone.plugin,
-                    trailing: SemanticChip(
-                      label: compat.label,
-                      tone: compat.tone,
-                      compact: true,
-                    ),
-                    child: SymmetricalActionBar(
-                      children: <Widget>[
-                        if (item.installed)
-                          FilledButton.tonal(
-                            onPressed: () => setState(
-                              () => _section = 'plugin-${item.plugin.id}',
-                            ),
-                            child: const Text('Abrir'),
-                          )
-                        else if (isAdmin)
-                          FilledButton.icon(
-                            style: FilledButton.styleFrom(
-                              backgroundColor: context.semanticColors.plugin,
-                              foregroundColor: context.semanticColors.onPlugin,
-                            ),
-                            onPressed: _installingPluginId != null
-                                ? null
-                                : () async {
-                                    setState(
-                                      () =>
-                                          _installingPluginId = item.plugin.id,
-                                    );
-                                    try {
-                                      await _runPluginOp(() async {
-                                        final ok = await withDeviceAccess<bool>(
-                                          context: context,
-                                          ref: ref,
-                                          action: () async {
-                                            await ref
-                                                .read(pluginsProvider.notifier)
-                                                .installPlugin(
-                                                  widget.deviceId,
-                                                  item.plugin.id,
-                                                );
-                                            return true;
-                                          },
-                                        );
-                                        if (ok == true && mounted) {
-                                          setState(
-                                            () => _section =
-                                                'plugin-${item.plugin.id}',
-                                          );
-                                        }
-                                      });
-                                    } finally {
-                                      if (mounted) {
-                                        setState(
-                                          () => _installingPluginId = null,
-                                        );
-                                      }
-                                    }
-                                  },
-                            icon: _installingPluginId == item.plugin.id
-                                ? const SizedBox(
-                                    width: 15,
-                                    height: 15,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  )
-                                : const Icon(Icons.download_outlined, size: 18),
-                            label: Text(
-                              _installingPluginId == item.plugin.id
-                                  ? 'Instalando...'
-                                  : 'Instalar',
-                            ),
-                          ),
-                      ],
-                    ),
-                  );
-                })
-                .toList(growable: false),
-          ),
-        if (incompatible.isNotEmpty) ...<Widget>[
-          const SizedBox(height: 14),
-          NestedPanel(
-            padding: EdgeInsets.zero,
-            child: Material(
-              type: MaterialType.transparency,
-              child: ExpansionTile(
-                title: Text('Incompatíveis (${incompatible.length})'),
-                children: incompatible
-                    .map((item) {
-                      final cleaned = item.reasons
-                          .map(
-                            (r) => r
-                                .replaceFirst(RegExp(r'^[\s·•\-;,]+'), '')
-                                .trim(),
-                          )
-                          .where((r) => r.isNotEmpty)
-                          .join(' · ');
-                      return ListTile(
-                        title: Text(item.plugin.name),
-                        subtitle: cleaned.isNotEmpty ? Text(cleaned) : null,
-                      );
-                    })
-                    .toList(growable: false),
-              ),
-            ),
-          ),
-        ],
-      ],
     );
   }
 
@@ -982,6 +418,7 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
                 context: context,
                 ref: ref,
                 deviceId: widget.deviceId,
+                platformHint: view.platform,
               );
               if (saved) {
                 await ref
@@ -1020,6 +457,10 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
                   Builder(
                     builder: (context) {
                       final cred = view.credentials[i];
+                      final dedicatedUser = cred.dedicatedInfo?.username ?? '';
+                      final effectiveUser = cred.username.isNotEmpty
+                          ? cred.username
+                          : dedicatedUser;
                       return NestedPanel(
                         padding: const EdgeInsets.all(12),
                         child: Column(
@@ -1035,14 +476,14 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: Text(
-                                    '${cred.username} (porta ${cred.port ?? 'padrão'})',
+                                    '$effectiveUser (porta ${cred.port ?? 'padrão'})',
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: context.textTheme.titleSmall
                                         ?.copyWith(fontWeight: FontWeight.w700),
                                   ),
                                 ),
-                                if (cred.dedicated != null)
+                                if (cred.dedicated)
                                   const SemanticChip(
                                     label: 'Chave dedicada',
                                     tone: SemanticTone.success,
@@ -1058,8 +499,8 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
                             ),
                             const SizedBox(height: 6),
                             Text(
-                              cred.dedicated != null
-                                  ? 'Chave dedicada SSH (${cred.dedicated!.username})'
+                              cred.dedicated
+                                  ? 'Chave dedicada SSH (${dedicatedUser.isNotEmpty ? dedicatedUser : effectiveUser})'
                                   : 'Armazenamento: ${cred.storage}${cred.sessionActive ? ' · Sessão ativa' : ''}',
                               style: context.textTheme.bodySmall?.copyWith(
                                 color: context.colorScheme.onSurfaceVariant,
@@ -1083,6 +524,7 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
                                             context: context,
                                             ref: ref,
                                             deviceId: widget.deviceId,
+                                            platformHint: view.platform,
                                             lockedTransport: cred.kind,
                                           );
                                       if (saved) {

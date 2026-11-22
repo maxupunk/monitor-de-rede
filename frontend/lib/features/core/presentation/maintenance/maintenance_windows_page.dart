@@ -40,40 +40,6 @@ class _MaintenanceWindowsPageState
   }
 
   Future<void> _openForm([MaintenanceWindow? existing]) async {
-    final monitorsState = ref.read(monitorsProvider);
-    final nameCtrl = TextEditingController(text: existing?.name ?? '');
-    final descCtrl = TextEditingController(text: existing?.description ?? '');
-    DateTime startsAt = existing != null
-        ? (DateTime.tryParse(existing.startsAt)?.toLocal() ?? DateTime.now())
-        : DateTime.now().add(const Duration(minutes: 15));
-    DateTime endsAt = existing != null
-        ? (DateTime.tryParse(existing.endsAt)?.toLocal() ??
-              DateTime.now().add(const Duration(hours: 2)))
-        : DateTime.now().add(const Duration(hours: 2));
-    String scope = existing?.deviceId != null
-        ? 'device'
-        : (existing?.siteId != null ? 'site' : 'global');
-    int? siteId = existing?.siteId;
-    int? deviceId = existing?.deviceId;
-    final formKey = GlobalKey<FormState>();
-    var saving = false;
-
-    Future<DateTime?> pickDateTime(BuildContext ctx, DateTime initial) async {
-      final date = await showDatePicker(
-        context: ctx,
-        initialDate: initial,
-        firstDate: DateTime(2024),
-        lastDate: DateTime(2035),
-      );
-      if (date == null || !ctx.mounted) return null;
-      final time = await showTimePicker(
-        context: ctx,
-        initialTime: TimeOfDay.fromDateTime(initial),
-      );
-      if (time == null) return null;
-      return DateTime(date.year, date.month, date.day, time.hour, time.minute);
-    }
-
     await showAdaptiveFormSheet<void>(
       context: context,
       title: existing == null
@@ -82,203 +48,8 @@ class _MaintenanceWindowsPageState
       subtitle:
           'Alertas ficam suprimidos para o escopo escolhido durante o período.',
       maxWidth: 600,
-      builder: (sheetCtx) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            return Form(
-              key: formKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  TextFormField(
-                    controller: nameCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Nome da janela',
-                    ),
-                    validator: FormValidators.required('Informe um nome.'),
-                  ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: descCtrl,
-                    maxLines: 2,
-                    decoration: const InputDecoration(
-                      labelText: 'Descrição (opcional)',
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  SegmentedButton<String>(
-                    showSelectedIcon: false,
-                    style: const ButtonStyle(
-                      visualDensity: VisualDensity.compact,
-                    ),
-                    segments: const <ButtonSegment<String>>[
-                      ButtonSegment<String>(
-                        value: 'global',
-                        label: Text('Global', overflow: TextOverflow.ellipsis),
-                      ),
-                      ButtonSegment<String>(
-                        value: 'site',
-                        label: Text('Site', overflow: TextOverflow.ellipsis),
-                      ),
-                      ButtonSegment<String>(
-                        value: 'device',
-                        label: Text(
-                          'Dispositivo',
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                    selected: <String>{scope},
-                    onSelectionChanged: (s) => setModalState(() {
-                      scope = s.first;
-                      if (scope != 'site') siteId = null;
-                      if (scope != 'device') deviceId = null;
-                    }),
-                  ),
-                  if (scope == 'site') ...<Widget>[
-                    const SizedBox(height: 12),
-                    AppDropdownFormField<int?>(
-                      initialValue: siteId,
-                      decoration: const InputDecoration(labelText: 'Site'),
-                      items: <DropdownMenuItem<int?>>[
-                        const DropdownMenuItem<int?>(
-                          value: null,
-                          child: Text(
-                            'Selecione o site',
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        for (final s in monitorsState.sites)
-                          DropdownMenuItem<int?>(
-                            value: s.id,
-                            child: Text(
-                              s.name,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                      ],
-                      onChanged: (v) => setModalState(() => siteId = v),
-                    ),
-                  ],
-                  if (scope == 'device') ...<Widget>[
-                    const SizedBox(height: 12),
-                    AppDropdownFormField<int?>(
-                      initialValue: deviceId,
-                      decoration: const InputDecoration(
-                        labelText: 'Dispositivo',
-                      ),
-                      items: <DropdownMenuItem<int?>>[
-                        const DropdownMenuItem<int?>(
-                          value: null,
-                          child: Text(
-                            'Selecione o dispositivo',
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        for (final d in monitorsState.devices)
-                          DropdownMenuItem<int?>(
-                            value: d.id,
-                            child: Text(
-                              d.name,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                      ],
-                      onChanged: (v) => setModalState(() => deviceId = v),
-                    ),
-                  ],
-                  const SizedBox(height: 12),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.schedule),
-                    title: const Text('Início'),
-                    subtitle: Text(formatDateTime(startsAt)),
-                    trailing: TextButton(
-                      onPressed: () async {
-                        final picked = await pickDateTime(context, startsAt);
-                        if (picked != null) {
-                          setModalState(() => startsAt = picked);
-                        }
-                      },
-                      child: const Text('Alterar'),
-                    ),
-                  ),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.event_available),
-                    title: const Text('Término'),
-                    subtitle: Text(formatDateTime(endsAt)),
-                    trailing: TextButton(
-                      onPressed: () async {
-                        final picked = await pickDateTime(context, endsAt);
-                        if (picked != null) {
-                          setModalState(() => endsAt = picked);
-                        }
-                      },
-                      child: const Text('Alterar'),
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  FilledButton.icon(
-                    onPressed: saving
-                        ? null
-                        : () async {
-                            if (!formKey.currentState!.validate()) return;
-                            if (!endsAt.isAfter(startsAt)) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text(
-                                    'O término deve ser posterior ao início.',
-                                  ),
-                                ),
-                              );
-                              return;
-                            }
-                            setModalState(() => saving = true);
-                            final payload = <String, dynamic>{
-                              'name': nameCtrl.text.trim(),
-                              'description': descCtrl.text.trim().isEmpty
-                                  ? null
-                                  : descCtrl.text.trim(),
-                              'siteId': scope == 'site' ? siteId : null,
-                              'deviceId': scope == 'device' ? deviceId : null,
-                              'startsAt': startsAt.toUtc().toIso8601String(),
-                              'endsAt': endsAt.toUtc().toIso8601String(),
-                            };
-                            final notifier = ref.read(
-                              maintenanceWindowsProvider.notifier,
-                            );
-                            final ok = existing == null
-                                ? await notifier.createWindow(payload)
-                                : await notifier.updateWindow(
-                                    existing.id,
-                                    payload,
-                                  );
-                            if (sheetCtx.mounted && ok) {
-                              Navigator.of(sheetCtx).pop();
-                            }
-                          },
-                    icon: saving
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.save_outlined),
-                    label: Text(
-                      existing == null ? 'Criar janela' : 'Salvar alterações',
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
+      builder: (_) => _MaintenanceWindowFormSheetBody(existing: existing),
     );
-
-    nameCtrl.dispose();
-    descCtrl.dispose();
   }
 
   @override
@@ -523,6 +294,247 @@ class _MaintenanceWindowsPageState
           ),
         );
       },
+    );
+  }
+}
+
+class _MaintenanceWindowFormSheetBody extends ConsumerStatefulWidget {
+  const _MaintenanceWindowFormSheetBody({this.existing});
+
+  final MaintenanceWindow? existing;
+
+  @override
+  ConsumerState<_MaintenanceWindowFormSheetBody> createState() =>
+      _MaintenanceWindowFormSheetBodyState();
+}
+
+class _MaintenanceWindowFormSheetBodyState
+    extends ConsumerState<_MaintenanceWindowFormSheetBody> {
+  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+  late final TextEditingController _nameCtrl;
+  late final TextEditingController _descCtrl;
+  late DateTime _startsAt;
+  late DateTime _endsAt;
+  late String _scope;
+  int? _siteId;
+  int? _deviceId;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final existing = widget.existing;
+    _nameCtrl = TextEditingController(text: existing?.name ?? '');
+    _descCtrl = TextEditingController(text: existing?.description ?? '');
+    _startsAt = existing != null
+        ? (parseDateOrNull(existing.startsAt) ?? DateTime.now())
+        : DateTime.now().add(const Duration(minutes: 15));
+    _endsAt = existing != null
+        ? (parseDateOrNull(existing.endsAt) ??
+              DateTime.now().add(const Duration(hours: 2)))
+        : DateTime.now().add(const Duration(hours: 2));
+    _scope = existing?.deviceId != null
+        ? 'device'
+        : (existing?.siteId != null ? 'site' : 'global');
+    _siteId = existing?.siteId;
+    _deviceId = existing?.deviceId;
+  }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _descCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<DateTime?> _pickDateTime(BuildContext ctx, DateTime initial) async {
+    final date = await showDatePicker(
+      context: ctx,
+      initialDate: initial,
+      firstDate: DateTime(2024),
+      lastDate: DateTime(2035),
+    );
+    if (date == null || !ctx.mounted) return null;
+    final time = await showTimePicker(
+      context: ctx,
+      initialTime: TimeOfDay.fromDateTime(initial),
+    );
+    if (time == null) return null;
+    return DateTime(date.year, date.month, date.day, time.hour, time.minute);
+  }
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
+    if (!_endsAt.isAfter(_startsAt)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('O término deve ser posterior ao início.'),
+        ),
+      );
+      return;
+    }
+    setState(() => _saving = true);
+    final payload = <String, dynamic>{
+      'name': _nameCtrl.text.trim(),
+      'description': _descCtrl.text.trim().isEmpty
+          ? null
+          : _descCtrl.text.trim(),
+      'siteId': _scope == 'site' ? _siteId : null,
+      'deviceId': _scope == 'device' ? _deviceId : null,
+      'startsAt': _startsAt.toUtc().toIso8601String(),
+      'endsAt': _endsAt.toUtc().toIso8601String(),
+    };
+    final notifier = ref.read(maintenanceWindowsProvider.notifier);
+    final existing = widget.existing;
+    final ok = existing == null
+        ? await notifier.createWindow(payload)
+        : await notifier.updateWindow(existing.id, payload);
+    if (!mounted) return;
+    if (ok) {
+      Navigator.of(context).pop();
+    } else {
+      setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final monitorsState = ref.watch(monitorsProvider);
+
+    return Form(
+      key: _formKey,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          TextFormField(
+            controller: _nameCtrl,
+            decoration: const InputDecoration(labelText: 'Nome da janela'),
+            validator: FormValidators.required('Informe um nome.'),
+          ),
+          const SizedBox(height: 12),
+          TextFormField(
+            controller: _descCtrl,
+            maxLines: 2,
+            decoration: const InputDecoration(
+              labelText: 'Descrição (opcional)',
+            ),
+          ),
+          const SizedBox(height: 12),
+          SegmentedButton<String>(
+            showSelectedIcon: false,
+            style: const ButtonStyle(visualDensity: VisualDensity.compact),
+            segments: const <ButtonSegment<String>>[
+              ButtonSegment<String>(
+                value: 'global',
+                label: Text('Global', overflow: TextOverflow.ellipsis),
+              ),
+              ButtonSegment<String>(
+                value: 'site',
+                label: Text('Site', overflow: TextOverflow.ellipsis),
+              ),
+              ButtonSegment<String>(
+                value: 'device',
+                label: Text('Dispositivo', overflow: TextOverflow.ellipsis),
+              ),
+            ],
+            selected: <String>{_scope},
+            onSelectionChanged: (s) => setState(() {
+              _scope = s.first;
+              if (_scope != 'site') _siteId = null;
+              if (_scope != 'device') _deviceId = null;
+            }),
+          ),
+          if (_scope == 'site') ...<Widget>[
+            const SizedBox(height: 12),
+            AppDropdownFormField<int?>(
+              initialValue: _siteId,
+              decoration: const InputDecoration(labelText: 'Site'),
+              items: <DropdownMenuItem<int?>>[
+                const DropdownMenuItem<int?>(
+                  value: null,
+                  child: Text(
+                    'Selecione o site',
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                for (final s in monitorsState.sites)
+                  DropdownMenuItem<int?>(
+                    value: s.id,
+                    child: Text(s.name, overflow: TextOverflow.ellipsis),
+                  ),
+              ],
+              onChanged: (v) => setState(() => _siteId = v),
+            ),
+          ],
+          if (_scope == 'device') ...<Widget>[
+            const SizedBox(height: 12),
+            AppDropdownFormField<int?>(
+              initialValue: _deviceId,
+              decoration: const InputDecoration(labelText: 'Dispositivo'),
+              items: <DropdownMenuItem<int?>>[
+                const DropdownMenuItem<int?>(
+                  value: null,
+                  child: Text(
+                    'Selecione o dispositivo',
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                for (final d in monitorsState.devices)
+                  DropdownMenuItem<int?>(
+                    value: d.id,
+                    child: Text(d.name, overflow: TextOverflow.ellipsis),
+                  ),
+              ],
+              onChanged: (v) => setState(() => _deviceId = v),
+            ),
+          ],
+          const SizedBox(height: 12),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.schedule),
+            title: const Text('Início'),
+            subtitle: Text(formatDateTime(_startsAt)),
+            trailing: TextButton(
+              onPressed: () async {
+                final picked = await _pickDateTime(context, _startsAt);
+                if (picked != null && mounted) {
+                  setState(() => _startsAt = picked);
+                }
+              },
+              child: const Text('Alterar'),
+            ),
+          ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.event_available),
+            title: const Text('Término'),
+            subtitle: Text(formatDateTime(_endsAt)),
+            trailing: TextButton(
+              onPressed: () async {
+                final picked = await _pickDateTime(context, _endsAt);
+                if (picked != null && mounted) {
+                  setState(() => _endsAt = picked);
+                }
+              },
+              child: const Text('Alterar'),
+            ),
+          ),
+          const SizedBox(height: 14),
+          FilledButton.icon(
+            onPressed: _saving ? null : _save,
+            icon: _saving
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.save_outlined),
+            label: Text(
+              widget.existing == null ? 'Criar janela' : 'Salvar alterações',
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

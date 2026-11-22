@@ -2,9 +2,11 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/servers/models/docker_models.dart';
 import 'package:netmonitor_app/features/servers/providers/docker_provider.dart';
+import 'package:netmonitor_app/features/servers/widgets/docker_history_widgets.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
 
@@ -52,8 +54,7 @@ class _DockerHistoryPageState extends ConsumerState<DockerHistoryPage> {
     try {
       final resp = await ref
           .read(dockerProvider.notifier)
-          .apiFor(hostKey)
-          .hostHistory(_range);
+          .fetchHostHistory(_range, hostKey: hostKey);
       if (!mounted) return;
       final containers = resp.containers;
       String? nextSelected = _selectedContainerName;
@@ -75,7 +76,7 @@ class _DockerHistoryPageState extends ConsumerState<DockerHistoryPage> {
     } catch (err) {
       if (!mounted) return;
       setState(() {
-        _error = err.toString();
+        _error = describeError(err, fallback: 'Erro ao carregar histórico.');
         _loading = false;
       });
     }
@@ -89,8 +90,7 @@ class _DockerHistoryPageState extends ConsumerState<DockerHistoryPage> {
     if (hostKey.isEmpty) return null;
     return ref
         .read(dockerProvider.notifier)
-        .apiFor(hostKey)
-        .containerHistory(name, rangeOverride ?? _range);
+        .fetchContainerHistory(name, rangeOverride ?? _range, hostKey: hostKey);
   }
 
   Future<void> _loadContainerHistory(String name) async {
@@ -152,52 +152,17 @@ class _DockerHistoryPageState extends ConsumerState<DockerHistoryPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        // Barra compacta de período + atualização na mesma linha
-        Row(
-          children: <Widget>[
-            Expanded(
-              child: SegmentedButton<String>(
-                showSelectedIcon: false,
-                style: SegmentedButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
-                ),
-                segments: const <ButtonSegment<String>>[
-                  ButtonSegment(
-                    value: '1h',
-                    label: Text('1h', maxLines: 1, softWrap: false),
-                  ),
-                  ButtonSegment(
-                    value: '6h',
-                    label: Text('6h', maxLines: 1, softWrap: false),
-                  ),
-                  ButtonSegment(
-                    value: '24h',
-                    label: Text('24h', maxLines: 1, softWrap: false),
-                  ),
-                  ButtonSegment(
-                    value: '7d',
-                    label: Text('7d', maxLines: 1, softWrap: false),
-                  ),
-                  ButtonSegment(
-                    value: '30d',
-                    label: Text('30d', maxLines: 1, softWrap: false),
-                  ),
-                ],
-                selected: <String>{_range},
-                onSelectionChanged: (set) {
-                  setState(() => _range = set.first);
-                  _loadHistory();
-                },
-              ),
-            ),
-            const SizedBox(width: 8),
-            IconButton.filledTonal(
-              tooltip: 'Recarregar histórico',
-              onPressed: _loading ? null : _loadHistory,
-              icon: const Icon(Icons.refresh, size: 19),
-            ),
-          ],
+        DockerHistoryRangeSelector(
+          selectedRange: _range,
+          onChanged: (nextRange) {
+            setState(() => _range = nextRange);
+            _loadHistory();
+          },
+          trailing: IconButton.filledTonal(
+            tooltip: 'Recarregar histórico',
+            onPressed: _loading ? null : _loadHistory,
+            icon: const Icon(Icons.refresh, size: 19),
+          ),
         ),
         if (!isDesktop) ...<Widget>[
           const SizedBox(height: 8),
@@ -526,8 +491,6 @@ class _DockerHistoryPageState extends ConsumerState<DockerHistoryPage> {
   }
 }
 
-/// Conteúdo do Bottom Sheet mobile com seletor rápido de container no topo
-/// (permite alternar entre containers sem fechar o sheet nem rolar a lista).
 class _ContainerHistorySheetBody extends StatefulWidget {
   const _ContainerHistorySheetBody({
     required this.initialContainerName,
@@ -576,7 +539,10 @@ class _ContainerHistorySheetBodyState
     } catch (err) {
       if (!mounted || _selectedName != name) return;
       setState(() {
-        _error = err.toString();
+        _error = describeError(
+          err,
+          fallback: 'Erro ao carregar histórico do container.',
+        );
         _loading = false;
       });
     }
@@ -630,9 +596,6 @@ class _ContainerHistorySheetBodyState
   }
 }
 
-/// Bloco reutilizável (DRY) de KPIs + 4 gráficos históricos de um container
-/// (CPU, RAM, Rede RX/TX e Block I/O), compartilhado entre o Bottom Sheet mobile
-/// e o painel Detail no desktop.
 class _ContainerHistoryDetailContent extends StatelessWidget {
   const _ContainerHistoryDetailContent({
     required this.summary,
@@ -698,187 +661,7 @@ class _ContainerHistoryDetailContent extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 12),
-        ResponsiveGrid(
-          xs: 1,
-          sm: 1,
-          md: 2,
-          lg: 2,
-          xl: 2,
-          children: <Widget>[
-            NestedPanel(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  Text(
-                    'CPU (%)',
-                    style: context.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  MetricLineChart(
-                    height: 165,
-                    series: <MetricLineSeries>[
-                      MetricLineSeries(
-                        name: 'Média',
-                        tone: SemanticTone.primary,
-                        points: <MetricSeriesPoint>[
-                          for (var i = 0; i < points.length; i++)
-                            MetricSeriesPoint(
-                              x: i.toDouble(),
-                              y: points[i].cpuAvg,
-                            ),
-                        ],
-                      ),
-                      MetricLineSeries(
-                        name: 'Pico',
-                        tone: SemanticTone.warning,
-                        showArea: false,
-                        points: <MetricSeriesPoint>[
-                          for (var i = 0; i < points.length; i++)
-                            MetricSeriesPoint(
-                              x: i.toDouble(),
-                              y: points[i].cpuMax,
-                            ),
-                        ],
-                      ),
-                    ],
-                    yFormatter: (v) => formatPercent(v, digits: v < 10 ? 1 : 0),
-                  ),
-                ],
-              ),
-            ),
-            NestedPanel(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  Text(
-                    'Memória (RAM)',
-                    style: context.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  MetricLineChart(
-                    height: 165,
-                    series: <MetricLineSeries>[
-                      MetricLineSeries(
-                        name: 'Média',
-                        tone: SemanticTone.info,
-                        points: <MetricSeriesPoint>[
-                          for (var i = 0; i < points.length; i++)
-                            MetricSeriesPoint(
-                              x: i.toDouble(),
-                              y: points[i].memoryAvg.toDouble(),
-                            ),
-                        ],
-                      ),
-                      MetricLineSeries(
-                        name: 'Pico',
-                        tone: SemanticTone.primary,
-                        showArea: false,
-                        points: <MetricSeriesPoint>[
-                          for (var i = 0; i < points.length; i++)
-                            MetricSeriesPoint(
-                              x: i.toDouble(),
-                              y: points[i].memoryMax.toDouble(),
-                            ),
-                        ],
-                      ),
-                    ],
-                    yFormatter: (v) => formatBinaryBytes(v, fractionDigits: 0),
-                  ),
-                ],
-              ),
-            ),
-            NestedPanel(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  Text(
-                    'Rede (RX / TX)',
-                    style: context.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  MetricLineChart(
-                    height: 165,
-                    series: <MetricLineSeries>[
-                      MetricLineSeries(
-                        name: 'Recebido (RX)',
-                        tone: SemanticTone.success,
-                        points: <MetricSeriesPoint>[
-                          for (var i = 0; i < points.length; i++)
-                            MetricSeriesPoint(
-                              x: i.toDouble(),
-                              y: points[i].netRxBytes.toDouble(),
-                            ),
-                        ],
-                      ),
-                      MetricLineSeries(
-                        name: 'Enviado (TX)',
-                        tone: SemanticTone.secondary,
-                        showArea: false,
-                        points: <MetricSeriesPoint>[
-                          for (var i = 0; i < points.length; i++)
-                            MetricSeriesPoint(
-                              x: i.toDouble(),
-                              y: points[i].netTxBytes.toDouble(),
-                            ),
-                        ],
-                      ),
-                    ],
-                    yFormatter: (v) => formatDecimalBytes(v, fractionDigits: 0),
-                  ),
-                ],
-              ),
-            ),
-            NestedPanel(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  Text(
-                    'Disco (Block I/O)',
-                    style: context.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  MetricLineChart(
-                    height: 165,
-                    series: <MetricLineSeries>[
-                      MetricLineSeries(
-                        name: 'Leitura',
-                        tone: SemanticTone.info,
-                        points: <MetricSeriesPoint>[
-                          for (var i = 0; i < points.length; i++)
-                            MetricSeriesPoint(
-                              x: i.toDouble(),
-                              y: points[i].blockReadBytes.toDouble(),
-                            ),
-                        ],
-                      ),
-                      MetricLineSeries(
-                        name: 'Escrita',
-                        tone: SemanticTone.warning,
-                        showArea: false,
-                        points: <MetricSeriesPoint>[
-                          for (var i = 0; i < points.length; i++)
-                            MetricSeriesPoint(
-                              x: i.toDouble(),
-                              y: points[i].blockWriteBytes.toDouble(),
-                            ),
-                        ],
-                      ),
-                    ],
-                    yFormatter: (v) => formatDecimalBytes(v, fractionDigits: 0),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
+        ContainerHistoryCharts(points: points),
       ],
     );
   }

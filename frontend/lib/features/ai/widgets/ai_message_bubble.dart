@@ -48,100 +48,13 @@ class _AiMessageBubbleState extends ConsumerState<AiMessageBubble> {
   }
 
   Future<void> _openDownRatingSheet() async {
-    final msg = widget.message;
-    String? selectedReason = msg.rating?.reason;
-    final customCtrl = TextEditingController(
-      text: selectedReason != null && !aiRatingReasons.contains(selectedReason)
-          ? selectedReason
-          : '',
-    );
-
     await showAdaptiveFormSheet<void>(
       context: context,
       title: 'O que faltou na resposta?',
       subtitle: 'Sua avaliação ajuda a melhorar os modelos e ferramentas.',
       maxWidth: 460,
-      builder: (sheetCtx) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: aiRatingReasons
-                      .map((reason) {
-                        return ChoiceChip(
-                          label: Text(reason),
-                          selected: selectedReason == reason,
-                          onSelected: (selected) {
-                            setModalState(() {
-                              selectedReason = selected ? reason : null;
-                              if (selected) customCtrl.clear();
-                            });
-                          },
-                        );
-                      })
-                      .toList(growable: false),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: customCtrl,
-                  maxLength: 200,
-                  maxLines: 2,
-                  decoration: const InputDecoration(
-                    labelText: 'Outro motivo (opcional)',
-                    hintText: 'Descreva brevemente o erro...',
-                  ),
-                  onChanged: (value) {
-                    if (value.trim().isNotEmpty && selectedReason != null) {
-                      setModalState(() => selectedReason = null);
-                    }
-                  },
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: <Widget>[
-                    if (msg.rating?.value == 'down')
-                      TextButton(
-                        onPressed: () {
-                          ref
-                              .read(aiChatProvider.notifier)
-                              .rateMessage(msg.id, 'down', msg.rating?.reason);
-                          Navigator.of(sheetCtx).pop();
-                        },
-                        child: const Text('Desfazer'),
-                      ),
-                    const Spacer(),
-                    TextButton(
-                      onPressed: () => Navigator.of(sheetCtx).pop(),
-                      child: const Text('Cancelar'),
-                    ),
-                    const SizedBox(width: 8),
-                    FilledButton(
-                      onPressed: () {
-                        final reason = customCtrl.text.trim().isNotEmpty
-                            ? customCtrl.text.trim()
-                            : selectedReason;
-                        ref
-                            .read(aiChatProvider.notifier)
-                            .rateMessage(msg.id, 'down', reason);
-                        Navigator.of(sheetCtx).pop();
-                      },
-                      child: const Text('Enviar avaliação'),
-                    ),
-                  ],
-                ),
-              ],
-            );
-          },
-        );
-      },
+      builder: (_) => _DownRatingSheet(message: widget.message),
     );
-    customCtrl.dispose();
   }
 
   @override
@@ -304,9 +217,9 @@ class _AiMessageBubbleState extends ConsumerState<AiMessageBubble> {
                 ),
                 child: Row(
                   children: <Widget>[
-                    const Expanded(child: SizedBox()),
+                    const Icon(Icons.info_outline, size: 16),
+                    const SizedBox(width: 8),
                     Expanded(
-                      flex: 20,
                       child: Text(
                         notice.message,
                         style: context.textTheme.bodySmall,
@@ -508,6 +421,116 @@ class _AiMessageBubbleState extends ConsumerState<AiMessageBubble> {
           ],
         ],
       ),
+    );
+  }
+}
+
+class _DownRatingSheet extends ConsumerStatefulWidget {
+  const _DownRatingSheet({required this.message});
+
+  final AiDisplayMessage message;
+
+  @override
+  ConsumerState<_DownRatingSheet> createState() => _DownRatingSheetState();
+}
+
+class _DownRatingSheetState extends ConsumerState<_DownRatingSheet> {
+  String? _selectedReason;
+  late final TextEditingController _customCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    final current = widget.message.rating?.reason;
+    _selectedReason = current;
+    _customCtrl = TextEditingController(
+      text: current != null && !aiRatingReasons.contains(current)
+          ? current
+          : '',
+    );
+  }
+
+  @override
+  void dispose() {
+    _customCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final msg = widget.message;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: aiRatingReasons
+              .map((reason) {
+                return ChoiceChip(
+                  label: Text(reason),
+                  selected: _selectedReason == reason,
+                  onSelected: (selected) {
+                    setState(() {
+                      _selectedReason = selected ? reason : null;
+                      if (selected) _customCtrl.clear();
+                    });
+                  },
+                );
+              })
+              .toList(growable: false),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _customCtrl,
+          maxLength: 200,
+          maxLines: 2,
+          decoration: const InputDecoration(
+            labelText: 'Outro motivo (opcional)',
+            hintText: 'Descreva brevemente o erro...',
+          ),
+          onChanged: (value) {
+            if (value.trim().isNotEmpty && _selectedReason != null) {
+              setState(() => _selectedReason = null);
+            }
+          },
+        ),
+        const SizedBox(height: 12),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: <Widget>[
+            if (msg.rating?.value == 'down')
+              TextButton(
+                onPressed: () {
+                  ref
+                      .read(aiChatProvider.notifier)
+                      .rateMessage(msg.id, 'down', msg.rating?.reason);
+                  Navigator.of(context).pop();
+                },
+                child: const Text('Desfazer'),
+              ),
+            const Spacer(),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancelar'),
+            ),
+            const SizedBox(width: 8),
+            FilledButton(
+              onPressed: () {
+                final reason = _customCtrl.text.trim().isNotEmpty
+                    ? _customCtrl.text.trim()
+                    : _selectedReason;
+                ref
+                    .read(aiChatProvider.notifier)
+                    .rateMessage(msg.id, 'down', reason);
+                Navigator.of(context).pop();
+              },
+              child: const Text('Enviar avaliação'),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }

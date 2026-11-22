@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
+import 'package:netmonitor_app/core/utils/file_download.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
-import 'package:netmonitor_app/features/ai/data/ai_repository.dart';
 import 'package:netmonitor_app/features/ai/models/ai_models.dart';
-import 'package:netmonitor_app/features/vpn/utils/file_export_helper.dart';
+import 'package:netmonitor_app/features/ai/providers/ai_providers.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
 
@@ -37,11 +38,11 @@ class _AiDataExportCardState extends ConsumerState<AiDataExportCard> {
     });
     try {
       final summary = await ref
-          .read(aiRepositoryProvider)
+          .read(aiSettingsProvider.notifier)
           .fetchExportSummary(days: _days);
       if (mounted) setState(() => _summary = summary);
     } catch (err) {
-      if (mounted) setState(() => _error = err.toString());
+      if (mounted) setState(() => _error = describeError(err));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -54,22 +55,19 @@ class _AiDataExportCardState extends ConsumerState<AiDataExportCard> {
     });
     try {
       final result = await ref
-          .read(aiRepositoryProvider)
+          .read(aiSettingsProvider.notifier)
           .downloadExportZip(days: _days);
-      final now = DateTime.now();
-      final fallbackName =
-          'netmonitor-ia-dados-${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}.zip';
-      await exportFileBytes(
-        bytes: result.bytes,
-        fileName: result.filename ?? fallbackName,
-        mimeType: 'application/zip',
-      );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Pacote ZIP de dados da IA exportado.')),
+      final fallbackName = 'netmonitor-ia-dados-${formatFileTimestamp()}.zip';
+      await saveOrShareBytes(
+        bytes: result.bytes,
+        filename: result.filename ?? fallbackName,
+        mimeType: 'application/zip',
+        context: context,
+        successMessage: 'Pacote ZIP de dados da IA exportado.',
       );
     } catch (err) {
-      if (mounted) setState(() => _error = err.toString());
+      if (mounted) setState(() => _error = describeError(err));
     } finally {
       if (mounted) setState(() => _downloading = false);
     }
@@ -144,7 +142,7 @@ class _AiDataExportCardState extends ConsumerState<AiDataExportCard> {
                   label: 'Comandos',
                   value: formatInteger(_summary!.deviceRuns),
                   icon: Icons.terminal_outlined,
-                  tone: SemanticTone.plugin,
+                  tone: SemanticTone.secondary,
                 ),
               ],
             ),

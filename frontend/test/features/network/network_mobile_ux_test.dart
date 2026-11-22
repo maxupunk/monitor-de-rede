@@ -525,26 +525,43 @@ class _StubDeviceAccessController extends DeviceAccessController {
   }
 
   @override
-  Future<void> saveCredential(
-    int deviceId,
-    Map<String, dynamic> payload,
-  ) async {
-    lastSavedCredentialPayload = Map<String, dynamic>.from(payload);
+  Future<void> saveSessionCredential({
+    required int deviceId,
+    required String kind,
+    required String username,
+    required String secret,
+    int? port,
+    bool https = false,
+    int? viaProbeId,
+  }) async {
+    lastSavedCredentialPayload = <String, dynamic>{
+      'kind': kind,
+      'username': username,
+      'storage': 'ask',
+      if (secret.isNotEmpty) 'secret': secret,
+      if (port != null && port > 0) 'port': port,
+      if (kind == 'http') 'https': https,
+      'viaProbeId': viaProbeId,
+    };
   }
 
   @override
-  Future<DeviceCredentialView> provisionDedicatedKey(
-    int deviceId,
-    Map<String, dynamic> payload,
-  ) async {
+  Future<void> provisionDedicatedKey({
+    required int deviceId,
+    required String platform,
+    required String username,
+    required String password,
+    int port = 22,
+    int? viaProbeId,
+  }) async {
     if (provisionError != null) throw provisionError!;
-    lastProvisionPayload = Map<String, dynamic>.from(payload);
-    return const DeviceCredentialView(
-      kind: 'ssh',
-      username: 'netmonitor',
-      storage: 'key',
-      dedicated: true,
-    );
+    lastProvisionPayload = <String, dynamic>{
+      'platform': platform,
+      'username': username,
+      'password': password,
+      'port': port,
+      'viaProbeId': viaProbeId,
+    };
   }
 }
 
