@@ -48,6 +48,8 @@ class TopologyHud extends StatelessWidget {
     required this.onSaveLayout,
     this.onUndoLayout,
     required this.onDiscardLayout,
+    this.zoomListenable,
+    this.readZoomScale,
     required this.onZoomIn,
     required this.onZoomOut,
     required this.onFitToScreen,
@@ -86,6 +88,8 @@ class TopologyHud extends StatelessWidget {
   final VoidCallback onSaveLayout;
   final VoidCallback? onUndoLayout;
   final VoidCallback onDiscardLayout;
+  final Listenable? zoomListenable;
+  final double Function()? readZoomScale;
   final VoidCallback onZoomIn;
   final VoidCallback onZoomOut;
   final VoidCallback onFitToScreen;
@@ -214,6 +218,8 @@ class TopologyHud extends StatelessWidget {
             editLayoutEnabled: editLayoutEnabled,
             canWrite: canWrite,
             overlayMode: filterSpec.overlayMode,
+            zoomListenable: zoomListenable,
+            readZoomScale: readZoomScale,
             onZoomIn: onZoomIn,
             onZoomOut: onZoomOut,
             onFitToScreen: onFitToScreen,
@@ -1210,6 +1216,8 @@ class _ThumbZoneControls extends StatelessWidget {
     required this.editLayoutEnabled,
     required this.canWrite,
     required this.overlayMode,
+    this.zoomListenable,
+    this.readZoomScale,
     required this.onZoomIn,
     required this.onZoomOut,
     required this.onFitToScreen,
@@ -1220,11 +1228,40 @@ class _ThumbZoneControls extends StatelessWidget {
   final bool editLayoutEnabled;
   final bool canWrite;
   final TopologyOverlayMode overlayMode;
+  final Listenable? zoomListenable;
+  final double Function()? readZoomScale;
   final VoidCallback onZoomIn;
   final VoidCallback onZoomOut;
   final VoidCallback onFitToScreen;
   final VoidCallback onToggleEditLayout;
   final ValueChanged<TopologyOverlayMode> onOverlayChanged;
+
+  Widget _buildZoomPercentPill(BuildContext context, ColorScheme scheme) {
+    final percent = ((readZoomScale?.call() ?? 1.0) * 100).round();
+    return Tooltip(
+      message: 'Zoom atual ($percent%) — toque para ajustar à tela',
+      child: InkWell(
+        onTap: onFitToScreen,
+        child: SizedBox(
+          width: 44,
+          height: 22,
+          child: Center(
+            child: Text(
+              '$percent%',
+              maxLines: 1,
+              softWrap: false,
+              style: context.textTheme.labelSmall?.copyWith(
+                fontSize: 10,
+                fontWeight: FontWeight.w800,
+                color: scheme.onSurfaceVariant,
+                fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1244,19 +1281,26 @@ class _ThumbZoneControls extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           IconButton(
-            tooltip: 'Aumentar zoom',
+            tooltip: 'Aproximar zoom (+)',
             visualDensity: VisualDensity.compact,
-            icon: const Icon(Icons.add, size: 20),
+            icon: const Icon(Icons.zoom_in, size: 20),
             onPressed: onZoomIn,
           ),
+          if (zoomListenable != null && readZoomScale != null)
+            ListenableBuilder(
+              listenable: zoomListenable!,
+              builder: (context, _) => _buildZoomPercentPill(context, scheme),
+            )
+          else if (readZoomScale != null)
+            _buildZoomPercentPill(context, scheme),
           IconButton(
-            tooltip: 'Diminuir zoom',
+            tooltip: 'Afastar zoom (-)',
             visualDensity: VisualDensity.compact,
-            icon: const Icon(Icons.remove, size: 20),
+            icon: const Icon(Icons.zoom_out, size: 20),
             onPressed: onZoomOut,
           ),
           IconButton(
-            tooltip: 'Ajustar à tela',
+            tooltip: 'Ajustar à tela (0)',
             visualDensity: VisualDensity.compact,
             icon: const Icon(Icons.fit_screen_outlined, size: 20),
             onPressed: onFitToScreen,

@@ -144,6 +144,7 @@ class TopologyCanvasView extends StatefulWidget {
     this.onNodePositionChanged,
     this.onNodeDragEnd,
     this.onUndo,
+    this.onDeleteSelected,
     this.onScaleChanged,
   });
 
@@ -183,6 +184,7 @@ class TopologyCanvasView extends StatefulWidget {
   final void Function(int nodeId, Offset nextPosition)? onNodePositionChanged;
   final void Function(int nodeId, Offset finalPosition)? onNodeDragEnd;
   final VoidCallback? onUndo;
+  final VoidCallback? onDeleteSelected;
   final ValueChanged<double>? onScaleChanged;
 
   @override
@@ -483,6 +485,7 @@ class _TopologyCanvasViewState extends State<TopologyCanvasView>
       tolerance: worldTolerance,
     );
     if (hitEdge != null) {
+      _canvasFocusNode.requestFocus();
       widget.onTapEdge?.call(hitEdge);
     } else {
       widget.onTapEmptySpace?.call();
@@ -628,6 +631,11 @@ class _TopologyCanvasViewState extends State<TopologyCanvasView>
             widget.onUndo?.call(),
         const SingleActivator(LogicalKeyboardKey.keyZ, meta: true): () =>
             widget.onUndo?.call(),
+        const SingleActivator(LogicalKeyboardKey.delete): () {
+          final focused = FocusManager.instance.primaryFocus?.context?.widget;
+          if (focused is EditableText) return;
+          widget.onDeleteSelected?.call();
+        },
         const SingleActivator(LogicalKeyboardKey.escape): () =>
             widget.onTapEmptySpace?.call(),
       },

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
@@ -42,6 +43,7 @@ class _NodeMoveUndoEntry {
 
 class _TopologyPageState extends ConsumerState<TopologyPage> {
   final TopologyCanvasController _canvasCtrl = TopologyCanvasController();
+  final FocusNode _pageFocusNode = FocusNode(debugLabel: 'topology-page');
 
   TopologyFilterSpec _filterSpec = const TopologyFilterSpec();
   Map<int, Offset> _customPositions = const <int, Offset>{};
@@ -57,6 +59,7 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
 
   bool _editLayoutEnabled = false;
   bool _forceEngineLayout = false;
+  bool _deletingEdge = false;
   int _acknowledgedRemoteRevision = 0;
 
   bool _pingLoading = false;
@@ -86,6 +89,7 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
 
   @override
   void dispose() {
+    _pageFocusNode.dispose();
     _canvasCtrl.dispose();
     super.dispose();
   }
@@ -283,7 +287,11 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
       _selectedEdgeId = edge.id;
       _selectedNodeId = null;
     });
-    if (!isWide) _openMobileEdgeInspector(edge);
+    if (isWide) {
+      _pageFocusNode.requestFocus();
+    } else {
+      _openMobileEdgeInspector(edge);
+    }
   }
 
   void _tracePathBetween(int fromId, int toId) {
@@ -459,19 +467,64 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
         'linkType': edge.linkType,
       });
 
+  void _handleDeleteSelectedEdge() {
+    if (_deletingEdge || _selectedEdgeId == null) return;
+    if (!ref.read(authProvider).canWrite) return;
+    final topo = ref.read(topologyProvider);
+    final edge = topo.edges.where((e) => e.id == _selectedEdgeId).firstOrNull;
+    if (edge == null) return;
+    if (isVirtualTopologyEdge(edge)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Enlaces virtuais não podem ser removidos manualmente.',
+          ),
+        ),
+      );
+      return;
+    }
+    _deleteEdge(edge);
+  }
+
   Future<void> _deleteEdge(TopologyEdgeModel edge) async {
-    final ok = await showConfirmActionDialog(
-      context: context,
-      title: 'Remover enlace',
-      message: 'Remover este enlace da topologia?',
-      confirmLabel: 'Remover',
-    );
-    if (!ok || !mounted) return;
-    final deleted = await ref
-        .read(topologyProvider.notifier)
-        .deleteLink(edge.id);
-    if (deleted && mounted && _selectedEdgeId == edge.id) {
-      setState(() => _selectedEdgeId = null);
+    if (_deletingEdge || isVirtualTopologyEdge(edge)) return;
+    _deletingEdge = true;
+    try {
+      final topo = ref.read(topologyProvider);
+      final srcName =
+          edge.sourceDeviceName ??
+          topo.nodes
+              .where((n) => n.id == edge.sourceDeviceId)
+              .firstOrNull
+              ?.name ??
+          '#${edge.sourceDeviceId}';
+      final dstName =
+          edge.targetDeviceName ??
+          topo.nodes
+              .where((n) => n.id == edge.targetDeviceId)
+              .firstOrNull
+              ?.name ??
+          '#${edge.targetDeviceId}';
+      final ok = await showConfirmActionDialog(
+        context: context,
+        title: 'Remover enlace',
+        message: 'Remover o enlace entre $srcName e $dstName da topologia?',
+        confirmLabel: 'Remover',
+      );
+      if (!ok || !mounted) {
+        if (mounted && _selectedEdgeId == edge.id) {
+          _pageFocusNode.requestFocus();
+        }
+        return;
+      }
+      final deleted = await ref
+          .read(topologyProvider.notifier)
+          .deleteLink(edge.id);
+      if (deleted && mounted && _selectedEdgeId == edge.id) {
+        setState(() => _selectedEdgeId = null);
+      }
+    } finally {
+      _deletingEdge = false;
     }
   }
 
@@ -610,183 +663,208 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
         ? 372.0
         : 0.0;
 
-    return Stack(
-      children: <Widget>[
-        if (topo.loading && topo.nodes.isEmpty)
-          const LoadingStateView(message: 'Carregando mapa de topologia...')
-        else if (topo.error != null && topo.nodes.isEmpty)
-          ErrorStateView(
-            message: topo.error!,
-            onRetry: () => ref.read(topologyProvider.notifier).fetchTopology(),
-          )
-        else if (topo.nodes.isEmpty)
-          const EmptyStateView(
-            title: 'Nenhum dispositivo na topologia',
-            description:
-                'Cadastre equipamentos ou execute uma descoberta de rede.',
-            icon: Icons.account_tree_outlined,
-          )
-        else
-          Positioned.fill(
-            child: TopologyCanvasView(
-              controller: _canvasCtrl,
-              nodes: filterResult.visibleNodes,
-              edges: filterResult.visibleEdges,
-              positions: layoutOutput.positions,
-              clusters: layoutOutput.clusters,
-              edgeStyle: effectiveSpec.edgeStyle,
-              overlayMode: effectiveSpec.overlayMode,
-              selectedNodeId: _selectedNodeId,
-              selectedEdgeId: _selectedEdgeId,
-              pathStartNodeId: _pathPickingSourceId,
-              highlightedPath: activePath,
-              dimmedNodeIds: filterResult.dimmedNodeIds,
-              dimmedEdgeIds: filterResult.dimmedEdgeIds,
-              showLabels: effectiveSpec.showLabels,
-              showIpLabels: effectiveSpec.showIpLabels,
-              showHealthBadges: effectiveSpec.showHealthBadges,
-              showTrafficFlow:
-                  effectiveSpec.showTrafficFlow &&
-                  (hasLiveTraffic ||
-                      effectiveSpec.overlayMode == TopologyOverlayMode.traffic),
-              showClusterBoxes: effectiveSpec.showClusterBoxes,
-              showMinimap: effectiveSpec.showMinimap,
-              editLayoutEnabled: canWrite && _editLayoutEnabled,
-              snapToGrid: effectiveSpec.snapToGrid,
-              nodeExtras: buildTopologyNodeExtras(
-                nodes: filterResult.visibleNodes,
-                pluginActions: topo.pluginActions,
-                wifiSnapshots: wifiSnapshots,
+    return CallbackShortcuts(
+      bindings: <ShortcutActivator, VoidCallback>{
+        const SingleActivator(LogicalKeyboardKey.delete): () {
+          if (ModalRoute.of(context)?.isCurrent != true) return;
+          final focused = FocusManager.instance.primaryFocus?.context?.widget;
+          if (focused is EditableText) return;
+          _handleDeleteSelectedEdge();
+        },
+      },
+      child: Focus(
+        focusNode: _pageFocusNode,
+        autofocus: true,
+        child: Stack(
+          children: <Widget>[
+            if (topo.loading && topo.nodes.isEmpty)
+              const LoadingStateView(message: 'Carregando mapa de topologia...')
+            else if (topo.error != null && topo.nodes.isEmpty)
+              ErrorStateView(
+                message: topo.error!,
+                onRetry: () =>
+                    ref.read(topologyProvider.notifier).fetchTopology(),
+              )
+            else if (topo.nodes.isEmpty)
+              const EmptyStateView(
+                title: 'Nenhum dispositivo na topologia',
+                description:
+                    'Cadastre equipamentos ou execute uma descoberta de rede.',
+                icon: Icons.account_tree_outlined,
+              )
+            else
+              Positioned.fill(
+                child: TopologyCanvasView(
+                  controller: _canvasCtrl,
+                  nodes: filterResult.visibleNodes,
+                  edges: filterResult.visibleEdges,
+                  positions: layoutOutput.positions,
+                  clusters: layoutOutput.clusters,
+                  edgeStyle: effectiveSpec.edgeStyle,
+                  overlayMode: effectiveSpec.overlayMode,
+                  selectedNodeId: _selectedNodeId,
+                  selectedEdgeId: _selectedEdgeId,
+                  pathStartNodeId: _pathPickingSourceId,
+                  highlightedPath: activePath,
+                  dimmedNodeIds: filterResult.dimmedNodeIds,
+                  dimmedEdgeIds: filterResult.dimmedEdgeIds,
+                  showLabels: effectiveSpec.showLabels,
+                  showIpLabels: effectiveSpec.showIpLabels,
+                  showHealthBadges: effectiveSpec.showHealthBadges,
+                  showTrafficFlow:
+                      effectiveSpec.showTrafficFlow &&
+                      (hasLiveTraffic ||
+                          effectiveSpec.overlayMode ==
+                              TopologyOverlayMode.traffic),
+                  showClusterBoxes: effectiveSpec.showClusterBoxes,
+                  showMinimap: effectiveSpec.showMinimap,
+                  editLayoutEnabled: canWrite && _editLayoutEnabled,
+                  snapToGrid: effectiveSpec.snapToGrid,
+                  nodeExtras: buildTopologyNodeExtras(
+                    nodes: filterResult.visibleNodes,
+                    pluginActions: topo.pluginActions,
+                    wifiSnapshots: wifiSnapshots,
+                  ),
+                  linkTestOverlay: buildTopologyLinkTestOverlays(
+                    edges: filterResult.visibleEdges,
+                    tests: linkTests,
+                  ),
+                  onTapNode: _handleNodeTap,
+                  onDoubleTapNode: (n) =>
+                      _focusAndSelectNode(n, openSheet: false),
+                  onLongPressNode: _openPathTargetPicker,
+                  onTapEdge: _handleEdgeTap,
+                  onTapEmptySpace: () => setState(() {
+                    _selectedNodeId = null;
+                    _selectedEdgeId = null;
+                  }),
+                  onNodeDragEnd: _handleNodeDragCommitted,
+                  onUndo: _undoStack.isNotEmpty ? _undoLastDrag : null,
+                  onDeleteSelected: _handleDeleteSelectedEdge,
+                ),
               ),
-              linkTestOverlay: buildTopologyLinkTestOverlays(
-                edges: filterResult.visibleEdges,
-                tests: linkTests,
+            TopologyHud(
+              filterSpec: effectiveSpec,
+              healthSummary: computeTopologyHealthSummary(
+                topo.nodes,
+                topo.edges,
               ),
-              onTapNode: _handleNodeTap,
-              onDoubleTapNode: (n) => _focusAndSelectNode(n, openSheet: false),
-              onLongPressNode: _openPathTargetPicker,
-              onTapEdge: _handleEdgeTap,
-              onTapEmptySpace: () => setState(() {
-                _selectedNodeId = null;
-                _selectedEdgeId = null;
-              }),
-              onNodeDragEnd: _handleNodeDragCommitted,
-              onUndo: _undoStack.isNotEmpty ? _undoLastDrag : null,
-            ),
-          ),
-        TopologyHud(
-          filterSpec: effectiveSpec,
-          healthSummary: computeTopologyHealthSummary(topo.nodes, topo.edges),
-          sites: sites,
-          canWrite: canWrite,
-          editLayoutEnabled: _editLayoutEnabled,
-          hasUnsavedLayoutChanges: _draggedNodeIds.isNotEmpty,
-          canUndoLayout: _undoStack.isNotEmpty,
-          draggedNodeCount: _draggedNodeIds.length,
-          savingLayout: topo.savingLayout,
-          recalculating: topo.recalculating,
-          hasRemoteLayoutUpdate:
-              topo.remoteLayoutRevision > _acknowledgedRemoteRevision,
-          rightInset: rightInset,
-          activePath: activePath,
-          pathNodeNames: resolvePathNodeNames(activePath, topo.nodes),
-          pathPickingSourceName: _pathPickingSourceId != null
-              ? topo.nodes
-                    .where((n) => n.id == _pathPickingSourceId)
-                    .firstOrNull
-                    ?.name
-              : null,
-          onOpenSearch: () => showTopologySearchSheet(
-            context: context,
-            nodes: topo.nodes,
-            initialQuery: _filterSpec.search,
-            macByNodeId: macIndex,
-            onSelectNode: _focusAndSelectNode,
-            onApplySearchFilter: (q) =>
-                _updateFilterSpec(_filterSpec.copyWith(search: q)),
-          ),
-          onClearSearch: () =>
-              _updateFilterSpec(_filterSpec.copyWith(search: '')),
-          onOpenFilters: () => showTopologyFiltersSheet(
-            context: context,
-            initialSpec: effectiveSpec,
-            sites: sites,
-            onSpecChanged: _updateFilterSpec,
-            onSiteChanged: _applySiteFilter,
-            onLayoutSelected: _applyLayoutMode,
-          ),
-          onSiteChanged: _applySiteFilter,
-          onLayoutChanged: _applyLayoutMode,
-          onOverlayChanged: (m) =>
-              _updateFilterSpec(_filterSpec.copyWith(overlayMode: m)),
-          onToggleEditLayout: () =>
-              setState(() => _editLayoutEnabled = !_editLayoutEnabled),
-          onToggleSnapToGrid: () => _updateFilterSpec(
-            _filterSpec.copyWith(snapToGrid: !_filterSpec.snapToGrid),
-          ),
-          onSaveLayout: () =>
-              _saveLayout(onlyNodeIds: _draggedNodeIds.toList(growable: false)),
-          onUndoLayout: _undoLastDrag,
-          onDiscardLayout: _discardDraggedLayout,
-          onZoomIn: _canvasCtrl.zoomIn,
-          onZoomOut: _canvasCtrl.zoomOut,
-          onFitToScreen: _canvasCtrl.fitToScreen,
-          onTapProblems: () => _toggleStatusFilter(onlyProblems: true),
-          onTapOffline: () =>
-              _toggleStatusFilter(onlyProblems: false, offlineOnly: true),
-          onClearPath: _clearPath,
-          onCancelPathPicking: () =>
-              setState(() => _pathPickingSourceId = null),
-          onReloadRemoteLayout: () =>
-              _handleHudAction(TopologyHudAction.refresh),
-          onAction: _handleHudAction,
-        ),
-        if (isWide && (selectedNode != null || selectedEdge != null))
-          Positioned(
-            top: 10,
-            right: 10,
-            bottom: 10,
-            width: 360,
-            child: TopologyDockedInspector(
-              selectedNode: selectedNode,
-              selectedEdge: selectedEdge,
-              allNodes: topo.nodes,
-              allEdges: topo.edges,
-              pluginActions: selectedNode != null
-                  ? (topo.pluginActions[selectedNode.id] ?? const [])
-                  : const [],
+              sites: sites,
               canWrite: canWrite,
-              pingLoading: _pingLoading,
-              pingReport: _pingReport,
-              pingError: _pingError,
-              onClose: () => setState(() {
-                _selectedNodeId = null;
-                _selectedEdgeId = null;
-              }),
-              onQuickPing: _runDesktopQuickPing,
-              onDismissPing: () => setState(() {
-                _pingReport = null;
-                _pingError = null;
-              }),
-              onOpenNodeDetails: (n) => context.go('/devices/${n.id}'),
-              onTracePathFromNode: _openPathTargetPicker,
-              onTraceUpstream: _traceUpstream,
-              onTraceroute: (n) =>
-                  showTracerouteDialog(context, initialHost: n.ipAddress),
-              onStartNodeLinkTest: _startNodeLinkTest,
-              onNewLinkFromNode: (n) => _openLinkForm(initialSourceId: n.id),
-              onEditDevice: _editNodeDevice,
-              onOpenPluginsTab: (n) =>
-                  context.go('/devices/${n.id}?tab=plugins'),
-              onFocusNode: _focusAndSelectNode,
-              onInspectEdge: _handleEdgeTap,
-              onStartEdgeLinkTest: _startEdgeLinkTest,
-              onConfirmEdge: _confirmEdge,
-              onEditEdge: (e) => _openLinkForm(existingEdge: e),
-              onDeleteEdge: _deleteEdge,
+              editLayoutEnabled: _editLayoutEnabled,
+              hasUnsavedLayoutChanges: _draggedNodeIds.isNotEmpty,
+              canUndoLayout: _undoStack.isNotEmpty,
+              draggedNodeCount: _draggedNodeIds.length,
+              savingLayout: topo.savingLayout,
+              recalculating: topo.recalculating,
+              hasRemoteLayoutUpdate:
+                  topo.remoteLayoutRevision > _acknowledgedRemoteRevision,
+              rightInset: rightInset,
+              activePath: activePath,
+              pathNodeNames: resolvePathNodeNames(activePath, topo.nodes),
+              pathPickingSourceName: _pathPickingSourceId != null
+                  ? topo.nodes
+                        .where((n) => n.id == _pathPickingSourceId)
+                        .firstOrNull
+                        ?.name
+                  : null,
+              onOpenSearch: () => showTopologySearchSheet(
+                context: context,
+                nodes: topo.nodes,
+                initialQuery: _filterSpec.search,
+                macByNodeId: macIndex,
+                onSelectNode: _focusAndSelectNode,
+                onApplySearchFilter: (q) =>
+                    _updateFilterSpec(_filterSpec.copyWith(search: q)),
+              ),
+              onClearSearch: () =>
+                  _updateFilterSpec(_filterSpec.copyWith(search: '')),
+              onOpenFilters: () => showTopologyFiltersSheet(
+                context: context,
+                initialSpec: effectiveSpec,
+                sites: sites,
+                onSpecChanged: _updateFilterSpec,
+                onSiteChanged: _applySiteFilter,
+                onLayoutSelected: _applyLayoutMode,
+              ),
+              onSiteChanged: _applySiteFilter,
+              onLayoutChanged: _applyLayoutMode,
+              onOverlayChanged: (m) =>
+                  _updateFilterSpec(_filterSpec.copyWith(overlayMode: m)),
+              onToggleEditLayout: () =>
+                  setState(() => _editLayoutEnabled = !_editLayoutEnabled),
+              onToggleSnapToGrid: () => _updateFilterSpec(
+                _filterSpec.copyWith(snapToGrid: !_filterSpec.snapToGrid),
+              ),
+              onSaveLayout: () => _saveLayout(
+                onlyNodeIds: _draggedNodeIds.toList(growable: false),
+              ),
+              onUndoLayout: _undoLastDrag,
+              onDiscardLayout: _discardDraggedLayout,
+              zoomListenable: _canvasCtrl,
+              readZoomScale: () => _canvasCtrl.scale,
+              onZoomIn: _canvasCtrl.zoomIn,
+              onZoomOut: _canvasCtrl.zoomOut,
+              onFitToScreen: _canvasCtrl.fitToScreen,
+              onTapProblems: () => _toggleStatusFilter(onlyProblems: true),
+              onTapOffline: () =>
+                  _toggleStatusFilter(onlyProblems: false, offlineOnly: true),
+              onClearPath: _clearPath,
+              onCancelPathPicking: () =>
+                  setState(() => _pathPickingSourceId = null),
+              onReloadRemoteLayout: () =>
+                  _handleHudAction(TopologyHudAction.refresh),
+              onAction: _handleHudAction,
             ),
-          ),
-      ],
+            if (isWide && (selectedNode != null || selectedEdge != null))
+              Positioned(
+                top: 10,
+                right: 10,
+                bottom: 10,
+                width: 360,
+                child: TopologyDockedInspector(
+                  selectedNode: selectedNode,
+                  selectedEdge: selectedEdge,
+                  allNodes: topo.nodes,
+                  allEdges: topo.edges,
+                  pluginActions: selectedNode != null
+                      ? (topo.pluginActions[selectedNode.id] ?? const [])
+                      : const [],
+                  canWrite: canWrite,
+                  pingLoading: _pingLoading,
+                  pingReport: _pingReport,
+                  pingError: _pingError,
+                  onClose: () => setState(() {
+                    _selectedNodeId = null;
+                    _selectedEdgeId = null;
+                  }),
+                  onQuickPing: _runDesktopQuickPing,
+                  onDismissPing: () => setState(() {
+                    _pingReport = null;
+                    _pingError = null;
+                  }),
+                  onOpenNodeDetails: (n) => context.go('/devices/${n.id}'),
+                  onTracePathFromNode: _openPathTargetPicker,
+                  onTraceUpstream: _traceUpstream,
+                  onTraceroute: (n) =>
+                      showTracerouteDialog(context, initialHost: n.ipAddress),
+                  onStartNodeLinkTest: _startNodeLinkTest,
+                  onNewLinkFromNode: (n) =>
+                      _openLinkForm(initialSourceId: n.id),
+                  onEditDevice: _editNodeDevice,
+                  onOpenPluginsTab: (n) =>
+                      context.go('/devices/${n.id}?tab=plugins'),
+                  onFocusNode: _focusAndSelectNode,
+                  onInspectEdge: _handleEdgeTap,
+                  onStartEdgeLinkTest: _startEdgeLinkTest,
+                  onConfirmEdge: _confirmEdge,
+                  onEditEdge: (e) => _openLinkForm(existingEdge: e),
+                  onDeleteEdge: _deleteEdge,
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 }

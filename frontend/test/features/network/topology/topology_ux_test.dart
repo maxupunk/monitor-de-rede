@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:netmonitor_app/core/auth/area_access.dart';
@@ -257,6 +258,17 @@ class _TestTopologyNotifier extends TopologyNotifier {
   @override
   Future<bool> createUnmanagedSwitch(Map<String, dynamic> payload) async {
     createUnmanagedSwitchCalls += 1;
+    return true;
+  }
+
+  final List<int> deletedLinkIds = <int>[];
+
+  @override
+  Future<bool> deleteLink(int id) async {
+    deletedLinkIds.add(id);
+    state = state.copyWith(
+      edges: state.edges.where((e) => e.id != id).toList(growable: false),
+    );
     return true;
   }
 
@@ -711,6 +723,67 @@ void main() {
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
       expect(find.text('Legenda da Topologia'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'Zoom controls use unmistakable zoom_in/zoom_out icons with live percentage pill and Delete key confirms link deletion',
+    (tester) async {
+      _setViewport(tester, const Size(1280, 800));
+      final notifier = _TestTopologyNotifier();
+      await tester.pumpWidget(_buildApp(topoNotifier: notifier));
+      await tester.pumpAndSettle();
+
+      // Controles de zoom usam lupa (zoom_in/zoom_out) e nunca "+" genérico de adicionar.
+      expect(find.byIcon(Icons.zoom_in), findsOneWidget);
+      expect(find.byIcon(Icons.zoom_out), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(TopologyHud),
+          matching: find.byIcon(Icons.add),
+        ),
+        findsNothing,
+      );
+      expect(find.textContaining('%'), findsWidgets);
+
+      // Seleciona o enlace 10 via Inspetor de Nó -> chip do enlace no vizinho.
+      await tester.tap(
+        find.byKey(const ValueKey<String>('topology-node-detail-1')),
+      );
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pumpAndSettle();
+      final edgeBadge = find.descendant(
+        of: find.byType(TopologyNodeInspectorCard),
+        matching: find.text('10 Gbps'),
+      );
+      await tester.ensureVisible(edgeBadge.last);
+      await tester.pumpAndSettle();
+      await tester.tap(edgeBadge.last);
+      await tester.pumpAndSettle();
+      expect(find.byType(TopologyEdgeInspectorCard), findsOneWidget);
+
+      // Pressiona tecla Delete -> abre diálogo de confirmação; Cancelar NÃO remove.
+      await tester.sendKeyEvent(LogicalKeyboardKey.delete);
+      await tester.pumpAndSettle();
+      expect(find.text('Remover enlace'), findsOneWidget);
+      expect(
+        find.text(
+          'Remover o enlace entre Borda-CCR e Switch-Core da topologia?',
+        ),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Cancelar'));
+      await tester.pumpAndSettle();
+      expect(notifier.deletedLinkIds, isEmpty);
+      expect(find.byType(TopologyEdgeInspectorCard), findsOneWidget);
+
+      // Pressiona Delete novamente e confirma -> remove o enlace 10 e fecha o inspetor.
+      await tester.sendKeyEvent(LogicalKeyboardKey.delete);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Remover'));
+      await tester.pumpAndSettle();
+      expect(notifier.deletedLinkIds, equals(<int>[10]));
+      expect(find.byType(TopologyEdgeInspectorCard), findsNothing);
     },
   );
 }

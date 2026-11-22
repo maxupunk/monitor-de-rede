@@ -1144,7 +1144,7 @@ class _TopologyLegendBody extends StatelessWidget {
               _TipRow(
                 icon: Icons.keyboard_outlined,
                 text:
-                    'Teclado (desktop): + / - (zoom), 0 (ajustar à tela), Esc (limpar seleção).',
+                    'Teclado (desktop): + / - (zoom), 0 (ajustar à tela), Delete (remover enlace selecionado), Ctrl+Z (desfazer), Esc (limpar seleção).',
                 color: scheme.primary,
               ),
             ],
