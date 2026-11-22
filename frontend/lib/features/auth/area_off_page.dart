@@ -5,9 +5,7 @@ import 'package:netmonitor_app/areas/area_registry.dart';
 import 'package:netmonitor_app/core/areas/area_models.dart';
 import 'package:netmonitor_app/core/areas/areas_provider.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
-import 'package:netmonitor_app/shared/widgets/nested_panel.dart';
-import 'package:netmonitor_app/shared/widgets/section_card.dart';
-import 'package:netmonitor_app/shared/widgets/semantic_chip.dart';
+import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
 
 /// Página exibida quando o usuário navega para uma rota de área desligada ou sem acesso.
@@ -155,9 +153,10 @@ class _AreaOffPageState extends ConsumerState<AreaOffPage> {
                     ),
                   ),
                 ] else if (auth.isAdmin) ...<Widget>[
-                  Wrap(
+                  SymmetricalActionBar(
                     spacing: 10,
                     runSpacing: 10,
+                    primaryFullWidthWhenOdd: true,
                     children: <Widget>[
                       FilledButton.icon(
                         onPressed: areasState.saving == area ? null : _turnOn,
@@ -175,7 +174,13 @@ class _AreaOffPageState extends ConsumerState<AreaOffPage> {
                       OutlinedButton.icon(
                         onPressed: () => context.go('/settings?tab=geral'),
                         icon: const Icon(Icons.settings_outlined, size: 18),
-                        label: const Text('Ir para Configurações'),
+                        label: Text(
+                          MediaQuery.sizeOf(context).width < 460
+                              ? 'Configurações'
+                              : 'Ir para Configurações',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                       FilledButton.tonal(
                         onPressed: () => context.go('/'),

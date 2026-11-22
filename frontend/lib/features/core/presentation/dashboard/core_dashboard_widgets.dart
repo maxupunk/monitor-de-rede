@@ -109,7 +109,9 @@ class _StatCardsWidget extends ConsumerWidget {
           value: formatInteger(monitors.downCount),
           subtitle: monitors.warningCount > 0
               ? '${monitors.warningCount} em atenção'
-              : 'Sem degradação',
+              : (monitors.downCount > 0
+                    ? 'Exige verificação'
+                    : 'Sem degradação'),
           icon: Icons.error_outline,
           tone: monitors.downCount > 0 ? SemanticTone.error : SemanticTone.info,
           onTap: () => context.go('/monitors?status=down'),
@@ -372,7 +374,11 @@ class _ActiveAlertsWidget extends ConsumerWidget {
                                 crossAxisAlignment: WrapCrossAlignment.center,
                                 children: <Widget>[
                                   SemanticChip(
-                                    label: alert.severity.toUpperCase(),
+                                    label: switch (alert.severity) {
+                                      'critical' || 'error' => 'Crítico',
+                                      'warning' => 'Aviso',
+                                      _ => 'Info',
+                                    },
                                     tone:
                                         alert.severity == 'critical' ||
                                             alert.severity == 'error'

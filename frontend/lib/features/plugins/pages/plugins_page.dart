@@ -378,58 +378,46 @@ class _PluginsPageState extends ConsumerState<PluginsPage> {
             ],
           ),
           const SizedBox(height: 12),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            alignment: WrapAlignment.spaceBetween,
-            crossAxisAlignment: WrapCrossAlignment.center,
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: <Widget>[
-              _buildPrimaryCta(summary),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  if (summary.opensApp)
-                    TextButton.icon(
-                      onPressed: () => context.go('/apps/${summary.id}'),
-                      icon: const Icon(Icons.apps, size: 17),
-                      label: const Text('Aplicativo'),
-                    ),
-                  TextButton(
-                    onPressed: () => _openEditor(summary),
-                    child: Text(
-                      summary.source == 'builtin' ? 'Ver código' : 'Editar',
-                    ),
+              Expanded(
+                child: SymmetricalActionBar(
+                  children: _buildCardActions(context, summary),
+                ),
+              ),
+              const SizedBox(width: 4),
+              PopupMenuButton<String>(
+                tooltip: 'Mais opções',
+                iconSize: 18,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 34, minHeight: 36),
+                onSelected: (cmd) async {
+                  if (cmd == 'export') {
+                    await _exportPlugin(summary);
+                  } else if (cmd == 'disable') {
+                    await ref
+                        .read(pluginsProvider.notifier)
+                        .lifecycle(summary.id, 'disable');
+                  } else if (cmd == 'delete') {
+                    await _deletePlugin(summary);
+                  }
+                },
+                itemBuilder: (_) => <PopupMenuEntry<String>>[
+                  const PopupMenuItem<String>(
+                    value: 'export',
+                    child: Text('Exportar pacote'),
                   ),
-                  PopupMenuButton<String>(
-                    iconSize: 18,
-                    onSelected: (cmd) async {
-                      if (cmd == 'export') {
-                        await _exportPlugin(summary);
-                      } else if (cmd == 'disable') {
-                        await ref
-                            .read(pluginsProvider.notifier)
-                            .lifecycle(summary.id, 'disable');
-                      } else if (cmd == 'delete') {
-                        await _deletePlugin(summary);
-                      }
-                    },
-                    itemBuilder: (_) => <PopupMenuEntry<String>>[
-                      const PopupMenuItem<String>(
-                        value: 'export',
-                        child: Text('Exportar pacote'),
-                      ),
-                      if (summary.status == 'active')
-                        const PopupMenuItem<String>(
-                          value: 'disable',
-                          child: Text('Desativar'),
-                        ),
-                      if (summary.source != 'builtin')
-                        const PopupMenuItem<String>(
-                          value: 'delete',
-                          child: Text('Excluir'),
-                        ),
-                    ],
-                  ),
+                  if (summary.status == 'active')
+                    const PopupMenuItem<String>(
+                      value: 'disable',
+                      child: Text('Desativar'),
+                    ),
+                  if (summary.source != 'builtin')
+                    const PopupMenuItem<String>(
+                      value: 'delete',
+                      child: Text('Excluir'),
+                    ),
                 ],
               ),
             ],
@@ -439,43 +427,101 @@ class _PluginsPageState extends ConsumerState<PluginsPage> {
     );
   }
 
-  Widget _buildPrimaryCta(PluginSummary summary) {
+  List<Widget> _buildCardActions(BuildContext context, PluginSummary summary) {
+    const compactPad = EdgeInsets.symmetric(horizontal: 10, vertical: 10);
+    final primary = _buildPrimaryAction(context, summary, compactPad);
+    final editBtn = OutlinedButton.icon(
+      style: OutlinedButton.styleFrom(padding: compactPad),
+      onPressed: () => _openEditor(summary),
+      icon: Icon(
+        summary.source == 'builtin' ? Icons.code : Icons.edit_outlined,
+        size: 16,
+      ),
+      label: Text(
+        summary.source == 'builtin' ? 'Ver código' : 'Editar',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+    );
+    return <Widget>[?primary, editBtn];
+  }
+
+  Widget? _buildPrimaryAction(
+    BuildContext context,
+    PluginSummary summary,
+    EdgeInsetsGeometry padding,
+  ) {
     switch (summary.status) {
       case 'quarantine':
         return FilledButton.icon(
+          style: FilledButton.styleFrom(padding: padding),
           onPressed: () => _openReview(summary),
-          icon: const Icon(Icons.security_outlined, size: 17),
-          label: const Text('Revisar segurança'),
+          icon: const Icon(Icons.security_outlined, size: 16),
+          label: const Text(
+            'Revisar',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
         );
       case 'tested':
         return FilledButton.icon(
+          style: FilledButton.styleFrom(
+            backgroundColor: context.semanticColors.plugin,
+            foregroundColor: context.semanticColors.onPlugin,
+            padding: padding,
+          ),
           onPressed: () => ref
               .read(pluginsProvider.notifier)
               .lifecycle(summary.id, 'promote'),
-          icon: const Icon(Icons.check_circle_outline, size: 17),
-          label: const Text('Ativar'),
+          icon: const Icon(Icons.check_circle_outline, size: 16),
+          label: const Text(
+            'Ativar',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
         );
       case 'draft':
         return FilledButton.tonalIcon(
+          style: FilledButton.styleFrom(padding: padding),
           onPressed: () => _openEditor(summary),
-          icon: const Icon(Icons.science_outlined, size: 17),
-          label: const Text('Abrir e testar'),
+          icon: const Icon(Icons.science_outlined, size: 16),
+          label: const Text(
+            'Testar',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
         );
       case 'disabled':
         return FilledButton.tonalIcon(
+          style: FilledButton.styleFrom(padding: padding),
           onPressed: () => ref
               .read(pluginsProvider.notifier)
               .lifecycle(summary.id, 'enable'),
-          icon: const Icon(Icons.power_settings_new, size: 17),
-          label: const Text('Reativar'),
+          icon: const Icon(Icons.power_settings_new, size: 16),
+          label: const Text(
+            'Reativar',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
         );
       default:
-        return SemanticChip(
-          label: 'Ativo',
-          tone: SemanticTone.plugin,
-          icon: Icons.check,
-          compact: true,
-        );
+        if (summary.opensApp) {
+          return FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: context.semanticColors.plugin,
+              foregroundColor: context.semanticColors.onPlugin,
+              padding: padding,
+            ),
+            onPressed: () => context.go('/apps/${summary.id}'),
+            icon: const Icon(Icons.apps, size: 16),
+            label: const Text(
+              'Aplicativo',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          );
+        }
+        return null;
     }
   }
 }

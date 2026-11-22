@@ -116,7 +116,7 @@ class EventPresentation {
         Icons.notifications_off_outlined,
         SemanticTone.info,
       ),
-      'monitor:result' => (
+      'monitor:result' || 'monitor:checked' => (
         'Verificação de monitor',
         'Monitores',
         Icons.monitor_heart_outlined,

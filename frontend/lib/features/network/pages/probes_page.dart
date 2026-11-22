@@ -266,15 +266,18 @@ class _ProbesPageState extends ConsumerState<ProbesPage> {
                               : probe.status == 'revoked'
                               ? SemanticTone.error
                               : SemanticTone.warning,
-                          trailing: StatusIndicator.fromStatus(
-                            probe.status,
-                            compact: true,
-                          ),
+                          trailing: probe.status == 'revoked'
+                              ? const StatusIndicator(
+                                  label: 'Revogada',
+                                  tone: SemanticTone.error,
+                                  compact: true,
+                                )
+                              : StatusIndicator.fromStatus(
+                                  probe.status,
+                                  compact: true,
+                                ),
                           footer: canWrite
-                              ? Wrap(
-                                  alignment: WrapAlignment.end,
-                                  spacing: 8,
-                                  runSpacing: 6,
+                              ? SymmetricalActionBar(
                                   children: <Widget>[
                                     OutlinedButton.icon(
                                       onPressed:
@@ -296,19 +299,22 @@ class _ProbesPageState extends ConsumerState<ProbesPage> {
                                       label: const Text('Testar'),
                                     ),
                                     if (probe.status != 'revoked')
-                                      TextButton.icon(
+                                      OutlinedButton.icon(
                                         onPressed: () => _revokeProbe(probe),
+                                        style: OutlinedButton.styleFrom(
+                                          foregroundColor:
+                                              context.colorScheme.error,
+                                          side: BorderSide(
+                                            color: context.colorScheme.error
+                                                .withValues(alpha: 0.5),
+                                          ),
+                                        ),
                                         icon: Icon(
                                           Icons.block,
                                           size: 16,
                                           color: context.colorScheme.error,
                                         ),
-                                        label: Text(
-                                          'Revogar',
-                                          style: TextStyle(
-                                            color: context.colorScheme.error,
-                                          ),
-                                        ),
+                                        label: const Text('Revogar'),
                                       ),
                                   ],
                                 )

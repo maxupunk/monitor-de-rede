@@ -387,7 +387,9 @@ class _RegistryPageState extends ConsumerState<RegistryPage> {
     return RefreshIndicator(
       onRefresh: _bootstrap,
       child: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: isCompact
+            ? const EdgeInsets.only(bottom: 16)
+            : const EdgeInsets.all(16),
         children: <Widget>[
           if (isCompact)
             Row(
@@ -445,42 +447,84 @@ class _RegistryPageState extends ConsumerState<RegistryPage> {
             ),
           const SizedBox(height: 12),
 
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: SegmentedButton<int>(
-              showSelectedIcon: false,
-              style: SegmentedButton.styleFrom(
-                visualDensity: VisualDensity.compact,
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-              ),
-              segments: <ButtonSegment<int>>[
-                const ButtonSegment(
-                  value: 0,
-                  label: Text('Imagens', maxLines: 1, softWrap: false),
-                  icon: Icon(Icons.inventory_2_outlined),
+          if (isCompact)
+            SizedBox(
+              width: double.infinity,
+              child: SegmentedButton<int>(
+                showSelectedIcon: false,
+                style: SegmentedButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
                 ),
-                const ButtonSegment(
-                  value: 1,
-                  label: Text('Tokens', maxLines: 1, softWrap: false),
-                  icon: Icon(Icons.vpn_key_outlined),
-                ),
-                const ButtonSegment(
-                  value: 2,
-                  label: Text('Vulnerabilidades', maxLines: 1, softWrap: false),
-                  icon: Icon(Icons.shield_outlined),
-                ),
-                if (canAdmin)
+                segments: <ButtonSegment<int>>[
                   const ButtonSegment(
-                    value: 3,
-                    label: Text('Configurações', maxLines: 1, softWrap: false),
-                    icon: Icon(Icons.tune),
+                    value: 0,
+                    label: Text('Imagens', maxLines: 1, softWrap: false),
                   ),
-              ],
-              selected: <int>{_tabIndex > 2 && !canAdmin ? 0 : _tabIndex},
-              onSelectionChanged: (set) =>
-                  setState(() => _tabIndex = set.first),
+                  const ButtonSegment(
+                    value: 1,
+                    label: Text('Tokens', maxLines: 1, softWrap: false),
+                  ),
+                  const ButtonSegment(
+                    value: 2,
+                    label: Text('Segurança', maxLines: 1, softWrap: false),
+                  ),
+                  if (canAdmin)
+                    const ButtonSegment(
+                      value: 3,
+                      label: Text('Ajustes', maxLines: 1, softWrap: false),
+                    ),
+                ],
+                selected: <int>{_tabIndex > 2 && !canAdmin ? 0 : _tabIndex},
+                onSelectionChanged: (set) =>
+                    setState(() => _tabIndex = set.first),
+              ),
+            )
+          else
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: SegmentedButton<int>(
+                showSelectedIcon: false,
+                style: SegmentedButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                ),
+                segments: <ButtonSegment<int>>[
+                  const ButtonSegment(
+                    value: 0,
+                    label: Text('Imagens', maxLines: 1, softWrap: false),
+                    icon: Icon(Icons.inventory_2_outlined),
+                  ),
+                  const ButtonSegment(
+                    value: 1,
+                    label: Text('Tokens', maxLines: 1, softWrap: false),
+                    icon: Icon(Icons.vpn_key_outlined),
+                  ),
+                  const ButtonSegment(
+                    value: 2,
+                    label: Text(
+                      'Vulnerabilidades',
+                      maxLines: 1,
+                      softWrap: false,
+                    ),
+                    icon: Icon(Icons.shield_outlined),
+                  ),
+                  if (canAdmin)
+                    const ButtonSegment(
+                      value: 3,
+                      label: Text(
+                        'Configurações',
+                        maxLines: 1,
+                        softWrap: false,
+                      ),
+                      icon: Icon(Icons.tune),
+                    ),
+                ],
+                selected: <int>{_tabIndex > 2 && !canAdmin ? 0 : _tabIndex},
+                onSelectionChanged: (set) =>
+                    setState(() => _tabIndex = set.first),
+              ),
             ),
-          ),
           const SizedBox(height: 16),
 
           if (reg.error != null) ...<Widget>[

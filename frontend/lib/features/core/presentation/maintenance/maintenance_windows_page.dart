@@ -441,7 +441,7 @@ class _MaintenanceWindowsPageState
                       return SectionCard(
                         title: w.name,
                         subtitle:
-                            '${formatDateTime(w.startsAt)} → ${formatDateTime(w.endsAt)} (${formatTimeSpan(w.startsAt, w.endsAt)})',
+                            '${formatDateTime(w.startsAt)} até ${formatDateTime(w.endsAt)} (${formatTimeSpan(w.startsAt, w.endsAt)})',
                         icon: Icons.build_circle_outlined,
                         iconTone: tone,
                         trailing: SemanticChip(
@@ -457,64 +457,61 @@ class _MaintenanceWindowsPageState
                               Text(w.description!),
                               const SizedBox(height: 8),
                             ],
-                            Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              alignment: WrapAlignment.spaceBetween,
-                              crossAxisAlignment: WrapCrossAlignment.center,
-                              children: <Widget>[
-                                SemanticChip(
-                                  label: 'Escopo: $scopeLabel',
-                                  tone: SemanticTone.primary,
-                                  compact: true,
-                                ),
-                                if (auth.canWrite)
-                                  Wrap(
-                                    spacing: 4,
-                                    runSpacing: 4,
-                                    children: <Widget>[
-                                      TextButton.icon(
-                                        onPressed: () => _openForm(w),
-                                        icon: const Icon(
-                                          Icons.edit_outlined,
-                                          size: 18,
-                                        ),
-                                        label: const Text('Editar'),
-                                      ),
-                                      TextButton.icon(
-                                        onPressed: () async {
-                                          final ok = await showConfirmActionDialog(
-                                            context: context,
-                                            title: 'Excluir janela?',
-                                            message:
-                                                'A janela "${w.name}" será removida.',
-                                            confirmLabel: 'Excluir',
-                                          );
-                                          if (ok) {
-                                            await ref
-                                                .read(
-                                                  maintenanceWindowsProvider
-                                                      .notifier,
-                                                )
-                                                .deleteWindow(w.id);
-                                          }
-                                        },
-                                        icon: Icon(
-                                          Icons.delete_outline,
-                                          size: 18,
-                                          color: context.colorScheme.error,
-                                        ),
-                                        label: Text(
-                                          'Excluir',
-                                          style: TextStyle(
-                                            color: context.colorScheme.error,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                              ],
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: SemanticChip(
+                                label: 'Escopo: $scopeLabel',
+                                tone: SemanticTone.primary,
+                                compact: true,
+                              ),
                             ),
+                            if (auth.canWrite) ...<Widget>[
+                              const SizedBox(height: 10),
+                              SymmetricalActionBar(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: <Widget>[
+                                  OutlinedButton.icon(
+                                    onPressed: () => _openForm(w),
+                                    icon: const Icon(
+                                      Icons.edit_outlined,
+                                      size: 18,
+                                    ),
+                                    label: const Text('Editar'),
+                                  ),
+                                  OutlinedButton.icon(
+                                    onPressed: () async {
+                                      final ok = await showConfirmActionDialog(
+                                        context: context,
+                                        title: 'Excluir janela?',
+                                        message:
+                                            'A janela "${w.name}" será removida.',
+                                        confirmLabel: 'Excluir',
+                                      );
+                                      if (ok) {
+                                        await ref
+                                            .read(
+                                              maintenanceWindowsProvider
+                                                  .notifier,
+                                            )
+                                            .deleteWindow(w.id);
+                                      }
+                                    },
+                                    icon: Icon(
+                                      Icons.delete_outline,
+                                      size: 18,
+                                      color: context.colorScheme.error,
+                                    ),
+                                    label: Text(
+                                      'Excluir',
+                                      style: TextStyle(
+                                        color: context.colorScheme.error,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
                           ],
                         ),
                       );

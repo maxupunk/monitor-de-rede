@@ -481,7 +481,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                 ),
                 if (dash.isEditMode) ...<Widget>[
                   const SizedBox(height: 8),
-                  Wrap(
+                  SymmetricalActionBar(
                     spacing: 8,
                     runSpacing: 8,
                     children: <Widget>[
@@ -490,7 +490,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                         icon: const Icon(Icons.add, size: 18),
                         label: const Text('Adicionar widget'),
                       ),
-                      TextButton.icon(
+                      OutlinedButton.icon(
                         onPressed: () async {
                           final ok = await showConfirmActionDialog(
                             context: context,

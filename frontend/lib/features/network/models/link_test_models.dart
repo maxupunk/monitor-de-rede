@@ -342,7 +342,7 @@ class LinkTestModel {
     if (legs.isNotEmpty) {
       final first = legs.first.a.name;
       final last = legs.last.b.name;
-      return '$first → $last';
+      return '$first -> $last';
     }
     return 'Teste #$id';
   }

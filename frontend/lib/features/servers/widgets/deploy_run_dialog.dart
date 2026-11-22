@@ -216,7 +216,7 @@ class _DeployRunBodyState extends ConsumerState<_DeployRunBody> {
               icon: statusVisual.icon,
             ),
             SemanticChip(
-              label: '${run.applicationName} → ${run.targetName}',
+              label: '${run.applicationName} -> ${run.targetName}',
               tone: SemanticTone.primary,
             ),
             SemanticChip(

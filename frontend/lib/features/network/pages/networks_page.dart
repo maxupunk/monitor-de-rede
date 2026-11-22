@@ -176,12 +176,9 @@ class _NetworksPageState extends ConsumerState<NetworksPage> {
                 decoration: const InputDecoration(labelText: 'Descrição'),
               ),
               const SizedBox(height: 16),
-              Wrap(
-                alignment: WrapAlignment.end,
-                spacing: 8,
-                runSpacing: 8,
+              SymmetricalActionBar(
                 children: <Widget>[
-                  TextButton(
+                  OutlinedButton(
                     onPressed: saving ? null : () => Navigator.of(ctx).pop(),
                     child: const Text('Cancelar'),
                   ),
@@ -410,11 +407,13 @@ class _NetworksPageState extends ConsumerState<NetworksPage> {
                           title: network.name,
                           subtitle: network.cidr,
                           icon: Icons.lan_outlined,
+                          stackTrailingOnCompact: false,
                           trailing: canWrite
                               ? Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: <Widget>[
                                     IconButton(
+                                      visualDensity: VisualDensity.compact,
                                       tooltip: 'Editar rede',
                                       icon: const Icon(
                                         Icons.edit_outlined,
@@ -424,6 +423,7 @@ class _NetworksPageState extends ConsumerState<NetworksPage> {
                                           _openNetworkSheet(existing: network),
                                     ),
                                     IconButton(
+                                      visualDensity: VisualDensity.compact,
                                       tooltip: 'Excluir rede',
                                       icon: Icon(
                                         Icons.delete_outline,

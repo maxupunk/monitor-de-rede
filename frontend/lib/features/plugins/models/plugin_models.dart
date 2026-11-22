@@ -27,8 +27,8 @@ class PluginAction {
 
   factory PluginAction.fromJson(Map<String, dynamic> json) {
     return PluginAction(
-      name: (json['name'] as String?) ?? '',
-      title: (json['title'] as String?) ?? (json['name'] as String?) ?? '',
+      name: (json['name'] ?? json['id'] ?? '').toString(),
+      title: (json['title'] ?? json['name'] ?? json['id'] ?? '').toString(),
       description: json['description'] as String?,
       effect: (json['effect'] as String?) ?? 'read',
       reveals: json['reveals'] == true,
@@ -37,7 +37,7 @@ class PluginAction {
           : (json['params'] is Map
                 ? Map<String, dynamic>.from(json['params'] as Map)
                 : null),
-      outputKind: json['outputKind'] as String?,
+      outputKind: (json['outputKind'] ?? json['output']) as String?,
       confirmMessage: json['confirmMessage'] as String?,
     );
   }
@@ -61,14 +61,14 @@ class PluginItemAction {
   final Map<String, String> fields;
 
   factory PluginItemAction.fromJson(Map<String, dynamic> json) {
-    final rawFields = json['fields'];
+    final rawFields = json['fields'] ?? json['params'];
     final fields = <String, String>{};
     if (rawFields is Map) {
       rawFields.forEach((k, v) => fields[k.toString()] = v.toString());
     }
     return PluginItemAction(
       action: (json['action'] as String?) ?? '',
-      title: json['title'] as String?,
+      title: (json['title'] ?? json['label']) as String?,
       icon: json['icon'] as String?,
       effect: json['effect'] as String?,
       fields: fields,
@@ -125,6 +125,8 @@ class PluginWifiQrSpec {
 class PluginItemListSpec {
   const PluginItemListSpec({
     required this.title,
+    this.itemName,
+    this.itemKey,
     this.layout = 'table',
     this.sourceAction,
     this.itemsKey = 'items',
@@ -138,6 +140,8 @@ class PluginItemListSpec {
   });
 
   final String title;
+  final String? itemName;
+  final String? itemKey;
   final String layout; // 'cards' | 'table'
   final String? sourceAction;
   final String itemsKey;
@@ -162,9 +166,11 @@ class PluginItemListSpec {
 
     return PluginItemListSpec(
       title: (json['title'] as String?) ?? 'Itens',
+      itemName: json['itemName'] as String?,
+      itemKey: (json['itemKey'] ?? json['key']) as String?,
       layout: (json['layout'] as String?) ?? 'table',
       sourceAction: (json['action'] ?? json['source']) as String?,
-      itemsKey: (json['itemsKey'] ?? json['key'] ?? 'items').toString(),
+      itemsKey: (json['itemsKey'] ?? json['field'] ?? 'items').toString(),
       searchParam: json['searchParam'] as String?,
       columns: json['columns'] is List
           ? (json['columns'] as List)
@@ -199,23 +205,28 @@ class PluginFleetSpec {
   const PluginFleetSpec({
     this.title,
     this.icon,
+    this.description,
     this.statusAction,
     this.deviceAction,
     this.actions = const <Map<String, dynamic>>[],
+    this.tools = const <String>[],
     this.list,
   });
 
   final String? title;
   final String? icon;
+  final String? description;
   final String? statusAction;
   final String? deviceAction;
   final List<Map<String, dynamic>> actions;
+  final List<String> tools;
   final PluginItemListSpec? list;
 
   factory PluginFleetSpec.fromJson(Map<String, dynamic> json) {
     return PluginFleetSpec(
       title: json['title'] as String?,
       icon: json['icon'] as String?,
+      description: json['description'] as String?,
       statusAction: json['statusAction'] as String?,
       deviceAction: json['deviceAction'] as String?,
       actions: json['actions'] is List
@@ -224,6 +235,11 @@ class PluginFleetSpec {
                 .map((a) => Map<String, dynamic>.from(a))
                 .toList(growable: false)
           : const <Map<String, dynamic>>[],
+      tools: json['tools'] is List
+          ? (json['tools'] as List)
+                .map((t) => t.toString())
+                .toList(growable: false)
+          : const <String>[],
       list: json['list'] is Map
           ? PluginItemListSpec.fromJson(
               Map<String, dynamic>.from(json['list'] as Map),
@@ -946,7 +962,8 @@ class DevicePluginItem {
         ),
       ),
       installed: json['installed'] == true,
-      compatibility: (json['compatibility'] as String?) ?? 'possible',
+      compatibility:
+          ((json['compatibility'] ?? json['compat']) as String?) ?? 'possible',
       reasons: json['reasons'] is List
           ? (json['reasons'] as List)
                 .map((e) => e.toString())
@@ -1144,7 +1161,9 @@ class FleetMember {
     required this.deviceName,
     required this.ipAddress,
     this.platform,
+    this.firmware,
     this.compatibility = 'likely',
+    this.reasons = const <String>[],
     this.credentialsReady = true,
     this.missingTransport,
     this.status,
@@ -1157,7 +1176,9 @@ class FleetMember {
   final String deviceName;
   final String ipAddress;
   final String? platform;
+  final String? firmware;
   final String compatibility;
+  final List<String> reasons;
   final bool credentialsReady;
   final String? missingTransport;
   final String? status;
@@ -1171,7 +1192,9 @@ class FleetMember {
       deviceName: deviceName,
       ipAddress: ipAddress,
       platform: platform,
+      firmware: firmware,
       compatibility: compatibility,
+      reasons: reasons,
       credentialsReady: credentialsReady,
       missingTransport: missingTransport,
       status: status,
@@ -1185,11 +1208,19 @@ class FleetMember {
     return FleetMember(
       deviceId: (json['deviceId'] as num?)?.toInt() ?? 0,
       deviceName: (json['deviceName'] ?? json['name'] ?? '').toString(),
-      ipAddress: (json['ipAddress'] as String?) ?? '',
+      ipAddress: ((json['ipAddress'] ?? json['ip']) as String?) ?? '',
       platform: json['platform'] as String?,
-      compatibility: (json['compatibility'] as String?) ?? 'likely',
+      firmware: json['firmware'] as String?,
+      compatibility:
+          ((json['compatibility'] ?? json['compat']) as String?) ?? 'likely',
+      reasons: json['reasons'] is List
+          ? (json['reasons'] as List)
+                .map((e) => e.toString())
+                .toList(growable: false)
+          : const <String>[],
       credentialsReady: json['credentialsReady'] != false,
-      missingTransport: json['missingTransport'] as String?,
+      missingTransport:
+          (json['missingTransport'] ?? json['missingAccess']) as String?,
       status: json['status'] as String?,
       settings: json['settings'] is Map
           ? Map<String, dynamic>.from(json['settings'] as Map)
@@ -1224,8 +1255,9 @@ class FleetCandidate {
     return FleetCandidate(
       deviceId: (json['deviceId'] as num?)?.toInt() ?? 0,
       deviceName: (json['deviceName'] ?? json['name'] ?? '').toString(),
-      ipAddress: (json['ipAddress'] as String?) ?? '',
-      compatibility: (json['compatibility'] as String?) ?? 'possible',
+      ipAddress: ((json['ipAddress'] ?? json['ip']) as String?) ?? '',
+      compatibility:
+          ((json['compatibility'] ?? json['compat']) as String?) ?? 'possible',
       reasons: json['reasons'] is List
           ? (json['reasons'] as List)
                 .map((e) => e.toString())
@@ -1263,7 +1295,8 @@ class BatchDevice {
       runId: (json['runId'] as num?)?.toInt(),
       output: json['output'],
       error: json['error'] as String?,
-      missingTransport: json['missingTransport'] as String?,
+      missingTransport:
+          (json['missingTransport'] ?? json['missingAccess']) as String?,
     );
   }
 }
@@ -1339,13 +1372,14 @@ class FleetView {
   FleetView copyWith({
     Map<String, dynamic>? settings,
     List<FleetMember>? members,
+    List<FleetCandidate>? candidates,
     List<PluginBatchView>? batches,
   }) {
     return FleetView(
       plugin: plugin,
       settings: settings ?? this.settings,
       members: members ?? this.members,
-      candidates: candidates,
+      candidates: candidates ?? this.candidates,
       batches: batches ?? this.batches,
     );
   }

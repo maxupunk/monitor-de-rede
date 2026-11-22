@@ -303,7 +303,7 @@ class _MonitorDetailViewState extends ConsumerState<MonitorDetailView> {
           ),
           const SizedBox(height: 12),
           if (auth.canWrite)
-            Wrap(
+            SymmetricalActionBar(
               spacing: 8,
               runSpacing: 8,
               children: <Widget>[

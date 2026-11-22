@@ -117,31 +117,63 @@ class _StoragesBackupTabState extends ConsumerState<StoragesBackupTab> {
     final state = ref.watch(storagesProvider);
     final dbConnections = ref.watch(databasesProvider).connections;
 
+    final isCompact = MediaQuery.sizeOf(context).width < 680;
+
     return RefreshIndicator(
       onRefresh: () => ref.read(storagesProvider.notifier).fetchStorages(),
       child: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.only(top: 12, bottom: 24),
         children: <Widget>[
-          SearchFilterHeader(
-            title: 'Destinos de armazenamento',
-            subtitle:
-                'Onde as cópias de backup do NetMonitor e dos bancos ficam salvas.',
-            actions: <Widget>[
-              OutlinedButton.icon(
-                onPressed: state.loading
-                    ? null
-                    : () => ref.read(storagesProvider.notifier).fetchStorages(),
-                icon: const Icon(Icons.refresh, size: 18),
-                label: const Text('Atualizar'),
-              ),
-              FilledButton.icon(
-                onPressed: () => _openForm(),
-                icon: const Icon(Icons.add),
-                label: const Text('Novo destino'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
+          if (isCompact)
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: Text(
+                    'Destinos de armazenamento',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: context.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                FilledButton.icon(
+                  onPressed: () => _openForm(),
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('Novo'),
+                ),
+                IconButton(
+                  tooltip: 'Atualizar',
+                  onPressed: state.loading
+                      ? null
+                      : () =>
+                            ref.read(storagesProvider.notifier).fetchStorages(),
+                  icon: const Icon(Icons.refresh, size: 20),
+                ),
+              ],
+            )
+          else
+            SearchFilterHeader(
+              title: 'Destinos de armazenamento',
+              subtitle:
+                  'Onde as cópias de backup do NetMonitor e dos bancos ficam salvas.',
+              actions: <Widget>[
+                OutlinedButton.icon(
+                  onPressed: state.loading
+                      ? null
+                      : () =>
+                            ref.read(storagesProvider.notifier).fetchStorages(),
+                  icon: const Icon(Icons.refresh, size: 18),
+                  label: const Text('Atualizar'),
+                ),
+                FilledButton.icon(
+                  onPressed: () => _openForm(),
+                  icon: const Icon(Icons.add),
+                  label: const Text('Novo destino'),
+                ),
+              ],
+            ),
+          const SizedBox(height: 12),
 
           if (state.error != null) ...<Widget>[
             NestedPanel(tone: SemanticTone.error, child: Text(state.error!)),
@@ -189,7 +221,7 @@ class _StoragesBackupTabState extends ConsumerState<StoragesBackupTab> {
                             : SemanticTone.secondary,
                         compact: true,
                       ),
-                      footer: Wrap(
+                      footer: SymmetricalActionBar(
                         spacing: 8,
                         runSpacing: 8,
                         children: <Widget>[
@@ -208,9 +240,19 @@ class _StoragesBackupTabState extends ConsumerState<StoragesBackupTab> {
                             icon: const Icon(Icons.edit_outlined, size: 16),
                             label: const Text('Editar'),
                           ),
-                          TextButton(
+                          OutlinedButton.icon(
                             onPressed: () => _remove(storage, usedByDbs.length),
-                            child: const Text('Excluir'),
+                            icon: Icon(
+                              Icons.delete_outline,
+                              size: 16,
+                              color: context.colorScheme.error,
+                            ),
+                            label: Text(
+                              'Excluir',
+                              style: TextStyle(
+                                color: context.colorScheme.error,
+                              ),
+                            ),
                           ),
                         ],
                       ),

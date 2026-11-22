@@ -21,7 +21,9 @@ import 'package:netmonitor_app/features/plugins/pages/plugin_app_page.dart';
 import 'package:netmonitor_app/features/plugins/pages/plugins_page.dart';
 import 'package:netmonitor_app/features/plugins/providers/plugin_apps_provider.dart';
 import 'package:netmonitor_app/features/plugins/providers/plugins_provider.dart';
+import 'package:netmonitor_app/features/plugins/utils/plugin_settings_logic.dart';
 import 'package:netmonitor_app/features/plugins/widgets/device_access_dialog.dart';
+import 'package:netmonitor_app/features/plugins/widgets/device_plugins_tab.dart';
 import 'package:netmonitor_app/features/plugins/widgets/plugin_approval_dialog.dart';
 import 'package:netmonitor_app/features/plugins/widgets/plugin_review_dialog.dart';
 import 'package:netmonitor_app/features/vpn/models/vpn_models.dart';
@@ -236,6 +238,192 @@ class _StubPluginsRepository extends PluginsRepository {
         deviceName: 'Roteador-OpenWrt',
         dedicatedPlatform: 'openwrt',
       );
+}
+
+class _OpenWrtAuth401PluginsRepository extends PluginsRepository {
+  _OpenWrtAuth401PluginsRepository(super.api, {this.platform = 'openwrt'});
+
+  final String platform;
+  int provisionAttempts = 0;
+
+  @override
+  Future<DeviceAccessView> fetchAccess(int deviceId) async => DeviceAccessView(
+    deviceId: deviceId,
+    deviceName: 'AP-Escritorio',
+    dedicatedPlatform: platform,
+  );
+
+  @override
+  Future<CredentialView> provisionDedicated(
+    int deviceId,
+    Map<String, dynamic> input,
+  ) async {
+    provisionAttempts += 1;
+    throw const ApiException(
+      statusCode: 401,
+      message: 'Usuário ou senha recusados pelo equipamento.',
+    );
+  }
+}
+
+class _OpenWrtFleetAppsNotifier extends PluginAppsNotifier {
+  _OpenWrtFleetAppsNotifier({required this.candidates});
+
+  final List<FleetCandidate> candidates;
+
+  @override
+  PluginAppsState build() => PluginAppsState(
+    fleets: <int, FleetView>{
+      9: FleetView(
+        plugin: const PluginSummary(
+          id: 9,
+          slug: 'openwrt-wifi',
+          name: 'Rede Wi-Fi OpenWrt',
+          version: '1.4.0',
+          status: 'active',
+          wifi: true,
+          actions: <PluginAction>[
+            PluginAction(name: 'status', title: 'Estado atual'),
+            PluginAction(
+              name: 'add_ssid',
+              title: 'Nova rede Wi-Fi',
+              effect: 'write',
+            ),
+            PluginAction(
+              name: 'plan_channels',
+              title: 'Planejar canais',
+              description: 'Analisa interferência entre rádios da frota.',
+            ),
+          ],
+          fleet: PluginFleetSpec(
+            title: 'Rede Wi-Fi OpenWrt',
+            statusAction: 'status',
+            actions: <Map<String, dynamic>>[
+              <String, dynamic>{
+                'id': 'plan_channels',
+                'action': 'plan_channels',
+                'title': 'Planejar canais',
+                'description': 'Analisa interferência entre rádios da frota.',
+              },
+            ],
+            list: PluginItemListSpec(
+              title: 'Redes',
+              itemsKey: 'networks',
+              itemKey: 'ssid',
+              addAction: PluginItemAction(
+                action: 'add_ssid',
+                title: 'Adicionar rede',
+              ),
+              editAction: PluginItemAction(action: 'add_ssid', title: 'Editar'),
+              wifiQr: PluginWifiQrSpec(
+                ssid: 'ssid',
+                encryption: 'encryption',
+                revealAction: 'reveal_psk',
+                secretField: 'password',
+              ),
+            ),
+          ),
+        ),
+        members: const <FleetMember>[],
+        candidates: candidates,
+        batches: const <PluginBatchView>[
+          PluginBatchView(
+            id: 101,
+            pluginId: 9,
+            action: 'status',
+            title: 'Atualizar',
+            status: 'succeeded',
+            finishedAt: '2026-11-22T12:00:00Z',
+            devices: <BatchDevice>[
+              BatchDevice(
+                deviceId: 1,
+                deviceName: 'AP-Recepcao',
+                status: 'succeeded',
+                output: <String, dynamic>{
+                  'networks': <Map<String, dynamic>>[
+                    <String, dynamic>{
+                      'ssid': 'Corporativo-5G',
+                      'encryption': 'psk2',
+                      'channel': 36,
+                    },
+                  ],
+                },
+              ),
+            ],
+          ),
+        ],
+      ),
+    },
+  );
+
+  @override
+  Future<void> loadFleet(int pluginId) async {}
+
+  @override
+  Future<int> runAction({
+    required int pluginId,
+    required String action,
+    required List<int> deviceIds,
+    required bool confirmWrite,
+    Map<String, dynamic> params = const <String, dynamic>{},
+    Map<int, Map<String, dynamic>>? deviceParams,
+  }) async => 102;
+
+  @override
+  Future<FleetView> identify(
+    int pluginId, {
+    List<int> deviceIds = const <int>[],
+  }) async => state.fleets[pluginId]!;
+}
+
+class _SeededDevicePluginsNotifier extends PluginsNotifier {
+  @override
+  PluginsState build() => const PluginsState(
+    deviceViews: <int, DevicePluginsView>{
+      5: DevicePluginsView(
+        deviceId: 5,
+        platform: 'openwrt',
+        firmware: 'OpenWrt 23.05.5',
+        plugins: <DevicePluginItem>[
+          DevicePluginItem(
+            installed: true,
+            compatibility: 'validated',
+            plugin: PluginSummary(
+              id: 9,
+              slug: 'openwrt-wifi',
+              name: 'Rede Wi-Fi OpenWrt',
+              version: '1.4.0',
+              status: 'active',
+              actions: <PluginAction>[
+                PluginAction(name: 'status', title: 'Ler rádios'),
+                PluginAction(
+                  name: 'apply_wifi',
+                  title: 'Aplicar Wi-Fi',
+                  effect: 'write',
+                ),
+              ],
+            ),
+          ),
+        ],
+        credentials: <CredentialView>[
+          CredentialView(
+            kind: 'ssh',
+            username: 'root',
+            storage: 'key',
+            port: 22,
+            dedicated: DedicatedAccess(
+              username: 'root',
+              platform: 'openwrt',
+              fingerprint: 'SHA256:abc123',
+            ),
+          ),
+        ],
+      ),
+    },
+  );
+
+  @override
+  Future<void> loadDevice(int deviceId) async {}
 }
 
 void _setMobileViewport(WidgetTester tester) {
@@ -718,6 +906,434 @@ void main() {
           (chipRect.center.dy - headerSwitchRect.center.dy).abs(),
           lessThan(12),
         );
+      },
+    );
+
+    testWidgets(
+      'PluginAppPage (Rede Wi-Fi OpenWrt) renders compact header and 50%/50% SymmetricalActionBar across Redes, Equipamentos and Avançado at 360x800 and 390x844',
+      (tester) async {
+        final candidates = <FleetCandidate>[
+          FleetCandidate.fromJson(const <String, dynamic>{
+            'deviceId': 11,
+            'name': 'AP assistencia',
+            'ip': null,
+            'compat': 'possible',
+            'reasons': <String>[
+              "· o firmware ainda não foi lido — rode 'Detectar'",
+            ],
+          }),
+          FleetCandidate.fromJson(const <String, dynamic>{
+            'deviceId': 12,
+            'name': 'Borda',
+            'ip': '192.168.1.1',
+            'compat': 'possible',
+            'reasons': <String>[
+              "o firmware ainda não foi lido — rode 'Detectar'",
+            ],
+          }),
+        ];
+
+        for (final viewport in const <Size>[Size(360, 800), Size(390, 844)]) {
+          tester.view.physicalSize = viewport;
+          tester.view.devicePixelRatio = 1.0;
+
+          final overrides = <Override>[
+            authProvider.overrideWith(_AdminAuthStub.new),
+            pluginsProvider.overrideWith(_SeededPluginsNotifier.new),
+            pluginAppsProvider.overrideWith(
+              () => _OpenWrtFleetAppsNotifier(candidates: candidates),
+            ),
+          ];
+
+          await tester.pumpWidget(
+            _wrap(
+              const Padding(
+                padding: EdgeInsets.all(12),
+                child: PluginAppPage(pluginId: 9),
+              ),
+              overrides: overrides,
+            ),
+          );
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull);
+
+          // Compact header holds title + equipment count badge without overflow
+          expect(find.text('Rede Wi-Fi OpenWrt'), findsOneWidget);
+          expect(find.text('0 equipamentos'), findsOneWidget);
+
+          // Redes tab: QR Wi-Fi + Editar sit 50% / 50% side-by-side
+          expect(find.text('Corporativo-5G'), findsOneWidget);
+          final qrBtn = find.widgetWithText(OutlinedButton, 'QR Wi-Fi');
+          final editBtn = find.ancestor(
+            of: find.text('Editar'),
+            matching: find.bySubtype<ButtonStyleButton>(),
+          );
+          expect(qrBtn, findsOneWidget);
+          expect(editBtn, findsOneWidget);
+          final qrRect = tester.getRect(qrBtn);
+          final editRect = tester.getRect(editBtn);
+          expect((qrRect.center.dy - editRect.center.dy).abs(), lessThan(2));
+          expect((qrRect.width - editRect.width).abs(), lessThan(2));
+
+          // Equipamentos tab: Adicionar (2) + Verificar (2) sit 50% / 50% on 1 symmetrical row
+          await tester.tap(find.text('Equipamentos (0)'));
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull);
+
+          final addBtn = find.ancestor(
+            of: find.text('Adicionar (2)'),
+            matching: find.bySubtype<ButtonStyleButton>(),
+          );
+          final verifyBtn = find.ancestor(
+            of: find.text('Verificar (2)'),
+            matching: find.bySubtype<ButtonStyleButton>(),
+          );
+          expect(addBtn, findsOneWidget);
+          expect(verifyBtn, findsOneWidget);
+
+          final addRect = tester.getRect(addBtn);
+          final verifyRect = tester.getRect(verifyBtn);
+          expect((addRect.center.dy - verifyRect.center.dy).abs(), lessThan(2));
+          expect((addRect.width - verifyRect.width).abs(), lessThan(2));
+
+          // Avançado tab renders cleanly with SymmetricalActionBar
+          final advancedTab = find.text('Avançado');
+          await tester.ensureVisible(advancedTab);
+          await tester.pumpAndSettle();
+          await tester.tap(advancedTab);
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull);
+          expect(find.text('Planejar canais'), findsOneWidget);
+          expect(find.text('Executar'), findsOneWidget);
+
+          await tester.pumpWidget(const SizedBox.shrink());
+        }
+
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      },
+    );
+
+    testWidgets(
+      'Adicionar equipamento à frota sheet renders bordered cards, zero leading "· " bug, symmetrical buttons and >5 search filter at 360x800',
+      (tester) async {
+        tester.view.physicalSize = const Size(360, 800);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() {
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
+
+        final sixCandidates = <FleetCandidate>[
+          FleetCandidate.fromJson(const <String, dynamic>{
+            'deviceId': 11,
+            'name': 'AP assistencia',
+            'ip': null,
+            'compat': 'possible',
+            'reasons': <String>[
+              "· o firmware ainda não foi lido — rode 'Detectar'",
+            ],
+          }),
+          FleetCandidate.fromJson(const <String, dynamic>{
+            'deviceId': 12,
+            'name': 'Borda',
+            'ip': '10.0.0.1',
+            'compat': 'likely',
+            'reasons': <String>[],
+          }),
+          FleetCandidate.fromJson(const <String, dynamic>{
+            'deviceId': 13,
+            'name': 'Switch Core',
+            'ip': '10.0.0.2',
+            'compat': 'incompatible',
+            'reasons': <String>['· Plataforma RouterOS incompatível'],
+          }),
+          for (var i = 4; i <= 6; i++)
+            FleetCandidate(
+              deviceId: 20 + i,
+              deviceName: 'AP Andar $i',
+              ipAddress: '10.0.0.${20 + i}',
+              compatibility: 'likely',
+            ),
+        ];
+
+        await tester.pumpWidget(
+          _wrap(
+            Builder(
+              builder: (context) => FilledButton(
+                onPressed: () =>
+                    showPluginFleetAddSheet(context: context, pluginId: 9),
+                child: const Text('Abrir candidatos'),
+              ),
+            ),
+            overrides: <Override>[
+              authProvider.overrideWith(_AdminAuthStub.new),
+              pluginAppsProvider.overrideWith(
+                () => _OpenWrtFleetAppsNotifier(candidates: sixCandidates),
+              ),
+            ],
+          ),
+        );
+
+        await tester.tap(find.text('Abrir candidatos'));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+
+        // Quick search filter appears when > 5 candidates
+        expect(find.byType(TextField), findsOneWidget);
+        expect(find.text('AP assistencia'), findsOneWidget);
+        expect(find.text('Talvez compatível'), findsOneWidget);
+        expect(
+          find.text(
+            'Firmware ainda não identificado — toque em Detectar sistema.',
+          ),
+          findsOneWidget,
+        );
+
+        // Zero orphan leading "· " in any rendered Text widget
+        for (final textWidget in tester.widgetList<Text>(find.byType(Text))) {
+          final data = textWidget.data ?? '';
+          expect(
+            data.trimLeft().startsWith('·'),
+            isFalse,
+            reason: 'Found orphan leading middle-dot in "$data"',
+          );
+        }
+
+        // First candidate ('possible') has 50%/50% side-by-side Detectar sistema + Adicionar à frota
+        final detectBtn = find
+            .ancestor(
+              of: find.text('Detectar sistema'),
+              matching: find.bySubtype<ButtonStyleButton>(),
+            )
+            .first;
+        final addFleetBtn = find
+            .ancestor(
+              of: find.text('Adicionar à frota'),
+              matching: find.bySubtype<ButtonStyleButton>(),
+            )
+            .first;
+        final detectRect = tester.getRect(detectBtn);
+        final addFleetRect = tester.getRect(addFleetBtn);
+        expect(
+          (detectRect.center.dy - addFleetRect.center.dy).abs(),
+          lessThan(2),
+        );
+        expect((detectRect.width - addFleetRect.width).abs(), lessThan(2));
+
+        // Search filter narrows candidates cleanly
+        await tester.enterText(find.byType(TextField), 'Core');
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(find.text('AP assistencia'), findsNothing);
+        expect(find.text('Switch Core'), findsOneWidget);
+        expect(find.text('Incompatível'), findsOneWidget);
+        expect(find.text('Plataforma RouterOS incompatível'), findsOneWidget);
+        expect(find.text('Adicionar à frota'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'DeviceAccessDialog defaults OpenWrt username to root and shows AlertDialog on HTTP 401 without closing or logging out at 360x800',
+      (tester) async {
+        tester.view.physicalSize = const Size(360, 800);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() {
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
+
+        late _OpenWrtAuth401PluginsRepository repo;
+        final container = ProviderContainer(
+          overrides: <Override>[
+            authProvider.overrideWith(_AdminAuthStub.new),
+            pluginsRepositoryProvider.overrideWith((ref) {
+              repo = _OpenWrtAuth401PluginsRepository(
+                ref.read(apiClientProvider),
+              );
+              return repo;
+            }),
+          ],
+        );
+        addTearDown(container.dispose);
+
+        await tester.pumpWidget(
+          UncontrolledProviderScope(
+            container: container,
+            child: MaterialApp(
+              theme: AppTheme.light(),
+              home: Scaffold(
+                body: Consumer(
+                  builder: (context, ref, _) => FilledButton(
+                    onPressed: () => showDeviceAccessDialog(
+                      context: context,
+                      ref: ref,
+                      deviceId: 3,
+                    ),
+                    child: const Text('Configurar acesso SSH'),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+
+        await tester.tap(find.text('Configurar acesso SSH'));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+
+        // OpenWrt dedicated SSH defaults username to 'root' (never 'admin')
+        final userField = tester.widget<TextField>(
+          find.widgetWithText(TextField, 'Usuário admin atual *'),
+        );
+        expect(userField.controller?.text, 'root');
+
+        // Enter wrong password and submit -> triggers 401 from device endpoint
+        await tester.enterText(
+          find.widgetWithText(TextField, 'Senha admin (uso único) *'),
+          'senha-errada',
+        );
+        final provisionBtn = find.text('Provisionar chave dedicada');
+        await tester.ensureVisible(provisionBtn);
+        await tester.tap(provisionBtn);
+        await tester.pumpAndSettle();
+
+        expect(tester.takeException(), isNull);
+        expect(repo.provisionAttempts, 1);
+
+        // Explicit AlertDialog explains the credential rejection + OpenWrt 'root' hint
+        expect(find.byType(AlertDialog), findsOneWidget);
+        expect(find.text('Usuário ou senha incorretos'), findsOneWidget);
+        expect(
+          find.descendant(
+            of: find.byType(AlertDialog),
+            matching: find.textContaining(
+              "No OpenWrt o usuário padrão é 'root'.",
+            ),
+          ),
+          findsOneWidget,
+        );
+        expect(find.text('Entendi'), findsOneWidget);
+
+        // Dismiss AlertDialog -> DeviceAccessDialog stays open AND user remains logged in!
+        await tester.tap(find.text('Entendi'));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(AlertDialog), findsNothing);
+        expect(find.text('Acesso ao equipamento'), findsOneWidget);
+        expect(find.text('Provisionar chave dedicada'), findsOneWidget);
+        expect(container.read(authProvider).isAuthenticated, isTrue);
+        expect(container.read(authProvider).token, 'test-token');
+
+        // Close sheet and verify MikroTik platform defaults to 'admin' at 390x844
+        await tester.tap(find.byTooltip('Fechar'));
+        await tester.pumpAndSettle();
+
+        tester.view.physicalSize = const Size(390, 844);
+        await tester.pumpWidget(
+          _wrap(
+            Consumer(
+              builder: (context, ref, _) => FilledButton(
+                onPressed: () => showDeviceAccessDialog(
+                  context: context,
+                  ref: ref,
+                  deviceId: 8,
+                ),
+                child: const Text('Abrir MikroTik'),
+              ),
+            ),
+            overrides: <Override>[
+              authProvider.overrideWith(_AdminAuthStub.new),
+              pluginsRepositoryProvider.overrideWith(
+                (ref) => _OpenWrtAuth401PluginsRepository(
+                  ref.read(apiClientProvider),
+                  platform: 'mikrotik',
+                ),
+              ),
+            ],
+          ),
+        );
+        await tester.tap(find.text('Abrir MikroTik'));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        final mikrotikUserField = tester.widget<TextField>(
+          find.widgetWithText(TextField, 'Usuário admin atual *'),
+        );
+        expect(mikrotikUserField.controller?.text, 'admin');
+      },
+    );
+
+    testWidgets(
+      'DevicePluginsTab renders symmetrical action bars and credential cards cleanly at 360x800',
+      (tester) async {
+        tester.view.physicalSize = const Size(360, 800);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() {
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
+
+        await tester.pumpWidget(
+          _wrap(
+            const Padding(
+              padding: EdgeInsets.all(12),
+              child: DevicePluginsTab(deviceId: 5),
+            ),
+            overrides: <Override>[
+              authProvider.overrideWith(_AdminAuthStub.new),
+              pluginsProvider.overrideWith(_SeededDevicePluginsNotifier.new),
+            ],
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+
+        // PopupMenuButton stays inline on the right of SectionCard header (not stacked below)
+        final cardTitleRect = tester.getRect(
+          find.descendant(
+            of: find.byType(SectionCard),
+            matching: find.text('Rede Wi-Fi OpenWrt'),
+          ),
+        );
+        final menuBtnRect = tester.getRect(find.byTooltip('Opções do plugin'));
+        expect(menuBtnRect.left, greaterThan(cardTitleRect.right - 8));
+        expect(
+          (menuBtnRect.center.dy - cardTitleRect.center.dy).abs(),
+          lessThan(24),
+        );
+
+        // humanizePluginFieldKey translates technical & camelCase keys cleanly
+        expect(humanizePluginFieldKey('band'), 'Banda');
+        expect(humanizePluginFieldKey('encryption'), 'Segurança');
+        expect(humanizePluginFieldKey('clients'), 'Clientes');
+        expect(humanizePluginFieldKey('redesAtivas'), 'Redes ativas');
+
+        // Installed plugin actions sit 50% / 50% side-by-side
+        final readRect = tester.getRect(
+          find.ancestor(
+            of: find.text('Ler rádios'),
+            matching: find.bySubtype<ButtonStyleButton>(),
+          ),
+        );
+        final writeRect = tester.getRect(
+          find.ancestor(
+            of: find.text('Aplicar Wi-Fi'),
+            matching: find.bySubtype<ButtonStyleButton>(),
+          ),
+        );
+        expect((readRect.center.dy - writeRect.center.dy).abs(), lessThan(2));
+        expect((readRect.width - writeRect.width).abs(), lessThan(2));
+
+        // Credentials chip shows bordered card with Gerenciar + Remover side-by-side
+        final credChip = find.text('Credenciais (1)');
+        await tester.ensureVisible(credChip);
+        await tester.pumpAndSettle();
+        await tester.tap(credChip);
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(find.text('root (porta 22)'), findsOneWidget);
+        expect(find.text('Gerenciar'), findsOneWidget);
+        expect(find.text('Remover'), findsOneWidget);
       },
     );
   });

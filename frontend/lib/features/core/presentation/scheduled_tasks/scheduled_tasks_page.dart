@@ -583,7 +583,9 @@ class _ScheduledTasksPageState extends ConsumerState<ScheduledTasksPage> {
                 for (final task in filtered) ...<Widget>[
                   SectionCard(
                     title: task.name,
-                    subtitle: '${task.scheduleLabel} (${task.cron})',
+                    subtitle: task.cron.trim().isNotEmpty
+                        ? '${task.scheduleLabel} (${task.cron})'
+                        : task.scheduleLabel,
                     icon: Icons.event_repeat_outlined,
                     iconTone: task.lastStatus == 'failed'
                         ? SemanticTone.error
@@ -611,11 +613,12 @@ class _ScheduledTasksPageState extends ConsumerState<ScheduledTasksPage> {
                           spacing: 6,
                           runSpacing: 6,
                           children: <Widget>[
-                            SemanticChip(
-                              label: task.tool,
-                              tone: SemanticTone.info,
-                              compact: true,
-                            ),
+                            if (task.tool.trim().isNotEmpty)
+                              SemanticChip(
+                                label: task.tool,
+                                tone: SemanticTone.info,
+                                compact: true,
+                              ),
                             if (task.origin == 'ai')
                               const SemanticChip(
                                 label: 'Criada pela IA',
@@ -629,8 +632,18 @@ class _ScheduledTasksPageState extends ConsumerState<ScheduledTasksPage> {
                                 compact: true,
                               )
                             else if (task.lastStatus != null)
-                              StatusIndicator.fromStatus(
-                                task.lastStatus!,
+                              SemanticChip(
+                                label: switch (task.lastStatus) {
+                                  'succeeded' || 'ok' => 'Concluída',
+                                  'failed' || 'error' => 'Falhou',
+                                  'running' => 'Executando',
+                                  _ => task.lastStatus!,
+                                },
+                                tone: switch (task.lastStatus) {
+                                  'succeeded' || 'ok' => SemanticTone.success,
+                                  'failed' || 'error' => SemanticTone.error,
+                                  _ => SemanticTone.info,
+                                },
                                 compact: true,
                               ),
                             if (task.ownerName != null)
@@ -658,9 +671,9 @@ class _ScheduledTasksPageState extends ConsumerState<ScheduledTasksPage> {
                           ),
                         ],
                         const SizedBox(height: 10),
-                        Wrap(
+                        SymmetricalActionBar(
                           spacing: 8,
-                          runSpacing: 6,
+                          runSpacing: 8,
                           children: <Widget>[
                             if (auth.canWrite)
                               FilledButton.tonalIcon(
@@ -692,12 +705,12 @@ class _ScheduledTasksPageState extends ConsumerState<ScheduledTasksPage> {
                               label: const Text('Histórico'),
                             ),
                             if (auth.canWrite) ...<Widget>[
-                              TextButton.icon(
+                              OutlinedButton.icon(
                                 onPressed: () => _openTaskForm(existing: task),
                                 icon: const Icon(Icons.edit_outlined, size: 18),
                                 label: const Text('Editar'),
                               ),
-                              TextButton.icon(
+                              OutlinedButton.icon(
                                 onPressed: () async {
                                   final ok = await showConfirmActionDialog(
                                     context: context,

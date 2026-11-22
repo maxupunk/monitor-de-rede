@@ -124,7 +124,7 @@ class DockerPortBinding {
   String get formatted {
     if (publicPort != null && publicPort! > 0) {
       final host = (ip != null && ip!.isNotEmpty) ? '$ip:' : '';
-      return '$host$publicPort→$privatePort/$type';
+      return '$host$publicPort->$privatePort/$type';
     }
     return '$privatePort/$type';
   }

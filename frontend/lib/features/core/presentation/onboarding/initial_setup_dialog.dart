@@ -87,6 +87,7 @@ class _OnboardingShellOverlayState
 
 /// Abre o Assistente de Configuração Inicial de 13 etapas (`InitialSetupDialog` parity).
 Future<void> showInitialSetupWizard(BuildContext context, WidgetRef ref) async {
+  final notifier = ref.read(onboardingProvider.notifier);
   await showAdaptiveFormSheet<void>(
     context: context,
     title: 'Assistente de configuração inicial',
@@ -96,7 +97,9 @@ Future<void> showInitialSetupWizard(BuildContext context, WidgetRef ref) async {
     isDismissible: false,
     builder: (_) => const _OnboardingWizardBody(),
   );
-  ref.read(onboardingProvider.notifier).dismissWizard(persistOnServer: false);
+  if (context.mounted) {
+    notifier.dismissWizard(persistOnServer: false);
+  }
 }
 
 enum _WizardStep {
@@ -175,7 +178,11 @@ class _OnboardingWizardBodyState extends ConsumerState<_OnboardingWizardBody> {
     super.initState();
     final st = ref.read(onboardingProvider).status;
     if (st?.detectedLanIp != null) _lanAddrCtrl.text = st!.detectedLanIp!;
-    ref.read(coreSettingsProvider.notifier).fetchServerAddresses();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        ref.read(coreSettingsProvider.notifier).fetchServerAddresses();
+      }
+    });
   }
 
   @override

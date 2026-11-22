@@ -71,12 +71,9 @@ class _SitesPageState extends ConsumerState<SitesPage> {
                 ),
               ),
               const SizedBox(height: 16),
-              Wrap(
-                alignment: WrapAlignment.end,
-                spacing: 8,
-                runSpacing: 8,
+              SymmetricalActionBar(
                 children: <Widget>[
-                  TextButton(
+                  OutlinedButton(
                     onPressed: saving ? null : () => Navigator.of(ctx).pop(),
                     child: const Text('Cancelar'),
                   ),
@@ -299,11 +296,13 @@ class _SitesPageState extends ConsumerState<SitesPage> {
                           subtitle:
                               site.location ?? 'Localização não informada',
                           icon: Icons.domain_outlined,
+                          stackTrailingOnCompact: false,
                           trailing: canWrite
                               ? Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: <Widget>[
                                     IconButton(
+                                      visualDensity: VisualDensity.compact,
                                       tooltip: 'Editar site',
                                       icon: const Icon(
                                         Icons.edit_outlined,
@@ -313,6 +312,7 @@ class _SitesPageState extends ConsumerState<SitesPage> {
                                           _openSiteSheet(existing: site),
                                     ),
                                     IconButton(
+                                      visualDensity: VisualDensity.compact,
                                       tooltip: 'Excluir site',
                                       icon: Icon(
                                         Icons.delete_outline,
@@ -324,11 +324,9 @@ class _SitesPageState extends ConsumerState<SitesPage> {
                                   ],
                                 )
                               : null,
-                          footer: Wrap(
-                            spacing: 8,
-                            runSpacing: 6,
+                          footer: SymmetricalActionBar(
                             children: <Widget>[
-                              TextButton.icon(
+                              OutlinedButton.icon(
                                 onPressed: () => context.go('/topology'),
                                 icon: const Icon(
                                   Icons.account_tree_outlined,
@@ -336,7 +334,7 @@ class _SitesPageState extends ConsumerState<SitesPage> {
                                 ),
                                 label: const Text('Topologia'),
                               ),
-                              TextButton.icon(
+                              OutlinedButton.icon(
                                 onPressed: () => context.go('/networks'),
                                 icon: const Icon(Icons.lan_outlined, size: 16),
                                 label: const Text('Redes IP'),

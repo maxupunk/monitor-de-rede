@@ -111,3 +111,199 @@ TopologyLayoutOutput resolveTopologyLayoutState({
     respectSavedPositions: !useEngineLayout && savedOffsets.isNotEmpty,
   );
 }
+
+/// Sugere automaticamente o meio físico/lógico (`fiber`, `wireless`, `vpn`,
+/// `ethernet`) a partir do nome, alias ou tipo SNMP de uma interface.
+String? inferTopologyLinkTypeFromInterface(
+  String? interfaceName, {
+  String? alias,
+  String? ifType,
+}) {
+  final primary = (interfaceName ?? '').trim().toLowerCase();
+  final secondary = '${alias ?? ''} ${ifType ?? ''}'.trim().toLowerCase();
+  if (primary.isEmpty && secondary.isEmpty) return null;
+
+  bool matchesAny(String text, List<String> tokens) {
+    if (text.isEmpty) return false;
+    for (final token in tokens) {
+      if (text.contains(token)) return true;
+    }
+    return false;
+  }
+
+  const fiberTokens = <String>[
+    'sfp',
+    'qsfp',
+    'xfp',
+    'pon',
+    'gpon',
+    'epon',
+    'fiber',
+    'fibra',
+    'optical',
+  ];
+  const wirelessTokens = <String>[
+    'wlan',
+    'ath',
+    'wifi',
+    'wi-fi',
+    'radio',
+    'mesh',
+    'wds',
+    'ra0',
+    'rai0',
+    'phy',
+  ];
+  const vpnTokens = <String>[
+    'wg',
+    'wireguard',
+    'tun',
+    'tap',
+    'vpn',
+    'ipsec',
+    'gre',
+    'l2tp',
+    'ovpn',
+    'ppp',
+    'vti',
+    'tailscale',
+    'zerotier',
+  ];
+  const ethernetTokens = <String>[
+    'eth',
+    'ether',
+    'eno',
+    'ens',
+    'enp',
+    'ge-',
+    'xe-',
+    'lan',
+    'wan',
+    'br-',
+    'port',
+  ];
+
+  // Prioriza o nome técnico da porta; usa alias/ifType como desempate secundário.
+  for (final target in <String>[primary, secondary]) {
+    if (matchesAny(target, fiberTokens)) return 'fiber';
+    if (matchesAny(target, vpnTokens)) return 'vpn';
+    if (matchesAny(target, wirelessTokens)) return 'wireless';
+    if (matchesAny(target, ethernetTokens)) return 'ethernet';
+  }
+  return null;
+}
+
+/// Combina as sugestões de mídia das portas de origem e destino priorizando
+/// meios específicos (`fiber` > `vpn` > `wireless` > `ethernet`).
+String? resolveSuggestedTopologyLinkType({
+  DeviceInterfaceModel? sourceInterface,
+  DeviceInterfaceModel? targetInterface,
+}) {
+  final srcKind = sourceInterface != null
+      ? inferTopologyLinkTypeFromInterface(
+          sourceInterface.displayName,
+          alias: sourceInterface.subtitleText,
+          ifType: sourceInterface.ifType,
+        )
+      : null;
+  final tgtKind = targetInterface != null
+      ? inferTopologyLinkTypeFromInterface(
+          targetInterface.displayName,
+          alias: targetInterface.subtitleText,
+          ifType: targetInterface.ifType,
+        )
+      : null;
+
+  const priority = <String>['fiber', 'vpn', 'wireless', 'ethernet'];
+  for (final kind in priority) {
+    if (srcKind == kind || tgtKind == kind) return kind;
+  }
+  return srcKind ?? tgtKind;
+}
+
+/// Filtra e ordena equipamentos candidatos para seleção de Origem/Destino de enlace:
+/// - Oculta `excludedNodeId` (ex.: Origem nunca aparece na lista de Destino).
+/// - Prioriza equipamentos do mesmo site (`preferSiteId`) no topo.
+/// - Suporta busca ao vivo por Nome, IP, Site, Tipo (incluindo rótulo PT-BR), Fabricante e MAC.
+List<TopologyNodeModel> rankTopologyEndpointCandidates({
+  required List<TopologyNodeModel> nodes,
+  required String query,
+  int? excludedNodeId,
+  int? preferSiteId,
+  Map<int, String>? macByNodeId,
+}) {
+  final candidates = excludedNodeId == null
+      ? List<TopologyNodeModel>.from(nodes)
+      : nodes.where((n) => n.id != excludedNodeId).toList();
+  if (candidates.isEmpty) return const <TopologyNodeModel>[];
+
+  int statusRank(TopologyNodeModel n) {
+    return switch (classifyNodeStatus(n.status)) {
+      TopologyNodeStatus.online => 0,
+      TopologyNodeStatus.warning => 1,
+      TopologyNodeStatus.unknown => 2,
+      TopologyNodeStatus.offline => 3,
+    };
+  }
+
+  bool isPreferredSite(TopologyNodeModel n) =>
+      preferSiteId != null && n.siteId == preferSiteId;
+
+  final cleanQuery = query.trim();
+  if (cleanQuery.isEmpty) {
+    candidates.sort((a, b) {
+      final siteA = isPreferredSite(a);
+      final siteB = isPreferredSite(b);
+      if (siteA != siteB) return siteA ? -1 : 1;
+      final stCmp = statusRank(a).compareTo(statusRank(b));
+      if (stCmp != 0) return stCmp;
+      return compareTopologyNodes(a, b);
+    });
+    return List<TopologyNodeModel>.unmodifiable(candidates);
+  }
+
+  final engineHits = searchTopologyNodes(
+    candidates,
+    cleanQuery,
+    limit: candidates.length,
+    macByNodeId: macByNodeId,
+  );
+  final scoreById = <int, double>{
+    for (final hit in engineHits) hit.node.id: hit.score,
+  };
+
+  final lowerTerms = cleanQuery
+      .toLowerCase()
+      .split(RegExp(r'\s+'))
+      .where((t) => t.isNotEmpty)
+      .toList(growable: false);
+
+  for (final node in candidates) {
+    if (scoreById.containsKey(node.id)) continue;
+    final localizedHaystack =
+        '${node.name} ${node.ipAddress ?? ''} ${node.siteName ?? ''} '
+                '${topologyNodeTypeLabel(node)} ${node.type} '
+                '${node.vendor ?? ''} ${node.model ?? ''} '
+                '${macByNodeId?[node.id] ?? ''}'
+            .toLowerCase();
+    if (lowerTerms.every(localizedHaystack.contains)) {
+      scoreById[node.id] = 0.45;
+    }
+  }
+
+  final matched = candidates
+      .where((n) => scoreById.containsKey(n.id))
+      .toList(growable: false);
+  final sorted = List<TopologyNodeModel>.from(matched)
+    ..sort((a, b) {
+      final effA = scoreById[a.id]! + (isPreferredSite(a) ? 0.12 : 0.0);
+      final effB = scoreById[b.id]! + (isPreferredSite(b) ? 0.12 : 0.0);
+      final scoreCmp = effB.compareTo(effA);
+      if (scoreCmp != 0) return scoreCmp;
+      final siteA = isPreferredSite(a);
+      final siteB = isPreferredSite(b);
+      if (siteA != siteB) return siteA ? -1 : 1;
+      return compareTopologyNodes(a, b);
+    });
+  return List<TopologyNodeModel>.unmodifiable(sorted);
+}

@@ -38,16 +38,18 @@ class AdaptiveAppShell extends ConsumerStatefulWidget {
 class _AdaptiveAppShellState extends ConsumerState<AdaptiveAppShell> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final Set<String> _expandedGroups = <String>{};
+  SseService? _sseNotifier;
 
   @override
   void initState() {
     super.initState();
+    _sseNotifier = ref.read(sseServiceProvider.notifier);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       // Garante rotas SSE das áreas registradas antes de conectar o stream.
       ref.read(areaRealtimeCoordinatorProvider);
       ref.read(authProvider.notifier).fetchMe();
-      ref.read(sseServiceProvider.notifier).connect();
+      _sseNotifier?.connect();
       _syncCurrentArea(widget.location);
     });
   }
@@ -65,7 +67,11 @@ class _AdaptiveAppShellState extends ConsumerState<AdaptiveAppShell> {
 
   @override
   void dispose() {
-    ref.read(sseServiceProvider.notifier).disconnect();
+    try {
+      _sseNotifier?.disconnect();
+    } catch (_) {
+      // Container já encerrado durante troca de ProviderScope.
+    }
     super.dispose();
   }
 

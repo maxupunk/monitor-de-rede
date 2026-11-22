@@ -27,6 +27,16 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   }
 
   @override
+  void didUpdateWidget(covariant SettingsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialTab != widget.initialTab &&
+        widget.initialTab != null &&
+        widget.initialTab!.isNotEmpty) {
+      _selectedTab = widget.initialTab;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final visibleAreas = ref.watch(visibleAreasProvider);
     final tabs = SettingsSectionRegistry.visibleTabs(visibleAreas);

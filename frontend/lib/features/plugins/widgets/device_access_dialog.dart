@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
 import 'package:netmonitor_app/core/network/api_client.dart';
+import 'package:netmonitor_app/core/utils/device_defaults.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/plugins/data/plugins_repository.dart';
 import 'package:netmonitor_app/features/plugins/models/plugin_models.dart';
@@ -110,11 +111,21 @@ class _DeviceAccessBodyState extends ConsumerState<_DeviceAccessBody> {
   final _userCtrl = TextEditingController();
   final _secretCtrl = TextEditingController();
   final _portCtrl = TextEditingController();
+  bool _userEditedUsername = false;
+
+  String? get _effectivePlatform =>
+      _access?.dedicatedPlatform ??
+      _access?.credentials
+          .where((c) => c.dedicated?.platform != null)
+          .map((c) => c.dedicated!.platform)
+          .firstOrNull ??
+      ref.read(pluginsProvider).deviceViews[widget.deviceId]?.platform;
 
   @override
   void initState() {
     super.initState();
     _kind = widget.lockedTransport ?? 'ssh';
+    _userCtrl.text = _kind == 'ssh' ? defaultDeviceAdminUsername(null) : '';
     _load();
   }
 
@@ -153,7 +164,16 @@ class _DeviceAccessBodyState extends ConsumerState<_DeviceAccessBody> {
     final existing = _access?.credentials
         .where((c) => c.kind == kind)
         .firstOrNull;
-    _userCtrl.text = existing?.username ?? (kind == 'ssh' ? 'admin' : '');
+    if (!_userEditedUsername) {
+      final savedUsername = existing?.username.trim() ?? '';
+      if (savedUsername.isNotEmpty) {
+        _userCtrl.text = savedUsername;
+      } else if (kind == 'ssh' || kind == 'telnet') {
+        _userCtrl.text = defaultDeviceAdminUsername(_effectivePlatform);
+      } else {
+        _userCtrl.text = '';
+      }
+    }
     _secretCtrl.clear();
     _portCtrl.text =
         (existing?.port ?? (kind == 'ssh' ? 22 : (kind == 'telnet' ? 23 : 80)))
@@ -172,12 +192,44 @@ class _DeviceAccessBodyState extends ConsumerState<_DeviceAccessBody> {
   }
 
   String _formatError(Object err) {
+    if (isDeviceAuthFailure(err)) {
+      return formatDeviceAuthFailureMessage(
+        err,
+        platformOrOs: _effectivePlatform,
+      );
+    }
     if (err is ApiException) {
       return err.message.isNotEmpty
           ? err.message
           : 'Erro ao comunicar com o servidor.';
     }
     return err.toString();
+  }
+
+  Future<void> _showAuthFailureDialog(Object err) {
+    final message = formatDeviceAuthFailureMessage(
+      err,
+      platformOrOs: _effectivePlatform,
+    );
+    return showDialog<void>(
+      context: context,
+      builder: (alertCtx) => AlertDialog(
+        title: Row(
+          children: <Widget>[
+            Icon(Icons.lock_person_outlined, color: alertCtx.colorScheme.error),
+            const SizedBox(width: 10),
+            const Expanded(child: Text('Usuário ou senha incorretos')),
+          ],
+        ),
+        content: Text(message),
+        actions: <Widget>[
+          FilledButton(
+            onPressed: () => Navigator.of(alertCtx).pop(),
+            child: const Text('Entendi'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _save() async {
@@ -233,11 +285,14 @@ class _DeviceAccessBodyState extends ConsumerState<_DeviceAccessBody> {
       }
       if (mounted) Navigator.of(context).pop(true);
     } catch (err) {
-      if (mounted) {
-        setState(() {
-          _saving = false;
-          _error = _formatError(err);
-        });
+      if (!mounted) return;
+      final formatted = _formatError(err);
+      setState(() {
+        _saving = false;
+        _error = formatted;
+      });
+      if (isDeviceAuthFailure(err)) {
+        await _showAuthFailureDialog(err);
       }
     }
   }
@@ -336,6 +391,7 @@ class _DeviceAccessBodyState extends ConsumerState<_DeviceAccessBody> {
             onSelectionChanged: (sel) {
               setState(() {
                 _kind = sel.first;
+                _userEditedUsername = false;
                 _applyDefaultsForKind(_kind);
               });
             },
@@ -401,26 +457,40 @@ class _DeviceAccessBodyState extends ConsumerState<_DeviceAccessBody> {
                     monospace: true,
                   ),
                 const SizedBox(height: 10),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
+                SymmetricalActionBar(
                   children: <Widget>[
                     FilledButton.tonalIcon(
                       onPressed: _saving ? null : _rotateDedicated,
                       icon: const Icon(Icons.key_outlined, size: 17),
-                      label: const Text('Rotacionar chave'),
+                      label: const Text(
+                        'Rotacionar chave',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: context.colorScheme.error,
+                        side: BorderSide(color: context.colorScheme.error),
+                      ),
+                      onPressed: _saving
+                          ? null
+                          : () => _revokeDedicated(localOnly: false),
+                      child: const Text(
+                        'Revogar',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                     OutlinedButton(
                       onPressed: _saving
                           ? null
-                          : () => _revokeDedicated(localOnly: false),
-                      child: const Text('Revogar'),
-                    ),
-                    TextButton(
-                      onPressed: _saving
-                          ? null
                           : () => _revokeDedicated(localOnly: true),
-                      child: const Text('Apagar só aqui'),
+                      child: const Text(
+                        'Apagar só aqui',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   ],
                 ),
@@ -459,6 +529,7 @@ class _DeviceAccessBodyState extends ConsumerState<_DeviceAccessBody> {
             children: <Widget>[
               TextField(
                 controller: _userCtrl,
+                onChanged: (_) => _userEditedUsername = true,
                 decoration: InputDecoration(
                   labelText:
                       _kind == 'ssh' &&
@@ -532,18 +603,29 @@ class _DeviceAccessBodyState extends ConsumerState<_DeviceAccessBody> {
             ),
           ],
           const SizedBox(height: 16),
-          Wrap(
-            alignment: WrapAlignment.end,
-            spacing: 8,
-            runSpacing: 8,
-            children: <Widget>[
-              TextButton(
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final isDedicatedProvision =
+                  _kind == 'ssh' &&
+                  _sshMode == 'dedicated' &&
+                  _access?.dedicatedPlatform != null;
+              final cancelBtn = OutlinedButton(
                 onPressed: _saving
                     ? null
                     : () => Navigator.of(context).pop(false),
-                child: const Text('Cancelar'),
-              ),
-              FilledButton.icon(
+                child: const Text(
+                  'Cancelar',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              );
+              final submitBtn = FilledButton.icon(
+                style: isDedicatedProvision
+                    ? FilledButton.styleFrom(
+                        backgroundColor: context.semanticColors.plugin,
+                        foregroundColor: context.semanticColors.onPlugin,
+                      )
+                    : null,
                 onPressed: _saving ? null : _save,
                 icon: _saving
                     ? const SizedBox(
@@ -551,16 +633,35 @@ class _DeviceAccessBodyState extends ConsumerState<_DeviceAccessBody> {
                         height: 16,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Icon(Icons.save_outlined, size: 18),
+                    : Icon(
+                        isDedicatedProvision
+                            ? Icons.vpn_key_outlined
+                            : Icons.save_outlined,
+                        size: 18,
+                      ),
                 label: Text(
-                  _kind == 'ssh' &&
-                          _sshMode == 'dedicated' &&
-                          _access?.dedicatedPlatform != null
+                  isDedicatedProvision
                       ? 'Provisionar chave dedicada'
                       : 'Salvar acesso',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
-              ),
-            ],
+              );
+
+              if (isDedicatedProvision && constraints.maxWidth < 430) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    submitBtn,
+                    const SizedBox(height: 8),
+                    cancelBtn,
+                  ],
+                );
+              }
+              return SymmetricalActionBar(
+                children: <Widget>[cancelBtn, submitBtn],
+              );
+            },
           ),
         ],
       ],

@@ -156,6 +156,9 @@ const List<(String, String)> kAuditResourceOptions = <(String, String)>[
   ('plugin', 'Plugin de dispositivo'),
   ('deploy', 'Deploy contínuo'),
   ('registry', 'Registry de imagens'),
+  ('topology_link', 'Enlace de topologia'),
+  ('agent', 'Servidor remoto'),
+  ('backup', 'Backup do sistema'),
 ];
 
 String auditActionLabel(String? action) {

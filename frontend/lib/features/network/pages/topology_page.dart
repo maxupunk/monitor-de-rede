@@ -55,6 +55,8 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
   int? _selectedNodeId;
   int? _selectedEdgeId;
   int? _pathPickingSourceId;
+  bool _linkPickingActive = false;
+  int? _linkPickingSourceId;
   TopologyPathResult? _activePath;
 
   bool _editLayoutEnabled = false;
@@ -271,7 +273,52 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
     if (!isWide && openSheet) _openMobileNodeInspector(node);
   }
 
+  void _startLinkPickingOnMap({int? sourceNodeId}) {
+    setState(() {
+      _linkPickingActive = true;
+      _linkPickingSourceId = sourceNodeId;
+      _pathPickingSourceId = null;
+      _selectedEdgeId = null;
+      if (MediaQuery.sizeOf(context).width >= 900) {
+        _selectedNodeId = null;
+      }
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _canvasCtrl.fitToScreen();
+    });
+  }
+
+  void _cancelLinkPicking() {
+    setState(() {
+      _linkPickingActive = false;
+      _linkPickingSourceId = null;
+    });
+  }
+
   void _handleNodeTap(TopologyNodeModel node) {
+    if (_linkPickingActive) {
+      if (_linkPickingSourceId == null) {
+        setState(() => _linkPickingSourceId = node.id);
+        return;
+      }
+      if (_linkPickingSourceId == node.id) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Toque em outro equipamento no mapa para ser o destino do enlace.',
+            ),
+          ),
+        );
+        return;
+      }
+      final srcId = _linkPickingSourceId!;
+      setState(() {
+        _linkPickingActive = false;
+        _linkPickingSourceId = null;
+      });
+      _openLinkForm(initialSourceId: srcId, initialTargetId: node.id);
+      return;
+    }
     if (_pathPickingSourceId != null) {
       final startId = _pathPickingSourceId!;
       setState(() => _pathPickingSourceId = null);
@@ -414,6 +461,8 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
           showTracerouteDialog(context, initialHost: node.ipAddress),
       onStartLinkTest: () => _startNodeLinkTest(node),
       onNewLinkFromNode: () => _openLinkForm(initialSourceId: node.id),
+      onConnectOnMapFromNode: () =>
+          _startLinkPickingOnMap(sourceNodeId: node.id),
       onEditDevice: () => _editNodeDevice(node),
       onOpenPluginsTab: () => context.go('/devices/${node.id}?tab=plugins'),
       onFocusNeighbor: _focusAndSelectNode,
@@ -447,12 +496,18 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
 
   Future<void> _openLinkForm({
     int? initialSourceId,
+    int? initialTargetId,
     TopologyEdgeModel? existingEdge,
   }) => showTopologyLinkFormSheet(
     context: context,
     nodes: ref.read(topologyProvider).nodes,
     initialSourceId: initialSourceId,
+    initialTargetId: initialTargetId,
     existingEdge: existingEdge,
+    macByNodeId: buildTopologyMacIndex(ref.read(devicesProvider).items),
+    onPickOnMap: existingEdge == null
+        ? (pickedSrcId) => _startLinkPickingOnMap(sourceNodeId: pickedSrcId)
+        : null,
     onSubmit: (payload) => existingEdge != null
         ? ref
               .read(topologyProvider.notifier)
@@ -545,6 +600,12 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
         ref.read(topologyProvider.notifier).recalculateTopology();
       case TopologyHudAction.addLink:
         _openLinkForm(initialSourceId: _selectedNodeId);
+      case TopologyHudAction.connectOnMap:
+        if (_linkPickingActive) {
+          _cancelLinkPicking();
+        } else {
+          _startLinkPickingOnMap(sourceNodeId: _selectedNodeId);
+        }
       case TopologyHudAction.unmanagedSwitch:
         showUnmanagedSwitchSheet(
           context: context,
@@ -659,12 +720,22 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
       (e) =>
           (e.trafficBps ?? 0) > 0 || (e.inBps ?? 0) > 0 || (e.outBps ?? 0) > 0,
     );
-    final rightInset = isWide && (selectedNode != null || selectedEdge != null)
+    final rightInset =
+        isWide &&
+            !_linkPickingActive &&
+            (selectedNode != null || selectedEdge != null)
         ? 372.0
         : 0.0;
 
     return CallbackShortcuts(
       bindings: <ShortcutActivator, VoidCallback>{
+        const SingleActivator(LogicalKeyboardKey.escape): () {
+          if (_linkPickingActive) {
+            _cancelLinkPicking();
+          } else if (_pathPickingSourceId != null) {
+            setState(() => _pathPickingSourceId = null);
+          }
+        },
         const SingleActivator(LogicalKeyboardKey.delete): () {
           if (ModalRoute.of(context)?.isCurrent != true) return;
           final focused = FocusManager.instance.primaryFocus?.context?.widget;
@@ -704,7 +775,7 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
                   overlayMode: effectiveSpec.overlayMode,
                   selectedNodeId: _selectedNodeId,
                   selectedEdgeId: _selectedEdgeId,
-                  pathStartNodeId: _pathPickingSourceId,
+                  pathStartNodeId: _linkPickingSourceId ?? _pathPickingSourceId,
                   highlightedPath: activePath,
                   dimmedNodeIds: filterResult.dimmedNodeIds,
                   dimmedEdgeIds: filterResult.dimmedEdgeIds,
@@ -768,6 +839,13 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
                         .firstOrNull
                         ?.name
                   : null,
+              linkPickingActive: _linkPickingActive,
+              linkPickingSourceName: _linkPickingSourceId != null
+                  ? topo.nodes
+                        .where((n) => n.id == _linkPickingSourceId)
+                        .firstOrNull
+                        ?.name
+                  : null,
               onOpenSearch: () => showTopologySearchSheet(
                 context: context,
                 nodes: topo.nodes,
@@ -812,11 +890,14 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
               onClearPath: _clearPath,
               onCancelPathPicking: () =>
                   setState(() => _pathPickingSourceId = null),
+              onCancelLinkPicking: _cancelLinkPicking,
               onReloadRemoteLayout: () =>
                   _handleHudAction(TopologyHudAction.refresh),
               onAction: _handleHudAction,
             ),
-            if (isWide && (selectedNode != null || selectedEdge != null))
+            if (isWide &&
+                !_linkPickingActive &&
+                (selectedNode != null || selectedEdge != null))
               Positioned(
                 top: 10,
                 right: 10,
@@ -851,6 +932,8 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
                   onStartNodeLinkTest: _startNodeLinkTest,
                   onNewLinkFromNode: (n) =>
                       _openLinkForm(initialSourceId: n.id),
+                  onConnectOnMapFromNode: (n) =>
+                      _startLinkPickingOnMap(sourceNodeId: n.id),
                   onEditDevice: _editNodeDevice,
                   onOpenPluginsTab: (n) =>
                       context.go('/devices/${n.id}?tab=plugins'),

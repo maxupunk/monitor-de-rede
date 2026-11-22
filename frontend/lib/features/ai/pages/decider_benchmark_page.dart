@@ -53,71 +53,123 @@ class _DeciderBenchmarkPageState extends ConsumerState<DeciderBenchmarkPage> {
   Widget build(BuildContext context) {
     final benchmark = ref.watch(aiBenchmarkProvider);
 
+    final isCompact = MediaQuery.sizeOf(context).width < 680;
+
     return SingleChildScrollView(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          Wrap(
-            spacing: 12,
-            runSpacing: 10,
-            alignment: WrapAlignment.spaceBetween,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: <Widget>[
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(
+          if (isCompact) ...<Widget>[
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: Text(
                     'Benchmark de Modelos IA',
-                    style: context.textTheme.headlineSmall?.copyWith(
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: context.textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.w800,
                     ),
                   ),
-                  Text(
-                    'Resultados medidos nas tarefas reais do NetMonitor (Chat Ollama & Decisor Ollaya)',
-                    style: context.textTheme.bodySmall?.copyWith(
-                      color: context.colorScheme.onSurfaceVariant,
+                ),
+                IconButton(
+                  tooltip: 'Configurações IA',
+                  onPressed: () => context.go('/settings?tab=ia'),
+                  icon: const Icon(Icons.settings_outlined, size: 20),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: SegmentedButton<String>(
+                showSelectedIcon: false,
+                selected: <String>{_tab},
+                onSelectionChanged: (sel) => _switchTab(sel.first),
+                segments: const <ButtonSegment<String>>[
+                  ButtonSegment<String>(
+                    value: 'chat',
+                    icon: Icon(Icons.chat_outlined, size: 17),
+                    label: Text(
+                      'Chat (Ollama)',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  ButtonSegment<String>(
+                    value: 'decider',
+                    icon: Icon(Icons.bolt_outlined, size: 17),
+                    label: Text(
+                      'Decisor (Ollaya)',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 ],
               ),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: <Widget>[
-                  SegmentedButton<String>(
-                    showSelectedIcon: false,
-                    selected: <String>{_tab},
-                    onSelectionChanged: (sel) => _switchTab(sel.first),
-                    segments: const <ButtonSegment<String>>[
-                      ButtonSegment<String>(
-                        value: 'chat',
-                        icon: Icon(Icons.chat_outlined, size: 17),
-                        label: Text(
-                          'Chat (Ollama)',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
+            ),
+          ] else
+            Wrap(
+              spacing: 12,
+              runSpacing: 10,
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: <Widget>[
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      'Benchmark de Modelos IA',
+                      style: context.textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
                       ),
-                      ButtonSegment<String>(
-                        value: 'decider',
-                        icon: Icon(Icons.bolt_outlined, size: 17),
-                        label: Text(
-                          'Decisor (Ollaya)',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
+                    ),
+                    Text(
+                      'Resultados medidos nas tarefas reais do NetMonitor (Chat Ollama & Decisor Ollaya)',
+                      style: context.textTheme.bodySmall?.copyWith(
+                        color: context.colorScheme.onSurfaceVariant,
                       ),
-                    ],
-                  ),
-                  OutlinedButton.icon(
-                    onPressed: () => context.go('/settings?tab=ia'),
-                    icon: const Icon(Icons.settings_outlined, size: 18),
-                    label: const Text('Configurações IA'),
-                  ),
-                ],
-              ),
-            ],
-          ),
+                    ),
+                  ],
+                ),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: <Widget>[
+                    SegmentedButton<String>(
+                      showSelectedIcon: false,
+                      selected: <String>{_tab},
+                      onSelectionChanged: (sel) => _switchTab(sel.first),
+                      segments: const <ButtonSegment<String>>[
+                        ButtonSegment<String>(
+                          value: 'chat',
+                          icon: Icon(Icons.chat_outlined, size: 17),
+                          label: Text(
+                            'Chat (Ollama)',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        ButtonSegment<String>(
+                          value: 'decider',
+                          icon: Icon(Icons.bolt_outlined, size: 17),
+                          label: Text(
+                            'Decisor (Ollaya)',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => context.go('/settings?tab=ia'),
+                      icon: const Icon(Icons.settings_outlined, size: 18),
+                      label: const Text('Configurações IA'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           const SizedBox(height: 16),
           if (_tab == 'chat')
             _buildChatSection(context, benchmark)
@@ -340,6 +392,8 @@ class _DeciderBenchmarkPageState extends ConsumerState<DeciderBenchmarkPage> {
           child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: DataTable(
+              dataRowMinHeight: 52,
+              dataRowMaxHeight: double.infinity,
               columns: <DataColumn>[
                 const DataColumn(label: Text('#')),
                 const DataColumn(label: Text('Modelo')),
@@ -564,6 +618,8 @@ class _DeciderBenchmarkPageState extends ConsumerState<DeciderBenchmarkPage> {
           child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: DataTable(
+              dataRowMinHeight: 52,
+              dataRowMaxHeight: double.infinity,
               columns: <DataColumn>[
                 const DataColumn(label: Text('Modelo')),
                 const DataColumn(label: Text('Geral')),

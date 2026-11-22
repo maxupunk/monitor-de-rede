@@ -49,6 +49,7 @@ class TopologyDockedInspector extends StatelessWidget {
     required this.onTraceroute,
     required this.onStartNodeLinkTest,
     required this.onNewLinkFromNode,
+    this.onConnectOnMapFromNode,
     required this.onEditDevice,
     required this.onOpenPluginsTab,
     required this.onFocusNode,
@@ -78,6 +79,7 @@ class TopologyDockedInspector extends StatelessWidget {
   final ValueChanged<TopologyNodeModel> onTraceroute;
   final ValueChanged<TopologyNodeModel> onStartNodeLinkTest;
   final ValueChanged<TopologyNodeModel> onNewLinkFromNode;
+  final ValueChanged<TopologyNodeModel>? onConnectOnMapFromNode;
   final ValueChanged<TopologyNodeModel> onEditDevice;
   final ValueChanged<TopologyNodeModel> onOpenPluginsTab;
   final ValueChanged<TopologyNodeModel> onFocusNode;
@@ -109,6 +111,9 @@ class TopologyDockedInspector extends StatelessWidget {
         onTraceroute: () => onTraceroute(node),
         onStartLinkTest: () => onStartNodeLinkTest(node),
         onNewLinkFromNode: () => onNewLinkFromNode(node),
+        onConnectOnMapFromNode: onConnectOnMapFromNode != null
+            ? () => onConnectOnMapFromNode!(node)
+            : null,
         onEditDevice: () => onEditDevice(node),
         onOpenPluginsTab: () => onOpenPluginsTab(node),
         onFocusNeighbor: onFocusNode,
@@ -154,6 +159,7 @@ class TopologyNodeInspectorCard extends StatelessWidget {
     required this.onTraceroute,
     required this.onStartLinkTest,
     required this.onNewLinkFromNode,
+    this.onConnectOnMapFromNode,
     required this.onEditDevice,
     required this.onOpenPluginsTab,
     required this.onFocusNeighbor,
@@ -178,6 +184,7 @@ class TopologyNodeInspectorCard extends StatelessWidget {
   final VoidCallback onTraceroute;
   final VoidCallback onStartLinkTest;
   final VoidCallback onNewLinkFromNode;
+  final VoidCallback? onConnectOnMapFromNode;
   final VoidCallback onEditDevice;
   final VoidCallback onOpenPluginsTab;
   final ValueChanged<TopologyNodeModel> onFocusNeighbor;
@@ -213,6 +220,7 @@ class TopologyNodeInspectorCard extends StatelessWidget {
                 onTraceroute: onTraceroute,
                 onStartLinkTest: onStartLinkTest,
                 onNewLinkFromNode: onNewLinkFromNode,
+                onConnectOnMapFromNode: onConnectOnMapFromNode,
                 onEditDevice: onEditDevice,
                 onOpenPluginsTab: onOpenPluginsTab,
                 onFocusNeighbor: onFocusNeighbor,
@@ -243,6 +251,7 @@ Future<void> showTopologyNodeInspectorSheet({
   required VoidCallback onTraceroute,
   required VoidCallback onStartLinkTest,
   required VoidCallback onNewLinkFromNode,
+  VoidCallback? onConnectOnMapFromNode,
   required VoidCallback onEditDevice,
   required VoidCallback onOpenPluginsTab,
   required ValueChanged<TopologyNodeModel> onFocusNeighbor,
@@ -294,6 +303,12 @@ Future<void> showTopologyNodeInspectorSheet({
               Navigator.of(sheetCtx).pop();
               onNewLinkFromNode();
             },
+            onConnectOnMapFromNode: onConnectOnMapFromNode != null
+                ? () {
+                    Navigator.of(sheetCtx).pop();
+                    onConnectOnMapFromNode();
+                  }
+                : null,
             onEditDevice: () {
               Navigator.of(sheetCtx).pop();
               onEditDevice();
@@ -333,6 +348,7 @@ class _MobileNodeInspectorSheetContent extends StatefulWidget {
     required this.onTraceroute,
     required this.onStartLinkTest,
     required this.onNewLinkFromNode,
+    this.onConnectOnMapFromNode,
     required this.onEditDevice,
     required this.onOpenPluginsTab,
     required this.onFocusNeighbor,
@@ -353,6 +369,7 @@ class _MobileNodeInspectorSheetContent extends StatefulWidget {
   final VoidCallback onTraceroute;
   final VoidCallback onStartLinkTest;
   final VoidCallback onNewLinkFromNode;
+  final VoidCallback? onConnectOnMapFromNode;
   final VoidCallback onEditDevice;
   final VoidCallback onOpenPluginsTab;
   final ValueChanged<TopologyNodeModel> onFocusNeighbor;
@@ -423,6 +440,7 @@ class _MobileNodeInspectorSheetContentState
               onTraceroute: widget.onTraceroute,
               onStartLinkTest: widget.onStartLinkTest,
               onNewLinkFromNode: widget.onNewLinkFromNode,
+              onConnectOnMapFromNode: widget.onConnectOnMapFromNode,
               onEditDevice: widget.onEditDevice,
               onOpenPluginsTab: widget.onOpenPluginsTab,
               onFocusNeighbor: widget.onFocusNeighbor,
@@ -582,6 +600,7 @@ class TopologyNodeInspectorBody extends ConsumerWidget {
     required this.onTraceroute,
     required this.onStartLinkTest,
     required this.onNewLinkFromNode,
+    this.onConnectOnMapFromNode,
     required this.onEditDevice,
     required this.onOpenPluginsTab,
     required this.onFocusNeighbor,
@@ -605,6 +624,7 @@ class TopologyNodeInspectorBody extends ConsumerWidget {
   final VoidCallback onTraceroute;
   final VoidCallback onStartLinkTest;
   final VoidCallback onNewLinkFromNode;
+  final VoidCallback? onConnectOnMapFromNode;
   final VoidCallback onEditDevice;
   final VoidCallback onOpenPluginsTab;
   final ValueChanged<TopologyNodeModel> onFocusNeighbor;
@@ -718,6 +738,14 @@ class TopologyNodeInspectorBody extends ConsumerWidget {
               ),
               if (canWrite) ...<Widget>[
                 const SizedBox(width: 8),
+                if (onConnectOnMapFromNode != null) ...<Widget>[
+                  FilledButton.tonalIcon(
+                    onPressed: onConnectOnMapFromNode,
+                    icon: const Icon(Icons.touch_app_outlined, size: 17),
+                    label: const Text('Conectar no mapa'),
+                  ),
+                  const SizedBox(width: 8),
+                ],
                 OutlinedButton.icon(
                   onPressed: onNewLinkFromNode,
                   icon: const Icon(Icons.add_link, size: 17),
@@ -1500,34 +1528,50 @@ class TopologyEdgeInspectorBody extends StatelessWidget {
         const SizedBox(height: 14),
 
         // ── Ações do enlace ──
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
+        SymmetricalActionBar(
           children: <Widget>[
             if (!isVirtual)
               FilledButton.tonalIcon(
                 onPressed: onStartLinkTest,
                 icon: const Icon(Icons.speed, size: 17),
-                label: const Text('Testar enlace'),
+                label: const Text(
+                  'Testar enlace',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             if (canWrite && canConfirmTopologyEdge(edge))
               OutlinedButton.icon(
                 onPressed: onConfirmLink,
                 icon: const Icon(Icons.verified_outlined, size: 17),
-                label: const Text('Confirmar enlace'),
+                label: const Text(
+                  'Confirmar enlace',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             if (canWrite && !isVirtual)
               OutlinedButton.icon(
                 onPressed: onEditLink,
                 icon: const Icon(Icons.edit_outlined, size: 17),
-                label: const Text('Editar'),
+                label: const Text(
+                  'Editar',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             if (canWrite && !isVirtual)
-              TextButton.icon(
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: scheme.error,
+                  side: BorderSide(color: scheme.error),
+                ),
                 onPressed: onDeleteLink,
                 icon: Icon(Icons.delete_outline, color: scheme.error, size: 18),
                 label: Text(
                   'Remover link',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(color: scheme.error),
                 ),
               ),

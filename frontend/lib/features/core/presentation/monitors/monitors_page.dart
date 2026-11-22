@@ -630,10 +630,12 @@ class _MonitorListCard extends StatelessWidget {
                     ],
                   ),
                   Wrap(
-                    spacing: 4,
+                    spacing: 0,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: <Widget>[
                       if (canWrite) ...<Widget>[
                         IconButton(
+                          visualDensity: VisualDensity.compact,
                           tooltip: 'Testar agora',
                           icon: running
                               ? const SizedBox(
@@ -643,10 +645,11 @@ class _MonitorListCard extends StatelessWidget {
                                     strokeWidth: 2,
                                   ),
                                 )
-                              : const Icon(Icons.play_arrow_outlined),
+                              : const Icon(Icons.play_arrow_outlined, size: 20),
                           onPressed: running ? null : onRunNow,
                         ),
                         IconButton(
+                          visualDensity: VisualDensity.compact,
                           tooltip: monitor.isEnabled
                               ? 'Pausar monitor'
                               : 'Reativar monitor',
@@ -654,21 +657,32 @@ class _MonitorListCard extends StatelessWidget {
                             monitor.isEnabled
                                 ? Icons.pause_circle_outline
                                 : Icons.play_circle_outline,
+                            size: 20,
                           ),
                           onPressed: onToggleEnabled,
                         ),
                         IconButton(
+                          visualDensity: VisualDensity.compact,
                           tooltip: 'Editar monitor',
-                          icon: const Icon(Icons.edit_outlined),
+                          icon: const Icon(Icons.edit_outlined, size: 19),
                           onPressed: onEdit,
                         ),
                         IconButton(
+                          visualDensity: VisualDensity.compact,
                           tooltip: 'Excluir monitor',
-                          icon: Icon(Icons.delete_outline, color: scheme.error),
+                          icon: Icon(
+                            Icons.delete_outline,
+                            size: 19,
+                            color: scheme.error,
+                          ),
                           onPressed: onDelete,
                         ),
                       ],
                       TextButton(
+                        style: TextButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                        ),
                         onPressed: onOpenDetail,
                         child: const Text('Detalhes'),
                       ),

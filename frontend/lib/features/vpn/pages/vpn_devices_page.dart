@@ -423,49 +423,101 @@ class _VpnDevicesPageState extends ConsumerState<VpnDevicesPage> {
                       ),
                     ],
                     const SizedBox(height: 10),
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
-                      alignment: WrapAlignment.end,
+                    SymmetricalActionBar(
+                      spacing: 8,
+                      runSpacing: 8,
+                      primaryFullWidthWhenOdd: true,
                       children: <Widget>[
-                        if (peer.pingMonitorId != null)
-                          TextButton.icon(
-                            onPressed: () =>
-                                context.go('/monitors/${peer.pingMonitorId}'),
-                            icon: const Icon(
-                              Icons.monitor_heart_outlined,
-                              size: 18,
+                        FilledButton.tonalIcon(
+                          style: FilledButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 10,
                             ),
-                            label: const Text('Histórico ping'),
                           ),
-                        TextButton.icon(
                           onPressed: () => _openConfig(peer),
                           icon: Icon(
                             supportsQr
                                 ? Icons.qr_code_2
                                 : Icons.description_outlined,
-                            size: 18,
+                            size: 17,
                           ),
-                          label: Text(supportsQr ? 'QR / Config' : 'Config'),
+                          label: Text(
+                            supportsQr ? 'QR / Config' : 'Config',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
+                        if (peer.pingMonitorId != null)
+                          OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 10,
+                              ),
+                            ),
+                            onPressed: () =>
+                                context.go('/monitors/${peer.pingMonitorId}'),
+                            icon: const Icon(
+                              Icons.monitor_heart_outlined,
+                              size: 17,
+                            ),
+                            label: const Text(
+                              'Histórico ping',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
                         if (canWrite) ...<Widget>[
-                          TextButton.icon(
+                          OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 10,
+                              ),
+                            ),
                             onPressed: () => _renamePeer(peer),
-                            icon: const Icon(Icons.edit_outlined, size: 18),
-                            label: const Text('Renomear'),
+                            icon: const Icon(Icons.edit_outlined, size: 17),
+                            label: const Text(
+                              'Renomear',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
-                          TextButton.icon(
+                          OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 10,
+                              ),
+                            ),
                             onPressed: () => _rotatePeer(peer),
-                            icon: const Icon(Icons.key_outlined, size: 18),
-                            label: const Text('Rotacionar'),
+                            icon: const Icon(Icons.key_outlined, size: 17),
+                            label: const Text(
+                              'Rotacionar',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
-                          TextButton.icon(
-                            style: TextButton.styleFrom(
-                              foregroundColor: scheme.error,
+                          OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 10,
+                              ),
                             ),
                             onPressed: () => _revokePeer(peer),
-                            icon: const Icon(Icons.delete_outline, size: 18),
-                            label: const Text('Revogar'),
+                            icon: Icon(
+                              Icons.delete_outline,
+                              size: 17,
+                              color: scheme.error,
+                            ),
+                            label: Text(
+                              'Revogar',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(color: scheme.error),
+                            ),
                           ),
                         ],
                       ],

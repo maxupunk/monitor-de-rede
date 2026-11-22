@@ -44,3 +44,6 @@ target/
 *.sqlite3
 *.sqlite-*
 master.key
+
+# Logs e capturas visuais locais
+logs/

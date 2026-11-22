@@ -316,7 +316,9 @@ class _RemoteServersPageState extends ConsumerState<RemoteServersPage> {
     return RefreshIndicator(
       onRefresh: () => ref.read(agentsProvider.notifier).fetchAgents(),
       child: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: isCompact
+            ? const EdgeInsets.only(bottom: 16)
+            : const EdgeInsets.all(16),
         children: <Widget>[
           if (isCompact) ...<Widget>[
             Row(
@@ -331,12 +333,14 @@ class _RemoteServersPageState extends ConsumerState<RemoteServersPage> {
                     ),
                   ),
                 ),
-                if (isAdmin)
+                if (isAdmin) ...<Widget>[
+                  const SizedBox(width: 8),
                   FilledButton.icon(
                     onPressed: _openCreateWizard,
                     icon: const Icon(Icons.add, size: 18),
                     label: const Text('Conectar'),
                   ),
+                ],
                 IconButton(
                   tooltip: 'Atualizar',
                   onPressed: agentsState.loading
@@ -540,6 +544,35 @@ class _AgentCard extends StatelessWidget {
         agent.host.arch!,
     ].join(' · ');
 
+    final showOverflowMenu = isAdmin && !agent.local;
+    final primaryActions = <Widget>[
+      FilledButton.tonalIcon(
+        onPressed: () => context.go(
+          '/docker?host=${Uri.encodeQueryComponent(agent.hostKey)}',
+        ),
+        icon: const Icon(Icons.view_in_ar_outlined, size: 18),
+        label: const Text('Docker'),
+      ),
+      OutlinedButton.icon(
+        onPressed: () => context.go(
+          '/docker/history?host=${Uri.encodeQueryComponent(agent.hostKey)}',
+        ),
+        icon: const Icon(Icons.show_chart, size: 18),
+        label: const Text('Histórico'),
+      ),
+      if (isAdmin &&
+          !agent.local &&
+          agent.status != 'revoked' &&
+          agent.deviceId == null)
+        ...movePaths.map(
+          (path) => OutlinedButton.icon(
+            onPressed: () => onMove(path),
+            icon: Icon(path.moveExistingIcon ?? path.icon, size: 18),
+            label: Text(path.moveExistingLabel!),
+          ),
+        ),
+    ];
+
     return SectionCard(
       title: agent.name,
       subtitle: hostSubtitle.isNotEmpty
@@ -547,57 +580,25 @@ class _AgentCard extends StatelessWidget {
           : 'Ainda não se conectou',
       icon: agent.local ? Icons.hub_outlined : Icons.dns_outlined,
       iconTone: statusTone,
-      trailing: Wrap(
-        spacing: 6,
-        runSpacing: 6,
-        alignment: WrapAlignment.end,
-        children: <Widget>[
-          if (agent.local)
-            const Tooltip(
-              message:
-                  'Agente local gerenciado pelo docker-compose.yml (netmonitor-agent — ADR 014).',
-              child: SemanticChip(
-                label: 'Esta central',
-                tone: SemanticTone.info,
-                icon: Icons.shield_outlined,
-                compact: true,
-              ),
-            ),
-          SemanticChip(
-            label: statusLabel,
-            tone: statusTone,
-            icon: statusIcon,
-            compact: true,
-          ),
-        ],
+      trailing: SemanticChip(
+        label: statusLabel,
+        tone: statusTone,
+        icon: statusIcon,
+        compact: true,
       ),
-      footer: Wrap(
-        spacing: 8,
-        runSpacing: 8,
+      footer: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          FilledButton.tonalIcon(
-            onPressed: () => context.go(
-              '/docker?host=${Uri.encodeQueryComponent(agent.hostKey)}',
+          Expanded(
+            child: SymmetricalActionBar(
+              spacing: 8,
+              runSpacing: 8,
+              primaryFullWidthWhenOdd: true,
+              children: primaryActions,
             ),
-            icon: const Icon(Icons.view_in_ar_outlined, size: 18),
-            label: const Text('Docker'),
           ),
-          OutlinedButton.icon(
-            onPressed: () => context.go(
-              '/docker/history?host=${Uri.encodeQueryComponent(agent.hostKey)}',
-            ),
-            icon: const Icon(Icons.show_chart, size: 18),
-            label: const Text('Histórico'),
-          ),
-          if (isAdmin && !agent.local) ...<Widget>[
-            if (agent.status != 'revoked' && agent.deviceId == null)
-              ...movePaths.map(
-                (path) => OutlinedButton.icon(
-                  onPressed: () => onMove(path),
-                  icon: Icon(path.moveExistingIcon ?? path.icon, size: 18),
-                  label: Text(path.moveExistingLabel!),
-                ),
-              ),
+          if (showOverflowMenu) ...<Widget>[
+            const SizedBox(width: 4),
             PopupMenuButton<String>(
               tooltip: 'Mais ações',
               onSelected: (action) {
@@ -656,6 +657,22 @@ class _AgentCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
+          if (agent.local) ...<Widget>[
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Tooltip(
+                message:
+                    'Agente local gerenciado pelo docker-compose.yml (netmonitor-agent — ADR 014).',
+                child: SemanticChip(
+                  label: 'Esta central',
+                  tone: SemanticTone.info,
+                  icon: Icons.shield_outlined,
+                  compact: true,
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
           KeyValueRow(
             label: 'Docker Engine',
             value: agent.host.docker.available

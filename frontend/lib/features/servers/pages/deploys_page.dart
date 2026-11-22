@@ -234,7 +234,9 @@ class _DeploysPageState extends ConsumerState<DeploysPage> {
         ]);
       },
       child: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: isCompact
+            ? const EdgeInsets.only(bottom: 16)
+            : const EdgeInsets.all(16),
         children: <Widget>[
           if (isCompact)
             Row(
@@ -251,8 +253,15 @@ class _DeploysPageState extends ConsumerState<DeploysPage> {
                 ),
                 if (canAdmin)
                   FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                    ),
                     onPressed: () => showDeploySetupDialog(context),
-                    icon: const Icon(Icons.rocket_launch_outlined, size: 17),
+                    icon: const Icon(Icons.rocket_launch_outlined, size: 16),
                     label: const Text('Automatizar'),
                   ),
                 PopupMenuButton<String>(
@@ -366,7 +375,7 @@ class _DeploysPageState extends ConsumerState<DeploysPage> {
                             ),
                             icon: const Icon(Icons.pending_actions, size: 16),
                             label: Text(
-                              '${run.applicationName} → ${run.targetName} (${run.shortSha})',
+                              '${run.applicationName} -> ${run.targetName} (${run.shortSha})',
                             ),
                           );
                         })
@@ -515,7 +524,7 @@ class _DeploysPageState extends ConsumerState<DeploysPage> {
                                 padding: const EdgeInsets.only(bottom: 8),
                                 child: ChoiceCard(
                                   title:
-                                      '${run.applicationName} → ${run.targetName} (${run.shortSha})',
+                                      '${run.applicationName} -> ${run.targetName} (${run.shortSha})',
                                   subtitle:
                                       '${formatRelativeTime(run.createdAt)} · ${commitFirstLine(run.commitMessage)}',
                                   badge: vis.label,
@@ -649,71 +658,75 @@ class _DeploysPageState extends ConsumerState<DeploysPage> {
       compact: true,
     );
 
+    final Widget? menuButton = canAdmin
+        ? PopupMenuButton<String>(
+            onSelected: (action) {
+              switch (action) {
+                case 'build':
+                  showDeployBuildStartDialog(context, application: app);
+                case 'secrets':
+                  showDeployBuildSecretsDialog(context, application: app);
+                case 'workflow':
+                  showDeployWorkflowDialog(context, application: app);
+                case 'remove':
+                  _removeApplication(app);
+              }
+            },
+            itemBuilder: (_) => <PopupMenuEntry<String>>[
+              if (isNetmonitorBuilder)
+                const PopupMenuItem(
+                  value: 'build',
+                  child: ListTile(
+                    dense: true,
+                    leading: Icon(Icons.build_outlined),
+                    title: Text('Compilar agora'),
+                  ),
+                ),
+              if (isNetmonitorBuilder)
+                const PopupMenuItem(
+                  value: 'secrets',
+                  child: ListTile(
+                    dense: true,
+                    leading: Icon(Icons.vpn_key_outlined),
+                    title: Text('Segredos de build'),
+                  ),
+                ),
+              const PopupMenuItem(
+                value: 'workflow',
+                child: ListTile(
+                  dense: true,
+                  leading: Icon(Icons.code),
+                  title: Text('Workflow GitHub Actions'),
+                ),
+              ),
+              const PopupMenuDivider(),
+              const PopupMenuItem(
+                value: 'remove',
+                child: ListTile(
+                  dense: true,
+                  leading: Icon(Icons.delete_outline),
+                  title: Text('Remover aplicação'),
+                ),
+              ),
+            ],
+          )
+        : null;
+
     return SectionCard(
       title: app.name,
       subtitle:
           '${app.repository} · ${app.rollout == 'parallel' ? 'todos juntos' : 'um alvo por vez'}',
       icon: Icons.rocket_launch_outlined,
       iconTone: SemanticTone.primary,
-      trailing: Wrap(
-        spacing: 6,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: <Widget>[
-          if (!isCompact) builderChip,
-          if (canAdmin)
-            PopupMenuButton<String>(
-              onSelected: (action) {
-                switch (action) {
-                  case 'build':
-                    showDeployBuildStartDialog(context, application: app);
-                  case 'secrets':
-                    showDeployBuildSecretsDialog(context, application: app);
-                  case 'workflow':
-                    showDeployWorkflowDialog(context, application: app);
-                  case 'remove':
-                    _removeApplication(app);
-                }
-              },
-              itemBuilder: (_) => <PopupMenuEntry<String>>[
-                if (isNetmonitorBuilder)
-                  const PopupMenuItem(
-                    value: 'build',
-                    child: ListTile(
-                      dense: true,
-                      leading: Icon(Icons.build_outlined),
-                      title: Text('Compilar agora'),
-                    ),
-                  ),
-                if (isNetmonitorBuilder)
-                  const PopupMenuItem(
-                    value: 'secrets',
-                    child: ListTile(
-                      dense: true,
-                      leading: Icon(Icons.vpn_key_outlined),
-                      title: Text('Segredos de build'),
-                    ),
-                  ),
-                const PopupMenuItem(
-                  value: 'workflow',
-                  child: ListTile(
-                    dense: true,
-                    leading: Icon(Icons.code),
-                    title: Text('Workflow GitHub Actions'),
-                  ),
-                ),
-                const PopupMenuDivider(),
-                const PopupMenuItem(
-                  value: 'remove',
-                  child: ListTile(
-                    dense: true,
-                    leading: Icon(Icons.delete_outline),
-                    title: Text('Remover aplicação'),
-                  ),
-                ),
-              ],
-            ),
-        ],
-      ),
+      trailing: isCompact
+          ? menuButton
+          : (menuButton == null
+                ? builderChip
+                : Wrap(
+                    spacing: 6,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: <Widget>[builderChip, menuButton],
+                  )),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
@@ -807,6 +820,13 @@ class _DeploysPageState extends ConsumerState<DeploysPage> {
                     tone: SemanticTone.secondary,
                     compact: true,
                   ),
+                if (canAdmin)
+                  IconButton(
+                    tooltip: 'Remover alvo',
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.delete_outline, size: 18),
+                    onPressed: () => _removeTarget(target),
+                  ),
               ],
             ),
             const SizedBox(height: 6),
@@ -848,56 +868,88 @@ class _DeploysPageState extends ConsumerState<DeploysPage> {
               ],
             ),
             const SizedBox(height: 10),
-            Wrap(
+            if (pending != null) ...<Widget>[
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: () => showDeployRunDialog(
+                    context,
+                    runId: pending.id,
+                    canAdmin: canAdmin,
+                  ),
+                  icon: const Icon(Icons.pending_actions, size: 16),
+                  label: Text(
+                    pending.status == 'awaiting_approval'
+                        ? 'Revisar e publicar ${pending.shortSha}'
+                        : '${deployRunStatusMeta(pending.status).label} (${pending.shortSha})',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+            SymmetricalActionBar(
               spacing: 8,
               runSpacing: 8,
+              primaryFullWidthWhenOdd: true,
               children: <Widget>[
-                if (pending != null)
-                  FilledButton.icon(
-                    onPressed: () => showDeployRunDialog(
-                      context,
-                      runId: pending.id,
-                      canAdmin: canAdmin,
-                    ),
-                    icon: const Icon(Icons.pending_actions, size: 16),
-                    label: Text(
-                      pending.status == 'awaiting_approval'
-                          ? 'Revisar e publicar ${pending.shortSha}'
-                          : '${deployRunStatusMeta(pending.status).label} (${pending.shortSha})',
-                    ),
-                  ),
                 if (canAdmin) ...<Widget>[
-                  OutlinedButton.icon(
+                  FilledButton.tonalIcon(
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 10,
+                      ),
+                    ),
                     onPressed: () =>
                         showDeployPublishDialog(context, target: target),
                     icon: const Icon(Icons.publish, size: 16),
-                    label: const Text('Publicar'),
+                    label: const Text(
+                      'Publicar',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
                   OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 10,
+                      ),
+                    ),
                     onPressed: () => showDeployEnvDialog(
                       context,
                       target: target,
                       canAdmin: canAdmin,
                     ),
                     icon: const Icon(Icons.vpn_key_outlined, size: 16),
-                    label: const Text('Variáveis'),
+                    label: const Text(
+                      'Variáveis',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
                 ],
-                TextButton.icon(
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 10,
+                    ),
+                  ),
                   onPressed: () => showDeployHistoryDialog(
                     context,
                     target: target,
                     canAdmin: canAdmin,
                   ),
                   icon: const Icon(Icons.history, size: 16),
-                  label: const Text('Histórico'),
-                ),
-                if (canAdmin)
-                  IconButton(
-                    tooltip: 'Remover alvo',
-                    icon: const Icon(Icons.delete_outline, size: 18),
-                    onPressed: () => _removeTarget(target),
+                  label: const Text(
+                    'Histórico',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
+                ),
               ],
             ),
           ],

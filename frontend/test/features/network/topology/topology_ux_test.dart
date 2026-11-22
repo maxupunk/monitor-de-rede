@@ -133,6 +133,7 @@ class _TestTopologyNotifier extends TopologyNotifier {
   int saveLayoutCalls = 0;
   List<int>? lastSavedNodeIds;
   int addLinkCalls = 0;
+  Map<String, dynamic>? lastAddedLinkPayload;
   int createUnmanagedSwitchCalls = 0;
 
   @override
@@ -252,6 +253,7 @@ class _TestTopologyNotifier extends TopologyNotifier {
   @override
   Future<bool> addLink(Map<String, dynamic> payload) async {
     addLinkCalls += 1;
+    lastAddedLinkPayload = Map<String, dynamic>.from(payload);
     return true;
   }
 
@@ -297,6 +299,46 @@ Widget _buildApp({
       aiSettingsProvider.overrideWith(_TestAiSettingsNotifier.new),
       diagnosticsServiceProvider.overrideWithValue(_FakeDiagnosticsService()),
       topologyNodeInterfacesProvider.overrideWith((ref, deviceId) async {
+        if (deviceId == 2) {
+          return const <DeviceInterfaceModel>[
+            DeviceInterfaceModel(
+              id: 21,
+              deviceId: 2,
+              ifName: 'sfp1',
+              alias: 'Trunk Fibra',
+              operStatus: 'up',
+              speed: 10000000000,
+            ),
+            DeviceInterfaceModel(
+              id: 22,
+              deviceId: 2,
+              ifName: 'eth24',
+              alias: 'Downlink LAN',
+              operStatus: 'up',
+              speed: 1000000000,
+            ),
+          ];
+        }
+        if (deviceId == 3) {
+          return const <DeviceInterfaceModel>[
+            DeviceInterfaceModel(
+              id: 31,
+              deviceId: 3,
+              ifName: 'eno1',
+              alias: 'LAN Produção',
+              operStatus: 'up',
+              speed: 1000000000,
+            ),
+            DeviceInterfaceModel(
+              id: 32,
+              deviceId: 3,
+              ifName: 'wlan0',
+              alias: 'Wi-Fi Contingência',
+              operStatus: 'up',
+              speed: 866700000,
+            ),
+          ];
+        }
         return <DeviceInterfaceModel>[
           const DeviceInterfaceModel(
             id: 1,
@@ -784,6 +826,253 @@ void main() {
       await tester.pumpAndSettle();
       expect(notifier.deletedLinkIds, equals(<int>[10]));
       expect(find.byType(TopologyEdgeInspectorCard), findsNothing);
+    },
+  );
+
+  test(
+    'Smart link-type inference & endpoint ranking prioritize same-site and hide Origin from Destination',
+    () {
+      expect(inferTopologyLinkTypeFromInterface('sfp-sfpplus1'), 'fiber');
+      expect(inferTopologyLinkTypeFromInterface('gpon0'), 'fiber');
+      expect(inferTopologyLinkTypeFromInterface('wlan0'), 'wireless');
+      expect(inferTopologyLinkTypeFromInterface('ath1'), 'wireless');
+      expect(inferTopologyLinkTypeFromInterface('wg0'), 'vpn');
+      expect(inferTopologyLinkTypeFromInterface('tun0'), 'vpn');
+      expect(inferTopologyLinkTypeFromInterface('ether1'), 'ethernet');
+      expect(inferTopologyLinkTypeFromInterface('wan0'), 'ethernet');
+
+      const nodes = <TopologyNodeModel>[
+        TopologyNodeModel(
+          id: 1,
+          name: 'Core-SP',
+          type: 'router',
+          status: 'online',
+          siteId: 1,
+          siteName: 'Matriz São Paulo',
+          ipAddress: '10.0.0.1',
+        ),
+        TopologyNodeModel(
+          id: 2,
+          name: 'SW-Campinas',
+          type: 'switch',
+          status: 'online',
+          siteId: 2,
+          siteName: 'Filial Campinas',
+          ipAddress: '10.2.0.2',
+        ),
+        TopologyNodeModel(
+          id: 3,
+          name: 'AP-SP',
+          type: 'access_point',
+          status: 'online',
+          siteId: 1,
+          siteName: 'Matriz São Paulo',
+          ipAddress: '10.0.0.20',
+        ),
+      ];
+
+      final ranked = rankTopologyEndpointCandidates(
+        nodes: nodes,
+        query: '',
+        excludedNodeId: 1,
+        preferSiteId: 1,
+      );
+      expect(ranked.map((n) => n.id).toList(), equals(<int>[3, 2]));
+      expect(ranked.any((n) => n.id == 1), isFalse);
+
+      final filteredCampinas = rankTopologyEndpointCandidates(
+        nodes: nodes,
+        query: 'Campinas',
+        excludedNodeId: 1,
+        preferSiteId: 1,
+      );
+      expect(filteredCampinas.map((n) => n.id).toList(), equals(<int>[2]));
+    },
+  );
+
+  testWidgets(
+    'Searchable & interface-aware Link Sheet hides Origin in Destination, swaps endpoints (⇅), and auto-suggests Fiber from SFP port',
+    (tester) async {
+      _setViewport(tester, const Size(390, 844));
+      final notifier = _TestTopologyNotifier();
+      await tester.pumpWidget(_buildApp(topoNotifier: notifier));
+      await tester.pumpAndSettle();
+
+      // Abre folha de Novo link pelo menu do HUD
+      await tester.tap(find.byTooltip('Mais ações da topologia'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Novo link'));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('Adicionar Enlace Manual'), findsOneWidget);
+
+      // Origem = Borda-CCR (site 1) e Destino auto-prioriza Switch-Core (mesmo site 1)
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey<String>('topology-link-source-card')),
+          matching: find.text('Borda-CCR'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey<String>('topology-link-target-card')),
+          matching: find.text('Switch-Core'),
+        ),
+        findsOneWidget,
+      );
+
+      // Abre seletor pesquisável de Destino -> Borda-CCR (Origem) NÃO aparece como destino!
+      await tester.tap(
+        find.byKey(const ValueKey<String>('topology-link-target-card')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Selecionar Destino'), findsOneWidget);
+
+      await tester.enterText(
+        find.byKey(const ValueKey<String>('topology-endpoint-search-input')),
+        'Campinas',
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Servidor-ERP'), findsWidgets);
+      await tester.ensureVisible(find.text('Servidor-ERP').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Servidor-ERP').last);
+      await tester.pumpAndSettle();
+
+      // Testa botão de 1-toque "Inverter origem/destino (⇅)" e desfaz a inversão
+      await tester.tap(
+        find.byKey(const ValueKey<String>('topology-link-swap-endpoints')),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey<String>('topology-link-source-card')),
+          matching: find.text('Servidor-ERP'),
+        ),
+        findsOneWidget,
+      );
+      await tester.tap(
+        find.byKey(const ValueKey<String>('topology-link-swap-endpoints')),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey<String>('topology-link-source-card')),
+          matching: find.text('Borda-CCR'),
+        ),
+        findsOneWidget,
+      );
+
+      // Escolhe porta de origem sfp-sfpplus1 -> auto-sugere Tipo de enlace = Fibra óptica!
+      await tester.tap(
+        find.byKey(const ValueKey<String>('topology-link-source-iface')),
+      );
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey<String>('topology-iface-search-input')),
+        'sfp',
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('sfp-sfpplus1').last);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Sugerido pela porta'), findsOneWidget);
+      expect(find.text('Fibra óptica'), findsWidgets);
+
+      // Escolhe porta de destino eno1
+      await tester.tap(
+        find.byKey(const ValueKey<String>('topology-link-target-iface')),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('eno1').last);
+      await tester.pumpAndSettle();
+
+      // Submete criação do enlace e confere DTO completo enviado ao backend
+      await tester.ensureVisible(find.text('Criar enlace'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Criar enlace'));
+      await tester.pumpAndSettle();
+
+      expect(notifier.addLinkCalls, 1);
+      expect(notifier.lastAddedLinkPayload, isNotNull);
+      expect(notifier.lastAddedLinkPayload!['sourceDeviceId'], 1);
+      expect(notifier.lastAddedLinkPayload!['targetDeviceId'], 3);
+      expect(notifier.lastAddedLinkPayload!['sourceInterfaceId'], 1);
+      expect(notifier.lastAddedLinkPayload!['targetInterfaceId'], 31);
+      expect(notifier.lastAddedLinkPayload!['linkType'], 'fiber');
+    },
+  );
+
+  testWidgets(
+    'Visual 2-tap "Conectar no mapa" mode connects Source -> Destination directly from canvas',
+    (tester) async {
+      _setViewport(tester, const Size(1280, 800));
+      final notifier = _TestTopologyNotifier();
+      await tester.pumpWidget(_buildApp(topoNotifier: notifier));
+      await tester.pumpAndSettle();
+
+      // 1. Toca no nó Borda-CCR -> abre Inspetor -> aciona "Conectar no mapa"
+      await tester.tap(
+        find.byKey(const ValueKey<String>('topology-node-detail-1')),
+      );
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(find.text('Conectar no mapa'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Conectar no mapa'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text(
+          'Conectando Borda-CCR → toque no equipamento destino no mapa',
+        ),
+        findsOneWidget,
+      );
+
+      // 2. Toca no equipamento destino Servidor-ERP no canvas -> abre folha já preenchida!
+      await tester.tap(
+        find.byKey(const ValueKey<String>('topology-node-detail-3')),
+      );
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('Adicionar Enlace Manual'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey<String>('topology-link-source-card')),
+          matching: find.text('Borda-CCR'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey<String>('topology-link-target-card')),
+          matching: find.text('Servidor-ERP'),
+        ),
+        findsOneWidget,
+      );
+
+      // 3. Também é possível voltar ao modo visual a partir de "Selecionar destino no mapa..."
+      await tester.tap(
+        find.byKey(const ValueKey<String>('topology-link-pick-on-map')),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey<String>('topology-link-picking-banner')),
+        findsOneWidget,
+      );
+
+      // Cancelar encerra o modo de conexão visual de forma limpa
+      await tester.tap(find.text('Cancelar'));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey<String>('topology-link-picking-banner')),
+        findsNothing,
+      );
     },
   );
 }

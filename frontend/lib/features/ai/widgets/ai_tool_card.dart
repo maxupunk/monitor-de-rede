@@ -236,44 +236,39 @@ class _AiToolCardState extends ConsumerState<AiToolCard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          Row(
-            children: <Widget>[
-              if (tool.status == AiToolStatus.running)
-                const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              else
-                Icon(
-                  isDevice
-                      ? Icons.terminal_outlined
-                      : Icons.build_circle_outlined,
-                  size: 18,
-                  color: context.semanticColors
-                      .resolve(statusTone, scheme)
-                      .foreground,
-                ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  toolFriendlyLabel(tool.name),
-                  style: context.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final stackChips = constraints.maxWidth < 460;
+              final leadingWidget = tool.status == AiToolStatus.running
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Icon(
+                      isDevice
+                          ? Icons.terminal_outlined
+                          : Icons.build_circle_outlined,
+                      size: 18,
+                      color: context.semanticColors
+                          .resolve(statusTone, scheme)
+                          .foreground,
+                    );
+              final chips = <Widget>[
+                if (tool.risk != null)
+                  SemanticChip(
+                    label: tool.risk!.label,
+                    tone: tool.risk!.tone,
+                    icon: tool.risk!.icon,
+                    compact: true,
                   ),
-                ),
-              ),
-              if (tool.risk != null) ...<Widget>[
                 SemanticChip(
-                  label: tool.risk!.label,
-                  tone: tool.risk!.tone,
-                  icon: tool.risk!.icon,
+                  label: statusLabel,
+                  tone: statusTone,
                   compact: true,
                 ),
-                const SizedBox(width: 6),
-              ],
-              SemanticChip(label: statusLabel, tone: statusTone, compact: true),
-              IconButton(
+              ];
+              final expandBtn = IconButton(
                 tooltip: _expanded ? 'Ocultar detalhes' : 'Ver detalhes',
                 visualDensity: VisualDensity.compact,
                 icon: Icon(
@@ -281,8 +276,59 @@ class _AiToolCardState extends ConsumerState<AiToolCard> {
                   size: 18,
                 ),
                 onPressed: () => setState(() => _expanded = !_expanded),
-              ),
-            ],
+              );
+
+              if (!stackChips) {
+                return Row(
+                  children: <Widget>[
+                    leadingWidget,
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        toolFriendlyLabel(tool.name),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: context.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    for (final c in chips) ...<Widget>[
+                      const SizedBox(width: 6),
+                      c,
+                    ],
+                    expandBtn,
+                  ],
+                );
+              }
+
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Row(
+                    children: <Widget>[
+                      leadingWidget,
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          toolFriendlyLabel(tool.name),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: context.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      expandBtn,
+                    ],
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(left: 26),
+                    child: Wrap(spacing: 6, runSpacing: 6, children: chips),
+                  ),
+                ],
+              );
+            },
           ),
           if (summaryText.isNotEmpty) ...<Widget>[
             const SizedBox(height: 6),

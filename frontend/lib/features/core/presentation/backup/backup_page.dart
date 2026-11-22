@@ -382,7 +382,12 @@ class _SystemBackupTab extends ConsumerWidget {
                         KeyValueRow(
                           label: 'Último backup',
                           value: plan.lastBackupAt != null
-                              ? '${formatDateTime(plan.lastBackupAt)} (${plan.lastBackupStatus ?? '—'})'
+                              ? '${formatDateTime(plan.lastBackupAt)} (${switch (plan.lastBackupStatus) {
+                                  'succeeded' || 'ok' => 'concluído',
+                                  'failed' || 'error' => 'falhou',
+                                  'running' => 'em andamento',
+                                  _ => plan.lastBackupStatus ?? '—',
+                                }})'
                               : 'Nunca executado',
                         ),
                         KeyValueRow(
@@ -401,9 +406,10 @@ class _SystemBackupTab extends ConsumerWidget {
                         ],
                       ],
                       const SizedBox(height: 12),
-                      Wrap(
+                      SymmetricalActionBar(
                         spacing: 8,
                         runSpacing: 8,
+                        primaryFullWidthWhenOdd: true,
                         children: <Widget>[
                           FilledButton.icon(
                             onPressed:
@@ -446,17 +452,37 @@ class _SystemBackupTab extends ConsumerWidget {
                             label: const Text('Fazer backup agora'),
                           ),
                           OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 10,
+                              ),
+                            ),
                             onPressed: () =>
                                 _openPlanSheet(context, ref, state),
-                            icon: const Icon(Icons.tune, size: 18),
-                            label: const Text('Configurar plano'),
+                            icon: const Icon(Icons.tune, size: 17),
+                            label: const Text(
+                              'Configurar plano',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                           if (plan?.storageDestinationId != null)
                             OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 10,
+                                ),
+                              ),
                               onPressed: () =>
                                   _openRestoreCopySheet(context, ref, plan!),
-                              icon: const Icon(Icons.restore, size: 18),
-                              label: const Text('Restaurar cópia'),
+                              icon: const Icon(Icons.restore, size: 17),
+                              label: const Text(
+                                'Restaurar cópia',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
                         ],
                       ),
@@ -473,11 +499,18 @@ class _SystemBackupTab extends ConsumerWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
-                Wrap(
+                SymmetricalActionBar(
                   spacing: 10,
                   runSpacing: 10,
+                  threeColumnBreakpoint: 680,
                   children: <Widget>[
                     FilledButton.tonalIcon(
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 10,
+                        ),
+                      ),
                       onPressed: state.exporting
                           ? null
                           : () async {
@@ -493,14 +526,20 @@ class _SystemBackupTab extends ConsumerWidget {
                                 ),
                               ]);
                             },
-                      icon: const Icon(Icons.description_outlined, size: 18),
+                      icon: const Icon(Icons.description_outlined, size: 17),
                       label: Text(
-                        state.exporting
-                            ? 'Exportando...'
-                            : 'Exportar configurações (.json)',
+                        state.exporting ? 'Exportando...' : 'Config (.json)',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                     OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 10,
+                        ),
+                      ),
                       onPressed: state.isDownloadingFull
                           ? null
                           : () async {
@@ -518,8 +557,12 @@ class _SystemBackupTab extends ConsumerWidget {
                                 ),
                               ]);
                             },
-                      icon: const Icon(Icons.archive_outlined, size: 18),
-                      label: const Text('Backup completo (.json.gz)'),
+                      icon: const Icon(Icons.archive_outlined, size: 17),
+                      label: const Text(
+                        'Banco (.json.gz)',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   ],
                 ),

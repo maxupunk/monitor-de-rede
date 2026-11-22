@@ -186,7 +186,7 @@ class _DatabasesBackupTabState extends ConsumerState<DatabasesBackupTab> {
     return RefreshIndicator(
       onRefresh: () => ref.read(databasesProvider.notifier).fetchConnections(),
       child: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.only(top: 12, bottom: 24),
         children: <Widget>[
           if (isCompact)
             Row(
@@ -439,45 +439,64 @@ class _DatabasesBackupTabState extends ConsumerState<DatabasesBackupTab> {
           '${conn.engineLabel} · ${conn.host}:${conn.port} (${_originLabel(conn)})',
       icon: Icons.storage_outlined,
       iconTone: statusTone,
-      trailing: Wrap(
-        spacing: 6,
-        runSpacing: 6,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: <Widget>[
-          SemanticChip(
-            label: conn.backupEnabled
-                ? 'A cada ${conn.backupIntervalHours}h'
-                : 'Manual',
-            tone: conn.backupEnabled
-                ? SemanticTone.success
-                : SemanticTone.secondary,
-            compact: true,
-          ),
-          if (conn.lastBackupStatus == 'failed')
-            const SemanticChip(
-              label: 'Último falhou',
-              tone: SemanticTone.error,
-              compact: true,
-            ),
-        ],
+      trailing: SemanticChip(
+        label: conn.lastBackupStatus == 'failed'
+            ? 'Último falhou'
+            : (conn.backupEnabled
+                  ? 'A cada ${conn.backupIntervalHours}h'
+                  : 'Manual'),
+        tone: conn.lastBackupStatus == 'failed'
+            ? SemanticTone.error
+            : (conn.backupEnabled
+                  ? SemanticTone.success
+                  : SemanticTone.secondary),
+        compact: true,
       ),
-      footer: Wrap(
-        spacing: 8,
-        runSpacing: 8,
+      footer: Row(
         children: <Widget>[
-          FilledButton.tonalIcon(
-            onPressed: activeBackupJob?.isRunning == true
-                ? null
-                : () => _runBackupNow(conn),
-            icon: const Icon(Icons.backup_outlined, size: 16),
-            label: const Text('Backup agora'),
+          Expanded(
+            child: SymmetricalActionBar(
+              spacing: 8,
+              runSpacing: 8,
+              children: <Widget>[
+                FilledButton.tonalIcon(
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 10,
+                    ),
+                  ),
+                  onPressed: activeBackupJob?.isRunning == true
+                      ? null
+                      : () => _runBackupNow(conn),
+                  icon: const Icon(Icons.backup_outlined, size: 16),
+                  label: const Text(
+                    'Backup agora',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 10,
+                    ),
+                  ),
+                  onPressed: () => _openHistory(conn),
+                  icon: const Icon(Icons.history, size: 16),
+                  label: const Text(
+                    'Histórico',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
           ),
-          OutlinedButton.icon(
-            onPressed: () => _openHistory(conn),
-            icon: const Icon(Icons.history, size: 16),
-            label: const Text('Histórico'),
-          ),
+          const SizedBox(width: 4),
           PopupMenuButton<String>(
+            tooltip: 'Mais ações',
             onSelected: (action) {
               switch (action) {
                 case 'edit':

@@ -185,30 +185,17 @@ class _DockerComposePageState extends ConsumerState<DockerComposePage> {
                     iconTone: project.running == project.containers
                         ? SemanticTone.success
                         : SemanticTone.warning,
-                    trailing: Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: <Widget>[
-                        if (project.protected)
-                          const SemanticChip(
-                            label: 'Instalação NetMonitor',
-                            tone: SemanticTone.info,
-                            icon: Icons.shield,
-                            compact: true,
-                          ),
-                        SemanticChip(
-                          label: '${project.running}/${project.containers}',
-                          tone: project.running == project.containers
-                              ? SemanticTone.success
-                              : SemanticTone.warning,
-                          compact: true,
-                        ),
-                      ],
+                    trailing: SemanticChip(
+                      label: '${project.running}/${project.containers}',
+                      tone: project.running == project.containers
+                          ? SemanticTone.success
+                          : SemanticTone.warning,
+                      compact: true,
                     ),
-                    footer: Wrap(
+                    footer: SymmetricalActionBar(
                       spacing: 8,
                       runSpacing: 8,
+                      primaryFullWidthWhenOdd: true,
                       children: <Widget>[
                         if (canAutomate && !project.protected)
                           FilledButton.tonalIcon(
@@ -239,15 +226,26 @@ class _DockerComposePageState extends ConsumerState<DockerComposePage> {
                               icon: const Icon(Icons.restart_alt, size: 16),
                               label: const Text('Reiniciar'),
                             ),
-                            TextButton(
+                            OutlinedButton.icon(
                               onPressed: () =>
                                   _runComposeAction(project, 'stop'),
-                              child: const Text('Parar'),
+                              icon: const Icon(Icons.stop_outlined, size: 16),
+                              label: const Text('Parar'),
                             ),
-                            TextButton(
+                            OutlinedButton.icon(
                               onPressed: () =>
                                   _runComposeAction(project, 'down'),
-                              child: const Text('Derrubar'),
+                              icon: Icon(
+                                Icons.delete_sweep_outlined,
+                                size: 16,
+                                color: context.colorScheme.error,
+                              ),
+                              label: Text(
+                                'Derrubar',
+                                style: TextStyle(
+                                  color: context.colorScheme.error,
+                                ),
+                              ),
                             ),
                           ],
                         ],
@@ -256,6 +254,18 @@ class _DockerComposePageState extends ConsumerState<DockerComposePage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: <Widget>[
+                        if (project.protected) ...<Widget>[
+                          const Align(
+                            alignment: Alignment.centerLeft,
+                            child: SemanticChip(
+                              label: 'Instalação NetMonitor',
+                              tone: SemanticTone.info,
+                              icon: Icons.shield,
+                              compact: true,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                        ],
                         if (project.workingDir != null &&
                             project.workingDir!.isNotEmpty) ...<Widget>[
                           Tooltip(

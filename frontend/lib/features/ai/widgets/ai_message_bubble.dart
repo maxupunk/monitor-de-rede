@@ -482,7 +482,7 @@ class _AiMessageBubbleState extends ConsumerState<AiMessageBubble> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'Contexto compactado: ${formatInteger(compaction.tokensBefore)} → ${formatInteger(compaction.tokensAfter)} tokens',
+                    'Contexto compactado: ${formatInteger(compaction.tokensBefore)} -> ${formatInteger(compaction.tokensAfter)} tokens',
                     style: context.textTheme.labelMedium?.copyWith(
                       fontWeight: FontWeight.w700,
                     ),

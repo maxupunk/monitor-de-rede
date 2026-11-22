@@ -79,6 +79,10 @@ String toolFriendlyLabel(String name) {
     'save_plugin_draft': 'Salvar rascunho de plugin',
     'run_plugin_action': 'Executar ação de plugin',
     'validate_plugin': 'Validar plugin',
+    'monitor_latency_series': 'Série de latência do monitor',
+    'device_metrics_series': 'Série de métricas do dispositivo',
+    'ping_device': 'Teste de ping',
+    'traceroute_device': 'Rota até o dispositivo',
     'ask_user': 'Pergunta',
   };
   return labels[name] ?? name.replaceAll('_', ' ');

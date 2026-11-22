@@ -10,8 +10,79 @@ import 'package:netmonitor_app/core/config/server_config.dart';
 /// Código de negócio retornado pelo backend quando falta credencial de dispositivo.
 const String missingCredentialCode = 'missing_credential';
 
-/// Endpoints onde 401 é erro de credencial e NÃO sessão expirada.
-const List<String> _credentialPaths = <String>['/auth/login', '/auth/setup'];
+/// Mensagem padrão em PT-BR quando um equipamento remoto recusa login/senha (HTTP 401)
+/// sem corpo detalhado.
+const String defaultDeviceAuthRejectedMessage =
+    'Usuário ou senha recusados pelo equipamento.';
+
+/// Padrões de rotas onde um HTTP 401 indica falha de credencial no alvo remoto,
+/// chave externa ou tentativa de login/setup — e NUNCA expiração do JWT da sessão NetMonitor.
+final List<RegExp> _nonSession401Patterns = <RegExp>[
+  RegExp(r'^/auth/(login|setup|magic-link|verify|forgot|reset)(/|$)'),
+  RegExp(r'^/devices/[^/]+/access(/|$)'),
+  RegExp(r'^/devices/[^/]+/credentials(/|$)'),
+  RegExp(r'^/devices/[^/]+/plugins(/|$)'),
+  RegExp(r'^/logs/devices/[^/]+/provision'),
+  RegExp(r'^/plugins(/|$)'),
+  RegExp(r'^/plugin-(batches|runs|approvals)(/|$)'),
+  RegExp(r'^/snmp(/|$)'),
+  RegExp(r'^/(network-tools|tools)(/|$)'),
+  RegExp(r'^/databases(/|$)'),
+  RegExp(r'^/storages(/|$)'),
+  RegExp(r'^/ai/(ollama|decider|providers)(/|$)'),
+  RegExp(r'^/ai/settings/test'),
+  RegExp(r'^/deploys(/|$)'),
+];
+
+/// Subconjunto de rotas cujo alvo direto é um equipamento gerenciado (SSH/Telnet/HTTP).
+final List<RegExp> _deviceTargetAuthPatterns = <RegExp>[
+  RegExp(r'^/devices/[^/]+/access(/|$)'),
+  RegExp(r'^/devices/[^/]+/credentials(/|$)'),
+  RegExp(r'^/devices/[^/]+/plugins(/|$)'),
+  RegExp(r'^/logs/devices/[^/]+/provision'),
+  RegExp(r'^/plugins(/|$)'),
+  RegExp(r'^/(network-tools|tools)(/|$)'),
+];
+
+String _normalizeApiPath(String rawPath) {
+  var clean = rawPath.trim();
+  final queryIndex = clean.indexOf('?');
+  if (queryIndex != -1) clean = clean.substring(0, queryIndex);
+  final hashIndex = clean.indexOf('#');
+  if (hashIndex != -1) clean = clean.substring(0, hashIndex);
+  if (!clean.startsWith('/')) clean = '/$clean';
+  if (clean == '/api') {
+    clean = '/';
+  } else if (clean.startsWith('/api/')) {
+    clean = clean.substring(4);
+  }
+  return clean;
+}
+
+/// Retorna `true` se um HTTP 401 nesta rota nunca deve deslogar a sessão do operador.
+bool isNonSession401Path(String rawPath) {
+  final clean = _normalizeApiPath(rawPath);
+  return _nonSession401Patterns.any((pattern) => pattern.hasMatch(clean));
+}
+
+bool _isDeviceTargetAuthPath(String rawPath) {
+  final clean = _normalizeApiPath(rawPath);
+  return _deviceTargetAuthPatterns.any((pattern) => pattern.hasMatch(clean));
+}
+
+bool _isGenericUnauthorizedText(String text) {
+  final lower = text.trim().toLowerCase();
+  return lower.isEmpty ||
+      lower == 'unauthorized' ||
+      lower == '401 unauthorized' ||
+      lower == '401: unauthorized' ||
+      lower == 'unauthenticated' ||
+      lower == 'invalid credentials' ||
+      lower == 'erro http 401' ||
+      lower == 'erro http 401: unauthorized' ||
+      lower.startsWith('<!doctype html') ||
+      lower.startsWith('<html');
+}
 
 const Duration _defaultTimeout = Duration(seconds: 15);
 
@@ -108,6 +179,7 @@ class ApiException implements Exception {
   bool get isNotFound => statusCode == 404;
   bool get isConflict => statusCode == 409;
   bool get isMissingCredential => payload?.code == missingCredentialCode;
+  String? get code => payload?.code;
   int? get deviceId => payload?.deviceId;
   String? get transport => payload?.transport;
   List<ApiFieldError> get fieldErrors =>
@@ -222,27 +294,78 @@ class ApiClient {
     return '${baseUrlProvider()}$normalizedPath';
   }
 
+  String _normalizeWhitespace(String text) {
+    return text.replaceAll(RegExp(r'[ \t]{2,}'), ' ').trim();
+  }
+
+  String? _extractPayloadMessage(ApiErrorPayload? payload) {
+    if (payload?.message != null && payload!.message!.trim().isNotEmpty) {
+      return _normalizeWhitespace(payload.message!);
+    }
+    if (payload?.description != null &&
+        payload!.description!.trim().isNotEmpty) {
+      final desc = _normalizeWhitespace(payload.description!);
+      if (payload.error != null && payload.error!.trim().isNotEmpty) {
+        final err = _normalizeWhitespace(payload.error!);
+        if (err.toLowerCase() != desc.toLowerCase() &&
+            !_isGenericUnauthorizedText(err)) {
+          return '$err: $desc';
+        }
+      }
+      return desc;
+    }
+    if (payload?.error != null && payload!.error!.trim().isNotEmpty) {
+      return _normalizeWhitespace(payload.error!);
+    }
+    if (payload != null && payload.errors.isNotEmpty) {
+      return payload.errors
+          .map((e) => _normalizeWhitespace(e.message))
+          .join(', ');
+    }
+    return null;
+  }
+
   String _extractErrorMessage(
     int statusCode,
     String? statusMessage,
-    ApiErrorPayload? payload,
-  ) {
-    if (payload?.message != null && payload!.message!.isNotEmpty) {
-      return payload.message!;
-    }
-    if (payload?.description != null && payload!.description!.isNotEmpty) {
-      if (payload.error != null && payload.error!.isNotEmpty) {
-        return '${payload.error}: ${payload.description}';
+    ApiErrorPayload? payload, {
+    String? path,
+  }) {
+    final payloadMessage = _extractPayloadMessage(payload);
+    if (statusCode == 401 && path != null && _isDeviceTargetAuthPath(path)) {
+      if (payloadMessage == null ||
+          _isGenericUnauthorizedText(payloadMessage)) {
+        return defaultDeviceAuthRejectedMessage;
       }
-      return payload.description!;
     }
-    if (payload?.error != null && payload!.error!.isNotEmpty) {
-      return payload.error!;
-    }
-    if (payload != null && payload.errors.isNotEmpty) {
-      return payload.errors.map((e) => e.message).join(', ');
+    if (payloadMessage != null && payloadMessage.isNotEmpty) {
+      return payloadMessage;
     }
     return 'Erro HTTP $statusCode${statusMessage != null && statusMessage.isNotEmpty ? ': $statusMessage' : ''}';
+  }
+
+  bool _shouldExpireSessionOn401(String path, ApiErrorPayload? payload) {
+    if (isNonSession401Path(path)) {
+      return false;
+    }
+    final code = payload?.code?.toLowerCase();
+    if (code == 'auth_failed' ||
+        code == 'invalid_credentials' ||
+        code == missingCredentialCode) {
+      return false;
+    }
+    final combined = <String?>[
+      payload?.message,
+      payload?.description,
+      payload?.error,
+    ].whereType<String>().join(' ').toLowerCase();
+    if (combined.contains('equipamento') ||
+        combined.contains('chave de api') ||
+        combined.contains('token do github') ||
+        combined.contains('assinatura do github')) {
+      return false;
+    }
+    return true;
   }
 
   ApiException _buildApiException(
@@ -251,13 +374,19 @@ class ApiClient {
     String path,
     Object? rawData,
   ) {
-    final normalizedPath = path.startsWith('/') ? path : '/$path';
+    final normalizedPath = _normalizeApiPath(path);
     final payload = ApiErrorPayload.tryFromDynamic(rawData);
-    if (statusCode == 401 && !_credentialPaths.contains(normalizedPath)) {
+    if (statusCode == 401 &&
+        _shouldExpireSessionOn401(normalizedPath, payload)) {
       onUnauthorized();
     }
     return ApiException(
-      message: _extractErrorMessage(statusCode, statusMessage, payload),
+      message: _extractErrorMessage(
+        statusCode,
+        statusMessage,
+        payload,
+        path: normalizedPath,
+      ),
       statusCode: statusCode,
       payload: payload,
     );

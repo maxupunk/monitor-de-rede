@@ -11,6 +11,7 @@ enum TopologyHudAction {
   resetLayout,
   recalculate,
   addLink,
+  connectOnMap,
   unmanagedSwitch,
   pathFinder,
   legend,
@@ -37,6 +38,8 @@ class TopologyHud extends StatelessWidget {
     this.activePath,
     this.pathNodeNames = const <String>[],
     this.pathPickingSourceName,
+    this.linkPickingActive = false,
+    this.linkPickingSourceName,
     required this.onOpenSearch,
     required this.onClearSearch,
     required this.onOpenFilters,
@@ -57,6 +60,7 @@ class TopologyHud extends StatelessWidget {
     required this.onTapOffline,
     required this.onClearPath,
     required this.onCancelPathPicking,
+    this.onCancelLinkPicking,
     required this.onReloadRemoteLayout,
     required this.onAction,
   });
@@ -76,6 +80,8 @@ class TopologyHud extends StatelessWidget {
   final TopologyPathResult? activePath;
   final List<String> pathNodeNames;
   final String? pathPickingSourceName;
+  final bool linkPickingActive;
+  final String? linkPickingSourceName;
 
   final VoidCallback onOpenSearch;
   final VoidCallback onClearSearch;
@@ -97,6 +103,7 @@ class TopologyHud extends StatelessWidget {
   final VoidCallback onTapOffline;
   final VoidCallback onClearPath;
   final VoidCallback onCancelPathPicking;
+  final VoidCallback? onCancelLinkPicking;
   final VoidCallback onReloadRemoteLayout;
   final ValueChanged<TopologyHudAction> onAction;
 
@@ -123,6 +130,7 @@ class TopologyHud extends StatelessWidget {
                   savingLayout: savingLayout,
                   recalculating: recalculating,
                   pathPickingActive: pathPickingSourceName != null,
+                  linkPickingActive: linkPickingActive,
                   onOpenSearch: onOpenSearch,
                   onClearSearch: onClearSearch,
                   onOpenFilters: onOpenFilters,
@@ -137,6 +145,7 @@ class TopologyHud extends StatelessWidget {
                   savingLayout: savingLayout,
                   recalculating: recalculating,
                   pathPickingActive: pathPickingSourceName != null,
+                  linkPickingActive: linkPickingActive,
                   onSiteChanged: onSiteChanged,
                   onOpenSearch: onOpenSearch,
                   onClearSearch: onClearSearch,
@@ -171,7 +180,13 @@ class TopologyHud extends StatelessWidget {
                     _RemoteLayoutNoticePill(onReload: onReloadRemoteLayout),
                 ],
               ),
-              if (pathPickingSourceName != null) ...<Widget>[
+              if (linkPickingActive) ...<Widget>[
+                const SizedBox(height: 6),
+                _LinkPickingBanner(
+                  sourceName: linkPickingSourceName,
+                  onCancel: onCancelLinkPicking,
+                ),
+              ] else if (pathPickingSourceName != null) ...<Widget>[
                 const SizedBox(height: 6),
                 _PathPickingBanner(
                   sourceName: pathPickingSourceName!,
@@ -239,6 +254,7 @@ class _CompactTopBar extends StatelessWidget {
     required this.savingLayout,
     required this.recalculating,
     required this.pathPickingActive,
+    required this.linkPickingActive,
     required this.onOpenSearch,
     required this.onClearSearch,
     required this.onOpenFilters,
@@ -250,6 +266,7 @@ class _CompactTopBar extends StatelessWidget {
   final bool savingLayout;
   final bool recalculating;
   final bool pathPickingActive;
+  final bool linkPickingActive;
   final VoidCallback onOpenSearch;
   final VoidCallback onClearSearch;
   final VoidCallback onOpenFilters;
@@ -339,6 +356,7 @@ class _CompactTopBar extends StatelessWidget {
               savingLayout: savingLayout,
               recalculating: recalculating,
               pathPickingActive: pathPickingActive,
+              linkPickingActive: linkPickingActive,
               onAction: onAction,
             ),
           ],
@@ -357,6 +375,7 @@ class _DesktopTopBar extends StatelessWidget {
     required this.savingLayout,
     required this.recalculating,
     required this.pathPickingActive,
+    required this.linkPickingActive,
     required this.onSiteChanged,
     required this.onOpenSearch,
     required this.onClearSearch,
@@ -374,6 +393,7 @@ class _DesktopTopBar extends StatelessWidget {
   final bool savingLayout;
   final bool recalculating;
   final bool pathPickingActive;
+  final bool linkPickingActive;
   final ValueChanged<int?> onSiteChanged;
   final VoidCallback onOpenSearch;
   final VoidCallback onClearSearch;
@@ -648,6 +668,7 @@ class _DesktopTopBar extends StatelessWidget {
               savingLayout: savingLayout,
               recalculating: recalculating,
               pathPickingActive: pathPickingActive,
+              linkPickingActive: linkPickingActive,
               onAction: onAction,
             ),
           ],
@@ -663,6 +684,7 @@ class _HudActionsMenu extends StatelessWidget {
     required this.savingLayout,
     required this.recalculating,
     required this.pathPickingActive,
+    required this.linkPickingActive,
     required this.onAction,
   });
 
@@ -670,6 +692,7 @@ class _HudActionsMenu extends StatelessWidget {
   final bool savingLayout;
   final bool recalculating;
   final bool pathPickingActive;
+  final bool linkPickingActive;
   final ValueChanged<TopologyHudAction> onAction;
 
   @override
@@ -707,6 +730,19 @@ class _HudActionsMenu extends StatelessWidget {
               contentPadding: EdgeInsets.zero,
               leading: Icon(Icons.add_link),
               title: Text('Novo link'),
+            ),
+          ),
+          PopupMenuItem<TopologyHudAction>(
+            value: TopologyHudAction.connectOnMap,
+            child: ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.touch_app_outlined),
+              title: Text(
+                linkPickingActive
+                    ? 'Cancelar conexão no mapa'
+                    : 'Conectar no mapa',
+              ),
             ),
           ),
           const PopupMenuItem<TopologyHudAction>(
@@ -915,6 +951,65 @@ class _RemoteLayoutNoticePill extends StatelessWidget {
       icon: Icons.sync,
       compact: true,
       onTap: onReload,
+    );
+  }
+}
+
+class _LinkPickingBanner extends StatelessWidget {
+  const _LinkPickingBanner({this.sourceName, this.onCancel});
+
+  final String? sourceName;
+  final VoidCallback? onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = context.colorScheme;
+    final colors = context.semanticColors.resolve(SemanticTone.primary, scheme);
+    final label = sourceName != null
+        ? 'Conectando $sourceName → toque no equipamento destino no mapa'
+        : 'Conectar no mapa → toque no equipamento de origem';
+
+    return Material(
+      key: const ValueKey<String>('topology-link-picking-banner'),
+      elevation: 3,
+      color: colors.container,
+      shape: RoundedRectangleBorder(
+        borderRadius: AppTheme.borderRadius,
+        side: BorderSide(color: colors.border),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Icon(Icons.add_link, size: 17, color: colors.onContainer),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: context.textTheme.labelMedium?.copyWith(
+                  color: colors.onContainer,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            if (onCancel != null) ...<Widget>[
+              const SizedBox(width: 8),
+              TextButton(
+                style: TextButton.styleFrom(
+                  foregroundColor: colors.onContainer,
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
+                onPressed: onCancel,
+                child: const Text('Cancelar'),
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }

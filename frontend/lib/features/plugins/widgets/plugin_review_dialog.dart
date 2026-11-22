@@ -308,15 +308,19 @@ class _PluginReviewBodyState extends ConsumerState<_PluginReviewBody> {
           ),
         ],
         const SizedBox(height: 14),
-        Wrap(
+        ResponsiveFieldRow(
+          breakpoint: 400,
           spacing: 8,
           runSpacing: 8,
-          alignment: WrapAlignment.end,
           children: <Widget>[
             OutlinedButton.icon(
               onPressed: _busy ? null : _reReview,
               icon: const Icon(Icons.refresh, size: 18),
-              label: const Text('Revisar de novo'),
+              label: const Text(
+                'Revisar de novo',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
             FilledButton.icon(
               onPressed: _busy || blocked || (needsAck && !_acknowledged)
@@ -329,7 +333,11 @@ class _PluginReviewBodyState extends ConsumerState<_PluginReviewBody> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.check_circle_outline, size: 18),
-              label: const Text('Instalar como rascunho'),
+              label: const Text(
+                'Instalar como rascunho',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           ],
         ),

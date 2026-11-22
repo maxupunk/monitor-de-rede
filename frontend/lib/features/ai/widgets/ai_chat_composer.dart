@@ -387,6 +387,7 @@ class _AiChatComposerState extends ConsumerState<AiChatComposer> {
                     decoration: const InputDecoration(
                       hintText:
                           'Pergunte sobre alertas, dispositivos, logs... (use @ para marcar)',
+                      hintMaxLines: 1,
                       isDense: true,
                     ),
                   ),

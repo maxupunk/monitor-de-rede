@@ -770,13 +770,31 @@ class _AlertEventCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final aiSummary = alert.aiSummary;
+    final (
+      String statusLabel,
+      SemanticTone statusTone,
+    ) = switch (alert.status) {
+      'acknowledged' => ('Reconhecido', SemanticTone.info),
+      'silenced' => ('Silenciado', SemanticTone.caution),
+      'resolved' => ('Resolvido', SemanticTone.success),
+      _ => ('Em alerta', tone),
+    };
+    const compactBtnPadding = EdgeInsets.symmetric(
+      horizontal: 10,
+      vertical: 10,
+    );
+
     return SectionCard(
       title: alert.title,
       subtitle:
           '${alert.deviceName ?? alert.monitorName ?? 'Geral'} · ${formatRelativeTime(alert.startedAt ?? alert.createdAt)}',
       icon: Icons.notifications_active_outlined,
       iconTone: tone,
-      trailing: StatusIndicator.fromStatus(alert.status, compact: true),
+      trailing: SemanticChip(
+        label: statusLabel,
+        tone: statusTone,
+        compact: true,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
@@ -808,34 +826,56 @@ class _AlertEventCard extends StatelessWidget {
             ),
           ],
           const SizedBox(height: 10),
-          Wrap(
+          SymmetricalActionBar(
             spacing: 8,
             runSpacing: 8,
+            primaryFullWidthWhenOdd: true,
             children: <Widget>[
               if (canWrite && alert.status == 'active')
                 FilledButton.tonalIcon(
+                  style: FilledButton.styleFrom(padding: compactBtnPadding),
                   onPressed: onAck,
                   icon: const Icon(Icons.done_all, size: 16),
-                  label: const Text('Reconhecer'),
+                  label: const Text(
+                    'Reconhecer',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
               if (canWrite) ...<Widget>[
                 OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(padding: compactBtnPadding),
                   onPressed: onVerify,
                   icon: const Icon(Icons.fact_check_outlined, size: 16),
-                  label: const Text('Verificar agora'),
+                  label: const Text(
+                    'Verificar agora',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
                 OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(padding: compactBtnPadding),
                   onPressed: onSilence,
                   icon: const Icon(Icons.notifications_off_outlined, size: 16),
-                  label: const Text('Silenciar'),
+                  label: const Text(
+                    'Silenciar',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
               ],
-              TextButton.icon(
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(padding: compactBtnPadding),
                 onPressed: onCorrelation,
                 icon: const Icon(Icons.hub_outlined, size: 16),
-                label: const Text('Correlação'),
+                label: const Text(
+                  'Correlação',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-              TextButton.icon(
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(padding: compactBtnPadding),
                 onPressed: onAiSummary,
                 icon: Icon(
                   Icons.auto_awesome,
@@ -844,6 +884,8 @@ class _AlertEventCard extends StatelessWidget {
                 ),
                 label: Text(
                   'Resumo IA',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(color: context.semanticColors.ai),
                 ),
               ),

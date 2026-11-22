@@ -295,7 +295,7 @@ class _AgentEnrollmentBodyState extends ConsumerState<_AgentEnrollmentBody> {
             tone: SemanticTone.secondary,
             child: Text(
               'Usando endereço padrão da central ($serverUrl). '
-              'Você pode configurar endereços adicionais em Configurações → Conectividade.',
+              'Você pode configurar endereços adicionais em Configurações > Conectividade.',
               style: context.textTheme.bodySmall,
             ),
           ),

@@ -209,6 +209,7 @@ class _SetupPageState extends ConsumerState<SetupPage> {
                           labelText: 'Token de instalação (SETUP_TOKEN)',
                           helperText:
                               'Obrigatório para confirmar que você opera este servidor.',
+                          helperMaxLines: 2,
                           prefixIcon: Icon(Icons.vpn_key_outlined),
                         ),
                         validator: FormValidators.required(

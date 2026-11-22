@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:netmonitor_app/shared/widgets/responsive_grid.dart';
+import 'package:netmonitor_app/shared/widgets/symmetrical_action_bar.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
 
 /// Card de página padrão do NetMonitor (elevation 2, raio 12, superfície limpa).
@@ -15,6 +17,7 @@ class SectionCard extends StatelessWidget {
     this.padding = const EdgeInsets.all(16),
     this.headerPadding = const EdgeInsets.fromLTRB(16, 16, 16, 12),
     this.showHeaderDivider = true,
+    this.stackTrailingOnCompact,
   });
 
   final Widget child;
@@ -28,8 +31,46 @@ class SectionCard extends StatelessWidget {
   final EdgeInsetsGeometry headerPadding;
   final bool showHeaderDivider;
 
+  /// Quando `null` (automático), itens únicos compactos (ex.: `SemanticChip`, `Badge`,
+  /// `IconButton`, `Switch`, `TextButton`) permanecem alinhados à direita na mesma linha
+  /// do título mesmo em telas mobile, enquanto barras largas/múltiplas (`SegmentedButton`,
+  /// `Row`, `Wrap`, `SymmetricalActionBar`) empilham abaixo do título em `< 560px`.
+  final bool? stackTrailingOnCompact;
+
   bool get _hasHeader =>
       title != null || subtitle != null || icon != null || trailing != null;
+
+  static Widget _unwrapSingleChild(Widget widget) {
+    var current = widget;
+    while (true) {
+      if (current is Padding && current.child != null) {
+        current = current.child!;
+      } else if (current is SizedBox && current.child != null) {
+        current = current.child!;
+      } else if (current is ConstrainedBox && current.child != null) {
+        current = current.child!;
+      } else if (current is Align && current.child != null) {
+        current = current.child!;
+      } else if (current is Tooltip && current.child != null) {
+        current = current.child!;
+      } else {
+        return current;
+      }
+    }
+  }
+
+  static bool _isWideMultiControlTrailing(Widget trailingWidget) {
+    final core = _unwrapSingleChild(trailingWidget);
+    return core is SegmentedButton ||
+        core is Row ||
+        core is Wrap ||
+        core is Column ||
+        core is SymmetricalActionBar ||
+        core is ResponsiveFieldRow ||
+        core is OverflowBar ||
+        core is ToggleButtons ||
+        core is SingleChildScrollView;
+  }
 
   Widget _wrapTrailing(Widget trailingWidget, {double? maxWidth}) {
     if (trailingWidget is Wrap) {
@@ -132,10 +173,14 @@ class SectionCard extends StatelessWidget {
                     );
                   }
 
-                  // Em larguras compactas (< 560px), empilha título e trailing
-                  // para evitar esmagamento vertical de texto por botões ou
-                  // SegmentedButton largos.
-                  if (constraints.maxWidth < 560) {
+                  final isCompactWidth = constraints.maxWidth < 560;
+                  final shouldStack =
+                      constraints.maxWidth < 240 ||
+                      (isCompactWidth &&
+                          (stackTrailingOnCompact ??
+                              _isWideMultiControlTrailing(trailing!)));
+
+                  if (shouldStack) {
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       mainAxisSize: MainAxisSize.min,
@@ -153,16 +198,17 @@ class SectionCard extends StatelessWidget {
                     );
                   }
 
+                  final trailingMaxRatio = isCompactWidth ? 0.42 : 0.55;
                   return Row(
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: <Widget>[
                       Expanded(child: identityRow),
-                      const SizedBox(width: 12),
+                      SizedBox(width: isCompactWidth ? 10 : 12),
                       Flexible(
                         flex: 0,
                         child: _wrapTrailing(
                           trailing!,
-                          maxWidth: constraints.maxWidth * 0.55,
+                          maxWidth: constraints.maxWidth * trailingMaxRatio,
                         ),
                       ),
                     ],

@@ -5,6 +5,9 @@ import 'package:netmonitor_app/core/areas/areas_provider.dart';
 import 'package:netmonitor_app/core/auth/area_access.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
 import 'package:netmonitor_app/core/network/api_client.dart';
+import 'package:netmonitor_app/features/core/models/log_models.dart';
+import 'package:netmonitor_app/features/core/providers/logs_provider.dart';
+import 'package:netmonitor_app/features/core/providers/settings_provider.dart';
 import 'package:netmonitor_app/features/network/models/device_models.dart';
 import 'package:netmonitor_app/features/network/models/diagnostics_models.dart';
 import 'package:netmonitor_app/features/network/models/link_test_models.dart';
@@ -26,6 +29,7 @@ import 'package:netmonitor_app/features/network/providers/sites_networks_provide
 import 'package:netmonitor_app/features/network/providers/topology_provider.dart';
 import 'package:netmonitor_app/features/network/providers/wifi_provider.dart';
 import 'package:netmonitor_app/features/network/widgets/device_access_host.dart';
+import 'package:netmonitor_app/features/network/widgets/device_form_sheet.dart';
 import 'package:netmonitor_app/features/network/widgets/diagnostics_dialogs.dart';
 import 'package:netmonitor_app/features/network/widgets/dns_widgets.dart';
 import 'package:netmonitor_app/features/network/widgets/network_settings_cards.dart';
@@ -289,6 +293,27 @@ class _StubWifiClientsNotifier extends WifiClientsNotifier {
             band: '5GHz',
             txRateBps: 866700000,
           ),
+          WifiStationModel(
+            mac: 'aa:bb:cc:dd:ee:22',
+            vendor: 'Tuya Smart',
+            signalDbm: -68,
+            signalGrade: 'good',
+            health: 'good',
+            linkScore: 0.74,
+            ssid: 'CorpWiFi-IoT',
+            band: '2.4GHz',
+          ),
+          WifiStationModel(
+            mac: 'aa:bb:cc:dd:ee:33',
+            vendor: 'Espressif',
+            ip: '10.10.0.142',
+            signalDbm: -69,
+            signalGrade: 'good',
+            health: 'good',
+            linkScore: 0.71,
+            ssid: 'CorpWiFi-IoT',
+            band: '2.4GHz',
+          ),
         ],
       ),
     },
@@ -402,10 +427,85 @@ class _StubWifiSettingsNotifier extends WifiSettingsNotifier {
   Future<void> fetch() async {}
 }
 
+class _StubCoreSettingsNotifier extends CoreSettingsNotifier {
+  @override
+  CoreSettingsState build() => const CoreSettingsState();
+
+  @override
+  Future<void> fetchServerAddresses({bool force = false}) async {}
+}
+
+class _StubOperatingSystemsNotifier extends OperatingSystemsNotifier {
+  @override
+  List<OperatingSystemOption> build() => const <OperatingSystemOption>[
+    OperatingSystemOption(
+      id: 'openwrt',
+      label: 'OpenWrt',
+      supportsSyslog: true,
+    ),
+    OperatingSystemOption(
+      id: 'routeros',
+      label: 'MikroTik RouterOS',
+      supportsSyslog: true,
+    ),
+  ];
+
+  @override
+  Future<void> fetchAll({bool force = false}) async {}
+
+  @override
+  Future<IdentifyResultModel?> identify({
+    String? name,
+    required String? ipAddress,
+    String? snmpVersion,
+    String? snmpCommunity,
+    String? vendor,
+    String? model,
+  }) async => null;
+}
+
+class _StubSnmpProfilesNotifier extends SnmpProfilesNotifier {
+  @override
+  List<SnmpProfileModel> build() => const <SnmpProfileModel>[];
+
+  @override
+  Future<void> fetchProfiles() async {}
+}
+
+class _StubLogsNotifier extends LogsNotifier {
+  @override
+  LogsState build() => const LogsState();
+
+  @override
+  Future<SetupGuide?> fetchSetupGuide({String? address}) async {
+    const guide = SetupGuide(
+      serverAddress: '10.10.0.10',
+      port: 514,
+      snippets: <SetupSnippet>[
+        SetupSnippet(
+          id: 'openwrt',
+          label: 'OpenWrt (logread)',
+          commands: "uci set system.@system[0].log_ip='10.10.0.10'",
+        ),
+      ],
+    );
+    state = state.copyWith(setupGuide: guide);
+    return guide;
+  }
+
+  @override
+  Future<ProvisionHintsResponse?> fetchProvisionHints(int deviceId) async =>
+      null;
+}
+
 class _StubDeviceAccessController extends DeviceAccessController {
-  _StubDeviceAccessController({this.dedicatedPlatform = 'openwrt'});
+  _StubDeviceAccessController({
+    this.dedicatedPlatform = 'openwrt',
+    this.provisionError,
+  });
 
   final String? dedicatedPlatform;
+  final Object? provisionError;
   Map<String, dynamic>? lastSavedCredentialPayload;
   Map<String, dynamic>? lastProvisionPayload;
 
@@ -437,6 +537,7 @@ class _StubDeviceAccessController extends DeviceAccessController {
     int deviceId,
     Map<String, dynamic> payload,
   ) async {
+    if (provisionError != null) throw provisionError!;
     lastProvisionPayload = Map<String, dynamic>.from(payload);
     return const DeviceCredentialView(
       kind: 'ssh',
@@ -468,10 +569,19 @@ List<Override> _baseOverrides() => <Override>[
   dnsServersProvider.overrideWith(_StubDnsServersNotifier.new),
   vendorsProvider.overrideWith(_StubVendorsNotifier.new),
   wifiSettingsProvider.overrideWith(_StubWifiSettingsNotifier.new),
+  coreSettingsProvider.overrideWith(_StubCoreSettingsNotifier.new),
+  operatingSystemsProvider.overrideWith(_StubOperatingSystemsNotifier.new),
+  snmpProfilesProvider.overrideWith(_StubSnmpProfilesNotifier.new),
+  logsProvider.overrideWith(_StubLogsNotifier.new),
 ];
 
-Widget _wrapMobile(Widget child, {List<Override> extraOverrides = const []}) {
+Widget _wrapMobile(
+  Widget child, {
+  Key? scopeKey,
+  List<Override> extraOverrides = const [],
+}) {
   return ProviderScope(
+    key: scopeKey,
     overrides: <Override>[..._baseOverrides(), ...extraOverrides],
     child: MaterialApp(
       theme: AppTheme.dark(),
@@ -764,6 +874,323 @@ void main() {
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
       expect(find.text('QR Code Wi-Fi'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'WifiClientsPage station sheet uses SymmetricalActionBar for 2-button (50/50) and 3-button (50/50 + 100%) layouts at 360px',
+    (tester) async {
+      _setViewport(tester, const Size(360, 800));
+      await tester.pumpWidget(_wrapMobile(const WifiClientsPage()));
+      await tester.pumpAndSettle();
+
+      // 1) Cliente com 3 ações (Ping pelo AP + Vigiado + QR Wi-Fi): 50%/50% na linha 1 + 100% na linha 2!
+      await tester.tap(find.text('Notebook Diretoria').last);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+
+      final pingBtn = find.widgetWithText(
+        FilledButton,
+        'Ping pelo AP',
+        skipOffstage: false,
+      );
+      final watchBtn3 = find.widgetWithText(
+        OutlinedButton,
+        'Vigiado (Notebook Diretoria)',
+        skipOffstage: false,
+      );
+      final qrBtn3 = find.widgetWithText(
+        OutlinedButton,
+        'QR Wi-Fi',
+        skipOffstage: false,
+      );
+
+      final pingRect = tester.getRect(pingBtn);
+      final watchRect3 = tester.getRect(watchBtn3);
+      final qrRect3 = tester.getRect(qrBtn3);
+
+      // Linha 1: Ping + Vigiado lado a lado com mesma largura; Linha 2: QR Wi-Fi largura total (sem botão órfão!)
+      expect(pingRect.top, closeTo(watchRect3.top, 1.0));
+      expect(pingRect.width, closeTo(watchRect3.width, 1.0));
+      expect(qrRect3.top, greaterThan(pingRect.bottom));
+      expect(qrRect3.left, closeTo(pingRect.left, 1.0));
+      expect(qrRect3.right, closeTo(watchRect3.right, 1.0));
+
+      await tester.tap(find.byTooltip('Fechar'));
+      await tester.pumpAndSettle();
+
+      // 2) Cliente com 2 ações (Tuya Smart sem IP -> Vigiar aparelho + QR Wi-Fi): 50%/50% em linha única!
+      await tester.tap(find.text('Tuya Smart'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+
+      final watchBtn2 = find.widgetWithText(OutlinedButton, 'Vigiar aparelho');
+      final qrBtn2 = find.widgetWithText(OutlinedButton, 'QR Wi-Fi');
+      final watchRect2 = tester.getRect(watchBtn2);
+      final qrRect2 = tester.getRect(qrBtn2);
+
+      expect(watchRect2.top, closeTo(qrRect2.top, 1.0));
+      expect(watchRect2.width, closeTo(qrRect2.width, 1.0));
+    },
+  );
+
+  testWidgets(
+    'WifiClientsPage "Mapa de Sinal" auto-fits at 390x844 with anti-overlap nodes and pans freely on drag',
+    (tester) async {
+      _setViewport(tester, const Size(390, 844));
+      await tester.pumpWidget(_wrapMobile(const WifiClientsPage()));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Mapa de Sinal'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+
+      final viewerFinder = find.byKey(
+        const ValueKey<String>('wifi-signal-interactive-viewer'),
+      );
+      expect(viewerFinder, findsOneWidget);
+
+      final viewer = tester.widget<InteractiveViewer>(viewerFinder);
+      final ctrl = viewer.transformationController!;
+      final initialTx = ctrl.value.storage[12];
+      final initialTy = ctrl.value.storage[13];
+      final initialScale = ctrl.value.storage[0];
+
+      // Auto-fit enquadra o radar inteiro (< 1.0x em 390px) sem cortar a borda direita!
+      expect(initialScale, lessThan(1.0));
+      expect(initialScale, greaterThanOrEqualTo(0.25));
+
+      // Nós com RSSI próximo (-68 e -69 dBm) não se sobrepõem graças ao relaxamento anti-colisão
+      final tuyaRect = tester.getRect(
+        find.byKey(
+          const ValueKey<String>('wifi-map-station-2-aa:bb:cc:dd:ee:22'),
+        ),
+      );
+      final espRect = tester.getRect(
+        find.byKey(
+          const ValueKey<String>('wifi-map-station-2-aa:bb:cc:dd:ee:33'),
+        ),
+      );
+      expect(tuyaRect.overlaps(espRect), isFalse);
+
+      // Arrastar o mapa move genuinamente a câmera em X e Y (TabBarView/NestedScrollView não roubam o gesto!)
+      await tester.drag(viewerFinder, const Offset(-85, -55));
+      await tester.pumpAndSettle();
+
+      final draggedTx = ctrl.value.storage[12];
+      final draggedTy = ctrl.value.storage[13];
+      expect((draggedTx - initialTx).abs(), greaterThan(20.0));
+      expect((draggedTy - initialTy).abs(), greaterThan(15.0));
+
+      // Botão flutuante "Ajustar mapa à tela" recentraliza o radar
+      await tester.tap(find.byTooltip('Ajustar mapa à tela'));
+      await tester.pumpAndSettle();
+      expect(ctrl.value.storage[12], closeTo(initialTx, 0.5));
+      expect(ctrl.value.storage[13], closeTo(initialTy, 0.5));
+    },
+  );
+
+  testWidgets(
+    'OpenWrt defaults to "root", MikroTik to "admin", and HTTP 401 shows "Usuário ou senha incorretos" AlertDialog without logging out',
+    (tester) async {
+      _setViewport(tester, const Size(360, 800));
+
+      // 1) OpenWrt preenche "root" automaticamente e exibe AlertDialog em HTTP 401 mantendo sessão ativa
+      final openwrtCtrl = _StubDeviceAccessController(
+        dedicatedPlatform: 'openwrt',
+        provisionError: const ApiException(
+          message: 'Usuário ou senha recusados pelo equipamento.',
+          statusCode: 401,
+        ),
+      );
+
+      late WidgetRef capturedRef;
+      await tester.pumpWidget(
+        _wrapMobile(
+          Consumer(
+            builder: (context, ref, _) {
+              capturedRef = ref;
+              return SingleChildScrollView(
+                child: Column(
+                  children: <Widget>[
+                    const DeviceAccessPanel(deviceId: 2),
+                    OutlinedButton(
+                      onPressed: () => showDeviceFormSheet(
+                        context: context,
+                        prefill: const <String, dynamic>{
+                          'name': 'AP OpenWrt Sala',
+                          'ipAddress': '10.10.0.50',
+                          'vendor': 'OpenWrt',
+                          'operatingSystem': 'openwrt',
+                        },
+                      ),
+                      child: const Text('Abrir cadastro OpenWrt'),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+          extraOverrides: <Override>[
+            deviceAccessProvider.overrideWith(() => openwrtCtrl),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final adminUserField = tester.widget<TextField>(
+        find.widgetWithText(TextField, 'Usuário admin atual'),
+      );
+      expect(adminUserField.controller?.text, 'root');
+
+      // Submete senha incorreta -> retorna 401 -> exibe AlertDialog sem encerrar a sessão do operador!
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Senha administrativa (uso único)'),
+        'senha-errada',
+      );
+      await tester.tap(find.text('Provisionar chave SSH'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(find.text('Usuário ou senha incorretos'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.textContaining("usuário padrão é 'root'"),
+        ),
+        findsOneWidget,
+      );
+      expect(capturedRef.read(authProvider).isAuthenticated, isTrue);
+
+      await tester.tap(find.text('Entendi'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.byType(DeviceAccessPanel), findsOneWidget);
+
+      // 2) DeviceFormSheet com OpenWrt também inicia o Syslog automático com "root" (nunca "admin")!
+      await tester.ensureVisible(find.text('Abrir cadastro OpenWrt'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Abrir cadastro OpenWrt'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Receber logs (Syslog)'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Receber logs (Syslog)'));
+      await tester.pumpAndSettle();
+
+      final syslogUserField = tester.widget<TextFormField>(
+        find.widgetWithText(
+          TextFormField,
+          'Usuário admin atual',
+          skipOffstage: false,
+        ),
+      );
+      expect(syslogUserField.controller?.text, 'root');
+      await tester.tap(find.byTooltip('Fechar'));
+      await tester.pumpAndSettle();
+
+      // 3) MikroTik preenche "admin" automaticamente
+      final mikrotikCtrl = _StubDeviceAccessController(
+        dedicatedPlatform: 'mikrotik',
+      );
+      await tester.pumpWidget(
+        _wrapMobile(
+          const SingleChildScrollView(child: DeviceAccessPanel(deviceId: 1)),
+          scopeKey: UniqueKey(),
+          extraOverrides: <Override>[
+            deviceAccessProvider.overrideWith(() => mikrotikCtrl),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+      final mkUserField = tester.widget<TextField>(
+        find.widgetWithText(TextField, 'Usuário admin atual'),
+      );
+      expect(mkUserField.controller?.text, 'admin');
+    },
+  );
+
+  testWidgets(
+    'Visual polish (#111): LinkTestsPage PT-BR labels without arrow boxes, inline SectionCard header actions, localized RSSI grade, and single-row VendorRegistryCard',
+    (tester) async {
+      _setViewport(tester, const Size(390, 844));
+
+      // 1) LinkTestsPage: zero setas Unicode quebráveis, chips com ícones e status/subtítulo em PT-BR
+      await tester.pumpWidget(_wrapMobile(const LinkTestsPage()));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.textContaining('Core-CCR -> SW-Distribuicao'), findsWidgets);
+      expect(
+        find.text('Enlace · Ida e volta · 10s (4 fluxos)'),
+        findsOneWidget,
+      );
+      expect(find.text('Em execução'), findsWidgets);
+      expect(find.byIcon(Icons.arrow_downward_rounded), findsOneWidget);
+      expect(find.byIcon(Icons.arrow_upward_rounded), findsOneWidget);
+
+      // 2) SitesPage: botões editar/excluir permanecem inline no cabeçalho (mesma linha do título!) + rodapé 50%/50%
+      await tester.pumpWidget(
+        _wrapMobile(const SitesPage(), scopeKey: UniqueKey()),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      final siteTitleRect = tester.getRect(find.text('Matriz São Paulo'));
+      final siteEditRect = tester.getRect(find.byTooltip('Editar site').first);
+      expect(
+        (siteEditRect.center.dy - siteTitleRect.center.dy).abs(),
+        lessThan(28.0),
+      );
+      final topoBtnRect = tester.getRect(
+        find.widgetWithText(OutlinedButton, 'Topologia').first,
+      );
+      final netBtnRect = tester.getRect(
+        find.widgetWithText(OutlinedButton, 'Redes IP').first,
+      );
+      expect(topoBtnRect.top, closeTo(netBtnRect.top, 1.0));
+      expect(topoBtnRect.width, closeTo(netBtnRect.width, 1.0));
+
+      // 3) ProbesPage: rodapé simétrico 50%/50% entre Testar e Revogar
+      await tester.pumpWidget(
+        _wrapMobile(const ProbesPage(), scopeKey: UniqueKey()),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      final testProbeRect = tester.getRect(
+        find.widgetWithText(OutlinedButton, 'Testar'),
+      );
+      final revokeProbeRect = tester.getRect(
+        find.widgetWithText(OutlinedButton, 'Revogar'),
+      );
+      expect(testProbeRect.top, closeTo(revokeProbeRect.top, 1.0));
+      expect(testProbeRect.width, closeTo(revokeProbeRect.width, 1.0));
+
+      // 4) VendorRegistryCard: campo MAC + botão Consultar na mesma linha em 390px
+      await tester.pumpWidget(
+        _wrapMobile(
+          const SingleChildScrollView(child: VendorRegistryCard()),
+          scopeKey: UniqueKey(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      final macFieldRect = tester.getRect(
+        find.widgetWithText(TextField, 'Testar consulta de MAC'),
+      );
+      final consultarRect = tester.getRect(
+        find.widgetWithText(FilledButton, 'Consultar'),
+      );
+      expect(
+        (macFieldRect.center.dy - consultarRect.center.dy).abs(),
+        lessThan(16.0),
+      );
+
+      // 5) WifiClientsPage: qualidade de sinal traduzida ("excelente" / "bom")
+      await tester.pumpWidget(
+        _wrapMobile(const WifiClientsPage(), scopeKey: UniqueKey()),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Notebook Diretoria').last);
+      await tester.pumpAndSettle();
+      expect(find.text('-54 dBm (excelente)'), findsOneWidget);
     },
   );
 }

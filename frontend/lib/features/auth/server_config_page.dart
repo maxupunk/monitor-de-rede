@@ -4,10 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
 import 'package:netmonitor_app/core/config/server_config.dart';
 import 'package:netmonitor_app/core/utils/form_validators.dart';
-import 'package:netmonitor_app/shared/widgets/nested_panel.dart';
-import 'package:netmonitor_app/shared/widgets/responsive_grid.dart';
-import 'package:netmonitor_app/shared/widgets/section_card.dart';
-import 'package:netmonitor_app/shared/widgets/semantic_chip.dart';
+import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
 
 /// Configuração de servidor NetMonitor (principalmente para Android nativo).
@@ -162,8 +159,7 @@ class _ServerConfigPageState extends ConsumerState<ServerConfigPage> {
                         ),
                         const SizedBox(height: 14),
                       ],
-                      ResponsiveFieldRow(
-                        breakpoint: 400,
+                      SymmetricalActionBar(
                         spacing: 10,
                         runSpacing: 10,
                         children: <Widget>[

@@ -12,6 +12,70 @@ import 'package:netmonitor_app/features/network/widgets/device_access_host.dart'
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
 
+String _linkTestKindLabel(String kind) => switch (kind.trim().toLowerCase()) {
+  'link' => 'Enlace',
+  'server' => 'Servidor',
+  'end_to_end' => 'Ponta a ponta',
+  'path' => 'Caminho',
+  _ => kind,
+};
+
+String _linkTestDirectionLabel(String direction) =>
+    switch (direction.trim().toLowerCase()) {
+      'both' => 'Ida e volta',
+      'forward' => 'Somente ida',
+      'reverse' => 'Somente volta',
+      _ => direction,
+    };
+
+String _linkTestStatusLabel(String status) =>
+    switch (status.trim().toLowerCase()) {
+      'completed' || 'succeeded' => 'Concluído',
+      'running' => 'Em execução',
+      'preparing' => 'Preparando',
+      'queued' || 'pending' => 'Na fila',
+      'failed' || 'error' => 'Falhou',
+      'cancelled' || 'canceled' => 'Cancelado',
+      _ => status,
+    };
+
+StatusIndicator _buildLinkTestStatus(String status, {bool compact = true}) {
+  final normalized = status.trim().toLowerCase();
+  return switch (normalized) {
+    'completed' || 'succeeded' => StatusIndicator(
+      label: 'Concluído',
+      tone: SemanticTone.success,
+      compact: compact,
+    ),
+    'running' => StatusIndicator(
+      label: 'Em execução',
+      tone: SemanticTone.info,
+      compact: compact,
+    ),
+    'preparing' => StatusIndicator(
+      label: 'Preparando',
+      tone: SemanticTone.info,
+      compact: compact,
+    ),
+    'queued' || 'pending' => StatusIndicator(
+      label: 'Na fila',
+      tone: SemanticTone.secondary,
+      compact: compact,
+    ),
+    'failed' || 'error' => StatusIndicator(
+      label: 'Falhou',
+      tone: SemanticTone.error,
+      compact: compact,
+    ),
+    'cancelled' || 'canceled' => StatusIndicator(
+      label: 'Cancelado',
+      tone: SemanticTone.warning,
+      compact: compact,
+    ),
+    _ => StatusIndicator.fromStatus(status, compact: compact),
+  };
+}
+
 class LinkTestsPage extends ConsumerStatefulWidget {
   const LinkTestsPage({
     super.key,
@@ -142,7 +206,7 @@ class _LinkTestsPageState extends ConsumerState<LinkTestsPage>
                 DropdownMenuItem(
                   value: 'server',
                   child: Text(
-                    'Central → Equipamento',
+                    'Central -> Equipamento',
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
@@ -156,7 +220,7 @@ class _LinkTestsPageState extends ConsumerState<LinkTestsPage>
                 DropdownMenuItem(
                   value: 'end_to_end',
                   child: Text(
-                    'Ponta a ponta (A → B)',
+                    'Ponta a ponta (A -> B)',
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
@@ -181,7 +245,7 @@ class _LinkTestsPageState extends ConsumerState<LinkTestsPage>
                       (e) => DropdownMenuItem<int?>(
                         value: e.id,
                         child: Text(
-                          '${e.sourceDeviceName ?? '#${e.sourceDeviceId}'} ↔ ${e.targetDeviceName ?? '#${e.targetDeviceId}'}',
+                          '${e.sourceDeviceName ?? '#${e.sourceDeviceId}'} <-> ${e.targetDeviceName ?? '#${e.targetDeviceId}'}',
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
@@ -286,48 +350,55 @@ class _LinkTestsPageState extends ConsumerState<LinkTestsPage>
               onChanged: (v) => setModal(() => enabled = v),
             ),
             const SizedBox(height: 12),
-            Align(
-              alignment: Alignment.centerRight,
-              child: FilledButton.icon(
-                onPressed: saving
-                    ? null
-                    : () async {
-                        if (nameCtrl.text.trim().isEmpty) return;
-                        setModal(() => saving = true);
-                        final payload = <String, dynamic>{
-                          'name': nameCtrl.text.trim(),
-                          'kind': kind,
-                          'linkId': ?linkId,
-                          'sourceDeviceId': ?sourceId,
-                          'targetDeviceId': ?targetId,
-                          'spec': <String, dynamic>{
-                            'durationS':
-                                int.tryParse(durationCtrl.text.trim()) ?? 10,
-                            'direction': direction,
-                            'streams': 4,
-                          },
-                          'intervalMinutes':
-                              (int.tryParse(intervalCtrl.text.trim()) ?? 60)
-                                  .clamp(15, 43200),
-                          if (windowStartCtrl.text.trim().isNotEmpty)
-                            'windowStart': windowStartCtrl.text.trim(),
-                          if (windowEndCtrl.text.trim().isNotEmpty)
-                            'windowEnd': windowEndCtrl.text.trim(),
-                          'enabled': enabled,
-                        };
-                        final ok = existing != null
-                            ? await ref
-                                  .read(linkTestsProvider.notifier)
-                                  .updateSchedule(existing.id, payload)
-                            : await ref
-                                  .read(linkTestsProvider.notifier)
-                                  .createSchedule(payload);
-                        if (ctx.mounted && ok) Navigator.of(ctx).pop();
-                        if (context.mounted) setModal(() => saving = false);
-                      },
-                icon: const Icon(Icons.check),
-                label: Text(existing != null ? 'Salvar' : 'Criar agendamento'),
-              ),
+            SymmetricalActionBar(
+              children: <Widget>[
+                OutlinedButton(
+                  onPressed: saving ? null : () => Navigator.of(ctx).pop(),
+                  child: const Text('Cancelar'),
+                ),
+                FilledButton.icon(
+                  onPressed: saving
+                      ? null
+                      : () async {
+                          if (nameCtrl.text.trim().isEmpty) return;
+                          setModal(() => saving = true);
+                          final payload = <String, dynamic>{
+                            'name': nameCtrl.text.trim(),
+                            'kind': kind,
+                            'linkId': ?linkId,
+                            'sourceDeviceId': ?sourceId,
+                            'targetDeviceId': ?targetId,
+                            'spec': <String, dynamic>{
+                              'durationS':
+                                  int.tryParse(durationCtrl.text.trim()) ?? 10,
+                              'direction': direction,
+                              'streams': 4,
+                            },
+                            'intervalMinutes':
+                                (int.tryParse(intervalCtrl.text.trim()) ?? 60)
+                                    .clamp(15, 43200),
+                            if (windowStartCtrl.text.trim().isNotEmpty)
+                              'windowStart': windowStartCtrl.text.trim(),
+                            if (windowEndCtrl.text.trim().isNotEmpty)
+                              'windowEnd': windowEndCtrl.text.trim(),
+                            'enabled': enabled,
+                          };
+                          final ok = existing != null
+                              ? await ref
+                                    .read(linkTestsProvider.notifier)
+                                    .updateSchedule(existing.id, payload)
+                              : await ref
+                                    .read(linkTestsProvider.notifier)
+                                    .createSchedule(payload);
+                          if (ctx.mounted && ok) Navigator.of(ctx).pop();
+                          if (context.mounted) setModal(() => saving = false);
+                        },
+                  icon: const Icon(Icons.check),
+                  label: Text(
+                    existing != null ? 'Salvar' : 'Criar agendamento',
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -369,7 +440,7 @@ class _LinkTestsPageState extends ConsumerState<LinkTestsPage>
         ),
       if (_statusFilter != null)
         ActiveFilterChipData(
-          label: 'Status: $_statusFilter',
+          label: 'Status: ${_linkTestStatusLabel(_statusFilter!)}',
           onDeleted: () {
             setState(() => _statusFilter = null);
             ref
@@ -379,7 +450,7 @@ class _LinkTestsPageState extends ConsumerState<LinkTestsPage>
         ),
       if (_kindFilter != null)
         ActiveFilterChipData(
-          label: 'Modo: $_kindFilter',
+          label: 'Modo: ${_linkTestKindLabel(_kindFilter!)}',
           onDeleted: () {
             setState(() => _kindFilter = null);
             ref
@@ -726,10 +797,7 @@ class _LinkTestsPageState extends ConsumerState<LinkTestsPage>
                                 children: <Widget>[
                                   Row(
                                     children: <Widget>[
-                                      StatusIndicator.fromStatus(
-                                        test.status,
-                                        compact: true,
-                                      ),
+                                      _buildLinkTestStatus(test.status),
                                       const SizedBox(width: 10),
                                       Expanded(
                                         child: Column(
@@ -749,7 +817,7 @@ class _LinkTestsPageState extends ConsumerState<LinkTestsPage>
                                             ),
                                             const SizedBox(height: 2),
                                             Text(
-                                              '${test.kind} · ${countNoun(test.legs.length, 'perna', 'pernas')} · ${formatShortDateTime(test.createdAt)}',
+                                              '${_linkTestKindLabel(test.kind)} · ${countNoun(test.legs.length, 'perna', 'pernas')} · ${formatShortDateTime(test.createdAt)}',
                                               maxLines: 1,
                                               overflow: TextOverflow.ellipsis,
                                               style: context.textTheme.bodySmall
@@ -795,15 +863,19 @@ class _LinkTestsPageState extends ConsumerState<LinkTestsPage>
                                       children: <Widget>[
                                         if (test.summary?.minForwardBps != null)
                                           SemanticChip(
-                                            label:
-                                                '↓ ${formatBps(test.summary!.minForwardBps)}',
+                                            label: formatBps(
+                                              test.summary!.minForwardBps,
+                                            ),
+                                            icon: Icons.arrow_downward_rounded,
                                             tone: SemanticTone.success,
                                             compact: true,
                                           ),
                                         if (test.summary?.minReverseBps != null)
                                           SemanticChip(
-                                            label:
-                                                '↑ ${formatBps(test.summary!.minReverseBps)}',
+                                            label: formatBps(
+                                              test.summary!.minReverseBps,
+                                            ),
+                                            icon: Icons.arrow_upward_rounded,
                                             tone: SemanticTone.info,
                                             compact: true,
                                           ),
@@ -917,7 +989,7 @@ class _LinkTestsPageState extends ConsumerState<LinkTestsPage>
                                       ),
                                       const SizedBox(height: 2),
                                       Text(
-                                        'A cada ${sched.intervalMinutes} min · ${sched.kind}'
+                                        'A cada ${sched.intervalMinutes} min · ${_linkTestKindLabel(sched.kind)}'
                                         '${sched.windowStart != null ? ' · Janela ${sched.windowStart}–${sched.windowEnd ?? ''}' : ''}'
                                         '${sched.nextRunAt != null ? ' · Próxima: ${formatTimeUntil(sched.nextRunAt)}' : ''}',
                                         maxLines: 2,
@@ -1146,7 +1218,7 @@ class _FocusedLinkTestCard extends StatelessWidget {
     return SectionCard(
       title: 'Teste #${test.id} · ${test.title}',
       subtitle:
-          '${test.kind} · ${test.spec.direction} · ${test.spec.durationS}s (${test.spec.streams} streams)',
+          '${_linkTestKindLabel(test.kind)} · ${_linkTestDirectionLabel(test.spec.direction)} · ${test.spec.durationS}s (${countNoun(test.spec.streams, 'fluxo', 'fluxos')})',
       icon: Icons.speed,
       iconTone: test.isActive ? SemanticTone.info : SemanticTone.success,
       trailing: IconButton(
@@ -1162,7 +1234,7 @@ class _FocusedLinkTestCard extends StatelessWidget {
             runSpacing: 8,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: <Widget>[
-              StatusIndicator.fromStatus(test.status, compact: true),
+              _buildLinkTestStatus(test.status),
               if (test.isActive && canWrite)
                 OutlinedButton.icon(
                   onPressed: onCancel,
@@ -1185,18 +1257,37 @@ class _FocusedLinkTestCard extends StatelessWidget {
                       child: NestedPanel(
                         tone: isBottleneck
                             ? SemanticTone.warning
-                            : leg.status == 'succeeded'
+                            : (leg.status == 'succeeded' ||
+                                  leg.status == 'completed')
                             ? SemanticTone.success
                             : SemanticTone.info,
                         padding: const EdgeInsets.all(10),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: <Widget>[
-                            Text(
-                              '${leg.a.name} → ${leg.b.name}',
-                              style: context.textTheme.labelLarge?.copyWith(
-                                fontWeight: FontWeight.w800,
-                              ),
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: <Widget>[
+                                Text(
+                                  leg.a.name,
+                                  style: context.textTheme.labelLarge?.copyWith(
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                                const Padding(
+                                  padding: EdgeInsets.symmetric(horizontal: 6),
+                                  child: Icon(
+                                    Icons.arrow_forward_rounded,
+                                    size: 15,
+                                  ),
+                                ),
+                                Text(
+                                  leg.b.name,
+                                  style: context.textTheme.labelLarge?.copyWith(
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ],
                             ),
                             const SizedBox(height: 4),
                             Text(
@@ -1487,7 +1578,7 @@ class _LinkTestWizardBodyState extends ConsumerState<_LinkTestWizardBody> {
                 ButtonSegment(
                   value: 'end_to_end',
                   label: Text(
-                    'A → B',
+                    'A -> B',
                     maxLines: 1,
                     softWrap: false,
                     overflow: TextOverflow.ellipsis,
@@ -1521,7 +1612,7 @@ class _LinkTestWizardBodyState extends ConsumerState<_LinkTestWizardBody> {
                   (e) => DropdownMenuItem<int?>(
                     value: e.id,
                     child: Text(
-                      '${e.sourceDeviceName ?? '#${e.sourceDeviceId}'} ↔ ${e.targetDeviceName ?? '#${e.targetDeviceId}'}',
+                      '${e.sourceDeviceName ?? '#${e.sourceDeviceId}'} <-> ${e.targetDeviceName ?? '#${e.targetDeviceId}'}',
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
@@ -1665,9 +1756,7 @@ class _LinkTestWizardBodyState extends ConsumerState<_LinkTestWizardBody> {
           ),
         ),
         const SizedBox(height: 12),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
+        SymmetricalActionBar(
           children: <Widget>[
             OutlinedButton.icon(
               onPressed: _planning ? null : _runPlan,
@@ -1710,14 +1799,40 @@ class _LinkTestWizardBodyState extends ConsumerState<_LinkTestWizardBody> {
                 for (final w in _plan!.warnings)
                   Padding(
                     padding: const EdgeInsets.only(top: 4),
-                    child: Text('⚠ $w', style: context.textTheme.bodySmall),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Icon(
+                          Icons.warning_amber_rounded,
+                          size: 16,
+                          color: context.semanticColors.warning,
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(w, style: context.textTheme.bodySmall),
+                        ),
+                      ],
+                    ),
                   ),
                 for (final b in _plan!.blocking)
                   Padding(
                     padding: const EdgeInsets.only(top: 4),
-                    child: Text(
-                      '✖ $b',
-                      style: TextStyle(color: context.colorScheme.error),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Icon(
+                          Icons.error_outline,
+                          size: 16,
+                          color: context.colorScheme.error,
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            b,
+                            style: TextStyle(color: context.colorScheme.error),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 if (_plan!.fixes.isNotEmpty) ...<Widget>[

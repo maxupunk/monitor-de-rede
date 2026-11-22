@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
 import 'package:netmonitor_app/core/network/api_client.dart';
+import 'package:netmonitor_app/core/utils/device_defaults.dart';
 import 'package:netmonitor_app/features/network/models/device_models.dart';
+import 'package:netmonitor_app/features/network/providers/devices_provider.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
 
@@ -234,8 +236,77 @@ class _DeviceAccessHostState extends ConsumerState<DeviceAccessHost> {
   }
 }
 
+/// Exibe diálogo Material 3 claro quando o equipamento remoto recusa as
+/// credenciais (HTTP 401/403), mantendo o operador autenticado no NetMonitor.
+Future<void> showDeviceAuthFailureDialog(
+  BuildContext context,
+  Object error, {
+  String? platformOrOs,
+}) {
+  if (!context.mounted) return Future<void>.value();
+  final message = formatDeviceAuthFailureMessage(
+    error,
+    platformOrOs: platformOrOs,
+  );
+  return showDialog<void>(
+    context: context,
+    builder: (dialogContext) {
+      final scheme = dialogContext.colorScheme;
+      final colors = dialogContext.semanticColors.resolve(
+        SemanticTone.error,
+        scheme,
+      );
+      return AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: AppTheme.borderRadius),
+        icon: Container(
+          width: 48,
+          height: 48,
+          decoration: BoxDecoration(
+            color: colors.container,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(
+            Icons.lock_person_outlined,
+            color: colors.onContainer,
+            size: 26,
+          ),
+        ),
+        title: Text(
+          'Usuário ou senha incorretos',
+          textAlign: TextAlign.center,
+          style: dialogContext.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Text(
+            message,
+            style: dialogContext.textTheme.bodyMedium?.copyWith(
+              color: scheme.onSurface,
+            ),
+          ),
+        ),
+        actions: <Widget>[
+          SymmetricalActionBar(
+            children: <Widget>[
+              FilledButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('Entendi'),
+              ),
+            ],
+          ),
+        ],
+      );
+    },
+  );
+}
+
 /// Formata erros da API de acesso de forma legível em PT-BR (incluindo `fieldErrors` e `description`).
-String formatDeviceAccessError(Object err) {
+String formatDeviceAccessError(Object err, {String? platformOrOs}) {
+  if (isDeviceAuthFailure(err)) {
+    return formatDeviceAuthFailureMessage(err, platformOrOs: platformOrOs);
+  }
   if (err is ApiException) {
     final parts = <String>[];
     final payload = err.payload;
@@ -304,6 +375,21 @@ class _DeviceAccessPanelState extends ConsumerState<DeviceAccessPanel> {
   final _adminUserCtrl = TextEditingController();
   final _adminPassCtrl = TextEditingController();
   final _dedicatedPortCtrl = TextEditingController(text: '22');
+  bool _adminUserEdited = false;
+  bool _standardUserEdited = false;
+
+  String? _resolvePlatformHint() {
+    final explicit = _view?.dedicatedPlatform?.trim();
+    if (explicit != null && explicit.isNotEmpty) return explicit;
+    final device = ref
+        .read(devicesProvider)
+        .items
+        .where((d) => d.id == widget.deviceId)
+        .firstOrNull;
+    return device?.effectiveOperatingSystem ??
+        device?.operatingSystem ??
+        device?.vendor;
+  }
 
   @override
   void initState() {
@@ -311,6 +397,24 @@ class _DeviceAccessPanelState extends ConsumerState<DeviceAccessPanel> {
     _transport = widget.initialTransport;
     _portCtrl.text = _defaultPortFor(_transport).toString();
     Future<void>.microtask(_load);
+  }
+
+  @override
+  void didUpdateWidget(covariant DeviceAccessPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.deviceId != widget.deviceId ||
+        oldWidget.initialTransport != widget.initialTransport) {
+      _transport = widget.initialTransport;
+      _modeInitialized = false;
+      _adminUserEdited = false;
+      _standardUserEdited = false;
+      _adminUserCtrl.clear();
+      _adminPassCtrl.clear();
+      _usernameCtrl.clear();
+      _passwordCtrl.clear();
+      _portCtrl.text = _defaultPortFor(_transport).toString();
+      Future<void>.microtask(_load);
+    }
   }
 
   @override
@@ -353,13 +457,21 @@ class _DeviceAccessPanelState extends ConsumerState<DeviceAccessPanel> {
             : 'password';
         _modeInitialized = true;
       }
+      if (!_adminUserEdited) {
+        _adminUserCtrl.text = defaultDeviceAdminUsername(
+          _resolvePlatformHint(),
+        );
+      }
       _prefillForTransport(_transport);
       setState(() => _loading = false);
     } catch (err) {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = formatDeviceAccessError(err);
+        _error = formatDeviceAccessError(
+          err,
+          platformOrOs: _resolvePlatformHint(),
+        );
       });
     }
   }
@@ -372,7 +484,11 @@ class _DeviceAccessPanelState extends ConsumerState<DeviceAccessPanel> {
         break;
       }
     }
-    _usernameCtrl.text = existing?.username ?? '';
+    if (existing?.username != null && existing!.username!.trim().isNotEmpty) {
+      _usernameCtrl.text = existing.username!;
+    } else if (!_standardUserEdited) {
+      _usernameCtrl.text = defaultDeviceAdminUsername(_resolvePlatformHint());
+    }
     _passwordCtrl.clear();
     _useHttps = existing?.useHttps ?? false;
     _viaProbeId = existing?.viaProbeId;
@@ -416,9 +532,22 @@ class _DeviceAccessPanelState extends ConsumerState<DeviceAccessPanel> {
         );
       }
     } catch (err) {
-      if (mounted) setState(() => _error = formatDeviceAccessError(err));
+      if (mounted) {
+        final platformHint = _resolvePlatformHint();
+        setState(() {
+          _saving = false;
+          _error = formatDeviceAccessError(err, platformOrOs: platformHint);
+        });
+        if (isDeviceAuthFailure(err)) {
+          await showDeviceAuthFailureDialog(
+            context,
+            err,
+            platformOrOs: platformHint,
+          );
+        }
+      }
     } finally {
-      if (mounted) setState(() => _saving = false);
+      if (mounted && _saving) setState(() => _saving = false);
     }
   }
 
@@ -437,9 +566,22 @@ class _DeviceAccessPanelState extends ConsumerState<DeviceAccessPanel> {
           .deleteCredential(widget.deviceId, kind);
       await _load();
     } catch (err) {
-      if (mounted) setState(() => _error = formatDeviceAccessError(err));
+      if (mounted) {
+        final platformHint = _resolvePlatformHint();
+        setState(() {
+          _saving = false;
+          _error = formatDeviceAccessError(err, platformOrOs: platformHint);
+        });
+        if (isDeviceAuthFailure(err)) {
+          await showDeviceAuthFailureDialog(
+            context,
+            err,
+            platformOrOs: platformHint,
+          );
+        }
+      }
     } finally {
-      if (mounted) setState(() => _saving = false);
+      if (mounted && _saving) setState(() => _saving = false);
     }
   }
 
@@ -481,10 +623,21 @@ class _DeviceAccessPanelState extends ConsumerState<DeviceAccessPanel> {
       }
     } catch (err) {
       if (mounted) {
-        setState(() => _error = formatDeviceAccessError(err));
+        final platformHint = _resolvePlatformHint();
+        setState(() {
+          _dedicatedBusy = false;
+          _error = formatDeviceAccessError(err, platformOrOs: platformHint);
+        });
+        if (isDeviceAuthFailure(err)) {
+          await showDeviceAuthFailureDialog(
+            context,
+            err,
+            platformOrOs: platformHint,
+          );
+        }
       }
     } finally {
-      if (mounted) setState(() => _dedicatedBusy = false);
+      if (mounted && _dedicatedBusy) setState(() => _dedicatedBusy = false);
     }
   }
 
@@ -712,9 +865,11 @@ class _DeviceAccessPanelState extends ConsumerState<DeviceAccessPanel> {
                       children: <Widget>[
                         TextField(
                           controller: _adminUserCtrl,
-                          decoration: const InputDecoration(
+                          onChanged: (_) => _adminUserEdited = true,
+                          decoration: InputDecoration(
                             labelText: 'Usuário admin atual',
-                            hintText: 'Ex.: root ou admin',
+                            hintText:
+                                'Ex.: ${defaultDeviceAdminUsername(_resolvePlatformHint())}',
                           ),
                         ),
                         TextField(
@@ -741,44 +896,57 @@ class _DeviceAccessPanelState extends ConsumerState<DeviceAccessPanel> {
                       _buildAgentRouteField(agents),
                     ],
                     const SizedBox(height: 12),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: FilledButton.icon(
-                        onPressed: _dedicatedBusy ? null : _provisionDedicated,
-                        icon: _dedicatedBusy
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(Icons.key),
-                        label: const Text('Provisionar chave SSH'),
-                      ),
+                    SymmetricalActionBar(
+                      children: <Widget>[
+                        FilledButton.icon(
+                          onPressed: _dedicatedBusy
+                              ? null
+                              : _provisionDedicated,
+                          icon: _dedicatedBusy
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.key),
+                          label: const Text('Provisionar chave SSH'),
+                        ),
+                      ],
                     ),
                   ] else ...<Widget>[
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
+                    SymmetricalActionBar(
                       children: <Widget>[
                         OutlinedButton.icon(
                           onPressed: _dedicatedBusy ? null : _rotateDedicated,
                           icon: const Icon(Icons.autorenew),
-                          label: const Text('Rotacionar chave'),
+                          label: const Text(
+                            'Rotacionar chave',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                         OutlinedButton.icon(
                           onPressed: _dedicatedBusy
                               ? null
                               : () => _revokeDedicated(localOnly: false),
                           icon: const Icon(Icons.delete_outline),
-                          label: const Text('Revogar'),
+                          label: const Text(
+                            'Revogar',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
-                        TextButton(
+                        OutlinedButton(
                           onPressed: _dedicatedBusy
                               ? null
                               : () => _revokeDedicated(localOnly: true),
-                          child: const Text('Remover só na central'),
+                          child: const Text(
+                            'Remover só na central',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                       ],
                     ),
@@ -827,6 +995,7 @@ class _DeviceAccessPanelState extends ConsumerState<DeviceAccessPanel> {
               children: <Widget>[
                 TextField(
                   controller: _usernameCtrl,
+                  onChanged: (_) => _standardUserEdited = true,
                   decoration: const InputDecoration(labelText: 'Usuário'),
                 ),
                 TextField(
@@ -865,19 +1034,20 @@ class _DeviceAccessPanelState extends ConsumerState<DeviceAccessPanel> {
               const SizedBox(height: 10),
             ],
             const SizedBox(height: 4),
-            Align(
-              alignment: Alignment.centerRight,
-              child: FilledButton.icon(
-                onPressed: _saving ? null : _saveStandard,
-                icon: _saving
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.save_outlined),
-                label: const Text('Salvar credencial'),
-              ),
+            SymmetricalActionBar(
+              children: <Widget>[
+                FilledButton.icon(
+                  onPressed: _saving ? null : _saveStandard,
+                  icon: _saving
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.save_outlined),
+                  label: const Text('Salvar credencial'),
+                ),
+              ],
             ),
           ],
         ],

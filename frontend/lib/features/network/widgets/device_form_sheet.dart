@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:netmonitor_app/core/utils/device_defaults.dart';
 import 'package:netmonitor_app/core/utils/form_validators.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/core/models/log_models.dart';
@@ -127,6 +128,8 @@ class _DeviceFormBodyState extends ConsumerState<_DeviceFormBody> {
   SyslogAccessMethod _syslogAccessMethod = SyslogAccessMethod.dedicatedSshKey;
   bool _reuseExistingSyslogAccess = false;
   bool _reuseChoiceTouched = false;
+  bool _sshAdminUserEdited = false;
+  bool _oneTimeUserEdited = false;
   String _oneTimeProtocol = 'ssh';
   String? _selectedSyslogAddress;
   String _snmpVersion = 'v2c';
@@ -177,6 +180,28 @@ class _DeviceFormBodyState extends ConsumerState<_DeviceFormBody> {
       _syslogHints?.operatingSystem ??
       widget.existing?.effectiveOperatingSystem;
 
+  String? _resolveAuthPlatformHint() {
+    final os = _resolvedEffectiveOsId()?.trim();
+    if (os != null && os.isNotEmpty) return os;
+    final accessPlat = _existingAccessView?.dedicatedPlatform?.trim();
+    if (accessPlat != null && accessPlat.isNotEmpty) return accessPlat;
+    final vendor = _vendorCtrl.text.trim();
+    if (vendor.isNotEmpty) return vendor;
+    final model = _modelCtrl.text.trim();
+    if (model.isNotEmpty) return model;
+    return null;
+  }
+
+  void _syncDefaultDeviceUsernames() {
+    final suggested = defaultDeviceAdminUsername(_resolveAuthPlatformHint());
+    if (!_sshAdminUserEdited && _sshAdminUserCtrl.text != suggested) {
+      _sshAdminUserCtrl.text = suggested;
+    }
+    if (!_oneTimeUserEdited && _oneTimeUserCtrl.text != suggested) {
+      _oneTimeUserCtrl.text = suggested;
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -211,13 +236,14 @@ class _DeviceFormBodyState extends ConsumerState<_DeviceFormBody> {
     _siteId = d?.siteId ?? (p['siteId'] as int?);
     _networkId = d?.networkId ?? (p['networkId'] as int?);
     _parentId = d?.parentId;
-    _operatingSystem = d?.operatingSystem;
+    _operatingSystem = d?.operatingSystem ?? (p['operatingSystem'] as String?);
     _userPickedOs =
-        d?.operatingSystem != null && d!.operatingSystem!.trim().isNotEmpty;
+        _operatingSystem != null && _operatingSystem!.trim().isNotEmpty;
     _accessMode = d?.accessMode;
     _isMonitored = d?.isMonitored ?? true;
     _snmpEnabled = d?.snmpEnabled ?? false;
     _snmpVersion = d?.snmpVersion ?? 'v2c';
+    _syncDefaultDeviceUsernames();
 
     Future<void>.microtask(() {
       ref.read(sitesProvider.notifier).fetchSites();
@@ -301,6 +327,7 @@ class _DeviceFormBodyState extends ConsumerState<_DeviceFormBody> {
           deviceTypeOptions.any((o) => o.$1 == result.hintDeviceType)) {
         _type = result.hintDeviceType!;
       }
+      _syncDefaultDeviceUsernames();
     });
     _scheduleAutoIdentify();
   }
@@ -349,6 +376,7 @@ class _DeviceFormBodyState extends ConsumerState<_DeviceFormBody> {
         if (_modelCtrl.text.trim().isEmpty && res?.model != null) {
           _modelCtrl.text = res!.model!;
         }
+        _syncDefaultDeviceUsernames();
       });
     } catch (err) {
       if (!automatic && mounted && requestSeq == _identifyRequestSeq) {
@@ -434,6 +462,7 @@ class _DeviceFormBodyState extends ConsumerState<_DeviceFormBody> {
         if (!_reuseChoiceTouched) {
           _reuseExistingSyslogAccess = _reusableSyslogCredential != null;
         }
+        _syncDefaultDeviceUsernames();
       });
 
       await ref
@@ -635,14 +664,26 @@ class _DeviceFormBodyState extends ConsumerState<_DeviceFormBody> {
       return true;
     } catch (err) {
       if (mounted) {
+        final platformHint = _resolveAuthPlatformHint();
         setState(() {
-          _syslogProvisionError = formatDeviceAccessError(err);
+          _provisioningSyslog = false;
+          _syslogProvisionError = formatDeviceAccessError(
+            err,
+            platformOrOs: platformHint,
+          );
           _syslogProvisionStep = null;
         });
+        if (isDeviceAuthFailure(err)) {
+          await showDeviceAuthFailureDialog(
+            context,
+            err,
+            platformOrOs: platformHint,
+          );
+        }
       }
       return false;
     } finally {
-      if (mounted) {
+      if (mounted && (_provisioningSyslog || _syslogProvisionStep != null)) {
         setState(() {
           _provisioningSyslog = false;
           _syslogProvisionStep = null;
@@ -1044,12 +1085,18 @@ class _DeviceFormBodyState extends ConsumerState<_DeviceFormBody> {
               TextFormField(
                 controller: _vendorCtrl,
                 decoration: const InputDecoration(labelText: 'Fabricante'),
-                onChanged: (_) => _scheduleAutoIdentify(),
+                onChanged: (_) {
+                  _syncDefaultDeviceUsernames();
+                  _scheduleAutoIdentify();
+                },
               ),
               TextFormField(
                 controller: _modelCtrl,
                 decoration: const InputDecoration(labelText: 'Modelo'),
-                onChanged: (_) => _scheduleAutoIdentify(),
+                onChanged: (_) {
+                  _syncDefaultDeviceUsernames();
+                  _scheduleAutoIdentify();
+                },
               ),
             ],
           ),
@@ -1083,6 +1130,7 @@ class _DeviceFormBodyState extends ConsumerState<_DeviceFormBody> {
                     _operatingSystem = v;
                     _userPickedOs = v != null;
                     _manualSyslogSnippetIndex = null;
+                    _syncDefaultDeviceUsernames();
                   }),
                 ),
               ),
@@ -1202,9 +1250,7 @@ class _DeviceFormBodyState extends ConsumerState<_DeviceFormBody> {
                     onChanged: (_) => _scheduleAutoIdentify(),
                   ),
                   const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
+                  SymmetricalActionBar(
                     children: <Widget>[
                       OutlinedButton.icon(
                         onPressed: _testingSnmp
@@ -1219,14 +1265,22 @@ class _DeviceFormBodyState extends ConsumerState<_DeviceFormBody> {
                                 ),
                               )
                             : const Icon(Icons.network_check, size: 16),
-                        label: const Text('Testar SNMP'),
+                        label: const Text(
+                          'Testar SNMP',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                       OutlinedButton.icon(
                         onPressed: _testingSnmp
                             ? null
                             : () => _testSnmp(autoDetect: true),
                         icon: const Icon(Icons.auto_awesome, size: 16),
-                        label: const Text('Auto-detectar'),
+                        label: const Text(
+                          'Auto-detectar',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                       OutlinedButton.icon(
                         onPressed: _loadingIfaces ? null : _queryLiveInterfaces,
@@ -1239,7 +1293,11 @@ class _DeviceFormBodyState extends ConsumerState<_DeviceFormBody> {
                                 ),
                               )
                             : const Icon(Icons.settings_ethernet, size: 16),
-                        label: const Text('Listar interfaces'),
+                        label: const Text(
+                          'Listar interfaces',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                     ],
                   ),
@@ -1339,6 +1397,8 @@ class _DeviceFormBodyState extends ConsumerState<_DeviceFormBody> {
             onSelectSnippetIndex: (idx) =>
                 setState(() => _manualSyslogSnippetIndex = idx),
             onRetryLoad: () => _loadSyslogGuide(force: true),
+            onSshAdminUserChanged: (_) => _sshAdminUserEdited = true,
+            onOneTimeUserChanged: (_) => _oneTimeUserEdited = true,
             onProvisionNow: _effectiveDeviceId != null
                 ? () => _runAutoSyslogProvision(_effectiveDeviceId!)
                 : null,
@@ -1361,17 +1421,16 @@ class _DeviceFormBodyState extends ConsumerState<_DeviceFormBody> {
             decoration: const InputDecoration(labelText: 'Observações'),
           ),
           const SizedBox(height: 16),
-          Wrap(
-            alignment: WrapAlignment.end,
-            spacing: 8,
-            runSpacing: 8,
+          SymmetricalActionBar(
             children: <Widget>[
-              TextButton(
+              OutlinedButton(
                 onPressed: (_saving || _provisioningSyslog)
                     ? null
                     : () => Navigator.of(context).pop(_createdDevice),
                 child: Text(
                   _createdDevice != null ? 'Concluir sem Syslog' : 'Cancelar',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
               FilledButton.icon(
@@ -1389,6 +1448,8 @@ class _DeviceFormBodyState extends ConsumerState<_DeviceFormBody> {
                       : (willAutoProvisionOnSave
                             ? 'Cadastrar e configurar Syslog'
                             : 'Cadastrar'),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],
@@ -1879,6 +1940,8 @@ class DeviceSyslogSetupPanel extends StatelessWidget {
     this.onSelectServerAddress,
     this.onSelectSnippetIndex,
     this.onRetryLoad,
+    this.onSshAdminUserChanged,
+    this.onOneTimeUserChanged,
     this.onProvisionNow,
   });
 
@@ -1919,6 +1982,8 @@ class DeviceSyslogSetupPanel extends StatelessWidget {
   final ValueChanged<String?>? onSelectServerAddress;
   final ValueChanged<int?>? onSelectSnippetIndex;
   final VoidCallback? onRetryLoad;
+  final ValueChanged<String>? onSshAdminUserChanged;
+  final ValueChanged<String>? onOneTimeUserChanged;
   final VoidCallback? onProvisionNow;
 
   /// Resolve o melhor endereço real do servidor Syslog disponível, evitando
@@ -2136,6 +2201,8 @@ class DeviceSyslogSetupPanel extends StatelessWidget {
                 onAccessMethodChanged: onAccessMethodChanged,
                 onReuseExistingAccessChanged: onReuseExistingAccessChanged,
                 onOneTimeProtocolChanged: onOneTimeProtocolChanged,
+                onSshAdminUserChanged: onSshAdminUserChanged,
+                onOneTimeUserChanged: onOneTimeUserChanged,
                 onProvisionNow: onProvisionNow,
                 onSwitchToManual: () =>
                     onModeChanged?.call(SyslogSetupMode.manual),
@@ -2294,6 +2361,8 @@ class _SyslogAutomaticSetupSection extends StatelessWidget {
     required this.onAccessMethodChanged,
     required this.onReuseExistingAccessChanged,
     required this.onOneTimeProtocolChanged,
+    this.onSshAdminUserChanged,
+    this.onOneTimeUserChanged,
     required this.onProvisionNow,
     required this.onSwitchToManual,
   });
@@ -2316,6 +2385,8 @@ class _SyslogAutomaticSetupSection extends StatelessWidget {
   final ValueChanged<SyslogAccessMethod>? onAccessMethodChanged;
   final ValueChanged<bool>? onReuseExistingAccessChanged;
   final ValueChanged<String>? onOneTimeProtocolChanged;
+  final ValueChanged<String>? onSshAdminUserChanged;
+  final ValueChanged<String>? onOneTimeUserChanged;
   final VoidCallback? onProvisionNow;
   final VoidCallback onSwitchToManual;
 
@@ -2377,6 +2448,7 @@ class _SyslogAutomaticSetupSection extends StatelessWidget {
               passwordController: sshAdminPasswordController,
               portController: sshDedicatedPortController,
               enabled: !provisioning,
+              onUserChanged: onSshAdminUserChanged,
             )
           else
             _SyslogOneTimeLoginFields(
@@ -2386,6 +2458,7 @@ class _SyslogAutomaticSetupSection extends StatelessWidget {
               portController: oneTimePortController,
               enabled: !provisioning,
               onProtocolChanged: onOneTimeProtocolChanged,
+              onUserChanged: onOneTimeUserChanged,
             ),
         ],
         if (provisioning && provisionStep != null) ...<Widget>[
@@ -2573,12 +2646,14 @@ class _SyslogDedicatedSshFields extends StatelessWidget {
     required this.passwordController,
     required this.portController,
     required this.enabled,
+    this.onUserChanged,
   });
 
   final TextEditingController? userController;
   final TextEditingController? passwordController;
   final TextEditingController? portController;
   final bool enabled;
+  final ValueChanged<String>? onUserChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -2591,9 +2666,10 @@ class _SyslogDedicatedSshFields extends StatelessWidget {
             TextFormField(
               controller: userController,
               enabled: enabled,
+              onChanged: onUserChanged,
               decoration: const InputDecoration(
                 labelText: 'Usuário admin atual',
-                hintText: 'Ex.: admin ou root',
+                hintText: 'Ex.: root ou admin',
               ),
             ),
             TextFormField(
@@ -2628,6 +2704,7 @@ class _SyslogOneTimeLoginFields extends StatelessWidget {
     required this.portController,
     required this.enabled,
     required this.onProtocolChanged,
+    this.onUserChanged,
   });
 
   final String protocol;
@@ -2636,6 +2713,7 @@ class _SyslogOneTimeLoginFields extends StatelessWidget {
   final TextEditingController? portController;
   final bool enabled;
   final ValueChanged<String>? onProtocolChanged;
+  final ValueChanged<String>? onUserChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -2684,9 +2762,10 @@ class _SyslogOneTimeLoginFields extends StatelessWidget {
             TextFormField(
               controller: userController,
               enabled: enabled,
+              onChanged: onUserChanged,
               decoration: const InputDecoration(
                 labelText: 'Usuário',
-                hintText: 'Ex.: admin ou root',
+                hintText: 'Ex.: root ou admin',
               ),
             ),
             TextFormField(

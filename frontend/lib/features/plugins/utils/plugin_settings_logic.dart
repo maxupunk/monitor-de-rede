@@ -303,3 +303,124 @@ Map<String, dynamic> normalizePluginFormParams(
   }
   return out;
 }
+
+const Map<String, String> _commonPluginKeyLabels = <String, String>{
+  'ssid': 'SSID',
+  'bssid': 'BSSID',
+  'band': 'Banda',
+  'bands': 'Bandas',
+  'channel': 'Canal',
+  'channels': 'Canais',
+  'current_channel': 'Canal atual',
+  'suggested_channel': 'Canal sugerido',
+  'width': 'Largura do canal',
+  'channel_width': 'Largura do canal',
+  'htmode': 'Largura do canal',
+  'encryption': 'Segurança',
+  'security': 'Segurança',
+  'auth': 'Autenticação',
+  'clients': 'Clientes',
+  'stations': 'Clientes',
+  'connected_clients': 'Clientes conectados',
+  'hidden': 'Rede oculta',
+  'disabled': 'Desativada',
+  'enabled': 'Ativa',
+  'status': 'Estado',
+  'state': 'Estado',
+  'mode': 'Modo',
+  'radio': 'Rádio',
+  'radios': 'Rádios',
+  'frequency': 'Frequência',
+  'freq': 'Frequência',
+  'tx_power': 'Potência TX',
+  'txpower': 'Potência TX',
+  'signal': 'Sinal',
+  'rssi': 'Sinal (RSSI)',
+  'noise': 'Ruído',
+  'vlan': 'VLAN',
+  'vlan_id': 'VLAN',
+  'network': 'Interface',
+  'interface': 'Interface',
+  'ip': 'Endereço IP',
+  'ip_address': 'Endereço IP',
+  'mac': 'Endereço MAC',
+  'mac_address': 'Endereço MAC',
+  'model': 'Modelo',
+  'modelo': 'Modelo',
+  'firmware': 'Firmware',
+  'version': 'Versão',
+  'uptime': 'Tempo ativo',
+  'hostname': 'Hostname',
+  'platform': 'Plataforma',
+  'rx_bytes': 'Tráfego RX',
+  'tx_bytes': 'Tráfego TX',
+  'redes_ativas': 'Redes ativas',
+  'active_networks': 'Redes ativas',
+};
+
+const Set<String> _upperAcronyms = <String>{
+  'ip',
+  'mac',
+  'vlan',
+  'ssid',
+  'bssid',
+  'ssh',
+  'vpn',
+  'dns',
+  'dhcp',
+  'cpu',
+  'ram',
+  'rx',
+  'tx',
+  'qr',
+  'snmp',
+  'http',
+  'https',
+  'rssi',
+};
+
+/// Humaniza e traduz chaves técnicas de saída de plugins (`band` -> `'Banda'`,
+/// `encryption` -> `'Segurança'`, `clients` -> `'Clientes'`, `redesAtivas` -> `'Redes ativas'`).
+String humanizePluginFieldKey(String rawKey, {Map<String, String>? labels}) {
+  final explicit = labels?[rawKey];
+  if (explicit != null && explicit.trim().isNotEmpty) {
+    return explicit.trim();
+  }
+  final trimmed = rawKey.trim();
+  if (trimmed.isEmpty) return '';
+
+  // Converte camelCase/PascalCase e hífens em snake_case para lookup unificado.
+  final snake = trimmed
+      .replaceAllMapped(
+        RegExp(r'([a-z0-9])([A-Z])'),
+        (m) => '${m.group(1)}_${m.group(2)}',
+      )
+      .replaceAllMapped(
+        RegExp(r'([A-Z]+)([A-Z][a-z])'),
+        (m) => '${m.group(1)}_${m.group(2)}',
+      )
+      .replaceAll('-', '_')
+      .toLowerCase();
+
+  final mapped = _commonPluginKeyLabels[snake];
+  if (mapped != null) return mapped;
+
+  final words = snake
+      .split(RegExp(r'[_\s]+'))
+      .where((w) => w.isNotEmpty)
+      .toList(growable: false);
+  if (words.isEmpty) return trimmed;
+
+  final formatted = <String>[];
+  for (var i = 0; i < words.length; i++) {
+    final w = words[i];
+    if (_upperAcronyms.contains(w)) {
+      formatted.add(w.toUpperCase());
+    } else if (i == 0) {
+      formatted.add('${w[0].toUpperCase()}${w.substring(1)}');
+    } else {
+      formatted.add(w);
+    }
+  }
+  return formatted.join(' ');
+}

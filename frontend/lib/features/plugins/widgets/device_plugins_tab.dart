@@ -249,13 +249,11 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           // Cabeçalho com plataforma, firmware e botão IA
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            alignment: WrapAlignment.spaceBetween,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: <Widget>[
-              Wrap(
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final aiEnabled =
+                  ref.watch(aiSettingsProvider).settings?.enabled ?? true;
+              final chipsWrap = Wrap(
                 spacing: 8,
                 runSpacing: 6,
                 children: <Widget>[
@@ -272,15 +270,33 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
                       compact: true,
                     ),
                 ],
-              ),
-              AiAskButton(
+              );
+              final aiBtn = AiAskButton(
                 label: 'Criar ou usar com IA',
                 prompt:
                     'Quero consultar ou criar um plugin para o equipamento #${widget.deviceId} (${view.platform}).',
                 contextData: AiChatContext(deviceId: widget.deviceId),
                 compact: true,
-              ),
-            ],
+              );
+              if (!aiEnabled) return chipsWrap;
+              if (constraints.maxWidth < 520) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    chipsWrap,
+                    const SizedBox(height: 8),
+                    SymmetricalActionBar(children: <Widget>[aiBtn]),
+                  ],
+                );
+              }
+              return Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                alignment: WrapAlignment.spaceBetween,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: <Widget>[chipsWrap, aiBtn],
+              );
+            },
           ),
           const SizedBox(height: 12),
 
@@ -388,9 +404,7 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
             : 'Este plugin está desativado na biblioteca.',
         icon: Icons.gpp_maybe_outlined,
         iconTone: SemanticTone.warning,
-        child: Wrap(
-          spacing: 8,
-          runSpacing: 8,
+        child: SymmetricalActionBar(
           children: <Widget>[
             if (isAdmin && isQuarantine)
               FilledButton.icon(
@@ -407,7 +421,11 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
                   }
                 },
                 icon: const Icon(Icons.security_outlined, size: 18),
-                label: const Text('Revisar segurança'),
+                label: const Text(
+                  'Revisar segurança',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             if (isAdmin && !isQuarantine)
               FilledButton.icon(
@@ -419,7 +437,11 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
                       refreshDeviceId: widget.deviceId,
                     ),
                 icon: const Icon(Icons.power_settings_new, size: 18),
-                label: const Text('Reativar plugin'),
+                label: const Text(
+                  'Reativar plugin',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             if (isAdmin)
               OutlinedButton(
@@ -429,7 +451,11 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
                       .uninstallPlugin(widget.deviceId, plugin.id);
                   if (mounted) setState(() => _section = 'catalog');
                 },
-                child: const Text('Desinstalar'),
+                child: const Text(
+                  'Desinstalar',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
           ],
         ),
@@ -451,6 +477,71 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
           )
         : null;
 
+    final menuBtn = isAdmin
+        ? PopupMenuButton<String>(
+            tooltip: 'Opções do plugin',
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+            onSelected: (cmd) async {
+              if (cmd == 'validate') {
+                final runId = await withDeviceAccess<int>(
+                  context: context,
+                  ref: ref,
+                  action: () => ref
+                      .read(pluginsProvider.notifier)
+                      .validatePlugin(widget.deviceId, plugin.id),
+                );
+                if (runId != null && mounted) {
+                  setState(() => _activeRunId = runId);
+                }
+              } else if (cmd == 'edit') {
+                final detail = await ref
+                    .read(pluginsProvider.notifier)
+                    .fetchDetail(plugin.id);
+                if (context.mounted) {
+                  await showPluginEditorDialog(
+                    context: context,
+                    existing: detail,
+                    exclusiveDeviceId: widget.deviceId,
+                  );
+                }
+              } else if (cmd == 'uninstall') {
+                await ref
+                    .read(pluginsProvider.notifier)
+                    .uninstallPlugin(widget.deviceId, plugin.id);
+                if (mounted) setState(() => _section = 'catalog');
+              }
+            },
+            itemBuilder: (_) => const <PopupMenuEntry<String>>[
+              PopupMenuItem<String>(
+                value: 'validate',
+                child: Text('Validar neste equipamento'),
+              ),
+              PopupMenuItem<String>(
+                value: 'edit',
+                child: Text('Ver código / Editar'),
+              ),
+              PopupMenuItem<String>(
+                value: 'uninstall',
+                child: Text('Desinstalar'),
+              ),
+            ],
+          )
+        : null;
+
+    final Widget? headerTrailing = (isCompact || openAppBtn == null)
+        ? menuBtn
+        : (menuBtn != null
+              ? Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    openAppBtn,
+                    const SizedBox(width: 6),
+                    menuBtn,
+                  ],
+                )
+              : openAppBtn);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
@@ -459,64 +550,12 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
           subtitle: plugin.description ?? 'v${plugin.version}',
           icon: Icons.extension_outlined,
           iconTone: SemanticTone.plugin,
-          trailing: Wrap(
-            spacing: 6,
-            children: <Widget>[
-              if (!isCompact && openAppBtn != null) openAppBtn,
-              if (isAdmin)
-                PopupMenuButton<String>(
-                  onSelected: (cmd) async {
-                    if (cmd == 'validate') {
-                      final runId = await withDeviceAccess<int>(
-                        context: context,
-                        ref: ref,
-                        action: () => ref
-                            .read(pluginsProvider.notifier)
-                            .validatePlugin(widget.deviceId, plugin.id),
-                      );
-                      if (runId != null && mounted) {
-                        setState(() => _activeRunId = runId);
-                      }
-                    } else if (cmd == 'edit') {
-                      final detail = await ref
-                          .read(pluginsProvider.notifier)
-                          .fetchDetail(plugin.id);
-                      if (context.mounted) {
-                        await showPluginEditorDialog(
-                          context: context,
-                          existing: detail,
-                          exclusiveDeviceId: widget.deviceId,
-                        );
-                      }
-                    } else if (cmd == 'uninstall') {
-                      await ref
-                          .read(pluginsProvider.notifier)
-                          .uninstallPlugin(widget.deviceId, plugin.id);
-                      if (mounted) setState(() => _section = 'catalog');
-                    }
-                  },
-                  itemBuilder: (_) => const <PopupMenuEntry<String>>[
-                    PopupMenuItem<String>(
-                      value: 'validate',
-                      child: Text('Validar neste equipamento'),
-                    ),
-                    PopupMenuItem<String>(
-                      value: 'edit',
-                      child: Text('Ver código / Editar'),
-                    ),
-                    PopupMenuItem<String>(
-                      value: 'uninstall',
-                      child: Text('Desinstalar'),
-                    ),
-                  ],
-                ),
-            ],
-          ),
+          trailing: headerTrailing,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
               if (isCompact && openAppBtn != null) ...<Widget>[
-                Align(alignment: Alignment.centerLeft, child: openAppBtn),
+                SymmetricalActionBar(children: <Widget>[openAppBtn]),
                 const SizedBox(height: 10),
               ],
               Text(
@@ -526,9 +565,7 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
                 ),
               ),
               const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
+              SymmetricalActionBar(
                 children: plugin.actions
                     .map((action) {
                       final isWrite = action.isWrite;
@@ -540,6 +577,10 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
                           foregroundColor: isWrite
                               ? context.semanticColors.onErrorContainer
                               : context.semanticColors.onPluginContainer,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
+                          ),
                         ),
                         onPressed: (isWrite || action.reveals) && !isAdmin
                             ? null
@@ -552,7 +593,11 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
                                     : Icons.play_arrow_outlined),
                           size: 18,
                         ),
-                        label: Text(action.title),
+                        label: Text(
+                          action.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       );
                     })
                     .toList(growable: false),
@@ -684,22 +729,42 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
         if (isAdmin)
           Padding(
             padding: const EdgeInsets.only(bottom: 12),
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
+            child: SymmetricalActionBar(
               children: <Widget>[
                 FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: context.semanticColors.plugin,
+                    foregroundColor: context.semanticColors.onPlugin,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                  ),
                   onPressed: () => showPluginEditorDialog(
                     context: context,
                     exclusiveDeviceId: widget.deviceId,
                   ),
                   icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Novo plugin'),
+                  label: const Text(
+                    'Novo plugin',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
                 OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                  ),
                   onPressed: () => context.go('/plugins'),
                   icon: const Icon(Icons.extension_outlined, size: 18),
-                  label: const Text('Biblioteca completa'),
+                  label: const Text(
+                    'Biblioteca completa',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
               ],
             ),
@@ -731,10 +796,7 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
                       tone: compat.tone,
                       compact: true,
                     ),
-                    child: Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      alignment: WrapAlignment.end,
+                    child: SymmetricalActionBar(
                       children: <Widget>[
                         if (item.installed)
                           FilledButton.tonal(
@@ -745,6 +807,10 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
                           )
                         else if (isAdmin)
                           FilledButton.icon(
+                            style: FilledButton.styleFrom(
+                              backgroundColor: context.semanticColors.plugin,
+                              foregroundColor: context.semanticColors.onPlugin,
+                            ),
                             onPressed: () async {
                               await ref
                                   .read(pluginsProvider.notifier)
@@ -777,9 +843,17 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
                 title: Text('Incompatíveis (${incompatible.length})'),
                 children: incompatible
                     .map((item) {
+                      final cleaned = item.reasons
+                          .map(
+                            (r) => r
+                                .replaceFirst(RegExp(r'^[\s·•\-;,]+'), '')
+                                .trim(),
+                          )
+                          .where((r) => r.isNotEmpty)
+                          .join(' · ');
                       return ListTile(
                         title: Text(item.plugin.name),
-                        subtitle: Text(item.reasons.join(' · ')),
+                        subtitle: cleaned.isNotEmpty ? Text(cleaned) : null,
                       );
                     })
                     .toList(growable: false),
@@ -824,7 +898,7 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
       iconTone: SemanticTone.plugin,
       trailing: isCompact ? null : configureBtn,
       footer: isCompact && configureBtn != null
-          ? Align(alignment: Alignment.centerRight, child: configureBtn)
+          ? SymmetricalActionBar(children: <Widget>[configureBtn])
           : null,
       child: view.credentials.isEmpty
           ? const EmptyStateView(
@@ -835,62 +909,133 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
               tone: SemanticTone.plugin,
             )
           : Column(
-              children: view.credentials
-                  .map((cred) {
-                    return ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: SemanticChip(
-                        label: cred.kind.toUpperCase(),
-                        tone: SemanticTone.plugin,
-                        compact: true,
-                      ),
-                      title: Text(
-                        '${cred.username} (porta ${cred.port ?? 'padrão'})',
-                      ),
-                      subtitle: Text(
-                        cred.dedicated != null
-                            ? 'Chave dedicada SSH (${cred.dedicated!.username})'
-                            : 'Armazenamento: ${cred.storage}${cred.sessionActive ? ' · Sessão ativa' : ''}',
-                      ),
-                      trailing: isAdmin
-                          ? Row(
-                              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                for (var i = 0; i < view.credentials.length; i++) ...<Widget>[
+                  if (i > 0) const SizedBox(height: 10),
+                  Builder(
+                    builder: (context) {
+                      final cred = view.credentials[i];
+                      return NestedPanel(
+                        padding: const EdgeInsets.all(12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: <Widget>[
+                            Row(
                               children: <Widget>[
-                                TextButton(
-                                  onPressed: () async {
-                                    final saved = await showDeviceAccessDialog(
-                                      context: context,
-                                      ref: ref,
-                                      deviceId: widget.deviceId,
-                                      lockedTransport: cred.kind,
-                                    );
-                                    if (saved) {
-                                      await ref
-                                          .read(pluginsProvider.notifier)
-                                          .loadDevice(widget.deviceId);
-                                    }
-                                  },
-                                  child: const Text('Gerenciar'),
+                                SemanticChip(
+                                  label: cred.kind.toUpperCase(),
+                                  tone: SemanticTone.plugin,
+                                  compact: true,
                                 ),
-                                IconButton(
-                                  tooltip: 'Remover credencial',
-                                  icon: Icon(
-                                    Icons.delete_outline,
-                                    color: context.colorScheme.error,
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    '${cred.username} (porta ${cred.port ?? 'padrão'})',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: context.textTheme.titleSmall
+                                        ?.copyWith(fontWeight: FontWeight.w700),
                                   ),
-                                  onPressed: () => ref
-                                      .read(pluginsProvider.notifier)
-                                      .deleteCredential(
-                                        widget.deviceId,
-                                        cred.kind,
-                                      ),
                                 ),
+                                if (cred.dedicated != null)
+                                  const SemanticChip(
+                                    label: 'Chave dedicada',
+                                    tone: SemanticTone.success,
+                                    compact: true,
+                                  )
+                                else if (cred.sessionActive)
+                                  const SemanticChip(
+                                    label: 'Sessão ativa',
+                                    tone: SemanticTone.info,
+                                    compact: true,
+                                  ),
                               ],
-                            )
-                          : null,
-                    );
-                  })
-                  .toList(growable: false),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              cred.dedicated != null
+                                  ? 'Chave dedicada SSH (${cred.dedicated!.username})'
+                                  : 'Armazenamento: ${cred.storage}${cred.sessionActive ? ' · Sessão ativa' : ''}',
+                              style: context.textTheme.bodySmall?.copyWith(
+                                color: context.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                            if (isAdmin) ...<Widget>[
+                              const SizedBox(height: 10),
+                              SymmetricalActionBar(
+                                children: <Widget>[
+                                  FilledButton.tonalIcon(
+                                    style: FilledButton.styleFrom(
+                                      visualDensity: VisualDensity.compact,
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 8,
+                                      ),
+                                    ),
+                                    onPressed: () async {
+                                      final saved =
+                                          await showDeviceAccessDialog(
+                                            context: context,
+                                            ref: ref,
+                                            deviceId: widget.deviceId,
+                                            lockedTransport: cred.kind,
+                                          );
+                                      if (saved) {
+                                        await ref
+                                            .read(pluginsProvider.notifier)
+                                            .loadDevice(widget.deviceId);
+                                      }
+                                    },
+                                    icon: const Icon(
+                                      Icons.vpn_key_outlined,
+                                      size: 16,
+                                    ),
+                                    label: const Text(
+                                      'Gerenciar',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  OutlinedButton.icon(
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor:
+                                          context.colorScheme.error,
+                                      side: BorderSide(
+                                        color: context.colorScheme.error,
+                                      ),
+                                      visualDensity: VisualDensity.compact,
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 8,
+                                      ),
+                                    ),
+                                    onPressed: () => ref
+                                        .read(pluginsProvider.notifier)
+                                        .deleteCredential(
+                                          widget.deviceId,
+                                          cred.kind,
+                                        ),
+                                    icon: const Icon(
+                                      Icons.delete_outline,
+                                      size: 16,
+                                    ),
+                                    label: const Text(
+                                      'Remover',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ],
             ),
     );
   }

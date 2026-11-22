@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/core/utils/plugin_presentation.dart';
 import 'package:netmonitor_app/features/plugins/models/plugin_models.dart';
+import 'package:netmonitor_app/features/plugins/utils/plugin_settings_logic.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
 
@@ -89,7 +90,7 @@ class PluginOutputView extends StatelessWidget {
             children: cardMap.entries
                 .map((e) {
                   return SemanticChip(
-                    label: '${keyLabel(e.key)}: ${e.value}',
+                    label: '${humanizePluginFieldKey(e.key)}: ${e.value}',
                     tone: SemanticTone.plugin,
                     compact: true,
                   );
@@ -106,7 +107,7 @@ class PluginOutputView extends StatelessWidget {
                     final rawStr = e.value?.toString() ?? '—';
                     final isState = e.key == 'status' || e.key == 'state';
                     return KeyValueRow(
-                      label: keyLabel(e.key),
+                      label: humanizePluginFieldKey(e.key),
                       value: isState ? pluginStateLabel(e.value) : rawStr,
                       trailing: isState
                           ? SemanticChip(
@@ -124,7 +125,7 @@ class PluginOutputView extends StatelessWidget {
         ],
         for (final tbl in tables) ...<Widget>[
           Text(
-            keyLabel(tbl.key),
+            humanizePluginFieldKey(tbl.key),
             style: context.textTheme.titleSmall?.copyWith(
               fontWeight: FontWeight.w700,
             ),
@@ -134,7 +135,11 @@ class PluginOutputView extends StatelessWidget {
           const SizedBox(height: 10),
         ],
         for (final txt in texts) ...<Widget>[
-          CodeViewer(title: keyLabel(txt.key), code: txt.value, maxHeight: 220),
+          CodeViewer(
+            title: humanizePluginFieldKey(txt.key),
+            code: txt.value,
+            maxHeight: 220,
+          ),
           const SizedBox(height: 10),
         ],
       ],
@@ -170,7 +175,7 @@ class PluginOutputView extends StatelessWidget {
       scrollDirection: Axis.horizontal,
       child: DataTable(
         columns: cols
-            .map((c) => DataColumn(label: Text(keyLabel(c))))
+            .map((c) => DataColumn(label: Text(humanizePluginFieldKey(c))))
             .toList(growable: false),
         rows: maps
             .map((row) {

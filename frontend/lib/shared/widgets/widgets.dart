@@ -15,4 +15,5 @@ export 'section_card.dart';
 export 'semantic_chip.dart';
 export 'state_views.dart';
 export 'status_indicator.dart';
+export 'symmetrical_action_bar.dart';
 export 'unified_filter_bar.dart';

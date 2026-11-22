@@ -511,66 +511,57 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                               ],
                             ),
                             const SizedBox(height: 8),
-                            Wrap(
+                            Text(
+                              'Último acesso: ${formatRelativeTime(user.lastLoginAt)}',
+                              style: context.textTheme.bodySmall?.copyWith(
+                                color: context.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            SymmetricalActionBar(
                               spacing: 8,
-                              alignment: WrapAlignment.spaceBetween,
-                              crossAxisAlignment: WrapCrossAlignment.center,
+                              runSpacing: 8,
                               children: <Widget>[
-                                Text(
-                                  'Último acesso: ${formatRelativeTime(user.lastLoginAt)}',
-                                  style: context.textTheme.bodySmall?.copyWith(
-                                    color: context.colorScheme.onSurfaceVariant,
+                                OutlinedButton.icon(
+                                  onPressed: () => _openUserForm(user),
+                                  icon: const Icon(
+                                    Icons.edit_outlined,
+                                    size: 18,
                                   ),
+                                  label: const Text('Editar'),
                                 ),
-                                Wrap(
-                                  spacing: 4,
-                                  runSpacing: 4,
-                                  children: <Widget>[
-                                    TextButton.icon(
-                                      onPressed: () => _openUserForm(user),
-                                      icon: const Icon(
-                                        Icons.edit_outlined,
-                                        size: 18,
-                                      ),
-                                      label: const Text('Editar'),
-                                    ),
-                                    TextButton.icon(
-                                      onPressed: isSelf || isLastAdmin
+                                OutlinedButton.icon(
+                                  onPressed: isSelf || isLastAdmin
+                                      ? null
+                                      : () async {
+                                          final ok = await showConfirmActionDialog(
+                                            context: context,
+                                            title: 'Excluir usuário?',
+                                            message:
+                                                'A conta de "${user.fullName}" será removida permanentemente.',
+                                            confirmLabel: 'Excluir',
+                                          );
+                                          if (ok) {
+                                            await ref
+                                                .read(usersProvider.notifier)
+                                                .deleteUser(user.id);
+                                          }
+                                        },
+                                  icon: Icon(
+                                    Icons.delete_outline,
+                                    size: 18,
+                                    color: isSelf || isLastAdmin
+                                        ? null
+                                        : context.colorScheme.error,
+                                  ),
+                                  label: Text(
+                                    'Excluir',
+                                    style: TextStyle(
+                                      color: isSelf || isLastAdmin
                                           ? null
-                                          : () async {
-                                              final ok =
-                                                  await showConfirmActionDialog(
-                                                    context: context,
-                                                    title: 'Excluir usuário?',
-                                                    message:
-                                                        'A conta de "${user.fullName}" será removida permanentemente.',
-                                                    confirmLabel: 'Excluir',
-                                                  );
-                                              if (ok) {
-                                                await ref
-                                                    .read(
-                                                      usersProvider.notifier,
-                                                    )
-                                                    .deleteUser(user.id);
-                                              }
-                                            },
-                                      icon: Icon(
-                                        Icons.delete_outline,
-                                        size: 18,
-                                        color: isSelf || isLastAdmin
-                                            ? null
-                                            : context.colorScheme.error,
-                                      ),
-                                      label: Text(
-                                        'Excluir',
-                                        style: TextStyle(
-                                          color: isSelf || isLastAdmin
-                                              ? null
-                                              : context.colorScheme.error,
-                                        ),
-                                      ),
+                                          : context.colorScheme.error,
                                     ),
-                                  ],
+                                  ),
                                 ),
                               ],
                             ),

@@ -83,7 +83,7 @@ class _VendorRegistryCardState extends ConsumerState<VendorRegistryCard> {
           icon: Icons.factory_outlined,
           trailing: isCompact ? null : refreshButton,
           footer: isCompact && refreshButton != null
-              ? Align(alignment: Alignment.centerRight, child: refreshButton)
+              ? SymmetricalActionBar(children: <Widget>[refreshButton])
               : null,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -127,48 +127,25 @@ class _VendorRegistryCardState extends ConsumerState<VendorRegistryCard> {
                   ),
               ],
               const SizedBox(height: 14),
-              if (constraints.maxWidth < 460)
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: <Widget>[
-                    TextField(
+              Row(
+                children: <Widget>[
+                  Expanded(
+                    child: TextField(
                       controller: _macCtrl,
                       decoration: const InputDecoration(
                         labelText: 'Testar consulta de MAC',
-                        hintText: 'Ex.: DC:2C:6E:00:00:01',
+                        hintText: 'DC:2C:6E:00:00:01',
                       ),
                     ),
-                    const SizedBox(height: 8),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: OutlinedButton.icon(
-                        onPressed: _lookingUp ? null : _testLookup,
-                        icon: const Icon(Icons.search, size: 18),
-                        label: const Text('Consultar'),
-                      ),
-                    ),
-                  ],
-                )
-              else
-                Row(
-                  children: <Widget>[
-                    Expanded(
-                      child: TextField(
-                        controller: _macCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'Testar consulta de MAC',
-                          hintText: 'Ex.: DC:2C:6E:00:00:01',
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    OutlinedButton.icon(
-                      onPressed: _lookingUp ? null : _testLookup,
-                      icon: const Icon(Icons.search, size: 18),
-                      label: const Text('Consultar'),
-                    ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton.tonalIcon(
+                    onPressed: _lookingUp ? null : _testLookup,
+                    icon: const Icon(Icons.search, size: 18),
+                    label: const Text('Consultar'),
+                  ),
+                ],
+              ),
               if (_lookupResult != null) ...<Widget>[
                 const SizedBox(height: 10),
                 NestedPanel(
@@ -397,15 +374,16 @@ class _WifiSettingsCardState extends ConsumerState<WifiSettingsCard> {
                 ),
                 if (canWrite) ...<Widget>[
                   const SizedBox(height: 14),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: FilledButton.icon(
-                      onPressed: state.saving ? null : _save,
-                      icon: const Icon(Icons.save_outlined),
-                      label: Text(
-                        state.saving ? 'Salvando...' : 'Salvar configurações',
+                  SymmetricalActionBar(
+                    children: <Widget>[
+                      FilledButton.icon(
+                        onPressed: state.saving ? null : _save,
+                        icon: const Icon(Icons.save_outlined),
+                        label: Text(
+                          state.saving ? 'Salvando...' : 'Salvar configurações',
+                        ),
                       ),
-                    ),
+                    ],
                   ),
                 ],
               ],
