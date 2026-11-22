@@ -7,6 +7,54 @@ bool isLinkTestActiveStatus(String status) =>
     status == 'preparing' ||
     status == 'pending';
 
+/// Normaliza mensagens vindas do backend para evitar setas Unicode sem glifo
+/// (`↔`, `→`) e substituir o jargão técnico `"perna"` por `"trecho"`.
+String humanizeLinkTestText(String text) {
+  if (text.isEmpty) return text;
+  return text
+      .replaceAll('↔', '<->')
+      .replaceAll('→', '->')
+      .replaceAll(RegExp(r'\bPernas\b'), 'Trechos')
+      .replaceAll(RegExp(r'\bPerna\b'), 'Trecho')
+      .replaceAll(RegExp(r'\bpernas\b'), 'trechos')
+      .replaceAll(RegExp(r'\bperna\b'), 'trecho');
+}
+
+bool _isIneligibleLinkTestDevice(DeviceModel device) =>
+    device.type.trim().toLowerCase() == 'unmanaged_switch' ||
+    (!device.isSystem && !device.hasIp);
+
+/// Filtra equipamentos elegíveis como origem nos modos `end_to_end` e `path`
+/// (exclui switches não gerenciáveis e equipamentos sem IP).
+List<DeviceModel> filterLinkTestSourceDevices(Iterable<DeviceModel> devices) {
+  return devices
+      .where((d) => !_isIneligibleLinkTestDevice(d))
+      .toList(growable: false);
+}
+
+/// Filtra equipamentos elegíveis como destino conforme o modo do teste:
+/// - `server`: exclui o próprio servidor (`isSystem`), switches não gerenciáveis e itens sem IP;
+/// - `end_to_end` / `path`: exclui switches sem gerência/IP e oculta a `Origem` já selecionada.
+List<DeviceModel> filterLinkTestTargetDevices(
+  Iterable<DeviceModel> devices, {
+  required String kind,
+  int? excludeSourceId,
+}) {
+  final isServerMode = kind.trim().toLowerCase() == 'server';
+  return devices
+      .where((d) {
+        if (_isIneligibleLinkTestDevice(d)) return false;
+        if (isServerMode && (d.isSystem || !d.hasIp)) return false;
+        if (!isServerMode &&
+            excludeSourceId != null &&
+            d.id == excludeSourceId) {
+          return false;
+        }
+        return true;
+      })
+      .toList(growable: false);
+}
+
 @immutable
 class LinkTestSpecModel {
   const LinkTestSpecModel({
@@ -176,6 +224,22 @@ class LinkTestFixModel {
   final String? role;
   final List<String> packages;
 
+  String get uniqueKey =>
+      '$kind:$deviceId:${pluginId ?? ''}:${transport ?? ''}:${action ?? ''}:${role ?? ''}:${packages.join(',')}';
+
+  String get packageLabel {
+    if (packages.isNotEmpty) return packages.join(', ');
+    if (engine != null && engine!.trim().isNotEmpty) return engine!.trim();
+    return 'pacote';
+  }
+
+  String get actionButtonLabel => switch (kind) {
+    'install_plugin' => 'Ativar plugin',
+    'add_credential' => 'Configurar acesso',
+    'install_package' => 'Instalar $packageLabel',
+    _ => 'Resolver',
+  };
+
   factory LinkTestFixModel.fromJson(Map<String, dynamic> json) {
     return LinkTestFixModel(
       kind: (json['kind'] as String?) ?? '',
@@ -241,6 +305,16 @@ class LinkTestLegModel {
   final List<LinkTestFixModel> fixes;
   final List<LinkTestSampleModel> samples;
   final List<LinkTestHealthSampleModel> health;
+
+  String get routeLabel => viaNames.isEmpty
+      ? '${a.name} -> ${b.name}'
+      : '${a.name} -> ${viaNames.join(' -> ')} -> ${b.name}';
+
+  String get planSummary => <String>[
+    routeLabel,
+    if (engine != null && engine!.trim().isNotEmpty) engine!.trim(),
+    '${durationS}s',
+  ].join(' · ');
 
   factory LinkTestLegModel.fromJson(Map<String, dynamic> json) {
     return LinkTestLegModel(

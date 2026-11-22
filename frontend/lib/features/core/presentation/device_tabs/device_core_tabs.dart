@@ -79,6 +79,7 @@ class _DeviceMonitorsTabState extends ConsumerState<_DeviceMonitorsTab> {
   @override
   Widget build(BuildContext context) {
     final auth = ref.watch(authProvider);
+    final runningId = ref.watch(monitorsProvider).runningId;
 
     return RefreshIndicator(
       onRefresh: _load,
@@ -143,13 +144,37 @@ class _DeviceMonitorsTabState extends ConsumerState<_DeviceMonitorsTab> {
                       if (auth.canWrite)
                         IconButton(
                           tooltip: 'Testar agora',
-                          icon: const Icon(Icons.play_arrow_outlined),
-                          onPressed: () async {
-                            await ref
-                                .read(monitorsProvider.notifier)
-                                .runMonitor(m.id);
-                            await _load();
-                          },
+                          icon: runningId == m.id
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.play_arrow_outlined),
+                          onPressed: runningId == m.id
+                              ? null
+                              : () async {
+                                  final ok = await ref
+                                      .read(monitorsProvider.notifier)
+                                      .runMonitor(m.id);
+                                  if (!context.mounted) return;
+                                  await _load();
+                                  if (!context.mounted) return;
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        ok
+                                            ? 'Verificação executada em "${m.name}".'
+                                            : (ref
+                                                      .read(monitorsProvider)
+                                                      .error ??
+                                                  'Falha ao executar verificação.'),
+                                      ),
+                                    ),
+                                  );
+                                },
                         ),
                     ],
                   ),

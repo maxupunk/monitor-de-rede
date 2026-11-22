@@ -418,25 +418,141 @@ class TopologyNotifier extends Notifier<TopologyState> {
   void applyRealtimeHealth(Map<String, dynamic> data) {
     final deviceId = parseIntOrNull(data['deviceId']);
     if (deviceId == null) return;
-    final idx = state.nodes.indexWhere((n) => n.id == deviceId);
-    if (idx < 0) return;
     final metrics = asJsonMapList(data['metrics']);
     if (metrics.isEmpty) return;
 
+    final nodeIdx = state.nodes.indexWhere((n) => n.id == deviceId);
+    final hasConnectedEdge = state.edges.any(
+      (e) => e.sourceDeviceId == deviceId || e.targetDeviceId == deviceId,
+    );
+    if (nodeIdx < 0 && !hasConnectedEdge) return;
+
     double? cpu;
     double? mem;
+    double? deviceInBps;
+    double? deviceOutBps;
+    final byInterfaceId = <int, ({double? inBps, double? outBps})>{};
+
     for (final m in metrics) {
-      if (m['interfaceId'] != null) continue;
       final val = parseDoubleOrNull(m['value']);
-      if (val == null) continue;
-      final clamped = val.clamp(0.0, 100.0);
-      if (m['name'] == 'cpu_usage') cpu = clamped;
-      if (m['name'] == 'memory_usage') mem = clamped;
+      if (val == null || !val.isFinite) continue;
+      final name = m['name']?.toString();
+      final ifId = parseIntOrNull(m['interfaceId']);
+      final isIn = name == 'inBps' || name == 'in_bps';
+      final isOut = name == 'outBps' || name == 'out_bps';
+
+      if (ifId == null) {
+        if (name == 'cpu_usage') cpu = val.clamp(0.0, 100.0);
+        if (name == 'memory_usage') mem = val.clamp(0.0, 100.0);
+        if (isIn && val >= 0) deviceInBps = val;
+        if (isOut && val >= 0) deviceOutBps = val;
+      } else if ((isIn || isOut) && val >= 0) {
+        final prev = byInterfaceId[ifId];
+        byInterfaceId[ifId] = (
+          inBps: isIn ? val : prev?.inBps,
+          outBps: isOut ? val : prev?.outBps,
+        );
+      }
     }
-    if (cpu == null && mem == null) return;
-    final next = List<TopologyNodeModel>.from(state.nodes)
-      ..[idx] = state.nodes[idx].copyWith(cpuPercent: cpu, memoryPercent: mem);
-    state = state.copyWith(nodes: List<TopologyNodeModel>.unmodifiable(next));
+
+    List<TopologyNodeModel>? nextNodes;
+    if (nodeIdx >= 0 && (cpu != null || mem != null)) {
+      final updated = List<TopologyNodeModel>.from(state.nodes)
+        ..[nodeIdx] = state.nodes[nodeIdx].copyWith(
+          cpuPercent: cpu,
+          memoryPercent: mem,
+        );
+      nextNodes = List<TopologyNodeModel>.unmodifiable(updated);
+    }
+
+    var edgesChanged = false;
+    List<TopologyEdgeModel>? nextEdges;
+    final hasDeviceLevelTraffic = deviceInBps != null || deviceOutBps != null;
+    if (byInterfaceId.isNotEmpty || hasDeviceLevelTraffic) {
+      final isSystemDevice = nodeIdx >= 0 && state.nodes[nodeIdx].isSystem;
+      final realLinksForDevice = state.edges
+          .where(
+            (e) =>
+                !e.isVirtualHierarchy &&
+                (e.sourceDeviceId == deviceId || e.targetDeviceId == deviceId),
+          )
+          .toList(growable: false);
+      final candidateLinksForDevice = realLinksForDevice.isNotEmpty
+          ? realLinksForDevice
+          : state.edges
+                .where(
+                  (e) =>
+                      e.sourceDeviceId == deviceId ||
+                      e.targetDeviceId == deviceId,
+                )
+                .toList(growable: false);
+      final allowUnboundDeviceTraffic =
+          hasDeviceLevelTraffic &&
+          (isSystemDevice || candidateLinksForDevice.length == 1);
+      final candidateEdgeIds = allowUnboundDeviceTraffic
+          ? candidateLinksForDevice.map((e) => e.id).toSet()
+          : const <int>{};
+
+      nextEdges = state.edges
+          .map((edge) {
+            if (edge.sourceDeviceId == deviceId) {
+              final ifMatch = edge.sourceInterfaceId != null
+                  ? byInterfaceId[edge.sourceInterfaceId!]
+                  : null;
+              if (ifMatch != null) {
+                edgesChanged = true;
+                return edge.withTrafficUpdate(
+                  inBps: ifMatch.inBps,
+                  outBps: ifMatch.outBps,
+                  trafficFromSource: true,
+                );
+              }
+              if (candidateEdgeIds.contains(edge.id) &&
+                  (edge.sourceInterfaceId == null ||
+                      candidateLinksForDevice.length == 1)) {
+                edgesChanged = true;
+                return edge.withTrafficUpdate(
+                  inBps: deviceInBps,
+                  outBps: deviceOutBps,
+                  trafficFromSource: true,
+                );
+              }
+            }
+            if (edge.targetDeviceId == deviceId) {
+              final canAcceptTarget =
+                  edge.sourceInterfaceId == null || !edge.trafficFromSource;
+              final ifMatch = edge.targetInterfaceId != null
+                  ? byInterfaceId[edge.targetInterfaceId!]
+                  : null;
+              if (ifMatch != null && canAcceptTarget) {
+                edgesChanged = true;
+                return edge.withTrafficUpdate(
+                  inBps: ifMatch.inBps,
+                  outBps: ifMatch.outBps,
+                );
+              }
+              if (candidateEdgeIds.contains(edge.id) &&
+                  canAcceptTarget &&
+                  (edge.targetInterfaceId == null ||
+                      candidateLinksForDevice.length == 1)) {
+                edgesChanged = true;
+                return edge.withTrafficUpdate(
+                  inBps: deviceInBps,
+                  outBps: deviceOutBps,
+                );
+              }
+            }
+            return edge;
+          })
+          .toList(growable: false);
+    }
+
+    if (nextNodes != null || edgesChanged) {
+      state = state.copyWith(
+        nodes: nextNodes,
+        edges: edgesChanged ? nextEdges : null,
+      );
+    }
   }
 
   void applyRealtimeTraffic(Map<String, dynamic> data) {
@@ -445,6 +561,36 @@ class TopologyNotifier extends Notifier<TopologyState> {
     final rawInterfaces = asJsonMapList(data['interfaces']);
     if (rawInterfaces.isEmpty) return;
 
+    final deviceEdgeCount = state.edges
+        .where(
+          (e) => e.sourceDeviceId == deviceId || e.targetDeviceId == deviceId,
+        )
+        .length;
+
+    Map<String, dynamic>? matchEndpoint(int? ifId, String? ifName) {
+      final normName = ifName?.trim().toLowerCase();
+      for (final item in rawInterfaces) {
+        if (ifId != null && parseIntOrNull(item['id']) == ifId) {
+          return item;
+        }
+        if (normName != null &&
+            normName.isNotEmpty &&
+            item['name'] != null &&
+            item['name'].toString().trim().toLowerCase() == normName) {
+          return item;
+        }
+      }
+      if (deviceEdgeCount == 1 &&
+          rawInterfaces.length == 1 &&
+          ifId == null &&
+          (normName == null ||
+              normName.isEmpty ||
+              rawInterfaces.first['name'] == null)) {
+        return rawInterfaces.first;
+      }
+      return null;
+    }
+
     var changed = false;
     final nextEdges = state.edges
         .map((edge) {
@@ -452,50 +598,39 @@ class TopologyNotifier extends Notifier<TopologyState> {
               edge.targetDeviceId != deviceId) {
             return edge;
           }
-          Map<String, dynamic>? match(int? ifId, String? ifName) {
-            for (final item in rawInterfaces) {
-              if (ifId != null && parseIntOrNull(item['id']) == ifId) {
-                return item;
-              }
-              if (ifName != null &&
-                  item['name'] != null &&
-                  item['name'].toString().toLowerCase() ==
-                      ifName.toLowerCase()) {
-                return item;
-              }
-            }
-            return null;
-          }
 
           if (edge.sourceDeviceId == deviceId) {
-            final m =
-                match(edge.sourceInterfaceId, edge.sourceInterfaceName) ??
-                (rawInterfaces.length == 1 && edge.sourceInterfaceId == null
-                    ? rawInterfaces.first
-                    : null);
+            final m = matchEndpoint(
+              edge.sourceInterfaceId,
+              edge.sourceInterfaceName,
+            );
             if (m != null) {
+              final nextIn = parseDoubleOrNull(m['inBps']);
+              final nextOut = parseDoubleOrNull(m['outBps']);
               changed = true;
               return edge.withTrafficUpdate(
-                inBps: parseDoubleOrNull(m['inBps']),
-                outBps: parseDoubleOrNull(m['outBps']),
+                inBps: nextIn,
+                outBps: nextOut,
                 sourceInterfaceStatus: m['operStatus']?.toString(),
                 sourceInterfaceSpeed: parseDoubleOrNull(m['speed']),
+                trafficFromSource:
+                    (nextIn != null || nextOut != null) ||
+                    edge.trafficFromSource,
               );
             }
           }
           if (edge.targetDeviceId == deviceId) {
-            final m =
-                match(edge.targetInterfaceId, edge.targetInterfaceName) ??
-                (rawInterfaces.length == 1 && edge.targetInterfaceId == null
-                    ? rawInterfaces.first
-                    : null);
+            final m = matchEndpoint(
+              edge.targetInterfaceId,
+              edge.targetInterfaceName,
+            );
             if (m != null) {
+              final canUpdateTraffic =
+                  edge.sourceInterfaceId == null || !edge.trafficFromSource;
               changed = true;
               return edge.withTrafficUpdate(
-                inBps: edge.inBps == null
-                    ? parseDoubleOrNull(m['inBps'])
-                    : null,
-                outBps: edge.outBps == null
+                inBps: canUpdateTraffic ? parseDoubleOrNull(m['inBps']) : null,
+                outBps: canUpdateTraffic
                     ? parseDoubleOrNull(m['outBps'])
                     : null,
                 targetInterfaceStatus: m['operStatus']?.toString(),

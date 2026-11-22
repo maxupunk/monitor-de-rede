@@ -132,6 +132,7 @@ class TopologyEdgeModel {
     this.confirmed = false,
     this.stale = false,
     this.lastSeenAt,
+    this.trafficFromSource = false,
   });
 
   final int id;
@@ -160,12 +161,29 @@ class TopologyEdgeModel {
   final String status;
   final bool stale;
   final String? lastSeenAt;
+  final bool trafficFromSource;
 
   bool get isVirtualHierarchy => id < 0;
 
+  double? get effectiveTrafficBps {
+    if (trafficBps != null && trafficBps!.isFinite) return trafficBps;
+    final hasIn = inBps != null && inBps!.isFinite;
+    final hasOut = outBps != null && outBps!.isFinite;
+    if (hasIn || hasOut) {
+      return (hasIn ? inBps! : 0.0) + (hasOut ? outBps! : 0.0);
+    }
+    return null;
+  }
+
+  bool get hasLiveTraffic =>
+      (inBps != null && inBps!.isFinite) ||
+      (outBps != null && outBps!.isFinite) ||
+      (trafficBps != null && trafficBps!.isFinite);
+
   String get formattedTraffic {
     if (trafficLabel != null && trafficLabel!.isNotEmpty) return trafficLabel!;
-    if (trafficBps != null) return formatBps(trafficBps);
+    final total = effectiveTrafficBps;
+    if (total != null) return formatBps(total);
     return '';
   }
 
@@ -216,6 +234,7 @@ class TopologyEdgeModel {
     String? targetInterfaceStatus,
     double? sourceInterfaceSpeed,
     double? targetInterfaceSpeed,
+    bool? trafficFromSource,
   }) {
     final nextIn = inBps ?? this.inBps;
     final nextOut = outBps ?? this.outBps;
@@ -223,21 +242,42 @@ class TopologyEdgeModel {
     final nextTgtStatus = targetInterfaceStatus ?? this.targetInterfaceStatus;
     final nextSrcSpeed = sourceInterfaceSpeed ?? this.sourceInterfaceSpeed;
     final nextTgtSpeed = targetInterfaceSpeed ?? this.targetInterfaceSpeed;
+    final nextFromSource = trafficFromSource ?? this.trafficFromSource;
 
+    final hasDir = nextIn != null || nextOut != null;
     final total = nextIn != null && nextOut != null
         ? nextIn + nextOut
         : (nextIn ?? nextOut ?? trafficBps);
-    final effectiveSpeed = speedBps ?? _minPositive(nextSrcSpeed, nextTgtSpeed);
-    final peak = nextIn != null || nextOut != null
+    final portSpeed = _minPositive(nextSrcSpeed, nextTgtSpeed);
+    final effectiveSpeed =
+        (sourceInterfaceSpeed != null || targetInterfaceSpeed != null)
+        ? (nextSrcSpeed != null &&
+                  nextSrcSpeed > 0 &&
+                  nextTgtSpeed != null &&
+                  nextTgtSpeed > 0
+              ? portSpeed
+              : _minPositive(speedBps, portSpeed))
+        : (speedBps ?? portSpeed);
+    final peak = hasDir
         ? ((nextIn ?? 0) > (nextOut ?? 0) ? (nextIn ?? 0) : (nextOut ?? 0))
-        : null;
+        : total;
     final nextUtil =
         (effectiveSpeed != null && effectiveSpeed > 0 && peak != null)
         ? (peak / effectiveSpeed).clamp(0.0, 1.0)
         : utilization;
-    final nextStatus = (nextSrcStatus == 'down' || nextTgtStatus == 'down')
-        ? 'down'
-        : 'up';
+
+    final srcNorm = nextSrcStatus?.trim().toLowerCase();
+    final tgtNorm = nextTgtStatus?.trim().toLowerCase();
+    final String nextStatus;
+    if (srcNorm == 'down' || tgtNorm == 'down') {
+      nextStatus = 'down';
+    } else if (srcNorm == 'up' || tgtNorm == 'up') {
+      nextStatus = 'up';
+    } else if (hasDir && status.trim().toLowerCase() == 'unknown') {
+      nextStatus = 'up';
+    } else {
+      nextStatus = status;
+    }
 
     return TopologyEdgeModel(
       id: id,
@@ -266,6 +306,7 @@ class TopologyEdgeModel {
       status: nextStatus,
       stale: stale,
       lastSeenAt: lastSeenAt,
+      trafficFromSource: nextFromSource,
     );
   }
 

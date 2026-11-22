@@ -29,7 +29,6 @@ class _DiscoveryPageState extends ConsumerState<DiscoveryPage>
   final TextEditingController _hostSearchCtrl = TextEditingController();
   int? _selectedNetworkId;
   String _hostFilter = 'all';
-  final Set<String> _selectedHostIps = <String>{};
   bool _autoStarted = false;
   bool _envBannerDismissed = false;
   bool _completedBannerDismissed = false;
@@ -109,14 +108,17 @@ class _DiscoveryPageState extends ConsumerState<DiscoveryPage>
       },
     );
     if (saved != null && mounted) {
-      setState(() => _selectedHostIps.remove(host.ipAddress));
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('"${saved.name}" adicionado ao inventário.')),
       );
     }
   }
 
-  Future<void> _adoptSelectedBatch(List<StreamedDiscoveryHost> hosts) async {
+  Future<void> _adoptSelectedBatch(
+    List<StreamedDiscoveryHost> hosts,
+    Set<String> selectedIps,
+  ) async {
+    if (selectedIps.isEmpty) return;
     final netId =
         ref.read(discoveryProvider).scan.networkId ?? _selectedNetworkId;
     final net = ref
@@ -126,7 +128,7 @@ class _DiscoveryPageState extends ConsumerState<DiscoveryPage>
         .firstOrNull;
     var created = 0;
     for (final host in hosts) {
-      if (!_selectedHostIps.contains(host.ipAddress)) continue;
+      if (!selectedIps.contains(host.ipAddress)) continue;
       final res = await ref
           .read(devicesProvider.notifier)
           .createDevice(<String, dynamic>{
@@ -142,7 +144,6 @@ class _DiscoveryPageState extends ConsumerState<DiscoveryPage>
       if (res != null) created++;
     }
     if (!mounted) return;
-    setState(() => _selectedHostIps.clear());
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
@@ -150,6 +151,27 @@ class _DiscoveryPageState extends ConsumerState<DiscoveryPage>
         ),
       ),
     );
+  }
+
+  Future<void> _openBatchAdoptSheet(
+    List<StreamedDiscoveryHost> newHosts,
+  ) async {
+    if (newHosts.isEmpty) return;
+    final selectedIps = await showAdaptiveFormSheet<Set<String>>(
+      context: context,
+      title: 'Adotar em lote',
+      subtitle:
+          'Selecione os equipamentos descobertos para adicionar ao inventário.',
+      maxWidth: 580,
+      builder: (ctx) => _BatchAdoptSheetBody(
+        hosts: newHosts,
+        onCancel: () => Navigator.of(ctx).pop(),
+        onConfirm: (picked) => Navigator.of(ctx).pop(picked),
+      ),
+    );
+    if (selectedIps != null && selectedIps.isNotEmpty && mounted) {
+      await _adoptSelectedBatch(newHosts, selectedIps);
+    }
   }
 
   void _showHostDetails(
@@ -254,9 +276,10 @@ class _DiscoveryPageState extends ConsumerState<DiscoveryPage>
     final canWrite = ref.watch(authProvider).canWrite;
 
     final allHosts = discovery.scan.hosts;
-    final newCount = allHosts
+    final newHosts = allHosts
         .where((h) => !managedIps.contains(h.ipAddress))
-        .length;
+        .toList(growable: false);
+    final newCount = newHosts.length;
     final managedCount = allHosts.length - newCount;
 
     final query = _hostSearchCtrl.text.trim().toLowerCase();
@@ -267,7 +290,7 @@ class _DiscoveryPageState extends ConsumerState<DiscoveryPage>
           if (_hostFilter == 'managed' && !managed) return false;
           if (query.isNotEmpty) {
             final text =
-                '${h.ipAddress} ${h.macAddress ?? ''} ${h.hostname ?? ''} ${h.vendor ?? ''}'
+                '${h.ipAddress} ${h.macAddress ?? ''} ${h.hostname ?? ''} ${h.mdnsName ?? ''} ${h.systemOrVendorLabel ?? ''}'
                     .toLowerCase();
             if (!text.contains(query)) return false;
           }
@@ -364,33 +387,12 @@ class _DiscoveryPageState extends ConsumerState<DiscoveryPage>
                 newCount: newCount,
                 managedCount: managedCount,
                 managedIps: managedIps,
-                selectedHostIps: _selectedHostIps,
                 canWrite: canWrite,
                 hostFilter: _hostFilter,
                 searchController: _hostSearchCtrl,
                 onSearchChanged: () => setState(() {}),
                 onFilterChanged: (f) => setState(() => _hostFilter = f),
-                onToggleSelection: (ip, selected) {
-                  setState(() {
-                    if (selected) {
-                      _selectedHostIps.add(ip);
-                    } else {
-                      _selectedHostIps.remove(ip);
-                    }
-                  });
-                },
-                onSelectAllVisibleNew: () {
-                  setState(() {
-                    for (final h in hosts) {
-                      if (!managedIps.contains(h.ipAddress)) {
-                        _selectedHostIps.add(h.ipAddress);
-                      }
-                    }
-                  });
-                },
-                onClearSelection: () =>
-                    setState(() => _selectedHostIps.clear()),
-                onAdoptSelected: () => _adoptSelectedBatch(hosts),
+                onOpenBatchAdopt: () => _openBatchAdoptSheet(newHosts),
                 onAdoptSingle: _adoptHost,
                 onOpenDetails: _showHostDetails,
                 onRefresh: _bootstrap,
@@ -809,16 +811,12 @@ class _DiscoveryResultsTab extends StatelessWidget {
     required this.newCount,
     required this.managedCount,
     required this.managedIps,
-    required this.selectedHostIps,
     required this.canWrite,
     required this.hostFilter,
     required this.searchController,
     required this.onSearchChanged,
     required this.onFilterChanged,
-    required this.onToggleSelection,
-    required this.onSelectAllVisibleNew,
-    required this.onClearSelection,
-    required this.onAdoptSelected,
+    required this.onOpenBatchAdopt,
     required this.onAdoptSingle,
     required this.onOpenDetails,
     required this.onRefresh,
@@ -829,16 +827,12 @@ class _DiscoveryResultsTab extends StatelessWidget {
   final int newCount;
   final int managedCount;
   final Set<String> managedIps;
-  final Set<String> selectedHostIps;
   final bool canWrite;
   final String hostFilter;
   final TextEditingController searchController;
   final VoidCallback onSearchChanged;
   final ValueChanged<String> onFilterChanged;
-  final void Function(String ip, bool selected) onToggleSelection;
-  final VoidCallback onSelectAllVisibleNew;
-  final VoidCallback onClearSelection;
-  final VoidCallback onAdoptSelected;
+  final VoidCallback onOpenBatchAdopt;
   final ValueChanged<StreamedDiscoveryHost> onAdoptSingle;
   final void Function(StreamedDiscoveryHost, bool isManaged, bool canWrite)
   onOpenDetails;
@@ -878,51 +872,22 @@ class _DiscoveryResultsTab extends StatelessWidget {
                       ),
                     ],
                   ),
-                  if (canWrite && selectedHostIps.isNotEmpty) ...<Widget>[
+                  if (canWrite && newCount > 1) ...<Widget>[
                     const SizedBox(height: 8),
-                    NestedPanel(
-                      tone: SemanticTone.primary,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 6,
-                      ),
-                      child: Row(
-                        children: <Widget>[
-                          Expanded(
-                            child: Text(
-                              countNoun(
-                                selectedHostIps.length,
-                                'selecionado',
-                                'selecionados',
-                              ),
-                              style: context.textTheme.labelLarge?.copyWith(
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                          TextButton(
-                            onPressed: onClearSelection,
-                            child: const Text('Limpar'),
-                          ),
-                          const SizedBox(width: 4),
-                          FilledButton.icon(
-                            onPressed: onAdoptSelected,
-                            icon: const Icon(Icons.playlist_add, size: 18),
-                            label: Text('Adotar (${selectedHostIps.length})'),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ] else if (canWrite && newCount > 1) ...<Widget>[
                     Align(
                       alignment: Alignment.centerRight,
-                      child: TextButton.icon(
-                        style: TextButton.styleFrom(
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
                           visualDensity: VisualDensity.compact,
+                          minimumSize: const Size(0, 36),
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
                         ),
-                        onPressed: onSelectAllVisibleNew,
-                        icon: const Icon(Icons.done_all, size: 16),
-                        label: const Text('Selecionar novos visíveis'),
+                        onPressed: onOpenBatchAdopt,
+                        icon: const Icon(
+                          Icons.playlist_add_check_outlined,
+                          size: 18,
+                        ),
+                        label: Text('Adotar em lote ($newCount)'),
                       ),
                     ),
                   ],
@@ -949,15 +914,11 @@ class _DiscoveryResultsTab extends StatelessWidget {
                 itemBuilder: (context, index) {
                   final host = hosts[index];
                   final managed = managedIps.contains(host.ipAddress);
-                  final checked = selectedHostIps.contains(host.ipAddress);
                   return _DiscoveryHostCard(
                     host: host,
                     managed: managed,
-                    checked: checked,
                     canWrite: canWrite,
                     onTap: () => onOpenDetails(host, managed, canWrite),
-                    onToggleSelect: (v) =>
-                        onToggleSelection(host.ipAddress, v ?? false),
                     onAdopt: () => onAdoptSingle(host),
                   );
                 },
@@ -973,92 +934,96 @@ class _DiscoveryHostCard extends StatelessWidget {
   const _DiscoveryHostCard({
     required this.host,
     required this.managed,
-    required this.checked,
     required this.canWrite,
     required this.onTap,
-    required this.onToggleSelect,
     required this.onAdopt,
   });
 
   final StreamedDiscoveryHost host;
   final bool managed;
-  final bool checked;
   final bool canWrite;
   final VoidCallback onTap;
-  final ValueChanged<bool?> onToggleSelect;
   final VoidCallback onAdopt;
 
   @override
   Widget build(BuildContext context) {
-    final details = <String>[
-      if (host.macAddress != null) host.macAddress!,
-      if (host.vendor != null) host.vendor!,
-      if (host.openPorts.isNotEmpty)
-        'Portas: ${host.openPorts.take(6).join(', ')}'
-            '${host.openPorts.length > 6 ? ' +${host.openPorts.length - 6}' : ''}',
-    ].join(' · ');
+    final scheme = context.colorScheme;
+    final addressLine = host.addressSubtitle;
+    final systemLine = host.systemOrVendorLabel;
+    final portsLine = host.openPortsSummary;
 
     return Card(
       elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: AppTheme.borderRadius),
+      clipBehavior: Clip.antiAlias,
       child: InkWell(
         borderRadius: AppTheme.borderRadius,
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
           child: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              if (!managed && canWrite)
-                Checkbox(
-                  visualDensity: VisualDensity.compact,
-                  value: checked,
-                  onChanged: onToggleSelect,
-                )
-              else
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: Icon(
-                    deviceTypeIcon(host.deviceType ?? 'other'),
-                    color: context.colorScheme.primary,
-                  ),
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: scheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(10),
                 ),
-              const SizedBox(width: 6),
+                child: Icon(
+                  deviceTypeIcon(host.deviceType ?? 'other'),
+                  size: 20,
+                  color: scheme.onPrimaryContainer,
+                ),
+              ),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
-                    Row(
-                      children: <Widget>[
-                        Flexible(
-                          child: Text(
-                            host.bestName,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: context.textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                        if (host.bestName != host.ipAddress) ...<Widget>[
-                          const SizedBox(width: 6),
-                          Text(
-                            host.ipAddress,
-                            style: context.textTheme.labelMedium?.copyWith(
-                              fontFamily: 'monospace',
-                              color: context.colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ],
-                      ],
+                    Text(
+                      host.bestName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: context.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: scheme.onSurface,
+                      ),
                     ),
-                    if (details.isNotEmpty) ...<Widget>[
+                    if (addressLine != null) ...<Widget>[
                       const SizedBox(height: 3),
                       Text(
-                        details,
-                        maxLines: 2,
+                        addressLine,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: context.textTheme.labelSmall?.copyWith(
+                          fontFamily: 'monospace',
+                          fontWeight: FontWeight.w600,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                    if (systemLine != null) ...<Widget>[
+                      const SizedBox(height: 3),
+                      Text(
+                        systemLine,
+                        maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: context.textTheme.bodySmall?.copyWith(
-                          color: context.colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w600,
+                          color: scheme.primary,
+                        ),
+                      ),
+                    ],
+                    if (portsLine != null) ...<Widget>[
+                      const SizedBox(height: 3),
+                      Text(
+                        portsLine,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: context.textTheme.labelSmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
                         ),
                       ),
                     ],
@@ -1075,7 +1040,9 @@ class _DiscoveryHostCard extends StatelessWidget {
               else if (canWrite)
                 FilledButton.tonal(
                   style: FilledButton.styleFrom(
-                    minimumSize: const Size(0, 38),
+                    minimumSize: const Size(0, 36),
+                    visualDensity: VisualDensity.compact,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                   ),
                   onPressed: onAdopt,
@@ -1091,6 +1058,173 @@ class _DiscoveryHostCard extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _BatchAdoptSheetBody extends StatefulWidget {
+  const _BatchAdoptSheetBody({
+    required this.hosts,
+    required this.onCancel,
+    required this.onConfirm,
+  });
+
+  final List<StreamedDiscoveryHost> hosts;
+  final VoidCallback onCancel;
+  final ValueChanged<Set<String>> onConfirm;
+
+  @override
+  State<_BatchAdoptSheetBody> createState() => _BatchAdoptSheetBodyState();
+}
+
+class _BatchAdoptSheetBodyState extends State<_BatchAdoptSheetBody> {
+  final Set<String> _selectedIps = <String>{};
+
+  void _selectAll() {
+    setState(() {
+      for (final host in widget.hosts) {
+        _selectedIps.add(host.ipAddress);
+      }
+    });
+  }
+
+  void _clearSelection() {
+    setState(_selectedIps.clear);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = context.colorScheme;
+    final allSelected = _selectedIps.length == widget.hosts.length;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Wrap(
+          alignment: WrapAlignment.spaceBetween,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 8,
+          runSpacing: 4,
+          children: <Widget>[
+            Text(
+              countNoun(_selectedIps.length, 'selecionado', 'selecionados'),
+              style: context.textTheme.labelLarge?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: scheme.onSurface,
+              ),
+            ),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                TextButton(
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                  ),
+                  onPressed: allSelected ? null : _selectAll,
+                  child: const Text('Selecionar todos'),
+                ),
+                const SizedBox(width: 4),
+                TextButton(
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                  ),
+                  onPressed: _selectedIps.isEmpty ? null : _clearSelection,
+                  child: const Text('Limpar'),
+                ),
+              ],
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(context).height * 0.45,
+          ),
+          child: NestedPanel(
+            padding: EdgeInsets.zero,
+            child: Material(
+              type: MaterialType.transparency,
+              clipBehavior: Clip.antiAlias,
+              borderRadius: AppTheme.borderRadius,
+              child: ListView.separated(
+                shrinkWrap: true,
+                itemCount: widget.hosts.length,
+                separatorBuilder: (context, index) => const Divider(height: 1),
+                itemBuilder: (context, index) {
+                  final host = widget.hosts[index];
+                  final selected = _selectedIps.contains(host.ipAddress);
+                  final subtitleParts = <String>[
+                    ?host.addressSubtitle,
+                    ?host.systemOrVendorLabel,
+                  ];
+                  return CheckboxListTile(
+                    dense: true,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    value: selected,
+                    onChanged: (checked) {
+                      setState(() {
+                        if (checked ?? false) {
+                          _selectedIps.add(host.ipAddress);
+                        } else {
+                          _selectedIps.remove(host.ipAddress);
+                        }
+                      });
+                    },
+                    secondary: Icon(
+                      deviceTypeIcon(host.deviceType ?? 'other'),
+                      size: 20,
+                      color: scheme.primary,
+                    ),
+                    title: Text(
+                      host.bestName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: context.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    subtitle: subtitleParts.isNotEmpty
+                        ? Text(
+                            subtitleParts.join(' · '),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: context.textTheme.labelSmall?.copyWith(
+                              fontFamily: 'monospace',
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          )
+                        : null,
+                  );
+                },
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Wrap(
+          alignment: WrapAlignment.end,
+          spacing: 8,
+          runSpacing: 8,
+          children: <Widget>[
+            TextButton(
+              onPressed: widget.onCancel,
+              child: const Text('Cancelar'),
+            ),
+            FilledButton.icon(
+              onPressed: _selectedIps.isEmpty
+                  ? null
+                  : () => widget.onConfirm(Set<String>.from(_selectedIps)),
+              icon: const Icon(Icons.playlist_add, size: 18),
+              label: const Text('Adotar selecionados'),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }

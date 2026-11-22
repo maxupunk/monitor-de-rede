@@ -7,7 +7,10 @@ import 'package:netmonitor_app/features/network/topology/engine/topology_engine.
 import 'package:netmonitor_app/theme/app_theme.dart';
 
 /// Escala mínima de zoom em que as pílulas de rótulo dos enlaces são exibidas.
-const double kTopologyEdgeBadgeMinScale = 0.72;
+const double kTopologyEdgeBadgeMinScale = 0.55;
+
+/// Escala mínima de zoom em que a 2ª linha (`capacidade · utilização`) aparece na pílula.
+const double kTopologyEdgeBadgeSecondaryMinScale = 0.68;
 
 /// Opacidade aplicada a enlaces fora do caminho destacado ou fora do filtro ativo.
 const double kTopologyEdgeDimmedOpacity = 0.22;
@@ -134,16 +137,19 @@ class TopologyEdgePainter extends CustomPainter {
       _paintEdge(canvas, edgePath, dimmed: false, emphasis: true);
     }
 
-    // Pílulas de rótulo no ponto médio (somente com zoom >= 0.72 para evitar poluição).
+    // Pílulas NOC de rótulo no ponto médio (zoom >= 0.55), com afastamento anti-colisão.
     if (showLabels && scale >= kTopologyEdgeBadgeMinScale) {
-      for (final edgePath in backgroundEdges) {
-        _paintEdgeBadge(canvas, edgePath, dimmed: true, emphasis: false);
-      }
-      for (final edgePath in regularEdges) {
-        _paintEdgeBadge(canvas, edgePath, dimmed: false, emphasis: false);
-      }
-      for (final edgePath in emphasisEdges) {
-        _paintEdgeBadge(canvas, edgePath, dimmed: false, emphasis: true);
+      final layouts = <_PreparedEdgeBadge>[
+        for (final ep in backgroundEdges)
+          ?_prepareEdgeBadge(ep, dimmed: true, emphasis: false),
+        for (final ep in regularEdges)
+          ?_prepareEdgeBadge(ep, dimmed: false, emphasis: false),
+        for (final ep in emphasisEdges)
+          ?_prepareEdgeBadge(ep, dimmed: false, emphasis: true),
+      ];
+      _resolveBadgeOverlaps(layouts);
+      for (final badge in layouts) {
+        _paintPreparedEdgeBadge(canvas, badge);
       }
     }
   }
@@ -383,8 +389,7 @@ class TopologyEdgePainter extends CustomPainter {
     }
   }
 
-  void _paintEdgeBadge(
-    Canvas canvas,
+  _PreparedEdgeBadge? _prepareEdgeBadge(
     TopologyEdgePath edgePath, {
     required bool dimmed,
     required bool emphasis,
@@ -393,81 +398,399 @@ class TopologyEdgePainter extends CustomPainter {
     final linkOverlay = overlayMode == TopologyOverlayMode.linkTest
         ? linkTestOverlay[edge.id]
         : null;
-    final label =
-        linkOverlay?.label ??
-        formatEdgeBadgeLabel(
-          edge,
-          overlay: overlayMode,
-          latencyMs: edgeLatencyMs[edge.id],
-        );
-    if (label.trim().isEmpty) return;
+    final spec = resolveEdgeBadgeSpec(
+      edge,
+      overlay: overlayMode,
+      latencyMs: edgeLatencyMs[edge.id],
+      linkTestLabel: linkOverlay?.label,
+      linkTestTone: linkOverlay?.tone,
+    );
+    if (spec.primaryLabel.trim().isEmpty && !spec.hasDirectionalTraffic) {
+      return null;
+    }
 
-    final tone = _resolveTone(edge);
-    final pair = semanticColors.resolve(tone, colorScheme);
     final isSelected = edge.id == selectedEdgeId;
     final alpha = dimmed ? kTopologyEdgeDimmedOpacity : 1.0;
+    final pair = semanticColors.resolve(spec.tone, colorScheme);
+    final baseStyle = textTheme.labelSmall ?? const TextStyle(fontSize: 11);
 
-    final textPainter = TextPainter(
-      text: TextSpan(
-        text: label,
-        style: (textTheme.labelSmall ?? const TextStyle(fontSize: 11)).copyWith(
-          fontSize: 10.5,
-          fontWeight: FontWeight.w700,
-          color: (isSelected ? colorScheme.onPrimary : colorScheme.onSurface)
-              .withValues(alpha: alpha),
-          height: 1.15,
+    final primaryTextColor = isSelected
+        ? colorScheme.onPrimaryContainer
+        : spec.isDown
+        ? pair.onContainer
+        : colorScheme.onSurface;
+    final secondaryTextColor = isSelected
+        ? colorScheme.onPrimaryContainer.withValues(alpha: 0.85 * alpha)
+        : colorScheme.onSurfaceVariant.withValues(alpha: alpha);
+
+    TextPainter? primaryPainter;
+    TextPainter? rxPainter;
+    TextPainter? sepPainter;
+    TextPainter? txPainter;
+
+    const arrowBox = 8.5;
+    const arrowGap = 2.5;
+    const sepGap = 4.5;
+
+    double line1Width;
+    double line1Height;
+
+    if (spec.hasDirectionalTraffic) {
+      final dirStyle = baseStyle.copyWith(
+        fontSize: 10.0,
+        fontWeight: FontWeight.w700,
+        color: primaryTextColor.withValues(alpha: alpha),
+        height: 1.15,
+      );
+      rxPainter = TextPainter(
+        text: TextSpan(text: spec.rxLabel, style: dirStyle),
+        maxLines: 1,
+        textDirection: TextDirection.ltr,
+      )..layout(maxWidth: 84);
+      sepPainter = TextPainter(
+        text: TextSpan(
+          text: '·',
+          style: dirStyle.copyWith(color: secondaryTextColor),
         ),
-      ),
-      maxLines: 1,
-      textDirection: TextDirection.ltr,
-    )..layout(maxWidth: 160);
+        maxLines: 1,
+        textDirection: TextDirection.ltr,
+      )..layout();
+      txPainter = TextPainter(
+        text: TextSpan(text: spec.txLabel, style: dirStyle),
+        maxLines: 1,
+        textDirection: TextDirection.ltr,
+      )..layout(maxWidth: 84);
 
-    const hPad = 8.0;
-    const vPad = 3.5;
-    final pillWidth = textPainter.width + hPad * 2;
-    final pillHeight = textPainter.height + vPad * 2;
-    final pillRect = Rect.fromCenter(
+      line1Width =
+          arrowBox +
+          arrowGap +
+          rxPainter.width +
+          sepGap +
+          sepPainter.width +
+          sepGap +
+          arrowBox +
+          arrowGap +
+          txPainter.width;
+      line1Height = math.max(
+        arrowBox,
+        math.max(rxPainter.height, txPainter.height),
+      );
+    } else {
+      primaryPainter = TextPainter(
+        text: TextSpan(
+          text: spec.primaryLabel,
+          style: baseStyle.copyWith(
+            fontSize: 10.2,
+            fontWeight: FontWeight.w700,
+            color: primaryTextColor.withValues(alpha: alpha),
+            height: 1.15,
+          ),
+        ),
+        maxLines: 1,
+        ellipsis: '…',
+        textDirection: TextDirection.ltr,
+      )..layout(maxWidth: 164);
+      line1Width = primaryPainter.width + (spec.isDown ? 10.0 : 0.0);
+      line1Height = primaryPainter.height;
+    }
+
+    TextPainter? secondaryPainter;
+    final showSecondary =
+        spec.secondaryLabel != null &&
+        spec.secondaryLabel!.trim().isNotEmpty &&
+        scale >= kTopologyEdgeBadgeSecondaryMinScale;
+    if (showSecondary) {
+      secondaryPainter = TextPainter(
+        text: TextSpan(
+          text: spec.secondaryLabel,
+          style: baseStyle.copyWith(
+            fontSize: 9.2,
+            fontWeight: FontWeight.w600,
+            color: secondaryTextColor,
+            height: 1.1,
+          ),
+        ),
+        maxLines: 1,
+        ellipsis: '…',
+        textDirection: TextDirection.ltr,
+      )..layout(maxWidth: 164);
+    }
+
+    final hasUtilBar =
+        spec.utilization != null && spec.utilization!.isFinite && !spec.isDown;
+    const hPad = 7.5;
+    const topPad = 4.0;
+    final bottomPad = hasUtilBar ? 7.0 : 4.0;
+    const lineGap = 1.8;
+
+    final contentWidth = secondaryPainter != null
+        ? math.max(line1Width, secondaryPainter.width)
+        : line1Width;
+    final contentHeight =
+        line1Height +
+        (secondaryPainter != null ? lineGap + secondaryPainter.height : 0.0);
+
+    return _PreparedEdgeBadge(
+      edge: edge,
+      spec: spec,
+      pair: pair,
+      naturalCenter: edgePath.midpoint,
       center: edgePath.midpoint,
-      width: pillWidth,
-      height: pillHeight,
+      size: Size(contentWidth + hPad * 2, contentHeight + topPad + bottomPad),
+      dimmed: dimmed,
+      emphasis: emphasis,
+      isSelected: isSelected,
+      hasUtilBar: hasUtilBar,
+      line1Width: line1Width,
+      line1Height: line1Height,
+      hPad: hPad,
+      topPad: topPad,
+      lineGap: lineGap,
+      primaryPainter: primaryPainter,
+      rxPainter: rxPainter,
+      sepPainter: sepPainter,
+      txPainter: txPainter,
+      secondaryPainter: secondaryPainter,
     );
+  }
+
+  void _resolveBadgeOverlaps(List<_PreparedEdgeBadge> badges) {
+    if (badges.length < 2) return;
+    const minGap = 5.0;
+    const maxShiftX = 34.0;
+    const maxShiftY = 18.0;
+
+    for (var pass = 0; pass < 2; pass++) {
+      for (var i = 0; i < badges.length; i++) {
+        for (var j = i + 1; j < badges.length; j++) {
+          final a = badges[i];
+          final b = badges[j];
+          if (a.dimmed != b.dimmed) continue;
+          final rectA = a.rect.inflate(minGap / 2);
+          final rectB = b.rect.inflate(minGap / 2);
+          if (!rectA.overlaps(rectB)) continue;
+
+          final overlapX =
+              math.min(rectA.right, rectB.right) -
+              math.max(rectA.left, rectB.left);
+          final overlapY =
+              math.min(rectA.bottom, rectB.bottom) -
+              math.max(rectA.top, rectB.top);
+          if (overlapX <= 0 || overlapY <= 0) continue;
+
+          final dx = b.center.dx - a.center.dx;
+          if (dx.abs() >= 6.0) {
+            final dir = dx >= 0 ? 1.0 : -1.0;
+            final step = overlapX * 0.52;
+            a.shift(dx: -dir * step, dy: 0, maxDx: maxShiftX, maxDy: maxShiftY);
+            b.shift(dx: dir * step, dy: 0, maxDx: maxShiftX, maxDy: maxShiftY);
+          } else {
+            final dy = b.center.dy - a.center.dy;
+            final dir = dy >= 0 ? 1.0 : -1.0;
+            final step = overlapY * 0.52;
+            a.shift(dx: 0, dy: -dir * step, maxDx: maxShiftX, maxDy: maxShiftY);
+            b.shift(dx: 0, dy: dir * step, maxDx: maxShiftX, maxDy: maxShiftY);
+          }
+        }
+      }
+    }
+  }
+
+  void _paintPreparedEdgeBadge(Canvas canvas, _PreparedEdgeBadge badge) {
+    final pillRect = badge.rect;
     final pillRRect = RRect.fromRectAndRadius(
       pillRect,
-      const Radius.circular(8),
+      const Radius.circular(8.5),
     );
+    final alpha = badge.dimmed ? kTopologyEdgeDimmedOpacity : 1.0;
 
-    if (!dimmed) {
+    if (!badge.dimmed) {
       canvas.drawRRect(
-        pillRRect.shift(const Offset(0, 1.2)),
-        Paint()..color = colorScheme.shadow.withValues(alpha: 0.16),
+        pillRRect.shift(const Offset(0, 1.4)),
+        Paint()..color = colorScheme.shadow.withValues(alpha: 0.18),
       );
     }
 
-    final fillColor = isSelected
+    final fillColor = badge.isSelected
+        ? colorScheme.primaryContainer.withValues(
+            alpha: badge.dimmed ? 0.5 : 0.98,
+          )
+        : badge.spec.isDown
+        ? badge.pair.container.withValues(alpha: badge.dimmed ? 0.45 : 0.96)
+        : colorScheme.surface.withValues(alpha: badge.dimmed ? 0.48 : 0.97);
+
+    final borderColor = badge.isSelected
         ? colorScheme.primary
-        : colorScheme.surface.withValues(alpha: dimmed ? 0.45 : 0.96);
-    final borderColor = isSelected
-        ? colorScheme.primary
-        : emphasis
+        : badge.spec.isDown
+        ? semanticColors.error.withValues(alpha: badge.dimmed ? 0.36 : 0.88)
+        : badge.emphasis
         ? semanticColors.warning
-        : pair.foreground.withValues(alpha: dimmed ? 0.3 : 0.72);
+        : badge.pair.foreground.withValues(alpha: badge.dimmed ? 0.32 : 0.76);
 
     canvas.drawRRect(pillRRect, Paint()..color = fillColor);
     canvas.drawRRect(
       pillRRect,
       Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = emphasis ? 1.6 : 1.1
+        ..strokeWidth = badge.isSelected || badge.emphasis ? 1.7 : 1.15
         ..color = borderColor,
     );
 
-    textPainter.paint(
-      canvas,
-      Offset(
-        pillRect.left + hPad,
-        pillRect.top + (pillHeight - textPainter.height) / 2,
-      ),
-    );
+    final line1Left = pillRect.left + (pillRect.width - badge.line1Width) / 2.0;
+    final line1Top = pillRect.top + badge.topPad;
+
+    if (badge.spec.hasDirectionalTraffic) {
+      const arrowBox = 8.5;
+      const arrowGap = 2.5;
+      const sepGap = 4.5;
+
+      final rxArrowColor =
+          (badge.isSelected ? semanticColors.success : semanticColors.success)
+              .withValues(alpha: alpha);
+      final txArrowColor = colorScheme.primary.withValues(alpha: alpha);
+
+      var cursorX = line1Left;
+      final centerY = line1Top + badge.line1Height / 2.0;
+
+      _paintMiniArrow(
+        canvas,
+        center: Offset(cursorX + arrowBox / 2.0, centerY),
+        downward: true,
+        color: rxArrowColor,
+        size: arrowBox,
+      );
+      cursorX += arrowBox + arrowGap;
+
+      final rxP = badge.rxPainter!;
+      rxP.paint(
+        canvas,
+        Offset(cursorX, line1Top + (badge.line1Height - rxP.height) / 2.0),
+      );
+      cursorX += rxP.width + sepGap;
+
+      final sepP = badge.sepPainter!;
+      sepP.paint(
+        canvas,
+        Offset(cursorX, line1Top + (badge.line1Height - sepP.height) / 2.0),
+      );
+      cursorX += sepP.width + sepGap;
+
+      _paintMiniArrow(
+        canvas,
+        center: Offset(cursorX + arrowBox / 2.0, centerY),
+        downward: false,
+        color: txArrowColor,
+        size: arrowBox,
+      );
+      cursorX += arrowBox + arrowGap;
+
+      final txP = badge.txPainter!;
+      txP.paint(
+        canvas,
+        Offset(cursorX, line1Top + (badge.line1Height - txP.height) / 2.0),
+      );
+    } else if (badge.primaryPainter != null) {
+      final p = badge.primaryPainter!;
+      var textX = line1Left;
+      if (badge.spec.isDown) {
+        final dotCenter = Offset(
+          line1Left + 3.2,
+          line1Top + badge.line1Height / 2.0,
+        );
+        canvas.drawCircle(
+          dotCenter,
+          3.0,
+          Paint()..color = semanticColors.error.withValues(alpha: alpha),
+        );
+        textX += 10.0;
+      }
+      p.paint(
+        canvas,
+        Offset(textX, line1Top + (badge.line1Height - p.height) / 2.0),
+      );
+    }
+
+    if (badge.secondaryPainter != null) {
+      final secP = badge.secondaryPainter!;
+      final secLeft = pillRect.left + (pillRect.width - secP.width) / 2.0;
+      final secTop = line1Top + badge.line1Height + badge.lineGap;
+      secP.paint(canvas, Offset(secLeft, secTop));
+    }
+
+    if (badge.hasUtilBar) {
+      final util = badge.spec.utilization!.clamp(0.0, 1.0);
+      final utilColor = semanticColors
+          .resolve(utilizationTone(util), colorScheme)
+          .foreground
+          .withValues(alpha: alpha);
+      final trackLeft = pillRect.left + 6.5;
+      final trackWidth = math.max(8.0, pillRect.width - 13.0);
+      final trackRect = Rect.fromLTWH(
+        trackLeft,
+        pillRect.bottom - 4.8,
+        trackWidth,
+        2.5,
+      );
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(trackRect, const Radius.circular(2)),
+        Paint()
+          ..color = colorScheme.surfaceContainerHighest.withValues(
+            alpha: alpha * 0.9,
+          ),
+      );
+      if (util > 0.0) {
+        final fillW = math.min(trackWidth, math.max(3.5, trackWidth * util));
+        final fillRect = Rect.fromLTWH(
+          trackLeft,
+          trackRect.top,
+          fillW,
+          trackRect.height,
+        );
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(fillRect, const Radius.circular(2)),
+          Paint()..color = utilColor,
+        );
+      }
+    }
+  }
+
+  /// Desenha mini-seta vetorial nítida (Download `downward: true` ou Upload `false`)
+  /// sem depender de glifos de fonte Unicode (`↓`/`↑`).
+  void _paintMiniArrow(
+    Canvas canvas, {
+    required Offset center,
+    required bool downward,
+    required Color color,
+    double size = 8.5,
+  }) {
+    final halfH = size * 0.44;
+    final wingW = size * 0.34;
+    final wingH = size * 0.32;
+    final topY = center.dy - halfH;
+    final bottomY = center.dy + halfH;
+
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.65
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..color = color;
+
+    canvas.drawLine(Offset(center.dx, topY), Offset(center.dx, bottomY), paint);
+
+    final head = Path();
+    if (downward) {
+      head
+        ..moveTo(center.dx - wingW, bottomY - wingH)
+        ..lineTo(center.dx, bottomY)
+        ..lineTo(center.dx + wingW, bottomY - wingH);
+    } else {
+      head
+        ..moveTo(center.dx - wingW, topY + wingH)
+        ..lineTo(center.dx, topY)
+        ..lineTo(center.dx + wingW, topY + wingH);
+    }
+    canvas.drawPath(head, paint);
   }
 
   Path _buildDashedPath(
@@ -500,9 +823,77 @@ class TopologyEdgePainter extends CustomPainter {
         oldDelegate.showTrafficFlow != showTrafficFlow ||
         (oldDelegate.scale >= kTopologyEdgeBadgeMinScale) !=
             (scale >= kTopologyEdgeBadgeMinScale) ||
+        (oldDelegate.scale >= kTopologyEdgeBadgeSecondaryMinScale) !=
+            (scale >= kTopologyEdgeBadgeSecondaryMinScale) ||
         oldDelegate.edgeLatencyMs != edgeLatencyMs ||
         oldDelegate.linkTestOverlay != linkTestOverlay ||
         oldDelegate.colorScheme != colorScheme ||
         oldDelegate.semanticColors != semanticColors;
+  }
+}
+
+class _PreparedEdgeBadge {
+  _PreparedEdgeBadge({
+    required this.edge,
+    required this.spec,
+    required this.pair,
+    required this.naturalCenter,
+    required this.center,
+    required this.size,
+    required this.dimmed,
+    required this.emphasis,
+    required this.isSelected,
+    required this.hasUtilBar,
+    required this.line1Width,
+    required this.line1Height,
+    required this.hPad,
+    required this.topPad,
+    required this.lineGap,
+    this.primaryPainter,
+    this.rxPainter,
+    this.sepPainter,
+    this.txPainter,
+    this.secondaryPainter,
+  });
+
+  final TopologyEdgeModel edge;
+  final TopologyEdgeBadgeSpec spec;
+  final SemanticColorPair pair;
+  final Offset naturalCenter;
+  Offset center;
+  final Size size;
+  final bool dimmed;
+  final bool emphasis;
+  final bool isSelected;
+  final bool hasUtilBar;
+  final double line1Width;
+  final double line1Height;
+  final double hPad;
+  final double topPad;
+  final double lineGap;
+  final TextPainter? primaryPainter;
+  final TextPainter? rxPainter;
+  final TextPainter? sepPainter;
+  final TextPainter? txPainter;
+  final TextPainter? secondaryPainter;
+
+  Rect get rect =>
+      Rect.fromCenter(center: center, width: size.width, height: size.height);
+
+  void shift({
+    required double dx,
+    required double dy,
+    required double maxDx,
+    required double maxDy,
+  }) {
+    final nextX = (center.dx + dx).clamp(
+      naturalCenter.dx - maxDx,
+      naturalCenter.dx + maxDx,
+    );
+    final nextY = (center.dy + dy).clamp(
+      naturalCenter.dy - maxDy,
+      naturalCenter.dy + maxDy,
+    );
+    center = Offset(nextX, nextY);
   }
 }

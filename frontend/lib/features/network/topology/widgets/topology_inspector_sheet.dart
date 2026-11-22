@@ -9,6 +9,7 @@ import 'package:netmonitor_app/features/network/models/device_models.dart';
 import 'package:netmonitor_app/features/network/models/diagnostics_models.dart';
 import 'package:netmonitor_app/features/network/models/topology_models.dart';
 import 'package:netmonitor_app/features/network/providers/devices_provider.dart';
+import 'package:netmonitor_app/features/network/providers/topology_provider.dart';
 import 'package:netmonitor_app/features/network/topology/engine/topology_engine.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
@@ -633,15 +634,25 @@ class TopologyNodeInspectorBody extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final scheme = context.colorScheme;
-    final byId = <int, TopologyNodeModel>{for (final n in allNodes) n.id: n};
-    final neighbors = connectedNeighbors(allEdges, node.id);
-    final hasIp = node.ipAddress != null && node.ipAddress!.trim().isNotEmpty;
+    final topoState = ref.watch(topologyProvider);
+    final liveNodes = topoState.loaded && topoState.nodes.isNotEmpty
+        ? topoState.nodes
+        : allNodes;
+    final liveEdges = topoState.loaded && topoState.edges.isNotEmpty
+        ? topoState.edges
+        : allEdges;
+    final liveNode =
+        liveNodes.where((n) => n.id == node.id).firstOrNull ?? node;
+    final byId = <int, TopologyNodeModel>{for (final n in liveNodes) n.id: n};
+    final neighbors = connectedNeighbors(liveEdges, liveNode.id);
+    final hasIp =
+        liveNode.ipAddress != null && liveNode.ipAddress!.trim().isNotEmpty;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
         // ── Faixa de telemetria ao vivo ──
-        _NodeTelemetryStrip(node: node, neighborsCount: neighbors.length),
+        _NodeTelemetryStrip(node: liveNode, neighborsCount: neighbors.length),
         const SizedBox(height: 12),
 
         // ── Resultado inline do Ping Rápido ──
@@ -1086,15 +1097,28 @@ class _NeighborLinkTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = context.colorScheme;
+    final semantics = context.semanticColors;
     final edge = link.edge;
     final neighborName =
         neighbor?.name ??
         (link.isOutgoing ? edge.targetDeviceName : edge.sourceDeviceName) ??
         '#${link.neighborId}';
     final status = classifyNodeStatus(neighbor?.status);
-    final statusColors = context.semanticColors.resolve(status.tone, scheme);
-    final badgeLabel = formatEdgeBadgeLabel(edge);
+    final statusColors = semantics.resolve(status.tone, scheme);
+    final edgeStatus = classifyEdgeStatus(edge);
     final edgeTone = edgeSemanticTone(edge);
+    final speedBps = resolveEdgeSpeedBps(edge);
+
+    final String trailingChipLabel;
+    if (edgeStatus == TopologyEdgeStatus.down) {
+      trailingChipLabel = speedBps != null
+          ? 'Offline · ${formatLinkSpeed(speedBps)}'
+          : 'Offline';
+    } else if (speedBps != null) {
+      trailingChipLabel = formatLinkSpeed(speedBps);
+    } else {
+      trailingChipLabel = classifyLinkKind(edge.linkType).label;
+    }
 
     final localPort = link.isOutgoing
         ? edge.sourceInterfaceName
@@ -1105,7 +1129,18 @@ class _NeighborLinkTile extends StatelessWidget {
     final portsText = <String>[
       if (localPort != null && localPort.isNotEmpty) localPort,
       if (remotePort != null && remotePort.isNotEmpty) remotePort,
-    ].join(' ↔ ');
+    ].join(' · ');
+
+    final hasDirectionalTraffic =
+        edgeStatus != TopologyEdgeStatus.down &&
+        ((edge.inBps != null && edge.inBps!.isFinite) ||
+            (edge.outBps != null && edge.outBps!.isFinite));
+    final totalTrafficBps = edgeStatus != TopologyEdgeStatus.down
+        ? edge.effectiveTrafficBps
+        : null;
+    final util = edgeStatus != TopologyEdgeStatus.down
+        ? resolveEdgeUtilization(edge)
+        : null;
 
     return Material(
       color: scheme.surfaceContainerLow,
@@ -1169,8 +1204,91 @@ class _NeighborLinkTile extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: context.textTheme.labelSmall?.copyWith(
                           color: scheme.onSurfaceVariant,
-                          fontFamily: portsText.isEmpty ? 'monospace' : null,
+                          fontFamily: 'monospace',
                         ),
+                      ),
+                    ],
+                    if (hasDirectionalTraffic) ...<Widget>[
+                      const SizedBox(height: 4),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 2,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: <Widget>[
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: <Widget>[
+                              Icon(
+                                Icons.arrow_downward_rounded,
+                                size: 13,
+                                color: semantics.success,
+                              ),
+                              const SizedBox(width: 2),
+                              Text(
+                                'RX ${formatBps(edge.inBps ?? 0)}',
+                                style: context.textTheme.labelSmall?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                  color: scheme.onSurface,
+                                ),
+                              ),
+                            ],
+                          ),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: <Widget>[
+                              Icon(
+                                Icons.arrow_upward_rounded,
+                                size: 13,
+                                color: scheme.primary,
+                              ),
+                              const SizedBox(width: 2),
+                              Text(
+                                'TX ${formatBps(edge.outBps ?? 0)}',
+                                style: context.textTheme.labelSmall?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                  color: scheme.onSurface,
+                                ),
+                              ),
+                            ],
+                          ),
+                          if (util != null)
+                            Text(
+                              formatPercent(
+                                util * 100,
+                                digits: util > 0 && util < 0.1 ? 1 : 0,
+                              ),
+                              style: context.textTheme.labelSmall?.copyWith(
+                                fontWeight: FontWeight.w800,
+                                color: semantics
+                                    .resolve(utilizationTone(util), scheme)
+                                    .foreground,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ] else if (totalTrafficBps != null) ...<Widget>[
+                      const SizedBox(height: 4),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          Icon(
+                            Icons.swap_vert_rounded,
+                            size: 13,
+                            color: scheme.primary,
+                          ),
+                          const SizedBox(width: 3),
+                          Flexible(
+                            child: Text(
+                              formatBps(totalTrafficBps),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: context.textTheme.labelSmall?.copyWith(
+                                fontWeight: FontWeight.w700,
+                                color: scheme.onSurface,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ],
@@ -1178,7 +1296,7 @@ class _NeighborLinkTile extends StatelessWidget {
               ),
               const SizedBox(width: 6),
               SemanticChip(
-                label: badgeLabel,
+                label: trailingChipLabel,
                 tone: edgeTone,
                 compact: true,
                 onTap: onTapEdge,
@@ -1347,7 +1465,7 @@ Future<void> showTopologyEdgeInspectorSheet({
 }
 
 /// Corpo compartilhado do Inspetor de Enlace.
-class TopologyEdgeInspectorBody extends StatelessWidget {
+class TopologyEdgeInspectorBody extends ConsumerWidget {
   const TopologyEdgeInspectorBody({
     super.key,
     required this.edge,
@@ -1370,19 +1488,26 @@ class TopologyEdgeInspectorBody extends StatelessWidget {
   final VoidCallback onDeleteLink;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final scheme = context.colorScheme;
-    final byId = <int, TopologyNodeModel>{for (final n in allNodes) n.id: n};
-    final sourceNode = byId[edge.sourceDeviceId];
-    final targetNode = byId[edge.targetDeviceId];
-    final linkKind = classifyLinkKind(edge.linkType);
-    final util = resolveEdgeUtilization(edge);
+    final topoState = ref.watch(topologyProvider);
+    final liveNodes = topoState.loaded && topoState.nodes.isNotEmpty
+        ? topoState.nodes
+        : allNodes;
+    final liveEdge = topoState.loaded
+        ? (topoState.edges.where((e) => e.id == edge.id).firstOrNull ?? edge)
+        : edge;
+    final byId = <int, TopologyNodeModel>{for (final n in liveNodes) n.id: n};
+    final sourceNode = byId[liveEdge.sourceDeviceId];
+    final targetNode = byId[liveEdge.targetDeviceId];
+    final linkKind = classifyLinkKind(liveEdge.linkType);
+    final util = resolveEdgeUtilization(liveEdge);
     final utilTone = utilizationTone(util);
     final utilColors = context.semanticColors.resolve(utilTone, scheme);
-    final speedLabel = formatEdgeSpeedLabel(edge);
-    final trafficLabel = formatEdgeTrafficLabel(edge);
-    final confidencePct = edgeConfidencePercent(edge.confidence);
-    final isVirtual = isVirtualTopologyEdge(edge);
+    final speedLabel = formatEdgeSpeedLabel(liveEdge);
+    final trafficLabel = formatEdgeTrafficLabel(liveEdge);
+    final confidencePct = edgeConfidencePercent(liveEdge.confidence);
+    final isVirtual = isVirtualTopologyEdge(liveEdge);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1396,9 +1521,9 @@ class TopologyEdgeInspectorBody extends StatelessWidget {
                 child: _EndpointChipButton(
                   label:
                       sourceNode?.name ??
-                      edge.sourceDeviceName ??
-                      '#${edge.sourceDeviceId}',
-                  subtitle: edge.sourceInterfaceName,
+                      liveEdge.sourceDeviceName ??
+                      '#${liveEdge.sourceDeviceId}',
+                  subtitle: liveEdge.sourceInterfaceName,
                   icon: sourceNode != null
                       ? topologyNodeIcon(sourceNode)
                       : Icons.devices_other_outlined,
@@ -1419,9 +1544,9 @@ class TopologyEdgeInspectorBody extends StatelessWidget {
                 child: _EndpointChipButton(
                   label:
                       targetNode?.name ??
-                      edge.targetDeviceName ??
-                      '#${edge.targetDeviceId}',
-                  subtitle: edge.targetInterfaceName,
+                      liveEdge.targetDeviceName ??
+                      '#${liveEdge.targetDeviceId}',
+                  subtitle: liveEdge.targetInterfaceName,
                   icon: targetNode != null
                       ? topologyNodeIcon(targetNode)
                       : Icons.devices_other_outlined,
@@ -1484,43 +1609,45 @@ class TopologyEdgeInspectorBody extends StatelessWidget {
                 label: 'Meio / Tipo',
                 value: linkKind.label,
                 trailing: SemanticChip(
-                  label: edge.confirmed ? 'Confirmado' : 'Automático',
-                  tone: edge.confirmed
+                  label: liveEdge.confirmed ? 'Confirmado' : 'Automático',
+                  tone: liveEdge.confirmed
                       ? SemanticTone.success
                       : SemanticTone.info,
                   compact: true,
                 ),
               ),
               KeyValueRow(label: 'Velocidade', value: speedLabel),
-              if (edge.inBps != null || edge.outBps != null) ...<Widget>[
+              if (liveEdge.inBps != null ||
+                  liveEdge.outBps != null) ...<Widget>[
                 KeyValueRow(
                   label: 'Download (RX)',
-                  value: formatBps(edge.inBps ?? 0),
+                  value: formatBps(liveEdge.inBps ?? 0),
                 ),
                 KeyValueRow(
                   label: 'Upload (TX)',
-                  value: formatBps(edge.outBps ?? 0),
+                  value: formatBps(liveEdge.outBps ?? 0),
                 ),
               ] else if (trafficLabel != null)
                 KeyValueRow(label: 'Tráfego ao vivo', value: trafficLabel),
-              if (edge.sourceInterfaceName != null)
+              if (liveEdge.sourceInterfaceName != null)
                 KeyValueRow(
                   label: 'Porta origem',
-                  value: edge.sourceInterfaceName!,
+                  value: liveEdge.sourceInterfaceName!,
                   monospace: true,
                 ),
-              if (edge.targetInterfaceName != null)
+              if (liveEdge.targetInterfaceName != null)
                 KeyValueRow(
                   label: 'Porta destino',
-                  value: edge.targetInterfaceName!,
+                  value: liveEdge.targetInterfaceName!,
                   monospace: true,
                 ),
               if (confidencePct != null && !isVirtual)
                 KeyValueRow(label: 'Confiança', value: '$confidencePct%'),
-              if (edge.lastSeenAt != null && edge.lastSeenAt!.isNotEmpty)
+              if (liveEdge.lastSeenAt != null &&
+                  liveEdge.lastSeenAt!.isNotEmpty)
                 KeyValueRow(
                   label: 'Última leitura',
-                  value: formatRelativeTime(edge.lastSeenAt),
+                  value: formatRelativeTime(liveEdge.lastSeenAt),
                 ),
             ]),
           ),
@@ -1540,7 +1667,7 @@ class TopologyEdgeInspectorBody extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-            if (canWrite && canConfirmTopologyEdge(edge))
+            if (canWrite && canConfirmTopologyEdge(liveEdge))
               OutlinedButton.icon(
                 onPressed: onConfirmLink,
                 icon: const Icon(Icons.verified_outlined, size: 17),
@@ -1995,7 +2122,7 @@ class _TopologyInterfaceRow extends StatelessWidget {
                     <String>[
                       ?subtitle,
                       if (hasTraffic)
-                        '↓ ${formatBps(interfaceModel.inBps ?? 0)} · ↑ ${formatBps(interfaceModel.outBps ?? 0)}',
+                        'RX ${formatBps(interfaceModel.inBps ?? 0)} · TX ${formatBps(interfaceModel.outBps ?? 0)}',
                     ].join(' · '),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,

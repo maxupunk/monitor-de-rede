@@ -1179,6 +1179,7 @@ class _FindingsDialogBodyState extends ConsumerState<_FindingsDialogBody> {
   List<RegistryFindingView> _findings = const <RegistryFindingView>[];
   bool _loading = true;
   bool _scanning = false;
+  String? _error;
 
   @override
   void initState() {
@@ -1187,7 +1188,10 @@ class _FindingsDialogBodyState extends ConsumerState<_FindingsDialogBody> {
   }
 
   Future<void> _load() async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
       final list = await ref
           .read(registryProvider.notifier)
@@ -1197,13 +1201,21 @@ class _FindingsDialogBodyState extends ConsumerState<_FindingsDialogBody> {
         _findings = list;
         _loading = false;
       });
-    } catch (_) {
-      if (mounted) setState(() => _loading = false);
+    } catch (err) {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _error = err.toString();
+        });
+      }
     }
   }
 
   Future<void> _rescan() async {
-    setState(() => _scanning = true);
+    setState(() {
+      _scanning = true;
+      _error = null;
+    });
     try {
       final list = await ref
           .read(registryProvider.notifier)
@@ -1213,47 +1225,75 @@ class _FindingsDialogBodyState extends ConsumerState<_FindingsDialogBody> {
         _findings = list;
         _scanning = false;
       });
-    } catch (_) {
-      if (mounted) setState(() => _scanning = false);
+    } catch (err) {
+      if (mounted) {
+        setState(() {
+          _scanning = false;
+          _error = err.toString();
+        });
+      }
     }
   }
 
   Future<void> _acceptRisk(RegistryFindingView f) async {
     final reasonCtrl = TextEditingController();
+    String? dialogError;
     final reason = await showDialog<String>(
       context: context,
-      builder: (dlgCtx) => AlertDialog(
-        title: Text('Aceitar risco · ${f.advisory}'),
-        content: TextField(
-          controller: reasonCtrl,
-          maxLines: 3,
-          decoration: const InputDecoration(
-            labelText: 'Justificativa (mín. 5 caracteres)',
+      builder: (dlgCtx) => StatefulBuilder(
+        builder: (dlgCtx, setDialogState) => AlertDialog(
+          title: Text('Aceitar risco · ${f.advisory}'),
+          content: TextField(
+            controller: reasonCtrl,
+            maxLines: 3,
+            onChanged: (_) {
+              if (dialogError != null) {
+                setDialogState(() => dialogError = null);
+              }
+            },
+            decoration: InputDecoration(
+              labelText: 'Justificativa (mín. 5 caracteres)',
+              errorText: dialogError,
+            ),
           ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dlgCtx).pop(),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final trimmed = reasonCtrl.text.trim();
+                if (trimmed.length < 5) {
+                  setDialogState(
+                    () => dialogError =
+                        'Informe ao menos 5 caracteres de justificativa.',
+                  );
+                  return;
+                }
+                Navigator.of(dlgCtx).pop(trimmed);
+              },
+              child: const Text('Aceitar por 30 dias'),
+            ),
+          ],
         ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(dlgCtx).pop(),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dlgCtx).pop(reasonCtrl.text.trim()),
-            child: const Text('Aceitar por 30 dias'),
-          ),
-        ],
       ),
     );
     reasonCtrl.dispose();
-    if (reason == null || reason.length < 5 || !mounted) return;
-    await ref
-        .read(registryProvider.notifier)
-        .addException(
-          applicationId: widget.applicationId,
-          advisory: f.advisory,
-          reason: reason,
-          days: 30,
-        );
-    await _load();
+    if (reason == null || !mounted) return;
+    try {
+      await ref
+          .read(registryProvider.notifier)
+          .addException(
+            applicationId: widget.applicationId,
+            advisory: f.advisory,
+            reason: reason,
+            days: 30,
+          );
+      await _load();
+    } catch (err) {
+      if (mounted) setState(() => _error = err.toString());
+    }
   }
 
   @override
@@ -1279,6 +1319,10 @@ class _FindingsDialogBodyState extends ConsumerState<_FindingsDialogBody> {
           ],
         ),
         const SizedBox(height: 12),
+        if (_error != null) ...<Widget>[
+          NestedPanel(tone: SemanticTone.error, child: Text(_error!)),
+          const SizedBox(height: 10),
+        ],
         if (_loading)
           const LoadingStateView(message: 'Lendo relatório SBOM/OSV...')
         else if (_findings.isEmpty)

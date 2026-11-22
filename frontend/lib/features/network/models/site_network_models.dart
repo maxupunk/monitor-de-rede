@@ -263,6 +263,64 @@ class StreamedDiscoveryHost {
       ? mdnsName!.trim()
       : ipAddress;
 
+  String? get normalizedMac {
+    final trimmed = macAddress?.trim();
+    return (trimmed != null && trimmed.isNotEmpty) ? trimmed : null;
+  }
+
+  /// Linha 2 do card de descoberta: `IP · MAC` quando há hostname no título,
+  /// ou apenas o `MAC` quando o próprio IP já ocupa o título.
+  String? get addressSubtitle {
+    final mac = normalizedMac;
+    if (bestName != ipAddress) {
+      return <String>[ipAddress, ?mac].join(' · ');
+    }
+    return mac;
+  }
+
+  /// Extrai o nome do sistema operacional reportado em [data], se disponível.
+  String? get detectedOsLabel {
+    for (final key in const <String>['operatingSystem', 'osName', 'os']) {
+      final raw = data[key];
+      if (raw is String && raw.trim().isNotEmpty) {
+        return raw.trim();
+      }
+      if (raw is Map) {
+        for (final subKey in const <String>['name', 'label', 'family']) {
+          final nested = raw[subKey];
+          if (nested is String && nested.trim().isNotEmpty) {
+            return nested.trim();
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  /// Linha 3 do card de descoberta: sistema operacional e/ou fabricante sem duplicar.
+  String? get systemOrVendorLabel {
+    final os = detectedOsLabel;
+    final cleanVendor = (vendor != null && vendor!.trim().isNotEmpty)
+        ? vendor!.trim()
+        : null;
+    if (os != null && cleanVendor != null) {
+      final osLower = os.toLowerCase();
+      final vendorLower = cleanVendor.toLowerCase();
+      if (osLower.contains(vendorLower)) return os;
+      if (vendorLower.contains(osLower)) return cleanVendor;
+      return '$cleanVendor · $os';
+    }
+    return os ?? cleanVendor;
+  }
+
+  /// Linha 4 do card de descoberta: resumo compacto de portas abertas.
+  String? get openPortsSummary {
+    if (openPorts.isEmpty) return null;
+    final listed = openPorts.take(6).join(', ');
+    final extra = openPorts.length > 6 ? ' +${openPorts.length - 6}' : '';
+    return 'Portas: $listed$extra';
+  }
+
   factory StreamedDiscoveryHost.fromJson(Map<String, dynamic> json) {
     return StreamedDiscoveryHost(
       ipAddress: (json['ipAddress'] as String?) ?? '',

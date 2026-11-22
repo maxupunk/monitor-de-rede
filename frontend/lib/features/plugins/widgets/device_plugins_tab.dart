@@ -2,10 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
+import 'package:netmonitor_app/core/network/api_client.dart';
+import 'package:netmonitor_app/core/utils/device_defaults.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/core/utils/plugin_presentation.dart';
 import 'package:netmonitor_app/features/ai/providers/ai_providers.dart';
 import 'package:netmonitor_app/features/ai/widgets/ai_proactive_widgets.dart';
+import 'package:netmonitor_app/features/network/widgets/device_access_host.dart'
+    show showDeviceAuthFailureDialog;
 import 'package:netmonitor_app/features/plugins/models/plugin_models.dart';
 import 'package:netmonitor_app/features/plugins/providers/plugins_provider.dart';
 import 'package:netmonitor_app/features/plugins/utils/plugin_settings_logic.dart';
@@ -36,8 +40,44 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
   String _section = 'catalog';
   bool _initializedSection = false;
   int? _activeRunId;
+  int? _installingPluginId;
+  String? _actionError;
   final Map<int, Map<String, dynamic>> _settingsDrafts =
       <int, Map<String, dynamic>>{};
+
+  Future<void> _runPluginOp(
+    Future<void> Function() op, {
+    String? successMessage,
+  }) async {
+    if (mounted) setState(() => _actionError = null);
+    try {
+      await op();
+      if (mounted && successMessage != null) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(successMessage)));
+      }
+    } catch (err) {
+      if (!mounted) return;
+      final platform = ref
+          .read(pluginsProvider)
+          .deviceViews[widget.deviceId]
+          ?.platform;
+      final msg = isDeviceAuthFailure(err)
+          ? formatDeviceAuthFailureMessage(err, platformOrOs: platform)
+          : (err is ApiException && err.message.trim().isNotEmpty
+                ? err.message.trim()
+                : err.toString());
+      setState(() => _actionError = msg);
+      if (isDeviceAuthFailure(err)) {
+        await showDeviceAuthFailureDialog(context, err, platformOrOs: platform);
+      } else {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(msg)));
+      }
+    }
+  }
 
   @override
   void initState() {
@@ -75,20 +115,22 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
 
     final hasParams = parsePluginSchemaFields(action.paramsSchema).isNotEmpty;
     if (!hasParams && !action.isWrite) {
-      final runId = await withDeviceAccess<int>(
-        context: context,
-        ref: ref,
-        action: () => ref
-            .read(pluginsProvider.notifier)
-            .runAction(
-              deviceId: widget.deviceId,
-              pluginId: plugin.id,
-              action: action.name,
-            ),
-      );
-      if (runId != null && mounted) {
-        setState(() => _activeRunId = runId);
-      }
+      await _runPluginOp(() async {
+        final runId = await withDeviceAccess<int>(
+          context: context,
+          ref: ref,
+          action: () => ref
+              .read(pluginsProvider.notifier)
+              .runAction(
+                deviceId: widget.deviceId,
+                pluginId: plugin.id,
+                action: action.name,
+              ),
+        );
+        if (runId != null && mounted) {
+          setState(() => _activeRunId = runId);
+        }
+      });
       return;
     }
 
@@ -119,18 +161,21 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
                     values: values,
                     onChanged: (next) => setModalState(() => values = next),
                     onRevealSecret: (fieldName, revealAction) async {
-                      final out = await withDeviceAccess<Map<String, dynamic>>(
-                        context: context,
-                        ref: ref,
-                        action: () => ref
-                            .read(pluginsProvider.notifier)
-                            .revealSecret(
-                              deviceId: widget.deviceId,
-                              pluginId: plugin.id,
-                              action: revealAction,
-                              params: values,
-                            ),
-                      );
+                      Map<String, dynamic>? out;
+                      await _runPluginOp(() async {
+                        out = await withDeviceAccess<Map<String, dynamic>>(
+                          context: context,
+                          ref: ref,
+                          action: () => ref
+                              .read(pluginsProvider.notifier)
+                              .revealSecret(
+                                deviceId: widget.deviceId,
+                                pluginId: plugin.id,
+                                action: revealAction,
+                                params: values,
+                              ),
+                        );
+                      });
                       return out?[fieldName]?.toString() ??
                           out?['password']?.toString();
                     },
@@ -177,24 +222,26 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
                                   values,
                                 );
                                 Navigator.of(sheetCtx).pop();
-                                final runId = await withDeviceAccess<int>(
-                                  context: context,
-                                  ref: ref,
-                                  retryAuto: !action.isWrite,
-                                  actionLabel: action.title,
-                                  action: () => ref
-                                      .read(pluginsProvider.notifier)
-                                      .runAction(
-                                        deviceId: widget.deviceId,
-                                        pluginId: plugin.id,
-                                        action: action.name,
-                                        params: normalized,
-                                        confirmWrite: action.isWrite,
-                                      ),
-                                );
-                                if (runId != null && mounted) {
-                                  setState(() => _activeRunId = runId);
-                                }
+                                await _runPluginOp(() async {
+                                  final runId = await withDeviceAccess<int>(
+                                    context: context,
+                                    ref: ref,
+                                    retryAuto: !action.isWrite,
+                                    actionLabel: action.title,
+                                    action: () => ref
+                                        .read(pluginsProvider.notifier)
+                                        .runAction(
+                                          deviceId: widget.deviceId,
+                                          pluginId: plugin.id,
+                                          action: action.name,
+                                          params: normalized,
+                                          confirmWrite: action.isWrite,
+                                        ),
+                                  );
+                                  if (runId != null && mounted) {
+                                    setState(() => _activeRunId = runId);
+                                  }
+                                });
                               },
                         icon: const Icon(Icons.play_arrow, size: 18),
                         label: const Text('Executar'),
@@ -355,6 +402,24 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
             ),
           ),
           const SizedBox(height: 14),
+          if (_actionError != null) ...<Widget>[
+            NestedPanel(
+              tone: SemanticTone.error,
+              child: Row(
+                children: <Widget>[
+                  const Icon(Icons.error_outline, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text(_actionError!)),
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.close, size: 16),
+                    onPressed: () => setState(() => _actionError = null),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
 
           if (_section.startsWith('plugin-'))
             _buildInstalledPluginSection(
@@ -408,7 +473,7 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
           children: <Widget>[
             if (isAdmin && isQuarantine)
               FilledButton.icon(
-                onPressed: () async {
+                onPressed: () => _runPluginOp(() async {
                   final detail = await ref
                       .read(pluginsProvider.notifier)
                       .fetchDetail(plugin.id);
@@ -419,7 +484,7 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
                       refreshDeviceId: widget.deviceId,
                     );
                   }
-                },
+                }),
                 icon: const Icon(Icons.security_outlined, size: 18),
                 label: const Text(
                   'Revisar segurança',
@@ -429,13 +494,16 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
               ),
             if (isAdmin && !isQuarantine)
               FilledButton.icon(
-                onPressed: () => ref
-                    .read(pluginsProvider.notifier)
-                    .lifecycle(
-                      plugin.id,
-                      'enable',
-                      refreshDeviceId: widget.deviceId,
-                    ),
+                onPressed: () => _runPluginOp(
+                  () => ref
+                      .read(pluginsProvider.notifier)
+                      .lifecycle(
+                        plugin.id,
+                        'enable',
+                        refreshDeviceId: widget.deviceId,
+                      ),
+                  successMessage: 'Plugin "${plugin.name}" reativado.',
+                ),
                 icon: const Icon(Icons.power_settings_new, size: 18),
                 label: const Text(
                   'Reativar plugin',
@@ -445,12 +513,12 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
               ),
             if (isAdmin)
               OutlinedButton(
-                onPressed: () async {
+                onPressed: () => _runPluginOp(() async {
                   await ref
                       .read(pluginsProvider.notifier)
                       .uninstallPlugin(widget.deviceId, plugin.id);
                   if (mounted) setState(() => _section = 'catalog');
-                },
+                }, successMessage: 'Plugin desinstalado do equipamento.'),
                 child: const Text(
                   'Desinstalar',
                   maxLines: 1,
@@ -484,32 +552,38 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
             constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
             onSelected: (cmd) async {
               if (cmd == 'validate') {
-                final runId = await withDeviceAccess<int>(
-                  context: context,
-                  ref: ref,
-                  action: () => ref
-                      .read(pluginsProvider.notifier)
-                      .validatePlugin(widget.deviceId, plugin.id),
-                );
-                if (runId != null && mounted) {
-                  setState(() => _activeRunId = runId);
-                }
-              } else if (cmd == 'edit') {
-                final detail = await ref
-                    .read(pluginsProvider.notifier)
-                    .fetchDetail(plugin.id);
-                if (context.mounted) {
-                  await showPluginEditorDialog(
+                await _runPluginOp(() async {
+                  final runId = await withDeviceAccess<int>(
                     context: context,
-                    existing: detail,
-                    exclusiveDeviceId: widget.deviceId,
+                    ref: ref,
+                    action: () => ref
+                        .read(pluginsProvider.notifier)
+                        .validatePlugin(widget.deviceId, plugin.id),
                   );
-                }
+                  if (runId != null && mounted) {
+                    setState(() => _activeRunId = runId);
+                  }
+                });
+              } else if (cmd == 'edit') {
+                await _runPluginOp(() async {
+                  final detail = await ref
+                      .read(pluginsProvider.notifier)
+                      .fetchDetail(plugin.id);
+                  if (context.mounted) {
+                    await showPluginEditorDialog(
+                      context: context,
+                      existing: detail,
+                      exclusiveDeviceId: widget.deviceId,
+                    );
+                  }
+                });
               } else if (cmd == 'uninstall') {
-                await ref
-                    .read(pluginsProvider.notifier)
-                    .uninstallPlugin(widget.deviceId, plugin.id);
-                if (mounted) setState(() => _section = 'catalog');
+                await _runPluginOp(() async {
+                  await ref
+                      .read(pluginsProvider.notifier)
+                      .uninstallPlugin(widget.deviceId, plugin.id);
+                  if (mounted) setState(() => _section = 'catalog');
+                }, successMessage: 'Plugin desinstalado do equipamento.');
               }
             },
             itemBuilder: (_) => const <PopupMenuEntry<String>>[
@@ -678,8 +752,8 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
                   Align(
                     alignment: Alignment.centerRight,
                     child: FilledButton.icon(
-                      onPressed: () async {
-                        await ref
+                      onPressed: () => _runPluginOp(
+                        () => ref
                             .read(pluginsProvider.notifier)
                             .saveDeviceSettings(
                               widget.deviceId,
@@ -689,15 +763,9 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
                                 draft,
                                 omitEmpty: false,
                               ),
-                            );
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Ajustes do equipamento salvos.'),
                             ),
-                          );
-                        }
-                      },
+                        successMessage: 'Ajustes do equipamento salvos.',
+                      ),
                       icon: const Icon(Icons.save_outlined, size: 18),
                       label: const Text('Salvar ajustes'),
                     ),
@@ -811,21 +879,57 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
                               backgroundColor: context.semanticColors.plugin,
                               foregroundColor: context.semanticColors.onPlugin,
                             ),
-                            onPressed: () async {
-                              await ref
-                                  .read(pluginsProvider.notifier)
-                                  .installPlugin(
-                                    widget.deviceId,
-                                    item.plugin.id,
-                                  );
-                              if (mounted) {
-                                setState(
-                                  () => _section = 'plugin-${item.plugin.id}',
-                                );
-                              }
-                            },
-                            icon: const Icon(Icons.download_outlined, size: 18),
-                            label: const Text('Instalar'),
+                            onPressed: _installingPluginId != null
+                                ? null
+                                : () async {
+                                    setState(
+                                      () =>
+                                          _installingPluginId = item.plugin.id,
+                                    );
+                                    try {
+                                      await _runPluginOp(() async {
+                                        final ok = await withDeviceAccess<bool>(
+                                          context: context,
+                                          ref: ref,
+                                          action: () async {
+                                            await ref
+                                                .read(pluginsProvider.notifier)
+                                                .installPlugin(
+                                                  widget.deviceId,
+                                                  item.plugin.id,
+                                                );
+                                            return true;
+                                          },
+                                        );
+                                        if (ok == true && mounted) {
+                                          setState(
+                                            () => _section =
+                                                'plugin-${item.plugin.id}',
+                                          );
+                                        }
+                                      });
+                                    } finally {
+                                      if (mounted) {
+                                        setState(
+                                          () => _installingPluginId = null,
+                                        );
+                                      }
+                                    }
+                                  },
+                            icon: _installingPluginId == item.plugin.id
+                                ? const SizedBox(
+                                    width: 15,
+                                    height: 15,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.download_outlined, size: 18),
+                            label: Text(
+                              _installingPluginId == item.plugin.id
+                                  ? 'Instalando...'
+                                  : 'Instalar',
+                            ),
                           ),
                       ],
                     ),
@@ -1010,12 +1114,26 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
                                         vertical: 8,
                                       ),
                                     ),
-                                    onPressed: () => ref
-                                        .read(pluginsProvider.notifier)
-                                        .deleteCredential(
-                                          widget.deviceId,
-                                          cred.kind,
-                                        ),
+                                    onPressed: () async {
+                                      final ok = await showConfirmActionDialog(
+                                        context: context,
+                                        title: 'Remover credencial',
+                                        message:
+                                            'Remover a credencial ${cred.kind.toUpperCase()} deste equipamento?',
+                                        confirmLabel: 'Remover',
+                                      );
+                                      if (!ok || !mounted) return;
+                                      await _runPluginOp(
+                                        () => ref
+                                            .read(pluginsProvider.notifier)
+                                            .deleteCredential(
+                                              widget.deviceId,
+                                              cred.kind,
+                                            ),
+                                        successMessage:
+                                            'Credencial ${cred.kind.toUpperCase()} removida.',
+                                      );
+                                    },
                                     icon: const Icon(
                                       Icons.delete_outline,
                                       size: 16,

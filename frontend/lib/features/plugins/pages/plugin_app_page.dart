@@ -3,8 +3,12 @@ import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
+import 'package:netmonitor_app/core/network/api_client.dart';
+import 'package:netmonitor_app/core/utils/device_defaults.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/core/utils/plugin_presentation.dart';
+import 'package:netmonitor_app/features/network/widgets/device_access_host.dart'
+    show showDeviceAuthFailureDialog;
 import 'package:netmonitor_app/features/plugins/models/plugin_models.dart';
 import 'package:netmonitor_app/features/plugins/providers/plugin_apps_provider.dart';
 import 'package:netmonitor_app/features/plugins/providers/plugins_provider.dart';
@@ -84,6 +88,30 @@ class _PluginAppPageState extends ConsumerState<PluginAppPage> {
           .fetchDetail(widget.pluginId);
       if (mounted) setState(() => _detailForAbout = detail);
     } catch (_) {}
+  }
+
+  Future<void> _runFleetOp(
+    Future<void> Function() op, {
+    String? successMessage,
+  }) async {
+    try {
+      await op();
+      if (mounted && successMessage != null) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(successMessage)));
+      }
+    } catch (err) {
+      if (!mounted) return;
+      if (isDeviceAuthFailure(err)) {
+        await showDeviceAuthFailureDialog(context, err);
+        return;
+      }
+      final msg = err is ApiException && err.message.trim().isNotEmpty
+          ? err.message.trim()
+          : err.toString();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    }
   }
 
   void _maybeAutoRead(FleetView fleet) {
@@ -892,9 +920,13 @@ class _PluginAppPageState extends ConsumerState<PluginAppPage> {
                               vertical: 10,
                             ),
                           ),
-                          onPressed: () => ref
-                              .read(pluginAppsProvider.notifier)
-                              .removeMember(widget.pluginId, member.deviceId),
+                          onPressed: () => _runFleetOp(
+                            () => ref
+                                .read(pluginAppsProvider.notifier)
+                                .removeMember(widget.pluginId, member.deviceId),
+                            successMessage:
+                                '"${member.deviceName}" removido da frota.',
+                          ),
                           icon: const Icon(Icons.link_off, size: 16),
                           label: const Text(
                             'Tirar da frota',
@@ -1055,8 +1087,8 @@ class _PluginAppPageState extends ConsumerState<PluginAppPage> {
               Align(
                 alignment: Alignment.centerRight,
                 child: FilledButton.icon(
-                  onPressed: () async {
-                    await ref
+                  onPressed: () => _runFleetOp(
+                    () => ref
                         .read(pluginAppsProvider.notifier)
                         .saveFleetSettings(
                           widget.pluginId,
@@ -1065,15 +1097,9 @@ class _PluginAppPageState extends ConsumerState<PluginAppPage> {
                             _fleetSettingsDraft,
                             omitEmpty: false,
                           ),
-                        );
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Configuração da frota salva.'),
                         ),
-                      );
-                    }
-                  },
+                    successMessage: 'Configuração da frota salva.',
+                  ),
                   icon: const Icon(Icons.save_outlined, size: 18),
                   label: const Text('Salvar configuração'),
                 ),
@@ -1127,9 +1153,12 @@ class _PluginAppPageState extends ConsumerState<PluginAppPage> {
                 Align(
                   alignment: Alignment.centerRight,
                   child: OutlinedButton(
-                    onPressed: () => ref
-                        .read(pluginAppsProvider.notifier)
-                        .cancelBatch(batch.id),
+                    onPressed: () => _runFleetOp(
+                      () => ref
+                          .read(pluginAppsProvider.notifier)
+                          .cancelBatch(batch.id),
+                      successMessage: 'Cancelamento solicitado.',
+                    ),
                     child: const Text('Cancelar lote'),
                   ),
                 ),
@@ -1146,9 +1175,12 @@ class _PluginAppPageState extends ConsumerState<PluginAppPage> {
                         'Este lote propõe ajustes para os equipamentos.',
                       ),
                       FilledButton.tonal(
-                        onPressed: () => ref
-                            .read(pluginAppsProvider.notifier)
-                            .applyPatch(batch),
+                        onPressed: () => _runFleetOp(
+                          () => ref
+                              .read(pluginAppsProvider.notifier)
+                              .applyPatch(batch),
+                          successMessage: 'Sugestão aplicada com sucesso.',
+                        ),
                         child: const Text('Aceitar sugestão'),
                       ),
                     ],
@@ -1198,13 +1230,15 @@ class _PluginAppPageState extends ConsumerState<PluginAppPage> {
                                 ref
                                     .read(pluginAppsProvider.notifier)
                                     .canRerun(batch.id, d.deviceId)) {
-                              await ref
-                                  .read(pluginAppsProvider.notifier)
-                                  .rerunDevice(
-                                    batch.id,
-                                    d.deviceId,
-                                    confirmWrite: true,
-                                  );
+                              await _runFleetOp(
+                                () => ref
+                                    .read(pluginAppsProvider.notifier)
+                                    .rerunDevice(
+                                      batch.id,
+                                      d.deviceId,
+                                      confirmWrite: true,
+                                    ),
+                              );
                             }
                           },
                           child: const Text('Acesso'),

@@ -48,6 +48,9 @@ class SymmetricalActionBar extends StatelessWidget {
     if (children.isEmpty) {
       return const SizedBox.shrink();
     }
+    if (children.length == 1) {
+      return SizedBox(width: double.infinity, child: children.first);
+    }
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -56,10 +59,6 @@ class SymmetricalActionBar extends StatelessWidget {
             ? constraints.maxWidth
             : threeColumnBreakpoint;
         final fullTargetWidth = hasBounded ? maxWidth : null;
-
-        if (children.length == 1) {
-          return _fullWidthItem(children.first, fullTargetWidth);
-        }
 
         // Em larguras ultra-estreitas (< 260px), empilha em 100% para evitar truncamento.
         if (maxWidth < 260) {

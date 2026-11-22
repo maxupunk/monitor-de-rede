@@ -23,12 +23,20 @@ Future<T?> withDeviceAccess<T>({
   try {
     return await action();
   } on ApiException catch (err) {
-    if (!err.isMissingCredential ||
-        err.deviceId == null ||
-        err.transport == null ||
-        !ref.read(authProvider).canManagePlugins ||
-        !context.mounted) {
+    if (!err.isMissingCredential || err.deviceId == null || !context.mounted) {
       rethrow;
+    }
+    if (!ref.read(authProvider).canManagePlugins) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            err.message.isNotEmpty
+                ? '${err.message} Peça a um administrador para configurar o acesso.'
+                : 'Credencial ausente no equipamento. Apenas administradores podem cadastrá-la.',
+          ),
+        ),
+      );
+      return null;
     }
     final saved = await showDeviceAccessDialog(
       context: context,

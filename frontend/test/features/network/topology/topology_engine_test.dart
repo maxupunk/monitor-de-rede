@@ -775,7 +775,7 @@ void main() {
       expect(utilizationTone(0.20), SemanticTone.success);
 
       expect(formatEdgeSpeedLabel(upEdge), '1 Gbps');
-      expect(formatEdgeTrafficLabel(upEdge), '↓ 250 Mbps ↑ 750 Mbps');
+      expect(formatEdgeTrafficLabel(upEdge), 'RX 250 Mbps · TX 750 Mbps');
       expect(
         formatEdgeBadgeLabel(
           upEdge,

@@ -288,13 +288,12 @@ Future<void> showDeviceAuthFailureDialog(
           ),
         ),
         actions: <Widget>[
-          SymmetricalActionBar(
-            children: <Widget>[
-              FilledButton(
-                onPressed: () => Navigator.of(dialogContext).pop(),
-                child: const Text('Entendi'),
-              ),
-            ],
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Entendi'),
+            ),
           ),
         ],
       );

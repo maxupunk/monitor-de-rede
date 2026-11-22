@@ -8,6 +8,23 @@ const int linkTestSampleLimit = 120;
 const int linkTestHealthLimit = 480;
 const int linkTestHistoryPerPage = 20;
 
+String formatLinkTestApiError(Object err) {
+  if (err is ApiException && err.message.trim().isNotEmpty) {
+    return err.message.trim();
+  }
+  if (err is NetworkException && err.message.trim().isNotEmpty) {
+    return err.message.trim();
+  }
+  final raw = err.toString().trim();
+  if (raw.startsWith('Bad state: ')) {
+    return raw.substring('Bad state: '.length).trim();
+  }
+  if (raw.startsWith('Exception: ')) {
+    return raw.substring('Exception: '.length).trim();
+  }
+  return raw;
+}
+
 String linkTestSampleKey(int testId, int legSeq, String flow) =>
     '$testId:$legSeq:$flow';
 String linkTestHealthKey(int testId, int legSeq) => '$testId:$legSeq';
@@ -198,7 +215,10 @@ class LinkTestsNotifier extends Notifier<LinkTestsState> {
         pageLoading: false,
       );
     } catch (err) {
-      state = state.copyWith(pageLoading: false, pageError: err.toString());
+      state = state.copyWith(
+        pageLoading: false,
+        pageError: formatLinkTestApiError(err),
+      );
     }
   }
 
@@ -234,12 +254,13 @@ class LinkTestsNotifier extends Notifier<LinkTestsState> {
     } catch (err) {
       state = state.copyWith(
         schedulesLoading: false,
-        schedulesError: err.toString(),
+        schedulesError: formatLinkTestApiError(err),
       );
     }
   }
 
   Future<bool> createSchedule(Map<String, dynamic> input) async {
+    state = state.copyWith(clearSchedulesError: true);
     try {
       final raw = await ref
           .read(apiClientProvider)
@@ -250,12 +271,13 @@ class LinkTestsNotifier extends Notifier<LinkTestsState> {
       );
       return true;
     } catch (err) {
-      state = state.copyWith(schedulesError: err.toString());
+      state = state.copyWith(schedulesError: formatLinkTestApiError(err));
       return false;
     }
   }
 
   Future<bool> updateSchedule(int id, Map<String, dynamic> input) async {
+    state = state.copyWith(clearSchedulesError: true);
     try {
       final raw = await ref
           .read(apiClientProvider)
@@ -268,12 +290,13 @@ class LinkTestsNotifier extends Notifier<LinkTestsState> {
       );
       return true;
     } catch (err) {
-      state = state.copyWith(schedulesError: err.toString());
+      state = state.copyWith(schedulesError: formatLinkTestApiError(err));
       return false;
     }
   }
 
   Future<bool> deleteSchedule(int id) async {
+    state = state.copyWith(clearSchedulesError: true);
     try {
       await ref
           .read(apiClientProvider)
@@ -285,7 +308,7 @@ class LinkTestsNotifier extends Notifier<LinkTestsState> {
       );
       return true;
     } catch (err) {
-      state = state.copyWith(schedulesError: err.toString());
+      state = state.copyWith(schedulesError: formatLinkTestApiError(err));
       return false;
     }
   }

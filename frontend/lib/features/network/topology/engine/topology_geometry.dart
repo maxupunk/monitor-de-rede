@@ -532,7 +532,7 @@ double computeTrafficFlowSpeedFactor(TopologyEdgeModel edge) {
   if (util != null) {
     return (0.45 + util * 2.05).clamp(0.45, 2.5);
   }
-  final bps = edge.trafficBps ?? ((edge.inBps ?? 0) + (edge.outBps ?? 0));
+  final bps = edge.effectiveTrafficBps ?? 0.0;
   if (bps > 0) {
     final logScale = (math.log(bps + 1.0) / math.ln10) / 10.0;
     return (0.5 + logScale * 1.6).clamp(0.5, 2.2);

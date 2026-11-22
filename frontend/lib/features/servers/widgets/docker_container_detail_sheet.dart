@@ -153,9 +153,12 @@ class _ContainerDetailBodyState extends ConsumerState<_ContainerDetailBody>
         _logs = entries;
         _loadingLogs = false;
       });
-    } catch (_) {
+    } catch (err) {
       if (!mounted) return;
       setState(() => _loadingLogs = false);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Erro ao carregar logs: $err')));
     }
   }
 
@@ -217,15 +220,22 @@ class _ContainerDetailBodyState extends ConsumerState<_ContainerDetailBody>
       tone: SemanticTone.warning,
     );
     if (!ok || !mounted) return;
-    await ref
-        .read(dockerProvider.notifier)
-        .apiFor()
-        .clearLogs(widget.initialContainer.id);
-    if (!mounted) return;
-    setState(() => _logs = const <DockerLogEntry>[]);
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Logs limpos com sucesso.')));
+    try {
+      await ref
+          .read(dockerProvider.notifier)
+          .apiFor()
+          .clearLogs(widget.initialContainer.id);
+      if (!mounted) return;
+      setState(() => _logs = const <DockerLogEntry>[]);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Logs limpos com sucesso.')));
+    } catch (err) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Erro ao limpar logs: $err')));
+    }
   }
 
   Future<void> _connectNetwork() async {

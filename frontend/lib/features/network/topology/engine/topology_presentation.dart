@@ -438,7 +438,13 @@ double? resolveEdgeUtilization(TopologyEdgeModel edge) {
   final outVal = edge.outBps != null && edge.outBps!.isFinite
       ? edge.outBps!
       : -1.0;
-  final peak = inVal > outVal ? inVal : outVal;
+  final totalVal =
+      edge.effectiveTrafficBps != null && edge.effectiveTrafficBps!.isFinite
+      ? edge.effectiveTrafficBps!
+      : -1.0;
+  final peak = inVal > outVal
+      ? inVal
+      : (outVal >= 0 ? outVal : (totalVal >= 0 ? totalVal : -1.0));
   if (peak < 0) return null;
   return (peak / speed).clamp(0.0, 1.0);
 }
@@ -511,12 +517,166 @@ SemanticTone edgeSemanticTone(
   }
 }
 
+/// Especificação declarativa pura da pílula NOC de um enlace no canvas.
+///
+/// Mantém 100% da regra de apresentação fora de `CustomPainter` / widgets para
+/// testes determinísticos sem UI e zero glifos Unicode de seta (`↓`/`↑`).
+@immutable
+class TopologyEdgeBadgeSpec {
+  const TopologyEdgeBadgeSpec({
+    required this.primaryLabel,
+    required this.tone,
+    this.rxLabel,
+    this.txLabel,
+    this.secondaryLabel,
+    this.utilization,
+    this.isDown = false,
+  });
+
+  final String primaryLabel;
+  final SemanticTone tone;
+  final String? rxLabel;
+  final String? txLabel;
+  final String? secondaryLabel;
+  final double? utilization;
+  final bool isDown;
+
+  bool get hasDirectionalTraffic => rxLabel != null && txLabel != null;
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is TopologyEdgeBadgeSpec &&
+        other.primaryLabel == primaryLabel &&
+        other.tone == tone &&
+        other.rxLabel == rxLabel &&
+        other.txLabel == txLabel &&
+        other.secondaryLabel == secondaryLabel &&
+        other.utilization == utilization &&
+        other.isDown == isDown;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    primaryLabel,
+    tone,
+    rxLabel,
+    txLabel,
+    secondaryLabel,
+    utilization,
+    isDown,
+  );
+}
+
+String _formatCompactUtilPercent(double util) {
+  final pct = (util * 100.0).clamp(0.0, 100.0);
+  final digits = pct > 0.0 && pct < 10.0 ? 1 : 0;
+  return formatPercent(pct, digits: digits);
+}
+
+String? _buildCapacityAndUtilLabel(double? speedBps, double? utilization) {
+  final hasSpeed = speedBps != null && speedBps.isFinite && speedBps > 0;
+  final hasUtil = utilization != null && utilization.isFinite;
+  if (hasSpeed && hasUtil) {
+    return '${formatLinkSpeed(speedBps)} · ${_formatCompactUtilPercent(utilization)}';
+  }
+  if (hasSpeed) return formatLinkSpeed(speedBps);
+  if (hasUtil) return _formatCompactUtilPercent(utilization);
+  return null;
+}
+
+/// Resolve declarativamente o conteúdo e estilo da pílula de um enlace.
+TopologyEdgeBadgeSpec resolveEdgeBadgeSpec(
+  TopologyEdgeModel edge, {
+  TopologyOverlayMode overlay = TopologyOverlayMode.status,
+  double? latencyMs,
+  String? linkTestLabel,
+  SemanticTone? linkTestTone,
+}) {
+  if (overlay == TopologyOverlayMode.linkTest &&
+      linkTestLabel != null &&
+      linkTestLabel.trim().isNotEmpty) {
+    return TopologyEdgeBadgeSpec(
+      primaryLabel: linkTestLabel.trim(),
+      tone: linkTestTone ?? SemanticTone.primary,
+      secondaryLabel: resolveEdgeSpeedBps(edge) != null
+          ? formatLinkSpeed(resolveEdgeSpeedBps(edge))
+          : null,
+    );
+  }
+
+  final status = classifyEdgeStatus(edge);
+  final speed = resolveEdgeSpeedBps(edge);
+
+  if (status == TopologyEdgeStatus.down) {
+    final downLabel = speed != null
+        ? 'Offline · ${formatLinkSpeed(speed)}'
+        : 'Offline';
+    return TopologyEdgeBadgeSpec(
+      primaryLabel: downLabel,
+      tone: SemanticTone.error,
+      isDown: true,
+    );
+  }
+
+  final tone = edgeSemanticTone(edge, overlay: overlay, latencyMs: latencyMs);
+  final util = resolveEdgeUtilization(edge);
+
+  if (overlay == TopologyOverlayMode.latency &&
+      latencyMs != null &&
+      latencyMs.isFinite) {
+    final total = edge.effectiveTrafficBps;
+    return TopologyEdgeBadgeSpec(
+      primaryLabel: formatLatency(latencyMs),
+      tone: tone,
+      secondaryLabel: total != null && total > 0 ? formatBps(total) : null,
+      utilization: util,
+    );
+  }
+
+  final hasDirectional =
+      (edge.inBps != null && edge.inBps!.isFinite) ||
+      (edge.outBps != null && edge.outBps!.isFinite);
+
+  if (edge.hasLiveTraffic) {
+    final secondary = _buildCapacityAndUtilLabel(speed, util);
+    if (hasDirectional) {
+      final rx = formatBps(edge.inBps ?? 0);
+      final tx = formatBps(edge.outBps ?? 0);
+      return TopologyEdgeBadgeSpec(
+        primaryLabel: 'RX $rx · TX $tx',
+        rxLabel: rx,
+        txLabel: tx,
+        secondaryLabel: secondary,
+        utilization: util,
+        tone: tone,
+      );
+    }
+    final total = edge.effectiveTrafficBps!;
+    return TopologyEdgeBadgeSpec(
+      primaryLabel: formatBps(total),
+      secondaryLabel: secondary,
+      utilization: util,
+      tone: tone,
+    );
+  }
+
+  return TopologyEdgeBadgeSpec(
+    primaryLabel: speed != null
+        ? formatLinkSpeed(speed)
+        : classifyLinkKind(edge.linkType).label,
+    tone: tone,
+    utilization: util,
+  );
+}
+
 /// Formata a velocidade nominal do enlace usando `formatLinkSpeed` canônico.
 String formatEdgeSpeedLabel(TopologyEdgeModel edge) {
   return formatLinkSpeed(resolveEdgeSpeedBps(edge));
 }
 
-/// Formata o tráfego ao vivo (`"↓ 15 Mbps ↑ 45 Mbps"`) usando `formatBps`.
+/// Formata o tráfego ao vivo (`"RX 15 Mbps · TX 45 Mbps"`) usando `formatBps`.
+/// Nunca usa setas Unicode cruas para evitar glifos ausentes (`▯`).
 /// Retorna `null` quando não há medição de tráfego.
 String? formatEdgeTrafficLabel(TopologyEdgeModel edge) {
   final hasDir =
@@ -525,10 +685,11 @@ String? formatEdgeTrafficLabel(TopologyEdgeModel edge) {
   if (hasDir) {
     final rx = formatBps(edge.inBps ?? 0);
     final tx = formatBps(edge.outBps ?? 0);
-    return '↓ $rx ↑ $tx';
+    return 'RX $rx · TX $tx';
   }
-  if (edge.trafficBps != null && edge.trafficBps!.isFinite) {
-    return formatBps(edge.trafficBps);
+  final total = edge.effectiveTrafficBps;
+  if (total != null && total.isFinite) {
+    return formatBps(total);
   }
   if (edge.trafficLabel != null && edge.trafficLabel!.trim().isNotEmpty) {
     return edge.trafficLabel!.trim();
@@ -536,38 +697,25 @@ String? formatEdgeTrafficLabel(TopologyEdgeModel edge) {
   return null;
 }
 
-/// Rótulo compacto exibido na pílula do enlace no canvas (usa formatadores canônicos).
+/// Rótulo compacto em linha única para um enlace (usa formatadores canônicos).
 String formatEdgeBadgeLabel(
   TopologyEdgeModel edge, {
   TopologyOverlayMode overlay = TopologyOverlayMode.status,
   double? latencyMs,
 }) {
-  if (overlay == TopologyOverlayMode.latency && latencyMs != null) {
-    return formatLatency(latencyMs);
+  final spec = resolveEdgeBadgeSpec(
+    edge,
+    overlay: overlay,
+    latencyMs: latencyMs,
+  );
+  if (overlay == TopologyOverlayMode.traffic &&
+      !spec.hasDirectionalTraffic &&
+      !spec.isDown &&
+      spec.utilization != null &&
+      edge.hasLiveTraffic) {
+    return '${spec.primaryLabel} (${formatPercent(spec.utilization! * 100, digits: 0)})';
   }
-  if (overlay == TopologyOverlayMode.traffic) {
-    final total =
-        edge.trafficBps ??
-        ((edge.inBps != null || edge.outBps != null)
-            ? (edge.inBps ?? 0) + (edge.outBps ?? 0)
-            : null);
-    if (total != null && total.isFinite) {
-      final util = resolveEdgeUtilization(edge);
-      if (util != null) {
-        return '${formatBps(total)} (${formatPercent(util * 100, digits: 0)})';
-      }
-      return formatBps(total);
-    }
-  }
-  final total = edge.trafficBps;
-  if (total != null && total.isFinite && total > 0) {
-    return formatBps(total);
-  }
-  final speed = resolveEdgeSpeedBps(edge);
-  if (speed != null) {
-    return formatLinkSpeed(speed);
-  }
-  return classifyLinkKind(edge.linkType).label;
+  return spec.primaryLabel;
 }
 
 /// Converte confiança `0..1` ou `0..100` em inteiro `0..100`.
