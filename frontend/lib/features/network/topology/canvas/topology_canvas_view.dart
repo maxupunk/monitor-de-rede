@@ -302,6 +302,8 @@ class _TopologyCanvasViewState extends State<TopologyCanvasView>
     super.dispose();
   }
 
+  bool get _isMacroLod => _currentScale < kTopologyMacroZoomThreshold;
+
   void _rebuildGeometry() {
     final positions = _effectivePositions;
     _cachedEdgePaths = buildTopologyEdgePaths(
@@ -309,6 +311,7 @@ class _TopologyCanvasViewState extends State<TopologyCanvasView>
       positions: positions,
       nodeSize: widget.nodeSize,
       style: widget.edgeStyle,
+      macroLod: _isMacroLod,
     );
     _cachedGraphBounds = computeGraphBounds(
       positions,
@@ -359,10 +362,21 @@ class _TopologyCanvasViewState extends State<TopologyCanvasView>
     final nextMacro = nextScale < kTopologyMacroZoomThreshold;
     final prevBadge = _currentScale >= kTopologyEdgeBadgeMinScale;
     final nextBadge = nextScale >= kTopologyEdgeBadgeMinScale;
+    final prevSecondaryBadge =
+        _currentScale >= kTopologyEdgeBadgeSecondaryMinScale;
+    final nextSecondaryBadge = nextScale >= kTopologyEdgeBadgeSecondaryMinScale;
     final meaningfulDelta = (nextScale - _currentScale).abs() >= 0.015;
 
-    if (prevMacro != nextMacro || prevBadge != nextBadge || meaningfulDelta) {
-      setState(() => _currentScale = nextScale);
+    if (prevMacro != nextMacro ||
+        prevBadge != nextBadge ||
+        prevSecondaryBadge != nextSecondaryBadge ||
+        meaningfulDelta) {
+      setState(() {
+        _currentScale = nextScale;
+        if (prevMacro != nextMacro) {
+          _rebuildGeometry();
+        }
+      });
       widget.onScaleChanged?.call(nextScale);
       widget.controller?._notifyStateChanged();
     }

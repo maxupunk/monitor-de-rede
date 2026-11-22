@@ -125,6 +125,24 @@ class TopologyAntDot {
   final bool reverse;
 }
 
+/// Interseção exata do raio que sai de `center` em direção a `targetPoint`
+/// com a circunferência de raio `radius` (opcionalmente ajustado por `margin`).
+Offset intersectCircleBorder(
+  Offset center,
+  double radius,
+  Offset targetPoint, {
+  double margin = 0.0,
+}) {
+  final r = math.max(0.5, radius + margin);
+  final dx = targetPoint.dx - center.dx;
+  final dy = targetPoint.dy - center.dy;
+  final dist = math.sqrt(dx * dx + dy * dy);
+  if (dist < 1e-6) {
+    return Offset(center.dx + r, center.dy);
+  }
+  return Offset(center.dx + (dx / dist) * r, center.dy + (dy / dist) * r);
+}
+
 /// Interseção exata do raio que sai do centro de `rect` em direção a `targetPoint`
 /// com a borda do retângulo (opcionalmente expandido por `margin`).
 Offset intersectRectBorder(
@@ -149,13 +167,16 @@ Offset intersectRectBorder(
 
 /// Calcula todas as geometrias de enlaces entre nós posicionados, aplicando
 /// automaticamente abertura em leque (fan-out) para enlaces paralelos entre o
-/// mesmo par de equipamentos.
+/// mesmo par de equipamentos e ajustando a ancoragem ao círculo compacto
+/// quando o canvas está em Zoom Semântico Macro (`macroLod: true`).
 List<TopologyEdgePath> buildTopologyEdgePaths({
   required List<TopologyEdgeModel> edges,
   required Map<int, Offset> positions,
   Size nodeSize = kDefaultTopologyNodeSize,
   TopologyEdgeStyle style = TopologyEdgeStyle.curved,
   double parallelSpacing = 28.0,
+  bool macroLod = false,
+  double macroNodeRadius = kTopologyMacroNodeRadius - 1.0,
 }) {
   if (edges.isEmpty || positions.isEmpty) return const <TopologyEdgePath>[];
 
@@ -181,8 +202,14 @@ List<TopologyEdgePath> buildTopologyEdgePaths({
       final edge = pairEdges[idx];
       final srcPos = positions[edge.sourceDeviceId]!;
       final tgtPos = positions[edge.targetDeviceId]!;
-      final srcRect = topologyNodeRect(srcPos, nodeSize: nodeSize);
-      final tgtRect = topologyNodeRect(tgtPos, nodeSize: nodeSize);
+      final fullSrcRect = topologyNodeRect(srcPos, nodeSize: nodeSize);
+      final fullTgtRect = topologyNodeRect(tgtPos, nodeSize: nodeSize);
+      final srcRect = macroLod
+          ? Rect.fromCircle(center: fullSrcRect.center, radius: macroNodeRadius)
+          : fullSrcRect;
+      final tgtRect = macroLod
+          ? Rect.fromCircle(center: fullTgtRect.center, radius: macroNodeRadius)
+          : fullTgtRect;
 
       if (edge.sourceDeviceId == edge.targetDeviceId) {
         paths.add(_buildSelfLoopPath(edge, srcRect, idx, count));
@@ -217,6 +244,8 @@ List<TopologyEdgePath> buildTopologyEdgePaths({
             parallelIndex: idx,
             parallelCount: count,
             laneOffset: curvedLaneOffset,
+            macroLod: macroLod,
+            macroNodeRadius: macroNodeRadius,
           ),
         );
       }
@@ -263,6 +292,8 @@ TopologyEdgePath _buildCurvedPath({
   required int parallelIndex,
   required int parallelCount,
   required double laneOffset,
+  bool macroLod = false,
+  double macroNodeRadius = kTopologyMacroNodeRadius - 1.0,
 }) {
   final c1 = srcRect.center;
   final c2 = tgtRect.center;
@@ -272,11 +303,39 @@ TopologyEdgePath _buildCurvedPath({
   final normal = Offset(-dir.dy, dir.dx);
 
   // Desloca levemente os pontos de mira na borda quando há múltiplos enlaces paralelos.
-  final anchorShift = parallelCount > 1
-      ? Offset(normal.dx * (laneOffset * 0.42), normal.dy * (laneOffset * 0.42))
-      : Offset.zero;
-  final start = intersectRectBorder(srcRect, c2 + anchorShift);
-  final end = intersectRectBorder(tgtRect, c1 + anchorShift);
+  final Offset start;
+  final Offset end;
+  if (macroLod) {
+    if (parallelCount > 1) {
+      final centeredIdx = parallelIndex - (parallelCount - 1) / 2.0;
+      final canonicalForward = edge.sourceDeviceId <= edge.targetDeviceId;
+      final angleSpread = centeredIdx * 0.28 * (canonicalForward ? 1.0 : -1.0);
+      final baseAngle = math.atan2(delta.dy, delta.dx);
+      final startAngle = baseAngle + angleSpread;
+      final endAngle = (baseAngle + math.pi) - angleSpread;
+      final r = math.max(0.5, macroNodeRadius);
+      start = Offset(
+        c1.dx + math.cos(startAngle) * r,
+        c1.dy + math.sin(startAngle) * r,
+      );
+      end = Offset(
+        c2.dx + math.cos(endAngle) * r,
+        c2.dy + math.sin(endAngle) * r,
+      );
+    } else {
+      start = intersectCircleBorder(c1, macroNodeRadius, c2);
+      end = intersectCircleBorder(c2, macroNodeRadius, c1);
+    }
+  } else {
+    final anchorShift = parallelCount > 1
+        ? Offset(
+            normal.dx * (laneOffset * 0.42),
+            normal.dy * (laneOffset * 0.42),
+          )
+        : Offset.zero;
+    start = intersectRectBorder(srcRect, c2 + anchorShift);
+    end = intersectRectBorder(tgtRect, c1 + anchorShift);
+  }
 
   final chord = end - start;
   final chordLen = math.max(1.0, chord.distance);

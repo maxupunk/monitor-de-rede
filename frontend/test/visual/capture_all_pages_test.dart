@@ -3118,8 +3118,21 @@ void main() {
         '35_device_detail_plugins.png',
       );
 
-      // Topology Canvas + Link Creation Sheet
+      // Topology Canvas + Macro Zoom (< 55%) + Link Creation Sheet
       await visitAndCapture('/topology', '36_topology_canvas.png');
+      if (find.byIcon(Icons.zoom_out).evaluate().isNotEmpty) {
+        await tester.tap(find.byIcon(Icons.zoom_out).first);
+        await _pumpFrames(tester);
+        await tester.tap(find.byIcon(Icons.zoom_out).first);
+        await _pumpFrames(tester);
+        await _savePng(
+          tester,
+          boundaryKey,
+          printsDir,
+          '36b_topology_macro_zoom.png',
+          saved,
+        );
+      }
       {
         final ctx = tester.element(find.byType(Scaffold).last);
         // ignore: unawaited_futures

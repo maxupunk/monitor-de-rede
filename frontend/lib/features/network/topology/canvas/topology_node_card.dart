@@ -1,9 +1,17 @@
+import 'dart:math' as math;
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/network/models/topology_models.dart';
 import 'package:netmonitor_app/features/network/topology/engine/topology_engine.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
+
+export 'package:netmonitor_app/features/network/topology/engine/topology_layouts.dart'
+    show
+        kTopologyMacroNodeDiameter,
+        kTopologyMacroNodeRadius,
+        kTopologyMacroZoomThreshold;
 
 /// Reconhecedor de arraste de nó com limiar menor (`computeHitSlop`: ~18px toque / 1px mouse)
 /// do que o `ScaleGestureRecognizer` do `InteractiveViewer` (`computePanSlop`: ~36px / 2px).
@@ -26,9 +34,6 @@ class _NodeDragGestureRecognizer extends PanGestureRecognizer {
   @override
   String get debugDescription => 'topology node drag';
 }
-
-/// Limite de escala abaixo do qual os nós entram em modo macro (LOD circular).
-const double kTopologyMacroZoomThreshold = 0.55;
 
 /// Metadados ao vivo complementares por nó para micro-badges no cartão.
 @immutable
@@ -199,6 +204,21 @@ class TopologyNodeCard extends StatelessWidget {
         ? SystemMouseCursors.grab
         : SystemMouseCursors.click;
 
+    final interactiveChild = MouseRegion(
+      cursor: cursor,
+      child: RawGestureDetector(
+        behavior: HitTestBehavior.opaque,
+        gestures: gestures,
+        child: Semantics(
+          button: true,
+          selected: selected,
+          label:
+              '${node.name}, ${topologyNodeTypeLabel(node)}, ${classifyNodeStatus(node.status).label}',
+          child: content,
+        ),
+      ),
+    );
+
     return AnimatedOpacity(
       duration: const Duration(milliseconds: 180),
       opacity: dimmed ? 0.26 : 1.0,
@@ -209,20 +229,15 @@ class TopologyNodeCard extends StatelessWidget {
         child: SizedBox(
           width: size.width,
           height: size.height,
-          child: MouseRegion(
-            cursor: cursor,
-            child: RawGestureDetector(
-              behavior: HitTestBehavior.opaque,
-              gestures: gestures,
-              child: Semantics(
-                button: true,
-                selected: selected,
-                label:
-                    '${node.name}, ${topologyNodeTypeLabel(node)}, ${classifyNodeStatus(node.status).label}',
-                child: content,
-              ),
-            ),
-          ),
+          child: _isMacroLod
+              ? Center(
+                  child: SizedBox(
+                    width: math.min(size.width, 136.0),
+                    height: size.height,
+                    child: interactiveChild,
+                  ),
+                )
+              : interactiveChild,
         ),
       ),
     );
@@ -246,18 +261,22 @@ class TopologyNodeCard extends StatelessWidget {
         : accentPair.foreground;
     final alerts = _effectiveAlertCount;
     final elevated = isDragging || selected || highlighted;
+    const circleDiameter = kTopologyMacroNodeDiameter;
+    final circleTop = (size.height - circleDiameter) / 2;
 
-    return Center(
+    return Stack(
       key: ValueKey<String>('topology-node-macro-${node.id}'),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Stack(
+      clipBehavior: Clip.none,
+      alignment: Alignment.center,
+      children: <Widget>[
+        Positioned(
+          top: circleTop,
+          child: Stack(
             clipBehavior: Clip.none,
             children: <Widget>[
               Container(
-                width: 54,
-                height: 54,
+                width: circleDiameter,
+                height: circleDiameter,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   color: scheme.surface,
@@ -357,34 +376,45 @@ class TopologyNodeCard extends StatelessWidget {
                 ),
             ],
           ),
-          const SizedBox(height: 5),
-          ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: size.width - 8),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: scheme.surface.withValues(alpha: 0.94),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: isDragging || selected
-                      ? scheme.primary
-                      : scheme.outlineVariant,
-                ),
-              ),
-              child: Text(
-                node.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: context.textTheme.labelMedium?.copyWith(
-                  fontWeight: FontWeight.w800,
-                  color: scheme.onSurface,
+        ),
+        Positioned(
+          top: circleTop + circleDiameter + 5,
+          left: -24,
+          right: -24,
+          child: IgnorePointer(
+            child: Center(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: size.width - 8),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: scheme.surface,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: isDragging || selected
+                          ? scheme.primary
+                          : scheme.outlineVariant,
+                    ),
+                  ),
+                  child: Text(
+                    node.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: context.textTheme.labelMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: scheme.onSurface,
+                    ),
+                  ),
                 ),
               ),
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 

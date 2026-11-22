@@ -255,7 +255,27 @@ void main() {
           findsNothing,
         );
 
-        // Volta para 1.0x -> cartões detalhados novamente.
+        // Verifica que os enlaces recalculam a geometria para conectar no anel
+        // circular do ícone (raio ~26px) em vez de parar na borda distante do card (102px).
+        final macroPaint = tester.widget<CustomPaint>(
+          find.byKey(const ValueKey<String>('topology-edges-canvas')),
+        );
+        final macroPainter = macroPaint.painter! as TopologyEdgePainter;
+        final macroEdge101 = macroPainter.edgePaths.singleWhere(
+          (p) => p.edge.id == 101,
+        );
+        final c1 = topologyNodeRect(_fixedPositions()[1]!).center;
+        final c2 = topologyNodeRect(_fixedPositions()[2]!).center;
+        expect(
+          (macroEdge101.start - c1).distance,
+          closeTo(kTopologyMacroNodeRadius - 1.0, 0.1),
+        );
+        expect(
+          (macroEdge101.end - c2).distance,
+          closeTo(kTopologyMacroNodeRadius - 1.0, 0.1),
+        );
+
+        // Volta para 1.0x -> cartões detalhados e ancoragem na borda do card (102px).
         controller.setScale(1.0, animate: false);
         await tester.pump();
 
@@ -264,6 +284,14 @@ void main() {
           find.byKey(const ValueKey<String>('topology-node-detail-1')),
           findsOneWidget,
         );
+        final detailPaint = tester.widget<CustomPaint>(
+          find.byKey(const ValueKey<String>('topology-edges-canvas')),
+        );
+        final detailPainter = detailPaint.painter! as TopologyEdgePainter;
+        final detailEdge101 = detailPainter.edgePaths.singleWhere(
+          (p) => p.edge.id == 101,
+        );
+        expect((detailEdge101.start - c1).distance, closeTo(102.0, 0.1));
       },
     );
   });

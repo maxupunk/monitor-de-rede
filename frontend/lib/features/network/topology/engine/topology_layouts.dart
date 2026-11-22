@@ -8,6 +8,13 @@ import 'package:netmonitor_app/features/network/topology/engine/topology_present
 /// Dimensão padrão de um cartão de nó no canvas (usada em layouts e geometria).
 const Size kDefaultTopologyNodeSize = Size(204, 96);
 
+/// Limite de escala abaixo do qual os nós entram em modo macro (LOD circular).
+const double kTopologyMacroZoomThreshold = 0.55;
+
+/// Diâmetro e raio do ícone circular exibido no modo macro (`scale < 0.55`).
+const double kTopologyMacroNodeDiameter = 54.0;
+const double kTopologyMacroNodeRadius = kTopologyMacroNodeDiameter / 2;
+
 /// Passo padrão da grade magnética (`snapToGrid`) ao arrastar nós.
 const double kTopologyGridSize = 24.0;
 

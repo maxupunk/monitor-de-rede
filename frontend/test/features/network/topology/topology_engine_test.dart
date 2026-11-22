@@ -806,5 +806,75 @@ void main() {
       expect(kTopologyLinkKindLegend, isNotEmpty);
       expect(kTopologySpeedTierLegend, isNotEmpty);
     });
+
+    test(
+      'buildTopologyEdgePaths anchors flush to circular ring in macroLod (scale < 0.55)',
+      () {
+        const positions = <int, Offset>{
+          1: Offset(100, 300),
+          2: Offset(380, 140),
+          3: Offset(380, 420),
+        };
+        final edges = <TopologyEdgeModel>[
+          _edge(10, 1, 2),
+          _edge(11, 2, 3),
+          _edge(12, 1, 2),
+        ];
+
+        final detailPaths = buildTopologyEdgePaths(
+          edges: edges,
+          positions: positions,
+          macroLod: false,
+        );
+        final macroPaths = buildTopologyEdgePaths(
+          edges: edges,
+          positions: positions,
+          macroLod: true,
+        );
+
+        final c1 = topologyNodeRect(positions[1]!).center;
+        final c2 = topologyNodeRect(positions[2]!).center;
+        final c3 = topologyNodeRect(positions[3]!).center;
+
+        // Em modo detalhado, a ancoragem fica na borda do cartão completo (distância >> 27px).
+        final detailVertical = detailPaths.singleWhere((p) => p.edge.id == 11);
+        expect((detailVertical.start - c2).distance, closeTo(48.0, 0.5));
+
+        // Em modo macro (ícone circular), todos os enlaces conectam direto no anel (~26px).
+        for (final path in macroPaths) {
+          final expectedSrc = path.edge.sourceDeviceId == 1 ? c1 : c2;
+          final expectedTgt = path.edge.targetDeviceId == 2 ? c2 : c3;
+          expect(
+            (path.start - expectedSrc).distance,
+            closeTo(kTopologyMacroNodeRadius - 1.0, 0.05),
+          );
+          expect(
+            (path.end - expectedTgt).distance,
+            closeTo(kTopologyMacroNodeRadius - 1.0, 0.05),
+          );
+        }
+
+        // Enlaces paralelos abrem em ângulos distintos sobre o anel circular.
+        final pA = macroPaths.singleWhere((p) => p.edge.id == 10);
+        final pB = macroPaths.singleWhere((p) => p.edge.id == 12);
+        expect((pA.start - pB.start).distance, greaterThan(6.5));
+
+        // Ortogonal em modo macro também ancora no raio circular.
+        final orthoMacro = buildTopologyEdgePaths(
+          edges: <TopologyEdgeModel>[_edge(20, 1, 2)],
+          positions: positions,
+          style: TopologyEdgeStyle.orthogonal,
+          macroLod: true,
+        ).single;
+        expect(
+          (orthoMacro.start - c1).distance,
+          lessThanOrEqualTo(kTopologyMacroNodeRadius + 0.5),
+        );
+        expect(
+          (orthoMacro.end - c2).distance,
+          lessThanOrEqualTo(kTopologyMacroNodeRadius + 0.5),
+        );
+      },
+    );
   });
 }
