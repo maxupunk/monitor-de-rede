@@ -465,6 +465,264 @@ void main() {
         expect(finalDraggedPos, isNotNull);
       },
     );
+
+    testWidgets(
+      'dragging the same node repeatedly A -> B -> C (negative coords) -> D works across touch & mouse and different nodes',
+      (tester) async {
+        tester.view.physicalSize = const Size(1280, 800);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() {
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
+
+        final controller = TopologyCanvasController();
+        addTearDown(controller.dispose);
+        var positions = <int, Offset>{
+          1: const Offset(240, 220),
+          2: const Offset(620, 220),
+        };
+        // Centraliza a câmera para que coordenadas negativas fiquem visíveis no viewport.
+        controller.panToWorld(const Offset(240, 220), animate: false);
+
+        await tester.pumpWidget(
+          _buildTestHarness(
+            theme: AppTheme.dark(),
+            child: StatefulBuilder(
+              builder: (context, setLocalState) {
+                return TopologyCanvasView(
+                  nodes: _sampleNodes().take(2).toList(),
+                  edges: <TopologyEdgeModel>[_sampleEdges().first],
+                  positions: positions,
+                  controller: controller,
+                  autoFitOnFirstLayout: false,
+                  showTrafficFlow: false,
+                  editLayoutEnabled: true,
+                  snapToGrid: false,
+                  onNodeDragEnd: (nodeId, finalPos) {
+                    setLocalState(() {
+                      positions = <int, Offset>{...positions, nodeId: finalPos};
+                    });
+                  },
+                );
+              },
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        controller.panToWorld(const Offset(200, 180), animate: false);
+        await tester.pumpAndSettle();
+
+        final node1Finder = find.byKey(
+          const ValueKey<String>('topology-node-detail-1'),
+        );
+        final node2Finder = find.byKey(
+          const ValueKey<String>('topology-node-detail-2'),
+        );
+
+        // Arraste 1 (A -> B): toque simples.
+        final posA = positions[1]!;
+        await tester.drag(node1Finder, const Offset(110, 70));
+        await tester.pumpAndSettle();
+        final posB = positions[1]!;
+        expect(posB.dx, closeTo(posA.dx + 110, 2.0));
+        expect(posB.dy, closeTo(posA.dy + 70, 2.0));
+
+        // Arraste 2 (B -> C): move o MESMO nó para coordenadas NEGATIVAS (x < 0, y < 0)!
+        await tester.drag(node1Finder, const Offset(-450, -360));
+        await tester.pumpAndSettle();
+        final posC = positions[1]!;
+        expect(posC.dx, lessThan(0));
+        expect(posC.dy, lessThan(0));
+        expect(posC.dx, closeTo(posB.dx - 450, 2.0));
+        expect(posC.dy, closeTo(posB.dy - 360, 2.0));
+
+        // Arraste 3 (C -> D): arrasta NOVAMENTE com MOUSE a partir das coordenadas negativas!
+        final mouseStart = tester.getCenter(node1Finder);
+        final mouseGesture = await tester.startGesture(
+          mouseStart,
+          kind: PointerDeviceKind.mouse,
+        );
+        await mouseGesture.moveBy(const Offset(220, 180));
+        await tester.pump();
+        await mouseGesture.up();
+        await tester.pumpAndSettle();
+        final posD = positions[1]!;
+        expect(posD.dx, closeTo(posC.dx + 220, 2.0));
+        expect(posD.dy, closeTo(posC.dy + 180, 2.0));
+
+        // Arraste 4: arrasta outro nó (#2) sem afetar o nó #1.
+        final node2Initial = positions[2]!;
+        await tester.drag(node2Finder, const Offset(85, 65));
+        await tester.pumpAndSettle();
+        expect(positions[2]!.dx, closeTo(node2Initial.dx + 85, 2.0));
+        expect(positions[2]!.dy, closeTo(node2Initial.dy + 65, 2.0));
+        expect(positions[1], posD);
+      },
+    );
+
+    testWidgets(
+      'node dragging tracks 1:1 with pointer at zoomed-out (0.5x) and zoomed-in (1.6x) scales',
+      (tester) async {
+        tester.view.physicalSize = const Size(1280, 800);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() {
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
+
+        final controller = TopologyCanvasController();
+        addTearDown(controller.dispose);
+        var positions = <int, Offset>{
+          1: const Offset(200, 200),
+          2: const Offset(620, 200),
+        };
+
+        await tester.pumpWidget(
+          _buildTestHarness(
+            theme: AppTheme.dark(),
+            child: StatefulBuilder(
+              builder: (context, setLocalState) {
+                return TopologyCanvasView(
+                  nodes: _sampleNodes().take(2).toList(),
+                  edges: <TopologyEdgeModel>[_sampleEdges().first],
+                  positions: positions,
+                  controller: controller,
+                  autoFitOnFirstLayout: false,
+                  showTrafficFlow: false,
+                  editLayoutEnabled: true,
+                  snapToGrid: false,
+                  onNodeDragEnd: (nodeId, finalPos) {
+                    setLocalState(() {
+                      positions = <int, Offset>{...positions, nodeId: finalPos};
+                    });
+                  },
+                );
+              },
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // Zoom out 0.5x (Macro LOD): 50px na tela = 100px no mundo (1:1 sem dupla divisão).
+        controller.setScale(0.5, animate: false);
+        await tester.pumpAndSettle();
+        final beforeZoomOut = positions[1]!;
+        await tester.drag(
+          find.byKey(const ValueKey<String>('topology-node-macro-1')),
+          const Offset(50, 30),
+        );
+        await tester.pumpAndSettle();
+        expect(positions[1]!.dx, closeTo(beforeZoomOut.dx + 100, 3.0));
+        expect(positions[1]!.dy, closeTo(beforeZoomOut.dy + 60, 3.0));
+
+        // Zoom in 1.6x (Detail LOD): 80px na tela = 50px no mundo.
+        controller.setScale(1.6, animate: false);
+        await tester.pumpAndSettle();
+        controller.focusNode(1, targetScale: 1.6, animate: false);
+        await tester.pumpAndSettle();
+        final beforeZoomIn = positions[1]!;
+        await tester.drag(
+          find.byKey(const ValueKey<String>('topology-node-detail-1')),
+          const Offset(80, 48),
+        );
+        await tester.pumpAndSettle();
+        expect(positions[1]!.dx, closeTo(beforeZoomIn.dx + 50, 3.0));
+        expect(positions[1]!.dy, closeTo(beforeZoomIn.dy + 30, 3.0));
+      },
+    );
+
+    testWidgets(
+      'empty-space pan still works in edit mode, pointer cancel unlocks drag, and OFF/ON toggle preserves repeatability',
+      (tester) async {
+        tester.view.physicalSize = const Size(1280, 800);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() {
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
+
+        final controller = TopologyCanvasController();
+        addTearDown(controller.dispose);
+        var editEnabled = true;
+        var positions = <int, Offset>{
+          1: const Offset(220, 220),
+          2: const Offset(620, 220),
+        };
+        late StateSetter setHostState;
+
+        await tester.pumpWidget(
+          _buildTestHarness(
+            theme: AppTheme.dark(),
+            child: StatefulBuilder(
+              builder: (context, setLocalState) {
+                setHostState = setLocalState;
+                return TopologyCanvasView(
+                  nodes: _sampleNodes().take(2).toList(),
+                  edges: <TopologyEdgeModel>[_sampleEdges().first],
+                  positions: positions,
+                  controller: controller,
+                  autoFitOnFirstLayout: false,
+                  showTrafficFlow: false,
+                  editLayoutEnabled: editEnabled,
+                  snapToGrid: false,
+                  onNodeDragEnd: (nodeId, finalPos) {
+                    setLocalState(() {
+                      positions = <int, Offset>{...positions, nodeId: finalPos};
+                    });
+                  },
+                );
+              },
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final node1Finder = find.byKey(
+          const ValueKey<String>('topology-node-detail-1'),
+        );
+
+        // 1) Arraste em espaço vazio ainda move a câmera mesmo em modo de edição.
+        final txBeforePan = controller.transform.getTranslation().x;
+        await tester.dragFrom(const Offset(40, 40), const Offset(100, 60));
+        await tester.pumpAndSettle();
+        expect(
+          controller.transform.getTranslation().x,
+          isNot(closeTo(txBeforePan, 1.0)),
+        );
+        expect(positions[1], const Offset(220, 220));
+
+        // 2) Pointer cancel no meio do arraste limpa o estado sem travar o nó.
+        final center = tester.getCenter(node1Finder);
+        final cancelledGesture = await tester.startGesture(center);
+        await cancelledGesture.moveBy(const Offset(60, 40));
+        await tester.pump();
+        await cancelledGesture.cancel();
+        await tester.pumpAndSettle();
+
+        // 3) Arraste imediatamente após cancelamento funciona normalmente.
+        final beforeAfterCancel = positions[1]!;
+        await tester.drag(node1Finder, const Offset(90, 50));
+        await tester.pumpAndSettle();
+        expect(positions[1]!.dx, closeTo(beforeAfterCancel.dx + 90, 2.0));
+
+        // 4) Desliga modo edição -> arraste NÃO move o nó.
+        setHostState(() => editEnabled = false);
+        await tester.pumpAndSettle();
+        final lockedPos = positions[1]!;
+        await tester.drag(node1Finder, const Offset(80, 40));
+        await tester.pumpAndSettle();
+        expect(positions[1], lockedPos);
+
+        // 5) Liga modo edição novamente -> arraste volta a mover o nó imediatamente.
+        setHostState(() => editEnabled = true);
+        await tester.pumpAndSettle();
+        await tester.drag(node1Finder, const Offset(75, -45));
+        await tester.pumpAndSettle();
+        expect(positions[1]!.dx, closeTo(lockedPos.dx + 75, 2.0));
+        expect(positions[1]!.dy, closeTo(lockedPos.dy - 45, 2.0));
+      },
+    );
   });
 
   group('Minimap & TopologyCanvasController', () {

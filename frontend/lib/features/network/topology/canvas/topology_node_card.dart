@@ -1,8 +1,31 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/network/models/topology_models.dart';
 import 'package:netmonitor_app/features/network/topology/engine/topology_engine.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
+
+/// Reconhecedor de arraste de nó com limiar menor (`computeHitSlop`: ~18px toque / 1px mouse)
+/// do que o `ScaleGestureRecognizer` do `InteractiveViewer` (`computePanSlop`: ~36px / 2px).
+///
+/// Garante que, em modo de edição, arrastar sobre um cartão de nó vença sempre
+/// a arena de gestos antes do pan da câmera, preservando taps limpos no nó e
+/// pan/pinch no espaço vazio do canvas.
+class _NodeDragGestureRecognizer extends PanGestureRecognizer {
+  _NodeDragGestureRecognizer({super.debugOwner});
+
+  @override
+  bool hasSufficientGlobalDistanceToAccept(
+    PointerDeviceKind pointerDeviceKind,
+    double? deviceTouchSlop,
+  ) {
+    final threshold = computeHitSlop(pointerDeviceKind, gestureSettings);
+    return globalDistanceMoved.abs() > threshold;
+  }
+
+  @override
+  String get debugDescription => 'topology node drag';
+}
 
 /// Limite de escala abaixo do qual os nós entram em modo macro (LOD circular).
 const double kTopologyMacroZoomThreshold = 0.55;
@@ -55,14 +78,16 @@ class TopologyNodeCard extends StatelessWidget {
     this.showIpLabel = true,
     this.showHealthBadges = true,
     this.editLayoutEnabled = false,
+    this.isDragging = false,
     this.overlayMode = TopologyOverlayMode.status,
     this.extras,
     this.onTap,
     this.onDoubleTap,
     this.onLongPress,
     this.onDragStart,
-    this.onDragDelta,
+    this.onDragUpdate,
     this.onDragEnd,
+    this.onDragCancel,
   });
 
   final TopologyNodeModel node;
@@ -75,14 +100,16 @@ class TopologyNodeCard extends StatelessWidget {
   final bool showIpLabel;
   final bool showHealthBadges;
   final bool editLayoutEnabled;
+  final bool isDragging;
   final TopologyOverlayMode overlayMode;
   final TopologyNodeExtras? extras;
   final VoidCallback? onTap;
   final VoidCallback? onDoubleTap;
   final VoidCallback? onLongPress;
-  final VoidCallback? onDragStart;
-  final ValueChanged<Offset>? onDragDelta;
+  final ValueChanged<Offset>? onDragStart;
+  final ValueChanged<Offset>? onDragUpdate;
   final VoidCallback? onDragEnd;
+  final VoidCallback? onDragCancel;
 
   bool get _isMacroLod => scale < kTopologyMacroZoomThreshold;
 
@@ -125,39 +152,76 @@ class TopologyNodeCard extends StatelessWidget {
       classifyNodeStatus(node.status).tone,
       scheme,
     );
-    final safeScale = scale.clamp(0.15, 4.0);
-
     final content = _isMacroLod
         ? _buildMacroNode(context, scheme, semantics, accentPair, statusPair)
         : _buildDetailCard(context, scheme, semantics, accentPair, statusPair);
 
+    final gestures = <Type, GestureRecognizerFactory>{
+      if (onTap != null)
+        TapGestureRecognizer:
+            GestureRecognizerFactoryWithHandlers<TapGestureRecognizer>(
+              () => TapGestureRecognizer(debugOwner: this),
+              (instance) => instance.onTap = onTap,
+            ),
+      if (onDoubleTap != null)
+        DoubleTapGestureRecognizer:
+            GestureRecognizerFactoryWithHandlers<DoubleTapGestureRecognizer>(
+              () => DoubleTapGestureRecognizer(debugOwner: this),
+              (instance) => instance.onDoubleTap = onDoubleTap,
+            ),
+      // Em modo de edição desabilitamos long-press no nó para que segurar
+      // o dedo antes de arrastar no toque nunca abra o seletor de caminho.
+      if (!editLayoutEnabled && onLongPress != null)
+        LongPressGestureRecognizer:
+            GestureRecognizerFactoryWithHandlers<LongPressGestureRecognizer>(
+              () => LongPressGestureRecognizer(debugOwner: this),
+              (instance) => instance.onLongPress = onLongPress,
+            ),
+      if (editLayoutEnabled)
+        _NodeDragGestureRecognizer:
+            GestureRecognizerFactoryWithHandlers<_NodeDragGestureRecognizer>(
+              () => _NodeDragGestureRecognizer(debugOwner: this),
+              (instance) {
+                instance.dragStartBehavior = DragStartBehavior.down;
+                instance.onStart = (details) =>
+                    onDragStart?.call(details.globalPosition);
+                instance.onUpdate = (details) =>
+                    onDragUpdate?.call(details.globalPosition);
+                instance.onEnd = (_) => onDragEnd?.call();
+                instance.onCancel = () => onDragCancel?.call();
+              },
+            ),
+    };
+
+    final cursor = isDragging
+        ? SystemMouseCursors.grabbing
+        : editLayoutEnabled
+        ? SystemMouseCursors.grab
+        : SystemMouseCursors.click;
+
     return AnimatedOpacity(
       duration: const Duration(milliseconds: 180),
       opacity: dimmed ? 0.26 : 1.0,
-      child: SizedBox(
-        width: size.width,
-        height: size.height,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: onTap,
-          onDoubleTap: onDoubleTap,
-          onLongPress: onLongPress,
-          onPanStart: editLayoutEnabled ? (_) => onDragStart?.call() : null,
-          onPanUpdate: editLayoutEnabled
-              ? (details) => onDragDelta?.call(
-                  Offset(
-                    details.delta.dx / safeScale,
-                    details.delta.dy / safeScale,
-                  ),
-                )
-              : null,
-          onPanEnd: editLayoutEnabled ? (_) => onDragEnd?.call() : null,
-          child: Semantics(
-            button: true,
-            selected: selected,
-            label:
-                '${node.name}, ${topologyNodeTypeLabel(node)}, ${classifyNodeStatus(node.status).label}',
-            child: content,
+      child: AnimatedScale(
+        duration: const Duration(milliseconds: 120),
+        curve: Curves.easeOutCubic,
+        scale: isDragging ? 1.035 : 1.0,
+        child: SizedBox(
+          width: size.width,
+          height: size.height,
+          child: MouseRegion(
+            cursor: cursor,
+            child: RawGestureDetector(
+              behavior: HitTestBehavior.opaque,
+              gestures: gestures,
+              child: Semantics(
+                button: true,
+                selected: selected,
+                label:
+                    '${node.name}, ${topologyNodeTypeLabel(node)}, ${classifyNodeStatus(node.status).label}',
+                child: content,
+              ),
+            ),
           ),
         ),
       ),
@@ -171,14 +235,17 @@ class TopologyNodeCard extends StatelessWidget {
     SemanticColorPair accentPair,
     SemanticColorPair statusPair,
   ) {
-    final ringColor = selected
+    final ringColor = isDragging || selected
         ? scheme.primary
         : isPathStart
         ? semantics.info
         : highlighted
         ? semantics.warning
+        : editLayoutEnabled
+        ? scheme.primary.withValues(alpha: 0.78)
         : accentPair.foreground;
     final alerts = _effectiveAlertCount;
+    final elevated = isDragging || selected || highlighted;
 
     return Center(
       key: ValueKey<String>('topology-node-macro-${node.id}'),
@@ -196,17 +263,27 @@ class TopologyNodeCard extends StatelessWidget {
                   color: scheme.surface,
                   border: Border.all(
                     color: ringColor,
-                    width: selected || highlighted ? 3.5 : 2.6,
+                    width: isDragging
+                        ? 4.0
+                        : selected || highlighted
+                        ? 3.5
+                        : 2.6,
                   ),
                   boxShadow: <BoxShadow>[
                     BoxShadow(
-                      color:
-                          (selected || highlighted ? ringColor : scheme.shadow)
-                              .withValues(
-                                alpha: selected || highlighted ? 0.34 : 0.2,
-                              ),
-                      blurRadius: selected || highlighted ? 12 : 6,
-                      offset: const Offset(0, 2),
+                      color: (elevated ? ringColor : scheme.shadow).withValues(
+                        alpha: isDragging
+                            ? 0.45
+                            : elevated
+                            ? 0.34
+                            : 0.2,
+                      ),
+                      blurRadius: isDragging
+                          ? 18
+                          : elevated
+                          ? 12
+                          : 6,
+                      offset: Offset(0, isDragging ? 6 : 2),
                     ),
                   ],
                 ),
@@ -218,6 +295,29 @@ class TopologyNodeCard extends StatelessWidget {
                   ),
                 ),
               ),
+              if (editLayoutEnabled)
+                Positioned(
+                  left: -4,
+                  top: -4,
+                  child: Container(
+                    width: 20,
+                    height: 20,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: isDragging
+                          ? scheme.primary
+                          : scheme.primaryContainer,
+                      border: Border.all(color: scheme.surface, width: 1.5),
+                    ),
+                    child: Icon(
+                      Icons.drag_indicator,
+                      size: 12,
+                      color: isDragging
+                          ? scheme.onPrimary
+                          : scheme.onPrimaryContainer,
+                    ),
+                  ),
+                ),
               Positioned(
                 right: -1,
                 bottom: -1,
@@ -266,7 +366,9 @@ class TopologyNodeCard extends StatelessWidget {
                 color: scheme.surface.withValues(alpha: 0.94),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
-                  color: selected ? scheme.primary : scheme.outlineVariant,
+                  color: isDragging || selected
+                      ? scheme.primary
+                      : scheme.outlineVariant,
                 ),
               ),
               child: Text(
@@ -294,7 +396,7 @@ class TopologyNodeCard extends StatelessWidget {
     SemanticColorPair statusPair,
   ) {
     final unmanaged = isUnmanagedSwitchNode(node);
-    final borderColor = selected
+    final borderColor = isDragging || selected
         ? scheme.primary
         : isPathStart
         ? semantics.info
@@ -302,11 +404,17 @@ class TopologyNodeCard extends StatelessWidget {
         ? semantics.warning
         : classifyNodeStatus(node.status) == TopologyNodeStatus.offline
         ? semantics.error
+        : editLayoutEnabled
+        ? scheme.primary.withValues(alpha: 0.55)
         : scheme.outlineVariant;
-    final borderWidth = selected
+    final borderWidth = isDragging
+        ? 2.8
+        : selected
         ? 2.4
         : highlighted || isPathStart
         ? 2.2
+        : editLayoutEnabled
+        ? 1.6
         : 1.2;
 
     final microBadges = _buildMicroBadges(context, scheme, semantics);
@@ -321,7 +429,16 @@ class TopologyNodeCard extends StatelessWidget {
       key: ValueKey<String>('topology-node-detail-${node.id}'),
       decoration: BoxDecoration(
         borderRadius: AppTheme.borderRadius,
-        boxShadow: selected || highlighted
+        boxShadow: isDragging
+            ? <BoxShadow>[
+                BoxShadow(
+                  color: scheme.primary.withValues(alpha: 0.34),
+                  blurRadius: 20,
+                  spreadRadius: 2,
+                  offset: const Offset(0, 6),
+                ),
+              ]
+            : selected || highlighted
             ? <BoxShadow>[
                 BoxShadow(
                   color: (selected ? scheme.primary : semantics.warning)
@@ -333,7 +450,9 @@ class TopologyNodeCard extends StatelessWidget {
             : null,
       ),
       child: Material(
-        elevation: selected
+        elevation: isDragging
+            ? 10
+            : selected
             ? 6
             : highlighted
             ? 4
@@ -388,10 +507,21 @@ class TopologyNodeCard extends StatelessWidget {
                         ),
                         if (editLayoutEnabled) ...<Widget>[
                           const SizedBox(width: 4),
-                          Icon(
-                            Icons.drag_indicator,
-                            size: 15,
-                            color: scheme.primary,
+                          Container(
+                            padding: const EdgeInsets.all(2),
+                            decoration: BoxDecoration(
+                              color: isDragging
+                                  ? scheme.primary
+                                  : scheme.primaryContainer,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Icon(
+                              Icons.drag_indicator,
+                              size: 14,
+                              color: isDragging
+                                  ? scheme.onPrimary
+                                  : scheme.onPrimaryContainer,
+                            ),
                           ),
                         ] else ...<Widget>[
                           const SizedBox(width: 5),

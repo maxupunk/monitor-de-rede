@@ -28,6 +28,8 @@ class TopologyHud extends StatelessWidget {
     required this.canWrite,
     required this.editLayoutEnabled,
     required this.hasUnsavedLayoutChanges,
+    this.canUndoLayout = false,
+    this.draggedNodeCount = 0,
     required this.savingLayout,
     required this.recalculating,
     required this.hasRemoteLayoutUpdate,
@@ -42,7 +44,9 @@ class TopologyHud extends StatelessWidget {
     required this.onLayoutChanged,
     required this.onOverlayChanged,
     required this.onToggleEditLayout,
+    this.onToggleSnapToGrid,
     required this.onSaveLayout,
+    this.onUndoLayout,
     required this.onDiscardLayout,
     required this.onZoomIn,
     required this.onZoomOut,
@@ -61,6 +65,8 @@ class TopologyHud extends StatelessWidget {
   final bool canWrite;
   final bool editLayoutEnabled;
   final bool hasUnsavedLayoutChanges;
+  final bool canUndoLayout;
+  final int draggedNodeCount;
   final bool savingLayout;
   final bool recalculating;
   final bool hasRemoteLayoutUpdate;
@@ -76,7 +82,9 @@ class TopologyHud extends StatelessWidget {
   final ValueChanged<TopologyLayoutKind> onLayoutChanged;
   final ValueChanged<TopologyOverlayMode> onOverlayChanged;
   final VoidCallback onToggleEditLayout;
+  final VoidCallback? onToggleSnapToGrid;
   final VoidCallback onSaveLayout;
+  final VoidCallback? onUndoLayout;
   final VoidCallback onDiscardLayout;
   final VoidCallback onZoomIn;
   final VoidCallback onZoomOut;
@@ -178,8 +186,20 @@ class TopologyHud extends StatelessWidget {
                 const SizedBox(height: 6),
                 _UnsavedLayoutPill(
                   saving: savingLayout,
+                  canUndo: canUndoLayout,
+                  movedCount: draggedNodeCount,
+                  snapToGrid: filterSpec.snapToGrid,
+                  onToggleSnapToGrid: onToggleSnapToGrid,
                   onSave: onSaveLayout,
+                  onUndo: onUndoLayout,
                   onDiscard: onDiscardLayout,
+                ),
+              ] else if (canWrite && editLayoutEnabled) ...<Widget>[
+                const SizedBox(height: 6),
+                _EditModeHelperPill(
+                  snapToGrid: filterSpec.snapToGrid,
+                  onToggleSnapToGrid: onToggleSnapToGrid,
+                  onDone: onToggleEditLayout,
                 ),
               ],
             ],
@@ -1009,15 +1029,88 @@ class _PathTraceBanner extends StatelessWidget {
   }
 }
 
+class _EditModeHelperPill extends StatelessWidget {
+  const _EditModeHelperPill({
+    required this.snapToGrid,
+    this.onToggleSnapToGrid,
+    required this.onDone,
+  });
+
+  final bool snapToGrid;
+  final VoidCallback? onToggleSnapToGrid;
+  final VoidCallback onDone;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = context.colorScheme;
+    final colors = context.semanticColors.resolve(SemanticTone.primary, scheme);
+
+    return Material(
+      elevation: 3,
+      color: scheme.surface.withValues(alpha: 0.96),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(24),
+        side: BorderSide(color: colors.foreground, width: 1.4),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+        child: Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: <Widget>[
+            Icon(Icons.open_with, size: 16, color: colors.foreground),
+            Text(
+              'Arraste os nós para mover',
+              style: context.textTheme.labelMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: scheme.onSurface,
+              ),
+            ),
+            if (onToggleSnapToGrid != null)
+              FilterChip(
+                visualDensity: VisualDensity.compact,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                avatar: const Icon(Icons.grid_4x4, size: 14),
+                label: const Text('Grade'),
+                selected: snapToGrid,
+                onSelected: (_) => onToggleSnapToGrid!(),
+              ),
+            TextButton(
+              style: TextButton.styleFrom(
+                minimumSize: const Size(0, 30),
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                visualDensity: VisualDensity.compact,
+              ),
+              onPressed: onDone,
+              child: const Text('Concluir'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _UnsavedLayoutPill extends StatelessWidget {
   const _UnsavedLayoutPill({
     required this.saving,
+    required this.canUndo,
+    required this.movedCount,
+    required this.snapToGrid,
+    this.onToggleSnapToGrid,
     required this.onSave,
+    this.onUndo,
     required this.onDiscard,
   });
 
   final bool saving;
+  final bool canUndo;
+  final int movedCount;
+  final bool snapToGrid;
+  final VoidCallback? onToggleSnapToGrid;
   final VoidCallback onSave;
+  final VoidCallback? onUndo;
   final VoidCallback onDiscard;
 
   @override
@@ -1046,6 +1139,30 @@ class _UnsavedLayoutPill extends StatelessWidget {
                 fontWeight: FontWeight.w700,
               ),
             ),
+            if (movedCount > 0)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: colors.container,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  '$movedCount',
+                  style: context.textTheme.labelSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: colors.onContainer,
+                  ),
+                ),
+              ),
+            if (onToggleSnapToGrid != null)
+              FilterChip(
+                visualDensity: VisualDensity.compact,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                avatar: const Icon(Icons.grid_4x4, size: 14),
+                label: const Text('Grade'),
+                selected: snapToGrid,
+                onSelected: saving ? null : (_) => onToggleSnapToGrid!(),
+              ),
             FilledButton(
               style: FilledButton.styleFrom(
                 minimumSize: const Size(0, 32),
@@ -1061,6 +1178,17 @@ class _UnsavedLayoutPill extends StatelessWidget {
                     )
                   : const Text('Salvar'),
             ),
+            if (canUndo && onUndo != null)
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(0, 32),
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  visualDensity: VisualDensity.compact,
+                ),
+                onPressed: saving ? null : onUndo,
+                icon: const Icon(Icons.undo, size: 15),
+                label: const Text('Desfazer'),
+              ),
             TextButton(
               style: TextButton.styleFrom(
                 minimumSize: const Size(0, 32),

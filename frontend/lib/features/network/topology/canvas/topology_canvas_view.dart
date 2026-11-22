@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:netmonitor_app/features/network/models/topology_models.dart';
 import 'package:netmonitor_app/features/network/topology/canvas/topology_edge_painter.dart';
@@ -142,6 +143,7 @@ class TopologyCanvasView extends StatefulWidget {
     this.onTapEmptySpace,
     this.onNodePositionChanged,
     this.onNodeDragEnd,
+    this.onUndo,
     this.onScaleChanged,
   });
 
@@ -180,6 +182,7 @@ class TopologyCanvasView extends StatefulWidget {
   final VoidCallback? onTapEmptySpace;
   final void Function(int nodeId, Offset nextPosition)? onNodePositionChanged;
   final void Function(int nodeId, Offset finalPosition)? onNodeDragEnd;
+  final VoidCallback? onUndo;
   final ValueChanged<double>? onScaleChanged;
 
   @override
@@ -191,6 +194,9 @@ class _TopologyCanvasViewState extends State<TopologyCanvasView>
   final TransformationController _transformController =
       TransformationController();
   final FocusNode _canvasFocusNode = FocusNode(debugLabel: 'topology-canvas');
+  final GlobalKey _canvasAreaKey = GlobalKey(
+    debugLabel: 'topology-canvas-area',
+  );
 
   late final AnimationController _cameraAnimController;
   late final AnimationController _flowAnimController;
@@ -200,13 +206,23 @@ class _TopologyCanvasViewState extends State<TopologyCanvasView>
   double _currentScale = 1.0;
   bool _hasAutoFitted = false;
 
-  // Acumulador de posição crua durante arraste para que `snapToGrid` seja suave.
+  // Estado transitório de arraste 1:1 ancorado no espaço do mundo (60fps local).
   int? _draggingNodeId;
-  Offset? _dragRawPosition;
+  Offset? _dragStartNodePos;
+  Offset? _dragStartWorldPointer;
+  Offset? _dragPreviewPos;
+  int _activePointerCount = 0;
 
   // Cache de geometria recalculada somente quando entradas geométricas mudam.
   List<TopologyEdgePath> _cachedEdgePaths = const <TopologyEdgePath>[];
   Rect _cachedGraphBounds = Rect.zero;
+
+  Map<int, Offset> get _effectivePositions {
+    final dragId = _draggingNodeId;
+    final preview = _dragPreviewPos;
+    if (dragId == null || preview == null) return widget.positions;
+    return <int, Offset>{...widget.positions, dragId: preview};
+  }
 
   @override
   void initState() {
@@ -237,13 +253,23 @@ class _TopologyCanvasViewState extends State<TopologyCanvasView>
       widget.controller?._attach(this);
     }
 
+    if ((!widget.editLayoutEnabled && _draggingNodeId != null) ||
+        (_draggingNodeId != null &&
+            !widget.positions.containsKey(_draggingNodeId))) {
+      _draggingNodeId = null;
+      _dragStartNodePos = null;
+      _dragStartWorldPointer = null;
+      _dragPreviewPos = null;
+    }
+
     final geometryChanged =
         oldWidget.edges != widget.edges ||
         oldWidget.positions != widget.positions ||
         oldWidget.clusters != widget.clusters ||
         oldWidget.showClusterBoxes != widget.showClusterBoxes ||
         oldWidget.nodeSize != widget.nodeSize ||
-        oldWidget.edgeStyle != widget.edgeStyle;
+        oldWidget.edgeStyle != widget.edgeStyle ||
+        oldWidget.editLayoutEnabled != widget.editLayoutEnabled;
 
     if (geometryChanged) {
       _rebuildGeometry();
@@ -275,14 +301,15 @@ class _TopologyCanvasViewState extends State<TopologyCanvasView>
   }
 
   void _rebuildGeometry() {
+    final positions = _effectivePositions;
     _cachedEdgePaths = buildTopologyEdgePaths(
       edges: widget.edges,
-      positions: widget.positions,
+      positions: positions,
       nodeSize: widget.nodeSize,
       style: widget.edgeStyle,
     );
     _cachedGraphBounds = computeGraphBounds(
-      widget.positions,
+      positions,
       nodeSize: widget.nodeSize,
       clusters: widget.showClusterBoxes
           ? widget.clusters
@@ -462,35 +489,85 @@ class _TopologyCanvasViewState extends State<TopologyCanvasView>
     }
   }
 
-  void _handleNodeDragStart(int nodeId) {
-    _cameraAnimController.stop();
-    _draggingNodeId = nodeId;
-    _dragRawPosition = widget.positions[nodeId];
+  Offset? _globalToWorld(Offset globalPosition) {
+    final box = _canvasAreaKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return null;
+    final viewportPoint = box.globalToLocal(globalPosition);
+    final inv = Matrix4.copy(_transformController.value);
+    if (inv.invert() == 0.0) return null;
+    return MatrixUtils.transformPoint(inv, viewportPoint);
   }
 
-  void _handleNodeDragDelta(int nodeId, Offset worldDelta) {
-    final base =
-        (_draggingNodeId == nodeId ? _dragRawPosition : null) ??
-        widget.positions[nodeId];
-    if (base == null) return;
-    final nextRaw = base + worldDelta;
-    _draggingNodeId = nodeId;
-    _dragRawPosition = nextRaw;
-    final effective = widget.snapToGrid ? snapOffsetToGrid(nextRaw) : nextRaw;
+  void _handleNodeDragStart(int nodeId, Offset globalPosition) {
+    if (!widget.editLayoutEnabled || _activePointerCount > 1) return;
+    final startPos = _effectivePositions[nodeId];
+    final worldPtr = _globalToWorld(globalPosition);
+    if (startPos == null || worldPtr == null) return;
+    _cameraAnimController.stop();
+    HapticFeedback.selectionClick();
+    setState(() {
+      _draggingNodeId = nodeId;
+      _dragStartNodePos = startPos;
+      _dragStartWorldPointer = worldPtr;
+      _dragPreviewPos = startPos;
+    });
+  }
+
+  void _handleNodeDragUpdate(int nodeId, Offset globalPosition) {
+    if (!widget.editLayoutEnabled || _activePointerCount > 1) {
+      if (_draggingNodeId == nodeId) {
+        _handleNodeDragCancel(nodeId);
+      }
+      return;
+    }
+    final worldPtr = _globalToWorld(globalPosition);
+    if (worldPtr == null) return;
+
+    if (_draggingNodeId != nodeId ||
+        _dragStartNodePos == null ||
+        _dragStartWorldPointer == null) {
+      final fallbackPos = widget.positions[nodeId];
+      if (fallbackPos == null) return;
+      _draggingNodeId = nodeId;
+      _dragStartNodePos = fallbackPos;
+      _dragStartWorldPointer = worldPtr;
+    }
+
+    final rawNext = _dragStartNodePos! + (worldPtr - _dragStartWorldPointer!);
+    final effective = widget.snapToGrid ? snapOffsetToGrid(rawNext) : rawNext;
+    if (_dragPreviewPos == effective) return;
+    setState(() {
+      _dragPreviewPos = effective;
+      _rebuildGeometry();
+    });
     widget.onNodePositionChanged?.call(nodeId, effective);
   }
 
   void _handleNodeDragEnd(int nodeId) {
-    final finalPos = (_draggingNodeId == nodeId && _dragRawPosition != null)
-        ? (widget.snapToGrid
-              ? snapOffsetToGrid(_dragRawPosition!)
-              : _dragRawPosition!)
-        : widget.positions[nodeId];
-    _draggingNodeId = null;
-    _dragRawPosition = null;
+    if (_draggingNodeId != nodeId) return;
+    final finalPos =
+        _dragPreviewPos ?? _dragStartNodePos ?? widget.positions[nodeId];
+    setState(() {
+      _draggingNodeId = null;
+      _dragStartNodePos = null;
+      _dragStartWorldPointer = null;
+      _dragPreviewPos = null;
+      _rebuildGeometry();
+    });
     if (finalPos != null) {
       widget.onNodeDragEnd?.call(nodeId, finalPos);
     }
+  }
+
+  void _handleNodeDragCancel(int nodeId) {
+    if (_draggingNodeId != nodeId) return;
+    setState(() {
+      _draggingNodeId = null;
+      _dragStartNodePos = null;
+      _dragStartWorldPointer = null;
+      _dragPreviewPos = null;
+      _rebuildGeometry();
+    });
   }
 
   @override
@@ -504,14 +581,35 @@ class _TopologyCanvasViewState extends State<TopologyCanvasView>
     final highlightedEdgeIds =
         widget.highlightedPath?.edgeIdSet ?? const <int>{};
     final hasPathHighlight = highlightedNodeIds.isNotEmpty;
+    final effectivePositions = _effectivePositions;
+    final orderedNodes = _draggingNodeId == null
+        ? widget.nodes
+        : <TopologyNodeModel>[
+            for (final n in widget.nodes)
+              if (n.id != _draggingNodeId) n,
+            for (final n in widget.nodes)
+              if (n.id == _draggingNodeId) n,
+          ];
 
     final worldWidth = math.max(
       2200.0,
-      _cachedGraphBounds.isEmpty ? 2200.0 : _cachedGraphBounds.right + 480.0,
+      _cachedGraphBounds.isEmpty ? 2200.0 : _cachedGraphBounds.right + 640.0,
     );
     final worldHeight = math.max(
       1400.0,
-      _cachedGraphBounds.isEmpty ? 1400.0 : _cachedGraphBounds.bottom + 480.0,
+      _cachedGraphBounds.isEmpty ? 1400.0 : _cachedGraphBounds.bottom + 640.0,
+    );
+    final boundaryMargin = EdgeInsets.fromLTRB(
+      math.max(
+        2400.0,
+        _cachedGraphBounds.isEmpty ? 2400.0 : -_cachedGraphBounds.left + 1400.0,
+      ),
+      math.max(
+        2400.0,
+        _cachedGraphBounds.isEmpty ? 2400.0 : -_cachedGraphBounds.top + 1400.0,
+      ),
+      2400.0,
+      2400.0,
     );
 
     return CallbackShortcuts(
@@ -526,6 +624,10 @@ class _TopologyCanvasViewState extends State<TopologyCanvasView>
             _zoomBy(1.0 / 1.28),
         const SingleActivator(LogicalKeyboardKey.digit0): () => _fitToScreen(),
         const SingleActivator(LogicalKeyboardKey.numpad0): () => _fitToScreen(),
+        const SingleActivator(LogicalKeyboardKey.keyZ, control: true): () =>
+            widget.onUndo?.call(),
+        const SingleActivator(LogicalKeyboardKey.keyZ, meta: true): () =>
+            widget.onUndo?.call(),
         const SingleActivator(LogicalKeyboardKey.escape): () =>
             widget.onTapEmptySpace?.call(),
       },
@@ -572,65 +674,91 @@ class _TopologyCanvasViewState extends State<TopologyCanvasView>
 
                 // Área interativa com pinch-zoom, pan e detecção de toque em enlaces.
                 Positioned.fill(
-                  child: GestureDetector(
+                  child: Listener(
                     behavior: HitTestBehavior.translucent,
-                    onTapUp: _handleCanvasTapUp,
-                    child: InteractiveViewer(
-                      key: const ValueKey<String>(
-                        'topology-interactive-viewer',
-                      ),
-                      transformationController: _transformController,
-                      constrained: false,
-                      boundaryMargin: const EdgeInsets.all(1400),
-                      minScale: kTopologyMinScale,
-                      maxScale: kTopologyMaxScale,
-                      onInteractionStart: (_) => _cameraAnimController.stop(),
-                      child: SizedBox(
-                        width: worldWidth,
-                        height: worldHeight,
-                        child: Stack(
-                          clipBehavior: Clip.none,
+                    onPointerDown: (_) {
+                      _activePointerCount += 1;
+                      if (_activePointerCount > 1 && _draggingNodeId != null) {
+                        _handleNodeDragCancel(_draggingNodeId!);
+                      }
+                    },
+                    onPointerUp: (_) {
+                      _activePointerCount = math.max(
+                        0,
+                        _activePointerCount - 1,
+                      );
+                    },
+                    onPointerCancel: (_) {
+                      _activePointerCount = math.max(
+                        0,
+                        _activePointerCount - 1,
+                      );
+                      if (_activePointerCount == 0 && _draggingNodeId != null) {
+                        _handleNodeDragCancel(_draggingNodeId!);
+                      }
+                    },
+                    child: GestureDetector(
+                      key: _canvasAreaKey,
+                      behavior: HitTestBehavior.translucent,
+                      onTapUp: _handleCanvasTapUp,
+                      child: InteractiveViewer(
+                        key: const ValueKey<String>(
+                          'topology-interactive-viewer',
+                        ),
+                        transformationController: _transformController,
+                        constrained: false,
+                        panEnabled: _draggingNodeId == null,
+                        scaleEnabled: true,
+                        boundaryMargin: boundaryMargin,
+                        minScale: kTopologyMinScale,
+                        maxScale: kTopologyMaxScale,
+                        onInteractionStart: (_) => _cameraAnimController.stop(),
+                        child: _UnboundedWorldStack(
                           children: <Widget>[
                             // Camada vetorial de clusters, enlaces, fluxo e badges.
-                            Positioned.fill(
-                              child: RepaintBoundary(
-                                child: CustomPaint(
-                                  key: const ValueKey<String>(
-                                    'topology-edges-canvas',
-                                  ),
-                                  painter: TopologyEdgePainter(
-                                    edgePaths: _cachedEdgePaths,
-                                    clusters: widget.clusters,
-                                    showClusterBoxes: widget.showClusterBoxes,
-                                    highlightedEdgeIds: highlightedEdgeIds,
-                                    dimmedEdgeIds: widget.dimmedEdgeIds,
-                                    selectedEdgeId: widget.selectedEdgeId,
-                                    overlayMode: widget.overlayMode,
-                                    showLabels: widget.showLabels,
-                                    showTrafficFlow: widget.showTrafficFlow,
-                                    scale: _currentScale,
-                                    flowAnimation: widget.showTrafficFlow
-                                        ? _flowAnimController
-                                        : null,
-                                    edgeLatencyMs: widget.edgeLatencyMs,
-                                    linkTestOverlay: widget.linkTestOverlay,
-                                    colorScheme: scheme,
-                                    semanticColors: semantics,
-                                    textTheme: textTheme,
+                            SizedBox(
+                              width: worldWidth,
+                              height: worldHeight,
+                              child: IgnorePointer(
+                                child: RepaintBoundary(
+                                  child: CustomPaint(
+                                    key: const ValueKey<String>(
+                                      'topology-edges-canvas',
+                                    ),
+                                    painter: TopologyEdgePainter(
+                                      edgePaths: _cachedEdgePaths,
+                                      clusters: widget.clusters,
+                                      showClusterBoxes: widget.showClusterBoxes,
+                                      highlightedEdgeIds: highlightedEdgeIds,
+                                      dimmedEdgeIds: widget.dimmedEdgeIds,
+                                      selectedEdgeId: widget.selectedEdgeId,
+                                      overlayMode: widget.overlayMode,
+                                      showLabels: widget.showLabels,
+                                      showTrafficFlow: widget.showTrafficFlow,
+                                      scale: _currentScale,
+                                      flowAnimation: widget.showTrafficFlow
+                                          ? _flowAnimController
+                                          : null,
+                                      edgeLatencyMs: widget.edgeLatencyMs,
+                                      linkTestOverlay: widget.linkTestOverlay,
+                                      colorScheme: scheme,
+                                      semanticColors: semantics,
+                                      textTheme: textTheme,
+                                    ),
                                   ),
                                 ),
                               ),
                             ),
 
                             // Camada de cartões de nós Material 3 com LOD.
-                            for (final node in widget.nodes)
-                              if (widget.positions[node.id] != null)
+                            for (final node in orderedNodes)
+                              if (effectivePositions[node.id] != null)
                                 Positioned(
                                   key: ValueKey<String>(
                                     'topology-node-pos-${node.id}',
                                   ),
-                                  left: widget.positions[node.id]!.dx,
-                                  top: widget.positions[node.id]!.dy,
+                                  left: effectivePositions[node.id]!.dx,
+                                  top: effectivePositions[node.id]!.dy,
                                   child: TopologyNodeCard(
                                     node: node,
                                     size: widget.nodeSize,
@@ -642,6 +770,7 @@ class _TopologyCanvasViewState extends State<TopologyCanvasView>
                                     isPathStart:
                                         widget.pathStartNodeId == node.id,
                                     dimmed:
+                                        _draggingNodeId != node.id &&
                                         widget.selectedNodeId != node.id &&
                                         (hasPathHighlight
                                             ? !highlightedNodeIds.contains(
@@ -653,6 +782,7 @@ class _TopologyCanvasViewState extends State<TopologyCanvasView>
                                     showIpLabel: widget.showIpLabels,
                                     showHealthBadges: widget.showHealthBadges,
                                     editLayoutEnabled: widget.editLayoutEnabled,
+                                    isDragging: _draggingNodeId == node.id,
                                     overlayMode: widget.overlayMode,
                                     extras: widget.nodeExtras[node.id],
                                     onTap: () => widget.onTapNode?.call(node),
@@ -667,16 +797,20 @@ class _TopologyCanvasViewState extends State<TopologyCanvasView>
                                         ? () => widget.onLongPressNode!(node)
                                         : null,
                                     onDragStart: widget.editLayoutEnabled
-                                        ? () => _handleNodeDragStart(node.id)
+                                        ? (pos) =>
+                                              _handleNodeDragStart(node.id, pos)
                                         : null,
-                                    onDragDelta: widget.editLayoutEnabled
-                                        ? (delta) => _handleNodeDragDelta(
+                                    onDragUpdate: widget.editLayoutEnabled
+                                        ? (pos) => _handleNodeDragUpdate(
                                             node.id,
-                                            delta,
+                                            pos,
                                           )
                                         : null,
                                     onDragEnd: widget.editLayoutEnabled
                                         ? () => _handleNodeDragEnd(node.id)
+                                        : null,
+                                    onDragCancel: widget.editLayoutEnabled
+                                        ? () => _handleNodeDragCancel(node.id)
                                         : null,
                                   ),
                                 ),
@@ -695,7 +829,7 @@ class _TopologyCanvasViewState extends State<TopologyCanvasView>
                     child: TopologyMinimap(
                       nodes: widget.nodes,
                       edges: widget.edges,
-                      positions: widget.positions,
+                      positions: effectivePositions,
                       graphBounds: _cachedGraphBounds,
                       viewportSize: nextSize,
                       transformationController: _transformController,
@@ -713,6 +847,47 @@ class _TopologyCanvasViewState extends State<TopologyCanvasView>
         ),
       ),
     );
+  }
+}
+
+/// Stack do mundo da topologia com hit-testing irrestrito às bordas `(0..w, 0..h)`.
+///
+/// Sem este override, `RenderBox.hitTest` descarta qualquer toque/arraste em
+/// nós movidos para coordenadas negativas (`x < 0` ou `y < 0`) mesmo quando
+/// visíveis com `Clip.none`, travando o nó após o primeiro arraste.
+class _UnboundedWorldStack extends Stack {
+  const _UnboundedWorldStack({super.children}) : super(clipBehavior: Clip.none);
+
+  @override
+  RenderStack createRenderObject(BuildContext context) {
+    return _RenderUnboundedWorldStack(
+      alignment: alignment,
+      textDirection: textDirection ?? Directionality.maybeOf(context),
+      fit: fit,
+      clipBehavior: clipBehavior,
+    );
+  }
+}
+
+class _RenderUnboundedWorldStack extends RenderStack {
+  _RenderUnboundedWorldStack({
+    super.alignment,
+    super.textDirection,
+    super.fit,
+    super.clipBehavior,
+  });
+
+  @override
+  bool hitTest(BoxHitTestResult result, {required Offset position}) {
+    if (hitTestChildren(result, position: position)) {
+      result.add(BoxHitTestEntry(this, position));
+      return true;
+    }
+    if (size.contains(position) && hitTestSelf(position)) {
+      result.add(BoxHitTestEntry(this, position));
+      return true;
+    }
+    return false;
   }
 }
 

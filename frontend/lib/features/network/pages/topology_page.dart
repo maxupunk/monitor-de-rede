@@ -27,13 +27,28 @@ class TopologyPage extends ConsumerStatefulWidget {
   ConsumerState<TopologyPage> createState() => _TopologyPageState();
 }
 
+@immutable
+class _NodeMoveUndoEntry {
+  const _NodeMoveUndoEntry({
+    required this.nodeId,
+    required this.previousPosition,
+    required this.wasPreviouslyDragged,
+  });
+
+  final int nodeId;
+  final Offset previousPosition;
+  final bool wasPreviouslyDragged;
+}
+
 class _TopologyPageState extends ConsumerState<TopologyPage> {
   final TopologyCanvasController _canvasCtrl = TopologyCanvasController();
 
   TopologyFilterSpec _filterSpec = const TopologyFilterSpec();
   Map<int, Offset> _customPositions = const <int, Offset>{};
+  Map<int, Offset> _lastResolvedPositions = const <int, Offset>{};
   Map<int, Offset>? _preDragSnapshot;
   final Set<int> _draggedNodeIds = <int>{};
+  final List<_NodeMoveUndoEntry> _undoStack = <_NodeMoveUndoEntry>[];
 
   int? _selectedNodeId;
   int? _selectedEdgeId;
@@ -84,6 +99,12 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
     _updateFilterSpec(
       _filterSpec.copyWith(siteId: siteId, clearSiteId: siteId == null),
     );
+    setState(() {
+      _customPositions = const <int, Offset>{};
+      _draggedNodeIds.clear();
+      _undoStack.clear();
+      _preDragSnapshot = null;
+    });
     ref
         .read(topologyProvider.notifier)
         .fetchTopology(siteId: siteId, updateSiteFilter: true);
@@ -101,13 +122,18 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
     setState(() {
       _customPositions = computed.positions;
       _forceEngineLayout = false;
+      _draggedNodeIds.clear();
+      _undoStack.clear();
+      _preDragSnapshot = null;
     });
+    ref.read(topologyProvider.notifier).clearUnsavedPositions();
     for (final entry in computed.positions.entries) {
       ref
           .read(topologyProvider.notifier)
           .moveNode(
             entry.key,
             TopologyPosition(entry.value.dx, entry.value.dy),
+            markUnsaved: false,
           );
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -115,30 +141,85 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
     });
   }
 
-  void _handleNodeDragged(int nodeId, Offset nextPos) {
+  void _handleNodeDragCommitted(int nodeId, Offset finalPos) {
     if (!_editLayoutEnabled) return;
     final topo = ref.read(topologyProvider);
     final base = _customPositions.isNotEmpty
         ? _customPositions
-        : offsetsFromTopologyPositions(topo.positions);
+        : (_lastResolvedPositions.isNotEmpty
+              ? _lastResolvedPositions
+              : offsetsFromTopologyPositions(topo.positions));
+    final prevPos = base[nodeId];
+    if (prevPos != null && (prevPos - finalPos).distance < 0.5) return;
     _preDragSnapshot ??= Map<int, Offset>.from(base);
     setState(() {
+      if (prevPos != null) {
+        _undoStack.add(
+          _NodeMoveUndoEntry(
+            nodeId: nodeId,
+            previousPosition: prevPos,
+            wasPreviouslyDragged: _draggedNodeIds.contains(nodeId),
+          ),
+        );
+      }
       _draggedNodeIds.add(nodeId);
-      _customPositions = <int, Offset>{...base, nodeId: nextPos};
+      _customPositions = <int, Offset>{...base, nodeId: finalPos};
     });
     ref
         .read(topologyProvider.notifier)
-        .moveNode(nodeId, TopologyPosition(nextPos.dx, nextPos.dy));
+        .moveNode(nodeId, TopologyPosition(finalPos.dx, finalPos.dy));
+  }
+
+  void _undoLastDrag() {
+    if (_undoStack.isEmpty) return;
+    final entry = _undoStack.removeLast();
+    final base = _customPositions.isNotEmpty
+        ? _customPositions
+        : _lastResolvedPositions;
+    final nextPositions = <int, Offset>{
+      ...base,
+      entry.nodeId: entry.previousPosition,
+    };
+    final notifier = ref.read(topologyProvider.notifier);
+    setState(() {
+      if (!entry.wasPreviouslyDragged) {
+        _draggedNodeIds.remove(entry.nodeId);
+      }
+      if (_undoStack.isEmpty) {
+        _draggedNodeIds.clear();
+        _preDragSnapshot = null;
+      }
+      _customPositions = nextPositions;
+    });
+    final stillUnsaved = _draggedNodeIds.contains(entry.nodeId);
+    notifier.moveNode(
+      entry.nodeId,
+      TopologyPosition(entry.previousPosition.dx, entry.previousPosition.dy),
+      markUnsaved: stillUnsaved,
+    );
+    if (_undoStack.isEmpty) {
+      notifier.clearUnsavedPositions();
+    }
   }
 
   Future<void> _saveLayout({List<int>? onlyNodeIds}) async {
+    final overridePositions = <int, TopologyPosition>{
+      for (final entry in _customPositions.entries)
+        entry.key: TopologyPosition(entry.value.dx, entry.value.dy),
+    };
     final ok = await ref
         .read(topologyProvider.notifier)
-        .saveLayout(onlyNodeIds: onlyNodeIds);
+        .saveLayout(
+          onlyNodeIds: onlyNodeIds,
+          overridePositions: overridePositions.isNotEmpty
+              ? overridePositions
+              : null,
+        );
     if (!mounted) return;
     if (ok) {
       setState(() {
         _draggedNodeIds.clear();
+        _undoStack.clear();
         _preDragSnapshot = null;
       });
     }
@@ -154,15 +235,17 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
     setState(() {
       _customPositions = Map<int, Offset>.from(snapshot);
       _draggedNodeIds.clear();
+      _undoStack.clear();
       _preDragSnapshot = null;
     });
+    final notifier = ref.read(topologyProvider.notifier);
+    notifier.clearUnsavedPositions();
     for (final entry in snapshot.entries) {
-      ref
-          .read(topologyProvider.notifier)
-          .moveNode(
-            entry.key,
-            TopologyPosition(entry.value.dx, entry.value.dy),
-          );
+      notifier.moveNode(
+        entry.key,
+        TopologyPosition(entry.value.dx, entry.value.dy),
+        markUnsaved: false,
+      );
     }
   }
 
@@ -400,6 +483,7 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
       case TopologyHudAction.resetLayout:
         setState(() {
           _draggedNodeIds.clear();
+          _undoStack.clear();
           _preDragSnapshot = null;
           _forceEngineLayout = true;
         });
@@ -432,6 +516,9 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
       case TopologyHudAction.refresh:
         setState(() {
           _customPositions = const <int, Offset>{};
+          _draggedNodeIds.clear();
+          _undoStack.clear();
+          _preDragSnapshot = null;
           _acknowledgedRemoteRevision = topo.remoteLayoutRevision;
         });
         ref.read(topologyProvider.notifier).fetchTopology();
@@ -502,6 +589,7 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
       layoutOverridePositions: _customPositions,
       useEngineLayout: _forceEngineLayout,
     );
+    _lastResolvedPositions = layoutOutput.positions;
     final activePath =
         _activePath ??
         (topo.highlightedPath != null
@@ -582,7 +670,8 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
                 _selectedNodeId = null;
                 _selectedEdgeId = null;
               }),
-              onNodePositionChanged: _handleNodeDragged,
+              onNodeDragEnd: _handleNodeDragCommitted,
+              onUndo: _undoStack.isNotEmpty ? _undoLastDrag : null,
             ),
           ),
         TopologyHud(
@@ -592,6 +681,8 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
           canWrite: canWrite,
           editLayoutEnabled: _editLayoutEnabled,
           hasUnsavedLayoutChanges: _draggedNodeIds.isNotEmpty,
+          canUndoLayout: _undoStack.isNotEmpty,
+          draggedNodeCount: _draggedNodeIds.length,
           savingLayout: topo.savingLayout,
           recalculating: topo.recalculating,
           hasRemoteLayoutUpdate:
@@ -630,8 +721,12 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
               _updateFilterSpec(_filterSpec.copyWith(overlayMode: m)),
           onToggleEditLayout: () =>
               setState(() => _editLayoutEnabled = !_editLayoutEnabled),
+          onToggleSnapToGrid: () => _updateFilterSpec(
+            _filterSpec.copyWith(snapToGrid: !_filterSpec.snapToGrid),
+          ),
           onSaveLayout: () =>
               _saveLayout(onlyNodeIds: _draggedNodeIds.toList(growable: false)),
+          onUndoLayout: _undoLastDrag,
           onDiscardLayout: _discardDraggedLayout,
           onZoomIn: _canvasCtrl.zoomIn,
           onZoomOut: _canvasCtrl.zoomOut,

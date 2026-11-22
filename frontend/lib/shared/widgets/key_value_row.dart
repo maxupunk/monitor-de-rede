@@ -24,11 +24,11 @@ class KeyValueRow extends StatelessWidget {
     final scheme = context.colorScheme;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.symmetric(vertical: 7),
       child: LayoutBuilder(
         builder: (context, constraints) {
           final isNarrow =
-              constraints.maxWidth < (trailing != null ? 400 : 360);
+              constraints.maxWidth < (trailing != null ? 400 : 250);
           final labelWidget = Text(
             label,
             style: context.textTheme.bodySmall?.copyWith(
@@ -49,7 +49,12 @@ class KeyValueRow extends StatelessWidget {
               ? IconButton(
                   tooltip: 'Copiar',
                   visualDensity: VisualDensity.compact,
-                  icon: const Icon(Icons.copy, size: 16),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(
+                    minWidth: 28,
+                    minHeight: 28,
+                  ),
+                  icon: const Icon(Icons.copy, size: 15),
                   onPressed: () {
                     Clipboard.setData(ClipboardData(text: value));
                     ScaffoldMessenger.of(context).showSnackBar(
@@ -85,13 +90,16 @@ class KeyValueRow extends StatelessWidget {
                 );
 
           if (isNarrow) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                labelWidget,
-                const SizedBox(height: 2),
-                valueWidget,
-              ],
+            return SizedBox(
+              width: double.infinity,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  labelWidget,
+                  const SizedBox(height: 2),
+                  valueWidget,
+                ],
+              ),
             );
           }
 

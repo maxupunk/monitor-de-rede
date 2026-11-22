@@ -1,14 +1,30 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:netmonitor_app/core/network/api_client.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/ai/providers/ai_providers.dart';
 import 'package:netmonitor_app/features/ai/widgets/ai_proactive_widgets.dart';
+import 'package:netmonitor_app/features/network/models/device_models.dart';
 import 'package:netmonitor_app/features/network/models/diagnostics_models.dart';
 import 'package:netmonitor_app/features/network/models/topology_models.dart';
+import 'package:netmonitor_app/features/network/providers/devices_provider.dart';
 import 'package:netmonitor_app/features/network/topology/engine/topology_engine.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
+
+/// Carrega sob demanda (sem polling) as interfaces reais do equipamento
+/// inspecionado na topologia para exibir nome, status UP/DOWN e velocidade.
+final topologyNodeInterfacesProvider = FutureProvider.autoDispose
+    .family<List<DeviceInterfaceModel>, int>((ref, deviceId) async {
+      final api = ref.read(apiClientProvider);
+      final raw = await api.get<dynamic>('/devices/$deviceId/interfaces');
+      final list = raw is Map
+          ? asJsonMapList(raw['interfaces'] ?? raw['data'] ?? raw['items'])
+          : asJsonMapList(raw);
+      final parsed = list.map(DeviceInterfaceModel.fromJson).toList();
+      return DeviceInterfaceModel.sortForUplinkSelection(parsed);
+    });
 
 /// Painel lateral fixo (desktop >= 900px) que alterna entre Inspetor de Nó
 /// e Inspetor de Enlace conforme a seleção ativa.
@@ -732,31 +748,14 @@ class TopologyNodeInspectorBody extends ConsumerWidget {
         const SizedBox(height: 14),
 
         // ── Metadados do equipamento ──
-        NestedPanel(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          child: Column(
-            children: <Widget>[
-              if (node.vendor != null && node.vendor!.trim().isNotEmpty)
-                KeyValueRow(
-                  label: 'Fabricante / Modelo',
-                  value: <String>[
-                    node.vendor!.trim(),
-                    if (node.model != null && node.model!.trim().isNotEmpty)
-                      node.model!.trim(),
-                  ].join(' · '),
-                ),
-              KeyValueRow(label: 'Site', value: node.siteName ?? 'Sem site'),
-              KeyValueRow(
-                label: 'Interfaces',
-                value: formatInteger(node.interfaceCount),
-              ),
-              KeyValueRow(
-                label: 'SNMP',
-                value: node.snmpEnabled ? 'Ativo' : 'Desativado',
-              ),
-            ],
-          ),
-        ),
+        _NodeEquipmentInfoSection(node: node),
+
+        // ── Interfaces reais do equipamento (nome, status UP/DOWN, velocidade) ──
+        if (!node.isSystem &&
+            (node.interfaceCount > 0 || node.snmpEnabled)) ...<Widget>[
+          const SizedBox(height: 14),
+          _NodeInterfacesSection(node: node),
+        ],
 
         // ── Ações de Plugins (token teal obrigatório §12) ──
         if (pluginActions.isNotEmpty) ...<Widget>[
@@ -1449,9 +1448,10 @@ class TopologyEdgeInspectorBody extends StatelessWidget {
 
         // ── Detalhes técnicos ──
         NestedPanel(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
           child: Column(
-            children: <Widget>[
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: _withDividers(<Widget>[
               KeyValueRow(
                 label: 'Meio / Tipo',
                 value: linkKind.label,
@@ -1479,11 +1479,13 @@ class TopologyEdgeInspectorBody extends StatelessWidget {
                 KeyValueRow(
                   label: 'Porta origem',
                   value: edge.sourceInterfaceName!,
+                  monospace: true,
                 ),
               if (edge.targetInterfaceName != null)
                 KeyValueRow(
                   label: 'Porta destino',
                   value: edge.targetInterfaceName!,
+                  monospace: true,
                 ),
               if (confidencePct != null && !isVirtual)
                 KeyValueRow(label: 'Confiança', value: '$confidencePct%'),
@@ -1492,7 +1494,7 @@ class TopologyEdgeInspectorBody extends StatelessWidget {
                   label: 'Última leitura',
                   value: formatRelativeTime(edge.lastSeenAt),
                 ),
-            ],
+            ]),
           ),
         ),
         const SizedBox(height: 14),
@@ -1597,6 +1599,392 @@ class _EndpointChipButton extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+List<Widget> _withDividers(List<Widget> children) {
+  if (children.length <= 1) return children;
+  return <Widget>[
+    for (var i = 0; i < children.length; i++) ...<Widget>[
+      if (i > 0) const Divider(height: 1),
+      children[i],
+    ],
+  ];
+}
+
+/// Bloco organizado de metadados do equipamento (alinhamento esquerda/direita
+/// limpo, divisores sutis e enriquecimento com MAC, SO, Rede e Uplink).
+class _NodeEquipmentInfoSection extends ConsumerWidget {
+  const _NodeEquipmentInfoSection({required this.node});
+
+  final TopologyNodeModel node;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final scheme = context.colorScheme;
+    final devices = ref.watch(devicesProvider).items;
+    final device = devices.where((d) => d.id == node.id).firstOrNull;
+
+    final vendorModel = <String>[
+      if (node.vendor != null && node.vendor!.trim().isNotEmpty)
+        node.vendor!.trim(),
+      if (node.model != null && node.model!.trim().isNotEmpty)
+        node.model!.trim(),
+    ].join(' · ');
+    final osName = (device?.effectiveOperatingSystem ?? device?.operatingSystem)
+        ?.trim();
+    final mac = device?.macAddress?.trim();
+    final networkLabel = device?.network?.name.trim();
+    final uplink = device?.linkInterfaceName?.trim();
+
+    final rows = <Widget>[
+      if (vendorModel.isNotEmpty)
+        KeyValueRow(label: 'Fabricante / Modelo', value: vendorModel),
+      KeyValueRow(label: 'Site', value: node.siteName ?? 'Sem site'),
+      if (networkLabel != null && networkLabel.isNotEmpty)
+        KeyValueRow(label: 'Rede IP', value: networkLabel),
+      if (osName != null && osName.isNotEmpty)
+        KeyValueRow(label: 'Sistema operacional', value: osName),
+      if (mac != null && mac.isNotEmpty)
+        KeyValueRow(
+          label: 'Endereço MAC',
+          value: mac,
+          monospace: true,
+          copyable: true,
+        ),
+      if (uplink != null && uplink.isNotEmpty)
+        KeyValueRow(label: 'Interface uplink', value: uplink, monospace: true),
+      Padding(
+        padding: const EdgeInsets.symmetric(vertical: 7),
+        child: Row(
+          children: <Widget>[
+            Expanded(
+              child: Text(
+                'SNMP',
+                style: context.textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            SemanticChip(
+              label: node.snmpEnabled ? 'Ativo' : 'Desativado',
+              tone: node.snmpEnabled
+                  ? SemanticTone.success
+                  : SemanticTone.warning,
+              compact: true,
+            ),
+          ],
+        ),
+      ),
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Row(
+          children: <Widget>[
+            Icon(Icons.info_outline, size: 16, color: scheme.primary),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                'Informações do equipamento',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: context.textTheme.labelLarge?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        NestedPanel(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: _withDividers(rows),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Seção dedicada de interfaces reais do equipamento na topologia: exibe nome,
+/// status UP/DOWN, velocidade negociada, tráfego RX/TX e destaque do uplink.
+class _NodeInterfacesSection extends ConsumerStatefulWidget {
+  const _NodeInterfacesSection({required this.node});
+
+  final TopologyNodeModel node;
+
+  @override
+  ConsumerState<_NodeInterfacesSection> createState() =>
+      _NodeInterfacesSectionState();
+}
+
+class _NodeInterfacesSectionState
+    extends ConsumerState<_NodeInterfacesSection> {
+  bool _showAll = false;
+
+  static const int _initialLimit = 6;
+
+  @override
+  void didUpdateWidget(covariant _NodeInterfacesSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.node.id != widget.node.id) {
+      _showAll = false;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = context.colorScheme;
+    final asyncIfaces = ref.watch(
+      topologyNodeInterfacesProvider(widget.node.id),
+    );
+    final device = ref
+        .watch(devicesProvider)
+        .items
+        .where((d) => d.id == widget.node.id)
+        .firstOrNull;
+    final uplinkName = device?.linkInterfaceName?.trim().toLowerCase();
+
+    final loaded = asyncIfaces.valueOrNull;
+    final totalCount = loaded?.length ?? widget.node.interfaceCount;
+    final upCount = loaded?.where((i) => i.isUp).length;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Row(
+          children: <Widget>[
+            Icon(Icons.settings_ethernet, size: 16, color: scheme.primary),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                'Interfaces ($totalCount)',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: context.textTheme.labelLarge?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            if (upCount != null && totalCount > 0) ...<Widget>[
+              SemanticChip(
+                label: '$upCount UP',
+                tone: upCount > 0 ? SemanticTone.success : SemanticTone.warning,
+                compact: true,
+              ),
+            ],
+          ],
+        ),
+        const SizedBox(height: 6),
+        asyncIfaces.when(
+          loading: () => const NestedPanel(
+            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(
+              children: <Widget>[
+                SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                SizedBox(width: 10),
+                Expanded(child: Text('Carregando interfaces...')),
+              ],
+            ),
+          ),
+          error: (error, stackTrace) => NestedPanel(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(
+              children: <Widget>[
+                Expanded(
+                  child: Text(
+                    '${formatInteger(widget.node.interfaceCount)} interfaces registradas (detalhes indisponíveis no momento).',
+                    style: context.textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Tentar novamente',
+                  visualDensity: VisualDensity.compact,
+                  icon: const Icon(Icons.refresh, size: 18),
+                  onPressed: () => ref.invalidate(
+                    topologyNodeInterfacesProvider(widget.node.id),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          data: (interfaces) {
+            if (interfaces.isEmpty) {
+              return NestedPanel(
+                padding: const EdgeInsets.all(12),
+                child: Text(
+                  'Nenhuma interface coletada para este equipamento.',
+                  style: context.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              );
+            }
+
+            final visible = _showAll
+                ? interfaces
+                : interfaces.take(_initialLimit).toList(growable: false);
+
+            return NestedPanel(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  ..._withDividers(
+                    visible
+                        .map(
+                          (iface) => _TopologyInterfaceRow(
+                            interfaceModel: iface,
+                            isUplink:
+                                uplinkName != null &&
+                                uplinkName.isNotEmpty &&
+                                iface.displayName.toLowerCase() == uplinkName,
+                          ),
+                        )
+                        .toList(growable: false),
+                  ),
+                  if (interfaces.length > _initialLimit) ...<Widget>[
+                    const Divider(height: 1),
+                    TextButton.icon(
+                      onPressed: () => setState(() => _showAll = !_showAll),
+                      icon: Icon(
+                        _showAll ? Icons.expand_less : Icons.expand_more,
+                        size: 18,
+                      ),
+                      label: Text(
+                        _showAll
+                            ? 'Mostrar menos'
+                            : 'Ver todas as ${interfaces.length} interfaces',
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _TopologyInterfaceRow extends StatelessWidget {
+  const _TopologyInterfaceRow({
+    required this.interfaceModel,
+    required this.isUplink,
+  });
+
+  final DeviceInterfaceModel interfaceModel;
+  final bool isUplink;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = context.colorScheme;
+    final statusTone = interfaceModel.isUp
+        ? SemanticTone.success
+        : SemanticTone.error;
+    final statusColors = context.semanticColors.resolve(statusTone, scheme);
+    final speedBps = interfaceModel.negotiatedSpeedBps;
+    final speedText = speedBps > 0 ? formatLinkSpeed(speedBps) : null;
+    final subtitle = interfaceModel.subtitleText;
+    final hasTraffic =
+        (interfaceModel.inBps != null && interfaceModel.inBps! > 0) ||
+        (interfaceModel.outBps != null && interfaceModel.outBps! > 0);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 7),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: <Widget>[
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: statusColors.foreground,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Row(
+                  children: <Widget>[
+                    Flexible(
+                      child: Text(
+                        interfaceModel.displayName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: context.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    ),
+                    if (isUplink) ...<Widget>[
+                      const SizedBox(width: 6),
+                      const SemanticChip(
+                        label: 'Uplink',
+                        tone: SemanticTone.primary,
+                        compact: true,
+                      ),
+                    ],
+                  ],
+                ),
+                if (subtitle != null || hasTraffic) ...<Widget>[
+                  const SizedBox(height: 2),
+                  Text(
+                    <String>[
+                      ?subtitle,
+                      if (hasTraffic)
+                        '↓ ${formatBps(interfaceModel.inBps ?? 0)} · ↑ ${formatBps(interfaceModel.outBps ?? 0)}',
+                    ].join(' · '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: context.textTheme.labelSmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: <Widget>[
+              Text(
+                interfaceModel.isUp ? 'UP' : 'DOWN',
+                style: context.textTheme.labelSmall?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  color: statusColors.foreground,
+                ),
+              ),
+              if (speedText != null)
+                Text(
+                  speedText,
+                  style: context.textTheme.labelSmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+            ],
+          ),
+        ],
       ),
     );
   }

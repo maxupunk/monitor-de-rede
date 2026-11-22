@@ -231,6 +231,7 @@ class _TestTopologyNotifier extends TopologyNotifier {
     int? siteId,
     bool updateSiteFilter = false,
     bool showLoading = true,
+    bool preserveUnsavedPositions = false,
   }) async {
     if (updateSiteFilter) {
       state = state.copyWith(siteId: siteId, clearSiteId: siteId == null);
@@ -238,7 +239,10 @@ class _TestTopologyNotifier extends TopologyNotifier {
   }
 
   @override
-  Future<bool> saveLayout({List<int>? onlyNodeIds}) async {
+  Future<bool> saveLayout({
+    List<int>? onlyNodeIds,
+    Map<int, TopologyPosition>? overridePositions,
+  }) async {
     saveLayoutCalls += 1;
     lastSavedNodeIds = onlyNodeIds;
     return true;
@@ -280,6 +284,36 @@ Widget _buildApp({
       wifiClientsProvider.overrideWith(_TestWifiClientsNotifier.new),
       aiSettingsProvider.overrideWith(_TestAiSettingsNotifier.new),
       diagnosticsServiceProvider.overrideWithValue(_FakeDiagnosticsService()),
+      topologyNodeInterfacesProvider.overrideWith((ref, deviceId) async {
+        return <DeviceInterfaceModel>[
+          const DeviceInterfaceModel(
+            id: 1,
+            deviceId: 1,
+            ifName: 'sfp-sfpplus1',
+            alias: 'Uplink Fibra',
+            operStatus: 'up',
+            speed: 10000000000,
+            inBps: 250000000,
+            outBps: 120000000,
+          ),
+          const DeviceInterfaceModel(
+            id: 2,
+            deviceId: 1,
+            ifName: 'ether1',
+            alias: 'LAN Matriz',
+            operStatus: 'up',
+            speed: 1000000000,
+          ),
+          for (var i = 3; i <= 8; i++)
+            DeviceInterfaceModel(
+              id: i,
+              deviceId: 1,
+              ifName: 'ether$i',
+              operStatus: 'down',
+              speed: 1000000000,
+            ),
+        ];
+      }),
       topologyProvider.overrideWith(() => topoNotifier),
     ],
     child: MaterialApp(
@@ -339,19 +373,34 @@ void main() {
 
       expect(tester.takeException(), isNull);
       expect(find.byType(TopologyNodeInspectorCard), findsOneWidget);
+      expect(find.text('Informações do equipamento'), findsOneWidget);
+      expect(find.text('Interfaces (8)'), findsOneWidget);
+      expect(find.text('2 UP'), findsOneWidget);
+      expect(find.text('sfp-sfpplus1'), findsWidgets);
+      expect(find.text('ether1'), findsOneWidget);
+      expect(find.text('10 Gbps'), findsWidgets);
+      expect(find.text('Ver todas as 8 interfaces'), findsOneWidget);
       expect(find.text('Ping rápido'), findsOneWidget);
       expect(find.text('Traçar caminho'), findsOneWidget);
       expect(find.text('Até a raiz'), findsOneWidget);
       expect(find.text('Listar leases DHCP'), findsOneWidget);
       expect(find.text('Conexões e Vizinhos (1)'), findsOneWidget);
 
-      // Executa Ping rápido inline
+      // Executa Ping rápido inline antes de expandir a lista de interfaces
+      await tester.ensureVisible(find.text('Ping rápido'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Ping rápido'));
       await tester.pumpAndSettle();
       expect(
         find.text('Latência estável sem perda de pacotes.'),
         findsOneWidget,
       );
+
+      await tester.ensureVisible(find.text('Ver todas as 8 interfaces'));
+      await tester.tap(find.text('Ver todas as 8 interfaces'));
+      await tester.pumpAndSettle();
+      expect(find.text('ether8'), findsOneWidget);
+      expect(find.text('Mostrar menos'), findsOneWidget);
 
       // Toca no vizinho Switch-Core -> navega e inspeciona o vizinho
       final neighborFinder = find.descendant(
@@ -460,6 +509,122 @@ void main() {
 
       await tester.tap(find.text('Salvar'));
       await tester.pumpAndSettle();
+      expect(notifier.saveLayoutCalls, 1);
+      expect(notifier.lastSavedNodeIds, contains(1));
+      expect(find.text('Layout editado'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'Repeated node drags A -> B -> C -> D, OFF/ON edit toggle, SSE non-clobbering & Undo/Discard/Save pill',
+    (tester) async {
+      _setViewport(tester, const Size(1280, 800));
+      final notifier = _TestTopologyNotifier();
+      await tester.pumpWidget(_buildApp(topoNotifier: notifier));
+      await tester.pumpAndSettle();
+
+      final posA = notifier.state.positions[1]!;
+      final node1Finder = find.byKey(
+        const ValueKey<String>('topology-node-detail-1'),
+      );
+
+      // Liga o modo de edição -> exibe pílula auxiliar de edição
+      await tester.tap(find.byTooltip('Editar posições'));
+      await tester.pumpAndSettle();
+      expect(find.text('Arraste os nós para mover'), findsOneWidget);
+
+      // Arraste 1: A -> B
+      await tester.drag(node1Finder, const Offset(80, 40));
+      await tester.pumpAndSettle();
+      final posB = notifier.state.positions[1]!;
+      expect(posB.x, isNot(closeTo(posA.x, 1.0)));
+      expect(find.text('Layout editado'), findsOneWidget);
+      expect(find.text('Desfazer'), findsOneWidget);
+      expect(find.text('Descartar'), findsOneWidget);
+      expect(find.text('Salvar'), findsOneWidget);
+
+      // Arraste 2: MESMO nó B -> C (regressão direta do bug reportado)
+      await tester.drag(node1Finder, const Offset(60, 50));
+      await tester.pumpAndSettle();
+      final posC = notifier.state.positions[1]!;
+      expect(posC.x, isNot(closeTo(posB.x, 1.0)));
+      expect(posC.y, isNot(closeTo(posB.y, 1.0)));
+
+      // Arraste 3: MESMO nó C -> D
+      await tester.drag(node1Finder, const Offset(-90, 40));
+      await tester.pumpAndSettle();
+      final posD = notifier.state.positions[1]!;
+      expect(posD.x, isNot(closeTo(posC.x, 1.0)));
+
+      // Eventos SSE em tempo real (status, health, traffic) NÃO sobrescrevem a posição D
+      notifier.applyRealtimeStatus(<String, dynamic>{
+        'id': 1,
+        'status': 'warning',
+      });
+      notifier.applyRealtimeHealth(<String, dynamic>{
+        'deviceId': 1,
+        'metrics': <Map<String, dynamic>>[
+          <String, dynamic>{'name': 'cpu_usage', 'value': 82.0},
+        ],
+      });
+      notifier.applyRealtimeTraffic(<String, dynamic>{
+        'deviceId': 1,
+        'interfaces': <Map<String, dynamic>>[
+          <String, dynamic>{
+            'name': 'sfp-sfpplus1',
+            'inBps': 500000000.0,
+            'outBps': 300000000.0,
+          },
+        ],
+      });
+      // Após `applyRealtimeTraffic`, a animação contínua de fluxo fica ativa;
+      // usamos `pump` com duração fixa em vez de `pumpAndSettle`.
+      await tester.pump(const Duration(milliseconds: 250));
+      expect(notifier.state.positions[1]!.x, closeTo(posD.x, 0.01));
+      expect(notifier.state.positions[1]!.y, closeTo(posD.y, 0.01));
+
+      // Desliga "Editando posições" -> arraste NÃO move o nó
+      await tester.tap(find.byTooltip('Bloquear posições'));
+      await tester.pump(const Duration(milliseconds: 250));
+      await tester.drag(node1Finder, const Offset(70, 30));
+      await tester.pump(const Duration(milliseconds: 250));
+      expect(notifier.state.positions[1]!.x, closeTo(posD.x, 0.01));
+      expect(notifier.state.positions[1]!.y, closeTo(posD.y, 0.01));
+
+      // Liga "Editando posições" novamente -> arraste volta a mover (D -> E)
+      await tester.tap(find.byTooltip('Editar posições'));
+      await tester.pump(const Duration(milliseconds: 250));
+      await tester.drag(node1Finder, const Offset(75, -35));
+      await tester.pump(const Duration(milliseconds: 250));
+      final posE = notifier.state.positions[1]!;
+      expect(posE.x, isNot(closeTo(posD.x, 1.0)));
+
+      // Desfazer 1x: E -> D
+      await tester.tap(find.text('Desfazer'));
+      await tester.pump(const Duration(milliseconds: 250));
+      expect(notifier.state.positions[1]!.x, closeTo(posD.x, 0.01));
+      expect(notifier.state.positions[1]!.y, closeTo(posD.y, 0.01));
+      expect(find.text('Layout editado'), findsOneWidget);
+
+      // Desfazer 2x: D -> C
+      await tester.tap(find.text('Desfazer'));
+      await tester.pump(const Duration(milliseconds: 250));
+      expect(notifier.state.positions[1]!.x, closeTo(posC.x, 0.01));
+      expect(notifier.state.positions[1]!.y, closeTo(posC.y, 0.01));
+
+      // Descartar restaura completamente para A e oculta a pílula de não salvos
+      await tester.tap(find.text('Descartar'));
+      await tester.pump(const Duration(milliseconds: 250));
+      expect(notifier.state.positions[1]!.x, closeTo(posA.x, 0.01));
+      expect(notifier.state.positions[1]!.y, closeTo(posA.y, 0.01));
+      expect(find.text('Layout editado'), findsNothing);
+
+      // Move novamente e salva com sucesso
+      await tester.drag(node1Finder, const Offset(65, 35));
+      await tester.pump(const Duration(milliseconds: 250));
+      expect(find.text('Layout editado'), findsOneWidget);
+      await tester.tap(find.text('Salvar'));
+      await tester.pump(const Duration(milliseconds: 250));
       expect(notifier.saveLayoutCalls, 1);
       expect(notifier.lastSavedNodeIds, contains(1));
       expect(find.text('Layout editado'), findsNothing);

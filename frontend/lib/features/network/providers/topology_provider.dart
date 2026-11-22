@@ -86,6 +86,9 @@ class TopologyState {
 }
 
 class TopologyNotifier extends Notifier<TopologyState> {
+  final Map<int, TopologyPosition> _unsavedPositions =
+      <int, TopologyPosition>{};
+
   @override
   TopologyState build() => const TopologyState();
 
@@ -93,8 +96,13 @@ class TopologyNotifier extends Notifier<TopologyState> {
     int? siteId,
     bool updateSiteFilter = false,
     bool showLoading = true,
+    bool preserveUnsavedPositions = false,
   }) async {
     final targetSite = updateSiteFilter ? siteId : state.siteId;
+    final siteChanged = updateSiteFilter && targetSite != state.siteId;
+    if (!preserveUnsavedPositions || siteChanged) {
+      _unsavedPositions.clear();
+    }
     state = state.copyWith(
       siteId: targetSite,
       clearSiteId: updateSiteFilter && siteId == null,
@@ -141,6 +149,15 @@ class TopologyNotifier extends Notifier<TopologyState> {
         existing: savedPositions,
       );
 
+      if (preserveUnsavedPositions && _unsavedPositions.isNotEmpty) {
+        final nodeIds = parsedNodes.map((n) => n.id).toSet();
+        for (final entry in _unsavedPositions.entries) {
+          if (nodeIds.contains(entry.key)) {
+            computed[entry.key] = entry.value;
+          }
+        }
+      }
+
       state = state.copyWith(
         nodes: parsedNodes,
         edges: parsedEdges,
@@ -186,7 +203,7 @@ class TopologyNotifier extends Notifier<TopologyState> {
 
   void refreshIfLoaded() {
     if (!state.loaded) return;
-    fetchTopology(showLoading: false);
+    fetchTopology(showLoading: false, preserveUnsavedPositions: true);
   }
 
   void setViewPrefs(TopologyViewPrefs prefs) {
@@ -195,10 +212,20 @@ class TopologyNotifier extends Notifier<TopologyState> {
 
   void applyLayoutMode(TopologyLayoutMode mode) {
     final computed = computeTopologyLayout(state.nodes, state.edges, mode);
+    _unsavedPositions.clear();
     state = state.copyWith(layoutMode: mode, positions: computed);
   }
 
-  void moveNode(int nodeId, TopologyPosition nextPosition) {
+  void moveNode(
+    int nodeId,
+    TopologyPosition nextPosition, {
+    bool markUnsaved = true,
+  }) {
+    if (markUnsaved) {
+      _unsavedPositions[nodeId] = nextPosition;
+    } else {
+      _unsavedPositions.remove(nodeId);
+    }
     state = state.copyWith(
       positions: <int, TopologyPosition>{
         ...state.positions,
@@ -207,28 +234,50 @@ class TopologyNotifier extends Notifier<TopologyState> {
     );
   }
 
-  Future<bool> saveLayout({List<int>? onlyNodeIds}) async {
-    final targets = onlyNodeIds ?? state.positions.keys.toList(growable: false);
+  void clearUnsavedPositions({Iterable<int>? nodeIds}) {
+    if (nodeIds == null) {
+      _unsavedPositions.clear();
+      return;
+    }
+    for (final id in nodeIds) {
+      _unsavedPositions.remove(id);
+    }
+  }
+
+  Future<bool> saveLayout({
+    List<int>? onlyNodeIds,
+    Map<int, TopologyPosition>? overridePositions,
+  }) async {
+    final mergedPositions =
+        overridePositions != null && overridePositions.isNotEmpty
+        ? <int, TopologyPosition>{...state.positions, ...overridePositions}
+        : state.positions;
+    final targets = onlyNodeIds ?? mergedPositions.keys.toList(growable: false);
     final changes = <Map<String, dynamic>>[];
     for (final id in targets) {
-      final pos = state.positions[id];
+      final pos = mergedPositions[id];
       if (pos != null) {
         changes.add(<String, dynamic>{'deviceId': id, 'x': pos.x, 'y': pos.y});
       }
     }
     if (changes.isEmpty) return true;
-    state = state.copyWith(savingLayout: true, clearActionError: true);
+    state = state.copyWith(
+      positions: mergedPositions,
+      savingLayout: true,
+      clearActionError: true,
+    );
     final api = ref.read(apiClientProvider);
     try {
       await api.patch<dynamic>(
         '/topology/layout',
         data: <String, dynamic>{'siteId': state.siteId, 'nodes': changes},
       );
+      clearUnsavedPositions(nodeIds: targets);
       state = state.copyWith(savingLayout: false);
       return true;
     } on ApiException catch (err) {
       if (err.statusCode == 404 || err.statusCode == 405) {
-        final allNodes = state.positions.entries
+        final allNodes = mergedPositions.entries
             .map(
               (e) => <String, dynamic>{
                 'deviceId': e.key,
@@ -244,6 +293,7 @@ class TopologyNotifier extends Notifier<TopologyState> {
               : null,
           data: <String, dynamic>{'nodes': allNodes},
         );
+        clearUnsavedPositions();
         state = state.copyWith(savingLayout: false);
         return true;
       }

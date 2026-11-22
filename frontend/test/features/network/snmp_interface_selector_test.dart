@@ -2,11 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:netmonitor_app/features/core/models/log_models.dart';
+import 'package:netmonitor_app/features/core/models/settings_models.dart'
+    show ServerAddressEntry;
 import 'package:netmonitor_app/features/core/providers/logs_provider.dart';
+import 'package:netmonitor_app/features/core/providers/settings_provider.dart';
 import 'package:netmonitor_app/features/network/models/device_models.dart';
 import 'package:netmonitor_app/features/network/models/diagnostics_models.dart';
 import 'package:netmonitor_app/features/network/providers/devices_provider.dart';
 import 'package:netmonitor_app/features/network/providers/sites_networks_provider.dart';
+import 'package:netmonitor_app/features/network/widgets/device_access_host.dart';
 import 'package:netmonitor_app/features/network/widgets/device_form_sheet.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
@@ -28,11 +32,121 @@ class _StubNetworksNotifier extends NetworksNotifier {
 }
 
 class _StubDevicesNotifier extends DevicesNotifier {
+  _StubDevicesNotifier({this.nextSavedDevice});
+
+  final DeviceModel? nextSavedDevice;
+  int createCalls = 0;
+  int updateCalls = 0;
+  Map<String, dynamic>? lastPayload;
+
   @override
   DevicesState build() => const DevicesState();
 
   @override
   Future<void> fetchDevices() async {}
+
+  @override
+  Future<DeviceModel?> createDevice(Map<String, dynamic> payload) async {
+    createCalls++;
+    lastPayload = payload;
+    return nextSavedDevice ??
+        DeviceModel(
+          id: 42,
+          name: (payload['name'] as String?) ?? 'Dispositivo',
+          type: (payload['type'] as String?) ?? 'router',
+          status: 'unknown',
+          ipAddress: payload['ipAddress'] as String?,
+          operatingSystem: payload['operatingSystem'] as String?,
+        );
+  }
+
+  @override
+  Future<DeviceModel?> updateDevice(
+    int id,
+    Map<String, dynamic> payload,
+  ) async {
+    updateCalls++;
+    lastPayload = payload;
+    return nextSavedDevice ??
+        DeviceModel(
+          id: id,
+          name: (payload['name'] as String?) ?? 'Dispositivo',
+          type: (payload['type'] as String?) ?? 'router',
+          status: 'online',
+          ipAddress: payload['ipAddress'] as String?,
+          operatingSystem: payload['operatingSystem'] as String?,
+        );
+  }
+}
+
+class _StubCoreSettingsNotifier extends CoreSettingsNotifier {
+  _StubCoreSettingsNotifier({
+    this.stubAddresses = const <ServerAddressEntry>[],
+    this.stubPreferredId,
+  });
+
+  final List<ServerAddressEntry> stubAddresses;
+  final String? stubPreferredId;
+  int fetchAddressesCalls = 0;
+
+  @override
+  CoreSettingsState build() => CoreSettingsState(
+    addresses: stubAddresses,
+    preferredAddressId: stubPreferredId,
+  );
+
+  @override
+  Future<void> fetchServerAddresses({bool force = false}) async {
+    fetchAddressesCalls++;
+    state = state.copyWith(
+      addresses: stubAddresses,
+      preferredAddressId: stubPreferredId,
+    );
+  }
+}
+
+class _StubDeviceAccessController extends DeviceAccessController {
+  _StubDeviceAccessController({this.accessView, this.provisionError});
+
+  DeviceAccessViewModel? accessView;
+  Object? provisionError;
+  int fetchAccessCalls = 0;
+  int provisionDedicatedCalls = 0;
+  int? lastDedicatedDeviceId;
+  Map<String, dynamic>? lastDedicatedPayload;
+
+  @override
+  Future<DeviceAccessViewModel> fetchAccess(int deviceId) async {
+    fetchAccessCalls++;
+    return accessView ??
+        DeviceAccessViewModel(deviceId: deviceId, deviceName: 'Core-GW');
+  }
+
+  @override
+  Future<DeviceCredentialView> provisionDedicatedKey(
+    int deviceId,
+    Map<String, dynamic> payload,
+  ) async {
+    provisionDedicatedCalls++;
+    lastDedicatedDeviceId = deviceId;
+    lastDedicatedPayload = payload;
+    if (provisionError != null) throw provisionError!;
+    const cred = DeviceCredentialView(
+      kind: 'ssh',
+      username: 'netmonitor',
+      port: 22,
+      storage: 'key',
+      dedicated: true,
+      hasSecret: true,
+    );
+    accessView = DeviceAccessViewModel(
+      deviceId: deviceId,
+      deviceName: 'Core-GW',
+      credentials: const <DeviceCredentialView>[cred],
+      dedicatedPlatform: 'mikrotik',
+    );
+    return cred;
+  }
 }
 
 class _StubOperatingSystemsNotifier extends OperatingSystemsNotifier {
@@ -81,10 +195,16 @@ class _StubOperatingSystemsNotifier extends OperatingSystemsNotifier {
 }
 
 class _StubLogsNotifier extends LogsNotifier {
-  _StubLogsNotifier(this.guide);
+  _StubLogsNotifier(this.guide, {this.hints, this.provisionError});
 
   final SetupGuide guide;
+  final ProvisionHintsResponse? hints;
+  Object? provisionError;
   int fetchGuideCalls = 0;
+  String? lastGuideAddress;
+  int provisionCalls = 0;
+  int? lastProvisionDeviceId;
+  Map<String, dynamic>? lastProvisionPayload;
 
   @override
   LogsState build() => const LogsState();
@@ -92,8 +212,38 @@ class _StubLogsNotifier extends LogsNotifier {
   @override
   Future<SetupGuide?> fetchSetupGuide({String? address}) async {
     fetchGuideCalls++;
-    state = state.copyWith(setupGuide: guide);
-    return guide;
+    lastGuideAddress = address;
+    final effective = address != null && address.isNotEmpty
+        ? SetupGuide(
+            serverAddress: address,
+            port: guide.port,
+            snippets: guide.snippets,
+          )
+        : guide;
+    state = state.copyWith(setupGuide: effective);
+    return effective;
+  }
+
+  @override
+  Future<ProvisionHintsResponse?> fetchProvisionHints(int deviceId) async =>
+      hints;
+
+  @override
+  Future<ProvisionLoggingResponse> provisionDevice(
+    int deviceId,
+    Map<String, dynamic> payload,
+  ) async {
+    provisionCalls++;
+    lastProvisionDeviceId = deviceId;
+    lastProvisionPayload = payload;
+    if (provisionError != null) throw provisionError!;
+    return const ProvisionLoggingResponse(
+      identifiedHostname: 'Core-GW',
+      commands: <String>['/system logging action add name=netmonitor'],
+      transcript: 'done',
+      confirmed: true,
+      addressSaved: true,
+    );
   }
 }
 
@@ -318,7 +468,7 @@ void main() {
     );
   });
 
-  group('DeviceSyslogSetupPanel OS recipe resolution', () {
+  group('DeviceSyslogSetupPanel OS recipe & address resolution', () {
     test('matches snippet by OS id, label, or vendor alias', () {
       expect(
         DeviceSyslogSetupPanel.resolveSnippetIndex(
@@ -340,6 +490,67 @@ void main() {
           vendorHint: 'MikroTik',
         ),
         0,
+      );
+    });
+
+    test('resolveBestServerAddress avoids <IP-DO-SERVIDOR> placeholder', () {
+      const lan = ServerAddressEntry(
+        id: 'lan',
+        kind: 'lan',
+        label: 'LAN',
+        description: 'Rede local',
+        value: '192.168.10.5',
+        overridden: false,
+        source: 'detected',
+        https: false,
+      );
+      const vpn = ServerAddressEntry(
+        id: 'vpn',
+        kind: 'vpn',
+        label: 'VPN',
+        description: 'WireGuard',
+        value: '10.8.0.1',
+        overridden: false,
+        source: 'detected',
+        https: false,
+      );
+
+      expect(
+        DeviceSyslogSetupPanel.resolveBestServerAddress(
+          usableAddresses: const <ServerAddressEntry>[lan, vpn],
+          preferredAddressId: 'vpn',
+          guideAddress: '<IP-DO-SERVIDOR>',
+        ),
+        '10.8.0.1',
+      );
+      expect(
+        DeviceSyslogSetupPanel.resolveBestServerAddress(
+          hintedAddress: '10.0.0.10',
+          usableAddresses: const <ServerAddressEntry>[lan, vpn],
+          preferredAddressId: 'vpn',
+        ),
+        '10.0.0.10',
+      );
+      expect(
+        DeviceSyslogSetupPanel.resolveBestServerAddress(
+          guideAddress: '<IP-DO-SERVIDOR>',
+        ),
+        isNull,
+      );
+    });
+
+    test('inferDedicatedPlatform maps RouterOS and OpenWrt accurately', () {
+      expect(
+        DeviceSyslogSetupPanel.inferDedicatedPlatform(osId: 'routeros'),
+        'mikrotik',
+      );
+      expect(
+        DeviceSyslogSetupPanel.inferDedicatedPlatform(osId: 'openwrt'),
+        'openwrt',
+      );
+      expect(
+        DeviceSyslogSetupPanel.inferDedicatedPlatform(osId: 'cisco_ios'),
+        isNull,
       );
     });
   });
@@ -511,6 +722,26 @@ void main() {
               sitesProvider.overrideWith(_StubSitesNotifier.new),
               networksProvider.overrideWith(_StubNetworksNotifier.new),
               devicesProvider.overrideWith(_StubDevicesNotifier.new),
+              coreSettingsProvider.overrideWith(
+                () => _StubCoreSettingsNotifier(
+                  stubAddresses: const <ServerAddressEntry>[
+                    ServerAddressEntry(
+                      id: 'lan',
+                      kind: 'lan',
+                      label: 'LAN',
+                      description: 'Rede local',
+                      value: '10.0.0.10',
+                      overridden: false,
+                      source: 'detected',
+                      https: false,
+                    ),
+                  ],
+                  stubPreferredId: 'lan',
+                ),
+              ),
+              deviceAccessProvider.overrideWith(
+                _StubDeviceAccessController.new,
+              ),
               operatingSystemsProvider.overrideWith(() => osStub),
               logsProvider.overrideWith(() => logsStub),
               snmpProfilesProvider.overrideWith(() => snmpStub),
@@ -600,7 +831,8 @@ void main() {
         await tester.tap(find.text('1 Gbps').last);
         await tester.pumpAndSettle();
 
-        // Habilita "Receber logs (Syslog)" -> exibe endereço + receita RouterOS via CodeViewer
+        // Habilita "Receber logs (Syslog)" -> inicia em Automático perguntando
+        // entre Chave SSH dedicada e Login e senha (uso único), sem overflow.
         final syslogSwitch = find.widgetWithText(
           SwitchListTile,
           'Receber logs (Syslog)',
@@ -611,7 +843,22 @@ void main() {
 
         expect(tester.takeException(), isNull);
         expect(logsStub.fetchGuideCalls, 1);
+        expect(logsStub.lastGuideAddress, '10.0.0.10');
         expect(find.text('10.0.0.10:514'), findsOneWidget);
+        expect(find.text('Automático'), findsAtLeastNWidgets(1));
+        expect(find.text('Manual'), findsOneWidget);
+        expect(find.text('Chave SSH dedicada'), findsOneWidget);
+        expect(find.text('Login e senha (uso único)'), findsOneWidget);
+        expect(find.text('Usuário admin atual'), findsOneWidget);
+        expect(find.text('Senha admin (uso único)'), findsOneWidget);
+
+        // Alterna para Manual -> exibe receita RouterOS via CodeViewer
+        final manualSegment = find.text('Manual');
+        await tester.ensureVisible(manualSegment);
+        await tester.tap(manualSegment);
+        await tester.pumpAndSettle();
+
+        expect(tester.takeException(), isNull);
         expect(find.byType(CodeViewer), findsOneWidget);
         expect(find.textContaining('bsd-syslog=yes'), findsOneWidget);
       },
@@ -690,6 +937,512 @@ void main() {
 
         expect(osStub.identifyCalls, 0);
         expect(find.text('Linux (rsyslog)'), findsOneWidget);
+      },
+    );
+  });
+
+  group('DeviceFormSheet Syslog automatic provisioning flows (360px)', () {
+    testWidgets(
+      'new device with Chave SSH dedicada provisions dedicated key then Syslog automatically',
+      (tester) async {
+        tester.view.physicalSize = const Size(360, 844);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        final devicesStub = _StubDevicesNotifier();
+        final accessStub = _StubDeviceAccessController();
+        final logsStub = _StubLogsNotifier(_sampleSyslogGuide);
+        final osStub = _StubOperatingSystemsNotifier(
+          nextIdentifyResult: const IdentifyResultModel(
+            operatingSystem: 'routeros',
+            source: 'heuristic',
+            vendor: 'MikroTik',
+          ),
+        );
+        DeviceModel? returnedDevice;
+
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: <Override>[
+              sitesProvider.overrideWith(_StubSitesNotifier.new),
+              networksProvider.overrideWith(_StubNetworksNotifier.new),
+              devicesProvider.overrideWith(() => devicesStub),
+              coreSettingsProvider.overrideWith(
+                () => _StubCoreSettingsNotifier(
+                  stubAddresses: const <ServerAddressEntry>[
+                    ServerAddressEntry(
+                      id: 'lan',
+                      kind: 'lan',
+                      label: 'LAN',
+                      description: 'Rede local',
+                      value: '10.0.0.10',
+                      overridden: false,
+                      source: 'detected',
+                      https: false,
+                    ),
+                  ],
+                  stubPreferredId: 'lan',
+                ),
+              ),
+              deviceAccessProvider.overrideWith(() => accessStub),
+              operatingSystemsProvider.overrideWith(() => osStub),
+              logsProvider.overrideWith(() => logsStub),
+              snmpProfilesProvider.overrideWith(
+                () => _StubSnmpProfilesNotifier(
+                  testResult: const SnmpTestResult(responded: false),
+                  queriedInterfaces: const <DeviceInterfaceModel>[],
+                ),
+              ),
+            ],
+            child: MaterialApp(
+              theme: AppTheme.dark(),
+              home: Builder(
+                builder: (context) => Scaffold(
+                  body: Center(
+                    child: FilledButton(
+                      onPressed: () async {
+                        returnedDevice = await showDeviceFormSheet(
+                          context: context,
+                          prefill: const <String, dynamic>{
+                            'name': 'RB-Edge',
+                            'ipAddress': '10.0.0.50',
+                          },
+                        );
+                      },
+                      child: const Text('Abrir'),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Abrir'));
+        await tester.pumpAndSettle();
+
+        final syslogSwitch = find.widgetWithText(
+          SwitchListTile,
+          'Receber logs (Syslog)',
+        );
+        await tester.ensureVisible(syslogSwitch);
+        await tester.tap(syslogSwitch);
+        await tester.pumpAndSettle();
+
+        final userField = find.widgetWithText(
+          TextFormField,
+          'Usuário admin atual',
+        );
+        await tester.ensureVisible(userField);
+        await tester.enterText(userField, 'admin');
+
+        final passField = find.widgetWithText(
+          TextFormField,
+          'Senha admin (uso único)',
+        );
+        await tester.ensureVisible(passField);
+        await tester.pumpAndSettle();
+        await tester.enterText(passField, 'super-secret');
+        await tester.pumpAndSettle();
+
+        final submitBtn = find.text('Cadastrar e configurar Syslog');
+        await tester.scrollUntilVisible(
+          submitBtn,
+          200,
+          scrollable: find.byType(Scrollable).last,
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(submitBtn);
+        await tester.pumpAndSettle();
+
+        expect(tester.takeException(), isNull);
+        expect(devicesStub.createCalls, 1);
+        expect(accessStub.provisionDedicatedCalls, 1);
+        expect(accessStub.lastDedicatedDeviceId, 42);
+        expect(accessStub.lastDedicatedPayload?['platform'], 'mikrotik');
+        expect(accessStub.lastDedicatedPayload?['username'], 'admin');
+        expect(accessStub.lastDedicatedPayload?['password'], 'super-secret');
+        expect(accessStub.lastDedicatedPayload?['port'], 22);
+        expect(logsStub.provisionCalls, 1);
+        expect(logsStub.lastProvisionDeviceId, 42);
+        expect(logsStub.lastProvisionPayload?['protocol'], 'ssh');
+        expect(logsStub.lastProvisionPayload?['savedCredential'], 'ssh');
+        expect(logsStub.lastProvisionPayload?['saveCredential'], isFalse);
+        expect(logsStub.lastProvisionPayload?['serverAddress'], '10.0.0.10');
+        expect(returnedDevice?.id, 42);
+      },
+    );
+
+    testWidgets(
+      'new device with Login e senha (uso único) provisions Syslog directly without saving password',
+      (tester) async {
+        tester.view.physicalSize = const Size(360, 844);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        final devicesStub = _StubDevicesNotifier();
+        final accessStub = _StubDeviceAccessController();
+        final logsStub = _StubLogsNotifier(_sampleSyslogGuide);
+        final osStub = _StubOperatingSystemsNotifier(
+          nextIdentifyResult: const IdentifyResultModel(
+            operatingSystem: 'cisco_ios',
+            source: 'heuristic',
+          ),
+        );
+        DeviceModel? returnedDevice;
+
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: <Override>[
+              sitesProvider.overrideWith(_StubSitesNotifier.new),
+              networksProvider.overrideWith(_StubNetworksNotifier.new),
+              devicesProvider.overrideWith(() => devicesStub),
+              coreSettingsProvider.overrideWith(
+                () => _StubCoreSettingsNotifier(
+                  stubAddresses: const <ServerAddressEntry>[
+                    ServerAddressEntry(
+                      id: 'lan',
+                      kind: 'lan',
+                      label: 'LAN',
+                      description: 'Rede local',
+                      value: '10.0.0.10',
+                      overridden: false,
+                      source: 'detected',
+                      https: false,
+                    ),
+                  ],
+                  stubPreferredId: 'lan',
+                ),
+              ),
+              deviceAccessProvider.overrideWith(() => accessStub),
+              operatingSystemsProvider.overrideWith(() => osStub),
+              logsProvider.overrideWith(() => logsStub),
+              snmpProfilesProvider.overrideWith(
+                () => _StubSnmpProfilesNotifier(
+                  testResult: const SnmpTestResult(responded: false),
+                  queriedInterfaces: const <DeviceInterfaceModel>[],
+                ),
+              ),
+            ],
+            child: MaterialApp(
+              theme: AppTheme.dark(),
+              home: Builder(
+                builder: (context) => Scaffold(
+                  body: Center(
+                    child: FilledButton(
+                      onPressed: () async {
+                        returnedDevice = await showDeviceFormSheet(
+                          context: context,
+                          prefill: const <String, dynamic>{
+                            'name': 'SW-Access',
+                            'ipAddress': '10.0.0.60',
+                          },
+                        );
+                      },
+                      child: const Text('Abrir'),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Abrir'));
+        await tester.pumpAndSettle();
+
+        final syslogSwitch = find.widgetWithText(
+          SwitchListTile,
+          'Receber logs (Syslog)',
+        );
+        await tester.ensureVisible(syslogSwitch);
+        await tester.tap(syslogSwitch);
+        await tester.pumpAndSettle();
+
+        final oneTimeCard = find.text('Login e senha (uso único)');
+        await tester.ensureVisible(oneTimeCard);
+        await tester.tap(oneTimeCard);
+        await tester.pumpAndSettle();
+
+        // Seleciona Telnet e confirma porta 23 automática
+        final protoDropdown = find.byWidgetPredicate(
+          (w) =>
+              w is AppDropdownFormField<String> &&
+              w.decoration.labelText == 'Protocolo',
+        );
+        await tester.ensureVisible(protoDropdown);
+        await tester.tap(protoDropdown);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Telnet').last);
+        await tester.pumpAndSettle();
+
+        final userField = find.widgetWithText(TextFormField, 'Usuário');
+        await tester.ensureVisible(userField);
+        await tester.enterText(userField, 'netops');
+
+        final passField = find.widgetWithText(
+          TextFormField,
+          'Senha (uso único)',
+        );
+        await tester.ensureVisible(passField);
+        await tester.enterText(passField, 'once-only');
+
+        final submitBtn = find.text('Cadastrar e configurar Syslog');
+        await tester.ensureVisible(submitBtn);
+        await tester.tap(submitBtn);
+        await tester.pumpAndSettle();
+
+        expect(tester.takeException(), isNull);
+        expect(devicesStub.createCalls, 1);
+        expect(accessStub.provisionDedicatedCalls, 0);
+        expect(logsStub.provisionCalls, 1);
+        expect(logsStub.lastProvisionPayload?['protocol'], 'telnet');
+        expect(logsStub.lastProvisionPayload?['port'], 23);
+        expect(logsStub.lastProvisionPayload?['username'], 'netops');
+        expect(logsStub.lastProvisionPayload?['password'], 'once-only');
+        expect(logsStub.lastProvisionPayload?['savedCredential'], isNull);
+        expect(logsStub.lastProvisionPayload?['saveCredential'], isFalse);
+        expect(returnedDevice?.id, 42);
+      },
+    );
+
+    testWidgets(
+      'existing device with dedicated SSH key shows configured badge and triggers immediate Syslog provision',
+      (tester) async {
+        tester.view.physicalSize = const Size(360, 844);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        final accessStub = _StubDeviceAccessController(
+          accessView: const DeviceAccessViewModel(
+            deviceId: 7,
+            deviceName: 'Core-GW',
+            dedicatedPlatform: 'mikrotik',
+            credentials: <DeviceCredentialView>[
+              DeviceCredentialView(
+                kind: 'ssh',
+                username: 'netmonitor',
+                port: 22,
+                storage: 'key',
+                dedicated: true,
+                hasSecret: true,
+              ),
+            ],
+          ),
+        );
+        final logsStub = _StubLogsNotifier(
+          _sampleSyslogGuide,
+          hints: const ProvisionHintsResponse(
+            serverAddress: '10.8.0.1',
+            serverPort: 514,
+            operatingSystem: 'routeros',
+            sshOpen: true,
+          ),
+        );
+
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: <Override>[
+              sitesProvider.overrideWith(_StubSitesNotifier.new),
+              networksProvider.overrideWith(_StubNetworksNotifier.new),
+              devicesProvider.overrideWith(_StubDevicesNotifier.new),
+              coreSettingsProvider.overrideWith(
+                () => _StubCoreSettingsNotifier(),
+              ),
+              deviceAccessProvider.overrideWith(() => accessStub),
+              operatingSystemsProvider.overrideWith(
+                _StubOperatingSystemsNotifier.new,
+              ),
+              logsProvider.overrideWith(() => logsStub),
+              snmpProfilesProvider.overrideWith(
+                () => _StubSnmpProfilesNotifier(
+                  testResult: const SnmpTestResult(responded: false),
+                  queriedInterfaces: const <DeviceInterfaceModel>[],
+                ),
+              ),
+            ],
+            child: MaterialApp(
+              theme: AppTheme.dark(),
+              home: Builder(
+                builder: (context) => Scaffold(
+                  body: Center(
+                    child: FilledButton(
+                      onPressed: () => showDeviceFormSheet(
+                        context: context,
+                        existing: const DeviceModel(
+                          id: 7,
+                          name: 'Core-GW',
+                          type: 'router',
+                          status: 'online',
+                          ipAddress: '10.8.0.2',
+                          operatingSystem: 'routeros',
+                        ),
+                      ),
+                      child: const Text('Editar'),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Editar'));
+        await tester.pumpAndSettle();
+
+        final syslogSwitch = find.widgetWithText(
+          SwitchListTile,
+          'Receber logs (Syslog)',
+        );
+        await tester.ensureVisible(syslogSwitch);
+        await tester.tap(syslogSwitch);
+        await tester.pumpAndSettle();
+
+        expect(tester.takeException(), isNull);
+        expect(find.text('10.8.0.1:514'), findsOneWidget);
+        expect(find.text('Acesso já configurado'), findsOneWidget);
+        expect(find.text('Configurar Syslog agora'), findsOneWidget);
+
+        final provisionBtn = find.text('Configurar Syslog agora');
+        await tester.ensureVisible(provisionBtn);
+        await tester.tap(provisionBtn);
+        await tester.pumpAndSettle();
+
+        expect(tester.takeException(), isNull);
+        expect(accessStub.provisionDedicatedCalls, 0);
+        expect(logsStub.provisionCalls, 1);
+        expect(logsStub.lastProvisionDeviceId, 7);
+        expect(logsStub.lastProvisionPayload?['savedCredential'], 'ssh');
+        expect(logsStub.lastProvisionPayload?['serverAddress'], '10.8.0.1');
+        expect(find.text('Syslog configurado e confirmado!'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'preserves created device if Syslog auto-provision fails and offers retry or manual commands',
+      (tester) async {
+        tester.view.physicalSize = const Size(360, 844);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        final devicesStub = _StubDevicesNotifier();
+        final accessStub = _StubDeviceAccessController();
+        final logsStub = _StubLogsNotifier(
+          _sampleSyslogGuide,
+          provisionError: Exception('Falha de autenticação SSH'),
+        );
+        DeviceModel? returnedDevice;
+
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: <Override>[
+              sitesProvider.overrideWith(_StubSitesNotifier.new),
+              networksProvider.overrideWith(_StubNetworksNotifier.new),
+              devicesProvider.overrideWith(() => devicesStub),
+              coreSettingsProvider.overrideWith(
+                () => _StubCoreSettingsNotifier(
+                  stubAddresses: const <ServerAddressEntry>[
+                    ServerAddressEntry(
+                      id: 'lan',
+                      kind: 'lan',
+                      label: 'LAN',
+                      description: 'Rede local',
+                      value: '10.0.0.10',
+                      overridden: false,
+                      source: 'detected',
+                      https: false,
+                    ),
+                  ],
+                  stubPreferredId: 'lan',
+                ),
+              ),
+              deviceAccessProvider.overrideWith(() => accessStub),
+              operatingSystemsProvider.overrideWith(
+                _StubOperatingSystemsNotifier.new,
+              ),
+              logsProvider.overrideWith(() => logsStub),
+              snmpProfilesProvider.overrideWith(
+                () => _StubSnmpProfilesNotifier(
+                  testResult: const SnmpTestResult(responded: false),
+                  queriedInterfaces: const <DeviceInterfaceModel>[],
+                ),
+              ),
+            ],
+            child: MaterialApp(
+              theme: AppTheme.dark(),
+              home: Builder(
+                builder: (context) => Scaffold(
+                  body: Center(
+                    child: FilledButton(
+                      onPressed: () async {
+                        returnedDevice = await showDeviceFormSheet(
+                          context: context,
+                          prefill: const <String, dynamic>{
+                            'name': 'AP-Sala',
+                            'ipAddress': '10.0.0.99',
+                          },
+                        );
+                      },
+                      child: const Text('Abrir'),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Abrir'));
+        await tester.pumpAndSettle();
+
+        final syslogSwitch = find.widgetWithText(
+          SwitchListTile,
+          'Receber logs (Syslog)',
+        );
+        await tester.ensureVisible(syslogSwitch);
+        await tester.tap(syslogSwitch);
+        await tester.pumpAndSettle();
+
+        final oneTimeCard = find.text('Login e senha (uso único)');
+        await tester.ensureVisible(oneTimeCard);
+        await tester.tap(oneTimeCard);
+        await tester.pumpAndSettle();
+
+        await tester.enterText(
+          find.widgetWithText(TextFormField, 'Usuário'),
+          'admin',
+        );
+        await tester.enterText(
+          find.widgetWithText(TextFormField, 'Senha (uso único)'),
+          'wrong',
+        );
+
+        final submitBtn = find.text('Cadastrar e configurar Syslog');
+        await tester.ensureVisible(submitBtn);
+        await tester.tap(submitBtn);
+        await tester.pumpAndSettle();
+
+        expect(tester.takeException(), isNull);
+        expect(devicesStub.createCalls, 1);
+        expect(logsStub.provisionCalls, 1);
+        expect(
+          find.textContaining('Falha de autenticação SSH'),
+          findsOneWidget,
+        );
+        expect(find.text('Ver comandos manuais'), findsOneWidget);
+        expect(find.text('Concluir sem Syslog'), findsOneWidget);
+
+        // Ao fechar sem Syslog, devolve o dispositivo já salvo (nunca perdido).
+        final doneWithoutBtn = find.text('Concluir sem Syslog');
+        await tester.ensureVisible(doneWithoutBtn);
+        await tester.tap(doneWithoutBtn);
+        await tester.pumpAndSettle();
+
+        expect(returnedDevice?.id, 42);
       },
     );
   });

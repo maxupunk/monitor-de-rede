@@ -346,6 +346,7 @@ class _StubTopologyNotifier extends TopologyNotifier {
     int? siteId,
     bool updateSiteFilter = false,
     bool showLoading = true,
+    bool preserveUnsavedPositions = true,
   }) async {}
 }
 
