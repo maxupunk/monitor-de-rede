@@ -1523,49 +1523,78 @@ class _LogsPageState extends ConsumerState<LogsPage> {
                   itemBuilder: (context, index) {
                     final entry = state.entries[index];
                     final tmpl = state.templateOf(entry);
+                    final hasAppName =
+                        entry.appName != null && entry.appName!.isNotEmpty;
+                    final sourceLabel =
+                        entry.deviceName ?? entry.hostname ?? entry.sourceIp;
                     return InkWell(
                       borderRadius: AppTheme.borderRadius,
                       onTap: () => _openLogDetailSheet(entry, tmpl),
                       child: NestedPanel(
-                        padding: const EdgeInsets.all(10),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: <Widget>[
-                            Wrap(
-                              spacing: 6,
-                              runSpacing: 4,
-                              crossAxisAlignment: WrapCrossAlignment.center,
+                            Row(
                               children: <Widget>[
-                                SemanticChip(
-                                  label:
-                                      (entry.severityLabel ??
-                                              'SEV ${entry.severity ?? '-'}')
-                                          .toUpperCase(),
-                                  tone: entry.severityTone,
-                                  compact: true,
+                                Expanded(
+                                  child: Row(
+                                    children: <Widget>[
+                                      SemanticChip(
+                                        label:
+                                            (entry.severityLabel ??
+                                                    'SEV ${entry.severity ?? '-'}')
+                                                .toUpperCase(),
+                                        tone: entry.severityTone,
+                                        compact: true,
+                                      ),
+                                      if (hasAppName) ...<Widget>[
+                                        const SizedBox(width: 6),
+                                        Flexible(
+                                          child: SemanticChip(
+                                            label: entry.appName!,
+                                            tone: SemanticTone.secondary,
+                                            compact: true,
+                                          ),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
                                 ),
+                                const SizedBox(width: 8),
                                 Text(
                                   formatShortDateTime(entry.receivedAt),
                                   style: context.textTheme.labelSmall?.copyWith(
                                     fontFamily: 'monospace',
+                                    fontWeight: FontWeight.w600,
                                     color: context.colorScheme.onSurfaceVariant,
                                   ),
                                 ),
-                                Text(
-                                  entry.deviceName ??
-                                      entry.hostname ??
-                                      entry.sourceIp,
-                                  style: context.textTheme.labelMedium
-                                      ?.copyWith(fontWeight: FontWeight.w700),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            Row(
+                              children: <Widget>[
+                                Icon(
+                                  Icons.router_outlined,
+                                  size: 14,
+                                  color: context.colorScheme.onSurfaceVariant,
                                 ),
-                                if (entry.appName != null &&
-                                    entry.appName!.isNotEmpty)
-                                  SemanticChip(
-                                    label: entry.appName!,
-                                    tone: SemanticTone.secondary,
-                                    compact: true,
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    sourceLabel,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: context.textTheme.labelLarge
+                                        ?.copyWith(fontWeight: FontWeight.w700),
                                   ),
-                                if (tmpl != null)
+                                ),
+                                if (tmpl != null) ...<Widget>[
+                                  const SizedBox(width: 8),
                                   SemanticChip(
                                     label: logCategoryLabel(tmpl.category),
                                     tone: tmpl.confirmed
@@ -1575,6 +1604,7 @@ class _LogsPageState extends ConsumerState<LogsPage> {
                                     onTap: () =>
                                         _openTemplateSheet(entry, tmpl),
                                   ),
+                                ],
                               ],
                             ),
                             const SizedBox(height: 6),
@@ -1583,6 +1613,7 @@ class _LogsPageState extends ConsumerState<LogsPage> {
                               style: TextStyle(
                                 fontFamily: 'monospace',
                                 fontSize: 12.5,
+                                height: 1.35,
                                 color: context.colorScheme.onSurface,
                               ),
                             ),

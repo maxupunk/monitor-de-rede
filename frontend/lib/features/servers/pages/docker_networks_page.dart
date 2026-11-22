@@ -181,43 +181,88 @@ class _DockerNetworksPageState extends ConsumerState<DockerNetworksPage> {
                 shape: RoundedRectangleBorder(
                   borderRadius: AppTheme.borderRadius,
                 ),
-                child: ListTile(
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
                   onTap: () => _inspectNetwork(net),
-                  leading: const Icon(Icons.hub_outlined),
-                  title: Wrap(
-                    spacing: 8,
-                    runSpacing: 4,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: <Widget>[
-                      Text(
-                        net.name,
-                        style: const TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                      SemanticChip(
-                        label: net.internal ? 'Interna' : 'Externa',
-                        tone: net.internal
-                            ? SemanticTone.warning
-                            : SemanticTone.success,
-                        compact: true,
-                      ),
-                      SemanticChip(
-                        label: '${net.connectedContainers} containers',
-                        tone: SemanticTone.info,
-                        compact: true,
-                      ),
-                    ],
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Container(
+                          width: 38,
+                          height: 38,
+                          decoration: BoxDecoration(
+                            color: context.colorScheme.primaryContainer,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Icon(
+                            Icons.hub_outlined,
+                            size: 20,
+                            color: context.colorScheme.onPrimaryContainer,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: <Widget>[
+                              Text(
+                                net.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: context.textTheme.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Row(
+                                children: <Widget>[
+                                  SemanticChip(
+                                    label: net.internal ? 'Interna' : 'Externa',
+                                    tone: net.internal
+                                        ? SemanticTone.warning
+                                        : SemanticTone.success,
+                                    compact: true,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Flexible(
+                                    child: SemanticChip(
+                                      label:
+                                          '${net.connectedContainers} containers',
+                                      tone: SemanticTone.info,
+                                      compact: true,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                'Driver: ${net.driver} · Escopo: ${net.scope}'
+                                '${subnets.isNotEmpty ? ' · Sub-redes: $subnets' : ''}',
+                                style: context.textTheme.bodySmall?.copyWith(
+                                  color: context.colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (isAdmin && !net.isBuiltIn)
+                          IconButton(
+                            tooltip: 'Remover rede',
+                            visualDensity: VisualDensity.compact,
+                            icon: Icon(
+                              Icons.delete_outline,
+                              color: context.colorScheme.error,
+                            ),
+                            onPressed: () => _removeNetwork(net),
+                          ),
+                      ],
+                    ),
                   ),
-                  subtitle: Text(
-                    'Driver: ${net.driver} · Escopo: ${net.scope}'
-                    '${subnets.isNotEmpty ? ' · Sub-redes: $subnets' : ''}',
-                  ),
-                  trailing: isAdmin && !net.isBuiltIn
-                      ? IconButton(
-                          tooltip: 'Remover rede',
-                          icon: const Icon(Icons.delete_outline),
-                          onPressed: () => _removeNetwork(net),
-                        )
-                      : null,
                 ),
               ),
             );

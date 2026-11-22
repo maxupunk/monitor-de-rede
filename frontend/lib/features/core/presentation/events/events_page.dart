@@ -344,42 +344,15 @@ class _EventsPageState extends ConsumerState<EventsPage>
       itemBuilder: (context, index) {
         final ev = liveEvents[index];
         final p = EventPresentation.describe(ev.type, ev.data);
-        return Card(
-          elevation: 1,
-          shape: RoundedRectangleBorder(borderRadius: AppTheme.borderRadius),
-          child: ListTile(
-            onTap: () => _showEventDetail(
-              type: ev.type,
-              timestamp: ev.timestamp,
-              data: ev.data,
-            ),
-            leading: Icon(
-              p.icon,
-              color: context.semanticColors
-                  .resolve(p.tone, context.colorScheme)
-                  .foreground,
-            ),
-            title: Wrap(
-              spacing: 6,
-              runSpacing: 4,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: <Widget>[
-                Text(
-                  p.label,
-                  style: const TextStyle(fontWeight: FontWeight.w700),
-                ),
-                SemanticChip(label: p.category, tone: p.tone, compact: true),
-              ],
-            ),
-            subtitle: Text(
-              p.summary,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-            trailing: Text(
-              formatClockTime(ev.timestamp),
-              style: context.textTheme.labelSmall,
-            ),
+        return _EventFeedCard(
+          presentation: p,
+          title: p.label,
+          summary: p.summary,
+          timestampLabel: formatClockTime(ev.timestamp),
+          onTap: () => _showEventDetail(
+            type: ev.type,
+            timestamp: ev.timestamp,
+            data: ev.data,
           ),
         );
       },
@@ -424,10 +397,10 @@ class _EventsPageState extends ConsumerState<EventsPage>
       onRefresh: () =>
           ref.read(eventsHistoryProvider.notifier).fetchPage(page: 1),
       child: ListView.separated(
-        padding: const EdgeInsets.only(top: 8, bottom: 24),
+        padding: const EdgeInsets.only(top: 10, bottom: 24),
         physics: const AlwaysScrollableScrollPhysics(),
         itemCount: history.items.length + (hasNext ? 1 : 0),
-        separatorBuilder: (_, _) => const Divider(height: 1),
+        separatorBuilder: (_, _) => const SizedBox(height: 8),
         itemBuilder: (context, index) {
           if (index >= history.items.length) {
             return Padding(
@@ -447,35 +420,118 @@ class _EventsPageState extends ConsumerState<EventsPage>
           }
           final item = history.items[index];
           final p = EventPresentation.describe(item.type, item.data);
-          return ListTile(
+          return _EventFeedCard(
+            presentation: p,
+            title: item.title ?? p.label,
+            summary: item.message ?? p.summary,
+            timestampLabel: formatShortDateTime(item.timestamp),
             onTap: () => _showEventDetail(
               type: item.type,
               timestamp: item.timestamp,
               data: item.data,
             ),
-            leading: Icon(
-              p.icon,
-              color: context.semanticColors
-                  .resolve(p.tone, context.colorScheme)
-                  .foreground,
-            ),
-            title: Text(
-              item.title ?? p.label,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.w700),
-            ),
-            subtitle: Text(
-              item.message ?? p.summary,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-            trailing: Text(
-              formatShortDateTime(item.timestamp),
-              style: context.textTheme.labelSmall,
-            ),
           );
         },
+      ),
+    );
+  }
+}
+
+class _EventFeedCard extends StatelessWidget {
+  const _EventFeedCard({
+    required this.presentation,
+    required this.title,
+    required this.summary,
+    required this.timestampLabel,
+    required this.onTap,
+  });
+
+  final EventPresentation presentation;
+  final String title;
+  final String summary;
+  final String timestampLabel;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = context.colorScheme;
+    final colors = context.semanticColors.resolve(presentation.tone, scheme);
+
+    return Card(
+      elevation: 1,
+      shape: RoundedRectangleBorder(borderRadius: AppTheme.borderRadius),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: colors.container,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: colors.border),
+                ),
+                child: Icon(
+                  presentation.icon,
+                  size: 20,
+                  color: colors.onContainer,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: context.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      summary,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: context.textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  SemanticChip(
+                    label: presentation.category,
+                    tone: presentation.tone,
+                    compact: true,
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    timestampLabel,
+                    style: context.textTheme.labelSmall?.copyWith(
+                      fontFamily: 'monospace',
+                      fontWeight: FontWeight.w600,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

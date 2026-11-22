@@ -347,50 +347,92 @@ class _AuditPageState extends ConsumerState<AuditPage> {
                   separatorBuilder: (_, _) => const SizedBox(height: 8),
                   itemBuilder: (context, index) {
                     final entry = state.entries[index];
+                    final scheme = context.colorScheme;
                     return Card(
                       elevation: 1,
                       shape: RoundedRectangleBorder(
                         borderRadius: AppTheme.borderRadius,
                       ),
-                      child: ListTile(
+                      clipBehavior: Clip.antiAlias,
+                      child: InkWell(
                         onTap: () => _openDetail(entry),
-                        title: Wrap(
-                          spacing: 6,
-                          runSpacing: 4,
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          children: <Widget>[
-                            SemanticChip(
-                              label: auditActionLabel(entry.action),
-                              tone: _actionTone(entry.action),
-                              compact: true,
-                            ),
-                            SemanticChip(
-                              label: auditResourceLabel(entry.resourceType),
-                              tone: SemanticTone.secondary,
-                              compact: true,
-                            ),
-                            if (entry.resourceLabel != null)
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 12,
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: <Widget>[
+                              Row(
+                                children: <Widget>[
+                                  Expanded(
+                                    child: Row(
+                                      children: <Widget>[
+                                        SemanticChip(
+                                          label: auditActionLabel(entry.action),
+                                          tone: _actionTone(entry.action),
+                                          compact: true,
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Flexible(
+                                          child: SemanticChip(
+                                            label: auditResourceLabel(
+                                              entry.resourceType,
+                                            ),
+                                            tone: SemanticTone.secondary,
+                                            compact: true,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    formatShortDateTime(entry.createdAt),
+                                    style: context.textTheme.labelSmall
+                                        ?.copyWith(
+                                          fontFamily: 'monospace',
+                                          fontWeight: FontWeight.w600,
+                                          color: scheme.onSurfaceVariant,
+                                        ),
+                                  ),
+                                ],
+                              ),
+                              if (entry.resourceLabel != null &&
+                                  entry.resourceLabel!.isNotEmpty) ...<Widget>[
+                                const SizedBox(height: 8),
+                                Text(
+                                  entry.resourceLabel!,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: context.textTheme.titleSmall?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ],
+                              const SizedBox(height: 4),
                               Text(
-                                entry.resourceLabel!,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w700,
+                                '${entry.userEmail ?? 'Sistema'}'
+                                '${entry.ipAddress != null ? ' · ${entry.ipAddress}' : ''}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: context.textTheme.bodySmall?.copyWith(
+                                  color: scheme.onSurfaceVariant,
                                 ),
                               ),
-                          ],
-                        ),
-                        subtitle: Padding(
-                          padding: const EdgeInsets.only(top: 4),
-                          child: Text(
-                            '${entry.userEmail ?? 'Sistema'}'
-                            '${entry.ipAddress != null ? ' · ${entry.ipAddress}' : ''}'
-                            '${entry.description != null ? '\n${entry.description}' : ''}',
-                            maxLines: 3,
-                            overflow: TextOverflow.ellipsis,
+                              if (entry.description != null &&
+                                  entry.description!.isNotEmpty) ...<Widget>[
+                                const SizedBox(height: 4),
+                                Text(
+                                  entry.description!,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: context.textTheme.bodySmall,
+                                ),
+                              ],
+                            ],
                           ),
-                        ),
-                        trailing: Text(
-                          formatShortDateTime(entry.createdAt),
-                          style: context.textTheme.labelSmall,
                         ),
                       ),
                     );

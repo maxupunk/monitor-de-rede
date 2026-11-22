@@ -310,6 +310,13 @@ void main() {
       expect(find.byType(UnifiedFilterBar), findsOneWidget);
       expect(find.text('Filtros'), findsOneWidget);
       expect(find.textContaining('DHCPNAK'), findsOneWidget);
+      // Severity badge and app/daemon tag sit on the exact same horizontal row (zero wrap).
+      final errChipRect = tester.getRect(find.text('ERR'));
+      final dhcpdChipRect = tester.getRect(find.text('dhcpd'));
+      expect(
+        (errChipRect.center.dy - dhcpdChipRect.center.dy).abs(),
+        lessThan(4.0),
+      );
       expect(tester.takeException(), isNull);
 
       // Open the mobile filter sheet and confirm zero overflow inside.
@@ -334,6 +341,20 @@ void main() {
           .read(sseServiceProvider.notifier)
           .dispatchForTest(
             const SseEvent(
+              type: 'monitor:checked',
+              timestamp: '2026-06-01T14:00:00Z',
+              data: <String, dynamic>{
+                'monitorId': 1,
+                'monitorName': 'Gateway Principal Fibra',
+                'status': 'up',
+                'latencyMs': 2.4,
+              },
+            ),
+          );
+      container
+          .read(sseServiceProvider.notifier)
+          .dispatchForTest(
+            const SseEvent(
               type: 'alert:triggered',
               timestamp: '2026-06-01T14:00:00Z',
               data: <String, dynamic>{
@@ -349,8 +370,19 @@ void main() {
       expect(find.byType(UnifiedFilterBar), findsOneWidget);
       expect(find.text('Eventos'), findsOneWidget);
       expect(find.text('Pausar'), findsOneWidget);
-      expect(find.text('Tempo Real (1)'), findsOneWidget);
+      expect(find.text('Tempo Real (2)'), findsOneWidget);
       expect(find.text('Link principal degradado'), findsOneWidget);
+      expect(find.text('Verificação de monitor'), findsOneWidget);
+
+      // Category chip sits in the right metadata column, never wrapped below the title.
+      final titleRect = tester.getRect(find.text('Verificação de monitor'));
+      final categoryChipRect = tester.getRect(
+        find.descendant(
+          of: find.byType(Card),
+          matching: find.text('Monitores'),
+        ),
+      );
+      expect(categoryChipRect.left, greaterThan(titleRect.right - 4.0));
       expect(tester.takeException(), isNull);
     },
   );

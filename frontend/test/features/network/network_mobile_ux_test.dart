@@ -606,7 +606,14 @@ void main() {
       expect(find.byType(UnifiedFilterBar), findsOneWidget);
       expect(find.text('Dispositivos'), findsOneWidget);
       expect(find.text('MikroTik CCR2004 Principal'), findsOneWidget);
+      expect(find.byType(Checkbox), findsNothing);
       expect(find.text('Filtros'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('Mais ações'));
+      await tester.pumpAndSettle();
+      expect(find.text('Definir pai em lote'), findsOneWidget);
+      await tester.tapAt(const Offset(8, 8));
+      await tester.pumpAndSettle();
 
       await tester.tap(find.text('Filtros'));
       await tester.pumpAndSettle();

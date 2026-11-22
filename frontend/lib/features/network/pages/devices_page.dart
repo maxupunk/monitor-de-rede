@@ -28,7 +28,6 @@ class _DevicesPageState extends ConsumerState<DevicesPage> {
   int? _networkFilter;
   String _vendorFilter = 'all';
   String _sortBy = 'name';
-  final Set<int> _selectedIds = <int>{};
 
   @override
   void initState() {
@@ -49,20 +48,37 @@ class _DevicesPageState extends ConsumerState<DevicesPage> {
 
   Future<void> _openBatchParentSheet(List<DeviceModel> allDevices) async {
     int? chosenParentId;
+    final selectedIds = <int>{};
+    var searchQuery = '';
+
     final confirmed = await showAdaptiveFormSheet<bool>(
       context: context,
       title: 'Definir dispositivo pai em lote',
-      subtitle: '${_selectedIds.length} dispositivos selecionados',
+      subtitle:
+          'Selecione os equipamentos filhos e o dispositivo pai na hierarquia.',
       builder: (ctx) => StatefulBuilder(
         builder: (context, setModal) {
-          final candidates = allDevices
-              .where((d) => !_selectedIds.contains(d.id))
+          final parentCandidates = allDevices
+              .where((d) => !selectedIds.contains(d.id))
               .toList(growable: false);
+          final childCandidates = allDevices
+              .where((d) {
+                if (d.id == chosenParentId) return false;
+                if (searchQuery.isEmpty) return true;
+                final q = searchQuery.toLowerCase();
+                return d.name.toLowerCase().contains(q) ||
+                    (d.ipAddress?.toLowerCase().contains(q) ?? false);
+              })
+              .toList(growable: false);
+
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
               AppDropdownFormField<int?>(
-                initialValue: chosenParentId,
+                initialValue:
+                    parentCandidates.any((d) => d.id == chosenParentId)
+                    ? chosenParentId
+                    : null,
                 decoration: const InputDecoration(labelText: 'Dispositivo pai'),
                 items: <DropdownMenuItem<int?>>[
                   const DropdownMenuItem<int?>(
@@ -72,34 +88,105 @@ class _DevicesPageState extends ConsumerState<DevicesPage> {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  for (final d in candidates)
+                  for (final d in parentCandidates)
                     DropdownMenuItem<int?>(
                       value: d.id,
                       child: Text(d.name, overflow: TextOverflow.ellipsis),
                     ),
                 ],
-                onChanged: (v) => setModal(() => chosenParentId = v),
+                onChanged: (v) => setModal(() {
+                  chosenParentId = v;
+                  if (v != null) selectedIds.remove(v);
+                }),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                decoration: const InputDecoration(
+                  hintText: 'Filtrar equipamentos da lista...',
+                  prefixIcon: Icon(Icons.search, size: 18),
+                  isDense: true,
+                ),
+                onChanged: (v) => setModal(() => searchQuery = v.trim()),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: <Widget>[
+                  Expanded(
+                    child: Text(
+                      countNoun(
+                        selectedIds.length,
+                        'equipamento selecionado',
+                        'equipamentos selecionados',
+                      ),
+                      style: context.textTheme.labelMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  if (selectedIds.isNotEmpty)
+                    TextButton(
+                      onPressed: () => setModal(selectedIds.clear),
+                      child: const Text('Limpar'),
+                    ),
+                ],
+              ),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 260),
+                child: NestedPanel(
+                  padding: EdgeInsets.zero,
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: childCandidates.length,
+                    separatorBuilder: (_, _) => const Divider(height: 1),
+                    itemBuilder: (context, index) {
+                      final d = childCandidates[index];
+                      final checked = selectedIds.contains(d.id);
+                      return CheckboxListTile(
+                        dense: true,
+                        controlAffinity: ListTileControlAffinity.leading,
+                        value: checked,
+                        onChanged: (v) => setModal(() {
+                          if (v == true) {
+                            selectedIds.add(d.id);
+                          } else {
+                            selectedIds.remove(d.id);
+                          }
+                        }),
+                        title: Text(
+                          d.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                        subtitle: d.ipAddress != null
+                            ? Text(
+                                d.ipAddress!,
+                                style: const TextStyle(fontFamily: 'monospace'),
+                              )
+                            : null,
+                      );
+                    },
+                  ),
+                ),
               ),
               const SizedBox(height: 16),
-              Align(
-                alignment: Alignment.centerRight,
-                child: FilledButton.icon(
-                  onPressed: () => Navigator.of(ctx).pop(true),
-                  icon: const Icon(Icons.account_tree_outlined),
-                  label: const Text('Aplicar hierarquia'),
-                ),
+              FilledButton.icon(
+                onPressed: selectedIds.isEmpty
+                    ? null
+                    : () => Navigator.of(ctx).pop(true),
+                icon: const Icon(Icons.account_tree_outlined),
+                label: const Text('Aplicar hierarquia'),
               ),
             ],
           );
         },
       ),
     );
-    if (confirmed == true) {
+    if (confirmed == true && selectedIds.isNotEmpty) {
       final ok = await ref
           .read(devicesProvider.notifier)
-          .batchSetParent(_selectedIds.toList(growable: false), chosenParentId);
+          .batchSetParent(selectedIds.toList(growable: false), chosenParentId);
       if (ok && mounted) {
-        setState(() => _selectedIds.clear());
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Hierarquia atualizada em lote.')),
         );
@@ -120,7 +207,6 @@ class _DevicesPageState extends ConsumerState<DevicesPage> {
         .read(devicesProvider.notifier)
         .deleteDevice(device.id);
     if (deleted && mounted) {
-      _selectedIds.remove(device.id);
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('"${device.name}" removido.')));
@@ -254,6 +340,14 @@ class _DevicesPageState extends ConsumerState<DevicesPage> {
                     ),
                   ),
                   if (!isCompact) ...<Widget>[
+                    if (canWrite && state.items.length > 1) ...<Widget>[
+                      OutlinedButton.icon(
+                        onPressed: () => _openBatchParentSheet(state.items),
+                        icon: const Icon(Icons.account_tree_outlined, size: 18),
+                        label: const Text('Hierarquia em lote'),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
                     OutlinedButton.icon(
                       onPressed: () => showSnmpProfilesDialog(context),
                       icon: const Icon(Icons.tune, size: 18),
@@ -282,10 +376,12 @@ class _DevicesPageState extends ConsumerState<DevicesPage> {
                       onSelected: (value) {
                         if (value == 'snmp_profiles') {
                           showSnmpProfilesDialog(context);
+                        } else if (value == 'batch_parent') {
+                          _openBatchParentSheet(state.items);
                         }
                       },
-                      itemBuilder: (_) => const <PopupMenuEntry<String>>[
-                        PopupMenuItem<String>(
+                      itemBuilder: (_) => <PopupMenuEntry<String>>[
+                        const PopupMenuItem<String>(
                           value: 'snmp_profiles',
                           child: ListTile(
                             dense: true,
@@ -294,6 +390,16 @@ class _DevicesPageState extends ConsumerState<DevicesPage> {
                             title: Text('Perfis SNMP'),
                           ),
                         ),
+                        if (canWrite && state.items.length > 1)
+                          const PopupMenuItem<String>(
+                            value: 'batch_parent',
+                            child: ListTile(
+                              dense: true,
+                              contentPadding: EdgeInsets.zero,
+                              leading: Icon(Icons.account_tree_outlined),
+                              title: Text('Definir pai em lote'),
+                            ),
+                          ),
                       ],
                     ),
                   ],
@@ -503,53 +609,6 @@ class _DevicesPageState extends ConsumerState<DevicesPage> {
                   ],
                 ),
               ],
-              if (_selectedIds.isNotEmpty && canWrite) ...<Widget>[
-                const SizedBox(height: 12),
-                NestedPanel(
-                  tone: SemanticTone.primary,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 10,
-                  ),
-                  child: Wrap(
-                    spacing: 10,
-                    runSpacing: 8,
-                    alignment: WrapAlignment.spaceBetween,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: <Widget>[
-                      Text(
-                        countNoun(
-                          _selectedIds.length,
-                          'dispositivo selecionado',
-                          'dispositivos selecionados',
-                        ),
-                        style: context.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 6,
-                        children: <Widget>[
-                          FilledButton.icon(
-                            onPressed: () => _openBatchParentSheet(state.items),
-                            icon: const Icon(
-                              Icons.account_tree_outlined,
-                              size: 18,
-                            ),
-                            label: const Text('Definir pai em lote'),
-                          ),
-                          TextButton(
-                            onPressed: () =>
-                                setState(() => _selectedIds.clear()),
-                            child: const Text('Limpar seleção'),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ],
               const SizedBox(height: 12),
               if (state.loading && state.items.isEmpty)
                 const LoadingStateView(message: 'Carregando dispositivos...')
@@ -584,22 +643,9 @@ class _DevicesPageState extends ConsumerState<DevicesPage> {
                   xl: 3,
                   children: filtered
                       .map((device) {
-                        final selected = _selectedIds.contains(device.id);
                         return _DeviceCard(
                           device: device,
                           canWrite: canWrite,
-                          selected: selected,
-                          onToggleSelect: canWrite
-                              ? (v) {
-                                  setState(() {
-                                    if (v == true) {
-                                      _selectedIds.add(device.id);
-                                    } else {
-                                      _selectedIds.remove(device.id);
-                                    }
-                                  });
-                                }
-                              : null,
                           onOpen: () => context.go('/devices/${device.id}'),
                           onEdit: () => showDeviceFormSheet(
                             context: context,
@@ -623,8 +669,6 @@ class _DeviceCard extends StatelessWidget {
   const _DeviceCard({
     required this.device,
     required this.canWrite,
-    required this.selected,
-    required this.onToggleSelect,
     required this.onOpen,
     required this.onEdit,
     required this.onDelete,
@@ -632,8 +676,6 @@ class _DeviceCard extends StatelessWidget {
 
   final DeviceModel device;
   final bool canWrite;
-  final bool selected;
-  final ValueChanged<bool?>? onToggleSelect;
   final VoidCallback onOpen;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
@@ -643,12 +685,7 @@ class _DeviceCard extends StatelessWidget {
     final scheme = context.colorScheme;
     return Card(
       elevation: 2,
-      shape: RoundedRectangleBorder(
-        borderRadius: AppTheme.borderRadius,
-        side: selected
-            ? BorderSide(color: scheme.primary, width: 2)
-            : BorderSide.none,
-      ),
+      shape: RoundedRectangleBorder(borderRadius: AppTheme.borderRadius),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onOpen,
@@ -658,18 +695,8 @@ class _DeviceCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
               Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: <Widget>[
-                  if (onToggleSelect != null)
-                    SizedBox(
-                      width: 28,
-                      height: 28,
-                      child: Checkbox(
-                        value: selected,
-                        onChanged: onToggleSelect,
-                        visualDensity: VisualDensity.compact,
-                      ),
-                    ),
                   Container(
                     width: 40,
                     height: 40,
