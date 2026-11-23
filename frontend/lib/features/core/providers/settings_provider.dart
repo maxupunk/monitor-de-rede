@@ -4,9 +4,6 @@ import 'package:netmonitor_app/core/network/api_client.dart';
 import 'package:netmonitor_app/core/utils/error_utils.dart';
 import 'package:netmonitor_app/core/utils/json_parsers.dart';
 import 'package:netmonitor_app/features/core/models/settings_models.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-
-const String _localNotifPrefKey = 'pwa_notifications_enabled';
 
 @immutable
 class CoreSettingsState {
@@ -24,9 +21,6 @@ class CoreSettingsState {
     this.snmpLoading = false,
     this.operatingSystems = const <OperatingSystemOption>[],
     this.osLoaded = false,
-    this.pushStatus,
-    this.vapidPublicKey,
-    this.localNotificationsEnabled = false,
     this.error,
   });
 
@@ -43,9 +37,6 @@ class CoreSettingsState {
   final bool snmpLoading;
   final List<OperatingSystemOption> operatingSystems;
   final bool osLoaded;
-  final PushStatusModel? pushStatus;
-  final String? vapidPublicKey;
-  final bool localNotificationsEnabled;
   final String? error;
 
   List<ServerAddressEntry> get usableAddresses => addresses
@@ -67,9 +58,6 @@ class CoreSettingsState {
     bool? snmpLoading,
     List<OperatingSystemOption>? operatingSystems,
     bool? osLoaded,
-    PushStatusModel? pushStatus,
-    String? vapidPublicKey,
-    bool? localNotificationsEnabled,
     String? error,
     bool clearError = false,
   }) {
@@ -89,10 +77,6 @@ class CoreSettingsState {
       snmpLoading: snmpLoading ?? this.snmpLoading,
       operatingSystems: operatingSystems ?? this.operatingSystems,
       osLoaded: osLoaded ?? this.osLoaded,
-      pushStatus: pushStatus ?? this.pushStatus,
-      vapidPublicKey: vapidPublicKey ?? this.vapidPublicKey,
-      localNotificationsEnabled:
-          localNotificationsEnabled ?? this.localNotificationsEnabled,
       error: clearError ? null : (error ?? this.error),
     );
   }
@@ -100,26 +84,7 @@ class CoreSettingsState {
 
 class CoreSettingsNotifier extends Notifier<CoreSettingsState> {
   @override
-  CoreSettingsState build() {
-    Future<void>.microtask(_loadLocalNotifPref);
-    return const CoreSettingsState();
-  }
-
-  Future<void> _loadLocalNotifPref() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final enabled = prefs.getBool(_localNotifPrefKey) ?? false;
-      state = state.copyWith(localNotificationsEnabled: enabled);
-    } catch (_) {}
-  }
-
-  Future<void> setLocalNotificationsEnabled(bool enabled) async {
-    state = state.copyWith(localNotificationsEnabled: enabled);
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool(_localNotifPrefKey, enabled);
-    } catch (_) {}
-  }
+  CoreSettingsState build() => const CoreSettingsState();
 
   // --- Global Preferences (/api/settings) ---
 
@@ -291,37 +256,6 @@ class CoreSettingsNotifier extends Notifier<CoreSettingsState> {
         osLoaded: true,
       );
     } catch (_) {}
-  }
-
-  // --- Push Notifications (/api/push/*) ---
-
-  Future<void> fetchPushStatus() async {
-    final api = ref.read(apiClientProvider);
-    try {
-      final statusRaw = await api.get<Map<String, dynamic>>('/push/status');
-      String? vapid;
-      try {
-        final keyRaw = await api.get<Map<String, dynamic>>(
-          '/push/vapid-public-key',
-        );
-        vapid = keyRaw['publicKey'] as String?;
-      } catch (_) {}
-      state = state.copyWith(
-        pushStatus: PushStatusModel.fromJson(statusRaw),
-        vapidPublicKey: vapid,
-      );
-    } catch (_) {}
-  }
-
-  Future<String> sendTestPush() async {
-    try {
-      final res = await ref
-          .read(apiClientProvider)
-          .post<Map<String, dynamic>>('/push/test');
-      return (res['message'] ?? 'Notificação de teste enviada.').toString();
-    } catch (err) {
-      return describeError(err);
-    }
   }
 }
 

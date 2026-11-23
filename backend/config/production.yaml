@@ -14,8 +14,8 @@ server:
   middlewares:
     # A SPA é servida por este mesmo processo (`src/spa.rs`), então em produção
     # o navegador não faz requisição cross-origin nenhuma — este bloco existe
-    # para quem publica o frontend em outro endereço, e para o `npm run dev`
-    # apontado a um container de produção.
+    # para quem publica o frontend em outro endereço, e para o frontend em
+    # desenvolvimento (`flutter run`) apontado a um container de produção.
     cors:
       enable: true
       allow_origins:

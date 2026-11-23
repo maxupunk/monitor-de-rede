@@ -51,6 +51,21 @@ class _WifiClientsPageState extends ConsumerState<WifiClientsPage>
     Future<void>.microtask(_syncWifiInterest);
   }
 
+  @override
+  void didUpdateWidget(covariant WifiClientsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialTab != widget.initialTab) {
+      final target = widget.initialTab == 'map' ? 1 : 0;
+      if (_tabController.index != target) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _tabController.index != target) {
+            _tabController.animateTo(target);
+          }
+        });
+      }
+    }
+  }
+
   void _syncWifiInterest() {
     if (!mounted) return;
     final onMapTab = _tabController.index == 1;

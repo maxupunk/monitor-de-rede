@@ -51,8 +51,8 @@ impl NotificationChannel for WebPushChannel {
             "title": message.title,
             "body": message.body,
             "severity": message.severity.as_str(),
-            "icon": "/pwa-192x192.png",
-            "badge": "/pwa-192x192.png",
+            "icon": "/icons/Icon-192.png",
+            "badge": "/icons/Icon-192.png",
             "tag": tag,
             "data": {
                 "url": target_url,

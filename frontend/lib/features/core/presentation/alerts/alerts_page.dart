@@ -86,6 +86,49 @@ class _AlertsPageState extends ConsumerState<AlertsPage>
   }
 
   @override
+  void didUpdateWidget(covariant AlertsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialTab != widget.initialTab) {
+      final rawTab = widget.initialTab;
+      final target = (rawTab != null && rawTab.isNotEmpty)
+          ? _tabs.indexOf(rawTab)
+          : 0;
+      if (target >= 0 && _tabController.index != target) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _tabController.index != target) {
+            _tabController.animateTo(target);
+          }
+        });
+      }
+    }
+    if (oldWidget.deviceId != widget.deviceId) {
+      final nextDeviceId = widget.deviceId;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ref
+            .read(alertsProvider.notifier)
+            .fetchAlertRules(deviceId: nextDeviceId);
+      });
+    }
+    if (oldWidget.catalogKey != widget.catalogKey &&
+        widget.catalogKey != null &&
+        widget.catalogKey!.isNotEmpty) {
+      final nextCatalogKey = widget.catalogKey!;
+      final nextDeviceId = widget.deviceId;
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (!mounted) return;
+        _catalogOpened = true;
+        await showAlertRuleCatalogSheet(
+          context: context,
+          ref: ref,
+          deviceId: nextDeviceId,
+          preselectKey: nextCatalogKey,
+        );
+      });
+    }
+  }
+
+  @override
   void dispose() {
     _tabController.dispose();
     _searchCtrl.dispose();

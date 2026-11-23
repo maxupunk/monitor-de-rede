@@ -184,8 +184,8 @@ async fn test_push(State(ctx): State<AppContext>, headers: HeaderMap) -> AppResu
     let payload = json!({
         "title": "🔔 Teste de Notificação Web Push",
         "body": "Sucesso! Seu dispositivo está configurado para receber alertas em segundo plano do NetMonitor.",
-        "icon": "/pwa-192x192.png",
-        "badge": "/pwa-192x192.png",
+        "icon": "/icons/Icon-192.png",
+        "badge": "/icons/Icon-192.png",
         "tag": format!("test-push-{}", chrono::Utc::now().timestamp()),
         "data": {
             "url": "/settings",

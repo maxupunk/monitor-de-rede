@@ -39,6 +39,15 @@ class _MonitorsPageState extends ConsumerState<MonitorsPage> {
   }
 
   @override
+  void didUpdateWidget(covariant MonitorsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialStatus != widget.initialStatus) {
+      final next = widget.initialStatus;
+      _statusFilter = (next != null && next.isNotEmpty) ? next : 'all';
+    }
+  }
+
+  @override
   void dispose() {
     _searchCtrl.dispose();
     super.dispose();

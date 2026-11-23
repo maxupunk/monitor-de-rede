@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
+import 'package:netmonitor_app/core/notifications/notifications_service.dart';
+import 'package:netmonitor_app/core/notifications/web_notifications_interop.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/core/models/settings_models.dart';
 import 'package:netmonitor_app/features/core/providers/backup_provider.dart';
@@ -18,80 +21,409 @@ class NotificationsCard extends ConsumerStatefulWidget {
 }
 
 class _NotificationsCardState extends ConsumerState<NotificationsCard> {
-  bool _testing = false;
+  bool _testingPush = false;
+  bool _requestingPermission = false;
+  String? _feedbackText;
+  SemanticTone _feedbackTone = SemanticTone.info;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) ref.read(coreSettingsProvider.notifier).fetchPushStatus();
+      if (mounted) {
+        ref.read(notificationsProvider.notifier).refreshStatus();
+      }
     });
+  }
+
+  void _setFeedback(String message, SemanticTone tone) {
+    setState(() {
+      _feedbackText = message;
+      _feedbackTone = tone;
+    });
+  }
+
+  Future<void> _handleRequestPermission() async {
+    setState(() {
+      _requestingPermission = true;
+      _feedbackText = null;
+    });
+    final granted = await ref
+        .read(notificationsProvider.notifier)
+        .requestPermission();
+    if (!mounted) return;
+    setState(() => _requestingPermission = false);
+    final current = ref.read(notificationsProvider);
+    if (granted) {
+      _setFeedback(
+        current.isSubscribed
+            ? 'Permissão concedida e dispositivo inscrito para notificações Web Push!'
+            : 'Permissão concedida! Notificações locais habilitadas.',
+        SemanticTone.success,
+      );
+    } else if (current.permissionState == NotificationPermissionState.denied) {
+      _setFeedback(
+        'Permissão bloqueada pelo navegador. Libere as notificações nas configurações do site.',
+        SemanticTone.error,
+      );
+    } else {
+      _setFeedback(
+        'A permissão de notificações não foi concedida.',
+        SemanticTone.warning,
+      );
+    }
+  }
+
+  Future<void> _handleToggleWebPush(bool enable) async {
+    setState(() => _feedbackText = null);
+    final ok = await ref
+        .read(notificationsProvider.notifier)
+        .toggleWebPush(enable);
+    if (!mounted) return;
+    if (ok) {
+      _setFeedback(
+        enable
+            ? 'Dispositivo inscrito com sucesso para notificações Web Push!'
+            : 'Inscrição Web Push desativada neste dispositivo.',
+        SemanticTone.success,
+      );
+    } else {
+      final err = ref.read(notificationsProvider).error;
+      _setFeedback(
+        err ?? 'Não foi possível alterar a inscrição de Web Push no navegador.',
+        SemanticTone.error,
+      );
+    }
+  }
+
+  Future<void> _handleSendTestPush() async {
+    setState(() {
+      _testingPush = true;
+      _feedbackText = null;
+    });
+    try {
+      final res = await ref.read(notificationsProvider.notifier).sendTestPush();
+      if (!mounted) return;
+      setState(() => _testingPush = false);
+      _setFeedback(
+        res.message,
+        res.success ? SemanticTone.success : SemanticTone.warning,
+      );
+    } catch (err) {
+      if (!mounted) return;
+      setState(() => _testingPush = false);
+      _setFeedback(describeError(err), SemanticTone.error);
+    }
+  }
+
+  Future<void> _handleLocalTest() async {
+    final shown = await ref
+        .read(notificationsProvider.notifier)
+        .sendLocalNotification(
+          'Notificação de Teste PWA',
+          body:
+              'Este é um teste de funcionamento das notificações em tempo real do NetMonitor.',
+          tag: 'netmonitor-local-test',
+          url: '/settings',
+        );
+    if (!mounted) return;
+    if (shown) {
+      _setFeedback(
+        'Notificação local disparada na aba aberta.',
+        SemanticTone.success,
+      );
+    } else {
+      _setFeedback(
+        'Ative as notificações visuais na aba aberta e garanta a permissão concedida.',
+        SemanticTone.warning,
+      );
+    }
+  }
+
+  (String subtitle, String chipLabel, SemanticTone tone) _permissionMeta(
+    NotificationPermissionState perm,
+  ) {
+    return switch (perm) {
+      NotificationPermissionState.granted => (
+        'Permissão concedida',
+        'PERMITIDO',
+        SemanticTone.success,
+      ),
+      NotificationPermissionState.denied => (
+        'Bloqueado no navegador',
+        'BLOQUEADO',
+        SemanticTone.error,
+      ),
+      NotificationPermissionState.unsupported => (
+        'Não suportado',
+        'INDISPONÍVEL',
+        SemanticTone.secondary,
+      ),
+      NotificationPermissionState.defaultState => (
+        'Ainda não solicitado',
+        'PENDENTE',
+        SemanticTone.warning,
+      ),
+    };
+  }
+
+  (String subtitle, String chipLabel, SemanticTone tone) _webPushMeta(
+    NotificationsState notifs,
+  ) {
+    final countLabel =
+        '${formatInteger(notifs.subscriptionCount)} assinatura(s) ativa(s)';
+    if (!notifs.isWebPushSupported) {
+      return (
+        'Não suportado neste navegador/contexto',
+        'INDISPONÍVEL',
+        SemanticTone.secondary,
+      );
+    }
+    if (notifs.isSubscribed) {
+      return (
+        'Dispositivo inscrito · $countLabel',
+        'ATIVO',
+        SemanticTone.success,
+      );
+    }
+    return (
+      'Não inscrito neste dispositivo · $countLabel',
+      'INATIVO',
+      SemanticTone.warning,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final settings = ref.watch(coreSettingsProvider);
-    final push = settings.pushStatus;
+    final notifs = ref.watch(notificationsProvider);
+    final (permSubtitle, permChip, permTone) = _permissionMeta(
+      notifs.permissionState,
+    );
+    final (pushSubtitle, pushChip, pushTone) = _webPushMeta(notifs);
+    final isGranted =
+        notifs.permissionState == NotificationPermissionState.granted;
 
     return SectionCard(
-      title: 'Notificações Push e Alertas Locais',
+      title: 'Notificações PWA & Web Push',
       subtitle:
-          'Receba alertas críticos, quedas de monitor e falhas de backup em tempo real',
+          'Configure alertas críticos, quedas de monitor e falhas de backup mesmo com o navegador ou aplicativo fechados',
       icon: Icons.notifications_active_outlined,
-      iconTone: push?.configured == true
+      iconTone: notifs.isSubscribed
           ? SemanticTone.success
-          : SemanticTone.info,
+          : (notifs.permissionState == NotificationPermissionState.denied
+                ? SemanticTone.error
+                : SemanticTone.warning),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
+          ResponsiveFieldRow(
+            breakpoint: 560,
+            spacing: 12,
+            runSpacing: 10,
+            children: <Widget>[
+              NestedPanel(
+                padding: const EdgeInsets.all(12),
+                child: Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(
+                            'Permissão do Navegador',
+                            style: context.textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            permSubtitle,
+                            style: context.textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    SemanticChip(
+                      label: permChip,
+                      tone: permTone,
+                      compact: true,
+                    ),
+                  ],
+                ),
+              ),
+              NestedPanel(
+                padding: const EdgeInsets.all(12),
+                child: Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(
+                            'Web Push em 2º Plano',
+                            style: context.textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            pushSubtitle,
+                            style: context.textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    SemanticChip(
+                      label: pushChip,
+                      tone: pushTone,
+                      compact: true,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (!notifs.isWebPushSupported) ...<Widget>[
+            const SizedBox(height: 10),
+            NestedPanel(
+              tone: SemanticTone.info,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Icon(
+                    Icons.lock_outline,
+                    size: 18,
+                    color: context.semanticColors
+                        .resolve(SemanticTone.info, context.colorScheme)
+                        .onContainer,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Web Push em segundo plano exige acesso via HTTPS (contexto seguro) ou localhost em um navegador compatível com Service Worker e PushManager.',
+                      style: context.textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        color: context.semanticColors
+                            .resolve(SemanticTone.info, context.colorScheme)
+                            .onContainer,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          const SizedBox(height: 10),
+          if (notifs.isWebPushSupported)
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: notifs.isSubscribed,
+              onChanged:
+                  notifs.isSubscribing ||
+                      notifs.permissionState ==
+                          NotificationPermissionState.denied
+                  ? null
+                  : _handleToggleWebPush,
+              title: const Text('Receber alertas em segundo plano (Web Push)'),
+              subtitle: Text(
+                notifs.isSubscribing
+                    ? 'Atualizando assinatura Web Push no servidor...'
+                    : 'Entrega alertas críticos mesmo com a aba ou o aplicativo fechados.',
+              ),
+            ),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
-            value: settings.localNotificationsEnabled,
-            onChanged: (v) => ref
-                .read(coreSettingsProvider.notifier)
-                .setLocalNotificationsEnabled(v),
-            title: const Text('Ativar notificações neste dispositivo'),
+            value: notifs.localNotificationsEnabled,
+            onChanged: isGranted
+                ? (v) => ref
+                      .read(notificationsProvider.notifier)
+                      .setLocalNotificationsEnabled(v)
+                : null,
+            title: const Text('Notificações visuais na aba aberta'),
             subtitle: const Text(
-              'Dispara avisos para alert:triggered, monitor down, device offline e backup:failed.',
+              'Dispara avisos em tempo real via SSE para alert:triggered, monitor down, device offline e backup:failed.',
             ),
           ),
-          const Divider(height: 16),
-          KeyValueRow(
-            label: 'Servidor Web Push (VAPID)',
-            value: push == null
-                ? 'Consultando...'
-                : (push.configured ? 'Configurado' : 'Não configurado'),
-          ),
-          KeyValueRow(
-            label: 'Assinaturas ativas',
-            value: formatInteger(push?.subscriptionCount ?? 0),
-          ),
+          if (_feedbackText != null) ...<Widget>[
+            const SizedBox(height: 8),
+            NestedPanel(
+              tone: _feedbackTone,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              child: Row(
+                children: <Widget>[
+                  Expanded(
+                    child: Text(
+                      _feedbackText!,
+                      style: context.textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        color: context.semanticColors
+                            .resolve(_feedbackTone, context.colorScheme)
+                            .onContainer,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Fechar aviso',
+                    visualDensity: VisualDensity.compact,
+                    icon: Icon(
+                      Icons.close,
+                      size: 16,
+                      color: context.semanticColors
+                          .resolve(_feedbackTone, context.colorScheme)
+                          .onContainer,
+                    ),
+                    onPressed: () => setState(() => _feedbackText = null),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 12),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: FilledButton.tonalIcon(
-              onPressed: _testing
-                  ? null
-                  : () async {
-                      setState(() => _testing = true);
-                      final msg = await ref
-                          .read(coreSettingsProvider.notifier)
-                          .sendTestPush();
-                      if (!context.mounted) return;
-                      setState(() => _testing = false);
-                      ScaffoldMessenger.of(
-                        context,
-                      ).showSnackBar(SnackBar(content: Text(msg)));
-                    },
-              icon: _testing
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.send_outlined, size: 18),
-              label: const Text('Enviar notificação de teste'),
-            ),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: <Widget>[
+              if (!isGranted)
+                FilledButton.icon(
+                  onPressed:
+                      notifs.permissionState ==
+                              NotificationPermissionState.unsupported ||
+                          _requestingPermission
+                      ? null
+                      : _handleRequestPermission,
+                  icon: _requestingPermission
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.notifications_active, size: 18),
+                  label: const Text('Solicitar permissão'),
+                )
+              else ...<Widget>[
+                FilledButton.icon(
+                  onPressed: !notifs.isSubscribed || _testingPush
+                      ? null
+                      : _handleSendTestPush,
+                  icon: _testingPush
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.send_outlined, size: 18),
+                  label: const Text('Testar Web Push (2º plano)'),
+                ),
+                FilledButton.tonalIcon(
+                  onPressed: _handleLocalTest,
+                  icon: const Icon(Icons.notifications_outlined, size: 18),
+                  label: const Text('Teste local (aba aberta)'),
+                ),
+              ],
+            ],
           ),
         ],
       ),

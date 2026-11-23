@@ -79,6 +79,46 @@ class _LinkTestsPageState extends ConsumerState<LinkTestsPage>
   }
 
   @override
+  void didUpdateWidget(covariant LinkTestsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialTab != widget.initialTab) {
+      final target = widget.initialTab == 'schedules' ? 1 : 0;
+      if (_tabController.index != target) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _tabController.index != target) {
+            _tabController.animateTo(target);
+          }
+        });
+      }
+    }
+    if (oldWidget.initialDeviceId != widget.initialDeviceId) {
+      _deviceFilter = widget.initialDeviceId;
+      final nextDeviceId = _deviceFilter;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ref
+            .read(linkTestsProvider.notifier)
+            .fetchPage(
+              page: 1,
+              deviceId: nextDeviceId,
+              status: _statusFilter,
+              kind: _kindFilter,
+            );
+      });
+    }
+    if (oldWidget.initialTestId != widget.initialTestId &&
+        widget.initialTestId != null) {
+      final nextTestId = widget.initialTestId!;
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (!mounted) return;
+        await ref.read(linkTestsProvider.notifier).fetchDetail(nextTestId);
+        if (!mounted) return;
+        ref.read(linkTestsProvider.notifier).focus(nextTestId);
+      });
+    }
+  }
+
+  @override
   void dispose() {
     _tabController.dispose();
     super.dispose();

@@ -101,8 +101,8 @@ pub fn push_payload(moment: Moment, run: &DeployRunView, message: &NotificationM
     json!({
         "title": message.title,
         "body": message.body,
-        "icon": "/pwa-192x192.png",
-        "badge": "/pwa-192x192.png",
+        "icon": "/icons/Icon-192.png",
+        "badge": "/icons/Icon-192.png",
         "tag": format!("deploy-{}", run.id),
         "data": { "url": url, "runId": run.id },
         "actions": actions,
@@ -159,8 +159,8 @@ pub async fn send_build_failed(ctx: &AppContext, build: &BuildView) {
     let payload = json!({
         "title": message.title,
         "body": message.body,
-        "icon": "/pwa-192x192.png",
-        "badge": "/pwa-192x192.png",
+        "icon": "/icons/Icon-192.png",
+        "badge": "/icons/Icon-192.png",
         "tag": format!("deploy-build-{}", build.id),
         "data": { "url": url, "buildId": build.id },
         "actions": [{ "action": "open", "title": "Ver compilação", "url": url }],
@@ -216,6 +216,8 @@ mod tests {
         assert!(message.body.contains("#a1b2c3d — feat: NF-e"));
         assert!(!message.body.contains("corpo"));
         let payload = push_payload(Moment::AwaitingApproval, &run, &message);
+        assert_eq!(payload["icon"], "/icons/Icon-192.png");
+        assert_eq!(payload["badge"], "/icons/Icon-192.png");
         assert_eq!(payload["actions"][0]["title"], "Revisar e publicar");
         assert_eq!(payload["data"]["url"], "/deploys?run=7");
     }

@@ -9,6 +9,7 @@ import 'package:netmonitor_app/core/areas/areas_provider.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
 import 'package:netmonitor_app/core/navigation/build_nav_sections.dart';
 import 'package:netmonitor_app/core/navigation/nav_models.dart';
+import 'package:netmonitor_app/core/notifications/notifications_service.dart';
 import 'package:netmonitor_app/core/pwa/pwa_install_service.dart';
 import 'package:netmonitor_app/core/realtime/sse_service.dart';
 import 'package:netmonitor_app/shared/widgets/menu_customize_sheet.dart';
@@ -53,6 +54,7 @@ class _AdaptiveAppShellState extends ConsumerState<AdaptiveAppShell> {
       if (!mounted) return;
       // Garante rotas SSE das áreas registradas antes de conectar o stream.
       ref.read(areaRealtimeCoordinatorProvider);
+      ref.read(notificationsProvider.notifier).ensureInitialized();
       ref.read(authProvider.notifier).fetchMe();
       _sseNotifier?.connect();
       _syncCurrentArea(widget.location);

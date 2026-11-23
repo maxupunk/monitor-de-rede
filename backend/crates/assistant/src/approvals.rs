@@ -329,8 +329,8 @@ fn notification(approval: &AiPendingApproval) -> Value {
     json!({
         "title": "Assistente IA aguarda sua aprovação",
         "body": format!("{}\n{risk}: {}", approval.summary, approval.reason),
-        "icon": "/pwa-192x192.png",
-        "badge": "/pwa-192x192.png",
+        "icon": "/icons/Icon-192.png",
+        "badge": "/icons/Icon-192.png",
         "tag": format!("ai-approval-{}", approval.call_id),
         "data": { "url": "/ai-chat", "callId": approval.call_id }
     })
@@ -478,6 +478,8 @@ mod tests {
     fn notificacao_abre_o_chat_e_diz_o_risco() {
         let payload = notification(&proposal("c3", 1).approval);
         assert_eq!(payload["title"], "Assistente IA aguarda sua aprovação");
+        assert_eq!(payload["icon"], "/icons/Icon-192.png");
+        assert_eq!(payload["badge"], "/icons/Icon-192.png");
         assert_eq!(payload["data"]["url"], "/ai-chat");
         assert_eq!(payload["tag"], "ai-approval-c3");
         assert!(payload["body"]

@@ -86,7 +86,16 @@ pub fn mount(router: Router, root: &Path) -> Router {
 
     tracing::info!(root = %root.display(), "SPA servida pelo processo da API");
 
-    let security_headers = Router::new()
+    // `.fallback_service(shell)` precisa vir antes das camadas `.layer(...)`:
+    // no Axum, `Router::layer` só envolve rotas/fallbacks já registrados;
+    // chamar `.fallback_service` depois substituiria o fallback e descartaria
+    // os headers de segurança (CSP, X-Content-Type-Options, etc.).
+    let spa_service = Router::new()
+        .fallback_service(shell)
+        .layer(SetResponseHeaderLayer::overriding(
+            CACHE_CONTROL,
+            HeaderValue::from_static(REVALIDATE),
+        ))
         .layer(SetResponseHeaderLayer::overriding(
             X_CONTENT_TYPE_OPTIONS,
             HeaderValue::from_static(X_CONTENT_TYPE_OPTIONS_VALUE),
@@ -106,9 +115,7 @@ pub fn mount(router: Router, root: &Path) -> Router {
 
     // Último recurso do roteador: as rotas da API já foram registradas e
     // continuam ganhando de qualquer arquivo de mesmo caminho.
-    router.fallback_service(security_headers.fallback_service(shell).layer(
-        SetResponseHeaderLayer::overriding(CACHE_CONTROL, HeaderValue::from_static(REVALIDATE)),
-    ))
+    router.fallback_service(spa_service)
 }
 
 #[cfg(test)]
@@ -150,5 +157,64 @@ mod tests {
         std::fs::write(tmp.join("index.html"), "<html></html>").unwrap();
         drop(mount(Router::new(), &tmp));
         std::fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    #[tokio::test]
+    async fn serve_netmonitor_push_sw_com_headers_e_csp() {
+        use axum::{body::Body, http::Request, http::StatusCode};
+        use tower::ServiceExt;
+
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("index.html"), "<html></html>").unwrap();
+        std::fs::write(
+            tmp.path().join("netmonitor_push_sw.js"),
+            "self.addEventListener('push', function () {});",
+        )
+        .unwrap();
+
+        let app = mount(Router::new(), tmp.path());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/netmonitor_push_sw.js")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let headers = response.headers();
+        assert_eq!(
+            headers.get(CACHE_CONTROL).and_then(|v| v.to_str().ok()),
+            Some(REVALIDATE)
+        );
+        assert_eq!(
+            headers
+                .get(X_CONTENT_TYPE_OPTIONS)
+                .and_then(|v| v.to_str().ok()),
+            Some(X_CONTENT_TYPE_OPTIONS_VALUE)
+        );
+        assert_eq!(
+            headers.get(REFERRER_POLICY).and_then(|v| v.to_str().ok()),
+            Some(REFERRER_POLICY_VALUE)
+        );
+        assert_eq!(
+            headers.get(X_FRAME_OPTIONS).and_then(|v| v.to_str().ok()),
+            Some(X_FRAME_OPTIONS_VALUE)
+        );
+        let csp = headers
+            .get(CONTENT_SECURITY_POLICY)
+            .and_then(|v| v.to_str().ok())
+            .expect("CSP header deve estar presente");
+        assert!(csp.contains("worker-src 'self' blob:"));
+        let content_type = headers
+            .get(axum::http::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .expect("Content-Type deve estar presente");
+        assert!(
+            content_type.contains("javascript"),
+            "esperado MIME JS, veio: {content_type}"
+        );
     }
 }

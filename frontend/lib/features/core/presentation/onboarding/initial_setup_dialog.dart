@@ -5,6 +5,8 @@ import 'package:netmonitor_app/areas/area_contribution.dart';
 import 'package:netmonitor_app/core/areas/area_models.dart';
 import 'package:netmonitor_app/core/areas/areas_provider.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
+import 'package:netmonitor_app/core/notifications/notifications_service.dart';
+import 'package:netmonitor_app/core/notifications/web_notifications_interop.dart';
 import 'package:netmonitor_app/core/realtime/sse_service.dart';
 import 'package:netmonitor_app/core/utils/error_utils.dart';
 import 'package:netmonitor_app/features/core/models/settings_models.dart';
@@ -168,6 +170,9 @@ class _OnboardingWizardBodyState extends ConsumerState<_OnboardingWizardBody> {
   bool _enableLocalNotifs = true;
 
   bool _applying = false;
+  bool _requestingNotifPermission = false;
+  String? _notifFeedback;
+  SemanticTone _notifFeedbackTone = SemanticTone.info;
   String? _error;
   String? _createdAgentToken;
   Map<String, dynamic>? _vpnPreflight;
@@ -390,6 +395,189 @@ class _OnboardingWizardBodyState extends ConsumerState<_OnboardingWizardBody> {
                 ),
             ],
           ),
+      ],
+    );
+  }
+
+  Future<void> _requestOnboardingNotificationPermission() async {
+    setState(() {
+      _requestingNotifPermission = true;
+      _notifFeedback = null;
+    });
+    final granted = await ref
+        .read(notificationsProvider.notifier)
+        .requestPermission();
+    if (!mounted) return;
+    setState(() {
+      _requestingNotifPermission = false;
+      if (granted) {
+        _enableLocalNotifs = true;
+        _notifFeedback = 'Notificações ativadas com sucesso neste navegador!';
+        _notifFeedbackTone = SemanticTone.success;
+      } else {
+        final perm = ref.read(notificationsProvider).permissionState;
+        _notifFeedback = perm == NotificationPermissionState.denied
+            ? 'Permissão bloqueada no navegador. Você pode liberar depois nas configurações do site.'
+            : 'Permissão de notificação não concedida.';
+        _notifFeedbackTone = perm == NotificationPermissionState.denied
+            ? SemanticTone.error
+            : SemanticTone.warning;
+      }
+    });
+  }
+
+  Future<void> _sendOnboardingTestNotification() async {
+    final shown = await ref
+        .read(notificationsProvider.notifier)
+        .sendLocalNotification(
+          'NetMonitor - Notificação de Teste',
+          body:
+              'As notificações PWA em tempo real estão configuradas e operacionais!',
+          tag: 'netmonitor-setup-test',
+          url: '/',
+        );
+    if (!mounted) return;
+    setState(() {
+      _notifFeedback = shown
+          ? 'Notificação de teste enviada!'
+          : 'Não foi possível exibir a notificação de teste agora.';
+      _notifFeedbackTone = shown ? SemanticTone.success : SemanticTone.warning;
+    });
+  }
+
+  Widget _buildNotificationsStep(BuildContext context) {
+    final notifs = ref.watch(notificationsProvider);
+    final perm = notifs.permissionState;
+    final (chipLabel, chipTone) = switch (perm) {
+      NotificationPermissionState.granted => (
+        'PERMITIDO',
+        SemanticTone.success,
+      ),
+      NotificationPermissionState.denied => ('BLOQUEADO', SemanticTone.error),
+      NotificationPermissionState.unsupported => (
+        'INDISPONÍVEL',
+        SemanticTone.secondary,
+      ),
+      NotificationPermissionState.defaultState => (
+        'NÃO SOLICITADO',
+        SemanticTone.warning,
+      ),
+    };
+    final warnColors = context.semanticColors.resolve(
+      SemanticTone.warning,
+      context.colorScheme,
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        NestedPanel(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: warnColors.container,
+                      borderRadius: AppTheme.borderRadius,
+                    ),
+                    child: Icon(
+                      Icons.notifications_active_outlined,
+                      color: warnColors.onContainer,
+                      size: 22,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          'Notificações PWA do Navegador',
+                          style: context.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Receba alertas imediatos na área de trabalho quando dispositivos caírem.',
+                          style: context.textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  SemanticChip(label: chipLabel, tone: chipTone, compact: true),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: <Widget>[
+                  if (perm != NotificationPermissionState.granted)
+                    FilledButton.icon(
+                      onPressed:
+                          perm == NotificationPermissionState.unsupported ||
+                              _requestingNotifPermission
+                          ? null
+                          : _requestOnboardingNotificationPermission,
+                      icon: _requestingNotifPermission
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.notifications_active, size: 18),
+                      label: const Text('Ativar notificações no navegador'),
+                    )
+                  else
+                    FilledButton.tonalIcon(
+                      onPressed: _sendOnboardingTestNotification,
+                      icon: const Icon(Icons.notifications_outlined, size: 18),
+                      label: const Text('Enviar notificação de teste'),
+                    ),
+                ],
+              ),
+              if (_notifFeedback != null) ...<Widget>[
+                const SizedBox(height: 10),
+                NestedPanel(
+                  tone: _notifFeedbackTone,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  child: Text(
+                    _notifFeedback!,
+                    style: context.textTheme.bodySmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: context.semanticColors
+                          .resolve(_notifFeedbackTone, context.colorScheme)
+                          .onContainer,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          value: _enableLocalNotifs,
+          onChanged: (v) => setState(() => _enableLocalNotifs = v),
+          title: const Text(
+            'Habilitar notificações de alerta neste dispositivo',
+          ),
+          subtitle: const Text(
+            'Você poderá ajustar Web Push em segundo plano em Configurações › Notificações.',
+          ),
+        ),
       ],
     );
   }
@@ -632,15 +820,7 @@ class _OnboardingWizardBodyState extends ConsumerState<_OnboardingWizardBody> {
             ),
         ],
       ),
-      _WizardStep.notifications => SwitchListTile(
-        contentPadding: EdgeInsets.zero,
-        value: _enableLocalNotifs,
-        onChanged: (v) => setState(() => _enableLocalNotifs = v),
-        title: const Text('Habilitar notificações de alerta neste dispositivo'),
-        subtitle: const Text(
-          'Você poderá ajustar canais e Web Push em Configurações › Notificações.',
-        ),
-      ),
+      _WizardStep.notifications => _buildNotificationsStep(context),
       _WizardStep.review => NestedPanel(
         tone: SemanticTone.primary,
         child: Column(

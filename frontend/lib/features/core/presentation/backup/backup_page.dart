@@ -23,13 +23,52 @@ class BackupPage extends ConsumerStatefulWidget {
   ConsumerState<BackupPage> createState() => _BackupPageState();
 }
 
-class _BackupPageState extends ConsumerState<BackupPage> {
+class _BackupPageState extends ConsumerState<BackupPage>
+    with TickerProviderStateMixin {
+  TabController? _tabController;
+  List<String> _tabIds = const <String>[];
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) ref.read(backupProvider.notifier).fetchPlan();
     });
+  }
+
+  int _resolveTabIndex(List<String> tabIds, String? rawTab) {
+    if (tabIds.isEmpty || rawTab == null || rawTab.isEmpty) return 0;
+    final exact = tabIds.indexOf(rawTab);
+    if (exact >= 0) return exact;
+    if (rawTab == 'destinos') {
+      final storagesIdx = tabIds.indexWhere(
+        (id) => id == 'storages' || id == 'destinos',
+      );
+      if (storagesIdx >= 0) return storagesIdx;
+    }
+    return 0;
+  }
+
+  @override
+  void didUpdateWidget(covariant BackupPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialTab != widget.initialTab) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || _tabController == null || _tabIds.isEmpty) return;
+        final target = _resolveTabIndex(_tabIds, widget.initialTab);
+        if (target >= 0 &&
+            target < _tabController!.length &&
+            _tabController!.index != target) {
+          _tabController!.animateTo(target);
+        }
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _tabController?.dispose();
+    super.dispose();
   }
 
   @override
@@ -63,59 +102,57 @@ class _BackupPageState extends ConsumerState<BackupPage> {
             ),
         ];
 
-    int initialIndex = 0;
-    if (widget.initialTab != null && widget.initialTab!.isNotEmpty) {
-      final exact = tabs.indexWhere((t) => t.id == widget.initialTab);
-      if (exact >= 0) {
-        initialIndex = exact;
-      } else if (widget.initialTab == 'destinos') {
-        final storagesIdx = tabs.indexWhere(
-          (t) => t.id == 'storages' || t.id == 'destinos',
-        );
-        if (storagesIdx >= 0) initialIndex = storagesIdx;
-      }
+    final tabIds = tabs.map((t) => t.id).toList(growable: false);
+    _tabIds = tabIds;
+    final initialIndex = _resolveTabIndex(tabIds, widget.initialTab);
+    if (_tabController == null || _tabController!.length != tabs.length) {
+      _tabController?.dispose();
+      _tabController = TabController(
+        length: tabs.length,
+        vsync: this,
+        initialIndex: initialIndex,
+      );
     }
+    final tabController = _tabController!;
 
     return LayoutBuilder(
       builder: (context, constraints) {
         final isCompact = constraints.maxWidth < 680;
-        return DefaultTabController(
-          length: tabs.length,
-          initialIndex: initialIndex,
-          child: NestedScrollView(
-            headerSliverBuilder: (context, innerBoxIsScrolled) => <Widget>[
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: SearchFilterHeader(
-                    title: 'Backup e Restauração',
-                    subtitle: isCompact
-                        ? null
-                        : 'Cópias agendadas do sistema, exportação completa e destinos de armazenamento',
-                  ),
+        return NestedScrollView(
+          headerSliverBuilder: (context, innerBoxIsScrolled) => <Widget>[
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: SearchFilterHeader(
+                  title: 'Backup e Restauração',
+                  subtitle: isCompact
+                      ? null
+                      : 'Cópias agendadas do sistema, exportação completa e destinos de armazenamento',
                 ),
               ),
-              SliverPersistentHeader(
-                pinned: true,
-                delegate: PinnedSliverHeaderDelegate(
-                  height: 60,
-                  bottomBorder: true,
-                  child: TabBar(
-                    isScrollable: isCompact,
-                    tabAlignment: isCompact
-                        ? TabAlignment.start
-                        : TabAlignment.fill,
-                    tabs: <Widget>[
-                      for (final t in tabs)
-                        Tab(icon: Icon(t.icon, size: 18), text: t.title),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-            body: TabBarView(
-              children: <Widget>[for (final t in tabs) t.builder(context)],
             ),
+            SliverPersistentHeader(
+              pinned: true,
+              delegate: PinnedSliverHeaderDelegate(
+                height: 60,
+                bottomBorder: true,
+                child: TabBar(
+                  controller: tabController,
+                  isScrollable: isCompact,
+                  tabAlignment: isCompact
+                      ? TabAlignment.start
+                      : TabAlignment.fill,
+                  tabs: <Widget>[
+                    for (final t in tabs)
+                      Tab(icon: Icon(t.icon, size: 18), text: t.title),
+                  ],
+                ),
+              ),
+            ),
+          ],
+          body: TabBarView(
+            controller: tabController,
+            children: <Widget>[for (final t in tabs) t.builder(context)],
           ),
         );
       },

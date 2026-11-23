@@ -16,7 +16,7 @@ logger:
 
 # Web server configuration
 server:
-  # 3333 é contrato, não preferência: o proxy do Vite (`frontend/vite.config.ts`)
+  # 3333 é contrato, não preferência: o frontend em desenvolvimento (`flutter run`)
   # e o docker-compose apontam para esta porta. O scaffold do Loco vem com 5150.
   port: 3333
   # Binding for the server (which interface to bind to)
@@ -25,9 +25,9 @@ server:
   host: http://localhost
   # Out of the box middleware configuration. to disable middleware you can changed the `enable` field to `false` of comment the middleware block
   middlewares:
-    # Em dev o frontend roda no Vite (5173) e chega via proxy — que preserva a
-    # origem quando `changeOrigin` reescreve só o Host. Liberar a origem do Vite
-    # cobre também o acesso direto a http://localhost:3333 durante depuração.
+    # Em dev o frontend roda separado (`flutter run -d chrome --web-port 5173` ou
+    # outra origem em `FRONTEND_ORIGIN`) e acessa diretamente http://localhost:3333
+    # durante depuração.
     cors:
       enable: true
       allow_origins:

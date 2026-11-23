@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
 import 'package:netmonitor_app/core/network/api_client.dart';
+import 'package:netmonitor_app/core/notifications/notifications_service.dart';
 import 'package:netmonitor_app/core/utils/json_parsers.dart';
 import 'package:netmonitor_app/features/core/models/settings_models.dart';
 import 'package:netmonitor_app/features/core/providers/monitors_provider.dart';
@@ -195,9 +196,9 @@ class OnboardingNotifier extends Notifier<OnboardingState> {
               as String?;
     }
 
-    await settingsNotifier.setLocalNotificationsEnabled(
-      enableLocalNotifications,
-    );
+    await ref
+        .read(notificationsProvider.notifier)
+        .setLocalNotificationsEnabled(enableLocalNotifications);
     await completeOnboarding();
     return createdAgentToken;
   }

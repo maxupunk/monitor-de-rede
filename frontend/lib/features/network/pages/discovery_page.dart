@@ -32,6 +32,7 @@ class _DiscoveryPageState extends ConsumerState<DiscoveryPage>
   final TextEditingController _hostSearchCtrl = TextEditingController();
   int? _selectedNetworkId;
   String _hostFilter = 'all';
+  bool _bootstrapped = false;
   bool _autoStarted = false;
   bool _envBannerDismissed = false;
   bool _completedBannerDismissed = false;
@@ -44,6 +45,25 @@ class _DiscoveryPageState extends ConsumerState<DiscoveryPage>
     Future<void>.microtask(_bootstrap);
   }
 
+  @override
+  void didUpdateWidget(covariant DiscoveryPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final networkChanged =
+        oldWidget.initialNetworkId != widget.initialNetworkId;
+    if (networkChanged && widget.initialNetworkId != null) {
+      _selectedNetworkId = widget.initialNetworkId;
+    }
+    final shouldTriggerScan =
+        widget.autoStartScan && (!oldWidget.autoStartScan || networkChanged);
+    if (shouldTriggerScan && _bootstrapped) {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (!mounted) return;
+        _autoStarted = true;
+        await _startScan();
+      });
+    }
+  }
+
   Future<void> _bootstrap() async {
     await Future.wait(<Future<void>>[
       ref.read(networksProvider.notifier).fetchNetworks(),
@@ -53,6 +73,7 @@ class _DiscoveryPageState extends ConsumerState<DiscoveryPage>
       ref.read(discoveryProvider.notifier).fetchConflicts(),
     ]);
     if (!mounted) return;
+    _bootstrapped = true;
     final networks = ref.read(networksProvider).items;
     final hasSelected = networks.any((n) => n.id == _selectedNetworkId);
     if (!hasSelected && networks.isNotEmpty) {

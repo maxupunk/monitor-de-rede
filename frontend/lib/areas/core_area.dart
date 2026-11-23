@@ -169,7 +169,7 @@ final AreaContribution coreArea = AreaContribution(
           BackupPage(initialTab: state.uri.queryParameters['tab']),
     ),
     GoRoute(path: '/storages', redirect: (_, _) => '/backup?tab=destinos'),
-    GoRoute(path: '/databases', redirect: (_, _) => '/backup'),
+    GoRoute(path: '/databases', redirect: (_, _) => '/backup?tab=databases'),
   ],
   routeMeta: <String, AreaRouteMeta>{
     '/': AreaRouteMeta(

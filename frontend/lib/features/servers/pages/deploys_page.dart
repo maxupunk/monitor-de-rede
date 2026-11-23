@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -38,6 +39,18 @@ class _DeploysPageState extends ConsumerState<DeploysPage> {
     Future<void>.microtask(_bootstrap);
   }
 
+  @override
+  void didUpdateWidget(covariant DeploysPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_handledInitialQuery &&
+        widget.queryParams.isNotEmpty &&
+        !mapEquals(oldWidget.queryParams, widget.queryParams)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _consumeQueryParams();
+      });
+    }
+  }
+
   Future<void> _bootstrap() async {
     await Future.wait<void>(<Future<void>>[
       ref.read(deploysProvider.notifier).fetchOverview(),
@@ -69,11 +82,12 @@ class _DeploysPageState extends ConsumerState<DeploysPage> {
             .read(deploysProvider.notifier)
             .connectGithub(code, state);
         if (!mounted) return;
-        context.replace('/deploys');
+        GoRouter.maybeOf(context)?.replace('/deploys');
         if (!conn.installed && conn.installUrl.isNotEmpty) {
           await launchUrl(
             Uri.parse(conn.installUrl),
             mode: LaunchMode.externalApplication,
+            webOnlyWindowName: '_self',
           );
         }
       } catch (err) {
@@ -99,7 +113,7 @@ class _DeploysPageState extends ConsumerState<DeploysPage> {
             .read(deploysProvider.notifier)
             .claimGithubInstallation(installationId);
         if (mounted) {
-          context.replace('/deploys');
+          GoRouter.maybeOf(context)?.replace('/deploys');
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('GitHub App instalado com sucesso!')),
           );
@@ -124,7 +138,7 @@ class _DeploysPageState extends ConsumerState<DeploysPage> {
     final runId = int.tryParse(q['run'] ?? '');
     if (runId != null && runId > 0) {
       if (!mounted) return;
-      context.replace('/deploys');
+      GoRouter.maybeOf(context)?.replace('/deploys');
       await showDeployRunDialog(context, runId: runId, canAdmin: canAdmin);
       return;
     }
@@ -132,7 +146,7 @@ class _DeploysPageState extends ConsumerState<DeploysPage> {
     final buildId = int.tryParse(q['build'] ?? '');
     if (buildId != null && buildId > 0) {
       if (!mounted) return;
-      context.replace('/deploys');
+      GoRouter.maybeOf(context)?.replace('/deploys');
       await showDeployBuildDialog(
         context,
         buildId: buildId,
@@ -145,7 +159,7 @@ class _DeploysPageState extends ConsumerState<DeploysPage> {
       final probeId = int.tryParse(q['probe'] ?? '');
       final project = q['project'];
       if (!mounted) return;
-      context.replace('/deploys');
+      GoRouter.maybeOf(context)?.replace('/deploys');
       await showDeploySetupDialog(
         context,
         presetProbeId: probeId,

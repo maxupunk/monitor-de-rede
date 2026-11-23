@@ -1,7 +1,10 @@
+import 'dart:async';
 import 'dart:js_interop';
 import 'dart:typed_data';
 
 import 'package:web/web.dart' as web;
+
+const Duration _objectUrlRevokeDelay = Duration(seconds: 1);
 
 Future<void> platformSaveOrShareBytes({
   required Uint8List bytes,
@@ -18,5 +21,6 @@ Future<void> platformSaveOrShareBytes({
   web.document.body?.appendChild(anchor);
   anchor.click();
   anchor.remove();
-  web.URL.revokeObjectURL(url);
+  // Adia a revogação para não abortar downloads em Safari, iOS PWA e Firefox.
+  Timer(_objectUrlRevokeDelay, () => web.URL.revokeObjectURL(url));
 }
