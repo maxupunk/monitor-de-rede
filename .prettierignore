@@ -1,5 +1,0 @@
-node_modules
-
-# Artefatos gerados: bundle do frontend (tem toolchain própria)
-frontend/dist
-frontend/dev-dist

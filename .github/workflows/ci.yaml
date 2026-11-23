@@ -139,7 +139,7 @@ jobs:
         run: cargo audit
 
   frontend:
-    name: Frontend Checks
+    name: Frontend Checks (Flutter)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -149,44 +149,21 @@ jobs:
     steps:
       - name: Checkout the code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
         with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          channel: stable
+          cache: true
       - name: Install dependencies
-        run: npm ci
-      - name: Type check
-        run: npm run typecheck
-      - name: Lint
-        run: npm run lint
+        run: flutter pub get
+      - name: Check formatting
+        run: dart format --output=none --set-exit-if-changed lib test
+      - name: Analyze
+        run: flutter analyze
       - name: Test
-        run: npm run test
-      - name: Build
-        run: npm run build
-
-  npm-audit:
-    name: Audit Frontend Dependencies
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout the code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - name: Install dependencies
-        run: npm ci
-      - name: Run npm audit
-        run: npm audit --audit-level=high
+        run: flutter test
+      - name: Build Web (PWA)
+        run: flutter build web --release --no-web-resources-cdn
 
   docker-build:
     name: Build Docker Image

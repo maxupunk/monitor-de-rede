@@ -1,18 +1,16 @@
-//! Serviço dos arquivos da SPA pelo próprio processo da API.
+//! Serviço dos arquivos da SPA (Flutter Web PWA) pelo próprio processo da API.
 //!
 //! Ocupa o lugar do container nginx. O proxy que ele fazia deixou de existir
 //! junto: a SPA e a API passam a atender na **mesma origem** (`:3333`), então
 //! não há mais `/api/` para reescrever — nem CORS a liberar em produção.
 //!
-//! Duas montagens, porque as duas metades do `dist` têm validades opostas:
-//!
-//! * `/assets/*` — tudo com hash no nome (Vite). Nome novo a cada build, logo
-//!   `immutable` por um ano. O navegador nunca revalida.
-//! * o resto (`index.html`, `sw.js`, `manifest.webmanifest`, ícones) — nome
-//!   estável e conteúdo que muda a cada deploy. `no-cache` aqui não quer dizer
-//!   "não guarde": quer dizer "guarde, mas confirme antes de usar". A
-//!   confirmação sai 304 pelo `Last-Modified` do `ServeDir`. Um `sw.js` servido
-//!   de cache é o bug clássico de PWA — a versão nova do app nunca chega.
+//! Os arquivos gerados pelo `flutter build web --no-web-resources-cdn`
+//! (`index.html`, `flutter_bootstrap.js`, `main.dart.js`, `manifest.json`,
+//! `assets/*`, `canvaskit/*`) usam nomes estáveis sem hash de conteúdo. Por
+//! isso tudo é servido com `Cache-Control: no-cache`: o navegador armazena em
+//! cache mas confirma com o servidor antes de usar, recebendo `304 Not
+//! Modified` via `Last-Modified` do `ServeDir` quando não houve deploy e a
+//! versão nova imediatamente quando houve.
 //!
 //! O `.gz` ao lado de cada arquivo é escrito no build da imagem
 //! (`gzip -9 -k`), e o `precompressed_gzip` o entrega quando o cliente aceita
@@ -38,20 +36,25 @@ use tower_http::{
 
 /// Onde o `dist` da SPA mora dentro da imagem. Fora dela — `cargo run` na
 /// máquina — o padrão não existe e a montagem é simplesmente pulada, que é o
-/// certo em desenvolvimento: quem serve a SPA ali é o Vite, na 5173.
+/// certo em desenvolvimento: quem serve a SPA ali é o `flutter run -d chrome`.
 pub const DEFAULT_WEB_ROOT: &str = "/app/web";
 
-const IMMUTABLE: &str = "public, max-age=31536000, immutable";
 const REVALIDATE: &str = "no-cache";
 
 // Headers de segurança aplicados a todos os arquivos estáticos da SPA.
-// O CSP começa restritivo e permite apenas recursos do próprio origin; a SPA
-// empacotada pelo Vite carrega scripts e CSS de <script src>/<link href>, sem
-// inline. Imagens de QR code e ícones podem vir como data:URI.
+// O Flutter Web empacotado com `--no-web-resources-cdn` carrega todos os
+// scripts, fontes e CanvasKit da própria origem:
+// - `'wasm-unsafe-eval'` permite compilar/instanciar `canvaskit.wasm` sem abrir
+//   `'unsafe-eval'` para JavaScript;
+// - `worker-src 'self' blob:` atende o service worker e workers locais;
+// - `connect-src` / `font-src` / `img-src` permitem `data:` e `blob:` para
+//   CanvasKit, QR codes e downloads;
+// - `form-action 'self' https://github.com` permite o cadastro do GitHub App
+//   via Manifest (ADR 021).
 const X_CONTENT_TYPE_OPTIONS_VALUE: &str = "nosniff";
 const REFERRER_POLICY_VALUE: &str = "strict-origin-when-cross-origin";
 const X_FRAME_OPTIONS_VALUE: &str = "DENY";
-const CSP_VALUE: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
+const CSP_VALUE: &str = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data: blob:; connect-src 'self' data: blob:; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://github.com";
 
 /// Raiz dos estáticos, de `WEB_ROOT` ou do padrão da imagem.
 #[must_use]
@@ -66,7 +69,7 @@ pub fn web_root() -> PathBuf {
 /// Acrescenta a SPA ao roteador — ou o devolve intacto se não houver `dist`.
 ///
 /// Ausência de `index.html` não é erro: é o modo API-only (o processo de um
-/// probe remoto, ou o backend rodando contra o Vite em desenvolvimento).
+/// probe remoto, ou o backend rodando contra o `flutter run` em desenvolvimento).
 pub fn mount(router: Router, root: &Path) -> Router {
     let index = root.join("index.html");
     if !index.is_file() {
@@ -74,51 +77,38 @@ pub fn mount(router: Router, root: &Path) -> Router {
         return router;
     }
 
-    // O `fallback` do `ServeDir` é o que faz a rota virtual do Vue Router
-    // funcionar: `/devices/7` não é arquivo nenhum, e ainda assim precisa
+    // O `fallback` do `ServeDir` é o que faz as rotas virtuais do GoRouter
+    // funcionarem: `/devices/7` não é arquivo nenhum, e ainda assim precisa
     // devolver o `index.html` para a SPA resolver o caminho no cliente.
     let shell = ServeDir::new(root)
         .precompressed_gzip()
         .fallback(ServeFile::new(&index));
-    let assets = ServeDir::new(root.join("assets")).precompressed_gzip();
 
     tracing::info!(root = %root.display(), "SPA servida pelo processo da API");
 
-    let security_headers = || {
-        Router::new()
-            .layer(SetResponseHeaderLayer::overriding(
-                X_CONTENT_TYPE_OPTIONS,
-                HeaderValue::from_static(X_CONTENT_TYPE_OPTIONS_VALUE),
-            ))
-            .layer(SetResponseHeaderLayer::overriding(
-                REFERRER_POLICY,
-                HeaderValue::from_static(REFERRER_POLICY_VALUE),
-            ))
-            .layer(SetResponseHeaderLayer::overriding(
-                X_FRAME_OPTIONS,
-                HeaderValue::from_static(X_FRAME_OPTIONS_VALUE),
-            ))
-            .layer(SetResponseHeaderLayer::overriding(
-                CONTENT_SECURITY_POLICY,
-                HeaderValue::from_static(CSP_VALUE),
-            ))
-    };
-
-    router
-        .nest_service(
-            "/assets",
-            security_headers()
-                .fallback_service(assets)
-                .layer(SetResponseHeaderLayer::overriding(
-                    CACHE_CONTROL,
-                    HeaderValue::from_static(IMMUTABLE),
-                )),
-        )
-        // Último recurso do roteador: as rotas da API já foram registradas e
-        // continuam ganhando de qualquer arquivo de mesmo caminho.
-        .fallback_service(security_headers().fallback_service(shell).layer(
-            SetResponseHeaderLayer::overriding(CACHE_CONTROL, HeaderValue::from_static(REVALIDATE)),
+    let security_headers = Router::new()
+        .layer(SetResponseHeaderLayer::overriding(
+            X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static(X_CONTENT_TYPE_OPTIONS_VALUE),
         ))
+        .layer(SetResponseHeaderLayer::overriding(
+            REFERRER_POLICY,
+            HeaderValue::from_static(REFERRER_POLICY_VALUE),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            X_FRAME_OPTIONS,
+            HeaderValue::from_static(X_FRAME_OPTIONS_VALUE),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static(CSP_VALUE),
+        ));
+
+    // Último recurso do roteador: as rotas da API já foram registradas e
+    // continuam ganhando de qualquer arquivo de mesmo caminho.
+    router.fallback_service(security_headers.fallback_service(shell).layer(
+        SetResponseHeaderLayer::overriding(CACHE_CONTROL, HeaderValue::from_static(REVALIDATE)),
+    ))
 }
 
 #[cfg(test)]
@@ -147,12 +137,13 @@ mod tests {
 
     #[test]
     fn headers_de_seguranca_estao_configurados() {
-        // Garante que as constantes de header não estão vazias e que o mount
-        // consegue aplicá-las sobre um diretório real.
+        // Garante que as constantes de header estão presentes e compatíveis com
+        // o Flutter Web CanvasKit (WASM local) e o manifest do GitHub App.
         assert!(!X_CONTENT_TYPE_OPTIONS_VALUE.is_empty());
         assert!(!REFERRER_POLICY_VALUE.is_empty());
         assert!(!X_FRAME_OPTIONS_VALUE.is_empty());
-        assert!(!CSP_VALUE.is_empty());
+        assert!(CSP_VALUE.contains("'wasm-unsafe-eval'"));
+        assert!(CSP_VALUE.contains("https://github.com"));
 
         let tmp = std::env::temp_dir().join(format!("netmonitor-spa-test-{}", std::process::id()));
         std::fs::create_dir_all(&tmp).unwrap();

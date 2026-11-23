@@ -13,14 +13,14 @@
 ## 🧪 Padrões Obrigatórios de Teste & Estabilidade
 
 1. **Validação Obrigatória Pré-Finalização**:
-   - **Frontend**:
+   - **Frontend (Flutter — Web PWA & Android)**, rodados a partir de `frontend/`:
      ```bash
-     pnpm --prefix frontend run typecheck
-     pnpm --prefix frontend run lint
-     pnpm --prefix frontend run format
-     pnpm --prefix frontend run build
+     dart format --output=none --set-exit-if-changed lib test
+     flutter analyze
+     flutter test
+     flutter build web --release --no-web-resources-cdn
      ```
-     (Ou da raiz: `pnpm typecheck`, `pnpm lint`, `pnpm format`, `pnpm build`).
+     (Ou da raiz via `package.json`: `npm run format:check`, `npm run lint`, `npm run test`, `npm run build`).
    - **Backend (Rust)**:
      ```bash
      cargo fmt --all --check
@@ -31,11 +31,11 @@
      Rodados a partir de `backend/`. Os quatro precisam passar — é
      critério de aceite, não sugestão.
 
-2. **Regras de Qualidade Vue / Template HTML**:
-   - Fechamento estrito de tags Vuetify (ex: `<v-row></v-row>`).
-   - Usar concatenação ou objetos no prop `:to` sem misturar template strings dentro de aspas duplas.
-   - Não colocar comentários `<!-- -->` entre diretivas `v-if` e `v-else`.
-   - Usar props `:title` e `:subtitle` no `<v-list-item>` do Vuetify 3 para evitar ambiguidades de slot.
+2. **Regras de Qualidade Flutter / Material Design 3**:
+   - Sempre guardar `mounted` / `context.mounted` após operações assíncronas antes de usar `setState`, `context` ou `ref`.
+   - Nunca chamar `ref.read(...)` dentro de `dispose()` — capture referências de notifiers em `initState()` quando precisar limpar estado no `dispose()`.
+   - Todo `DropdownButtonFormField` / `AppDropdownFormField` deve validar `initialValue` contra a lista de itens atual para evitar `AssertionError` em runtime.
+   - Respeitar as guardas automáticas de arquitetura e convenção em `frontend/test/conventions/solid_dry_conventions_test.dart`.
 
 3. **Independência de Ambiente (Docker / Local)**:
    - O backend Rust roda em **PostgreSQL 18** (o banco do `docker compose`,
@@ -58,10 +58,9 @@
      SQLite: o SQLite reporta todo inteiro como `INTEGER` e o `db entities`
      rodado contra ele produz `i64` onde o Postgres tem `INT4` — e aí o `sqlx`
      recusa a leitura em produção.
-   - **Alinhamento de Peer Dependencies (frontend)**: ao atualizar/adicionar
-     dependências em `package.json`, garanta versões compatíveis para evitar
-     `ERESOLVE`, e rode `pnpm --prefix frontend install` para sincronizar o
-     `pnpm-lock.yaml`.
+   - **Alinhamento de Dependências (frontend)**: ao atualizar/adicionar
+     dependências em `frontend/pubspec.yaml`, rode `flutter pub get` em
+     `frontend/` para sincronizar o `pubspec.lock`.
 
 4. **Práticas de Teste (Rust)**:
    - **Isolamento de Banco**: testes de requisição usam
@@ -196,15 +195,13 @@
 
 8. **Edições Cirúrgicas e Preservação de Formatação / Indentação (Economia de Tokens)**:
    - **Edições cirúrgicas**: Faça apenas modificações pontuais no escopo estrito da tarefa. **NUNCA** reformate arquivos inteiros nem altere a indentação, espaçamento ou quebras de linha de blocos de código não relacionados à mudança funcional.
-   - **Evitar retrabalho com formatadores**: O repositório já possui formatadores padronizados (`cargo fmt` no backend e `pnpm run format` / Prettier no frontend). Alterar indentação arbitrariamente faz com que a etapa de validação (`format`) precise desfazer ou reformatar tudo, inflando diffs e desperdiçando tokens desnecessariamente.
+   - **Evitar retrabalho com formatadores**: O repositório já possui formatadores padronizados (`cargo fmt` no backend e `dart format` no frontend). Alterar indentação arbitrariamente faz com que a etapa de validação (`format`) precise desfazer ou reformatar tudo, inflando diffs e desperdiçando tokens desnecessariamente.
    - **Respeite o estilo local**: Ao escrever código novo, siga rigorosamente o padrão de indentação e espaçamento já presente no arquivo para que o formatador não precise reformatar o bloco na validação final.
    - **NUNCA gaste tempo alterando indentação — regra para todos os agentes**: indentação, quebras de linha, espaços, aspas e ponto e vírgula **são trabalho do formatador, não do agente**. Não faça edições, passadas ou rodadas extras só para ajustar estilo, não "corrija" indentação à mão e não reescreva um bloco para ele "ficar bonito". Escreva o código funcional e rode o formatador **uma única vez**, no fim.
    - **Um dono por estilo, sem conflito**:
-     - Frontend: o **Prettier** (`frontend/.prettierrc.json`) é o único dono do estilo. O ESLint carrega `eslint-config-prettier` por último e só aponta erro de código — ele não reformata nada. Ordem única: `pnpm lint` → `pnpm format` (rodar os dois em sequência é idempotente; `pnpm --prefix frontend run format:check` confere sem gravar).
+     - Frontend: o **`dart format`** é o único dono do estilo, e o **`flutter analyze`** (`frontend/analysis_options.yaml`) aponta apenas problemas de código. Ordem única: `dart format lib test` → `flutter analyze`.
      - Backend: o **`cargo fmt`** (`backend/.rustfmt.toml`, 4 espaços, 100 colunas) é o único dono.
-     - O `.editorconfig` segue os dois (Rust com 4 espaços, o resto com 2), para o editor não brigar com o formatador.
-     - `frontend/src/bindings/` é gerado pelo `ts-rs` e fica **fora** do Prettier (`frontend/.prettierignore`): não formate esses arquivos; o `cargo test` os reescreve.
-   - **Não crie regra de estilo nova no ESLint** (nem reative as do `eslint-plugin-vue`): toda regra de apresentação vai no `.prettierrc.json`, ou não existe.
+     - O `.editorconfig` segue os dois (Rust com 4 espaços, Dart e o resto com 2), para o editor não brigar com o formatador.
 
 9. **Tempo Real Exclusivamente por SSE — Polling Proibido**:
    - **É proibido implementar polling no frontend sob qualquer forma**: não usar `setInterval`, `setTimeout` recursivo, `refetchInterval`, loops temporizados, watchers que consultam repetidamente a API ou qualquer mecanismo equivalente para atualizar dados automaticamente.
@@ -221,7 +218,7 @@
       - **Services** (`services/` de cada crate — `crates/nucleo/src/services/` no Núcleo): Contêm regras de negócio puras, orquestração e fluxos de domínio. Devem ser testáveis sem camada HTTP (sem axum/loco requests).
       - **Views** (`views/` de cada crate): Responsáveis por formatação, hidratação de apresentação, serialização de envelopes e renderização de relatórios/exportações (ex: CSV, plain text).
       - **Entidades e Repositórios** (`crates/core/src/models/`, `services/**/repository.rs`): Responsáveis pelo acesso a dados, mapeamento relacional e consultas otimizadas.
-      - **Frontend (Vue 3 / Vuetify / Pinia)**: Componentes tratam da interação do usuário e da árvore visual; Pinia stores (`src/stores/`) tratam do estado reativo e chamadas a endpoints; utilitários centralizados (`src/utils/formatters.ts`) tratam de formatação de valores, datas, latências e bytes (DRY absoluto).
+      - **Frontend (Flutter / Riverpod / GoRouter)**: Widgets tratam da interação do usuário e da árvore visual; Riverpod `Notifier`s (`features/*/providers/`) tratam do estado reativo e chamadas a endpoints; utilitários centralizados (`lib/core/utils/formatters.dart`, `json_parsers.dart`, `error_utils.dart`) tratam de formatação, parsing e erros (DRY absoluto).
     - **O — Aberto/Fechado (Open/Closed)**:
       - Módulos e serviços devem ser abertos para extensão e fechados para modificação.
       - Use traits e enums polimórficos para novos comportamentos (ex: runners de monitoramento, drivers de notificação, regras de alerta) em vez de blocos gigantes de `match`/`if` espalhados pelo código.
@@ -250,27 +247,19 @@
         - Sondas UDP com payloads conhecidos devem usar `network_tools::udp_probes::probe_for`.
       - **Tratamento e Propagação de Erros**:
         - Utilize os tipos centrais `AppError` e `AppResult<T>` (`crates/core/src/shared/errors.rs`). Jamais crie tipos ad-hoc de erro redundantes onde os existentes cobrem a semântica.
-    - **Frontend (Vue 3 / TypeScript)**:
-      - **Formatadores Centralizados (`frontend/src/utils/formatters.ts`)**:
-        - Toda exibição de dados — bytes (`formatBytes`, `formatBinaryBytes`, `formatDecimalBytes`), taxas de rede (`formatBps`, `formatLinkSpeed`), latências (`formatLatency`), datas e horários (`formatDate`, `formatDateTime`, `formatShortDateTime`, `formatClockTime`, `formatRelativeTime`, `formatTimeSpan`) — **DEVE** ser importada de `@/utils/formatters`.
-        - É expressamente proibido declarar funções locais `formatDate`, `formatBytes`, `formatLatency`, chamadas diretas ad-hoc a `toLocaleString()` ou `.toFixed()` em componentes `.vue`.
-      - **Stores Pinia & Serviços de API**:
-        - Requisições HTTP a um mesmo domínio ou recurso devem residir exclusivamente na sua respectiva store (`src/stores/`). Não faça chamadas diretas via `fetch` ou `axios` duplicadas em componentes.
+    - **Frontend (Flutter / Dart)**:
+      - **Formatadores Centralizados (`frontend/lib/core/utils/formatters.dart`)**:
+        - Toda exibição de dados — bytes (`formatBytes`, `formatBinaryBytes`, `formatDecimalBytes`), taxas de rede (`formatBps`, `formatLinkSpeed`), latências (`formatLatency`), datas e horários (`formatDate`, `formatDateTime`, `formatShortDateTime`, `formatClockTime`, `formatRelativeTime`, `formatTimeSpan`) — **DEVE** ser importada de `package:netmonitor_app/core/utils/formatters.dart`.
+        - É expressamente proibido duplicar formatadores locais ou parsers JSON ad-hoc fora dos utilitários canônicos (`test/conventions/solid_dry_conventions_test.dart` valida).
+      - **Providers Riverpod & Serviços de API**:
+        - Requisições HTTP a um mesmo domínio ou recurso devem residir exclusivamente nos seus respectivos providers/serviços (`features/*/providers/`), usando `apiClientProvider`. Não faça chamadas HTTP duplicadas diretamente em widgets.
 
 12. **Acessibilidade, Alto Contraste & Proibição Estrita de Branco/Cinza Desbotado**:
     - **Proibição de Contrastes Baixos (Branco e Cinza)**: É expressamente proibido utilizar combinações visuais que resultem em baixo contraste e prejudiquem a legibilidade, tais como textos ou chips cinzas sobre fundos brancos/cinzas, `bg-surface-variant` associado a textos claros, e classes como `text-medium-emphasis` em textos essenciais ou informativos.
     - **Cores Semânticas e Vivas**: Chips, badges, alertas e indicadores visuais devem utilizar cores semânticas bem contrastadas (`primary`, `secondary`, `info`, `warning`, `success`, `error`) e evitar chips cinzas desbotados (`color="default"`).
     - **Superfície Limpa dos Cards**: Os containers e cards devem adotar o fundo padrão da superfície do tema (`surface`), bordas nítidas e contraste consistente tanto no tema claro quanto no tema escuro.
-    - **Um padrão de superfície só** (`plugins/vuetify.ts`): card de página é
-      `elevation="2"`; painel dentro de outro card ou diálogo é `border flat`;
-      card clicável (escolha de tipo, atalho para um detalhe) é `<ChoiceCard>`;
-      canto sempre `lg` (o padrão do `VCard`). Proibido `variant="outlined"`
-      sem `color` num card (a borda sai na cor do texto, quase branca no tema
-      escuro), canto `xl` e fundo de cor fixa clara (`bg-grey-lighten-*`,
-      `bg-*-lighten-5`) — para realce use `bg-surface-light` ou `tint-*`
-      (`style.css`). `tests/conventions/surfaces.test.ts` barra as duas
-      primeiras.
-    - **Cor de plugin é fixa — não alterar**: tudo o que vem de plugin usa o token de tema `plugin` (`PLUGIN_COLOR` em `utils/pluginPresentation.ts`): a aba **Plugins** e as abas que só existem por causa de um plugin, como **Clientes Wi-Fi** em `/devices/{id}` — cor no estado normal e no selecionado (`base-color`, `color`, `slider-color`). As abas nativas do equipamento ficam em `primary`. É decisão de produto, para o operador separar o que é do equipamento do que é extensão: não troque por `primary`, não reaproveite o token para outra coisa, e aba nova alimentada por plugin entra com ele.
+    - **Um padrão de superfície só** (`lib/theme/app_theme.dart` e `lib/shared/widgets/`): card de página é `SectionCard` / `Card(elevation: 2)`; painel dentro de outro card ou diálogo é `NestedPanel`; card clicável é `ChoiceCard`; canto padrão `AppTheme.borderRadius`.
+    - **Cor de plugin é fixa — não alterar**: tudo o que vem de plugin usa o token de tema `plugin` (`SemanticTone.plugin` / `context.semanticColors.plugin` em `lib/theme/app_theme.dart`): a aba **Plugins** e as abas que só existem por causa de um plugin, como **Clientes Wi-Fi** em `/devices/{id}`. As abas nativas do equipamento ficam em `primary`. É decisão de produto, para o operador separar o que é do equipamento do que é extensão: não troque por `primary`, não reaproveite o token para outra coisa, e aba nova alimentada por plugin entra com ele.
 
 
 

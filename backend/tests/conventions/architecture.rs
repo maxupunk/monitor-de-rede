@@ -237,7 +237,7 @@ fn toda_area_tem_consumidor() {
     let registries =
         fs::read_to_string(backend().join("src/registries.rs")).expect("registries legível");
     let montadas = areas_citadas(&registries);
-    let frontend = backend().join("../frontend/src/areas");
+    let frontend = backend().join("../frontend/lib/areas");
     for area in AREAS {
         assert!(
             montadas.contains(area),
@@ -246,8 +246,8 @@ fn toda_area_tem_consumidor() {
         // O assistente não é área de produto: não tem menu próprio.
         if *area != "assistant" {
             assert!(
-                frontend.join(area).join("index.ts").is_file(),
-                "a área `{area}` não tem a sua parte no frontend (frontend/src/areas/{area})"
+                frontend.join(format!("{area}_area.dart")).is_file(),
+                "a área `{area}` não tem a sua parte no frontend (frontend/lib/areas/{area}_area.dart)"
             );
         }
     }

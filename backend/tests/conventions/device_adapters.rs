@@ -51,9 +51,9 @@ fn consumidores_de_dispositivo_dependem_do_registro() {
 
 #[test]
 fn frontend_nao_duplica_os_perfis_da_vpn() {
-    let store = production_part("frontend/src/stores/vpn.ts");
-    assert!(!store.contains("VPN_PROFILE_LABELS"));
-    assert!(!store.contains("VPN_PROFILE_ICONS"));
-    assert!(!store.contains("'mikrotik' | 'openwrt'"));
-    assert!(store.contains("profiles.find"));
+    let provider = production_part("frontend/lib/features/vpn/providers/vpn_provider.dart");
+    assert!(!provider.contains("VPN_PROFILE_LABELS"));
+    assert!(!provider.contains("VPN_PROFILE_ICONS"));
+    assert!(!provider.contains("'mikrotik' | 'openwrt'"));
+    assert!(provider.contains("serverState?.profiles"));
 }

@@ -1,7 +1,7 @@
 # NetMonitor
 
 Monitoramento e gerenciamento de **redes** e de **servidores com Docker**, com
-backend em **Rust (Loco.rs)** e frontend em **Vue 3 + Vuetify**. A stack
+backend em **Rust (Loco.rs)** e frontend em **Flutter (Web PWA + Android, Material Design 3)**. A stack
 inteira sobe por `docker compose`: um container com API, interface web, ciclo
 de monitores e servidor WireGuard, o **PostgreSQL 18** ao lado e o agente local
 que atende o Docker do host.
@@ -38,7 +38,7 @@ no [ADR 017](docs/adr/017-arquitetura-modular.md) e no
 | Diretório | O que é | Toolchain |
 | :--- | :--- | :--- |
 | `backend/` | API, scheduler, probe e migrations | `cargo` |
-| `frontend/` | SPA Vue 3, servida pela própria API em produção | `npm` |
+| `frontend/` | SPA Flutter Web (PWA) e app Android, servida pela própria API em produção | `flutter` / `dart` |
 | `docker/` | Entrypoint e watcher do WireGuard | — |
 | `docs/` | Arquitetura, roadmaps e ADRs | — |
 
@@ -310,17 +310,21 @@ Actions. Para fixar uma versão ou usar outro registry, defina `AGENT_IMAGE` na
 central (ex.: `ghcr.io/maxupunk/netmonitor-agent:1.0.0`). A instalação systemd
 não depende da imagem: baixa o binário da própria central.
 
-## Frontend — comandos
+## Frontend — comandos (`cd frontend`)
 
 ```powershell
-npm --prefix frontend run dev
-npm --prefix frontend run typecheck
-npm --prefix frontend run lint
-npm --prefix frontend run build
+flutter pub get
+flutter run -d chrome
+dart format --output=none --set-exit-if-changed lib test
+flutter analyze
+flutter test
+flutter build web --release --no-web-resources-cdn
+flutter build apk --release
 ```
 
-Os mesmos atalhos existem na raiz como `npm run dev:frontend`, `build:frontend`,
-`typecheck:frontend`, `lint:frontend` e `format:frontend`.
+Os mesmos atalhos existem na raiz via `package.json`: `npm run dev:frontend`,
+`lint:frontend`, `format:frontend`, `format:check`, `test:frontend`,
+`build:frontend` e `build:android`.
 
 ## Configuração
 

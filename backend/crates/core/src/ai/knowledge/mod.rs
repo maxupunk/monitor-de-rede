@@ -29,7 +29,7 @@ pub static SYSTEM_DOCS: &[DocTopic] = &[
         id: "overview",
         title: "Visão Geral do NetMonitor",
         keywords: &["netmonitor", "sistema", "inicio", "dashboard", "visao geral", "como funciona"],
-        content: "O NetMonitor é um sistema corporativo de monitoramento de redes e infraestrutura desenvolvido em Rust (backend Loco.rs) e Vue 3/Vuetify (frontend). Ele oferece coleta de métricas em tempo real via SSE (Server-Sent Events), monitoramento contínuo de conectividade (ICMP/TCP/UDP/SNMP), descoberta automatizada de dispositivos, topologia de rede visual, gestão de alertas com detecção de flapping, servidor WireGuard VPN integrado e diagnósticos avançados com playbooks automatizados.",
+        content: "O NetMonitor é um sistema corporativo de monitoramento de redes e infraestrutura desenvolvido em Rust (backend Loco.rs) e Flutter (frontend Web PWA e Android). Ele oferece coleta de métricas em tempo real via SSE (Server-Sent Events), monitoramento contínuo de conectividade (ICMP/TCP/UDP/SNMP), descoberta automatizada de dispositivos, topologia de rede visual, gestão de alertas com detecção de flapping, servidor WireGuard VPN integrado e diagnósticos avançados com playbooks automatizados.",
     },
     DocTopic {
         id: "dashboard_layout",
