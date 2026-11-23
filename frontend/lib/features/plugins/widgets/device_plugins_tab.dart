@@ -104,7 +104,8 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
   }
 
   Future<void> _executeAction(PluginSummary plugin, PluginAction action) async {
-    if (action.reveals) {
+    final hasParams = parsePluginSchemaFields(action.paramsSchema).isNotEmpty;
+    if (action.reveals && !hasParams) {
       await showEphemeralRevealDialog(
         context: context,
         deviceId: widget.deviceId,
@@ -115,7 +116,6 @@ class _DevicePluginsTabState extends ConsumerState<DevicePluginsTab> {
       return;
     }
 
-    final hasParams = parsePluginSchemaFields(action.paramsSchema).isNotEmpty;
     if (!hasParams && !action.isWrite) {
       await _runPluginOp(() async {
         final runId = await withDeviceAccess<int>(

@@ -472,11 +472,10 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                     double spanWidth(DashboardWidgetConfig w) {
                       if (width < 700) return width;
                       final cols = width >= 1100 ? w.lg : w.md;
-                      final fraction = (cols.clamp(4, 12)) / 12.0;
-                      if (fraction >= 0.99) return width;
-                      final itemsPerRow = (1 / fraction).round();
-                      return (width - spacing * (itemsPerRow - 1)) /
-                          itemsPerRow;
+                      final clamped = cols.clamp(4, 12);
+                      if (clamped >= 12) return width;
+                      final fraction = clamped / 12.0;
+                      return (width * fraction) - spacing * (1.0 - fraction);
                     }
 
                     return Wrap(
@@ -699,11 +698,12 @@ class _DashboardWidgetConfigSheetBodyState
   }
 
   Future<void> _save() async {
+    if (_saving) return;
     setState(() => _saving = true);
     final keys = widget.configKeys;
     final cfg = <String, dynamic>{
-      'deviceId': ?_selectedDeviceId,
-      'monitorId': ?_selectedMonitorId,
+      if (keys.contains('deviceId')) 'deviceId': _selectedDeviceId,
+      if (keys.contains('monitorId')) 'monitorId': _selectedMonitorId,
       if (keys.contains('timeframe')) 'timeframe': _timeframe,
       if (keys.contains('warningThreshold'))
         'warningThreshold': parseDoubleOrNull(_warnCtrl.text) ?? 75,
@@ -728,6 +728,18 @@ class _DashboardWidgetConfigSheetBodyState
   Widget build(BuildContext context) {
     final monitorsState = ref.watch(monitorsProvider);
     final keys = widget.configKeys;
+    final safeDeviceId =
+        monitorsState.devices.any((d) => d.id == _selectedDeviceId)
+        ? _selectedDeviceId
+        : null;
+    final safeMonitorId =
+        monitorsState.monitors.any((m) => m.id == _selectedMonitorId)
+        ? _selectedMonitorId
+        : null;
+    const allowedTimeframes = <String>['5m', '15m', '1h', '24h'];
+    final safeTimeframe = allowedTimeframes.contains(_timeframe)
+        ? _timeframe
+        : '1h';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -739,7 +751,7 @@ class _DashboardWidgetConfigSheetBodyState
         if (keys.contains('deviceId')) ...<Widget>[
           const SizedBox(height: 12),
           AppDropdownFormField<int?>(
-            initialValue: _selectedDeviceId,
+            initialValue: safeDeviceId,
             decoration: const InputDecoration(labelText: 'Dispositivo'),
             items: <DropdownMenuItem<int?>>[
               const DropdownMenuItem<int?>(
@@ -758,7 +770,7 @@ class _DashboardWidgetConfigSheetBodyState
         if (keys.contains('monitorId')) ...<Widget>[
           const SizedBox(height: 12),
           AppDropdownFormField<int?>(
-            initialValue: _selectedMonitorId,
+            initialValue: safeMonitorId,
             decoration: const InputDecoration(labelText: 'Monitor'),
             items: <DropdownMenuItem<int?>>[
               const DropdownMenuItem<int?>(
@@ -780,7 +792,7 @@ class _DashboardWidgetConfigSheetBodyState
         if (keys.contains('timeframe')) ...<Widget>[
           const SizedBox(height: 12),
           AppDropdownFormField<String>(
-            initialValue: _timeframe,
+            initialValue: safeTimeframe,
             decoration: const InputDecoration(labelText: 'Janela padrão'),
             items: const <DropdownMenuItem<String>>[
               DropdownMenuItem<String>(

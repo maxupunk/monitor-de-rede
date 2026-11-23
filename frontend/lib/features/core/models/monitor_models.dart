@@ -160,7 +160,7 @@ class MonitorGaugeMetric {
 class MonitorModel {
   const MonitorModel({
     required this.id,
-    required this.deviceId,
+    this.deviceId,
     this.probeId,
     required this.name,
     required this.type,
@@ -188,7 +188,7 @@ class MonitorModel {
   });
 
   final int id;
-  final int deviceId;
+  final int? deviceId;
   final int? probeId;
   final String name;
   final String type;
@@ -313,7 +313,7 @@ class MonitorModel {
 
     return MonitorModel(
       id: parseIntOrNull(json['id']) ?? 0,
-      deviceId: parseIntOrNull(json['deviceId']) ?? 0,
+      deviceId: parseIntOrNull(json['deviceId']),
       probeId: parseIntOrNull(json['probeId']),
       name: (json['name'] ?? '').toString(),
       type: (json['type'] ?? 'ping').toString(),
@@ -325,7 +325,7 @@ class MonitorModel {
       retryCount: parseIntOrNull(json['retryCount']),
       status: (json['status'] ?? json['currentStatus'] ?? 'unknown').toString(),
       isEnabled: enabled,
-      lastCheckedAt: json['lastCheckedAt'] as String?,
+      lastCheckedAt: (json['lastCheckedAt'] ?? json['lastRunAt']) as String?,
       lastLatencyMs: parseDoubleOrNull(
         json['lastLatencyMs'] ?? json['latencyMs'],
       ),
@@ -422,9 +422,12 @@ class SaasPresetItem {
       name: (json['name'] ?? '').toString(),
       category: (json['category'] ?? 'Outros').toString(),
       target: (json['target'] ?? json['url'] ?? '').toString(),
-      type: (json['type'] ?? 'https').toString(),
+      type: (json['checkType'] ?? json['type'] ?? 'https').toString(),
       description: json['description'] as String?,
-      provisioned: json['provisioned'] == true || json['exists'] == true,
+      provisioned:
+          json['isProvisioned'] == true ||
+          json['provisioned'] == true ||
+          json['exists'] == true,
     );
   }
 }

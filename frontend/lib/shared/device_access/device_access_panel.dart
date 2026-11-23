@@ -164,9 +164,18 @@ class _DeviceAccessPanelState extends ConsumerState<DeviceAccessPanel> {
   }
 
   Future<void> _saveStandard() async {
+    if (_saving) return;
     final user = _usernameCtrl.text.trim();
     if (user.isEmpty) {
       setState(() => _error = 'Informe o nome de usuário do equipamento.');
+      return;
+    }
+    final existingCred = _view?.credentialFor(_transport);
+    final hasActiveSession = existingCred?.sessionActive == true;
+    if (_transport != 'http' &&
+        _passwordCtrl.text.isEmpty &&
+        (!hasActiveSession || widget.lockedTransport != null)) {
+      setState(() => _error = 'Informe a senha de acesso do equipamento.');
       return;
     }
     setState(() {
@@ -191,6 +200,7 @@ class _DeviceAccessPanelState extends ConsumerState<DeviceAccessPanel> {
         const SnackBar(content: Text('Credencial salva com sucesso.')),
       );
       await _load();
+      if (!mounted) return;
       widget.onSaved?.call();
     } catch (err) {
       if (!mounted) return;
@@ -279,6 +289,7 @@ class _DeviceAccessPanelState extends ConsumerState<DeviceAccessPanel> {
         ),
       );
       await _load();
+      if (!mounted) return;
       widget.onSaved?.call();
     } catch (err) {
       if (!mounted) return;

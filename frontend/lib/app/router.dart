@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:netmonitor_app/areas/area_registry.dart';
@@ -11,6 +12,7 @@ import 'package:netmonitor_app/features/auth/login_page.dart';
 import 'package:netmonitor_app/features/auth/server_config_page.dart';
 import 'package:netmonitor_app/features/auth/setup_page.dart';
 import 'package:netmonitor_app/shared/widgets/adaptive_app_shell.dart';
+import 'package:netmonitor_app/shared/widgets/state_views.dart';
 
 const Set<String> _publicPaths = <String>{'/login', '/setup', '/server-config'};
 
@@ -49,7 +51,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 
       // 2. Autenticado: bloqueia login/setup, valida admin e área ligada/com acesso.
       if (auth.isAuthenticated) {
-        if (location == '/login' || location == '/setup') {
+        // O refresh do router reavalia `/login` assim que o token chega: o
+        // destino pedido em `?redirect=` precisa sobreviver a essa corrida.
+        if (location == '/login') {
+          return sanitizeLoginRedirect(state.uri.queryParameters['redirect']);
+        }
+        if (location == '/setup') {
           return '/';
         }
 
@@ -57,7 +64,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         if (meta != null) {
           if (meta.requiresAdmin && !auth.isAdmin) {
             await ref.read(authProvider.notifier).fetchMe();
-            if (!ref.read(authProvider).isAdmin) {
+            final refreshed = ref.read(authProvider);
+            if (!refreshed.isAuthenticated) {
+              final encoded = Uri.encodeQueryComponent(fullLocation);
+              return '/login?redirect=$encoded';
+            }
+            if (!refreshed.isAdmin) {
               return '/';
             }
           }
@@ -96,7 +108,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         return '/login';
       }
 
-      // 6. Rota privada sem sessão -> `/login?redirect=...`.
+      // 6. Rota privada sem sessão -> `/login?redirect=...` (ou destino explícito pós-logout).
+      final postLogout = ref.read(postLogoutLocationProvider);
+      if (postLogout != null) {
+        ref.read(postLogoutLocationProvider.notifier).state = null;
+        return fullLocation == postLogout ? null : postLogout;
+      }
+
       if (!_publicPaths.contains(location)) {
         final encoded = Uri.encodeQueryComponent(fullLocation);
         return '/login?redirect=$encoded';
@@ -104,6 +122,21 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 
       return null;
     },
+    errorBuilder: (context, state) => Scaffold(
+      body: Center(
+        child: EmptyStateView(
+          icon: Icons.explore_off_outlined,
+          title: 'Página não encontrada',
+          description:
+              'O endereço "${state.uri.path}" não existe ou foi movido.',
+          action: FilledButton.icon(
+            onPressed: () => context.go('/'),
+            icon: const Icon(Icons.home_outlined),
+            label: const Text('Voltar ao início'),
+          ),
+        ),
+      ),
+    ),
     routes: <RouteBase>[
       GoRoute(
         path: '/server-config',
@@ -113,8 +146,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/login',
         name: 'login',
-        builder: (context, state) =>
-            LoginPage(redirectTo: state.uri.queryParameters['redirect']),
+        builder: (context, state) => LoginPage(
+          redirectTo: state.uri.queryParameters['redirect'],
+          restored: state.uri.queryParameters['restaurado'] == '1',
+        ),
       ),
       GoRoute(
         path: '/setup',

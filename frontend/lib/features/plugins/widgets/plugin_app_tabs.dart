@@ -407,7 +407,7 @@ class PluginAppMembersTab extends ConsumerWidget {
                           ),
                         ),
                         onPressed: () => context.go(
-                          '/devices/${member.deviceId}?tab=plugin-$pluginId',
+                          '/devices/${member.deviceId}?tab=plugins',
                         ),
                         icon: const Icon(Icons.open_in_new, size: 16),
                         label: const Text(

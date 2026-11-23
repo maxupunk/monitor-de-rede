@@ -84,6 +84,7 @@ class _LinkTestScheduleFormBodyState
   }
 
   Future<void> _submit({
+    required int? validLinkId,
     required int? validSourceId,
     required int? validTargetId,
   }) async {
@@ -91,7 +92,7 @@ class _LinkTestScheduleFormBodyState
       setState(() => _formError = 'Informe o nome do agendamento.');
       return;
     }
-    if (_kind == 'link' && _linkId == null) {
+    if (_kind == 'link' && validLinkId == null) {
       setState(() => _formError = 'Selecione o enlace da topologia.');
       return;
     }
@@ -109,16 +110,21 @@ class _LinkTestScheduleFormBodyState
       _formError = null;
     });
 
+    final existing = widget.existing;
+    final limitMbps = existing?.spec.limitMbps;
     final payload = <String, dynamic>{
       'name': _nameCtrl.text.trim(),
       'kind': _kind,
-      'linkId': ?_linkId,
-      'sourceDeviceId': ?validSourceId,
-      'targetDeviceId': ?validTargetId,
+      if (_kind == 'link' && validLinkId != null) 'linkId': validLinkId,
+      if (_kind != 'link' && _kind != 'server' && validSourceId != null)
+        'sourceDeviceId': validSourceId,
+      if (_kind != 'link' && validTargetId != null)
+        'targetDeviceId': validTargetId,
       'spec': <String, dynamic>{
         'durationS': int.tryParse(_durationCtrl.text.trim()) ?? 10,
         'direction': _direction,
-        'streams': 4,
+        'streams': existing?.spec.streams ?? 4,
+        if (limitMbps != null && limitMbps > 0) 'limitMbps': limitMbps,
       },
       'intervalMinutes': (int.tryParse(_intervalCtrl.text.trim()) ?? 60).clamp(
         15,
@@ -131,7 +137,6 @@ class _LinkTestScheduleFormBodyState
       'enabled': _enabled,
     };
 
-    final existing = widget.existing;
     final ok = existing != null
         ? await ref
               .read(linkTestsProvider.notifier)
@@ -167,6 +172,7 @@ class _LinkTestScheduleFormBodyState
       kind: _kind,
       excludeSourceId: _kind != 'server' ? _sourceId : null,
     );
+    final validLinkId = edges.any((e) => e.id == _linkId) ? _linkId : null;
     final validSourceId = sources.any((d) => d.id == _sourceId)
         ? _sourceId
         : null;
@@ -217,13 +223,22 @@ class _LinkTestScheduleFormBodyState
           ],
           onChanged: (v) => setState(() {
             _kind = v ?? 'server';
+            if (_kind == 'link') {
+              _sourceId = null;
+              _targetId = null;
+            } else {
+              _linkId = null;
+              if (_kind == 'server') {
+                _sourceId = null;
+              }
+            }
             _formError = null;
           }),
         ),
         const SizedBox(height: 10),
         if (_kind == 'link')
           AppDropdownFormField<int?>(
-            initialValue: edges.any((e) => e.id == _linkId) ? _linkId : null,
+            initialValue: validLinkId,
             decoration: const InputDecoration(labelText: 'Enlace'),
             items: edges
                 .map(
@@ -355,6 +370,7 @@ class _LinkTestScheduleFormBodyState
               onPressed: _saving
                   ? null
                   : () => _submit(
+                      validLinkId: validLinkId,
                       validSourceId: validSourceId,
                       validTargetId: validTargetId,
                     ),

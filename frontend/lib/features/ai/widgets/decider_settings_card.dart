@@ -281,6 +281,7 @@ class _DeciderSettingsCardState extends ConsumerState<DeciderSettingsCard> {
                     provider?.defaultBaseUrl.isEmpty == true) ...<Widget>[
                   TextField(
                     controller: _baseUrlCtrl,
+                    onChanged: (_) => setState(() {}),
                     decoration: InputDecoration(
                       labelText: 'URL do servidor Decisor',
                       suffixIcon: IconButton(
@@ -297,6 +298,7 @@ class _DeciderSettingsCardState extends ConsumerState<DeciderSettingsCard> {
                 if (provider?.requiresAccount == true) ...<Widget>[
                   TextField(
                     controller: _accountIdCtrl,
+                    onChanged: (_) => setState(() {}),
                     decoration: const InputDecoration(
                       labelText: 'ID da conta (Cloudflare)',
                     ),
@@ -307,6 +309,7 @@ class _DeciderSettingsCardState extends ConsumerState<DeciderSettingsCard> {
                   TextField(
                     controller: _apiKeyCtrl,
                     obscureText: !_showKey,
+                    onChanged: (_) => setState(() {}),
                     decoration: InputDecoration(
                       labelText: 'Chave de API',
                       suffixIcon: IconButton(

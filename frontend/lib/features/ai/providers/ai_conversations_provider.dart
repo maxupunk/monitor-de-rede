@@ -72,24 +72,42 @@ class AiConversationsNotifier extends Notifier<AiConversationsState> {
     state = state.copyWith(clearActiveId: true, clearSaveError: true);
   }
 
-  /// Persiste a conversa atual de forma serializada (evita creates duplicados).
-  Future<void> persistCurrent(List<AiDisplayMessage> messages) {
-    _writeQueue = _writeQueue.then((_) => _persistInternal(messages));
+  /// Persiste a conversa informada (ou ativa no momento da chamada) de forma
+  /// serializada. O `targetId` é capturado sincronamente antes de entrar na
+  /// fila para evitar gravar na conversa errada após troca rápida de chat.
+  Future<void> persistCurrent(
+    List<AiDisplayMessage> messages, {
+    String? targetId,
+    bool updateActiveOnCreate = true,
+  }) {
+    final capturedId = targetId ?? state.activeId;
+    _writeQueue = _writeQueue.then(
+      (_) => _persistInternal(
+        messages,
+        targetId: capturedId,
+        updateActiveOnCreate: updateActiveOnCreate,
+      ),
+    );
     return _writeQueue;
   }
 
-  Future<void> _persistInternal(List<AiDisplayMessage> messages) async {
+  Future<void> _persistInternal(
+    List<AiDisplayMessage> messages, {
+    required String? targetId,
+    required bool updateActiveOnCreate,
+  }) async {
     if (messages.isEmpty) return;
     final title = _deriveTitle(messages);
     try {
-      final activeId = state.activeId;
-      if (activeId == null) {
+      if (targetId == null) {
         final created = await _repo.createConversation(
           title: title,
           messages: messages,
         );
         state = state.copyWith(
-          activeId: created.id,
+          activeId: updateActiveOnCreate && state.activeId == null
+              ? created.id
+              : state.activeId,
           summaries: <AiConversationSummary>[
             created,
             ...state.summaries.where((s) => s.id != created.id),
@@ -98,11 +116,11 @@ class AiConversationsNotifier extends Notifier<AiConversationsState> {
         );
       } else {
         final existingTitle = state.summaries
-            .where((s) => s.id == activeId)
+            .where((s) => s.id == targetId)
             .map((s) => s.title)
             .firstOrNull;
         final updated = await _repo.updateConversation(
-          id: activeId,
+          id: targetId,
           title: existingTitle?.isNotEmpty == true ? existingTitle! : title,
           messages: messages,
         );

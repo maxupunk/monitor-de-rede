@@ -341,7 +341,7 @@ class HourlyEventBucket {
         parseIntOrNull(json['count']) ??
         (crit + warn + inf);
     return HourlyEventBucket(
-      hour: (json['hour'] ?? json['label'] ?? json['bucket'] ?? '').toString(),
+      hour: (json['label'] ?? json['hour'] ?? json['bucket'] ?? '').toString(),
       critical: crit,
       warning: warn,
       info: inf,

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/utils/error_utils.dart';
 import 'package:netmonitor_app/core/utils/form_validators.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 import 'package:netmonitor_app/features/core/models/monitor_models.dart';
 import 'package:netmonitor_app/features/core/providers/monitors_provider.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
@@ -14,19 +15,36 @@ const List<(String, String)> kMonitorKinds = <(String, String)>[
   ('https', 'HTTPS'),
   ('dns', 'DNS'),
   ('snmp', 'SNMP'),
-  ('ssh', 'SSH'),
-  ('tls', 'TLS / Certificado'),
+  ('ssl', 'SSL / Certificado'),
+  ('port_scan', 'Varredura de Portas'),
+  ('container', 'Container Docker'),
+  ('host_resources', 'Recursos do Host'),
 ];
 
 const List<(String, String)> kSnmpModes = <(String, String)>[
   ('oid', 'OID customizado'),
-  ('cpu', 'Uso de CPU'),
-  ('memory', 'Uso de memória'),
+  ('cpu_usage', 'Uso de CPU'),
+  ('memory_usage', 'Uso de memória'),
   ('interface', 'Estado de interface'),
   ('interface_traffic', 'Tráfego de interface (bps)'),
+  ('sensor', 'Sensor SNMP'),
   ('temperature', 'Temperatura'),
   ('disk', 'Disco / Armazenamento'),
 ];
+
+String _normalizeSnmpMode(Object? raw) {
+  final mode = (raw ?? 'oid').toString().trim();
+  return switch (mode) {
+    'cpu' => 'cpu_usage',
+    'memory' => 'memory_usage',
+    'traffic' => 'interface_traffic',
+    '' => 'oid',
+    _ => mode,
+  };
+}
+
+String _interfaceChoiceKey(DeviceInterfaceRef intf) =>
+    intf.ifIndex != null ? 'idx:${intf.ifIndex}' : 'name:${intf.name}';
 
 /// Abre o formulário completo de criação/edição de monitor (todos os tipos e modos SNMP).
 Future<bool> showMonitorFormSheet({
@@ -82,19 +100,26 @@ class _MonitorFormBodyState extends ConsumerState<_MonitorFormBody> {
   bool _saving = false;
   bool _loadingIfs = false;
   List<DeviceInterfaceRef> _interfaces = const <DeviceInterfaceRef>[];
-  DeviceInterfaceRef? _selectedInterface;
+  String? _selectedInterfaceKey;
   String? _error;
 
   @override
   void initState() {
     super.initState();
     final e = widget.existing;
-    _type = e?.type ?? 'ping';
+    _type = e?.type == 'tls' ? 'ssl' : (e?.type ?? 'ping');
     _deviceId = e?.deviceId ?? widget.presetDeviceId;
     _probeId = e?.probeId;
     _enabled = e?.isEnabled ?? true;
     final cfg = e?.configuration ?? const <String, dynamic>{};
-    _snmpMode = (cfg['mode'] ?? cfg['metric'] ?? 'oid').toString();
+    _snmpMode = _normalizeSnmpMode(cfg['metric'] ?? cfg['mode']);
+    final savedIfIndex = parseIntOrNull(cfg['ifIndex']);
+    final savedIfName = (cfg['ifName'] as String?)?.trim();
+    if (savedIfIndex != null) {
+      _selectedInterfaceKey = 'idx:$savedIfIndex';
+    } else if (savedIfName != null && savedIfName.isNotEmpty) {
+      _selectedInterfaceKey = 'name:$savedIfName';
+    }
 
     _nameCtrl = TextEditingController(text: e?.name ?? '');
     _targetCtrl = TextEditingController(text: e?.target ?? '');
@@ -150,30 +175,57 @@ class _MonitorFormBodyState extends ConsumerState<_MonitorFormBody> {
   }
 
   Future<void> _submit() async {
+    if (_saving) return;
     if (!_formKey.currentState!.validate()) return;
     setState(() {
       _saving = true;
       _error = null;
     });
 
-    final cfg = <String, dynamic>{};
-    if (_type == 'http' || _type == 'https') {
+    final target = _targetCtrl.text.trim();
+    final port = int.tryParse(_portCtrl.text.trim());
+    final cfg = <String, dynamic>{
+      if (widget.existing != null) ...widget.existing!.configuration,
+    };
+    if (_type == 'ping' ||
+        _type == 'tcp' ||
+        _type == 'snmp' ||
+        _type == 'ssl') {
+      if (target.isNotEmpty) cfg['host'] = target;
+    } else if (_type == 'http' || _type == 'https') {
+      if (target.isNotEmpty) {
+        cfg['url'] = target.startsWith('http') ? target : '$_type://$target';
+      }
       final code = int.tryParse(_expectedStatusCtrl.text.trim());
       if (code != null) cfg['expectedStatus'] = code;
     } else if (_type == 'dns') {
       if (_dnsDomainCtrl.text.trim().isNotEmpty) {
         cfg['domain'] = _dnsDomainCtrl.text.trim();
+      } else if (target.isNotEmpty) {
+        cfg['domain'] = target;
       }
-    } else if (_type == 'snmp') {
+    } else if (_type == 'container' && target.isNotEmpty) {
+      cfg['container'] = target;
+    }
+    if (port != null) {
+      cfg['port'] = port;
+    }
+    if (_type == 'snmp') {
+      cfg['metric'] = _snmpMode;
       cfg['mode'] = _snmpMode;
       if (_snmpMode == 'oid' && _oidCtrl.text.trim().isNotEmpty) {
         cfg['oid'] = _oidCtrl.text.trim();
       }
       if ((_snmpMode == 'interface' || _snmpMode == 'interface_traffic') &&
-          _selectedInterface != null) {
-        cfg['ifName'] = _selectedInterface!.name;
-        if (_selectedInterface!.ifIndex != null) {
-          cfg['ifIndex'] = _selectedInterface!.ifIndex;
+          _selectedInterfaceKey != null) {
+        final selected = _interfaces
+            .where((i) => _interfaceChoiceKey(i) == _selectedInterfaceKey)
+            .firstOrNull;
+        if (selected != null) {
+          cfg['ifName'] = selected.name;
+          if (selected.ifIndex != null) {
+            cfg['ifIndex'] = selected.ifIndex;
+          }
         }
       }
     }
@@ -181,11 +233,10 @@ class _MonitorFormBodyState extends ConsumerState<_MonitorFormBody> {
     final payload = <String, dynamic>{
       'name': _nameCtrl.text.trim(),
       'type': _type,
-      'target': _targetCtrl.text.trim(),
-      if (_deviceId != null) 'deviceId': _deviceId,
-      if (_probeId != null) 'probeId': _probeId,
-      if (_portCtrl.text.trim().isNotEmpty)
-        'port': int.tryParse(_portCtrl.text.trim()),
+      'target': target,
+      'deviceId': _deviceId,
+      'probeId': _probeId,
+      'port': ?port,
       'intervalSeconds': int.tryParse(_intervalCtrl.text.trim()) ?? 60,
       'timeoutSeconds': int.tryParse(_timeoutCtrl.text.trim()) ?? 5,
       'retryCount': int.tryParse(_retryCtrl.text.trim()) ?? 1,
@@ -213,7 +264,17 @@ class _MonitorFormBodyState extends ConsumerState<_MonitorFormBody> {
   @override
   Widget build(BuildContext context) {
     final monitorsState = ref.watch(monitorsProvider);
-    final needsPort = _type == 'tcp' || _type == 'ssh' || _type == 'tls';
+    final needsPort = _type == 'tcp' || _type == 'ssl';
+    final safeDeviceId = monitorsState.devices.any((d) => d.id == _deviceId)
+        ? _deviceId
+        : null;
+    final safeProbeId = monitorsState.probes.any((p) => p.id == _probeId)
+        ? _probeId
+        : null;
+    final safeInterfaceKey =
+        _interfaces.any((i) => _interfaceChoiceKey(i) == _selectedInterfaceKey)
+        ? _selectedInterfaceKey
+        : null;
 
     return Form(
       key: _formKey,
@@ -252,7 +313,7 @@ class _MonitorFormBodyState extends ConsumerState<_MonitorFormBody> {
           ),
           const SizedBox(height: 12),
           AppDropdownFormField<int?>(
-            initialValue: _deviceId,
+            initialValue: safeDeviceId,
             decoration: const InputDecoration(
               labelText: 'Dispositivo vinculado',
             ),
@@ -273,8 +334,12 @@ class _MonitorFormBodyState extends ConsumerState<_MonitorFormBody> {
             onChanged: (v) {
               setState(() => _deviceId = v);
               if (v != null) {
-                final dev = monitorsState.devices.firstWhere((d) => d.id == v);
-                if (_targetCtrl.text.trim().isEmpty && dev.ipAddress != null) {
+                final dev = monitorsState.devices
+                    .where((d) => d.id == v)
+                    .firstOrNull;
+                if (dev != null &&
+                    _targetCtrl.text.trim().isEmpty &&
+                    dev.ipAddress != null) {
                   _targetCtrl.text = dev.ipAddress!;
                 }
                 if (_type == 'snmp') _loadInterfaces(v);
@@ -301,9 +366,7 @@ class _MonitorFormBodyState extends ConsumerState<_MonitorFormBody> {
               keyboardType: TextInputType.number,
               decoration: InputDecoration(
                 labelText: 'Porta',
-                hintText: _type == 'ssh'
-                    ? '22'
-                    : (_type == 'tls' ? '443' : '80'),
+                hintText: _type == 'ssl' ? '443' : '80',
               ),
               validator: FormValidators.port(),
             ),
@@ -362,11 +425,11 @@ class _MonitorFormBodyState extends ConsumerState<_MonitorFormBody> {
               const SizedBox(height: 12),
               LayoutBuilder(
                 builder: (context, constraints) {
-                  final dropdown = AppDropdownFormField<DeviceInterfaceRef?>(
-                    initialValue: _selectedInterface,
+                  final dropdown = AppDropdownFormField<String?>(
+                    initialValue: safeInterfaceKey,
                     decoration: const InputDecoration(labelText: 'Interface'),
-                    items: <DropdownMenuItem<DeviceInterfaceRef?>>[
-                      const DropdownMenuItem<DeviceInterfaceRef?>(
+                    items: <DropdownMenuItem<String?>>[
+                      const DropdownMenuItem<String?>(
                         value: null,
                         child: Text(
                           'Selecione a interface',
@@ -374,15 +437,15 @@ class _MonitorFormBodyState extends ConsumerState<_MonitorFormBody> {
                         ),
                       ),
                       for (final intf in _interfaces)
-                        DropdownMenuItem<DeviceInterfaceRef?>(
-                          value: intf,
+                        DropdownMenuItem<String?>(
+                          value: _interfaceChoiceKey(intf),
                           child: Text(
                             intf.name,
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
                     ],
-                    onChanged: (v) => setState(() => _selectedInterface = v),
+                    onChanged: (v) => setState(() => _selectedInterfaceKey = v),
                   );
                   final discoverBtn = OutlinedButton.icon(
                     onPressed: _loadingIfs
@@ -415,7 +478,7 @@ class _MonitorFormBodyState extends ConsumerState<_MonitorFormBody> {
           if (monitorsState.probes.isNotEmpty) ...<Widget>[
             const SizedBox(height: 12),
             AppDropdownFormField<int?>(
-              initialValue: _probeId,
+              initialValue: safeProbeId,
               decoration: const InputDecoration(
                 labelText: 'Sonda / Agente (opcional)',
               ),

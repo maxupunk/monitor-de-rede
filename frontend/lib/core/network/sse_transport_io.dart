@@ -38,7 +38,7 @@ class _IoSseTransport implements SseTransport {
         final response = await client.send(request);
         if (_closed) return;
         if (response.statusCode < 200 || response.statusCode >= 300) {
-          onError(Exception('SSE HTTP ${response.statusCode}'));
+          onError(SseHttpException(response.statusCode));
           return;
         }
         onOpen();

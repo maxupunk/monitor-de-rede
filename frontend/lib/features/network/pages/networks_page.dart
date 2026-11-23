@@ -426,6 +426,7 @@ class _NetworkFormBodyState extends ConsumerState<_NetworkFormBody> {
   }
 
   Future<void> _submit() async {
+    if (_saving) return;
     if (!_formKey.currentState!.validate()) return;
     setState(() => _saving = true);
     final payload = <String, dynamic>{
@@ -436,7 +437,7 @@ class _NetworkFormBodyState extends ConsumerState<_NetworkFormBody> {
       if (_gatewayCtrl.text.trim().isNotEmpty)
         'gateway': _gatewayCtrl.text.trim(),
       if (_vlanCtrl.text.trim().isNotEmpty)
-        'vlanId': int.tryParse(_vlanCtrl.text.trim()),
+        'vlan': int.tryParse(_vlanCtrl.text.trim()),
       'scanEnabled': _scanEnabled,
       if (_scanEnabled)
         'scanInterval': int.tryParse(_intervalCtrl.text.trim()) ?? 3600,
@@ -450,7 +451,14 @@ class _NetworkFormBodyState extends ConsumerState<_NetworkFormBody> {
         : await ref.read(networksProvider.notifier).createNetwork(payload);
     if (!mounted) return;
     setState(() => _saving = false);
-    if (ok) widget.onSaved();
+    if (ok) {
+      widget.onSaved();
+    } else {
+      final err = ref.read(networksProvider).error;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(err ?? 'Erro ao salvar rede.')));
+    }
   }
 
   @override

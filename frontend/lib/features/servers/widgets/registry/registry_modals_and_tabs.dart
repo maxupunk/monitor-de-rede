@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:netmonitor_app/core/areas/area_models.dart';
+import 'package:netmonitor_app/core/auth/auth_state.dart';
 import 'package:netmonitor_app/core/utils/error_utils.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/servers/models/registry_models.dart';
@@ -372,14 +374,15 @@ class RegistryTokensTab extends ConsumerWidget {
           ),
           const SizedBox(height: 12),
         ],
-        Align(
-          alignment: Alignment.centerRight,
-          child: FilledButton.icon(
-            onPressed: () => showCreateRegistryTokenSheet(context),
-            icon: const Icon(Icons.add),
-            label: const Text('Novo token pessoal'),
+        if (ref.watch(authProvider).canWriteIn(ProductArea.servers))
+          Align(
+            alignment: Alignment.centerRight,
+            child: FilledButton.icon(
+              onPressed: () => showCreateRegistryTokenSheet(context),
+              icon: const Icon(Icons.add),
+              label: const Text('Novo token pessoal'),
+            ),
           ),
-        ),
         const SizedBox(height: 12),
         if (reg.loadingTokens && !reg.tokensLoaded)
           const LoadingStateView(message: 'Carregando tokens...')
@@ -439,7 +442,8 @@ class RegistryTokensTab extends ConsumerWidget {
                         ],
                       ),
                     ),
-                    if (!t.revoked)
+                    if (!t.revoked &&
+                        ref.watch(authProvider).canWriteIn(ProductArea.servers))
                       IconButton(
                         tooltip: 'Revogar token',
                         icon: const Icon(Icons.delete_outline),
@@ -452,10 +456,17 @@ class RegistryTokensTab extends ConsumerWidget {
                             confirmLabel: 'Revogar',
                             tone: SemanticTone.error,
                           );
-                          if (!ok) return;
-                          await ref
-                              .read(registryProvider.notifier)
-                              .revokeToken(t.id);
+                          if (!ok || !context.mounted) return;
+                          try {
+                            await ref
+                                .read(registryProvider.notifier)
+                                .revokeToken(t.id);
+                          } catch (err) {
+                            if (!context.mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text(describeError(err))),
+                            );
+                          }
                         },
                       ),
                   ],
@@ -616,9 +627,22 @@ class RegistryVulnerabilitiesTab extends ConsumerWidget {
                                 if (canAdmin)
                                   IconButton(
                                     icon: const Icon(Icons.delete_outline),
-                                    onPressed: () => ref
-                                        .read(registryProvider.notifier)
-                                        .removeException(ex.id),
+                                    onPressed: () async {
+                                      try {
+                                        await ref
+                                            .read(registryProvider.notifier)
+                                            .removeException(ex.id);
+                                      } catch (err) {
+                                        if (!context.mounted) return;
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).showSnackBar(
+                                          SnackBar(
+                                            content: Text(describeError(err)),
+                                          ),
+                                        );
+                                      }
+                                    },
                                   ),
                               ],
                             ),

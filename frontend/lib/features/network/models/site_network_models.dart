@@ -91,7 +91,7 @@ class NetworkModel {
       name: (json['name'] as String?) ?? 'Rede',
       cidr: (json['cidr'] as String?) ?? '',
       gateway: json['gateway'] as String?,
-      vlanId: parseIntOrNull(json['vlanId']),
+      vlanId: parseIntOrNull(json['vlan'] ?? json['vlanId']),
       description: json['description'] as String?,
       scanEnabled: json['scanEnabled'] == true,
       scanInterval: parseIntOrNull(json['scanInterval']),

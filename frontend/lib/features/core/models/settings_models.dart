@@ -273,7 +273,13 @@ class PushStatusModel {
     return PushStatusModel(
       enabled: json['enabled'] == true,
       configured: json['configured'] == true,
-      subscriptionCount: parseIntOrNull(json['subscriptionCount']) ?? 0,
+      subscriptionCount:
+          parseIntOrNull(
+            json['userSubscriptions'] ??
+                json['totalSubscriptions'] ??
+                json['subscriptionCount'],
+          ) ??
+          0,
     );
   }
 }

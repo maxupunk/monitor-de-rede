@@ -171,19 +171,31 @@ class _RegistryRepositoryDetailBodyState
                           icon: const Icon(Icons.shield_outlined, size: 16),
                           label: const Text('Vulnerabilidades'),
                         ),
-                        OutlinedButton.icon(
-                          onPressed: () async {
-                            await ref
-                                .read(registryProvider.notifier)
-                                .pinVersion(v.id, pinned: !v.pinned);
-                            await _load();
-                          },
-                          icon: Icon(
-                            v.pinned ? Icons.push_pin : Icons.push_pin_outlined,
-                            size: 16,
+                        if (widget.canAdmin)
+                          OutlinedButton.icon(
+                            onPressed: () async {
+                              final messenger = ScaffoldMessenger.of(context);
+                              try {
+                                await ref
+                                    .read(registryProvider.notifier)
+                                    .pinVersion(v.id, pinned: !v.pinned);
+                                if (!mounted) return;
+                                await _load();
+                              } catch (err) {
+                                if (!mounted) return;
+                                messenger.showSnackBar(
+                                  SnackBar(content: Text(describeError(err))),
+                                );
+                              }
+                            },
+                            icon: Icon(
+                              v.pinned
+                                  ? Icons.push_pin
+                                  : Icons.push_pin_outlined,
+                              size: 16,
+                            ),
+                            label: Text(v.pinned ? 'Soltar' : 'Fixar'),
                           ),
-                          label: Text(v.pinned ? 'Soltar' : 'Fixar'),
-                        ),
                         if (widget.canAdmin)
                           Tooltip(
                             message: v.canDelete
@@ -192,6 +204,9 @@ class _RegistryRepositoryDetailBodyState
                             child: TextButton.icon(
                               onPressed: v.canDelete
                                   ? () async {
+                                      final messenger = ScaffoldMessenger.of(
+                                        context,
+                                      );
                                       final ok = await showConfirmActionDialog(
                                         context: context,
                                         title:
@@ -201,11 +216,21 @@ class _RegistryRepositoryDetailBodyState
                                         confirmLabel: 'Apagar',
                                         tone: SemanticTone.error,
                                       );
-                                      if (!ok) return;
-                                      await ref
-                                          .read(registryProvider.notifier)
-                                          .removeVersion(v.id);
-                                      await _load();
+                                      if (!ok || !mounted) return;
+                                      try {
+                                        await ref
+                                            .read(registryProvider.notifier)
+                                            .removeVersion(v.id);
+                                        if (!mounted) return;
+                                        await _load();
+                                      } catch (err) {
+                                        if (!mounted) return;
+                                        messenger.showSnackBar(
+                                          SnackBar(
+                                            content: Text(describeError(err)),
+                                          ),
+                                        );
+                                      }
                                     }
                                   : null,
                               icon: const Icon(Icons.delete_outline, size: 16),
@@ -348,11 +373,12 @@ class _RegistryFindingsDialogBodyState
               label: registryScanSentence(widget.version.scan),
               tone: registryScanTone(widget.version.scan),
             ),
-            OutlinedButton.icon(
-              onPressed: _scanning ? null : _rescan,
-              icon: const Icon(Icons.refresh, size: 16),
-              label: const Text('Analisar de novo'),
-            ),
+            if (widget.canAdmin)
+              OutlinedButton.icon(
+                onPressed: _scanning ? null : _rescan,
+                icon: const Icon(Icons.refresh, size: 16),
+                label: const Text('Analisar de novo'),
+              ),
           ],
         ),
         const SizedBox(height: 12),
@@ -454,9 +480,9 @@ class _AcceptRiskDialogState extends State<_AcceptRiskDialog> {
 
   void _confirm() {
     final trimmed = _reasonCtrl.text.trim();
-    if (trimmed.length < 5) {
+    if (trimmed.length < 10) {
       setState(
-        () => _dialogError = 'Informe ao menos 5 caracteres de justificativa.',
+        () => _dialogError = 'Informe ao menos 10 caracteres de justificativa.',
       );
       return;
     }
@@ -477,7 +503,7 @@ class _AcceptRiskDialogState extends State<_AcceptRiskDialog> {
           }
         },
         decoration: InputDecoration(
-          labelText: 'Justificativa (mín. 5 caracteres)',
+          labelText: 'Justificativa (mín. 10 caracteres)',
           errorText: _dialogError,
         ),
       ),

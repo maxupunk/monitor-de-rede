@@ -97,20 +97,43 @@ class SseService extends Notifier<RealtimeState> implements SseBus {
       <String, Set<SseEventListener>>{};
   final Map<String, Timer> _pendingRefreshes = <String, Timer>{};
   final Map<String, int> _interests = <String, int>{};
+  final Set<SseClient> _customClients = <SseClient>{};
 
   String _connectedInterests = '';
   Timer? _interestTimer;
 
   @override
   RealtimeState build() {
-    _client = SseClient();
+    _client = SseClient(
+      onUnauthorized: () {
+        ref.read(sessionTokenProvider.notifier).state = null;
+        ref.read(sessionExpiredSignalProvider.notifier).state++;
+      },
+    );
     _stateSub = _client.connectionStates.listen((connectionState) {
       state = state.copyWith(connectionState: connectionState);
     });
     _eventSub = _client.events.listen(_handleIncomingEvent);
 
+    ref.listen<String?>(sessionTokenProvider, (prev, next) {
+      if (next == null || next.isEmpty) {
+        disconnect(clearFeed: true);
+      } else if (prev != null &&
+          prev != next &&
+          _client.state != SseConnectionState.disconnected) {
+        _client.reconnectNow();
+      }
+    });
+    ref.listen<ServerConfigState>(serverConfigProvider, (prev, next) {
+      if (prev != null &&
+          prev.apiBaseUrl != next.apiBaseUrl &&
+          _client.state != SseConnectionState.disconnected) {
+        _client.reconnectNow();
+      }
+    });
+
     ref.onDispose(() {
-      disconnect();
+      disconnect(clearFeed: true);
       _eventSub?.cancel();
       _stateSub?.cancel();
       _client.dispose();
@@ -221,6 +244,8 @@ class SseService extends Notifier<RealtimeState> implements SseBus {
   }
 
   void connect() {
+    final token = ref.read(sessionTokenProvider);
+    if (token == null || token.isEmpty) return;
     _connectedInterests = _interestKey();
     _client.connect(
       urlBuilder: _buildStreamUri,
@@ -228,14 +253,21 @@ class SseService extends Notifier<RealtimeState> implements SseBus {
     );
   }
 
-  void disconnect() {
+  void disconnect({bool clearFeed = false}) {
     _interestTimer?.cancel();
     _interestTimer = null;
     for (final timer in _pendingRefreshes.values) {
       timer.cancel();
     }
     _pendingRefreshes.clear();
+    for (final custom in List<SseClient>.from(_customClients)) {
+      custom.dispose();
+    }
+    _customClients.clear();
     _client.disconnect();
+    if (clearFeed && state.recentEvents.isNotEmpty) {
+      state = const RealtimeState();
+    }
   }
 
   /// Cria um `SseClient` dedicado para streams secundários autorizados (ex.: `GET /api/logs/stream`).
@@ -244,7 +276,17 @@ class SseService extends Notifier<RealtimeState> implements SseBus {
     Map<String, String> queryParameters = const <String, String>{},
   }) {
     final normalizedPath = path.startsWith('/') ? path : '/$path';
-    final customClient = SseClient();
+    final customClient = SseClient(
+      onUnauthorized: () {
+        ref.read(sessionTokenProvider.notifier).state = null;
+        ref.read(sessionExpiredSignalProvider.notifier).state++;
+      },
+    );
+    _customClients.add(customClient);
+    customClient.connectionStates.listen(
+      (_) {},
+      onDone: () => _customClients.remove(customClient),
+    );
     customClient.connect(
       urlBuilder: () {
         final apiBase = ref.read(serverConfigProvider).apiBaseUrl;

@@ -50,14 +50,18 @@ class _AiChatDrawerState extends ConsumerState<AiChatDrawer> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       ref.read(aiConversationsProvider.notifier).fetchAll();
     });
   }
 
-  void _closeDrawer() {
-    if (_showHistory) {
+  void _closeDrawer({bool force = false}) {
+    if (!force && _showHistory) {
       setState(() => _showHistory = false);
       return;
+    }
+    if (_showHistory) {
+      setState(() => _showHistory = false);
     }
     ref.read(aiDrawerOpenProvider.notifier).state = false;
     final scaffold = Scaffold.maybeOf(context);
@@ -125,7 +129,7 @@ class _AiChatDrawerState extends ConsumerState<AiChatDrawer> {
                   tooltip: 'Abrir em tela cheia',
                   icon: const Icon(Icons.open_in_full, size: 18),
                   onPressed: () {
-                    _closeDrawer();
+                    _closeDrawer(force: true);
                     context.go('/ai-chat');
                   },
                 ),
@@ -187,9 +191,21 @@ class _AiChatDrawerState extends ConsumerState<AiChatDrawer> {
                                   size: 18,
                                   color: scheme.error,
                                 ),
-                                onPressed: () => ref
-                                    .read(aiConversationsProvider.notifier)
-                                    .remove(item.id),
+                                onPressed: () async {
+                                  final isActive =
+                                      ref
+                                          .read(aiConversationsProvider)
+                                          .activeId ==
+                                      item.id;
+                                  await ref
+                                      .read(aiConversationsProvider.notifier)
+                                      .remove(item.id);
+                                  if (isActive && mounted) {
+                                    ref
+                                        .read(aiChatProvider.notifier)
+                                        .newConversation();
+                                  }
+                                },
                               ),
                             );
                           },

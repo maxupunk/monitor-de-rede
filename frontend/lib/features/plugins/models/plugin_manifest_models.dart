@@ -501,7 +501,7 @@ class TestCaseResult {
     return TestCaseResult(
       name: (json['name'] as String?) ?? '',
       passed: parseBool(json['passed']),
-      error: json['error'] as String?,
+      error: (json['message'] ?? json['error']) as String?,
       output: json['output'],
     );
   }
@@ -513,6 +513,7 @@ class PluginTestReport {
     required this.passed,
     required this.total,
     required this.failed,
+    this.ok = false,
     this.problems = const <String>[],
     this.cases = const <TestCaseResult>[],
     this.hints = const <String>[],
@@ -521,6 +522,7 @@ class PluginTestReport {
   final int passed;
   final int total;
   final int failed;
+  final bool ok;
   final List<String> problems;
   final List<TestCaseResult> cases;
   final List<String> hints;
@@ -537,12 +539,28 @@ class PluginTestReport {
         }
       }
     }
+    final cases = asJsonList<TestCaseResult>(
+      json['cases'],
+      TestCaseResult.fromJson,
+    );
+    final problems = asStringList(json['problems']);
+    final rawPassed = json['passed'];
+    final passedCount = rawPassed is num
+        ? rawPassed.toInt()
+        : cases.where((c) => c.passed).length;
+    final total = parseIntOrNull(json['total']) ?? cases.length;
+    final failed =
+        parseIntOrNull(json['failed']) ?? cases.where((c) => !c.passed).length;
+    final ok = rawPassed is bool
+        ? rawPassed
+        : (failed == 0 && problems.isEmpty);
     return PluginTestReport(
-      passed: parseIntOrNull(json['passed']) ?? 0,
-      total: parseIntOrNull(json['total']) ?? 0,
-      failed: parseIntOrNull(json['failed']) ?? 0,
-      problems: asStringList(json['problems']),
-      cases: asJsonList<TestCaseResult>(json['cases'], TestCaseResult.fromJson),
+      passed: passedCount,
+      total: total,
+      failed: failed,
+      ok: ok,
+      problems: problems,
+      cases: cases,
       hints: hints,
     );
   }

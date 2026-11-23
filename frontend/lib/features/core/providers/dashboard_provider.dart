@@ -457,18 +457,26 @@ class DashboardNotifier extends Notifier<DashboardState> {
     Map<String, dynamic>? config,
   }) async {
     final next = state.widgets
-        .map(
-          (w) => w.id == id
-              ? w.copyWith(
-                  title: title != null && title.trim().isNotEmpty
-                      ? title.trim()
-                      : w.title,
-                  config: config != null
-                      ? <String, dynamic>{...w.config, ...config}
-                      : w.config,
-                )
-              : w,
-        )
+        .map((w) {
+          if (w.id != id) return w;
+          Map<String, dynamic> merged = w.config;
+          if (config != null) {
+            merged = <String, dynamic>{...w.config};
+            config.forEach((key, value) {
+              if (value == null) {
+                merged.remove(key);
+              } else {
+                merged[key] = value;
+              }
+            });
+          }
+          return w.copyWith(
+            title: title != null && title.trim().isNotEmpty
+                ? title.trim()
+                : w.title,
+            config: merged,
+          );
+        })
         .toList(growable: false);
     await _commitWidgets(next);
   }

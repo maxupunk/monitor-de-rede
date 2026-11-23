@@ -10,6 +10,18 @@ const int maxSseReconnectDelayMs = 30000;
 
 enum SseConnectionState { disconnected, connecting, connected, reconnecting }
 
+/// Erro HTTP retornado ao tentar abrir um stream SSE (ex.: 401 token expirado).
+class SseHttpException implements Exception {
+  const SseHttpException(this.statusCode);
+
+  final int statusCode;
+
+  bool get isUnauthorized => statusCode == 401;
+
+  @override
+  String toString() => 'SSE HTTP $statusCode';
+}
+
 /// Evento SSE tipado entregue pelo barramento (`GET /api/events/stream`).
 @immutable
 class SseEvent {
@@ -29,11 +41,17 @@ class SseEvent {
       final decoded = jsonDecode(rawData);
       if (decoded is! Map) return null;
       final map = Map<String, dynamic>.from(decoded);
+      final hasEnvelopeType =
+          map.containsKey('type') || map.containsKey('event');
       final type = (map['type'] ?? map['event'] ?? 'unknown').toString();
       final rawPayload = map['data'];
+      // Streams dedicados como `GET /api/logs/stream` enviam o objeto JSON
+      // diretamente no nível raiz (sem envelope `{ type, data }`).
       final data = rawPayload is Map
           ? Map<String, dynamic>.from(rawPayload)
-          : <String, dynamic>{};
+          : (!hasEnvelopeType && !map.containsKey('data')
+                ? map
+                : <String, dynamic>{});
       final timestamp =
           (map['timestamp'] ??
                   (now ?? DateTime.now().toUtc()).toIso8601String())
@@ -117,11 +135,13 @@ class SseClient {
   SseClient({
     SseTransport Function()? transportFactory,
     Duration Function(int attempt)? backoffCalculator,
+    this.onUnauthorized,
   }) : _transportFactory = transportFactory ?? createPlatformSseTransport,
        _backoffCalculator = backoffCalculator ?? computeSseBackoffDelay;
 
   final SseTransport Function() _transportFactory;
   final Duration Function(int attempt) _backoffCalculator;
+  final VoidCallback? onUnauthorized;
 
   final StreamController<SseEvent> _eventController =
       StreamController<SseEvent>.broadcast();
@@ -199,9 +219,18 @@ class SseClient {
           _eventController.add(event);
         }
       },
-      onError: (_) {
+      onError: (err) {
         if (_transport != transport) return;
         _closeTransport();
+        if (err is SseHttpException && err.isUnauthorized) {
+          _manualDisconnect = true;
+          _reconnectTimer?.cancel();
+          _reconnectTimer = null;
+          _reconnectAttempts = 0;
+          _setState(SseConnectionState.disconnected);
+          onUnauthorized?.call();
+          return;
+        }
         if (!_manualDisconnect) {
           _scheduleReconnect();
         }

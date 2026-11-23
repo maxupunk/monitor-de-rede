@@ -194,7 +194,7 @@ class DatabaseContainer {
     return DatabaseContainer(
       hostKey: (json['hostKey'] as String?) ?? '',
       hostName: (json['hostName'] as String?) ?? '',
-      probeId: parseIntOrNull(json['probeId']),
+      probeId: parseIntOrNull(json['viaProbeId'] ?? json['probeId']),
       containerId: (json['containerId'] as String?) ?? '',
       containerName: (json['containerName'] as String?) ?? '',
       image: (json['image'] as String?) ?? '',

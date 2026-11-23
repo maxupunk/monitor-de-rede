@@ -284,11 +284,7 @@ class AlertsNotifier extends Notifier<AlertsState> {
             queryParameters: params.isEmpty ? null : params,
           );
       final rules = asJsonList<AlertRule>(raw, AlertRule.fromJson);
-      if (params.isEmpty) {
-        state = state.copyWith(alertRules: rules, loading: false);
-      } else {
-        state = state.copyWith(loading: false);
-      }
+      state = state.copyWith(alertRules: rules, loading: false);
       return rules;
     } catch (err) {
       state = state.copyWith(loading: false, error: describeError(err));

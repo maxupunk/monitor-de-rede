@@ -82,7 +82,9 @@ class EventsHistoryNotifier extends Notifier<EventsHistoryState> {
           );
       final list = raw is List
           ? raw
-          : (raw is Map ? (raw['buckets'] ?? raw['data']) : null);
+          : (raw is Map
+                ? (raw['bins'] ?? raw['buckets'] ?? raw['data'])
+                : null);
       return asJsonList<HourlyEventBucket>(list, HourlyEventBucket.fromJson);
     } catch (_) {
       return const <HourlyEventBucket>[];

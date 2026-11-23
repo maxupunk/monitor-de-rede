@@ -45,21 +45,28 @@ class _DeployRunBodyState extends ConsumerState<_DeployRunBody> {
   List<DeployBackupView> _backups = const <DeployBackupView>[];
   bool _loadingMeta = false;
   bool _acting = false;
+  DeploysNotifier? _deploysNotifier;
 
   @override
   void initState() {
     super.initState();
     _runId = widget.initialRunId;
+    _deploysNotifier = ref.read(deploysProvider.notifier);
     Future<void>.microtask(_open);
   }
 
   @override
   void dispose() {
-    ref.read(deploysProvider.notifier).closeRunConsole(_runId);
+    final runId = _runId;
+    final notifier = _deploysNotifier;
+    if (notifier != null) {
+      Future<void>.microtask(() => notifier.closeRunConsole(runId));
+    }
     super.dispose();
   }
 
   Future<void> _open() async {
+    if (!mounted) return;
     setState(() => _loadingMeta = true);
     final notifier = ref.read(deploysProvider.notifier);
     try {
@@ -86,15 +93,25 @@ class _DeployRunBodyState extends ConsumerState<_DeployRunBody> {
   }
 
   Future<void> _approve(String when) async {
+    if (_acting) return;
     setState(() => _acting = true);
     try {
       await ref.read(deploysProvider.notifier).approveRun(_runId, when: when);
+    } catch (err) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao aprovar deploy: ${describeError(err)}'),
+          ),
+        );
+      }
     } finally {
       if (mounted) setState(() => _acting = false);
     }
   }
 
   Future<void> _reject() async {
+    if (_acting) return;
     final reason = await showDialog<String>(
       context: context,
       builder: (_) => const _RejectDeployDialog(),
@@ -105,12 +122,21 @@ class _DeployRunBodyState extends ConsumerState<_DeployRunBody> {
       await ref
           .read(deploysProvider.notifier)
           .rejectRun(_runId, reason: reason);
+    } catch (err) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao rejeitar deploy: ${describeError(err)}'),
+          ),
+        );
+      }
     } finally {
       if (mounted) setState(() => _acting = false);
     }
   }
 
   Future<void> _cancel() async {
+    if (_acting) return;
     final ok = await showConfirmActionDialog(
       context: context,
       title: 'Cancelar deploy #$_runId?',
@@ -122,6 +148,14 @@ class _DeployRunBodyState extends ConsumerState<_DeployRunBody> {
     setState(() => _acting = true);
     try {
       await ref.read(deploysProvider.notifier).cancelRun(_runId);
+    } catch (err) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao cancelar deploy: ${describeError(err)}'),
+          ),
+        );
+      }
     } finally {
       if (mounted) setState(() => _acting = false);
     }

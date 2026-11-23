@@ -54,7 +54,19 @@ class AreasState {
 
 class AreasNotifier extends Notifier<AreasState> {
   @override
-  AreasState build() => const AreasState();
+  AreasState build() {
+    ref.listen<String?>(sessionTokenProvider, (prev, next) {
+      if (prev != null && (next == null || next.isEmpty)) {
+        state = const AreasState();
+      }
+    });
+    return const AreasState();
+  }
+
+  /// Limpa o snapshot em memória (ex.: troca de conta ou servidor).
+  void reset() {
+    state = const AreasState();
+  }
 
   /// Aplica snapshot recebido pelo SSE (`areas:updated`) ou resposta HTTP de ação.
   void apply(Object? payload) {

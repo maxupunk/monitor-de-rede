@@ -66,15 +66,17 @@ class ChatBenchmarkSplitView {
   factory ChatBenchmarkSplitView.fromJson(Map<String, dynamic> json) {
     return ChatBenchmarkSplitView(
       overall: parseDoubleOrNull(json['overall']) ?? 0,
-      ciLow: parseDoubleOrNull(json['ciLow']) ?? 0,
-      ciHigh: parseDoubleOrNull(json['ciHigh']) ?? 0,
+      ciLow: parseDoubleOrNull(json['overallLow'] ?? json['ciLow']) ?? 0,
+      ciHigh: parseDoubleOrNull(json['overallHigh'] ?? json['ciHigh']) ?? 0,
       tools: parseDoubleOrNull(json['tools']) ?? 0,
-      response: parseDoubleOrNull(json['response']) ?? 0,
+      response: parseDoubleOrNull(json['answer'] ?? json['response']) ?? 0,
       safety: parseDoubleOrNull(json['safety']) ?? 0,
       turnP50Ms: parseDoubleOrNull(json['turnP50Ms']) ?? 0,
       turnP95Ms: parseDoubleOrNull(json['turnP95Ms']) ?? 0,
-      tokensPerSec: parseDoubleOrNull(json['tokensPerSec']) ?? 0,
-      perfectRatio: parseDoubleOrNull(json['perfectRatio']) ?? 0,
+      tokensPerSec:
+          parseDoubleOrNull(json['tokensPerS'] ?? json['tokensPerSec']) ?? 0,
+      perfectRatio:
+          parseDoubleOrNull(json['perfect'] ?? json['perfectRatio']) ?? 0,
       errors: parseIntOrNull(json['errors']) ?? 0,
       fit: parseBool(json['fit']),
       domains: asJsonList<ChatBenchmarkDomainScore>(
@@ -254,8 +256,8 @@ class DeciderBenchmarkRow {
     return DeciderBenchmarkRow(
       model: (json['model'] as String?) ?? '',
       overall: parseDoubleOrNull(json['overall']) ?? 0,
-      ciLow: parseDoubleOrNull(json['ciLow']) ?? 0,
-      ciHigh: parseDoubleOrNull(json['ciHigh']) ?? 0,
+      ciLow: parseDoubleOrNull(json['overallLow'] ?? json['ciLow']) ?? 0,
+      ciHigh: parseDoubleOrNull(json['overallHigh'] ?? json['ciHigh']) ?? 0,
       p50Ms: parseDoubleOrNull(json['p50Ms']) ?? 0,
       p95Ms: parseDoubleOrNull(json['p95Ms']) ?? 0,
       overTimeout: parseDoubleOrNull(json['overTimeout']) ?? 0,

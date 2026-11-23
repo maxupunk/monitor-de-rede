@@ -283,15 +283,21 @@ class DeviceDetailState {
 }
 
 class DeviceDetailNotifier extends Notifier<DeviceDetailState> {
+  int _loadToken = 0;
+
   @override
   DeviceDetailState build() => const DeviceDetailState();
 
   Future<void> loadDeviceDetails(int deviceId) async {
-    state = state.copyWith(
-      loading: true,
-      clearError: true,
-      metrics: const <DeviceMetricModel>[],
-    );
+    final token = ++_loadToken;
+    final switchingDevice = state.device?.id != deviceId;
+    state = switchingDevice
+        ? const DeviceDetailState(loading: true)
+        : state.copyWith(
+            loading: true,
+            clearError: true,
+            metrics: const <DeviceMetricModel>[],
+          );
     final api = ref.read(apiClientProvider);
 
     try {
@@ -307,6 +313,7 @@ class DeviceDetailNotifier extends Notifier<DeviceDetailState> {
             .get<dynamic>('/devices/$deviceId/capabilities')
             .catchError((_) => null),
       ]);
+      if (token != _loadToken) return;
 
       final devRaw = results[0];
       final device = devRaw is Map
@@ -335,7 +342,7 @@ class DeviceDetailNotifier extends Notifier<DeviceDetailState> {
           ? DeviceCapabilitiesModel.fromJson(asJsonMap(capRaw))
           : null;
 
-      state = state.copyWith(
+      state = DeviceDetailState(
         device: device,
         interfaces: interfaces,
         monitors: monitors,
@@ -360,6 +367,7 @@ class DeviceDetailNotifier extends Notifier<DeviceDetailState> {
             } catch (_) {}
           }),
         );
+        if (token != _loadToken) return;
         if (state.device?.id == deviceId) {
           state = state.copyWith(uptimeByMonitor: uptimes);
         }

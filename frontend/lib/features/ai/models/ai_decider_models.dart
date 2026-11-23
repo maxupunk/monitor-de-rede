@@ -344,10 +344,36 @@ class DeciderTriage {
   final String? reason;
 
   factory DeciderTriage.fromJson(Map<String, dynamic> json) {
+    final actionable = parseDoubleOrNull(json['actionable']);
+    final symptom = parseDoubleOrNull(json['symptom']);
+    final transient = parseDoubleOrNull(json['transient']);
+    if (actionable != null || symptom != null || transient != null) {
+      final a = actionable ?? 0.0;
+      final s = symptom ?? 0.0;
+      final t = transient ?? 0.0;
+      String cls = 'actionable';
+      double score = a;
+      if (s >= score && s > a) {
+        cls = 'symptom';
+        score = s;
+      }
+      if (t > score) {
+        cls = 'transient';
+        score = t;
+      }
+      final normalized = score > 1.0 ? score / 100.0 : score;
+      return DeciderTriage(
+        classification: cls,
+        confidence: normalized.clamp(0.0, 1.0),
+        suppressed: parseBool(json['suppressed']),
+        reason: json['reason'] as String?,
+      );
+    }
+    final rawConf = parseDoubleOrNull(json['confidence']) ?? 0;
     return DeciderTriage(
       classification: (json['classification'] ?? json['label'] ?? 'actionable')
           .toString(),
-      confidence: parseDoubleOrNull(json['confidence']) ?? 0,
+      confidence: rawConf > 1.0 ? (rawConf / 100.0).clamp(0.0, 1.0) : rawConf,
       suppressed: parseBool(json['suppressed']),
       reason: json['reason'] as String?,
     );
@@ -388,6 +414,18 @@ class DeciderProviderView {
   final int suggestedTimeoutMs;
 
   factory DeciderProviderView.fromJson(Map<String, dynamic> json) {
+    final rawModels = json['models'];
+    final parsedModels = <String>[];
+    if (rawModels is List) {
+      for (final item in rawModels) {
+        if (item is String && item.isNotEmpty) {
+          parsedModels.add(item);
+        } else if (item is Map) {
+          final name = (item['name'] ?? item['id'])?.toString() ?? '';
+          if (name.isNotEmpty) parsedModels.add(name);
+        }
+      }
+    }
     return DeciderProviderView(
       id: (json['id'] as String?) ?? '',
       label: (json['label'] as String?) ?? '',
@@ -395,7 +433,7 @@ class DeciderProviderView {
       protocol: json['protocol'] as String?,
       defaultBaseUrl: (json['defaultBaseUrl'] as String?) ?? '',
       defaultModel: (json['defaultModel'] as String?) ?? '',
-      models: asStringList(json['models']),
+      models: List<String>.unmodifiable(parsedModels),
       requiresKey: parseBool(json['requiresKey']),
       requiresAccount: parseBool(json['requiresAccount']),
       keyUrl: json['keyUrl'] as String?,
@@ -462,13 +500,15 @@ class DeciderModelOption {
   final DeciderDecisionsScoreView? decisions;
 
   factory DeciderModelOption.fromJson(Map<String, dynamic> json) {
+    final spec = json['spec'] is Map
+        ? DeciderModelSpecView.fromJson(asJsonMap(json['spec']))
+        : null;
     return DeciderModelOption(
       name: (json['name'] as String?) ?? '',
       installed: parseBool(json['installed']),
-      recommended: parseBool(json['recommended']),
-      spec: json['spec'] is Map
-          ? DeciderModelSpecView.fromJson(asJsonMap(json['spec']))
-          : null,
+      recommended:
+          parseBool(json['recommended']) || (spec?.recommended ?? false),
+      spec: spec,
       decisions: json['decisions'] is Map
           ? DeciderDecisionsScoreView.fromJson(asJsonMap(json['decisions']))
           : null,
@@ -533,12 +573,13 @@ class DeciderGroupScore {
   final bool selected;
 
   factory DeciderGroupScore.fromJson(Map<String, dynamic> json) {
-    final rawConf = parseDoubleOrNull(json['confidence']) ?? 0;
+    final rawConf =
+        parseDoubleOrNull(json['probability'] ?? json['confidence']) ?? 0;
     final conf = rawConf <= 1.0 && rawConf > 0
         ? (rawConf * 100).round()
         : rawConf.round();
     return DeciderGroupScore(
-      group: (json['group'] ?? json['name'] ?? '').toString(),
+      group: (json['id'] ?? json['group'] ?? json['name'] ?? '').toString(),
       confidence: conf,
       selected: parseBool(json['selected']),
     );

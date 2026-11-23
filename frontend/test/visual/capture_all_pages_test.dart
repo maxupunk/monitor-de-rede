@@ -792,7 +792,7 @@ class _StubSseService extends SseService {
   void connect() {}
 
   @override
-  void disconnect() {}
+  void disconnect({bool clearFeed = false}) {}
 
   @override
   VoidCallback acquireInterest(String topic) => () {};

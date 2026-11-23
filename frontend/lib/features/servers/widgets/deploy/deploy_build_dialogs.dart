@@ -182,23 +182,48 @@ class _DeployBuildBody extends ConsumerStatefulWidget {
 class _DeployBuildBodyState extends ConsumerState<_DeployBuildBody> {
   late int _buildId;
   bool _acting = false;
+  bool _logLoaded = false;
+  String? _loadError;
+  DeploysNotifier? _deploysNotifier;
 
   @override
   void initState() {
     super.initState();
     _buildId = widget.initialBuildId;
-    Future<void>.microtask(
-      () => ref.read(deploysProvider.notifier).openBuildConsole(_buildId),
-    );
+    _deploysNotifier = ref.read(deploysProvider.notifier);
+    Future<void>.microtask(_loadConsole);
+  }
+
+  Future<void> _loadConsole() async {
+    if (!mounted) return;
+    try {
+      await ref.read(deploysProvider.notifier).openBuildConsole(_buildId);
+      if (mounted) setState(() => _logLoaded = true);
+    } catch (err) {
+      if (mounted) {
+        setState(() {
+          _logLoaded = true;
+          _loadError = describeError(
+            err,
+            fallback: 'Não foi possível carregar o log da compilação.',
+          );
+        });
+      }
+    }
   }
 
   @override
   void dispose() {
-    ref.read(deploysProvider.notifier).closeBuildConsole(_buildId);
+    final buildId = _buildId;
+    final notifier = _deploysNotifier;
+    if (notifier != null) {
+      Future<void>.microtask(() => notifier.closeBuildConsole(buildId));
+    }
     super.dispose();
   }
 
   Future<void> _cancel() async {
+    if (_acting) return;
     final ok = await showConfirmActionDialog(
       context: context,
       title: 'Cancelar compilação #$_buildId?',
@@ -210,6 +235,14 @@ class _DeployBuildBodyState extends ConsumerState<_DeployBuildBody> {
     setState(() => _acting = true);
     try {
       await ref.read(deploysProvider.notifier).cancelBuild(_buildId);
+    } catch (err) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao cancelar compilação: ${describeError(err)}'),
+          ),
+        );
+      }
     } finally {
       if (mounted) setState(() => _acting = false);
     }
@@ -242,7 +275,26 @@ class _DeployBuildBodyState extends ConsumerState<_DeployBuildBody> {
     final lines = deploys.buildConsoles[_buildId] ?? const <String>[];
 
     if (build == null) {
-      return const LoadingStateView(message: 'Carregando compilação...');
+      if (_loadError != null) {
+        return ErrorStateView(message: _loadError!, onRetry: _loadConsole);
+      }
+      if (!_logLoaded) {
+        return const LoadingStateView(message: 'Carregando compilação...');
+      }
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          SemanticChip(
+            label: 'Compilação #$_buildId (histórico)',
+            tone: SemanticTone.secondary,
+          ),
+          const SizedBox(height: 12),
+          CodeViewer(
+            title: 'Console da compilação #$_buildId',
+            code: lines.isEmpty ? '(sem saída registrada)' : lines.join('\n'),
+          ),
+        ],
+      );
     }
 
     final statusVisual = deployBuildStatusMeta(build.status);

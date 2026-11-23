@@ -260,12 +260,27 @@ class _MaintenanceWindowsPageState
                                         confirmLabel: 'Excluir',
                                       );
                                       if (ok) {
-                                        await ref
+                                        final deleted = await ref
                                             .read(
                                               maintenanceWindowsProvider
                                                   .notifier,
                                             )
                                             .deleteWindow(w.id);
+                                        if (!deleted && context.mounted) {
+                                          final err = ref
+                                              .read(maintenanceWindowsProvider)
+                                              .error;
+                                          ScaffoldMessenger.of(
+                                            context,
+                                          ).showSnackBar(
+                                            SnackBar(
+                                              content: Text(
+                                                err ??
+                                                    'Erro ao excluir janela de manutenção.',
+                                              ),
+                                            ),
+                                          );
+                                        }
                                       }
                                     },
                                     icon: Icon(
@@ -319,6 +334,7 @@ class _MaintenanceWindowFormSheetBodyState
   int? _siteId;
   int? _deviceId;
   bool _saving = false;
+  String? _error;
 
   @override
   void initState() {
@@ -333,9 +349,7 @@ class _MaintenanceWindowFormSheetBodyState
         ? (parseDateOrNull(existing.endsAt) ??
               DateTime.now().add(const Duration(hours: 2)))
         : DateTime.now().add(const Duration(hours: 2));
-    _scope = existing?.deviceId != null
-        ? 'device'
-        : (existing?.siteId != null ? 'site' : 'global');
+    _scope = existing?.deviceId != null ? 'device' : 'site';
     _siteId = existing?.siteId;
     _deviceId = existing?.deviceId;
   }
@@ -364,16 +378,26 @@ class _MaintenanceWindowFormSheetBodyState
   }
 
   Future<void> _save() async {
+    if (_saving) return;
     if (!_formKey.currentState!.validate()) return;
-    if (!_endsAt.isAfter(_startsAt)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('O término deve ser posterior ao início.'),
-        ),
+    if (_scope == 'site' && _siteId == null) {
+      setState(() => _error = 'Selecione o site para a janela de manutenção.');
+      return;
+    }
+    if (_scope == 'device' && _deviceId == null) {
+      setState(
+        () => _error = 'Selecione o dispositivo para a janela de manutenção.',
       );
       return;
     }
-    setState(() => _saving = true);
+    if (!_endsAt.isAfter(_startsAt)) {
+      setState(() => _error = 'O término deve ser posterior ao início.');
+      return;
+    }
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
     final payload = <String, dynamic>{
       'name': _nameCtrl.text.trim(),
       'description': _descCtrl.text.trim().isEmpty
@@ -393,19 +417,34 @@ class _MaintenanceWindowFormSheetBodyState
     if (ok) {
       Navigator.of(context).pop();
     } else {
-      setState(() => _saving = false);
+      setState(() {
+        _saving = false;
+        _error =
+            ref.read(maintenanceWindowsProvider).error ??
+            'Erro ao salvar janela de manutenção.';
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final monitorsState = ref.watch(monitorsProvider);
+    final safeSiteId = monitorsState.sites.any((s) => s.id == _siteId)
+        ? _siteId
+        : null;
+    final safeDeviceId = monitorsState.devices.any((d) => d.id == _deviceId)
+        ? _deviceId
+        : null;
 
     return Form(
       key: _formKey,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
+          if (_error != null) ...<Widget>[
+            NestedPanel(tone: SemanticTone.error, child: Text(_error!)),
+            const SizedBox(height: 12),
+          ],
           TextFormField(
             controller: _nameCtrl,
             decoration: const InputDecoration(labelText: 'Nome da janela'),
@@ -425,10 +464,6 @@ class _MaintenanceWindowFormSheetBodyState
             style: const ButtonStyle(visualDensity: VisualDensity.compact),
             segments: const <ButtonSegment<String>>[
               ButtonSegment<String>(
-                value: 'global',
-                label: Text('Global', overflow: TextOverflow.ellipsis),
-              ),
-              ButtonSegment<String>(
                 value: 'site',
                 label: Text('Site', overflow: TextOverflow.ellipsis),
               ),
@@ -440,6 +475,7 @@ class _MaintenanceWindowFormSheetBodyState
             selected: <String>{_scope},
             onSelectionChanged: (s) => setState(() {
               _scope = s.first;
+              _error = null;
               if (_scope != 'site') _siteId = null;
               if (_scope != 'device') _deviceId = null;
             }),
@@ -447,7 +483,7 @@ class _MaintenanceWindowFormSheetBodyState
           if (_scope == 'site') ...<Widget>[
             const SizedBox(height: 12),
             AppDropdownFormField<int?>(
-              initialValue: _siteId,
+              initialValue: safeSiteId,
               decoration: const InputDecoration(labelText: 'Site'),
               items: <DropdownMenuItem<int?>>[
                 const DropdownMenuItem<int?>(
@@ -469,7 +505,7 @@ class _MaintenanceWindowFormSheetBodyState
           if (_scope == 'device') ...<Widget>[
             const SizedBox(height: 12),
             AppDropdownFormField<int?>(
-              initialValue: _deviceId,
+              initialValue: safeDeviceId,
               decoration: const InputDecoration(labelText: 'Dispositivo'),
               items: <DropdownMenuItem<int?>>[
                 const DropdownMenuItem<int?>(

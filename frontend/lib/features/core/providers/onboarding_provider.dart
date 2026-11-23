@@ -96,11 +96,35 @@ class OnboardingNotifier extends Notifier<OnboardingState> {
 
     final lan = (lanAddressOverride ?? '').trim();
     if (lan.isNotEmpty) {
+      if (ref.read(coreSettingsProvider).addresses.isEmpty) {
+        await settingsNotifier.fetchServerAddresses();
+      }
+      final existing = ref.read(coreSettingsProvider);
+      final existingOverrides = <String, String>{
+        for (final entry in existing.addresses)
+          if (entry.overridden &&
+              entry.value != null &&
+              entry.value!.isNotEmpty &&
+              entry.kind != 'custom')
+            entry.id: entry.value!,
+      };
+      final existingCustom = <Map<String, dynamic>>[
+        for (final entry in existing.addresses)
+          if (entry.kind == 'custom' &&
+              entry.value != null &&
+              entry.value!.isNotEmpty)
+            <String, dynamic>{
+              'id': entry.id,
+              'label': entry.label,
+              'value': entry.value,
+            },
+      ];
+      existingOverrides['lan'] = lan;
       await settingsNotifier.saveServerAddresses(
-        overrides: <String, String>{'lan': lan},
-        custom: const <Map<String, dynamic>>[],
-        preferredId: 'lan',
-        domainHttps: false,
+        overrides: existingOverrides,
+        custom: existingCustom,
+        preferredId: existing.preferredAddressId ?? 'lan',
+        domainHttps: existing.domainHttps,
       );
     }
 
@@ -138,7 +162,7 @@ class OnboardingNotifier extends Notifier<OnboardingState> {
               '/dns/servers',
               data: <String, dynamic>{
                 'name': cleanDnsName.isEmpty ? cleanDnsIp : cleanDnsName,
-                'ipAddress': cleanDnsIp,
+                'address': cleanDnsIp,
               },
             )
             .catchError((_) => null);
@@ -160,7 +184,15 @@ class OnboardingNotifier extends Notifier<OnboardingState> {
             data: <String, dynamic>{'name': cleanAgent},
           )
           .catchError((_) => <String, dynamic>{});
-      createdAgentToken = agentRes['token'] as String?;
+      final enrollment = agentRes['enrollment'] is Map
+          ? asJsonMap(agentRes['enrollment'])
+          : const <String, dynamic>{};
+      final commands = enrollment['commands'] is Map
+          ? asJsonMap(enrollment['commands'])
+          : const <String, dynamic>{};
+      createdAgentToken =
+          (commands['docker'] ?? enrollment['code'] ?? agentRes['token'])
+              as String?;
     }
 
     await settingsNotifier.setLocalNotificationsEnabled(
@@ -173,7 +205,7 @@ class OnboardingNotifier extends Notifier<OnboardingState> {
   Future<bool> checkAndOpenIfNeeded() async {
     if (state.checked || state.dismissedInSession) return false;
     final auth = ref.read(authProvider);
-    if (!auth.isAuthenticated || !auth.canWrite) return false;
+    if (!auth.isAuthenticated || !auth.isAdmin) return false;
 
     state = state.copyWith(checked: true);
     final st = await fetchStatus();

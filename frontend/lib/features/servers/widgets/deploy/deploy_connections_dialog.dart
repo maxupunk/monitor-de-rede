@@ -4,6 +4,7 @@ import 'package:netmonitor_app/core/config/server_config.dart';
 import 'package:netmonitor_app/core/utils/error_utils.dart';
 import 'package:netmonitor_app/features/servers/models/deploy_models.dart';
 import 'package:netmonitor_app/features/servers/providers/deploys_provider.dart';
+import 'package:netmonitor_app/features/servers/utils/github_manifest_submit.dart';
 import 'package:netmonitor_app/features/servers/utils/server_utils.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
@@ -75,9 +76,15 @@ class _DeployConnectionsBodyState
         _manifestReady = manifest;
         _creatingManifest = false;
       });
-      final uri = Uri.tryParse(manifest.actionUrl);
-      if (uri != null) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      final submitted = submitGithubManifestForm(
+        actionUrl: manifest.actionUrl,
+        manifestJson: manifest.manifest,
+      );
+      if (!submitted) {
+        final uri = Uri.tryParse(manifest.actionUrl);
+        if (uri != null) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        }
       }
     } catch (err) {
       if (!mounted) return;

@@ -339,17 +339,18 @@ class _DatabaseUsageDialogBodyState
         const SizedBox(height: 14),
         ...usage.databases.map((section) => _buildSection(context, section)),
         const SizedBox(height: 12),
-        Align(
-          alignment: Alignment.centerRight,
-          child: OutlinedButton.icon(
-            onPressed: () {
-              Navigator.of(context).pop();
-              widget.onClearHistory();
-            },
-            icon: const Icon(Icons.cleaning_services_outlined, size: 16),
-            label: const Text('Apagar histórico…'),
+        if (ref.watch(authProvider).isAdmin)
+          Align(
+            alignment: Alignment.centerRight,
+            child: OutlinedButton.icon(
+              onPressed: () {
+                Navigator.of(context).pop();
+                widget.onClearHistory();
+              },
+              icon: const Icon(Icons.cleaning_services_outlined, size: 16),
+              label: const Text('Apagar histórico…'),
+            ),
           ),
-        ),
       ],
     );
   }

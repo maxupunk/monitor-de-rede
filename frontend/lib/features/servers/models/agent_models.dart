@@ -335,11 +335,12 @@ class ServerAddressOption {
   final bool isDefault;
 
   factory ServerAddressOption.fromJson(Map<String, dynamic> json) {
+    final host = ((json['value'] ?? json['host']) as String?) ?? '';
     return ServerAddressOption(
       id: (json['id'] ?? '').toString(),
-      label: (json['label'] as String?) ?? (json['host'] as String?) ?? '',
+      label: (json['label'] as String?) ?? host,
       kind: (json['kind'] as String?) ?? 'lan',
-      host: (json['host'] as String?) ?? '',
+      host: host,
       url: json['url'] as String?,
       isDefault: parseBool(json['isDefault']) || parseBool(json['default']),
     );

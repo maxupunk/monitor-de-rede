@@ -26,6 +26,7 @@ class _AiChatPageState extends ConsumerState<AiChatPage> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       ref.read(aiSettingsProvider.notifier).load();
       ref.read(aiConversationsProvider.notifier).fetchAll();
     });
@@ -42,7 +43,7 @@ class _AiChatPageState extends ConsumerState<AiChatPage> {
       context: context,
       builder: (_) => _RenameConversationDialog(initialTitle: conv.title),
     );
-    if (next == null || next.isEmpty || next == conv.title) return;
+    if (!mounted || next == null || next.isEmpty || next == conv.title) return;
     await ref.read(aiConversationsProvider.notifier).rename(conv.id, next);
   }
 
@@ -54,9 +55,10 @@ class _AiChatPageState extends ConsumerState<AiChatPage> {
       confirmLabel: 'Excluir',
       tone: SemanticTone.error,
     );
-    if (!ok) return;
+    if (!mounted || !ok) return;
     final active = ref.read(aiConversationsProvider).activeId == conv.id;
     await ref.read(aiConversationsProvider.notifier).remove(conv.id);
+    if (!mounted) return;
     if (active) {
       ref.read(aiChatProvider.notifier).newConversation();
     }

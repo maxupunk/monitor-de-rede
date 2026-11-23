@@ -134,7 +134,7 @@ class DockerPortBinding {
       ip: json['ip'] as String?,
       privatePort: parseIntOrNull(json['privatePort']) ?? 0,
       publicPort: parseIntOrNull(json['publicPort']),
-      type: (json['type'] as String?) ?? 'tcp',
+      type: (json['protocol'] as String?) ?? (json['type'] as String?) ?? 'tcp',
     );
   }
 }
@@ -362,7 +362,7 @@ class DockerMount {
       name: json['name'] as String?,
       source: (json['source'] as String?) ?? '',
       destination: (json['destination'] as String?) ?? '',
-      rw: parseBool(json['rw'], fallback: true),
+      rw: parseBool(json['readWrite'] ?? json['rw'], fallback: true),
     );
   }
 }
@@ -438,6 +438,18 @@ class DockerContainerDetail {
     final state = asJsonMap(json['state']);
     final config = asJsonMap(json['config']);
     final hostConfig = asJsonMap(json['hostConfig']);
+    final rawRestart = hostConfig['restartPolicy'];
+    String? restartPolicy;
+    if (rawRestart is String) {
+      restartPolicy = rawRestart;
+    } else if (rawRestart is Map) {
+      final map = asJsonMap(rawRestart);
+      final name = (map['name'] as String?)?.trim();
+      final maxRetry = parseIntOrNull(map['maximumRetryCount']) ?? 0;
+      if (name != null && name.isNotEmpty) {
+        restartPolicy = maxRetry > 0 ? '$name (máx. $maxRetry)' : name;
+      }
+    }
     return DockerContainerDetail(
       id: (json['id'] as String?) ?? '',
       name: ((json['name'] as String?) ?? '').replaceFirst(RegExp(r'^/'), ''),
@@ -449,7 +461,7 @@ class DockerContainerDetail {
       pid: parseIntOrNull(state['pid']),
       hostname: config['hostname'] as String?,
       user: config['user'] as String?,
-      restartPolicy: hostConfig['restartPolicy'] as String?,
+      restartPolicy: restartPolicy,
       networkMode: hostConfig['networkMode'] as String?,
       command: List<String>.unmodifiable(
         asStringList(config['cmd'] ?? config['command']),

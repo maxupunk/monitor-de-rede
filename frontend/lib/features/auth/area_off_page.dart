@@ -33,7 +33,6 @@ class _AreaOffPageState extends ConsumerState<AreaOffPage> {
 
   ProductArea get _area =>
       ProductArea.tryParse(widget.areaId) ?? ProductArea.core;
-  bool get _noAccess => widget.reason == 'acesso';
 
   void _goBack() {
     final target = widget.fromPath;
@@ -71,6 +70,9 @@ class _AreaOffPageState extends ConsumerState<AreaOffPage> {
     }
 
     final state = areasState.stateOf(area);
+    final noAccess =
+        (areasState.isEnabled(area) && !auth.hasAccess(area)) ||
+        (widget.reason == 'acesso' && !auth.hasAccess(area));
     final title = state?.title ?? area.defaultTitle;
     final module = areaContributionById(area);
     final contents = (module?.nav ?? const [])
@@ -84,12 +86,12 @@ class _AreaOffPageState extends ConsumerState<AreaOffPage> {
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 640),
           child: SectionCard(
-            title: _noAccess
+            title: noAccess
                 ? 'Você não tem acesso a esta área'
                 : 'Esta área está desligada',
-            subtitle: _noAccess ? 'Sem acesso' : 'Área desligada',
-            icon: _noAccess ? Icons.lock_outline : area.defaultIcon,
-            iconTone: _noAccess ? SemanticTone.error : SemanticTone.warning,
+            subtitle: noAccess ? 'Sem acesso' : 'Área desligada',
+            icon: noAccess ? Icons.lock_outline : area.defaultIcon,
+            iconTone: noAccess ? SemanticTone.error : SemanticTone.warning,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
@@ -109,7 +111,7 @@ class _AreaOffPageState extends ConsumerState<AreaOffPage> {
                 if (state?.evidence?.present == true &&
                     state?.evidence?.reason != null &&
                     state!.evidence!.reason!.isNotEmpty &&
-                    !_noAccess) ...<Widget>[
+                    !noAccess) ...<Widget>[
                   const SizedBox(height: 10),
                   Align(
                     alignment: Alignment.centerLeft,
@@ -120,7 +122,7 @@ class _AreaOffPageState extends ConsumerState<AreaOffPage> {
                     ),
                   ),
                 ],
-                if (contents.isNotEmpty && !_noAccess) ...<Widget>[
+                if (contents.isNotEmpty && !noAccess) ...<Widget>[
                   const SizedBox(height: 10),
                   Text(
                     'Ela reúne ${contents.join(', ')}. Enquanto estiver desligada, '
@@ -136,7 +138,7 @@ class _AreaOffPageState extends ConsumerState<AreaOffPage> {
                   NestedPanel(tone: SemanticTone.error, child: Text(_error!)),
                 ],
                 const SizedBox(height: 16),
-                if (_noAccess) ...<Widget>[
+                if (noAccess) ...<Widget>[
                   const NestedPanel(
                     tone: SemanticTone.info,
                     child: Text(

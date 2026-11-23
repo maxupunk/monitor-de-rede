@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:netmonitor_app/core/areas/area_models.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/network/models/link_test_models.dart';
@@ -65,12 +66,15 @@ class _LinkTestsPageState extends ConsumerState<LinkTestsPage>
       await ref
           .read(linkTestsProvider.notifier)
           .fetchDetail(widget.initialTestId!);
+      if (!mounted) return;
       ref.read(linkTestsProvider.notifier).focus(widget.initialTestId);
     }
     final draft = ref.read(pendingLinkTestDraftProvider);
     if (draft != null) {
       ref.read(pendingLinkTestDraftProvider.notifier).state = null;
-      _openWizard(draft: draft);
+      if (ref.read(authProvider).canWriteIn(ProductArea.network)) {
+        _openWizard(draft: draft);
+      }
     }
   }
 

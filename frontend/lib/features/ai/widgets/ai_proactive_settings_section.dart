@@ -78,26 +78,41 @@ class AiProactiveSettingsSection extends StatelessWidget {
                   }
                 },
               ),
-              AppDropdownFormField<int>(
-                initialValue: proactive.maxSummariesPerHour.clamp(1, 60),
-                decoration: const InputDecoration(
-                  labelText: 'Máx. resumos por hora',
-                ),
-                items: const <int>[2, 4, 6, 10, 20, 30, 60]
-                    .map(
-                      (n) => DropdownMenuItem<int>(
-                        value: n,
-                        child: Text(
-                          '$n / hora',
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    )
-                    .toList(growable: false),
-                onChanged: (v) {
-                  if (v != null) {
-                    onChanged(proactive.copyWith(maxSummariesPerHour: v));
-                  }
+              Builder(
+                builder: (_) {
+                  final currentMax = proactive.maxSummariesPerHour.clamp(1, 60);
+                  final options = <int>{
+                    2,
+                    4,
+                    6,
+                    10,
+                    20,
+                    30,
+                    60,
+                    currentMax,
+                  }.toList()..sort();
+                  return AppDropdownFormField<int>(
+                    initialValue: currentMax,
+                    decoration: const InputDecoration(
+                      labelText: 'Máx. resumos por hora',
+                    ),
+                    items: options
+                        .map(
+                          (n) => DropdownMenuItem<int>(
+                            value: n,
+                            child: Text(
+                              '$n / hora',
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        )
+                        .toList(growable: false),
+                    onChanged: (v) {
+                      if (v != null) {
+                        onChanged(proactive.copyWith(maxSummariesPerHour: v));
+                      }
+                    },
+                  );
                 },
               ),
             ],

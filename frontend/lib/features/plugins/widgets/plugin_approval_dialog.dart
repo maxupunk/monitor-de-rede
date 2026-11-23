@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/core/utils/plugin_presentation.dart';
 import 'package:netmonitor_app/features/plugins/providers/plugin_apps_provider.dart';
@@ -22,11 +23,18 @@ class _PluginApprovalOverlayState extends ConsumerState<PluginApprovalOverlay> {
   bool _submitting = false;
 
   Future<void> _respond(String key, bool approved) async {
+    if (_submitting) return;
     setState(() => _submitting = true);
     try {
       await ref
           .read(pluginsProvider.notifier)
           .respondApproval(key, approved: approved);
+    } catch (err) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(describeError(err))));
+      }
     } finally {
       if (mounted) setState(() => _submitting = false);
     }

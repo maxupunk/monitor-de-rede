@@ -85,8 +85,23 @@ class _EtherBandwidthWidgetState extends ConsumerState<EtherBandwidthWidget> {
           }
         }
       }
+      _inSeq = _inPoints.length;
+      _outSeq = _outPoints.length;
     } catch (_) {}
     if (mounted) setState(() => _loading = false);
+  }
+
+  int _inSeq = 0;
+  int _outSeq = 0;
+
+  void _appendIn(double val) {
+    _inPoints.add(MetricSeriesPoint(x: (_inSeq++).toDouble(), y: val));
+    if (_inPoints.length > 60) _inPoints.removeAt(0);
+  }
+
+  void _appendOut(double val) {
+    _outPoints.add(MetricSeriesPoint(x: (_outSeq++).toDouble(), y: val));
+    if (_outPoints.length > 60) _outPoints.removeAt(0);
   }
 
   void _onLiveEvent(Map<String, dynamic> data) {
@@ -95,24 +110,42 @@ class _EtherBandwidthWidgetState extends ConsumerState<EtherBandwidthWidget> {
         !mounted) {
       return;
     }
-    final metrics = asJsonMapList(data['metrics']);
     var changed = false;
+    final metrics = asJsonMapList(data['metrics']);
     for (final m in metrics) {
       final name = m['name']?.toString();
       final val = parseDoubleOrNull(m['value']);
       if (val == null) continue;
       if (name == 'inBps' || name == 'interface_in_bps') {
-        _inPoints.add(
-          MetricSeriesPoint(x: _inPoints.length.toDouble(), y: val),
-        );
-        if (_inPoints.length > 60) _inPoints.removeAt(0);
+        _appendIn(val);
         changed = true;
       } else if (name == 'outBps' || name == 'interface_out_bps') {
-        _outPoints.add(
-          MetricSeriesPoint(x: _outPoints.length.toDouble(), y: val),
-        );
-        if (_outPoints.length > 60) _outPoints.removeAt(0);
+        _appendOut(val);
         changed = true;
+      }
+    }
+    // Eventos `interface:traffic` trazem os contadores sob `data['interfaces']`.
+    final ifaces = asJsonMapList(data['interfaces']);
+    if (ifaces.isNotEmpty) {
+      final wantedName = (widget.config['interfaceName'] as String?)?.trim();
+      final chosen = wantedName != null && wantedName.isNotEmpty
+          ? ifaces
+                .where(
+                  (i) => (i['ifName'] ?? i['name'])?.toString() == wantedName,
+                )
+                .firstOrNull
+          : ifaces.first;
+      if (chosen != null) {
+        final inVal = parseDoubleOrNull(chosen['inBps']);
+        final outVal = parseDoubleOrNull(chosen['outBps']);
+        if (inVal != null) {
+          _appendIn(inVal);
+          changed = true;
+        }
+        if (outVal != null) {
+          _appendOut(outVal);
+          changed = true;
+        }
       }
     }
     if (changed) setState(() {});

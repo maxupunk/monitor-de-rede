@@ -30,6 +30,7 @@ class _VpnDevicesPageState extends ConsumerState<VpnDevicesPage> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
       final notifier = ref.read(vpnProvider.notifier);
       await Future.wait<void>(<Future<void>>[
         notifier.fetchServer(),
@@ -45,10 +46,14 @@ class _VpnDevicesPageState extends ConsumerState<VpnDevicesPage> {
   }
 
   Future<void> _addPeer() async {
+    final notifier = ref.read(vpnProvider.notifier);
     final artifact = await showVpnPeerWizard(context: context);
-    if (artifact != null && mounted) {
-      await showVpnScriptViewer(context: context, ref: ref, artifact: artifact);
+    if (artifact == null) return;
+    if (!mounted) {
+      notifier.clearLastArtifact();
+      return;
     }
+    await showVpnScriptViewer(context: context, ref: ref, artifact: artifact);
   }
 
   Future<void> _renamePeer(VpnPeer peer) async {
@@ -56,7 +61,10 @@ class _VpnDevicesPageState extends ConsumerState<VpnDevicesPage> {
       context: context,
       builder: (_) => _RenamePeerDialog(initialName: peer.displayName),
     );
-    if (newName == null || newName.isEmpty || newName == peer.displayName) {
+    if (!mounted ||
+        newName == null ||
+        newName.isEmpty ||
+        newName == peer.displayName) {
       return;
     }
     final ok = await ref

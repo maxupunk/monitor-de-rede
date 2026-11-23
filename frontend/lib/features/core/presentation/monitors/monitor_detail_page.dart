@@ -91,12 +91,31 @@ class _MonitorDetailViewState extends ConsumerState<MonitorDetailView> {
   }
 
   @override
+  void didUpdateWidget(covariant MonitorDetailView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.monitorId != widget.monitorId) {
+      setState(() {
+        _uptime = null;
+        _baseline = null;
+        _historyResults = const <MonitorResult>[];
+        _historyMeta = null;
+        _monitorAlerts = const <AlertEvent>[];
+        _alertsMeta = null;
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _loadAll();
+      });
+    }
+  }
+
+  @override
   void dispose() {
     _unsubAlerts?.call();
     super.dispose();
   }
 
   Future<void> _loadAll() async {
+    if (!mounted) return;
     final notifier = ref.read(monitorsProvider.notifier);
     final mon = await notifier.fetchMonitorById(widget.monitorId);
     final up = await notifier.fetchUptime(
@@ -401,37 +420,58 @@ class _MonitorDetailViewState extends ConsumerState<MonitorDetailView> {
           ),
           const SizedBox(height: 14),
           if (_baseline != null && _baseline!.isNotEmpty) ...<Widget>[
-            SectionCard(
-              title: 'Linha de base adaptativa',
-              subtitle: 'Comportamento esperado de latência para este alvo',
-              icon: Icons.insights,
-              iconTone: SemanticTone.info,
-              child: Wrap(
-                spacing: 16,
-                runSpacing: 8,
-                children: <Widget>[
-                  if (_baseline!['expectedLatencyMs'] is num)
-                    SemanticChip(
-                      label:
-                          'Esperado: ${formatLatency(_baseline!['expectedLatencyMs'] as num)}',
-                      tone: SemanticTone.info,
+            Builder(
+              builder: (_) {
+                final inner = _baseline!['baseline'] is Map
+                    ? asJsonMap(_baseline!['baseline'])
+                    : _baseline!;
+                final expectedMs =
+                    inner['latencyBaselineMs'] ??
+                    _baseline!['expectedLatencyMs'];
+                final thresholdMs =
+                    inner['latencyUpperBandMs'] ??
+                    _baseline!['alertThresholdMs'];
+                final sampleCount =
+                    inner['sampleCount'] ?? _baseline!['sampleCount'];
+                final hasData =
+                    expectedMs is num ||
+                    thresholdMs is num ||
+                    sampleCount is num;
+                if (!hasData) return const SizedBox.shrink();
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 14),
+                  child: SectionCard(
+                    title: 'Linha de base adaptativa',
+                    subtitle:
+                        'Comportamento esperado de latência para este alvo',
+                    icon: Icons.insights,
+                    iconTone: SemanticTone.info,
+                    child: Wrap(
+                      spacing: 16,
+                      runSpacing: 8,
+                      children: <Widget>[
+                        if (expectedMs is num)
+                          SemanticChip(
+                            label: 'Esperado: ${formatLatency(expectedMs)}',
+                            tone: SemanticTone.info,
+                          ),
+                        if (thresholdMs is num)
+                          SemanticChip(
+                            label:
+                                'Limiar de alerta: ${formatLatency(thresholdMs)}',
+                            tone: SemanticTone.warning,
+                          ),
+                        if (sampleCount is num)
+                          SemanticChip(
+                            label: '${formatInteger(sampleCount)} amostras',
+                            tone: SemanticTone.secondary,
+                          ),
+                      ],
                     ),
-                  if (_baseline!['alertThresholdMs'] is num)
-                    SemanticChip(
-                      label:
-                          'Limiar de alerta: ${formatLatency(_baseline!['alertThresholdMs'] as num)}',
-                      tone: SemanticTone.warning,
-                    ),
-                  if (_baseline!['sampleCount'] is num)
-                    SemanticChip(
-                      label:
-                          '${formatInteger(_baseline!['sampleCount'] as num)} amostras',
-                      tone: SemanticTone.secondary,
-                    ),
-                ],
-              ),
+                  ),
+                );
+              },
             ),
-            const SizedBox(height: 14),
           ],
           SectionCard(
             title: monitor.isTrafficMonitor

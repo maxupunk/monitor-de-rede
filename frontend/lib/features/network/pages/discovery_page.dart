@@ -54,7 +54,8 @@ class _DiscoveryPageState extends ConsumerState<DiscoveryPage>
     ]);
     if (!mounted) return;
     final networks = ref.read(networksProvider).items;
-    if (_selectedNetworkId == null && networks.isNotEmpty) {
+    final hasSelected = networks.any((n) => n.id == _selectedNetworkId);
+    if (!hasSelected && networks.isNotEmpty) {
       setState(() => _selectedNetworkId = networks.first.id);
     }
     if (widget.autoStartScan && !_autoStarted && _selectedNetworkId != null) {
@@ -71,9 +72,16 @@ class _DiscoveryPageState extends ConsumerState<DiscoveryPage>
   }
 
   Future<void> _startScan() async {
-    if (_selectedNetworkId == null) return;
+    final networks = ref.read(networksProvider).items;
+    final effectiveId = networks.any((n) => n.id == _selectedNetworkId)
+        ? _selectedNetworkId
+        : (networks.isNotEmpty ? networks.first.id : null);
+    if (effectiveId == null) return;
+    if (_selectedNetworkId != effectiveId) {
+      setState(() => _selectedNetworkId = effectiveId);
+    }
     setState(() => _completedBannerDismissed = false);
-    await ref.read(discoveryProvider.notifier).startScan(_selectedNetworkId!);
+    await ref.read(discoveryProvider.notifier).startScan(effectiveId);
   }
 
   Future<void> _checkConflicts() async {
@@ -345,6 +353,13 @@ class _DiscoveryPageState extends ConsumerState<DiscoveryPage>
                       onInfo: _showEnvironmentNoticeDialog,
                       onDismiss: () =>
                           setState(() => _envBannerDismissed = true),
+                    ),
+                  ],
+                  if (discovery.error != null) ...<Widget>[
+                    const SizedBox(height: 8),
+                    NestedPanel(
+                      tone: SemanticTone.error,
+                      child: Text(discovery.error!),
                     ),
                   ],
                   const SizedBox(height: 8),

@@ -250,9 +250,18 @@ class _ScheduledTasksPageState extends ConsumerState<ScheduledTasksPage> {
                     trailing: auth.canWrite
                         ? Switch(
                             value: task.enabled,
-                            onChanged: (v) => ref
-                                .read(scheduledTasksProvider.notifier)
-                                .setEnabled(task.id, v),
+                            onChanged: (v) async {
+                              try {
+                                await ref
+                                    .read(scheduledTasksProvider.notifier)
+                                    .setEnabled(task.id, v);
+                              } catch (err) {
+                                if (!context.mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text(describeError(err))),
+                                );
+                              }
+                            },
                           )
                         : SemanticChip(
                             label: task.enabled ? 'Ativa' : 'Pausada',
@@ -289,13 +298,17 @@ class _ScheduledTasksPageState extends ConsumerState<ScheduledTasksPage> {
                             else if (task.lastStatus != null)
                               SemanticChip(
                                 label: switch (task.lastStatus) {
-                                  'succeeded' || 'ok' => 'Concluída',
+                                  'success' ||
+                                  'succeeded' ||
+                                  'ok' => 'Concluída',
                                   'failed' || 'error' => 'Falhou',
                                   'running' => 'Executando',
                                   _ => task.lastStatus!,
                                 },
                                 tone: switch (task.lastStatus) {
-                                  'succeeded' || 'ok' => SemanticTone.success,
+                                  'success' ||
+                                  'succeeded' ||
+                                  'ok' => SemanticTone.success,
                                   'failed' || 'error' => SemanticTone.error,
                                   _ => SemanticTone.info,
                                 },
@@ -335,21 +348,32 @@ class _ScheduledTasksPageState extends ConsumerState<ScheduledTasksPage> {
                                 onPressed: task.running
                                     ? null
                                     : () async {
-                                        await ref
-                                            .read(
-                                              scheduledTasksProvider.notifier,
-                                            )
-                                            .runNow(task.id);
-                                        if (!context.mounted) return;
-                                        ScaffoldMessenger.of(
-                                          context,
-                                        ).showSnackBar(
-                                          const SnackBar(
-                                            content: Text(
-                                              'Execução disparada. Aguarde o retorno via SSE.',
+                                        try {
+                                          await ref
+                                              .read(
+                                                scheduledTasksProvider.notifier,
+                                              )
+                                              .runNow(task.id);
+                                          if (!context.mounted) return;
+                                          ScaffoldMessenger.of(
+                                            context,
+                                          ).showSnackBar(
+                                            const SnackBar(
+                                              content: Text(
+                                                'Execução disparada. Aguarde o retorno via SSE.',
+                                              ),
                                             ),
-                                          ),
-                                        );
+                                          );
+                                        } catch (err) {
+                                          if (!context.mounted) return;
+                                          ScaffoldMessenger.of(
+                                            context,
+                                          ).showSnackBar(
+                                            SnackBar(
+                                              content: Text(describeError(err)),
+                                            ),
+                                          );
+                                        }
                                       },
                                 icon: const Icon(Icons.play_arrow, size: 18),
                                 label: const Text('Rodar agora'),
@@ -375,9 +399,20 @@ class _ScheduledTasksPageState extends ConsumerState<ScheduledTasksPage> {
                                     confirmLabel: 'Excluir',
                                   );
                                   if (ok) {
-                                    await ref
-                                        .read(scheduledTasksProvider.notifier)
-                                        .remove(task.id);
+                                    try {
+                                      await ref
+                                          .read(scheduledTasksProvider.notifier)
+                                          .remove(task.id);
+                                    } catch (err) {
+                                      if (!context.mounted) return;
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        SnackBar(
+                                          content: Text(describeError(err)),
+                                        ),
+                                      );
+                                    }
                                   }
                                 },
                                 icon: Icon(
@@ -629,6 +664,7 @@ class _ScheduledTaskFormSheetBodyState
                   const SizedBox(height: 8),
                   for (final entry in props.entries) ...<Widget>[
                     _SchemaFieldInput(
+                      key: ValueKey<String>('$_selectedTool:${entry.key}'),
                       fieldName: entry.key,
                       schema: asJsonMap(entry.value),
                       value: _args[entry.key],
@@ -785,6 +821,7 @@ class _ScheduledTaskFormSheetBodyState
 
 class _SchemaFieldInput extends StatelessWidget {
   const _SchemaFieldInput({
+    super.key,
     required this.fieldName,
     required this.schema,
     required this.value,

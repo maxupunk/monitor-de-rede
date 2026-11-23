@@ -7,23 +7,50 @@ class AlertRuleCondition {
     required this.field,
     required this.operator,
     required this.value,
+    this.pattern,
+    this.windowSeconds,
+    this.minSeverity,
   });
 
   final String field;
   final String operator;
   final Object value;
+  final String? pattern;
+  final int? windowSeconds;
+  final int? minSeverity;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'field': field,
     'operator': operator,
     'value': value,
+    if (pattern != null && pattern!.isNotEmpty) 'pattern': pattern,
+    if (windowSeconds != null) 'windowSeconds': windowSeconds,
+    if (minSeverity != null) 'minSeverity': minSeverity,
   };
+
+  static String normalizeOperator(Object? raw) {
+    final op = (raw ?? 'eq').toString().trim();
+    return switch (op) {
+      '==' => 'eq',
+      '!=' => 'neq',
+      '>' => 'gt',
+      '>=' => 'gte',
+      '<' => 'lt',
+      '<=' => 'lte',
+      'matches' => 'contains',
+      '' => 'eq',
+      _ => op,
+    };
+  }
 
   factory AlertRuleCondition.fromJson(Map<String, dynamic> json) {
     return AlertRuleCondition(
       field: (json['field'] ?? 'status').toString(),
-      operator: (json['operator'] ?? '==').toString(),
+      operator: normalizeOperator(json['operator']),
       value: json['value'] ?? '',
+      pattern: json['pattern'] as String?,
+      windowSeconds: parseIntOrNull(json['windowSeconds']),
+      minSeverity: parseIntOrNull(json['minSeverity']),
     );
   }
 }
@@ -81,7 +108,7 @@ class AlertRule {
           ? AlertRuleCondition.fromJson(asJsonMap(json['condition']))
           : const AlertRuleCondition(
               field: 'status',
-              operator: '==',
+              operator: 'eq',
               value: 'down',
             ),
       severity: (json['severity'] ?? 'warning').toString(),
@@ -141,7 +168,7 @@ class AlertRuleTemplate {
           ? AlertRuleCondition.fromJson(asJsonMap(json['condition']))
           : const AlertRuleCondition(
               field: 'status',
-              operator: '==',
+              operator: 'eq',
               value: 'down',
             ),
       severity: (json['severity'] ?? 'warning').toString(),

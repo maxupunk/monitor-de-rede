@@ -29,10 +29,22 @@ class _LatencyTimeSeriesWidgetState
   bool _loading = true;
   VoidCallback? _unsub;
 
+  static const Set<String> _validTimeframes = <String>{
+    '5m',
+    '15m',
+    '1h',
+    '24h',
+  };
+
+  String _normalizeTimeframe(Object? raw) {
+    final tf = (raw ?? '1h').toString();
+    return _validTimeframes.contains(tf) ? tf : '1h';
+  }
+
   @override
   void initState() {
     super.initState();
-    _timeframe = (widget.config['timeframe'] ?? '1h').toString();
+    _timeframe = _normalizeTimeframe(widget.config['timeframe']);
     _load();
     _unsub = ref.read(sseServiceProvider.notifier).onEvent(
       <String>['monitor:result'],
@@ -40,6 +52,19 @@ class _LatencyTimeSeriesWidgetState
         if (mounted) _load(silent: true);
       },
     );
+  }
+
+  @override
+  void didUpdateWidget(covariant LatencyTimeSeriesWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final oldMonitorId = parseIntOrNull(oldWidget.config['monitorId']);
+    final nextMonitorId = parseIntOrNull(widget.config['monitorId']);
+    final oldTf = _normalizeTimeframe(oldWidget.config['timeframe']);
+    final nextTf = _normalizeTimeframe(widget.config['timeframe']);
+    if (oldMonitorId != nextMonitorId || oldTf != nextTf) {
+      _timeframe = nextTf;
+      _load();
+    }
   }
 
   @override
@@ -88,11 +113,12 @@ class _LatencyTimeSeriesWidgetState
               showSelectedIcon: false,
               style: const ButtonStyle(visualDensity: VisualDensity.compact),
               segments: const <ButtonSegment<String>>[
+                ButtonSegment<String>(value: '5m', label: Text('5m')),
                 ButtonSegment<String>(value: '15m', label: Text('15m')),
                 ButtonSegment<String>(value: '1h', label: Text('1h')),
                 ButtonSegment<String>(value: '24h', label: Text('24h')),
               ],
-              selected: <String>{_timeframe},
+              selected: <String>{_normalizeTimeframe(_timeframe)},
               onSelectionChanged: (next) {
                 setState(() => _timeframe = next.first);
                 _load();
@@ -251,7 +277,7 @@ class _ResourceUsageWidgetState extends ConsumerState<ResourceUsageWidget> {
       <String>['metric:recorded'],
       (data, _) {
         final devId = parseIntOrNull(data['deviceId']);
-        if (devId == null || (_deviceId != null && devId != _deviceId)) return;
+        if (devId == null || _deviceId == null || devId != _deviceId) return;
         for (final item in asJsonMapList(data['metrics'])) {
           if (item['name'] == _metricName) {
             final val = parseDoubleOrNull(item['value']);
@@ -271,6 +297,23 @@ class _ResourceUsageWidgetState extends ConsumerState<ResourceUsageWidget> {
         }
       },
     );
+  }
+
+  @override
+  void didUpdateWidget(covariant ResourceUsageWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final oldDeviceId = parseIntOrNull(oldWidget.config['deviceId']);
+    if (oldDeviceId != _deviceId || oldWidget.metric != widget.metric) {
+      if (_deviceId == null) {
+        setState(() {
+          _points = const <MetricSeriesPoint>[];
+          _latestValue = null;
+          _loading = false;
+        });
+      } else {
+        _load();
+      }
+    }
   }
 
   @override

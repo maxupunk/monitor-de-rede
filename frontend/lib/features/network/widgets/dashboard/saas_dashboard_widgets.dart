@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/realtime/sse_service.dart';
+import 'package:netmonitor_app/core/utils/error_utils.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/network/models/device_models.dart';
 import 'package:netmonitor_app/features/network/models/diagnostics_models.dart';
@@ -81,6 +82,7 @@ class _SaasServicesWidgetState extends ConsumerState<SaasServicesWidget> {
         final catalogBtn = FilledButton.tonalIcon(
           onPressed: () async {
             await showSaasPresetsDialog(context);
+            if (!mounted) return;
             _load();
           },
           icon: const Icon(Icons.add, size: 18),
@@ -106,6 +108,7 @@ class _SaasServicesWidgetState extends ConsumerState<SaasServicesWidget> {
                   action: FilledButton.icon(
                     onPressed: () async {
                       await showSaasPresetsDialog(context);
+                      if (!mounted) return;
                       _load();
                     },
                     icon: const Icon(Icons.add),
@@ -211,11 +214,19 @@ class _SaasPresetsBodyState extends ConsumerState<_SaasPresetsBody> {
   }
 
   Future<void> _provisionIds(List<String> ids) async {
-    if (ids.isEmpty) return;
+    if (ids.isEmpty || _provisioning) return;
     setState(() => _provisioning = true);
     try {
       await ref.read(diagnosticsServiceProvider).provisionSaasPresets(ids);
       if (mounted) widget.onDone();
+    } catch (err) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao provisionar SaaS: ${describeError(err)}'),
+          ),
+        );
+      }
     } finally {
       if (mounted) setState(() => _provisioning = false);
     }

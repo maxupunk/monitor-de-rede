@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:netmonitor_app/core/areas/area_models.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
 import 'package:netmonitor_app/core/utils/form_validators.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/network/models/site_network_models.dart';
+import 'package:netmonitor_app/features/network/providers/devices_provider.dart';
 import 'package:netmonitor_app/features/network/providers/sites_networks_provider.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
@@ -22,7 +24,18 @@ class _SitesPageState extends ConsumerState<SitesPage> {
   @override
   void initState() {
     super.initState();
-    Future<void>.microtask(() => ref.read(sitesProvider.notifier).fetchSites());
+    Future<void>.microtask(() {
+      if (!mounted) return;
+      ref.read(sitesProvider.notifier).fetchSites();
+      final devicesState = ref.read(devicesProvider);
+      if (devicesState.items.isEmpty && !devicesState.loading) {
+        ref.read(devicesProvider.notifier).fetchDevices();
+      }
+      final networksState = ref.read(networksProvider);
+      if (networksState.items.isEmpty && !networksState.loading) {
+        ref.read(networksProvider.notifier).fetchNetworks();
+      }
+    });
   }
 
   @override
@@ -53,15 +66,22 @@ class _SitesPageState extends ConsumerState<SitesPage> {
           'Remover o site "${site.name}"? Dispositivos vinculados ficarão sem site.',
       confirmLabel: 'Excluir',
     );
-    if (ok) {
-      await ref.read(sitesProvider.notifier).deleteSite(site.id);
+    if (!ok || !mounted) return;
+    final deleted = await ref.read(sitesProvider.notifier).deleteSite(site.id);
+    if (!deleted && mounted) {
+      final err = ref.read(sitesProvider).error;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(err ?? 'Erro ao excluir site.')));
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(sitesProvider);
-    final canWrite = ref.watch(authProvider).canWrite;
+    final devices = ref.watch(devicesProvider).items;
+    final networks = ref.watch(networksProvider).items;
+    final canWrite = ref.watch(authProvider).canWriteIn(ProductArea.core);
     final query = _searchCtrl.text.trim().toLowerCase();
     final filtered = state.items
         .where((s) {
@@ -72,13 +92,31 @@ class _SitesPageState extends ConsumerState<SitesPage> {
         })
         .toList(growable: false);
 
+    final devicesBySite = <int, int>{};
+    for (final d in devices) {
+      if (d.siteId != null) {
+        devicesBySite[d.siteId!] = (devicesBySite[d.siteId!] ?? 0) + 1;
+      }
+    }
+    final networksBySite = <int, int>{};
+    for (final n in networks) {
+      if (n.siteId != null) {
+        networksBySite[n.siteId!] = (networksBySite[n.siteId!] ?? 0) + 1;
+      }
+    }
+
+    int siteDeviceCount(SiteModel s) =>
+        s.devicesCount > 0 ? s.devicesCount : (devicesBySite[s.id] ?? 0);
+    int siteNetworkCount(SiteModel s) =>
+        s.networksCount > 0 ? s.networksCount : (networksBySite[s.id] ?? 0);
+
     final totalDevices = state.items.fold<int>(
       0,
-      (acc, s) => acc + s.devicesCount,
+      (acc, s) => acc + siteDeviceCount(s),
     );
     final totalNetworks = state.items.fold<int>(
       0,
-      (acc, s) => acc + s.networksCount,
+      (acc, s) => acc + siteNetworkCount(s),
     );
 
     return LayoutBuilder(
@@ -280,7 +318,7 @@ class _SitesPageState extends ConsumerState<SitesPage> {
                                 children: <Widget>[
                                   SemanticChip(
                                     label: countNoun(
-                                      site.devicesCount,
+                                      siteDeviceCount(site),
                                       'dispositivo',
                                       'dispositivos',
                                     ),
@@ -290,7 +328,7 @@ class _SitesPageState extends ConsumerState<SitesPage> {
                                   ),
                                   SemanticChip(
                                     label: countNoun(
-                                      site.networksCount,
+                                      siteNetworkCount(site),
                                       'rede IP',
                                       'redes IP',
                                     ),

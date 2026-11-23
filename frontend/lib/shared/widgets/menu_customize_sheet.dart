@@ -74,15 +74,6 @@ class _MenuCustomizeSheetBodyState
     _hidden = Set<String>.from(widget.initialPrefs.hidden);
   }
 
-  void _movePinned(int index, int delta) {
-    final target = index + delta;
-    if (target < 0 || target >= _pinned.length) return;
-    setState(() {
-      final item = _pinned.removeAt(index);
-      _pinned.insert(target, item);
-    });
-  }
-
   Future<void> _save() async {
     setState(() => _saving = true);
     try {
@@ -115,57 +106,87 @@ class _MenuCustomizeSheetBodyState
       for (final leaf in widget.leaves)
         if (leaf.leaf.to != null) leaf.leaf.to!: leaf,
     };
+    final visiblePinnedIndices = <int>[
+      for (var i = 0; i < _pinned.length; i++)
+        if (byPath.containsKey(_pinned[i])) i,
+    ];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        if (_pinned.isNotEmpty) ...<Widget>[
+        if (visiblePinnedIndices.isNotEmpty) ...<Widget>[
           NestedPanel(
             tone: SemanticTone.primary,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Text(
-                  'Ordem dos fixados (${_pinned.length})',
+                  'Ordem dos fixados (${visiblePinnedIndices.length})',
                   style: context.textTheme.labelLarge?.copyWith(
                     fontWeight: FontWeight.w800,
                   ),
                 ),
                 const SizedBox(height: 6),
-                for (var i = 0; i < _pinned.length; i++)
-                  if (byPath[_pinned[i]] != null)
-                    Row(
-                      children: <Widget>[
-                        Icon(byPath[_pinned[i]]!.leaf.icon, size: 18),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            byPath[_pinned[i]]!.leaf.title,
-                            style: const TextStyle(fontWeight: FontWeight.w600),
+                for (var vi = 0; vi < visiblePinnedIndices.length; vi++)
+                  Builder(
+                    builder: (_) {
+                      final idx = visiblePinnedIndices[vi];
+                      final leaf = byPath[_pinned[idx]]!.leaf;
+                      return Row(
+                        children: <Widget>[
+                          Icon(leaf.icon, size: 18),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              leaf.title,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
                           ),
-                        ),
-                        IconButton(
-                          tooltip: 'Subir',
-                          visualDensity: VisualDensity.compact,
-                          icon: const Icon(Icons.arrow_upward, size: 18),
-                          onPressed: i == 0 ? null : () => _movePinned(i, -1),
-                        ),
-                        IconButton(
-                          tooltip: 'Descer',
-                          visualDensity: VisualDensity.compact,
-                          icon: const Icon(Icons.arrow_downward, size: 18),
-                          onPressed: i == _pinned.length - 1
-                              ? null
-                              : () => _movePinned(i, 1),
-                        ),
-                        IconButton(
-                          tooltip: 'Desafixar',
-                          visualDensity: VisualDensity.compact,
-                          icon: const Icon(Icons.close, size: 18),
-                          onPressed: () => setState(() => _pinned.removeAt(i)),
-                        ),
-                      ],
-                    ),
+                          IconButton(
+                            tooltip: 'Subir',
+                            visualDensity: VisualDensity.compact,
+                            icon: const Icon(Icons.arrow_upward, size: 18),
+                            onPressed: vi == 0
+                                ? null
+                                : () {
+                                    final targetIdx =
+                                        visiblePinnedIndices[vi - 1];
+                                    setState(() {
+                                      final tmp = _pinned[idx];
+                                      _pinned[idx] = _pinned[targetIdx];
+                                      _pinned[targetIdx] = tmp;
+                                    });
+                                  },
+                          ),
+                          IconButton(
+                            tooltip: 'Descer',
+                            visualDensity: VisualDensity.compact,
+                            icon: const Icon(Icons.arrow_downward, size: 18),
+                            onPressed: vi == visiblePinnedIndices.length - 1
+                                ? null
+                                : () {
+                                    final targetIdx =
+                                        visiblePinnedIndices[vi + 1];
+                                    setState(() {
+                                      final tmp = _pinned[idx];
+                                      _pinned[idx] = _pinned[targetIdx];
+                                      _pinned[targetIdx] = tmp;
+                                    });
+                                  },
+                          ),
+                          IconButton(
+                            tooltip: 'Desafixar',
+                            visualDensity: VisualDensity.compact,
+                            icon: const Icon(Icons.close, size: 18),
+                            onPressed: () =>
+                                setState(() => _pinned.removeAt(idx)),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
               ],
             ),
           ),

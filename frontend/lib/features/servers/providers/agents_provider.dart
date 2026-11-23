@@ -92,12 +92,29 @@ class AgentsNotifier extends Notifier<AgentsState> {
   Future<void> fetchServerAddresses() async {
     try {
       final raw = await _api.get<dynamic>('/server-addresses');
+      final preferredId = raw is Map ? raw['preferredId'] as String? : null;
       final list = raw is List
           ? raw
-          : (raw is Map && raw['addresses'] is List
-                ? raw['addresses']
-                : const <dynamic>[]);
-      final parsed = asJsonList(list, ServerAddressOption.fromJson);
+          : (raw is Map && raw['data'] is List
+                ? raw['data']
+                : (raw is Map && raw['addresses'] is List
+                      ? raw['addresses']
+                      : const <dynamic>[]));
+      final parsed = asJsonList(list, ServerAddressOption.fromJson)
+          .where((a) => a.host.trim().isNotEmpty)
+          .map(
+            (a) => preferredId != null && a.id == preferredId
+                ? ServerAddressOption(
+                    id: a.id,
+                    label: a.label,
+                    kind: a.kind,
+                    host: a.host,
+                    url: a.url,
+                    isDefault: true,
+                  )
+                : a,
+          )
+          .toList(growable: false);
       state = state.copyWith(
         addresses: List<ServerAddressOption>.unmodifiable(parsed),
       );

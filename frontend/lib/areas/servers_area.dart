@@ -122,64 +122,62 @@ final AreaContribution serversArea = AreaContribution(
         hostQueryParam: state.uri.queryParameters['host'],
         child: const DockerOverviewPage(),
       ),
-      routes: <RouteBase>[
-        GoRoute(
-          path: 'containers',
-          name: 'docker-containers',
-          builder: (context, state) => DockerLayoutScaffold(
-            activeTab: DockerTab.containers,
-            hostQueryParam: state.uri.queryParameters['host'],
-            child: DockerContainersPage(
-              initialStateFilter: state.uri.queryParameters['state'],
-            ),
-          ),
+    ),
+    GoRoute(
+      path: '/docker/containers',
+      name: 'docker-containers',
+      builder: (context, state) => DockerLayoutScaffold(
+        activeTab: DockerTab.containers,
+        hostQueryParam: state.uri.queryParameters['host'],
+        child: DockerContainersPage(
+          initialStateFilter: state.uri.queryParameters['state'],
         ),
-        GoRoute(
-          path: 'compose',
-          name: 'docker-compose',
-          builder: (context, state) => DockerLayoutScaffold(
-            activeTab: DockerTab.compose,
-            hostQueryParam: state.uri.queryParameters['host'],
-            child: const DockerComposePage(),
-          ),
-        ),
-        GoRoute(
-          path: 'volumes',
-          name: 'docker-volumes',
-          builder: (context, state) => DockerLayoutScaffold(
-            activeTab: DockerTab.volumes,
-            hostQueryParam: state.uri.queryParameters['host'],
-            child: const DockerVolumesPage(),
-          ),
-        ),
-        GoRoute(
-          path: 'networks',
-          name: 'docker-networks',
-          builder: (context, state) => DockerLayoutScaffold(
-            activeTab: DockerTab.networks,
-            hostQueryParam: state.uri.queryParameters['host'],
-            child: const DockerNetworksPage(),
-          ),
-        ),
-        GoRoute(
-          path: 'images',
-          name: 'docker-images',
-          builder: (context, state) => DockerLayoutScaffold(
-            activeTab: DockerTab.images,
-            hostQueryParam: state.uri.queryParameters['host'],
-            child: const DockerImagesPage(),
-          ),
-        ),
-        GoRoute(
-          path: 'history',
-          name: 'docker-history',
-          builder: (context, state) => DockerLayoutScaffold(
-            activeTab: DockerTab.history,
-            hostQueryParam: state.uri.queryParameters['host'],
-            child: const DockerHistoryPage(),
-          ),
-        ),
-      ],
+      ),
+    ),
+    GoRoute(
+      path: '/docker/compose',
+      name: 'docker-compose',
+      builder: (context, state) => DockerLayoutScaffold(
+        activeTab: DockerTab.compose,
+        hostQueryParam: state.uri.queryParameters['host'],
+        child: const DockerComposePage(),
+      ),
+    ),
+    GoRoute(
+      path: '/docker/volumes',
+      name: 'docker-volumes',
+      builder: (context, state) => DockerLayoutScaffold(
+        activeTab: DockerTab.volumes,
+        hostQueryParam: state.uri.queryParameters['host'],
+        child: const DockerVolumesPage(),
+      ),
+    ),
+    GoRoute(
+      path: '/docker/networks',
+      name: 'docker-networks',
+      builder: (context, state) => DockerLayoutScaffold(
+        activeTab: DockerTab.networks,
+        hostQueryParam: state.uri.queryParameters['host'],
+        child: const DockerNetworksPage(),
+      ),
+    ),
+    GoRoute(
+      path: '/docker/images',
+      name: 'docker-images',
+      builder: (context, state) => DockerLayoutScaffold(
+        activeTab: DockerTab.images,
+        hostQueryParam: state.uri.queryParameters['host'],
+        child: const DockerImagesPage(),
+      ),
+    ),
+    GoRoute(
+      path: '/docker/history',
+      name: 'docker-history',
+      builder: (context, state) => DockerLayoutScaffold(
+        activeTab: DockerTab.history,
+        hostQueryParam: state.uri.queryParameters['host'],
+        child: const DockerHistoryPage(),
+      ),
     ),
     GoRoute(
       path: '/deploys',

@@ -159,9 +159,35 @@ class _DatabaseRestoreBodyState extends ConsumerState<_DatabaseRestoreBody> {
     super.dispose();
   }
 
+  int? _resolveEffectiveTargetId(List<DatabaseConnectionResponse> connections) {
+    DatabaseConnectionResponse? sourceConn;
+    for (final c in connections) {
+      if (c.id == widget.sourceConnectionId) {
+        sourceConn = c;
+        break;
+      }
+    }
+    final family =
+        sourceConn?.protocolFamily ??
+        (widget.sourceEngine == 'postgres' ? 'postgres' : 'mysql');
+    final compatible = connections
+        .where((c) => c.protocolFamily == family)
+        .toList(growable: false);
+    if (compatible.any((c) => c.id == _targetConnectionId)) {
+      return _targetConnectionId;
+    }
+    return compatible.isNotEmpty ? compatible.first.id : null;
+  }
+
   Future<void> _submit() async {
-    final targetConnId = _targetConnectionId;
-    if (targetConnId == null) return;
+    if (_submitting) return;
+    final targetConnId = _resolveEffectiveTargetId(
+      ref.read(databasesProvider).connections,
+    );
+    if (targetConnId == null) {
+      setState(() => _error = 'Nenhuma conexão compatível selecionada.');
+      return;
+    }
     final dbName = _mode == 'new_database'
         ? _targetDbController.text.trim()
         : widget.sourceDatabaseName;

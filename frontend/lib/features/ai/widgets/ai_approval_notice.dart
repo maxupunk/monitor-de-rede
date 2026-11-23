@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:netmonitor_app/areas/area_contribution.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/ai/providers/ai_providers.dart';
@@ -17,11 +18,16 @@ class AiApprovalNoticeOverlay extends ConsumerWidget {
     if (mine.isEmpty) return const SizedBox.shrink();
 
     final drawerOpen = ref.watch(aiDrawerOpenProvider);
+    var onAiChatPage = false;
+    try {
+      onAiChatPage = GoRouterState.of(context).uri.path == '/ai-chat';
+    } catch (_) {}
+    final chatVisible = drawerOpen || onAiChatPage;
     final chat = ref.watch(aiChatProvider);
     final approvalsState = ref.watch(aiApprovalsProvider);
 
     final visible = mine
-        .where((item) => !(drawerOpen && chat.hasTool(item.callId)))
+        .where((item) => !(chatVisible && chat.hasTool(item.callId)))
         .toList(growable: false);
     if (visible.isEmpty) return const SizedBox.shrink();
 

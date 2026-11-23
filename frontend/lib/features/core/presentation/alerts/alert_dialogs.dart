@@ -48,6 +48,7 @@ class _AlertSilenceSheetBodyState
   int _selectedMinutes = 60;
   final TextEditingController _customCtrl = TextEditingController(text: '60');
   bool _saving = false;
+  String? _error;
 
   @override
   void dispose() {
@@ -56,13 +57,26 @@ class _AlertSilenceSheetBodyState
   }
 
   Future<void> _submit() async {
+    if (_saving) return;
     final mins = int.tryParse(_customCtrl.text.trim()) ?? _selectedMinutes;
     if (mins <= 0) return;
-    setState(() => _saving = true);
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
     final ok = await ref
         .read(alertsProvider.notifier)
         .silenceAlert(widget.alertId, mins);
-    if (mounted) Navigator.of(context).pop(ok);
+    if (!mounted) return;
+    if (ok) {
+      Navigator.of(context).pop(true);
+    } else {
+      setState(() {
+        _saving = false;
+        _error =
+            ref.read(alertsProvider).error ?? 'Erro ao silenciar o alerta.';
+      });
+    }
   }
 
   @override
@@ -70,6 +84,10 @@ class _AlertSilenceSheetBodyState
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
+        if (_error != null) ...<Widget>[
+          NestedPanel(tone: SemanticTone.error, child: Text(_error!)),
+          const SizedBox(height: 12),
+        ],
         Text(
           'Escolha por quanto tempo suprimir notificações deste incidente:',
           style: context.textTheme.bodyMedium,
@@ -130,6 +148,7 @@ Future<void> showAlertCorrelationSheet({
   required WidgetRef ref,
   required AlertEvent alert,
 }) async {
+  final future = ref.read(alertsProvider.notifier).fetchCorrelation(alert.id);
   await showAdaptiveFormSheet<void>(
     context: context,
     title: 'Correlação e Causa Raiz',
@@ -137,7 +156,7 @@ Future<void> showAlertCorrelationSheet({
     maxWidth: 640,
     builder: (sheetCtx) {
       return FutureBuilder<AlertCorrelation?>(
-        future: ref.read(alertsProvider.notifier).fetchCorrelation(alert.id),
+        future: future,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const LoadingStateView(
@@ -153,6 +172,9 @@ Future<void> showAlertCorrelationSheet({
               icon: Icons.hub_outlined,
             );
           }
+          final confidencePct = data.confidence <= 1.0
+              ? data.confidence * 100
+              : data.confidence;
 
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -173,7 +195,7 @@ Future<void> showAlertCorrelationSheet({
                         ),
                         SemanticChip(
                           label:
-                              'Confiança ${formatPercent(data.confidence * 100, digits: 0)}',
+                              'Confiança ${formatPercent(confidencePct, digits: 0)}',
                           tone: SemanticTone.info,
                           compact: true,
                         ),
@@ -318,13 +340,15 @@ class _AlertRuleFormBodyState extends ConsumerState<_AlertRuleFormBody> {
   late final TextEditingController _nameCtrl;
   late final TextEditingController _fieldCtrl;
   late final TextEditingController _valueCtrl;
+  late final TextEditingController _patternCtrl;
+  late final TextEditingController _windowSecondsCtrl;
   late final TextEditingController _durationCtrl;
   late final TextEditingController _recoveryCtrl;
   late final TextEditingController _flapThresholdCtrl;
   late final TextEditingController _cooldownCtrl;
 
   String _type = 'device_offline';
-  String _operator = '==';
+  String _operator = 'eq';
   String _severity = 'warning';
   int? _siteId;
   int? _deviceId;
@@ -338,30 +362,33 @@ class _AlertRuleFormBodyState extends ConsumerState<_AlertRuleFormBody> {
   void initState() {
     super.initState();
     final e = widget.existing;
-    _type =
-        e?.type ??
-        (widget.presetLogRegex != null ? 'custom' : 'device_offline');
-    _operator =
-        e?.condition.operator ??
-        (widget.presetLogRegex != null ? 'matches' : '==');
+    final isPresetLog = e == null && widget.presetLogRegex != null;
+    _type = e?.type ?? (isPresetLog ? 'log_pattern' : 'device_offline');
+    _operator = e != null
+        ? AlertRuleCondition.normalizeOperator(e.condition.operator)
+        : (isPresetLog ? 'gte' : 'eq');
     _severity = e?.severity ?? 'warning';
     _siteId = e?.siteId;
     _deviceId = e?.deviceId ?? widget.presetDeviceId;
     _monitorId = e?.monitorId;
-    _inhibitParent = e?.inhibitWhenParentDown ?? true;
+    _inhibitParent = e?.inhibitWhenParentDown ?? !isPresetLog;
     _enabled = e?.isEnabled ?? true;
 
     _nameCtrl = TextEditingController(text: e?.name ?? '');
     _fieldCtrl = TextEditingController(
-      text:
-          e?.condition.field ??
-          (widget.presetLogRegex != null ? 'log_pattern' : 'status'),
+      text: e?.condition.field ?? (isPresetLog ? 'logMatchCount' : 'status'),
     );
     _valueCtrl = TextEditingController(
-      text: e?.condition.value.toString() ?? widget.presetLogRegex ?? 'down',
+      text: e?.condition.value.toString() ?? (isPresetLog ? '1' : 'down'),
+    );
+    _patternCtrl = TextEditingController(
+      text: e?.condition.pattern ?? widget.presetLogRegex ?? '',
+    );
+    _windowSecondsCtrl = TextEditingController(
+      text: (e?.condition.windowSeconds ?? 300).toString(),
     );
     _durationCtrl = TextEditingController(
-      text: (e?.durationSeconds ?? 60).toString(),
+      text: (e?.durationSeconds ?? (isPresetLog ? 0 : 60)).toString(),
     );
     _recoveryCtrl = TextEditingController(
       text: (e?.recoveryWindowSeconds ?? 0).toString(),
@@ -379,6 +406,8 @@ class _AlertRuleFormBodyState extends ConsumerState<_AlertRuleFormBody> {
     _nameCtrl.dispose();
     _fieldCtrl.dispose();
     _valueCtrl.dispose();
+    _patternCtrl.dispose();
+    _windowSecondsCtrl.dispose();
     _durationCtrl.dispose();
     _recoveryCtrl.dispose();
     _flapThresholdCtrl.dispose();
@@ -387,6 +416,7 @@ class _AlertRuleFormBodyState extends ConsumerState<_AlertRuleFormBody> {
   }
 
   Future<void> _submit() async {
+    if (_saving) return;
     if (!_formKey.currentState!.validate()) return;
     setState(() {
       _saving = true;
@@ -395,6 +425,18 @@ class _AlertRuleFormBodyState extends ConsumerState<_AlertRuleFormBody> {
 
     final rawVal = _valueCtrl.text.trim();
     final numVal = num.tryParse(rawVal);
+    final isLogPattern = _type == 'log_pattern';
+    final patternText = _patternCtrl.text.trim();
+    final condition = <String, dynamic>{
+      'field': _fieldCtrl.text.trim(),
+      'operator': AlertRuleCondition.normalizeOperator(_operator),
+      'value': numVal ?? rawVal,
+      if (isLogPattern && patternText.isNotEmpty) 'pattern': patternText,
+      if (isLogPattern)
+        'windowSeconds': int.tryParse(_windowSecondsCtrl.text.trim()) ?? 300,
+      if (widget.existing?.condition.minSeverity != null)
+        'minSeverity': widget.existing!.condition.minSeverity,
+    };
 
     final payload = <String, dynamic>{
       'name': _nameCtrl.text.trim(),
@@ -403,11 +445,7 @@ class _AlertRuleFormBodyState extends ConsumerState<_AlertRuleFormBody> {
       'siteId': _siteId,
       'deviceId': _deviceId,
       'monitorId': _monitorId,
-      'condition': <String, dynamic>{
-        'field': _fieldCtrl.text.trim(),
-        'operator': _operator,
-        'value': numVal ?? rawVal,
-      },
+      'condition': condition,
       'durationSeconds': int.tryParse(_durationCtrl.text.trim()) ?? 60,
       'recoveryWindowSeconds': int.tryParse(_recoveryCtrl.text.trim()) ?? 0,
       'flapThreshold': int.tryParse(_flapThresholdCtrl.text.trim()) ?? 0,
@@ -434,9 +472,41 @@ class _AlertRuleFormBodyState extends ConsumerState<_AlertRuleFormBody> {
     }
   }
 
+  static const List<(String, String)> _ruleTypes = <(String, String)>[
+    ('device_offline', 'Dispositivo offline'),
+    ('latency_high', 'Latência alta'),
+    ('http_failure', 'Falha HTTP'),
+    ('tcp_failure', 'Falha TCP'),
+    ('threshold', 'Limiar de métrica'),
+    ('availability', 'Disponibilidade'),
+    ('log_pattern', 'Padrão de Log (Syslog)'),
+    ('custom', 'Personalizada'),
+  ];
+
+  static const List<(String, String)> _ruleOperators = <(String, String)>[
+    ('eq', '== (igual)'),
+    ('neq', '!= (diferente)'),
+    ('gt', '> (maior)'),
+    ('gte', '>= (maior ou igual)'),
+    ('lt', '< (menor)'),
+    ('lte', '<= (menor ou igual)'),
+    ('contains', 'contém'),
+  ];
+
   @override
   Widget build(BuildContext context) {
     final monitorsState = ref.watch(monitorsProvider);
+    final hasCustomType = !_ruleTypes.any((t) => t.$1 == _type);
+    final safeOperator = _ruleOperators.any((o) => o.$1 == _operator)
+        ? _operator
+        : 'eq';
+    final safeSeverity =
+        const <String>['info', 'warning', 'critical'].contains(_severity)
+        ? _severity
+        : 'warning';
+    final safeDeviceId = monitorsState.devices.any((d) => d.id == _deviceId)
+        ? _deviceId
+        : null;
 
     return Form(
       key: _formKey,
@@ -459,43 +529,33 @@ class _AlertRuleFormBodyState extends ConsumerState<_AlertRuleFormBody> {
               AppDropdownFormField<String>(
                 initialValue: _type,
                 decoration: const InputDecoration(labelText: 'Tipo'),
-                items: const <DropdownMenuItem<String>>[
-                  DropdownMenuItem(
-                    value: 'device_offline',
-                    child: Text(
-                      'Dispositivo offline',
-                      overflow: TextOverflow.ellipsis,
+                items: <DropdownMenuItem<String>>[
+                  for (final (value, label) in _ruleTypes)
+                    DropdownMenuItem(
+                      value: value,
+                      child: Text(label, overflow: TextOverflow.ellipsis),
                     ),
-                  ),
-                  DropdownMenuItem(
-                    value: 'latency_high',
-                    child: Text(
-                      'Latência alta',
-                      overflow: TextOverflow.ellipsis,
+                  if (hasCustomType)
+                    DropdownMenuItem(
+                      value: _type,
+                      child: Text(_type, overflow: TextOverflow.ellipsis),
                     ),
-                  ),
-                  DropdownMenuItem(
-                    value: 'http_failure',
-                    child: Text('Falha HTTP', overflow: TextOverflow.ellipsis),
-                  ),
-                  DropdownMenuItem(
-                    value: 'tcp_failure',
-                    child: Text('Falha TCP', overflow: TextOverflow.ellipsis),
-                  ),
-                  DropdownMenuItem(
-                    value: 'custom',
-                    child: Text(
-                      'Personalizada / Log',
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
                 ],
                 onChanged: (v) {
-                  if (v != null) setState(() => _type = v);
+                  if (v == null) return;
+                  setState(() {
+                    _type = v;
+                    if (v == 'log_pattern' &&
+                        _fieldCtrl.text.trim() == 'status') {
+                      _fieldCtrl.text = 'logMatchCount';
+                      _operator = 'gte';
+                      _valueCtrl.text = '1';
+                    }
+                  });
                 },
               ),
               AppDropdownFormField<String>(
-                initialValue: _severity,
+                initialValue: safeSeverity,
                 decoration: const InputDecoration(labelText: 'Severidade'),
                 items: const <DropdownMenuItem<String>>[
                   DropdownMenuItem(
@@ -525,21 +585,19 @@ class _AlertRuleFormBodyState extends ConsumerState<_AlertRuleFormBody> {
                 controller: _fieldCtrl,
                 decoration: const InputDecoration(
                   labelText: 'Campo',
-                  hintText: 'status, latency_ms, cpu_usage, log_pattern',
+                  hintText: 'status, latencyMs, cpuUsage, logMatchCount',
                 ),
                 validator: FormValidators.required('Campo obrigatório.'),
               ),
               AppDropdownFormField<String>(
-                initialValue: _operator,
+                initialValue: safeOperator,
                 decoration: const InputDecoration(labelText: 'Operador'),
-                items: const <DropdownMenuItem<String>>[
-                  DropdownMenuItem(value: '==', child: Text('==')),
-                  DropdownMenuItem(value: '!=', child: Text('!=')),
-                  DropdownMenuItem(value: '>', child: Text('>')),
-                  DropdownMenuItem(value: '>=', child: Text('>=')),
-                  DropdownMenuItem(value: '<', child: Text('<')),
-                  DropdownMenuItem(value: '<=', child: Text('<=')),
-                  DropdownMenuItem(value: 'matches', child: Text('regex')),
+                items: <DropdownMenuItem<String>>[
+                  for (final (value, label) in _ruleOperators)
+                    DropdownMenuItem(
+                      value: value,
+                      child: Text(label, overflow: TextOverflow.ellipsis),
+                    ),
                 ],
                 onChanged: (v) {
                   if (v != null) setState(() => _operator = v);
@@ -547,14 +605,44 @@ class _AlertRuleFormBodyState extends ConsumerState<_AlertRuleFormBody> {
               ),
               TextFormField(
                 controller: _valueCtrl,
-                decoration: const InputDecoration(labelText: 'Valor / Regex'),
+                decoration: InputDecoration(
+                  labelText: _type == 'log_pattern'
+                      ? 'Ocorrências mínimas'
+                      : 'Valor de referência',
+                ),
                 validator: FormValidators.required('Informe o valor.'),
               ),
             ],
           ),
+          if (_type == 'log_pattern') ...<Widget>[
+            const SizedBox(height: 12),
+            ResponsiveFieldRow(
+              breakpoint: 480,
+              children: <Widget>[
+                TextFormField(
+                  controller: _patternCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Expressão regular (Syslog)',
+                    hintText: '(?i)failed password|auth failure',
+                  ),
+                  validator: FormValidators.required(
+                    'Informe a expressão regular de log.',
+                  ),
+                ),
+                TextFormField(
+                  controller: _windowSecondsCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Janela de contagem (s)',
+                  ),
+                  validator: FormValidators.integerRange(10, 86400),
+                ),
+              ],
+            ),
+          ],
           const SizedBox(height: 12),
           AppDropdownFormField<int?>(
-            initialValue: _deviceId,
+            initialValue: safeDeviceId,
             decoration: const InputDecoration(
               labelText: 'Escopo — Dispositivo (opcional)',
             ),
@@ -661,122 +749,134 @@ Future<void> showAlertRuleCatalogSheet({
     maxWidth: 680,
     builder: (sheetCtx) {
       return StatefulBuilder(
-        builder: (context, setModalState) {
-          final alerts = ref.watch(alertsProvider);
-          final templates = alerts.ruleTemplates;
-          if (alerts.catalogLoading && templates.isEmpty) {
-            return const LoadingStateView(message: 'Carregando catálogo...');
-          }
-          if (templates.isEmpty) {
-            return const EmptyStateView(
-              title: 'Nenhum template disponível',
-              icon: Icons.rule_folder_outlined,
-            );
-          }
+        builder: (modalCtx, setModalState) {
+          return Consumer(
+            builder: (consumerCtx, modalRef, _) {
+              final alerts = modalRef.watch(alertsProvider);
+              final templates = alerts.ruleTemplates;
+              if (alerts.catalogLoading && templates.isEmpty) {
+                return const LoadingStateView(
+                  message: 'Carregando catálogo...',
+                );
+              }
+              if (templates.isEmpty) {
+                return const EmptyStateView(
+                  title: 'Nenhum template disponível',
+                  icon: Icons.rule_folder_outlined,
+                );
+              }
 
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: <Widget>[
-                  OutlinedButton(
-                    onPressed: () {
-                      setModalState(() {
-                        for (final t in templates) {
-                          if (t.recommended && !t.applied && t.applicable) {
-                            selectedKeys.add(t.key);
-                          }
-                        }
-                      });
-                    },
-                    child: const Text('Selecionar recomendadas'),
-                  ),
-                  TextButton(
-                    onPressed: () => setModalState(selectedKeys.clear),
-                    child: const Text('Limpar seleção'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              for (final tmpl in templates) ...<Widget>[
-                CheckboxListTile(
-                  contentPadding: EdgeInsets.zero,
-                  value: tmpl.applied || selectedKeys.contains(tmpl.key),
-                  onChanged: tmpl.applied
-                      ? null
-                      : (v) {
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: <Widget>[
+                      OutlinedButton(
+                        onPressed: () {
                           setModalState(() {
-                            if (v == true) {
-                              selectedKeys.add(tmpl.key);
-                            } else {
-                              selectedKeys.remove(tmpl.key);
+                            for (final t in templates) {
+                              if (t.recommended && !t.applied && t.applicable) {
+                                selectedKeys.add(t.key);
+                              }
                             }
                           });
                         },
-                  title: Wrap(
-                    spacing: 6,
-                    runSpacing: 4,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: <Widget>[
-                      Text(
-                        tmpl.name,
-                        style: const TextStyle(fontWeight: FontWeight.w700),
+                        child: const Text('Selecionar recomendadas'),
                       ),
-                      if (tmpl.recommended)
-                        const SemanticChip(
-                          label: 'Recomendada',
-                          tone: SemanticTone.primary,
-                          compact: true,
-                        ),
-                      if (tmpl.applied)
-                        const SemanticChip(
-                          label: 'Já configurada',
-                          tone: SemanticTone.success,
-                          compact: true,
-                        ),
+                      TextButton(
+                        onPressed: () => setModalState(selectedKeys.clear),
+                        child: const Text('Limpar seleção'),
+                      ),
                     ],
                   ),
-                  subtitle: Text(
-                    '${alerts.ruleCategories[tmpl.category] ?? tmpl.category} · ${tmpl.description}',
-                  ),
-                ),
-                const Divider(height: 1),
-              ],
-              const SizedBox(height: 16),
-              FilledButton.icon(
-                onPressed: selectedKeys.isEmpty || applying
-                    ? null
-                    : () async {
-                        setModalState(() => applying = true);
-                        final count = await ref
-                            .read(alertsProvider.notifier)
-                            .applyCatalogRules(
-                              selectedKeys.toList(growable: false),
-                              deviceId: deviceId,
-                            );
-                        if (sheetCtx.mounted) {
-                          Navigator.of(sheetCtx).pop();
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                '${countNoun(count, 'regra aplicada', 'regras aplicadas')} com sucesso.',
-                              ),
+                  const SizedBox(height: 10),
+                  for (final tmpl in templates) ...<Widget>[
+                    CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: tmpl.applied || selectedKeys.contains(tmpl.key),
+                      onChanged: tmpl.applied
+                          ? null
+                          : (v) {
+                              setModalState(() {
+                                if (v == true) {
+                                  selectedKeys.add(tmpl.key);
+                                } else {
+                                  selectedKeys.remove(tmpl.key);
+                                }
+                              });
+                            },
+                      title: Wrap(
+                        spacing: 6,
+                        runSpacing: 4,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: <Widget>[
+                          Text(
+                            tmpl.name,
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                          if (tmpl.recommended)
+                            const SemanticChip(
+                              label: 'Recomendada',
+                              tone: SemanticTone.primary,
+                              compact: true,
                             ),
-                          );
-                        }
-                      },
-                icon: applying
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.playlist_add_check),
-                label: Text('Aplicar selecionadas (${selectedKeys.length})'),
-              ),
-            ],
+                          if (tmpl.applied)
+                            const SemanticChip(
+                              label: 'Já configurada',
+                              tone: SemanticTone.success,
+                              compact: true,
+                            ),
+                        ],
+                      ),
+                      subtitle: Text(
+                        '${alerts.ruleCategories[tmpl.category] ?? tmpl.category} · ${tmpl.description}',
+                      ),
+                    ),
+                    const Divider(height: 1),
+                  ],
+                  const SizedBox(height: 16),
+                  FilledButton.icon(
+                    onPressed: selectedKeys.isEmpty || applying
+                        ? null
+                        : () async {
+                            setModalState(() => applying = true);
+                            final count = await modalRef
+                                .read(alertsProvider.notifier)
+                                .applyCatalogRules(
+                                  selectedKeys.toList(growable: false),
+                                  deviceId: deviceId,
+                                );
+                            if (sheetCtx.mounted) {
+                              Navigator.of(sheetCtx).pop();
+                            }
+                            if (context.mounted) {
+                              final err = modalRef.read(alertsProvider).error;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    err ??
+                                        '${countNoun(count, 'regra aplicada', 'regras aplicadas')} com sucesso.',
+                                  ),
+                                ),
+                              );
+                            }
+                          },
+                    icon: applying
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.playlist_add_check),
+                    label: Text(
+                      'Aplicar selecionadas (${selectedKeys.length})',
+                    ),
+                  ),
+                ],
+              );
+            },
           );
         },
       );

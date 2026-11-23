@@ -270,7 +270,10 @@ class TopologyNotifier extends Notifier<TopologyState> {
     try {
       await api.patch<dynamic>(
         '/topology/layout',
-        data: <String, dynamic>{'siteId': state.siteId, 'nodes': changes},
+        queryParameters: state.siteId != null
+            ? <String, dynamic>{'siteId': state.siteId}
+            : null,
+        data: <String, dynamic>{'nodes': changes},
       );
       clearUnsavedPositions(nodeIds: targets);
       state = state.copyWith(savingLayout: false);

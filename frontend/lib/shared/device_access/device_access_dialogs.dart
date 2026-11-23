@@ -106,24 +106,22 @@ Future<T?> withDeviceAccess<T>({
     if (!err.isMissingCredential || targetDeviceId == null) {
       rethrow;
     }
+    if (!context.mounted) return null;
 
     final auth = ref.read(authProvider);
     if (!auth.canManagePlugins) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              err.message.isNotEmpty
-                  ? '${err.message} Peça a um administrador para configurar o acesso.'
-                  : 'Credencial ausente no equipamento. Apenas administradores podem cadastrá-la.',
-            ),
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            err.message.isNotEmpty
+                ? '${err.message} Peça a um administrador para configurar o acesso.'
+                : 'Credencial ausente no equipamento. Apenas administradores podem cadastrá-la.',
           ),
-        );
-      }
+        ),
+      );
       return null;
     }
 
-    if (!context.mounted) return null;
     final saved = await showDeviceAccessDialog(
       context: context,
       ref: ref,
@@ -133,11 +131,11 @@ Future<T?> withDeviceAccess<T>({
       lockedTransport: err.transport,
       reason: err.message,
     );
-    if (!saved) return null;
+    if (!saved || !context.mounted) return null;
     onSaved?.call();
 
     final shouldConfirm = confirmRetry ?? !(retryAuto ?? true);
-    if (shouldConfirm && context.mounted) {
+    if (shouldConfirm) {
       final proceed = await showConfirmActionDialog(
         context: context,
         title: 'Credencial salva',
@@ -148,7 +146,7 @@ Future<T?> withDeviceAccess<T>({
         tone: SemanticTone.primary,
         icon: Icons.play_arrow_rounded,
       );
-      if (!proceed) return null;
+      if (!proceed || !context.mounted) return null;
     }
     return action();
   }
@@ -177,6 +175,7 @@ class _DeviceAccessHostState extends ConsumerState<DeviceAccessHost> {
 
   Future<void> _openSheet(DeviceAccessRequest req) async {
     _dialogOpen = true;
+    final notifier = ref.read(deviceAccessProvider.notifier);
     bool saved = false;
     try {
       saved = await showDeviceAccessDialog(
@@ -190,7 +189,7 @@ class _DeviceAccessHostState extends ConsumerState<DeviceAccessHost> {
       );
     } finally {
       _dialogOpen = false;
-      ref.read(deviceAccessProvider.notifier).settle(saved);
+      notifier.settle(saved);
     }
   }
 }

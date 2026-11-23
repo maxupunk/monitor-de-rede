@@ -204,22 +204,26 @@ class AiSettingsNotifier extends Notifier<AiSettingsState> {
         percentage: 0,
       ),
     );
+    _pullCancelled = false;
     try {
       await for (final progress in _repo.pullOllamaModel(
         model: model,
         baseUrl: baseUrl,
         onCancelAvailable: (cancel) => _cancelPull = cancel,
       )) {
+        if (_pullCancelled) return false;
         state = state.copyWith(pullProgress: progress);
         if (progress.error != null && progress.error!.isNotEmpty) {
           state = state.copyWith(pulling: false);
           return false;
         }
       }
+      if (_pullCancelled) return false;
       state = state.copyWith(pulling: false, clearPullProgress: true);
       await loadOllamaModels(baseUrl: baseUrl);
       return true;
     } catch (err) {
+      if (_pullCancelled) return false;
       state = state.copyWith(
         pulling: false,
         pullProgress: ModelPullProgress(
@@ -234,7 +238,10 @@ class AiSettingsNotifier extends Notifier<AiSettingsState> {
     }
   }
 
+  bool _pullCancelled = false;
+
   void cancelPull() {
+    _pullCancelled = true;
     _cancelPull?.call();
     _cancelPull = null;
     state = state.copyWith(

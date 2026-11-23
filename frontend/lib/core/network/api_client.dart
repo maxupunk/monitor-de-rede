@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:netmonitor_app/core/config/server_config.dart';
+import 'package:netmonitor_app/core/network/sse_client.dart';
 
 /// Código de negócio retornado pelo backend quando falta credencial de dispositivo.
 const String missingCredentialCode = 'missing_credential';
@@ -237,16 +238,13 @@ NdjsonDrainResult drainNdjson(String buffer, {bool isFinal = false}) {
   for (final line in lines) {
     final trimmed = line.trim();
     if (trimmed.isEmpty) continue;
-    final decoded = jsonDecode(trimmed);
-    if (decoded is Map) {
-      events.add(Map<String, dynamic>.from(decoded));
-    }
-  }
-
-  if (isFinal && remainder.trim().isNotEmpty) {
-    final decoded = jsonDecode(remainder.trim());
-    if (decoded is Map) {
-      events.add(Map<String, dynamic>.from(decoded));
+    try {
+      final decoded = jsonDecode(trimmed);
+      if (decoded is Map) {
+        events.add(Map<String, dynamic>.from(decoded));
+      }
+    } catch (_) {
+      // Ignora linhas corrompidas ou parciais no fechamento sem derrubar o stream.
     }
   }
 
@@ -344,7 +342,32 @@ class ApiClient {
     return 'Erro HTTP $statusCode${statusMessage != null && statusMessage.isNotEmpty ? ': $statusMessage' : ''}';
   }
 
+  bool _isSessionGuardMessage(String combined) {
+    return combined.contains('não autenticado') ||
+        combined.contains('nao autenticado') ||
+        combined.contains('usuário está desativado') ||
+        combined.contains('usuario esta desativado') ||
+        combined.contains('sessão expirada') ||
+        combined.contains('sessao expirada');
+  }
+
   bool _shouldExpireSessionOn401(String path, ApiErrorPayload? payload) {
+    final isPublicAuthPath = RegExp(
+      r'^/auth/(login|setup|magic-link|verify|forgot|reset)(/|$)',
+    ).hasMatch(path);
+    if (isPublicAuthPath) {
+      return false;
+    }
+    final combined = <String?>[
+      payload?.message,
+      payload?.description,
+      payload?.error,
+    ].whereType<String>().join(' ').toLowerCase();
+    // Resposta explícita do guard JWT do NetMonitor sempre invalida a sessão,
+    // mesmo em rotas cujo prefixo também conversa com equipamentos/serviços.
+    if (_isSessionGuardMessage(combined)) {
+      return true;
+    }
     if (isNonSession401Path(path)) {
       return false;
     }
@@ -354,11 +377,6 @@ class ApiClient {
         code == missingCredentialCode) {
       return false;
     }
-    final combined = <String?>[
-      payload?.message,
-      payload?.description,
-      payload?.error,
-    ].whereType<String>().join(' ').toLowerCase();
     if (combined.contains('equipamento') ||
         combined.contains('chave de api') ||
         combined.contains('token do github') ||
@@ -410,7 +428,15 @@ class ApiClient {
     final data = response.data;
     if (data is String) {
       if (data.trim().isEmpty) return _emptyOrCast<T>();
-      return jsonDecode(data) as T;
+      if (T == String) return data as T;
+      try {
+        final decoded = jsonDecode(data);
+        if (decoded == null) return _emptyOrCast<T>();
+        return decoded as T;
+      } on FormatException {
+        if (data is T) return data as T;
+        rethrow;
+      }
     }
     return data as T;
   }
@@ -418,6 +444,12 @@ class ApiClient {
   T _emptyOrCast<T>() {
     if (<String, dynamic>{} is T) {
       return <String, dynamic>{} as T;
+    }
+    if (<dynamic>[] is T) {
+      return <dynamic>[] as T;
+    }
+    if ('' is T) {
+      return '' as T;
     }
     return null as T;
   }
@@ -746,18 +778,15 @@ class ApiClient {
         );
       }
 
-      var buffer = '';
+      final parser = SseLineParser();
       await for (final chunk in response.stream.transform(utf8.decoder)) {
-        buffer += chunk;
-        final lines = buffer.split('\n');
-        buffer = lines.isNotEmpty ? lines.removeLast() : '';
-        for (final line in lines) {
-          final parsed = _parseSseDataLine(line);
+        for (final rawPayload in parser.feed(chunk)) {
+          final parsed = _parseSseJsonPayload(rawPayload);
           if (parsed != null) yield parsed;
         }
       }
-      if (buffer.trim().isNotEmpty) {
-        final parsed = _parseSseDataLine(buffer);
+      for (final rawPayload in parser.flush()) {
+        final parsed = _parseSseJsonPayload(rawPayload);
         if (parsed != null) yield parsed;
       }
     } on ApiException {
@@ -772,13 +801,11 @@ class ApiClient {
     }
   }
 
-  Map<String, dynamic>? _parseSseDataLine(String line) {
-    final trimmed = line.trim();
-    if (!trimmed.startsWith('data:')) return null;
-    final raw = trimmed.substring(5).trim();
-    if (raw.isEmpty) return null;
+  Map<String, dynamic>? _parseSseJsonPayload(String rawPayload) {
+    final trimmed = rawPayload.trim();
+    if (trimmed.isEmpty) return null;
     try {
-      final decoded = jsonDecode(raw);
+      final decoded = jsonDecode(trimmed);
       return decoded is Map ? Map<String, dynamic>.from(decoded) : null;
     } catch (_) {
       return null;

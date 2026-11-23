@@ -405,11 +405,13 @@ class _DnsBatchMonitorBodyState extends ConsumerState<_DnsBatchMonitorBody> {
         .where((e) => e.isNotEmpty)
         .toList(growable: false);
 
+    final resolvedDomains = domains.isEmpty ? <String>['google.com'] : domains;
     final res = await ref
         .read(dnsPerformanceProvider.notifier)
         .provisionMonitors(<String, dynamic>{
           'servers': servers,
-          'domains': domains.isEmpty ? <String>['google.com'] : domains,
+          'domain': resolvedDomains.first,
+          'domains': resolvedDomains,
           'recordType': _recordType,
           'intervalSeconds': _intervalSeconds,
           'includePing': _includePing,

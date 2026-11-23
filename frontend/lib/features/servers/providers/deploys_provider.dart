@@ -672,11 +672,13 @@ class DeploysNotifier extends Notifier<DeploysState> {
       '/deploys/builds/$buildId/log',
     );
     final log = (raw['log'] as String?) ?? '';
-    final lines = log.isEmpty ? const <String>[] : log.split('\n');
+    final fetched = log.isEmpty ? const <String>[] : log.split('\n');
+    final existing = state.buildConsoles[buildId] ?? const <String>[];
+    final merged = existing.length > fetched.length ? existing : fetched;
     state = state.copyWith(
       buildConsoles: Map<int, List<String>>.unmodifiable(<int, List<String>>{
         ...state.buildConsoles,
-        buildId: List<String>.unmodifiable(lines),
+        buildId: List<String>.unmodifiable(merged),
       }),
     );
   }

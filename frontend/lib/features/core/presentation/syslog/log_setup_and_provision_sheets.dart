@@ -225,6 +225,9 @@ class _LogAutoProvisionSheetBodyState
         } else if (h.telnetOpen) {
           _protocol = 'telnet';
           _portCtrl.text = '23';
+        } else if (!h.layer2Reachable && _protocol == 'mactelnet') {
+          _protocol = 'ssh';
+          _portCtrl.text = '22';
         }
         _useSaved = h.savedCredentials.contains(_protocol);
       }
@@ -272,35 +275,41 @@ class _LogAutoProvisionSheetBodyState
   Widget build(BuildContext context) {
     final devices = ref.watch(monitorsProvider).devices;
     final systems = ref.watch(coreSettingsProvider).operatingSystems;
+    final syslogSystems = systems.where((s) => s.supportsSyslog).toList();
+    final allowMacTelnet = _hints?.layer2Reachable == true;
+    final safeProtocol = (!allowMacTelnet && _protocol == 'mactelnet')
+        ? 'ssh'
+        : _protocol;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        AppDropdownFormField<int>(
-          initialValue: devices.any((d) => d.id == _selectedDeviceId)
-              ? _selectedDeviceId
-              : devices.first.id,
-          decoration: const InputDecoration(labelText: 'Dispositivo'),
-          items: <DropdownMenuItem<int>>[
-            for (final d in devices)
-              DropdownMenuItem<int>(
-                value: d.id,
-                child: Text(d.name, overflow: TextOverflow.ellipsis),
-              ),
-          ],
-          onChanged: (v) {
-            if (v != null) {
-              setState(() => _selectedDeviceId = v);
-              _loadHints(v);
-            }
-          },
-        ),
+        if (devices.isNotEmpty)
+          AppDropdownFormField<int>(
+            initialValue: devices.any((d) => d.id == _selectedDeviceId)
+                ? _selectedDeviceId
+                : devices.first.id,
+            decoration: const InputDecoration(labelText: 'Dispositivo'),
+            items: <DropdownMenuItem<int>>[
+              for (final d in devices)
+                DropdownMenuItem<int>(
+                  value: d.id,
+                  child: Text(d.name, overflow: TextOverflow.ellipsis),
+                ),
+            ],
+            onChanged: (v) {
+              if (v != null) {
+                setState(() => _selectedDeviceId = v);
+                _loadHints(v);
+              }
+            },
+          ),
         const SizedBox(height: 12),
         ResponsiveFieldRow(
           breakpoint: 480,
           children: <Widget>[
             AppDropdownFormField<String>(
-              initialValue: _protocol,
+              initialValue: safeProtocol,
               decoration: const InputDecoration(labelText: 'Protocolo'),
               items: <DropdownMenuItem<String>>[
                 const DropdownMenuItem<String>(
@@ -311,9 +320,9 @@ class _LogAutoProvisionSheetBodyState
                   value: 'telnet',
                   child: Text('Telnet', overflow: TextOverflow.ellipsis),
                 ),
-                if (_hints?.layer2Reachable == true)
+                if (allowMacTelnet)
                   const DropdownMenuItem<String>(
-                    value: 'mac_telnet',
+                    value: 'mactelnet',
                     child: Text('MAC-Telnet', overflow: TextOverflow.ellipsis),
                   ),
               ],
@@ -321,7 +330,11 @@ class _LogAutoProvisionSheetBodyState
                 if (v != null) {
                   setState(() {
                     _protocol = v;
-                    _portCtrl.text = v == 'telnet' ? '23' : '22';
+                    _portCtrl.text = switch (v) {
+                      'telnet' => '23',
+                      'mactelnet' => '20561',
+                      _ => '22',
+                    };
                   });
                 }
               },
@@ -333,10 +346,22 @@ class _LogAutoProvisionSheetBodyState
             ),
           ],
         ),
+        if (safeProtocol == 'mactelnet') ...<Widget>[
+          const SizedBox(height: 12),
+          TextField(
+            controller: _macCtrl,
+            decoration: const InputDecoration(
+              labelText: 'Endereço MAC (MAC-Telnet)',
+              hintText: 'AA:BB:CC:DD:EE:FF',
+            ),
+          ),
+        ],
         const SizedBox(height: 12),
-        if (systems.isNotEmpty) ...<Widget>[
+        if (syslogSystems.isNotEmpty) ...<Widget>[
           AppDropdownFormField<String?>(
-            initialValue: systems.any((s) => s.id == _osId) ? _osId : null,
+            initialValue: syslogSystems.any((s) => s.id == _osId)
+                ? _osId
+                : null,
             decoration: const InputDecoration(labelText: 'Sistema operacional'),
             items: <DropdownMenuItem<String?>>[
               const DropdownMenuItem<String?>(
@@ -346,7 +371,7 @@ class _LogAutoProvisionSheetBodyState
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              for (final s in systems.where((s) => s.supportsSyslog))
+              for (final s in syslogSystems)
                 DropdownMenuItem<String?>(
                   value: s.id,
                   child: Text(s.label, overflow: TextOverflow.ellipsis),

@@ -185,6 +185,8 @@ class _FleetActionFlowBodyState extends ConsumerState<_FleetActionFlowBody> {
     }
 
     if (_step == _FlowStep.form) {
+      final liveFleet =
+          ref.watch(pluginAppsProvider).fleets[pluginId] ?? widget.fleet;
       return Form(
         key: _formKey,
         child: Column(
@@ -201,32 +203,39 @@ class _FleetActionFlowBodyState extends ConsumerState<_FleetActionFlowBody> {
                 values: _params,
                 onChanged: (next) => setState(() => _params = next),
                 onRevealSecret: (fieldName, revealAction) async {
-                  final ready = widget.fleet.members
+                  final ready = liveFleet.members
                       .where((m) => m.credentialsReady)
                       .firstOrNull;
                   if (ready == null) return null;
-                  final out = await ref
-                      .read(pluginsProvider.notifier)
-                      .revealSecret(
-                        deviceId: ready.deviceId,
-                        pluginId: pluginId,
-                        action: revealAction,
-                        params: _params,
-                      );
-                  return out[fieldName]?.toString() ??
-                      out['password']?.toString();
+                  try {
+                    final out = await ref
+                        .read(pluginsProvider.notifier)
+                        .revealSecret(
+                          deviceId: ready.deviceId,
+                          pluginId: pluginId,
+                          action: revealAction,
+                          params: _params,
+                        );
+                    return out[fieldName]?.toString() ??
+                        out['password']?.toString();
+                  } catch (err) {
+                    if (mounted) {
+                      setState(() => _error = describeError(err));
+                    }
+                    return null;
+                  }
                 },
               ),
               const SizedBox(height: 12),
             ],
             Text(
-              'Equipamentos (${_selectedDevices.length}/${widget.fleet.members.length})',
+              'Equipamentos (${_selectedDevices.length}/${liveFleet.members.length})',
               style: context.textTheme.titleSmall?.copyWith(
                 fontWeight: FontWeight.w700,
               ),
             ),
             const SizedBox(height: 6),
-            for (final member in widget.fleet.members)
+            for (final member in liveFleet.members)
               CheckboxListTile(
                 contentPadding: EdgeInsets.zero,
                 dense: true,
@@ -251,7 +260,7 @@ class _FleetActionFlowBodyState extends ConsumerState<_FleetActionFlowBody> {
                             deviceId: member.deviceId,
                             lockedTransport: member.missingTransport,
                           );
-                          if (ok) {
+                          if (ok && mounted) {
                             await ref
                                 .read(pluginAppsProvider.notifier)
                                 .loadFleet(pluginId);

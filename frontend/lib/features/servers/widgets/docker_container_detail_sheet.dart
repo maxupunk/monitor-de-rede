@@ -66,13 +66,16 @@ class _ContainerDetailBodyState extends ConsumerState<_ContainerDetailBody>
 
   // Redes
   String? _selectedConnectNetworkId;
+  DockerNotifier? _dockerNotifier;
 
   @override
   void initState() {
     super.initState();
+    _dockerNotifier = ref.read(dockerProvider.notifier);
     _tabController = TabController(length: 5, vsync: this);
     _tabController.addListener(_onTabChanged);
     Future<void>.microtask(() {
+      if (!mounted) return;
       _loadDetail();
       _loadHistory();
     });
@@ -87,9 +90,12 @@ class _ContainerDetailBodyState extends ConsumerState<_ContainerDetailBody>
 
   @override
   void dispose() {
-    if (_logStreamId != null) {
-      unawaited(ref.read(dockerProvider.notifier).stopLogStream(_logStreamId!));
+    final streamId = _logStreamId;
+    final notifier = _dockerNotifier;
+    if (streamId != null && notifier != null) {
+      Future<void>.microtask(() => notifier.stopLogStream(streamId));
     }
+    _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
     super.dispose();
   }
@@ -165,17 +171,22 @@ class _ContainerDetailBodyState extends ConsumerState<_ContainerDetailBody>
   }
 
   Future<void> _toggleLiveLogs() async {
+    final notifier = ref.read(dockerProvider.notifier);
     if (_logStreamId != null) {
       final id = _logStreamId!;
       setState(() => _logStreamId = null);
-      await ref.read(dockerProvider.notifier).stopLogStream(id);
+      await notifier.stopLogStream(id);
       return;
     }
     try {
-      final streamId = await ref
-          .read(dockerProvider.notifier)
-          .startLogStream(widget.initialContainer.id, tail: _tail);
-      if (!mounted) return;
+      final streamId = await notifier.startLogStream(
+        widget.initialContainer.id,
+        tail: _tail,
+      );
+      if (!mounted) {
+        unawaited(notifier.stopLogStream(streamId));
+        return;
+      }
       setState(() => _logStreamId = streamId);
     } catch (err) {
       if (!mounted) return;
@@ -673,7 +684,7 @@ class _ContainerDetailBodyState extends ConsumerState<_ContainerDetailBody>
                 children: <Widget>[
                   linesField,
                   const SizedBox(width: 8),
-                  Expanded(child: liveBtn),
+                  if (isAdmin) Expanded(child: liveBtn) else const Spacer(),
                   PopupMenuButton<String>(
                     tooltip: 'Mais ações de log',
                     onSelected: (cmd) {
@@ -736,7 +747,7 @@ class _ContainerDetailBodyState extends ConsumerState<_ContainerDetailBody>
                   icon: const Icon(Icons.refresh, size: 16),
                   label: const Text('Atualizar'),
                 ),
-                liveBtn,
+                if (isAdmin) liveBtn,
                 OutlinedButton.icon(
                   onPressed: _downloadLogs,
                   icon: const Icon(Icons.download, size: 16),

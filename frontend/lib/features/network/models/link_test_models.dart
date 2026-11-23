@@ -67,14 +67,15 @@ class LinkTestSpecModel {
   final int durationS;
   final String direction;
   final int streams;
-  final double? limitMbps;
+  final int? limitMbps;
 
   factory LinkTestSpecModel.fromJson(Map<String, dynamic> json) {
+    final rawLimit = parseDoubleOrNull(json['limitMbps']);
     return LinkTestSpecModel(
       durationS: parseIntOrNull(json['durationS']) ?? 10,
       direction: (json['direction'] as String?) ?? 'both',
       streams: parseIntOrNull(json['streams']) ?? 4,
-      limitMbps: parseDoubleOrNull(json['limitMbps']),
+      limitMbps: rawLimit != null && rawLimit > 0 ? rawLimit.round() : null,
     );
   }
 

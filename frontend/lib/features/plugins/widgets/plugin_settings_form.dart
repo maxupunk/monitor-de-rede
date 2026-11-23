@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/plugins/utils/plugin_settings_logic.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
@@ -233,7 +233,7 @@ class _PluginSettingsFormState extends State<PluginSettingsForm> {
 
     return TextFormField(
       key: ValueKey<String>(
-        '${field.name}-${visibleSecret ? current : 'masked'}',
+        '${field.name}-${visibleSecret ? 'visible' : 'masked'}',
       ),
       initialValue: current?.toString() ?? '',
       enabled: !widget.readOnly,

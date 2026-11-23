@@ -16,6 +16,7 @@ Future<void> showVpnScriptViewer({
   int? peerId,
   String? deviceName,
 }) async {
+  final vpnNotifier = ref.read(vpnProvider.notifier);
   try {
     await showAdaptiveFormSheet<void>(
       context: context,
@@ -30,7 +31,7 @@ Future<void> showVpnScriptViewer({
       ),
     );
   } finally {
-    ref.read(vpnProvider.notifier).clearLastArtifact();
+    vpnNotifier.clearLastArtifact();
   }
 }
 

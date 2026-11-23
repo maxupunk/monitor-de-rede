@@ -12,6 +12,7 @@ import 'package:netmonitor_app/theme/app_theme.dart';
 /// Wizard completo de 3 etapas para automatizar uma stack (`DeploySetupDialog`).
 Future<void> showDeploySetupDialog(
   BuildContext context, {
+  int? presetApplicationId,
   int? presetProbeId,
   String? presetProject,
 }) {
@@ -22,6 +23,7 @@ Future<void> showDeploySetupDialog(
         'Passo 1: Repositório · Passo 2: Servidor alvo · Passo 3: Variáveis (.env)',
     maxWidth: 780,
     builder: (_) => _DeploySetupBody(
+      presetApplicationId: presetApplicationId,
       presetProbeId: presetProbeId,
       presetProject: presetProject,
     ),
@@ -29,7 +31,12 @@ Future<void> showDeploySetupDialog(
 }
 
 class _DeploySetupBody extends ConsumerStatefulWidget {
-  const _DeploySetupBody({this.presetProbeId, this.presetProject});
+  const _DeploySetupBody({
+    this.presetApplicationId,
+    this.presetProbeId,
+    this.presetProject,
+  });
+  final int? presetApplicationId;
   final int? presetProbeId;
   final String? presetProject;
 
@@ -75,6 +82,7 @@ class _DeploySetupBodyState extends ConsumerState<_DeploySetupBody> {
   final TextEditingController _envCtrl = TextEditingController();
 
   DeployReadinessView? _readiness;
+  List<DeployBuildImage> _discoveredImages = const <DeployBuildImage>[];
   bool _discovering = false;
   bool _saving = false;
   String? _error;
@@ -82,6 +90,7 @@ class _DeploySetupBodyState extends ConsumerState<_DeploySetupBody> {
   @override
   void initState() {
     super.initState();
+    _existingAppId = widget.presetApplicationId;
     _probeId = widget.presetProbeId;
     _projectCtrl = TextEditingController(text: widget.presetProject ?? '');
     Future<void>.microtask(() async {
@@ -139,6 +148,7 @@ class _DeploySetupBodyState extends ConsumerState<_DeploySetupBody> {
           );
       if (!mounted) return;
       setState(() {
+        _discoveredImages = disc.images;
         if (disc.suggestedFiles.isNotEmpty) {
           _composeFilesCtrl.text = disc.suggestedFiles.join(', ');
         }
@@ -216,6 +226,9 @@ class _DeploySetupBodyState extends ConsumerState<_DeploySetupBody> {
                           ? const <String>['docker-compose.yml']
                           : composeFiles,
                       imageTagVariable: _tagVarCtrl.text.trim(),
+                      images: _builder == 'netmonitor'
+                          ? _discoveredImages
+                          : const <DeployBuildImage>[],
                       rollout: _rollout,
                       builder: _builder,
                       buildProbeId: _builder == 'netmonitor'
@@ -252,6 +265,14 @@ class _DeploySetupBodyState extends ConsumerState<_DeploySetupBody> {
   Widget build(BuildContext context) {
     final deploys = ref.watch(deploysProvider);
     final dbConnections = ref.watch(databasesProvider).connections;
+    final safeExistingAppId =
+        deploys.applications.any((a) => a.id == _existingAppId)
+        ? _existingAppId
+        : null;
+    final safeGithubConnectionId =
+        deploys.githubConnections.any((c) => c.id == _githubConnectionId)
+        ? _githubConnectionId
+        : null;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -287,7 +308,7 @@ class _DeploySetupBodyState extends ConsumerState<_DeploySetupBody> {
         if (_step == 0) ...<Widget>[
           if (deploys.applications.isNotEmpty) ...<Widget>[
             AppDropdownFormField<int?>(
-              initialValue: _existingAppId,
+              initialValue: safeExistingAppId,
               decoration: const InputDecoration(labelText: 'Aplicação'),
               items: <DropdownMenuItem<int?>>[
                 const DropdownMenuItem<int?>(
@@ -333,7 +354,7 @@ class _DeploySetupBodyState extends ConsumerState<_DeploySetupBody> {
             const SizedBox(height: 12),
             if (deploys.githubConnections.isNotEmpty) ...<Widget>[
               AppDropdownFormField<int?>(
-                initialValue: _githubConnectionId,
+                initialValue: safeGithubConnectionId,
                 decoration: const InputDecoration(
                   labelText: 'Conexão GitHub App',
                 ),

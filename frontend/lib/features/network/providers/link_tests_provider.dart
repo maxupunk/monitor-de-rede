@@ -30,10 +30,11 @@ class LinkTestPluginRunResult {
       status == 'succeeded' || status == 'failed' || status == 'cancelled';
 
   factory LinkTestPluginRunResult.fromJson(Map<String, dynamic> json) {
+    final inner = json['run'] is Map ? asJsonMap(json['run']) : json;
     return LinkTestPluginRunResult(
-      id: parseIntOrNull(json['id'] ?? json['runId']) ?? 0,
-      status: (json['status'] as String?) ?? 'running',
-      error: json['error'] as String?,
+      id: parseIntOrNull(inner['id'] ?? inner['runId']) ?? 0,
+      status: (inner['status'] as String?) ?? 'running',
+      error: inner['error'] as String?,
     );
   }
 }
@@ -526,13 +527,13 @@ class LinkTestsNotifier extends Notifier<LinkTestsState> {
     return parseIntOrNull(map['runId'] ?? map['id']) ?? 0;
   }
 
-  /// Aguarda conclusão de execução de plugin via SSE (`plugin:run` / `plugin:run_updated`)
+  /// Aguarda conclusão de execução de plugin via SSE (`plugin:run_finished`)
   /// + leitura única sob demanda (zero polling — AGENTS.md §9).
   Future<LinkTestPluginRunResult> waitForPluginRun(int runId) async {
     final completer = Completer<LinkTestPluginRunResult>();
     late final VoidCallback unsub;
     unsub = ref.read(sseServiceProvider.notifier).onEvent(
-      const <String>['plugin:run', 'plugin:run_updated'],
+      const <String>['plugin:run_finished', 'plugin:run', 'plugin:run_updated'],
       (data, _) {
         final parsed = LinkTestPluginRunResult.fromJson(data);
         if (parsed.id == runId && parsed.isFinished && !completer.isCompleted) {

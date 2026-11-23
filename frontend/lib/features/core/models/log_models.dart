@@ -212,7 +212,7 @@ class SetupSnippet {
       id: (json['id'] ?? json['os'] ?? '').toString(),
       label: (json['label'] ?? json['title'] ?? json['name'] ?? '').toString(),
       commands: commands,
-      notes: (json['notes'] ?? json['description']) as String?,
+      notes: (json['note'] ?? json['notes'] ?? json['description']) as String?,
     );
   }
 }

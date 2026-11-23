@@ -149,78 +149,126 @@ class _SystemBackupTab extends ConsumerWidget {
     final storageId = plan.storageDestinationId;
     if (storageId == null) return;
 
+    final copiesFuture = ref
+        .read(backupProvider.notifier)
+        .listCopies(storageId: storageId);
+    final messenger = ScaffoldMessenger.of(context);
+
     await showAdaptiveFormSheet<void>(
       context: context,
       title: 'Restaurar cópia do destino',
       subtitle: plan.storageDestinationName ?? 'Destino configurado',
       maxWidth: 640,
       builder: (sheetCtx) {
-        return FutureBuilder<List<SystemBackupCopy>>(
-          future: ref
-              .read(backupProvider.notifier)
-              .listCopies(storageId: storageId),
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const LoadingStateView(
-                message: 'Listando cópias disponíveis...',
-              );
-            }
-            final copies = snapshot.data ?? const <SystemBackupCopy>[];
-            if (copies.isEmpty) {
-              return const EmptyStateView(
-                title: 'Nenhuma cópia encontrada',
-                icon: Icons.cloud_off_outlined,
-              );
-            }
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                for (final copy in copies) ...<Widget>[
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.inventory_2_outlined),
-                    title: Text(
-                      copy.name,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w700),
+        var acting = false;
+        String? sheetError;
+        return StatefulBuilder(
+          builder: (modalCtx, setModalState) {
+            return FutureBuilder<List<SystemBackupCopy>>(
+              future: copiesFuture,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const LoadingStateView(
+                    message: 'Listando cópias disponíveis...',
+                  );
+                }
+                if (snapshot.hasError) {
+                  return ErrorStateView(
+                    message: describeError(
+                      snapshot.error!,
+                      fallback: 'Erro ao listar cópias no destino.',
                     ),
-                    subtitle: Text(
-                      '${formatBytes(copy.size)} · ${formatDateTime(copy.lastModified)}',
-                    ),
-                    trailing: FilledButton.tonal(
-                      onPressed: () async {
-                        final counts = await ref
-                            .read(backupProvider.notifier)
-                            .previewCopy(storageId, copy.key);
-                        if (!context.mounted) return;
-                        final confirmed = await showConfirmActionDialog(
-                          context: context,
-                          title: 'Confirmar restauração da cópia?',
-                          message:
-                              'Serão restauradas ${formatInteger(counts.totalRows)} linhas em ${counts.tables.length} tabela(s).',
-                          confirmLabel: 'Restaurar agora',
-                          details: BackupCountsSummaryWidget(counts: counts),
-                        );
-                        if (!confirmed) return;
-                        await ref
-                            .read(backupProvider.notifier)
-                            .restoreCopy(storageId, copy.key);
-                        if (sheetCtx.mounted) {
-                          Navigator.of(sheetCtx).pop();
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Cópia restaurada com sucesso.'),
-                            ),
-                          );
-                        }
-                      },
-                      child: const Text('Restaurar'),
-                    ),
-                  ),
-                  const Divider(height: 1),
-                ],
-              ],
+                  );
+                }
+                final copies = snapshot.data ?? const <SystemBackupCopy>[];
+                if (copies.isEmpty) {
+                  return const EmptyStateView(
+                    title: 'Nenhuma cópia encontrada',
+                    icon: Icons.cloud_off_outlined,
+                  );
+                }
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    if (sheetError != null) ...<Widget>[
+                      NestedPanel(
+                        tone: SemanticTone.error,
+                        child: Text(sheetError!),
+                      ),
+                      const SizedBox(height: 10),
+                    ],
+                    for (final copy in copies) ...<Widget>[
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.inventory_2_outlined),
+                        title: Text(
+                          copy.name,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        subtitle: Text(
+                          '${formatBytes(copy.size)} · ${formatDateTime(copy.lastModified)}',
+                        ),
+                        trailing: FilledButton.tonal(
+                          onPressed: acting
+                              ? null
+                              : () async {
+                                  setModalState(() {
+                                    acting = true;
+                                    sheetError = null;
+                                  });
+                                  try {
+                                    final counts = await ref
+                                        .read(backupProvider.notifier)
+                                        .previewCopy(storageId, copy.key);
+                                    if (!modalCtx.mounted) return;
+                                    final confirmed = await showConfirmActionDialog(
+                                      context: modalCtx,
+                                      title: 'Confirmar restauração da cópia?',
+                                      message:
+                                          'Serão restauradas ${formatInteger(counts.totalRows)} linhas em ${counts.tables.length} tabela(s).',
+                                      confirmLabel: 'Restaurar agora',
+                                      details: BackupCountsSummaryWidget(
+                                        counts: counts,
+                                      ),
+                                    );
+                                    if (!confirmed || !modalCtx.mounted) {
+                                      if (modalCtx.mounted) {
+                                        setModalState(() => acting = false);
+                                      }
+                                      return;
+                                    }
+                                    await ref
+                                        .read(backupProvider.notifier)
+                                        .restoreCopy(storageId, copy.key);
+                                    if (sheetCtx.mounted) {
+                                      Navigator.of(sheetCtx).pop();
+                                    }
+                                    messenger.showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          'Cópia restaurada com sucesso.',
+                                        ),
+                                      ),
+                                    );
+                                  } catch (err) {
+                                    if (modalCtx.mounted) {
+                                      setModalState(() {
+                                        acting = false;
+                                        sheetError = describeError(err);
+                                      });
+                                    }
+                                  }
+                                },
+                          child: const Text('Restaurar'),
+                        ),
+                      ),
+                      const Divider(height: 1),
+                    ],
+                  ],
+                );
+              },
             );
           },
         );
@@ -273,7 +321,7 @@ class _SystemBackupTab extends ConsumerWidget {
                           label: 'Último backup',
                           value: plan.lastBackupAt != null
                               ? '${formatDateTime(plan.lastBackupAt)} (${switch (plan.lastBackupStatus) {
-                                  'succeeded' || 'ok' => 'concluído',
+                                  'success' || 'succeeded' || 'ok' => 'concluído',
                                   'failed' || 'error' => 'falhou',
                                   'running' => 'em andamento',
                                   _ => plan.lastBackupStatus ?? '—',
@@ -490,7 +538,9 @@ class _SystemBackupTab extends ConsumerWidget {
           BackupFileRestoreCard(
             onRestored: (res) async {
               if (res.signInAgain) {
-                await ref.read(authProvider.notifier).logout();
+                await ref
+                    .read(authProvider.notifier)
+                    .logout(redirectTo: '/login?restaurado=1');
                 if (context.mounted) context.go('/login?restaurado=1');
               } else if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -529,6 +579,10 @@ class BackupFileRestoreCard extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
+          if (state.error != null) ...<Widget>[
+            NestedPanel(tone: SemanticTone.error, child: Text(state.error!)),
+            const SizedBox(height: 10),
+          ],
           if (state.upload != null) ...<Widget>[
             LinearProgressIndicator(value: state.upload!.fraction),
             const SizedBox(height: 6),
@@ -613,8 +667,11 @@ class BackupFileRestoreCard extends ConsumerWidget {
                   ),
                 ),
                 TextButton(
-                  onPressed: () =>
-                      ref.read(backupProvider.notifier).clearPendingFile(),
+                  onPressed: state.restoring
+                      ? null
+                      : () => ref
+                            .read(backupProvider.notifier)
+                            .clearPendingFile(),
                   child: const Text('Cancelar arquivo'),
                 ),
               ],

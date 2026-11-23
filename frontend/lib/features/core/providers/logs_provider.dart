@@ -98,7 +98,7 @@ class LogsNotifier extends Notifier<LogsState> {
     final f = state.filters;
     return <String, dynamic>{
       'limit': limit,
-      if (before != null && before.isNotEmpty) 'before': before,
+      if (before != null && before.isNotEmpty) 'cursor': before,
       if (f.deviceId != null) 'deviceId': f.deviceId,
       if (f.severity != null) 'severity': f.severity,
       if (f.hours != null)
@@ -140,14 +140,20 @@ class LogsNotifier extends Notifier<LogsState> {
         if (info != null) updatedTemplates[info.templateHash] = info;
       }
 
+      final meta = raw['meta'] is Map
+          ? asJsonMap(raw['meta'])
+          : const <String, dynamic>{};
+      final nextCursor = (meta['nextCursor'] ?? raw['nextCursor']) as String?;
+      final hasMore = meta['hasMore'] == true || raw['hasMore'] == true;
+
       state = state.copyWith(
         entries: reset
             ? newEntries
             : <LogEntry>[...state.entries, ...newEntries],
         templates: updatedTemplates,
-        nextCursor: raw['nextCursor'] as String?,
-        clearNextCursor: raw['nextCursor'] == null,
-        hasMore: raw['hasMore'] == true,
+        nextCursor: nextCursor,
+        clearNextCursor: nextCursor == null,
+        hasMore: hasMore,
         loading: false,
         loadingMore: false,
       );

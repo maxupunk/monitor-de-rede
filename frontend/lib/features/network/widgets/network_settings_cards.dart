@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:netmonitor_app/core/areas/area_models.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/network/models/diagnostics_models.dart';
@@ -52,7 +53,7 @@ class _VendorRegistryCardState extends ConsumerState<VendorRegistryCard> {
   Widget build(BuildContext context) {
     final state = ref.watch(vendorsProvider);
     final status = state.status;
-    final canWrite = ref.watch(authProvider).canWrite;
+    final canWrite = ref.watch(authProvider).canWriteIn(ProductArea.network);
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -259,7 +260,7 @@ class _WifiSettingsCardState extends ConsumerState<WifiSettingsCard> {
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(wifiSettingsProvider);
-    final canWrite = ref.watch(authProvider).canWrite;
+    final canWrite = ref.watch(authProvider).canWriteIn(ProductArea.network);
     if (!_hydrated && state.settings != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && !_hydrated) _hydrate(state.settings);

@@ -509,23 +509,23 @@ class _WifiClientsPageState extends ConsumerState<WifiClientsPage>
                                       ),
                                     ),
                                     DropdownMenuItem(
-                                      value: '2.4GHz',
+                                      value: '2g',
                                       child: Text(
-                                        '2.4GHz',
+                                        '2.4 GHz',
                                         overflow: TextOverflow.ellipsis,
                                       ),
                                     ),
                                     DropdownMenuItem(
-                                      value: '5GHz',
+                                      value: '5g',
                                       child: Text(
-                                        '5GHz',
+                                        '5 GHz',
                                         overflow: TextOverflow.ellipsis,
                                       ),
                                     ),
                                     DropdownMenuItem(
-                                      value: '6GHz',
+                                      value: '6g',
                                       child: Text(
-                                        '6GHz',
+                                        '6 GHz',
                                         overflow: TextOverflow.ellipsis,
                                       ),
                                     ),

@@ -20,23 +20,27 @@ Future<T?> showAdaptiveFormSheet<T>({
       context: context,
       isScrollControlled: true,
       isDismissible: isDismissible,
+      enableDrag: isDismissible,
       useSafeArea: true,
       builder: (sheetContext) {
         final bottomInset = MediaQuery.viewInsetsOf(sheetContext).bottom;
-        return Padding(
-          padding: EdgeInsets.only(bottom: bottomInset),
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.9,
-            ),
-            child: _SheetContent(
-              title: title,
-              subtitle: subtitle,
-              actions: actions,
-              onClose: isDismissible
-                  ? () => Navigator.of(sheetContext).pop()
-                  : null,
-              child: builder(sheetContext),
+        return PopScope(
+          canPop: isDismissible,
+          child: Padding(
+            padding: EdgeInsets.only(bottom: bottomInset),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.9,
+              ),
+              child: _SheetContent(
+                title: title,
+                subtitle: subtitle,
+                actions: actions,
+                onClose: isDismissible
+                    ? () => Navigator.of(sheetContext).pop()
+                    : null,
+                child: builder(sheetContext),
+              ),
             ),
           ),
         );
@@ -48,22 +52,25 @@ Future<T?> showAdaptiveFormSheet<T>({
     context: context,
     barrierDismissible: isDismissible,
     builder: (dialogContext) {
-      return Dialog(
-        insetPadding: const EdgeInsets.all(24),
-        shape: RoundedRectangleBorder(borderRadius: AppTheme.borderRadius),
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxWidth: maxWidth,
-            maxHeight: MediaQuery.sizeOf(dialogContext).height * 0.88,
-          ),
-          child: _SheetContent(
-            title: title,
-            subtitle: subtitle,
-            actions: actions,
-            onClose: isDismissible
-                ? () => Navigator.of(dialogContext).pop()
-                : null,
-            child: builder(dialogContext),
+      return PopScope(
+        canPop: isDismissible,
+        child: Dialog(
+          insetPadding: const EdgeInsets.all(24),
+          shape: RoundedRectangleBorder(borderRadius: AppTheme.borderRadius),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: maxWidth,
+              maxHeight: MediaQuery.sizeOf(dialogContext).height * 0.88,
+            ),
+            child: _SheetContent(
+              title: title,
+              subtitle: subtitle,
+              actions: actions,
+              onClose: isDismissible
+                  ? () => Navigator.of(dialogContext).pop()
+                  : null,
+              child: builder(dialogContext),
+            ),
           ),
         ),
       );

@@ -264,18 +264,18 @@ class DiagnosticsService {
     final raw = await _api.get<dynamic>('/monitors');
     final all = asJsonMapList(raw);
     final saas = all
-        .where(
-          (m) =>
-              m['isSaas'] == true ||
-              (m['tags'] is List && (m['tags'] as List).contains('saas')),
-        )
+        .where((m) {
+          final cfg = m['configuration'] is Map
+              ? asJsonMap(m['configuration'])
+              : const <String, dynamic>{};
+          return m['isSaas'] == true ||
+              cfg['saasPresetId'] != null ||
+              cfg['saasService'] != null ||
+              (m['tags'] is List && (m['tags'] as List).contains('saas'));
+        })
         .map(DeviceMonitorSummary.fromJson)
         .toList(growable: false);
-    if (saas.isNotEmpty) return saas;
-    return all
-        .take(6)
-        .map(DeviceMonitorSummary.fromJson)
-        .toList(growable: false);
+    return saas;
   }
 
   Future<List<SaasPresetItem>> fetchSaasPresets() async {
@@ -306,7 +306,8 @@ class DiagnosticsService {
       },
     );
     final map = asJsonMap(raw);
-    final cellsRaw = map['cells'] ?? map['buckets'] ?? map['data'] ?? raw;
+    final cellsRaw =
+        map['matrix'] ?? map['cells'] ?? map['buckets'] ?? map['data'] ?? raw;
     return asJsonMapList(
       cellsRaw,
     ).map(HeatmapCell.fromJson).toList(growable: false);

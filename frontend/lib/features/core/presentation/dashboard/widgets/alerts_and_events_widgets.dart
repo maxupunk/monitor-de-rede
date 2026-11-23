@@ -159,11 +159,29 @@ class _EventDistributionWidgetState
     super.dispose();
   }
 
+  int get _hours {
+    return switch ((widget.config['timeframe'] ?? '24h').toString()) {
+      '5m' || '15m' || '1h' => 1,
+      '6h' => 6,
+      '12h' => 12,
+      '7d' => 168,
+      _ => 24,
+    };
+  }
+
+  @override
+  void didUpdateWidget(covariant EventDistributionWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.config['timeframe'] != widget.config['timeframe']) {
+      _load();
+    }
+  }
+
   Future<void> _load({bool silent = false}) async {
     if (!silent) setState(() => _loading = true);
     final buckets = await ref
         .read(eventsHistoryProvider.notifier)
-        .fetchHourlyDistribution(hours: 24);
+        .fetchHourlyDistribution(hours: _hours);
     if (!mounted) return;
     setState(() {
       _buckets = buckets;

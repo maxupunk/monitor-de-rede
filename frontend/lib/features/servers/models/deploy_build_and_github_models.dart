@@ -173,7 +173,11 @@ class DeployReadinessCheck {
   factory DeployReadinessCheck.fromJson(Map<String, dynamic> json) {
     return DeployReadinessCheck(
       level: (json['level'] as String?) ?? 'ok',
-      title: (json['title'] as String?) ?? (json['message'] as String?) ?? '',
+      title:
+          (json['label'] as String?) ??
+          (json['title'] as String?) ??
+          (json['message'] as String?) ??
+          '',
       detail: json['detail'] as String?,
     );
   }

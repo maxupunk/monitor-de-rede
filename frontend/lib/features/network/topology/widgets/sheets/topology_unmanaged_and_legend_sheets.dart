@@ -70,15 +70,22 @@ class _UnmanagedSwitchSheetBodyState extends State<_UnmanagedSwitchSheetBody> {
 
   Future<void> _handleSubmit() async {
     if (_nameCtrl.text.trim().isEmpty || _saving) return;
+    final parsedPorts = int.tryParse(_portsCtrl.text.trim()) ?? 8;
+    final safePorts = parsedPorts.clamp(1, 256);
     setState(() => _saving = true);
     final ok = await widget.onSubmit(<String, dynamic>{
       'name': _nameCtrl.text.trim(),
       if (_vendorCtrl.text.trim().isNotEmpty) 'vendor': _vendorCtrl.text.trim(),
-      'portCount': int.tryParse(_portsCtrl.text.trim()) ?? 8,
+      'portCount': safePorts,
       'siteId': _selectedSiteId,
     });
     if (mounted && !ok) {
       setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Não foi possível criar o switch não gerenciável.'),
+        ),
+      );
     }
   }
 

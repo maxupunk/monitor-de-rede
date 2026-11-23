@@ -50,7 +50,7 @@ class DeployBuildImage {
     'name': name,
     'context': context,
     'dockerfile': dockerfile,
-    'image': image,
+    if (image.isNotEmpty) 'reference': image,
     if (target != null && target!.isNotEmpty) 'target': target,
   };
 
@@ -59,7 +59,7 @@ class DeployBuildImage {
       name: (json['name'] as String?) ?? '',
       context: (json['context'] as String?) ?? '.',
       dockerfile: (json['dockerfile'] as String?) ?? 'Dockerfile',
-      image: (json['image'] as String?) ?? '',
+      image: (json['reference'] as String?) ?? (json['image'] as String?) ?? '',
       target: json['target'] as String?,
     );
   }
@@ -506,7 +506,7 @@ class DeployGithubConnectionView {
   const DeployGithubConnectionView({
     required this.id,
     required this.account,
-    this.organization,
+    this.organization = false,
     required this.appSlug,
     required this.installed,
     required this.canWrite,
@@ -517,7 +517,7 @@ class DeployGithubConnectionView {
 
   final int id;
   final String account;
-  final String? organization;
+  final bool organization;
   final String appSlug;
   final bool installed;
   final bool canWrite;
@@ -529,7 +529,7 @@ class DeployGithubConnectionView {
     return DeployGithubConnectionView(
       id: parseIntOrNull(json['id']) ?? 0,
       account: (json['account'] as String?) ?? '',
-      organization: json['organization'] as String?,
+      organization: parseBool(json['organization']),
       appSlug: (json['appSlug'] as String?) ?? '',
       installed: parseBool(json['installed']),
       canWrite: parseBool(json['canWrite']),
@@ -605,7 +605,7 @@ class DeployGuideView {
 
   factory DeployGuideView.fromJson(Map<String, dynamic> json) {
     return DeployGuideView(
-      complete: parseBool(json['complete']),
+      complete: parseBool(json['done'] ?? json['complete']),
       steps: List<DeployGuideStep>.unmodifiable(
         asJsonList(json['steps'], DeployGuideStep.fromJson),
       ),

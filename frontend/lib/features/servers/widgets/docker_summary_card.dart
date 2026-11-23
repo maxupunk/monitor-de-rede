@@ -29,9 +29,10 @@ class _DockerSummaryCardState extends ConsumerState<DockerSummaryCard> {
     _releaseInterest = ref
         .read(sseServiceProvider.notifier)
         .acquireInterest('docker');
-    Future<void>.microtask(
-      () => ref.read(dockerProvider.notifier).fetchHosts(),
-    );
+    Future<void>.microtask(() {
+      if (!mounted) return;
+      ref.read(dockerProvider.notifier).fetchHosts();
+    });
   }
 
   @override

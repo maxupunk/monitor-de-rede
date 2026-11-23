@@ -60,18 +60,27 @@ class _DockerLayoutScaffoldState extends ConsumerState<DockerLayoutScaffold> {
   @override
   void didUpdateWidget(covariant DockerLayoutScaffold oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.hostQueryParam != widget.hostQueryParam &&
-        widget.hostQueryParam != null &&
-        widget.hostQueryParam!.isNotEmpty) {
-      Future<void>.microtask(
-        () => ref
-            .read(dockerProvider.notifier)
-            .selectHost(widget.hostQueryParam!),
-      );
+    if (oldWidget.hostQueryParam != widget.hostQueryParam) {
+      final requested = widget.hostQueryParam;
+      Future<void>.microtask(() {
+        if (!mounted) return;
+        final notifier = ref.read(dockerProvider.notifier);
+        if (requested != null && requested.isNotEmpty) {
+          notifier.selectHost(requested);
+        } else {
+          final hosts = ref.read(dockerProvider).hosts;
+          if (hosts.isNotEmpty) {
+            final fallback =
+                hosts.where((h) => h.isLocal).firstOrNull ?? hosts.first;
+            notifier.selectHost(fallback.key);
+          }
+        }
+      });
     }
   }
 
   Future<void> _syncHosts() async {
+    if (!mounted) return;
     await ref
         .read(dockerProvider.notifier)
         .fetchHosts(preferredHostKey: widget.hostQueryParam);

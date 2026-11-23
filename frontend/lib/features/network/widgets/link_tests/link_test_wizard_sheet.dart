@@ -172,8 +172,8 @@ class _LinkTestWizardBodyState extends ConsumerState<LinkTestWizardBody> {
       'durationS': _durationS,
       'direction': _direction,
       'streams': _streams,
-      if (double.tryParse(_limitCtrl.text.trim()) != null)
-        'limitMbps': double.parse(_limitCtrl.text.trim()),
+      if ((int.tryParse(_limitCtrl.text.trim()) ?? 0) > 0)
+        'limitMbps': int.parse(_limitCtrl.text.trim()),
     },
   };
 

@@ -123,6 +123,7 @@ class _DeploysPageState extends ConsumerState<DeploysPage> {
     // 2. Deep links `?run=`, `?build=`, `?setup=1&probe=&project=`
     final runId = int.tryParse(q['run'] ?? '');
     if (runId != null && runId > 0) {
+      if (!mounted) return;
       context.replace('/deploys');
       await showDeployRunDialog(context, runId: runId, canAdmin: canAdmin);
       return;
@@ -130,6 +131,7 @@ class _DeploysPageState extends ConsumerState<DeploysPage> {
 
     final buildId = int.tryParse(q['build'] ?? '');
     if (buildId != null && buildId > 0) {
+      if (!mounted) return;
       context.replace('/deploys');
       await showDeployBuildDialog(
         context,
@@ -142,6 +144,7 @@ class _DeploysPageState extends ConsumerState<DeploysPage> {
     if (canAdmin && q['setup'] == '1') {
       final probeId = int.tryParse(q['probe'] ?? '');
       final project = q['project'];
+      if (!mounted) return;
       context.replace('/deploys');
       await showDeploySetupDialog(
         context,
@@ -161,7 +164,16 @@ class _DeploysPageState extends ConsumerState<DeploysPage> {
       tone: SemanticTone.error,
     );
     if (!ok || !mounted) return;
-    await ref.read(deploysProvider.notifier).removeApplication(app.id);
+    try {
+      await ref.read(deploysProvider.notifier).removeApplication(app.id);
+    } catch (err) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Erro ao remover aplicação: ${describeError(err)}'),
+        ),
+      );
+    }
   }
 
   Future<void> _removeTarget(DeployTargetView target) async {
@@ -174,7 +186,14 @@ class _DeploysPageState extends ConsumerState<DeploysPage> {
       tone: SemanticTone.error,
     );
     if (!ok || !mounted) return;
-    await ref.read(deploysProvider.notifier).removeTarget(target.id);
+    try {
+      await ref.read(deploysProvider.notifier).removeTarget(target.id);
+    } catch (err) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao remover alvo: ${describeError(err)}')),
+      );
+    }
   }
 
   void _handleGuideAction(DeployGuideAction action, bool canAdmin) {
@@ -193,7 +212,10 @@ class _DeploysPageState extends ConsumerState<DeploysPage> {
         context.go('/remote-servers');
       case 'setup':
       case 'add_target':
-        showDeploySetupDialog(context);
+        showDeploySetupDialog(
+          context,
+          presetApplicationId: action.applicationId,
+        );
       case 'edit_env':
         if (action.targetId != null) {
           for (final app in ref.read(deploysProvider).applications) {

@@ -66,16 +66,20 @@ class _ServerConfigPageState extends ConsumerState<ServerConfigPage> {
     });
     if (!result.ok) return;
 
+    final previousUrl = ref.read(serverConfigProvider).baseUrl;
+    final targetRoute = result.needsSetup == true ? '/setup' : '/login';
+    if (ref.read(authProvider).isAuthenticated &&
+        previousUrl != result.normalizedUrl) {
+      await ref
+          .read(authProvider.notifier)
+          .clearSessionForServerSwitch(redirectTo: targetRoute);
+    }
     await ref
         .read(serverConfigProvider.notifier)
         .setServerUrl(result.normalizedUrl);
     await ref.read(authProvider.notifier).refreshSetupStatus();
     if (!mounted) return;
-    if (result.needsSetup == true) {
-      context.go('/setup');
-    } else {
-      context.go('/login');
-    }
+    context.go(targetRoute);
   }
 
   @override

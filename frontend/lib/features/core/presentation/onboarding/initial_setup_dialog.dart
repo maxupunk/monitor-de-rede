@@ -434,13 +434,18 @@ class _OnboardingWizardBodyState extends ConsumerState<_OnboardingWizardBody> {
       _WizardStep.restore => BackupFileRestoreCard(
         onRestored: (res) async {
           if (res.signInAgain) {
-            await ref.read(authProvider.notifier).logout();
+            await ref
+                .read(authProvider.notifier)
+                .logout(redirectTo: '/login?restaurado=1');
             if (context.mounted) {
               Navigator.of(context).pop();
               context.go('/login?restaurado=1');
             }
-          } else if (context.mounted) {
-            setState(() => _step = _WizardStep.done);
+          } else {
+            await ref.read(onboardingProvider.notifier).completeOnboarding();
+            if (context.mounted) {
+              setState(() => _step = _WizardStep.done);
+            }
           }
         },
       ),
@@ -606,11 +611,11 @@ class _OnboardingWizardBodyState extends ConsumerState<_OnboardingWizardBody> {
           ),
           const SizedBox(height: 10),
           for (final (id, label) in const <(String, String)>[
-            ('google', 'Google'),
-            ('cloudflare', 'Cloudflare'),
-            ('github', 'GitHub'),
-            ('whatsapp', 'WhatsApp'),
-            ('microsoft365', 'Microsoft 365'),
+            ('google-http', 'Google'),
+            ('cloudflare-http', 'Cloudflare'),
+            ('github-http', 'GitHub'),
+            ('whatsapp-http', 'WhatsApp'),
+            ('microsoft365-http', 'Microsoft 365'),
           ])
             CheckboxListTile(
               contentPadding: EdgeInsets.zero,

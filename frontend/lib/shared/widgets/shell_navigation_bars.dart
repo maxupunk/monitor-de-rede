@@ -448,7 +448,7 @@ class ShellUserAccountMenu extends ConsumerWidget {
           ),
         ),
         const PopupMenuDivider(),
-        if (auth.canWrite)
+        if (auth.isAdmin)
           const PopupMenuItem<String>(
             value: 'onboarding',
             child: ListTile(

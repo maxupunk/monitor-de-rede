@@ -710,12 +710,16 @@ class AiDigest {
   final String? createdAt;
 
   factory AiDigest.fromJson(Map<String, dynamic> json) {
+    final periodHours = parseIntOrNull(json['periodHours']);
     return AiDigest(
       title: (json['title'] as String?) ?? 'Resumo da rede',
-      summary: (json['summary'] ?? json['content'] ?? '').toString(),
-      period: json['period'] as String?,
+      summary: (json['text'] ?? json['summary'] ?? json['content'] ?? '')
+          .toString(),
+      period:
+          (json['period'] as String?) ??
+          (periodHours != null ? '${periodHours}h' : null),
       highlights: asStringList(json['highlights']),
-      createdAt: json['createdAt'] as String?,
+      createdAt: (json['generatedAt'] ?? json['createdAt']) as String?,
     );
   }
 }

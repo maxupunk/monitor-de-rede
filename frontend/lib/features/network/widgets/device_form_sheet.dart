@@ -780,8 +780,8 @@ class _DeviceFormBodyState extends ConsumerState<_DeviceFormBody> {
       'siteId': _siteId,
       'networkId': _networkId,
       'parentId': _parentId,
-      'operatingSystem': _operatingSystem,
-      'accessMode': _accessMode,
+      'operatingSystem': _operatingSystem ?? 'auto',
+      'accessMode': _accessMode ?? 'auto',
       'isMonitored': _isMonitored,
       'snmpEnabled': _snmpEnabled,
       if (_snmpEnabled) ...<String, dynamic>{
@@ -791,8 +791,8 @@ class _DeviceFormBodyState extends ConsumerState<_DeviceFormBody> {
             : _communityCtrl.text.trim(),
         'snmpPollIntervalSeconds':
             int.tryParse(_pollIntervalCtrl.text.trim()) ?? 60,
-      },
-      if (_linkIfaceCtrl.text.trim().isNotEmpty)
+        'linkInterfaceName': _linkIfaceCtrl.text.trim(),
+      } else if (_linkIfaceCtrl.text.trim().isNotEmpty)
         'linkInterfaceName': _linkIfaceCtrl.text.trim(),
     };
 

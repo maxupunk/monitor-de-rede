@@ -321,7 +321,7 @@ class StorageOptionRef {
     return StorageOptionRef(
       id: parseIntOrNull(json['id']) ?? 0,
       name: (json['name'] ?? '').toString(),
-      kind: (json['kind'] ?? 'local').toString(),
+      kind: (json['provider'] ?? json['kind'] ?? 'local').toString(),
     );
   }
 }

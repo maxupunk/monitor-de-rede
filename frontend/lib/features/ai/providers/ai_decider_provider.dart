@@ -237,22 +237,26 @@ class AiDeciderNotifier extends Notifier<AiDeciderState> {
         percentage: 0,
       ),
     );
+    _pullCancelled = false;
     try {
       await for (final progress in _repo.pullDeciderModel(
         decider: decider,
         onCancelAvailable: (cancel) => _cancelPull = cancel,
       )) {
+        if (_pullCancelled) return false;
         state = state.copyWith(pullProgress: progress);
         if (progress.error != null && progress.error!.isNotEmpty) {
           state = state.copyWith(pulling: false);
           return false;
         }
       }
+      if (_pullCancelled) return false;
       state = state.copyWith(pulling: false, clearPullProgress: true);
       await loadModels(decider);
       await test(decider, question: question);
       return true;
     } catch (err) {
+      if (_pullCancelled) return false;
       state = state.copyWith(
         pulling: false,
         pullProgress: ModelPullProgress(
@@ -270,7 +274,10 @@ class AiDeciderNotifier extends Notifier<AiDeciderState> {
     }
   }
 
+  bool _pullCancelled = false;
+
   void cancelPull() {
+    _pullCancelled = true;
     _cancelPull?.call();
     _cancelPull = null;
     state = state.copyWith(

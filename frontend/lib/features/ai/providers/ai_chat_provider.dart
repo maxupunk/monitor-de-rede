@@ -120,7 +120,11 @@ class AiChatNotifier extends Notifier<AiChatState> {
     state = state.copyWith(compactNext: !state.compactNext);
   }
 
-  void stopStreaming() {
+  int _streamGeneration = 0;
+  int _cancelledGeneration = 0;
+
+  void stopStreaming({bool switchingConversation = false}) {
+    _cancelledGeneration = _streamGeneration;
     _cancelStream?.call();
     _cancelStream = null;
     if (!state.isStreaming) return;
@@ -130,12 +134,19 @@ class AiChatNotifier extends Notifier<AiChatState> {
           return interruptRunningTools(m);
         })
         .toList(growable: false);
+    final capturedId = ref.read(aiConversationsProvider).activeId;
     state = state.copyWith(messages: updated, isStreaming: false);
-    ref.read(aiConversationsProvider.notifier).persistCurrent(updated);
+    ref
+        .read(aiConversationsProvider.notifier)
+        .persistCurrent(
+          updated,
+          targetId: capturedId,
+          updateActiveOnCreate: !switchingConversation,
+        );
   }
 
   void newConversation({AiChatContext context = const AiChatContext()}) {
-    stopStreaming();
+    stopStreaming(switchingConversation: true);
     ref.read(aiConversationsProvider.notifier).startNew();
     state = AiChatState(
       conversationKey: _randomConversationKey(),
@@ -147,7 +158,7 @@ class AiChatNotifier extends Notifier<AiChatState> {
   }
 
   Future<void> openConversation(String id) async {
-    stopStreaming();
+    stopStreaming(switchingConversation: true);
     final detail = await ref.read(aiConversationsProvider.notifier).open(id);
     if (detail == null) return;
     state = AiChatState(
@@ -292,12 +303,27 @@ class AiChatNotifier extends Notifier<AiChatState> {
       'conversationKey': state.conversationKey,
     };
 
+    final myGen = ++_streamGeneration;
+    final myConversationKey = state.conversationKey;
+    final capturedConvId = ref.read(aiConversationsProvider).activeId;
+    bool isStaleOrCancelled() =>
+        _cancelledGeneration == myGen ||
+        _streamGeneration != myGen ||
+        state.conversationKey != myConversationKey;
+
     var streamEndedProperly = false;
     try {
       await for (final frame in _repo.streamChat(
         body: payload,
-        onCancelAvailable: (cancel) => _cancelStream = cancel,
+        onCancelAvailable: (cancel) {
+          if (!isStaleOrCancelled()) {
+            _cancelStream = cancel;
+          } else {
+            cancel();
+          }
+        },
       )) {
+        if (isStaleOrCancelled()) break;
         final type = frame['type']?.toString();
         if (type == 'contextCompacted') {
           state = state.copyWith(
@@ -326,7 +352,7 @@ class AiChatNotifier extends Notifier<AiChatState> {
         );
       }
 
-      if (!streamEndedProperly) {
+      if (!streamEndedProperly && !isStaleOrCancelled()) {
         final interrupted = state.messages
             .map((m) {
               if (m.id != assistantId) return m;
@@ -345,31 +371,37 @@ class AiChatNotifier extends Notifier<AiChatState> {
         );
       }
     } catch (err) {
-      final errMsg = describeError(
-        err,
-        fallback: 'Falha na comunicação com a IA.',
-      );
-      final failed = state.messages
-          .map((m) {
-            if (m.id != assistantId) return m;
-            return interruptRunningTools(
-              m,
-            ).copyWith(error: errMsg, isStreaming: false);
-          })
-          .toList(growable: false);
-      state = state.copyWith(
-        messages: failed,
-        isStreaming: false,
-        streamError: errMsg,
-      );
-    } finally {
-      _cancelStream = null;
-      if (state.isStreaming) {
-        state = state.copyWith(isStreaming: false);
+      if (!isStaleOrCancelled()) {
+        final errMsg = describeError(
+          err,
+          fallback: 'Falha na comunicação com a IA.',
+        );
+        final failed = state.messages
+            .map((m) {
+              if (m.id != assistantId) return m;
+              return interruptRunningTools(
+                m,
+              ).copyWith(error: errMsg, isStreaming: false);
+            })
+            .toList(growable: false);
+        state = state.copyWith(
+          messages: failed,
+          isStreaming: false,
+          streamError: errMsg,
+        );
       }
-      await ref
-          .read(aiConversationsProvider.notifier)
-          .persistCurrent(state.messages);
+    } finally {
+      if (_streamGeneration == myGen) {
+        _cancelStream = null;
+      }
+      if (!isStaleOrCancelled()) {
+        if (state.isStreaming) {
+          state = state.copyWith(isStreaming: false);
+        }
+        await ref
+            .read(aiConversationsProvider.notifier)
+            .persistCurrent(state.messages, targetId: capturedConvId);
+      }
     }
   }
 

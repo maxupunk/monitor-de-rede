@@ -86,7 +86,9 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
         .remoteLayoutRevision;
     await Future.wait<void>(<Future<void>>[
       ref.read(sitesProvider.notifier).fetchSites(),
-      ref.read(topologyProvider.notifier).fetchTopology(),
+      ref
+          .read(topologyProvider.notifier)
+          .fetchTopology(siteId: _filterSpec.siteId, updateSiteFilter: true),
     ]);
   }
 
@@ -225,9 +227,13 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
     if (!mounted) return;
     if (ok) {
       setState(() {
+        _customPositions.clear();
         _draggedNodeIds.clear();
         _undoStack.clear();
         _preDragSnapshot = null;
+        _acknowledgedRemoteRevision = ref
+            .read(topologyProvider)
+            .remoteLayoutRevision;
       });
     }
     final msg = ok
@@ -516,12 +522,21 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
         : ref.read(topologyProvider.notifier).addLink(payload),
   );
 
-  Future<void> _confirmEdge(TopologyEdgeModel edge) =>
-      ref.read(topologyProvider.notifier).updateLink(edge.id, <String, dynamic>{
-        'sourceInterfaceId': edge.sourceInterfaceId,
-        'targetInterfaceId': edge.targetInterfaceId,
-        'linkType': edge.linkType,
-      });
+  Future<void> _confirmEdge(TopologyEdgeModel edge) async {
+    final ok = await ref
+        .read(topologyProvider.notifier)
+        .updateLink(edge.id, <String, dynamic>{
+          'sourceInterfaceId': edge.sourceInterfaceId,
+          'targetInterfaceId': edge.targetInterfaceId,
+          'linkType': edge.linkType,
+        });
+    if (!ok && mounted) {
+      final err = ref.read(topologyProvider).actionError;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(err ?? 'Erro ao confirmar enlace.')),
+      );
+    }
+  }
 
   void _handleDeleteSelectedEdge() {
     if (_deletingEdge || _selectedEdgeId == null) return;
@@ -578,6 +593,11 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
           .deleteLink(edge.id);
       if (deleted && mounted && _selectedEdgeId == edge.id) {
         setState(() => _selectedEdgeId = null);
+      } else if (!deleted && mounted) {
+        final err = ref.read(topologyProvider).actionError;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(err ?? 'Erro ao remover enlace.')),
+        );
       }
     } finally {
       _deletingEdge = false;
@@ -598,7 +618,14 @@ class _TopologyPageState extends ConsumerState<TopologyPage> {
         });
         _applyLayoutMode(_filterSpec.layoutMode);
       case TopologyHudAction.recalculate:
-        ref.read(topologyProvider.notifier).recalculateTopology();
+        ref.read(topologyProvider.notifier).recalculateTopology().then((ok) {
+          if (!ok && mounted) {
+            final err = ref.read(topologyProvider).actionError;
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(err ?? 'Erro ao recalcular topologia.')),
+            );
+          }
+        });
       case TopologyHudAction.addLink:
         _openLinkForm(initialSourceId: _selectedNodeId);
       case TopologyHudAction.connectOnMap:

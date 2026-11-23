@@ -43,6 +43,8 @@ class _AdaptiveAppShellState extends ConsumerState<AdaptiveAppShell> {
   final Set<String> _expandedGroups = <String>{};
   SseService? _sseNotifier;
 
+  String? _lastAutoExpandedLocation;
+
   @override
   void initState() {
     super.initState();
@@ -97,20 +99,18 @@ class _AdaptiveAppShellState extends ConsumerState<AdaptiveAppShell> {
     final aiOpen = ref.watch(aiDrawerOpenProvider);
     final aiBuilder = ref.watch(aiDrawerBuilderProvider);
 
-    // Se a área aberta desligar ou perder acesso em tempo real (SSE), redireciona.
-    ref.listen<Set<ProductArea>>(visibleAreasProvider, (_, next) {
-      final meta = resolveRouteMeta(widget.location);
-      if (meta == null || meta.area == ProductArea.core) return;
-      final areasState = ref.read(areasProvider);
-      final authState = ref.read(authProvider);
-      if (!areasState.isEnabled(meta.area)) {
-        final encodedFrom = Uri.encodeQueryComponent(widget.location);
-        context.go('/area-desligada/${meta.area.id}?from=$encodedFrom');
-      } else if (!authState.hasAccess(meta.area)) {
-        final encodedFrom = Uri.encodeQueryComponent(widget.location);
-        context.go(
-          '/area-desligada/${meta.area.id}?from=$encodedFrom&motivo=acesso',
-        );
+    // Em telas estreitas (< 900px), espelha `aiDrawerOpenProvider` no `endDrawer`
+    // para que ações programáticas ("Perguntar à IA", aprovação) abram o painel.
+    ref.listen<bool>(aiDrawerOpenProvider, (prev, next) {
+      if (!mounted) return;
+      final isNarrow = MediaQuery.sizeOf(context).width < 900;
+      if (!isNarrow) return;
+      final scaffold = _scaffoldKey.currentState;
+      if (scaffold == null) return;
+      if (next && !scaffold.isEndDrawerOpen) {
+        scaffold.openEndDrawer();
+      } else if (!next && scaffold.isEndDrawerOpen) {
+        scaffold.closeEndDrawer();
       }
     });
 
@@ -132,9 +132,12 @@ class _AdaptiveAppShellState extends ConsumerState<AdaptiveAppShell> {
     );
     final navSections = buildNavSections(navCtx, allNavEntries);
 
-    final activeGroup = groupOfPath(navSections, widget.location);
-    if (activeGroup != null) {
-      _expandedGroups.add(activeGroup);
+    if (_lastAutoExpandedLocation != widget.location) {
+      _lastAutoExpandedLocation = widget.location;
+      final activeGroup = groupOfPath(navSections, widget.location);
+      if (activeGroup != null) {
+        _expandedGroups.add(activeGroup);
+      }
     }
 
     final routeMeta = resolveRouteMeta(widget.location);
@@ -265,6 +268,11 @@ class _AdaptiveAppShellState extends ConsumerState<AdaptiveAppShell> {
       endDrawer: width < 900 && aiBuilder != null
           ? Drawer(width: 360, child: _buildAiDrawerPanel(context, aiBuilder))
           : null,
+      onEndDrawerChanged: (isOpened) {
+        if (width < 900 && ref.read(aiDrawerOpenProvider) != isOpened) {
+          ref.read(aiDrawerOpenProvider.notifier).state = isOpened;
+        }
+      },
       appBar: AppBar(
         automaticallyImplyLeading: false,
         leading: isExpanded

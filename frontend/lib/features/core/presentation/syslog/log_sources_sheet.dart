@@ -100,7 +100,9 @@ class _LogSourcesSheetBody extends ConsumerWidget {
                 if (auth.canWrite) ...<Widget>[
                   const SizedBox(height: 10),
                   AppDropdownFormField<int?>(
-                    initialValue: src.deviceId,
+                    initialValue: devices.any((d) => d.id == src.deviceId)
+                        ? src.deviceId
+                        : null,
                     decoration: const InputDecoration(
                       labelText: 'Vincular ao dispositivo',
                       isDense: true,

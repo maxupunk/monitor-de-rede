@@ -565,10 +565,12 @@ class SaasPresetItem {
       name: (json['name'] ?? '').toString(),
       category: (json['category'] ?? 'cloud').toString(),
       target: (json['target'] ?? json['url'] ?? '').toString(),
-      type: (json['type'] ?? 'http').toString(),
+      type: (json['checkType'] ?? json['type'] ?? 'http').toString(),
       recommended: json['recommended'] == true,
       alreadyProvisioned:
-          json['alreadyProvisioned'] == true || json['provisioned'] == true,
+          json['isProvisioned'] == true ||
+          json['alreadyProvisioned'] == true ||
+          json['provisioned'] == true,
       description: json['description'] as String?,
     );
   }

@@ -78,9 +78,10 @@ class _PluginEditorBodyState extends ConsumerState<_PluginEditorBody>
               'transports': <String>['ssh'],
               'actions': <Map<String, dynamic>>[
                 <String, dynamic>{
-                  'name': 'status',
-                  'title': 'Consultar status',
-                  'effect': 'read',
+                  'id': 'detect',
+                  'label': 'Detectar equipamento',
+                  'kind': 'read',
+                  'params': <dynamic>[],
                 },
               ],
             },
@@ -90,7 +91,7 @@ class _PluginEditorBodyState extends ConsumerState<_PluginEditorBody>
       text:
           pkg?.script ??
           '// Script Rhai (use {{username}} e {{password}} no transporte)\n'
-              'fn status(ctx) {\n  #{ ok: true }\n}\n',
+              'fn detect(device, params) {\n  #{ compatible: true }\n}\n',
     );
     _usageCtrl = TextEditingController(
       text:
@@ -440,7 +441,7 @@ class _PluginEditorBodyState extends ConsumerState<_PluginEditorBody>
                 SemanticChip(
                   label:
                       '${_preview!.report.passed}/${_preview!.report.total} testes OK',
-                  tone: _preview!.report.failed == 0
+                  tone: _preview!.report.ok
                       ? SemanticTone.success
                       : SemanticTone.error,
                   compact: true,

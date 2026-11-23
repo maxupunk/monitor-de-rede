@@ -90,7 +90,14 @@ class VpnNotifier extends Notifier<VpnState> {
   /// Aplica snapshot SSE `vpn:peers_updated` diretamente em memória (zero polling).
   void applyRealtimePeers(Map<String, dynamic> data) {
     final updates = asJsonMapList(data['peers']);
-    if (updates.isEmpty) return;
+    if (updates.isEmpty) {
+      // Eventos de CRUD de peer/servidor chegam com payload `{}` -> recarrega.
+      Future<void>.microtask(() async {
+        await fetchServer();
+        await fetchPeers();
+      });
+      return;
+    }
 
     final updatesById = <int, Map<String, dynamic>>{};
     for (final item in updates) {
@@ -100,6 +107,14 @@ class VpnNotifier extends Notifier<VpnState> {
       }
     }
     if (updatesById.isEmpty) return;
+
+    final existingIds = state.peers.map((p) => p.id).toSet();
+    final hasStructuralChange =
+        updatesById.length != existingIds.length ||
+        updatesById.keys.any((id) => !existingIds.contains(id));
+    if (hasStructuralChange) {
+      Future<void>.microtask(fetchPeers);
+    }
 
     var changed = false;
     var connectedCount = 0;

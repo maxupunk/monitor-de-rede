@@ -68,12 +68,17 @@ class _DiagnosticPlaybookBodyState
       _summary = null;
     });
     try {
+      final target = _targetCtrl.text.trim();
+      final deviceIp = widget.device?.ipAddress?.trim();
+      final useDeviceId =
+          widget.device != null &&
+          (deviceIp == null || deviceIp.isEmpty || target == deviceIp);
       final stream = ref
           .read(diagnosticsServiceProvider)
           .streamPlaybook(
             playbookType: _playbookType,
-            target: _targetCtrl.text.trim(),
-            deviceId: widget.device?.id,
+            target: target,
+            deviceId: useDeviceId ? widget.device?.id : null,
             onCancelAvailable: (c) => _cancel = c,
           );
       await for (final evt in stream) {

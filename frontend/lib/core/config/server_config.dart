@@ -213,6 +213,16 @@ class ServerConfigNotifier extends Notifier<ServerConfigState> {
             needsSetup = decoded['needsSetup'] as bool;
           }
         } catch (_) {}
+        if (needsSetup == null) {
+          return ServerProbeResult(
+            ok: false,
+            normalizedUrl: normalized,
+            statusCode: response.statusCode,
+            latencyMs: stopwatch.elapsedMilliseconds,
+            error:
+                'O endereço respondeu, mas não parece ser uma central NetMonitor.',
+          );
+        }
         return ServerProbeResult(
           ok: true,
           normalizedUrl: normalized,

@@ -384,8 +384,10 @@ class AuthNotifier extends Notifier<AuthState> {
     }
   }
 
-  Future<void> logout() async {
+  Future<void> logout({String? redirectTo}) async {
     final token = state.token;
+    ref.read(postLogoutLocationProvider.notifier).state =
+        redirectTo ?? '/login';
     try {
       if (token != null && token.isNotEmpty) {
         await ref.read(apiClientProvider).post<dynamic>('/auth/logout');
@@ -395,6 +397,13 @@ class AuthNotifier extends Notifier<AuthState> {
     } finally {
       await _clearLocalSession();
     }
+  }
+
+  /// Limpa a sessão local ao trocar de servidor (sem tentar chamar `/auth/logout` no servidor novo).
+  Future<void> clearSessionForServerSwitch({String? redirectTo}) async {
+    ref.read(postLogoutLocationProvider.notifier).state = redirectTo;
+    await _clearLocalSession();
+    state = state.copyWith(clearNeedsSetup: true);
   }
 
   Future<void> _persistSession({
@@ -424,6 +433,11 @@ class AuthNotifier extends Notifier<AuthState> {
   String _describeError(Object err, String fallback) =>
       describeError(err, fallback: fallback);
 }
+
+/// Destino explícito após logout manual (ex.: `/login` ou `/login?restaurado=1`)
+/// para evitar corrida com o `refreshListenable` do `GoRouter` que anexaria
+/// `?redirect=<rota_anterior>`.
+final postLogoutLocationProvider = StateProvider<String?>((ref) => null);
 
 final authProvider = NotifierProvider<AuthNotifier, AuthState>(
   AuthNotifier.new,

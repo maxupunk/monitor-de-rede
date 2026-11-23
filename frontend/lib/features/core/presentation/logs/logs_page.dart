@@ -31,26 +31,41 @@ class LogsPage extends ConsumerStatefulWidget {
 
 class _LogsPageState extends ConsumerState<LogsPage> {
   final TextEditingController _searchCtrl = TextEditingController();
+  LogsNotifier? _logsNotifier;
 
   @override
   void initState() {
     super.initState();
+    _logsNotifier = ref.read(logsProvider.notifier);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       final notifier = ref.read(logsProvider.notifier);
       if (widget.deviceId != null) {
         await notifier.applyFilters(LogFilters(deviceId: widget.deviceId));
       } else {
-        await notifier.fetchLogs(reset: true);
+        final current = ref.read(logsProvider).filters;
+        if (current.deviceId != null) {
+          await notifier.applyFilters(current.copyWith(clearDevice: true));
+        } else {
+          await notifier.fetchLogs(reset: true);
+        }
       }
+      if (!mounted) return;
       await notifier.fetchSources();
+      if (!mounted) return;
       await ref.read(monitorsProvider.notifier).fetchReferenceCatalogs();
+      if (!mounted) return;
       await ref.read(coreSettingsProvider.notifier).fetchOperatingSystems();
     });
   }
 
   @override
   void dispose() {
+    try {
+      _logsNotifier?.stopTail();
+    } catch (_) {
+      // Container já encerrado em teardown de testes.
+    }
     _searchCtrl.dispose();
     super.dispose();
   }
