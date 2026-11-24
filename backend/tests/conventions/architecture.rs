@@ -46,6 +46,7 @@ const PERMITIDAS: &[(&str, &[&str])] = &[
     ("servers", &["core", "agent-protocol"]),
     ("vpn", &["core", "agent-protocol"]),
     ("assistant", &["core", "agent-protocol"]),
+    ("mcp", &["core"]),
     ("network-wifi", &["core", "agent-protocol", "network"]),
     ("network-link-tests", &["core", "agent-protocol", "network"]),
     ("servers-registry", &["core", "agent-protocol", "servers"]),

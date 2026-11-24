@@ -24,6 +24,7 @@ pub mod dashboard;
 pub mod devices;
 pub mod events;
 pub mod maintenance;
+pub mod mcp;
 pub mod migrations;
 pub mod models;
 pub mod monitoring;

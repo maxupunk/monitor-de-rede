@@ -183,12 +183,9 @@ pub fn basic(headers: &HeaderMap) -> Option<(String, String)> {
 /// `Bearer …`.
 #[must_use]
 pub fn bearer(headers: &HeaderMap) -> Option<Claims> {
-    let raw = headers
-        .get(axum::http::header::AUTHORIZATION)?
-        .to_str()
-        .ok()?
-        .strip_prefix("Bearer ")?;
-    verify(raw.trim())
+    verify(netmonitor_core::shared::personal_token::bearer_token(
+        headers,
+    )?)
 }
 
 /// Por que o login foi recusado (a mensagem vai ao `docker login`).

@@ -402,6 +402,7 @@ pub fn ai_tool_catalog() -> Vec<Box<dyn AiToolHandler>> {
         Box::new(docker::DockerContainerAction),
         Box::new(netmonitor_servers::deploys::ai_tools::DeployStatus),
         Box::new(netmonitor_servers::deploys::ai_tools::DeployGuide),
+        Box::new(netmonitor_servers::deploys::ai_tools::DeployReadiness),
         Box::new(netmonitor_servers::deploys::ai_tools::DeployLog),
         Box::new(netmonitor_servers::deploys::ai_tools::BuildStatus),
         Box::new(netmonitor_servers::deploys::ai_tools::BuildLog),
@@ -557,6 +558,12 @@ impl assistant::CentralServices for AssistantCentral {
 #[must_use]
 pub fn assistant_central() -> assistant::Central {
     assistant::Central::new(Arc::new(AssistantCentral))
+}
+
+/// Catálogo de aplicações de deploy fornecido pela área Servidores ao servidor MCP (ADR 024).
+#[must_use]
+pub fn deploy_app_catalog() -> Arc<dyn netmonitor_core::mcp::McpDeployAppCatalog> {
+    Arc::new(netmonitor_servers::deploys::ServersDeployAppCatalog)
 }
 
 #[cfg(test)]

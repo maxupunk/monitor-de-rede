@@ -752,22 +752,12 @@ pub fn routes() -> Routes {
 
 /// O token do `Authorization: Bearer …`.
 fn bearer(headers: &HeaderMap) -> AppResult<&str> {
-    headers
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| {
-            value
-                .strip_prefix("Bearer ")
-                .or_else(|| value.strip_prefix("bearer "))
-        })
-        .map(str::trim)
-        .filter(|token| !token.is_empty())
-        .ok_or_else(|| {
-            AppError::unauthorized(
-                "Envie o token OIDC do GitHub Actions em Authorization: Bearer (veja o workflow \
+    netmonitor_core::shared::personal_token::bearer_token(headers).ok_or_else(|| {
+        AppError::unauthorized(
+            "Envie o token OIDC do GitHub Actions em Authorization: Bearer (veja o workflow \
                  gerado em Deploys)",
-            )
-        })
+        )
+    })
 }
 
 async fn github_hook(

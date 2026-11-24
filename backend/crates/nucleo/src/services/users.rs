@@ -70,6 +70,16 @@ pub fn request_is_allowed(role: Role, method: &Method, path: &str) -> bool {
         return true;
     }
 
+    // Servidor MCP (ADR 024): configurações globais são exclusivas do admin;
+    // cada usuário autenticado pode listar/criar/revogar seus próprios tokens
+    // dentro dos escopos permitidos pelo seu papel.
+    if path == "/api/mcp/settings" {
+        return role.can_manage_users();
+    }
+    if path == "/api/mcp" || path.starts_with("/api/mcp/") {
+        return true;
+    }
+
     // Um agente tem o Docker de outro servidor nas mãos: cadastrar, emitir
     // código ou revogar é tão sensível quanto operar a Engine.
     if path == "/api/agents" || path.starts_with("/api/agents/") {
@@ -336,5 +346,33 @@ mod tests {
             &Method::DELETE,
             "/api/users/2"
         ));
+    }
+
+    #[test]
+    fn mcp_settings_so_admin_e_tokens_para_todos_os_papeis() {
+        assert!(request_is_allowed(
+            Role::Admin,
+            &Method::PUT,
+            "/api/mcp/settings"
+        ));
+        assert!(!request_is_allowed(
+            Role::Operator,
+            &Method::PUT,
+            "/api/mcp/settings"
+        ));
+        assert!(!request_is_allowed(
+            Role::Viewer,
+            &Method::PUT,
+            "/api/mcp/settings"
+        ));
+        for role in [Role::Admin, Role::Operator, Role::Viewer] {
+            assert!(request_is_allowed(role, &Method::GET, "/api/mcp/overview"));
+            assert!(request_is_allowed(role, &Method::POST, "/api/mcp/tokens"));
+            assert!(request_is_allowed(
+                role,
+                &Method::DELETE,
+                "/api/mcp/tokens/1"
+            ));
+        }
     }
 }

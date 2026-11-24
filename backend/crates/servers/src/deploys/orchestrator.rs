@@ -239,6 +239,23 @@ pub async fn request_manual(
     input: &DeployInput,
     user: &str,
 ) -> AppResult<deploy_runs::Model> {
+    request_manual_with_approval_policy(ctx, target_id, input, user, true).await
+}
+
+/// "Publicar" com política explícita de aprovação: quando `auto_approve` é
+/// `false` (ex.: chamada via MCP), alvos com `requires_approval = true` entram
+/// em `awaiting_approval` em vez de pular a aprovação humana.
+///
+/// # Errors
+///
+/// `404`; `Validation` sem versão no ar e sem commit, ou commit/tag inválidos.
+pub async fn request_manual_with_approval_policy(
+    ctx: &AppContext,
+    target_id: i64,
+    input: &DeployInput,
+    user: &str,
+    auto_approve: bool,
+) -> AppResult<deploy_runs::Model> {
     let target = applications::find_target(&ctx.db, target_id).await?;
     let application = applications::find(&ctx.db, target.application_id).await?;
     let commit = input
@@ -299,7 +316,7 @@ pub async fn request_manual(
             revision: &revision,
             trigger: RunTrigger::Manual,
             triggered_by: Some(user.to_string()),
-            approver: Some(user.to_string()),
+            approver: auto_approve.then(|| user.to_string()),
             when: input.when,
             env_version_id: current_env(ctx, target.id).await?,
             rollback_of_run_id: None,
@@ -320,6 +337,21 @@ pub async fn request_restore(
     run_id: i64,
     when: DeployWhen,
     user: &str,
+) -> AppResult<deploy_runs::Model> {
+    request_restore_with_approval_policy(ctx, run_id, when, user, true).await
+}
+
+/// "Restaurar esta versão" com política explícita de aprovação.
+///
+/// # Errors
+///
+/// `404`; `Validation` para deploy que não terminou bem.
+pub async fn request_restore_with_approval_policy(
+    ctx: &AppContext,
+    run_id: i64,
+    when: DeployWhen,
+    user: &str,
+    auto_approve: bool,
 ) -> AppResult<deploy_runs::Model> {
     let source = runs::find(&ctx.db, run_id).await?;
     if runs::status_of(&source) != RunStatus::Succeeded {
@@ -344,7 +376,7 @@ pub async fn request_restore(
             revision: &revision,
             trigger: RunTrigger::Rollback,
             triggered_by: Some(user.to_string()),
-            approver: Some(user.to_string()),
+            approver: auto_approve.then(|| user.to_string()),
             when,
             env_version_id: source.env_version_id,
             rollback_of_run_id: Some(source.id),

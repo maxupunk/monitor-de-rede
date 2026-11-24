@@ -158,6 +158,7 @@ static FULL: &[TableIo] = &[
         "push_subscriptions"
     ),
     table_io!(Store::Main, _entities::ai_conversations, "ai_conversations"),
+    table_io!(Store::Main, _entities::mcp_tokens, "mcp_tokens"),
     table_io!(Store::Main, _entities::host_metrics_1m, "host_metrics_1m"),
     table_io!(
         Store::Main,

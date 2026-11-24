@@ -30,7 +30,7 @@ use netmonitor_core::ai::{
     access,
     args::ToolArgs,
     lookup::find_device,
-    tools::{AiToolHandler, ToolGroup, ToolKind, ToolOutput},
+    tools::{AiToolHandler, McpExposure, ToolGroup, ToolKind, ToolOutput},
 };
 use netmonitor_core::{
     models::{devices, plugins as plugin_rows},
@@ -421,6 +421,13 @@ impl AiToolHandler for RunPluginTests {
 
     fn name(&self) -> &'static str {
         "run_plugin_tests"
+    }
+
+    /// Consulta no chat, mas grava o resultado e move o plugin entre rascunho
+    /// e testado (o passo antes da revisão do ADR 012): pelo MCP cairia no
+    /// escopo de leitura, que até um viewer concede.
+    fn mcp_exposure(&self) -> McpExposure {
+        McpExposure::Hidden
     }
 
     fn description(&self) -> &'static str {

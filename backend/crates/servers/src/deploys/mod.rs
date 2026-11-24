@@ -63,6 +63,8 @@ pub mod webhook;
 pub mod window;
 pub mod workflow;
 
+pub use catalog::ServersDeployAppCatalog;
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 

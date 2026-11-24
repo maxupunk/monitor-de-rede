@@ -16,8 +16,8 @@ use std::collections::HashSet;
 use loco_rs::Result;
 use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 
-/// As 67 tabelas do esquema, na ordem de criação da §6 (pais antes de filhos).
-pub const CREATION_ORDER: [&str; 67] = [
+/// As 68 tabelas do esquema, na ordem de criação da §6 (pais antes de filhos).
+pub const CREATION_ORDER: [&str; 68] = [
     "users",
     "sites",
     "probes",
@@ -51,6 +51,8 @@ pub const CREATION_ORDER: [&str; 67] = [
     "push_subscriptions",
     // Conversas do Assistente IA. Depois de `users` pela FK.
     "ai_conversations",
+    // Tokens pessoais do servidor MCP (ADR 024). Depois de `users` pela FK.
+    "mcp_tokens",
     // Histórico de métricas de host e containers (ADR 011). Sem FK.
     "host_metrics_1m",
     "container_metrics_1m",
@@ -124,7 +126,7 @@ pub const LOG_TABLES: [&str; 2] = ["device_logs", "log_templates"];
 /// Nome legível de cada tabela, para as telas que falam de banco (o espaço
 /// ocupado, o conteúdo de um backup). Um teste garante que nenhuma tabela do
 /// esquema fique sem nome.
-const LABELS: [(&str, &str); 70] = [
+const LABELS: [(&str, &str); 71] = [
     ("users", "Usuários"),
     ("sites", "Sites"),
     ("probes", "Agentes e sondas"),
@@ -154,6 +156,7 @@ const LABELS: [(&str, &str); 70] = [
     ("audit_logs", "Auditoria"),
     ("push_subscriptions", "Inscrições de notificação push"),
     ("ai_conversations", "Conversas do Assistente IA"),
+    ("mcp_tokens", "MCP: tokens pessoais"),
     ("host_metrics_1m", "Métricas dos servidores (1 min)"),
     ("container_metrics_1m", "Métricas dos containers (1 min)"),
     ("plugins", "Plugins de dispositivo"),
@@ -313,10 +316,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cobre_as_27_tabelas_sem_repetir() {
-        assert_eq!(CREATION_ORDER.len(), 67);
+    fn cobre_todas_as_tabelas_sem_repetir() {
+        assert_eq!(CREATION_ORDER.len(), 68);
         let unicas: HashSet<&&str> = CREATION_ORDER.iter().collect();
-        assert_eq!(unicas.len(), 67, "há nome de tabela repetido");
+        assert_eq!(unicas.len(), 68, "há nome de tabela repetido");
     }
 
     #[test]

@@ -28,6 +28,9 @@ use crate::{
     shared::errors::{AppError, AppResult},
 };
 
+pub use super::args::McpToolContext;
+pub use crate::audit::VIA_MCP;
+
 /// O que as configurações da IA dizem sobre as ferramentas do chat — o
 /// assistente implementa para as configurações dele.
 pub trait ToolSettings {
@@ -50,7 +53,8 @@ pub fn install_catalog(catalog: Catalog) {
 
 /// Catálogo completo, na ordem em que a IA as vê. Sem catálogo instalado,
 /// nenhuma ferramenta.
-fn all_handlers() -> Vec<Box<dyn AiToolHandler>> {
+#[must_use]
+pub fn all_handlers() -> Vec<Box<dyn AiToolHandler>> {
     CATALOG.get().map_or_else(Vec::new, |catalog| catalog())
 }
 
@@ -76,6 +80,22 @@ pub enum ToolKind {
     /// automaticamente" ligado para aquela conversa e aquele equipamento
     /// (`plugins::auto_accept`), decidido no laço do agente.
     DeviceAccess,
+}
+
+/// Como a ferramenta aparece para agentes externos pelo servidor MCP
+/// (ADR 024). Cada ferramenta declara a sua: o MCP não decide pelo nome.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum McpExposure {
+    /// Pelo [`ToolKind`]: consulta → leitura, teste ativo → diagnóstico,
+    /// ação do Núcleo → operações, ação em container → containers. Ação de
+    /// área, conversa e acesso a equipamento ficam fora.
+    ByKind,
+    /// Consulta de deploy (`deploys:read`).
+    DeploysRead,
+    /// A ação de deploy: o escopo depende da subação (executar ou aprovar).
+    DeploysAction,
+    /// Nunca exposta — por exemplo, uma consulta que grava.
+    Hidden,
 }
 
 /// Grupo do catálogo. Só o [`ToolGroup::Core`] vai em toda chamada ao
@@ -596,6 +616,11 @@ pub trait AiToolHandler: Send + Sync {
         !matches!(self.group(), ToolGroup::Charts | ToolGroup::Schedules)
     }
 
+    /// Como aparece pelo servidor MCP ([`McpExposure`]).
+    fn mcp_exposure(&self) -> McpExposure {
+        McpExposure::ByKind
+    }
+
     /// Só o administrador pode rodar (e, por isso, agendar).
     fn admin_only(&self) -> bool {
         self.kind() == ToolKind::ContainerAction
@@ -1080,6 +1105,16 @@ impl ToolRegistry {
 
 /// Marca no registro de auditoria que a ação veio do chat.
 pub const VIA_AI: &str = "via Assistente IA";
+
+/// Rótulo de origem para auditoria e histórico de execuções: distingue chat da
+/// IA local de chamadas autenticadas pelo servidor MCP.
+#[must_use]
+pub fn via_label(args: &ToolArgs) -> String {
+    match args.mcp() {
+        Some(mcp) => format!("{VIA_MCP}: {}", mcp.token_name),
+        None => VIA_AI.to_string(),
+    }
+}
 
 /// Registra na auditoria, em nome de quem conversa, uma ação feita por uma
 /// ferramenta. Falha da auditoria não desfaz a ação.

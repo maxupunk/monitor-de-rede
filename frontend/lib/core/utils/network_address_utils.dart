@@ -123,3 +123,8 @@ bool looksPrivateUrl(String rawUrl) {
   if (uri == null || uri.host.isEmpty) return false;
   return isPrivateHost(uri.host);
 }
+
+/// Resolve a origem HTTP/HTTPS efetiva da central (Web PWA vs cliente nativo).
+String resolveCentralOrigin(String configuredBaseUrl) {
+  return kIsWeb ? Uri.base.origin : configuredBaseUrl;
+}

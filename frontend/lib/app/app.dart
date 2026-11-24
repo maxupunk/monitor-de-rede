@@ -37,14 +37,7 @@ class _NetMonitorAppState extends ConsumerState<NetMonitorApp> {
     final themeMode = ref.watch(themePreferenceProvider);
 
     if (!_bootstrapped) {
-      return MaterialApp(
-        title: 'NetMonitor',
-        debugShowCheckedModeBanner: false,
-        theme: AppTheme.light(),
-        darkTheme: AppTheme.dark(),
-        themeMode: themeMode,
-        home: const Scaffold(body: Center(child: CircularProgressIndicator())),
-      );
+      return BootstrapSplashApp(themeMode: themeMode);
     }
 
     final router = ref.watch(appRouterProvider);
@@ -63,6 +56,30 @@ class _NetMonitorAppState extends ConsumerState<NetMonitorApp> {
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
+    );
+  }
+}
+
+/// Tela de espera enquanto a sessão e o servidor são restaurados.
+///
+/// Usa só `builder`, sem `home`: um `MaterialApp` com `home` cria um
+/// `Navigator` que anuncia `/` ao navegador e apaga o endereço pedido
+/// (`/deploys/github?code=…`, um link direto) antes de o `GoRouter` lê-lo.
+class BootstrapSplashApp extends StatelessWidget {
+  const BootstrapSplashApp({super.key, required this.themeMode});
+
+  final ThemeMode themeMode;
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'NetMonitor',
+      debugShowCheckedModeBanner: false,
+      theme: AppTheme.light(),
+      darkTheme: AppTheme.dark(),
+      themeMode: themeMode,
+      builder: (_, _) =>
+          const Scaffold(body: Center(child: CircularProgressIndicator())),
     );
   }
 }

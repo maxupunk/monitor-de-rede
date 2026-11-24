@@ -31,6 +31,7 @@ pub mod link_test_legs;
 pub mod link_test_schedules;
 pub mod link_tests;
 pub mod maintenance_windows;
+pub mod mcp_tokens;
 pub mod metrics;
 pub mod monitor_results;
 pub mod monitor_results_hourly;

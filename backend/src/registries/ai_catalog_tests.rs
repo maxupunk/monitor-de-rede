@@ -15,7 +15,8 @@ use netmonitor_core::{
         automation::AiAutomationMode,
         risk::{AiToolRisk, Approval},
         tools::{
-            ToolGroup, ToolGroups, ToolKind, ToolPolicy, ToolRegistry, UnattendedTools, LOAD_TOOLS,
+            McpExposure, ToolGroup, ToolGroups, ToolKind, ToolPolicy, ToolRegistry,
+            UnattendedTools, LOAD_TOOLS,
         },
     },
     areas::{Area, AreaSet},
@@ -30,6 +31,29 @@ fn nomes_sao_unicos() {
     let handlers = ai_tool_catalog();
     let names: HashSet<&str> = handlers.iter().map(|handler| handler.name()).collect();
     assert_eq!(names.len(), handlers.len());
+}
+
+/// O MCP dá o escopo pela exposição que a ferramenta declara (ADR 024). Uma
+/// ferramenta de deploy que esquecesse de declarar cairia no escopo `read`,
+/// que até um viewer concede — em vez de `deploys:read`/`deploys:write`.
+#[test]
+fn ferramenta_de_deploy_declara_a_exposicao_mcp() {
+    install_dashboard_widgets();
+    install_ai_tools();
+    let deploy_tools: Vec<_> = ai_tool_catalog()
+        .into_iter()
+        .filter(|handler| handler.area() == Area::Servers)
+        .filter(|handler| handler.name().contains("deploy") || handler.name().contains("build"))
+        .collect();
+    assert!(!deploy_tools.is_empty());
+    for handler in deploy_tools {
+        assert_ne!(
+            handler.mcp_exposure(),
+            McpExposure::ByKind,
+            "{} precisa declarar mcp_exposure",
+            handler.name()
+        );
+    }
 }
 
 #[test]
@@ -364,10 +388,12 @@ async fn exporta_o_contrato_do_chat() {
 }
 
 /// O que toda pergunta de verdade paga em cada rodada, antes de qualquer
-/// dado: o system prompt e o núcleo de ferramentas. Medido em 3.021
-/// tokens (era 3.038, depois 2.795, 2.589, 2.675, 2.727 e 2.970). Subir o teto é
+/// dado: o system prompt e o núcleo de ferramentas. Medido em 3.028
+/// tokens (era 3.021, 3.038, depois 2.795, 2.589, 2.675, 2.727 e 2.970). Subir o teto é
 /// decisão, não acidente: cada token a mais aqui se paga em toda rodada de
-/// toda pergunta. Última subida (3.000 → 3.025): `chart_logs_volume` e
+/// toda pergunta. Última subida (3.025 → 3.035): `get_deploy_readiness` na
+/// linha do grupo `docker` (prontidão do deploy contínuo para IA/MCP, ADR 024),
+/// ~7 tokens. Antes (3.000 → 3.025): `chart_logs_volume` e
 /// `chart_docker_usage` na linha do grupo `charts` e a regra 5 (gráfico só
 /// por `chart_*`), ~21 tokens — sem ela o modelo pequeno inventava gráfico
 /// ("o gráfico mostra…", `<analysis_chart>`) para dado sem ferramenta.
@@ -387,7 +413,7 @@ async fn exporta_o_contrato_do_chat() {
 /// (2.650 → 2.700): o grupo `audit` e a `list_plugin_apps`, ~25 tokens.
 #[test]
 fn custo_fixo_por_rodada_cabe_no_orcamento() {
-    const BUDGET: u64 = 3_025;
+    const BUDGET: u64 = 3_035;
     install_dashboard_widgets();
     install_ai_tools();
     let settings = AiSettings {

@@ -11,6 +11,66 @@ use crate::{
     shared::errors::{AppError, AppResult},
 };
 
+/// Contexto de execução quando a chamada de uma ferramenta veio do servidor MCP.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct McpToolContext {
+    pub token_id: i64,
+    pub token_name: String,
+    /// Aplicações de deploy liberadas para este token (`None` = todas que o
+    /// usuário enxerga; `Some(ids)` = estritamente restrito a estes IDs).
+    pub allowed_application_ids: Option<Vec<i64>>,
+    /// Quando `true`, deploys manuais respeitam `target.requires_approval`.
+    pub respect_target_approval: bool,
+    /// Verdadeiro apenas quando o token possui o escopo `deploys:approve`.
+    pub can_approve_deploys: bool,
+}
+
+impl McpToolContext {
+    /// O token tem acesso à aplicação de deploy indicada?
+    #[must_use]
+    pub fn allows_application(&self, app_id: i64) -> bool {
+        self.allowed_application_ids
+            .as_ref()
+            .is_none_or(|ids| ids.contains(&app_id))
+    }
+
+    /// Garante que o token tem acesso à aplicação de deploy indicada.
+    ///
+    /// # Errors
+    ///
+    /// `Forbidden` quando `allowed_application_ids` está definido e não contém `app_id`.
+    pub fn require_application(&self, app_id: i64) -> AppResult<()> {
+        if self.allows_application(app_id) {
+            Ok(())
+        } else {
+            Err(AppError::forbidden(format!(
+                "Este token MCP não tem acesso à aplicação #{app_id}"
+            )))
+        }
+    }
+
+    /// Garante que o token possui escopo para aprovar ou recusar deploys.
+    ///
+    /// # Errors
+    ///
+    /// `Forbidden` quando `can_approve_deploys` é falso.
+    pub fn require_deploy_approval_scope(&self) -> AppResult<()> {
+        if self.can_approve_deploys {
+            Ok(())
+        } else {
+            Err(AppError::forbidden(
+                "Este token MCP não tem permissão para aprovar ou recusar deploys",
+            ))
+        }
+    }
+
+    /// Deploys manuais podem pular `target.requires_approval`?
+    #[must_use]
+    pub const fn auto_approve_manual_deploys(&self) -> bool {
+        !self.respect_target_approval
+    }
+}
+
 /// Argumentos de uma chamada e quem a fez.
 #[derive(Debug, Clone)]
 pub struct ToolArgs {
@@ -19,6 +79,8 @@ pub struct ToolArgs {
     /// Conversa de onde veio a chamada — o modo "Aceitar automaticamente" dos
     /// plugins vale por conversa e equipamento.
     conversation: Option<String>,
+    /// Contexto do servidor MCP quando a chamada veio de um cliente externo.
+    mcp: Option<McpToolContext>,
 }
 
 impl ToolArgs {
@@ -40,6 +102,7 @@ impl ToolArgs {
             values,
             actor: AuditActor::default(),
             conversation: None,
+            mcp: None,
         }
     }
 
@@ -64,6 +127,18 @@ impl ToolArgs {
     #[must_use]
     pub fn conversation(&self) -> Option<&str> {
         self.conversation.as_deref()
+    }
+
+    /// Anexa o contexto do token MCP que originou a chamada.
+    #[must_use]
+    pub fn with_mcp(mut self, mcp: McpToolContext) -> Self {
+        self.mcp = Some(mcp);
+        self
+    }
+
+    #[must_use]
+    pub const fn mcp(&self) -> Option<&McpToolContext> {
+        self.mcp.as_ref()
     }
 
     /// Os argumentos como vieram, para quem precisa do objeto inteiro.
@@ -221,5 +296,41 @@ mod tests {
         assert!(args.flag("a"));
         assert!(args.flag("b"));
         assert!(!args.flag("c"));
+    }
+
+    #[test]
+    fn contexto_mcp_restringe_aplicacoes_e_aprovacao() {
+        let sem_restricao = McpToolContext {
+            token_id: 1,
+            token_name: "ide".into(),
+            allowed_application_ids: None,
+            respect_target_approval: true,
+            can_approve_deploys: false,
+        };
+        assert!(sem_restricao.allows_application(10));
+        assert!(sem_restricao.require_application(10).is_ok());
+        assert!(!sem_restricao.auto_approve_manual_deploys());
+        assert!(matches!(
+            sem_restricao.require_deploy_approval_scope(),
+            Err(AppError::Forbidden(_))
+        ));
+
+        let restrito = McpToolContext {
+            token_id: 2,
+            token_name: "projeto-sgc".into(),
+            allowed_application_ids: Some(vec![3, 7]),
+            respect_target_approval: true,
+            can_approve_deploys: true,
+        };
+        assert!(restrito.allows_application(3));
+        assert!(!restrito.allows_application(4));
+        assert!(matches!(
+            restrito.require_application(4),
+            Err(AppError::Forbidden(_))
+        ));
+        assert!(restrito.require_deploy_approval_scope().is_ok());
+
+        let args = ToolArgs::from_value(json!({})).with_mcp(restrito.clone());
+        assert_eq!(args.mcp(), Some(&restrito));
     }
 }

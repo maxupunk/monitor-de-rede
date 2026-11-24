@@ -16,8 +16,8 @@ use ts_rs::TS;
 use netmonitor_core::{
     models::registry_tokens,
     shared::{
-        crypto::sha256_hex,
         errors::{AppError, AppResult},
+        personal_token,
     },
 };
 
@@ -131,35 +131,16 @@ pub async fn create(
     scope: &Scope,
     days: i64,
 ) -> AppResult<(registry_tokens::Model, String)> {
-    let name = name.trim();
-    if name.is_empty() || name.chars().count() > 120 {
-        return Err(AppError::validation(
-            "Dê um nome ao token (até 120 caracteres)",
-        ));
-    }
-    if !(1..=MAX_DAYS).contains(&days) {
-        return Err(AppError::validation(format!(
-            "A validade vai de 1 a {MAX_DAYS} dias"
-        )));
-    }
+    let name = personal_token::validate_name(name)?;
+    personal_token::validate_ttl(days, MAX_DAYS)?;
     scope.validate()?;
-    let secret = format!(
-        "{PREFIX}{}",
-        netmonitor_core::shared::crypto::random_token()
-    );
+    let issued = personal_token::issue(PREFIX);
     let now = Utc::now();
     let row = registry_tokens::ActiveModel {
         user_id: Set(user_id),
-        name: Set(name.to_string()),
-        token_hash: Set(sha256_hex(&secret)),
-        hint: Set(secret
-            .chars()
-            .rev()
-            .take(4)
-            .collect::<String>()
-            .chars()
-            .rev()
-            .collect()),
+        name: Set(name.to_owned()),
+        token_hash: Set(issued.hash),
+        hint: Set(issued.hint),
         scopes: Set(serde_json::to_value(scope).map_err(|error| AppError::Internal(error.into()))?),
         expires_at: Set((now + Duration::days(days)).into()),
         last_used_at: Set(None),
@@ -171,7 +152,7 @@ pub async fn create(
     }
     .insert(db)
     .await?;
-    Ok((row, secret))
+    Ok((row, issued.secret))
 }
 
 /// Os tokens (de um usuário, ou de todos para o administrador).
@@ -220,17 +201,17 @@ pub async fn authenticate(
     secret: &str,
     ip: Option<String>,
 ) -> AppResult<Option<registry_tokens::Model>> {
-    if !secret.starts_with(PREFIX) {
+    let Some(hash) = personal_token::lookup_hash(PREFIX, secret) else {
         return Ok(None);
-    }
+    };
     let Some(token) = registry_tokens::Entity::find()
-        .filter(registry_tokens::Column::TokenHash.eq(sha256_hex(secret)))
+        .filter(registry_tokens::Column::TokenHash.eq(hash))
         .one(db)
         .await?
     else {
         return Ok(None);
     };
-    if token.revoked_at.is_some() || token.expires_at.with_timezone(&Utc) <= Utc::now() {
+    if !personal_token::is_usable(token.revoked_at, token.expires_at, Utc::now()) {
         return Ok(None);
     }
     let mut active: registry_tokens::ActiveModel = token.clone().into();

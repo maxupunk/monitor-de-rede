@@ -51,6 +51,7 @@ fn arquivos_de_contrato() -> Vec<PathBuf> {
     // O assistente (Fase 8): os DTOs dele e o gráfico das ferramentas, que
     // mora no núcleo.
     arquivos.push(raiz.join("crates/assistant/src/dtos.rs"));
+    arquivos.push(raiz.join("crates/mcp/src/dtos.rs"));
     arquivos.push(raiz.join("crates/core/src/ai/chart.rs"));
     arquivos
 }

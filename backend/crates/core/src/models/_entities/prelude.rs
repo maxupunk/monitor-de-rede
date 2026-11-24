@@ -27,6 +27,7 @@ pub use super::host_metrics_1m::Entity as HostMetrics1m;
 pub use super::link_test_legs::Entity as LinkTestLegs;
 pub use super::link_test_schedules::Entity as LinkTestSchedules;
 pub use super::link_tests::Entity as LinkTests;
+pub use super::mcp_tokens::Entity as McpTokens;
 pub use super::metrics::Entity as Metrics;
 pub use super::monitor_results::Entity as MonitorResults;
 pub use super::monitors::Entity as Monitors;

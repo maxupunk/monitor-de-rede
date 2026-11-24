@@ -259,6 +259,27 @@ pub async fn recent<C: ConnectionTrait>(
     Ok(query.limit(limit).all(db).await?)
 }
 
+/// As mais recentes restritas a um conjunto de aplicações (ex.: token MCP escopado).
+///
+/// # Errors
+///
+/// Banco.
+pub async fn recent_for_applications<C: ConnectionTrait>(
+    db: &C,
+    application_ids: &[i64],
+    limit: u64,
+) -> AppResult<Vec<deploy_builds::Model>> {
+    if application_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    Ok(deploy_builds::Entity::find()
+        .filter(deploy_builds::Column::ApplicationId.is_in(application_ids.iter().copied()))
+        .order_by_desc(deploy_builds::Column::Id)
+        .limit(limit)
+        .all(db)
+        .await?)
+}
+
 /// O pedido de uma compilação.
 pub struct Ask {
     pub application_id: i64,

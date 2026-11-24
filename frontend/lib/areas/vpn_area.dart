@@ -13,6 +13,7 @@ import 'package:netmonitor_app/features/ai/widgets/ai_data_export_card.dart';
 import 'package:netmonitor_app/features/ai/widgets/ai_proactive_widgets.dart';
 import 'package:netmonitor_app/features/ai/widgets/ai_settings_card.dart';
 import 'package:netmonitor_app/features/ai/widgets/decider_settings_card.dart';
+import 'package:netmonitor_app/features/ai/widgets/mcp_settings_card.dart';
 import 'package:netmonitor_app/features/plugins/pages/plugin_app_page.dart';
 import 'package:netmonitor_app/features/plugins/pages/plugins_page.dart';
 import 'package:netmonitor_app/features/plugins/providers/plugin_apps_provider.dart';
@@ -166,6 +167,13 @@ final AreaContribution vpnArea = AreaContribution(
         handle: (data, _, _) =>
             ref.read(aiAlertFeedbackProvider.notifier).applyAiSummary(data),
       ),
+      'mcp:changed': SseRoute(
+        ephemeral: true,
+        handle: (_, _, bus) => bus.scheduleRefresh(
+          'mcp',
+          () => ref.read(mcpProvider.notifier).refreshIfLoaded(),
+        ),
+      ),
     },
     ProductArea.network: (ref) => <String, SseRoute>{
       'stream:connected': SseRoute(
@@ -220,6 +228,12 @@ final AreaContribution vpnArea = AreaContribution(
       order: 10,
       area: ProductArea.core,
       builder: (_) => const AiSettingsCard(),
+    ),
+    SettingsCardContribution(
+      tab: 'ia',
+      order: 15,
+      area: ProductArea.core,
+      builder: (_) => const McpSettingsCard(),
     ),
     SettingsCardContribution(
       tab: 'ia',

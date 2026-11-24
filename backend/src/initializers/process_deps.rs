@@ -88,6 +88,7 @@ pub fn install(ctx: &AppContext) {
         .insert(crate::registries::assistant_central());
     crate::registries::install_dashboard_widgets();
     crate::registries::install_ai_tools();
+    netmonitor_core::mcp::install_deploy_app_catalog(ctx, crate::registries::deploy_app_catalog());
 
     // O socket ICMP é a única peça que pode falhar, e falha por configuração do
     // ambiente, não por bug: sem `net.ipv4.ping_group_range` liberado, o

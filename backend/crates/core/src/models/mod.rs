@@ -30,6 +30,7 @@ pub mod link_tests;
 /// Entidades do banco de logs, separado do principal.
 pub mod logs;
 pub mod maintenance_windows;
+pub mod mcp_tokens;
 pub mod metrics;
 pub mod monitor_results;
 pub mod monitor_results_hourly;

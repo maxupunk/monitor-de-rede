@@ -174,7 +174,7 @@ pub fn finish(state: &str) -> AppResult<()> {
         Some(created) if created.elapsed() < STATE_TTL => Ok(()),
         _ => Err(AppError::validation(
             "Este retorno do GitHub não foi pedido por esta central (ou já venceu). Clique em \
-             \"Conectar GitHub\" de novo.",
+             \"Conectar GitHub App\" de novo.",
         )),
     }
 }

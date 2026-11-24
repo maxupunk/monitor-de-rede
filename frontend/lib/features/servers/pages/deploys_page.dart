@@ -61,6 +61,21 @@ class _DeploysPageState extends ConsumerState<DeploysPage> {
     await _consumeQueryParams();
   }
 
+  /// Fim do fluxo do GitHub: diz que deu certo e leva à conexão.
+  void _announceGithubConnected(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        action: SnackBarAction(
+          label: 'Ver conexão',
+          onPressed: () {
+            if (mounted) showDeployConnectionsDialog(context);
+          },
+        ),
+      ),
+    );
+  }
+
   Future<void> _consumeQueryParams() async {
     final q = widget.queryParams;
     if (q.isEmpty) return;
@@ -71,6 +86,21 @@ class _DeploysPageState extends ConsumerState<DeploysPage> {
     final code = q['code'];
     final state = q['state'];
     final installationId = int.tryParse(q['installation_id'] ?? '');
+    final isGithubCallback =
+        (code != null && code.isNotEmpty) ||
+        (installationId != null && installationId > 0);
+    if (isGithubCallback && !canAdmin) {
+      GoRouter.maybeOf(context)?.replace('/deploys');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'O retorno do GitHub só é concluído por um administrador da área '
+            'Servidores. Peça a ele para conectar o GitHub App.',
+          ),
+        ),
+      );
+      return;
+    }
     if (canAdmin &&
         code != null &&
         code.isNotEmpty &&
@@ -84,14 +114,28 @@ class _DeploysPageState extends ConsumerState<DeploysPage> {
         if (!mounted) return;
         GoRouter.maybeOf(context)?.replace('/deploys');
         if (!conn.installed && conn.installUrl.isNotEmpty) {
+          // Passo 2: instalar o app e escolher os repositórios; o GitHub
+          // volta com `?installation_id=`.
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'GitHub App de ${conn.account} criado. Agora instale-o nos '
+                'repositórios…',
+              ),
+            ),
+          );
           await launchUrl(
             Uri.parse(conn.installUrl),
             mode: LaunchMode.externalApplication,
             webOnlyWindowName: '_self',
           );
+        } else {
+          _announceGithubConnected('GitHub App de ${conn.account} conectado.');
         }
       } catch (err) {
         if (mounted) {
+          // O código é de uso único: recarregar a página não pode reenviá-lo.
+          GoRouter.maybeOf(context)?.replace('/deploys');
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
@@ -109,17 +153,18 @@ class _DeploysPageState extends ConsumerState<DeploysPage> {
     if (canAdmin && installationId != null && installationId > 0) {
       setState(() => _processingGithubCallback = true);
       try {
-        await ref
+        final conn = await ref
             .read(deploysProvider.notifier)
             .claimGithubInstallation(installationId);
         if (mounted) {
           GoRouter.maybeOf(context)?.replace('/deploys');
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('GitHub App instalado com sucesso!')),
+          _announceGithubConnected(
+            'GitHub App instalado em ${conn.account}: conexão pronta.',
           );
         }
       } catch (err) {
         if (mounted) {
+          GoRouter.maybeOf(context)?.replace('/deploys');
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(

@@ -45,6 +45,7 @@ const WORKSPACE_CRATES: &[&str] = &[
     "netmonitor_servers_registry",
     "netmonitor_vpn",
     "netmonitor_assistant",
+    "netmonitor_mcp",
     "agent_protocol",
 ];
 
@@ -262,6 +263,7 @@ impl Hooks for App {
                 netmonitor_assistant::controllers::ai_data_export::routes()
                     .layer(business_auth.clone()),
             )
+            .add_route(netmonitor_mcp::controllers::routes().layer(business_auth.clone()))
             .add_route(
                 netmonitor_network::controllers::plugins::routes().layer(business_auth.clone()),
             )
@@ -285,8 +287,11 @@ impl Hooks for App {
     async fn after_routes(router: AxumRouter, ctx: &AppContext) -> Result<AxumRouter> {
         // O registry OCI (ADR 022) fica na raiz do host: o Docker exige
         // `/v2/`. Autentica pelo token do registry, não pela sessão.
-        let router =
-            router.merge(netmonitor_servers_registry::api::routes().with_state(ctx.clone()));
+        // O servidor MCP (ADR 024) também fica na raiz (`/mcp`) e autentica
+        // exclusivamente pelo token pessoal `nmm_*`.
+        let router = router
+            .merge(netmonitor_servers_registry::api::routes().with_state(ctx.clone()))
+            .merge(netmonitor_mcp::protocol::routes().with_state(ctx.clone()));
         Ok(spa::mount(router, &spa::web_root())
             .layer(axum::middleware::from_fn(
                 netmonitor_nucleo::services::shared::incident::track,

@@ -34,6 +34,9 @@ use crate::{
 /// sobrescreve.
 pub const AUTHENTICATED_USER_HEADER: &str = "x-authenticated-user";
 
+/// Marca no registro de auditoria que a ação veio do servidor MCP.
+pub const VIA_MCP: &str = "via MCP";
+
 /// Ação registrada na trilha de auditoria.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuditAction {
@@ -116,6 +119,10 @@ pub enum ResourceType {
     /// Registry de imagens (ADR 022): versões, tokens de acesso, exceções de
     /// vulnerabilidade e configurações.
     Registry,
+    /// Token pessoal do servidor MCP (ADR 024).
+    McpToken,
+    /// Execução de ferramenta via servidor MCP (ADR 024).
+    McpTool,
 }
 
 impl ResourceType {
@@ -145,6 +152,8 @@ impl ResourceType {
             ResourceType::ScheduledTask => "scheduled_task",
             ResourceType::Deploy => "deploy",
             ResourceType::Registry => "registry",
+            ResourceType::McpToken => "mcp_token",
+            ResourceType::McpTool => "mcp_tool",
         }
     }
 }
@@ -183,6 +192,8 @@ impl std::str::FromStr for ResourceType {
             "scheduled_task" | "scheduledtask" => Ok(ResourceType::ScheduledTask),
             "deploy" => Ok(ResourceType::Deploy),
             "registry" => Ok(ResourceType::Registry),
+            "mcp_token" | "mcptoken" => Ok(ResourceType::McpToken),
+            "mcp_tool" | "mcptool" => Ok(ResourceType::McpTool),
             _ => Err(AppError::validation(format!(
                 "Tipo de recurso inválido: {s}"
             ))),
@@ -483,6 +494,8 @@ mod tests {
             ResourceType::MaintenanceWindow.as_str(),
             "maintenance_window"
         );
+        assert_eq!(ResourceType::McpToken.as_str(), "mcp_token");
+        assert_eq!(ResourceType::McpTool.as_str(), "mcp_tool");
     }
 
     #[test]
@@ -504,6 +517,22 @@ mod tests {
         assert_eq!(
             "vpnPeer".parse::<ResourceType>().unwrap(),
             ResourceType::VpnPeer
+        );
+        assert_eq!(
+            "mcp_token".parse::<ResourceType>().unwrap(),
+            ResourceType::McpToken
+        );
+        assert_eq!(
+            "mcpToken".parse::<ResourceType>().unwrap(),
+            ResourceType::McpToken
+        );
+        assert_eq!(
+            "mcp_tool".parse::<ResourceType>().unwrap(),
+            ResourceType::McpTool
+        );
+        assert_eq!(
+            "mcpTool".parse::<ResourceType>().unwrap(),
+            ResourceType::McpTool
         );
         assert!("foo".parse::<ResourceType>().is_err());
     }

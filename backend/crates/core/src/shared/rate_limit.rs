@@ -18,6 +18,8 @@ pub const AUTH_RATE_WINDOW: Duration = Duration::from_secs(60);
 
 /// Teto de chaves rastreadas em memória para evitar consumo desenfreado de RAM.
 pub const MAX_TRACKED_ENTRIES: usize = 10_000;
+/// O limite no ambiente de teste ([`SlidingWindowRateLimiter::for_environment`]).
+const TEST_ENVIRONMENT_LIMIT: usize = 100_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RateLimitDecision {
@@ -52,6 +54,18 @@ impl SlidingWindowRateLimiter {
             window,
             hits: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// O limite de produção; no ambiente de teste, alto o bastante para a
+    /// suíte não esbarrar nele.
+    #[must_use]
+    pub fn for_environment(limit: usize, window: Duration) -> Self {
+        let limit = if is_test_environment() {
+            TEST_ENVIRONMENT_LIMIT
+        } else {
+            limit
+        };
+        Self::new(limit, window)
     }
 
     pub fn consume(&self, key: &str) -> RateLimitDecision {
@@ -100,6 +114,27 @@ impl SlidingWindowRateLimiter {
         }
     }
 
+    /// Segundos até liberar, se `key` já esgotou a janela — sem registrar
+    /// um acesso. Serve para barrar antes de checar uma credencial: quem só
+    /// conta as falhas deixaria o palpite certo passar depois do limite.
+    #[must_use]
+    pub fn blocked_for(&self, key: &str) -> Option<u64> {
+        let now = Instant::now();
+        let hits = self.hits.lock().ok()?;
+        let recent: Vec<&Instant> = hits
+            .get(key)?
+            .iter()
+            .filter(|hit| now.duration_since(**hit) < self.window)
+            .collect();
+        (recent.len() >= self.limit).then(|| {
+            let oldest = recent.first().map_or(now, |hit| **hit);
+            self.window
+                .saturating_sub(now.duration_since(oldest))
+                .as_secs()
+                .max(1)
+        })
+    }
+
     pub fn reset(&self) {
         if let Ok(mut hits) = self.hits.lock() {
             hits.clear();
@@ -128,12 +163,7 @@ pub fn is_test_environment() -> bool {
 pub fn auth_endpoint_limiter() -> &'static SlidingWindowRateLimiter {
     static AUTH_LIMITER: OnceLock<SlidingWindowRateLimiter> = OnceLock::new();
     AUTH_LIMITER.get_or_init(|| {
-        let limit = if is_test_environment() {
-            100_000
-        } else {
-            AUTH_RATE_LIMIT
-        };
-        SlidingWindowRateLimiter::new(limit, AUTH_RATE_WINDOW)
+        SlidingWindowRateLimiter::for_environment(AUTH_RATE_LIMIT, AUTH_RATE_WINDOW)
     })
 }
 
@@ -159,6 +189,18 @@ mod tests {
         assert_eq!(barrado.remaining, 0);
         // `Retry-After` nunca é 0: o cliente precisa de um valor acionável.
         assert!(barrado.retry_after_seconds >= 1);
+    }
+
+    #[test]
+    fn consultar_o_bloqueio_nao_gasta_a_janela() {
+        let limiter = SlidingWindowRateLimiter::new(2, Duration::from_secs(60));
+        assert_eq!(limiter.blocked_for("ip:1"), None);
+        limiter.consume("ip:1");
+        assert_eq!(limiter.blocked_for("ip:1"), None);
+        assert_eq!(limiter.blocked_for("ip:1"), None);
+        limiter.consume("ip:1");
+        assert!(limiter.blocked_for("ip:1").is_some_and(|secs| secs >= 1));
+        assert_eq!(limiter.blocked_for("ip:2"), None);
     }
 
     #[test]

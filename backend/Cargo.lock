@@ -709,6 +709,7 @@ dependencies = [
  "netmonitor-agent-protocol",
  "netmonitor-assistant",
  "netmonitor-core",
+ "netmonitor-mcp",
  "netmonitor-network",
  "netmonitor-network-link-tests",
  "netmonitor-network-wifi",
@@ -4116,6 +4117,27 @@ dependencies = [
  "ts-rs",
  "uuid",
  "validator",
+]
+
+[[package]]
+name = "netmonitor-mcp"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "chrono",
+ "loco-rs",
+ "netmonitor-core",
+ "sea-orm",
+ "sea-orm-migration",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

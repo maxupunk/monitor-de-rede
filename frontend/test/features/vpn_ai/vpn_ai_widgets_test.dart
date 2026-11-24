@@ -465,7 +465,7 @@ void main() {
       final tabs = SettingsSectionRegistry.visibleTabs(onlyCore);
       final iaTab = tabs.where((t) => t.tab.value == 'ia').firstOrNull;
       expect(iaTab, isNotNull);
-      expect(iaTab!.cards.length, 3);
+      expect(iaTab!.cards.length, 4);
     });
 
     test(

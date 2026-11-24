@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
 
@@ -16,9 +15,4 @@ class StatusVisual {
   final SemanticTone tone;
   final IconData icon;
   final bool live;
-}
-
-/// Resolve a origem HTTP/HTTPS efetiva da central (Web PWA vs cliente nativo).
-String resolveCentralOrigin(String configuredBaseUrl) {
-  return kIsWeb ? Uri.base.origin : configuredBaseUrl;
 }

@@ -17,6 +17,7 @@ impl MigratorTrait for Migrator {
             netmonitor_servers_registry::migrations::migrations(),
             netmonitor_vpn::migrations::migrations(),
             netmonitor_assistant::migrations::migrations(),
+            netmonitor_mcp::migrations::migrations(),
         ]
         .into_iter()
         .flatten()

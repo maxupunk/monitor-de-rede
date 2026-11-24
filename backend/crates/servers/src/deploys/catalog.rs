@@ -252,3 +252,26 @@ pub async fn history(
     }
     Ok(out)
 }
+
+/// Catálogo de aplicações de deploy fornecido pela área Servidores ao servidor
+/// MCP (ADR 017 / ADR 024).
+pub struct ServersDeployAppCatalog;
+
+#[async_trait::async_trait]
+impl netmonitor_core::mcp::McpDeployAppCatalog for ServersDeployAppCatalog {
+    async fn list_applications(
+        &self,
+        db: &sea_orm::DatabaseConnection,
+    ) -> AppResult<Vec<netmonitor_core::mcp::McpDeployAppSummary>> {
+        Ok(applications::list(db)
+            .await?
+            .into_iter()
+            .map(|app| netmonitor_core::mcp::McpDeployAppSummary {
+                id: app.id,
+                name: app.name,
+                slug: app.slug,
+                repository: app.repository,
+            })
+            .collect())
+    }
+}
