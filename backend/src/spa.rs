@@ -42,19 +42,23 @@ pub const DEFAULT_WEB_ROOT: &str = "/app/web";
 const REVALIDATE: &str = "no-cache";
 
 // Headers de segurança aplicados a todos os arquivos estáticos da SPA.
-// O Flutter Web empacotado com `--no-web-resources-cdn` carrega todos os
-// scripts, fontes e CanvasKit da própria origem:
+// O Flutter Web empacotado com `--no-web-resources-cdn` carrega scripts,
+// CanvasKit e a fonte principal (`Roboto`) da própria origem:
 // - `'wasm-unsafe-eval'` permite compilar/instanciar `canvaskit.wasm` sem abrir
 //   `'unsafe-eval'` para JavaScript;
 // - `worker-src 'self' blob:` atende o service worker e workers locais;
-// - `connect-src` / `font-src` / `img-src` permitem `data:` e `blob:` para
-//   CanvasKit, QR codes e downloads;
+// - `font-src` / `connect-src` incluem `https://fonts.gstatic.com` para o
+//   `FontFallbackManager` do CanvasKit (símbolos Unicode raros / emojis) não
+//   gerar erros de CSP no console quando há acesso à internet, mantendo a UI
+//   100% funcional offline graças à `Roboto` local;
+// - `img-src` / `connect-src` permitem `data:` e `blob:` para CanvasKit, QR
+//   codes e downloads;
 // - `form-action 'self' https://github.com` permite o cadastro do GitHub App
 //   via Manifest (ADR 021).
 const X_CONTENT_TYPE_OPTIONS_VALUE: &str = "nosniff";
 const REFERRER_POLICY_VALUE: &str = "strict-origin-when-cross-origin";
 const X_FRAME_OPTIONS_VALUE: &str = "DENY";
-const CSP_VALUE: &str = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data: blob:; connect-src 'self' data: blob:; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://github.com";
+const CSP_VALUE: &str = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data: blob: https://fonts.gstatic.com; connect-src 'self' data: blob: https://fonts.gstatic.com; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://github.com";
 
 /// Raiz dos estáticos, de `WEB_ROOT` ou do padrão da imagem.
 #[must_use]
@@ -151,6 +155,7 @@ mod tests {
         assert!(!X_FRAME_OPTIONS_VALUE.is_empty());
         assert!(CSP_VALUE.contains("'wasm-unsafe-eval'"));
         assert!(CSP_VALUE.contains("https://github.com"));
+        assert!(CSP_VALUE.contains("https://fonts.gstatic.com"));
 
         let tmp = std::env::temp_dir().join(format!("netmonitor-spa-test-{}", std::process::id()));
         std::fs::create_dir_all(&tmp).unwrap();

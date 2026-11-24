@@ -40,7 +40,7 @@ RUN flutter build web --release --no-web-resources-cdn \
 RUN find dist -type f \
       \( -name '*.js' -o -name '*.css' -o -name '*.html' \
          -o -name '*.svg' -o -name '*.json' -o -name '*.webmanifest' \
-         -o -name '*.wasm' \) \
+         -o -name '*.wasm' -o -name '*.ttf' -o -name '*.otf' \) \
       -size +1k -exec gzip -9 -k {} \;
 
 # ------------------------------------------------------------- rust-base ----

@@ -480,6 +480,7 @@ class AppTheme {
   }) {
     final base = ThemeData(
       useMaterial3: true,
+      fontFamily: 'Roboto',
       colorScheme: scheme,
       scaffoldBackgroundColor: scaffoldBackground,
       visualDensity: VisualDensity.standard,
