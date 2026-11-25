@@ -31,14 +31,14 @@
 //! (`host:<hostname>`) em vez de por endereço.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     net::IpAddr,
     sync::Arc,
     time::{Duration, Instant},
 };
 
 use ipnet::IpNet;
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use tokio::sync::RwLock;
 
 use super::nat::NatDetector;
@@ -47,7 +47,10 @@ use crate::{
         _entities::{devices, networks},
         system_settings,
     },
-    services::shared::errors::AppResult,
+    services::shared::{
+        errors::{AppError, AppResult},
+        transaction::begin_write,
+    },
 };
 
 /// Chave em `system_settings` com o mapa `ip -> device_id` do *bind* manual.
@@ -97,6 +100,10 @@ pub fn normalize_bind_key(key: &str) -> String {
 /// bastante para um dispositivo recém-cadastrado começar a vincular sem
 /// reiniciar nada.
 const TTL: Duration = Duration::from_secs(30);
+
+/// Teto de entradas no cache em memória. Protege contra pacotes UDP com IPs ou
+/// hostnames forjados fazendo o mapa crescer sem fim.
+const MAX_CACHE_ENTRIES: usize = 4096;
 
 /// O que o resolvedor concluiu sobre uma origem.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -183,10 +190,20 @@ impl Resolver {
             }
         }
         let resolucao = consulta(db, origem, hostname, &self.nat).await?;
-        self.cache
-            .write()
-            .await
-            .insert(chave, (resolucao.clone(), Instant::now()));
+        let mut cache = self.cache.write().await;
+        if cache.len() >= MAX_CACHE_ENTRIES && !cache.contains_key(&chave) {
+            cache.retain(|_, (_, gravado_em)| gravado_em.elapsed() < TTL);
+            if cache.len() >= MAX_CACHE_ENTRIES {
+                if let Some(mais_antiga) = cache
+                    .iter()
+                    .min_by_key(|(_, (_, gravado_em))| *gravado_em)
+                    .map(|(k, _)| k.clone())
+                {
+                    cache.remove(&mais_antiga);
+                }
+            }
+        }
+        cache.insert(chave, (resolucao.clone(), Instant::now()));
         Ok(resolucao)
     }
 
@@ -307,15 +324,30 @@ async fn desempata(
     candidatos: &[devices::Model],
     origem: IpAddr,
 ) -> AppResult<Resolution> {
+    let network_ids: HashSet<i64> = candidatos
+        .iter()
+        .filter_map(|candidato| candidato.network_id)
+        .collect();
+    let cidrs: HashMap<i64, String> = if network_ids.is_empty() {
+        HashMap::new()
+    } else {
+        networks::Entity::find()
+            .filter(networks::Column::Id.is_in(network_ids))
+            .all(db)
+            .await?
+            .into_iter()
+            .map(|rede| (rede.id, rede.cidr))
+            .collect()
+    };
     let mut compativeis = Vec::new();
     for candidato in candidatos {
         let Some(network_id) = candidato.network_id else {
             continue;
         };
-        let Some(rede) = networks::Entity::find_by_id(network_id).one(db).await? else {
+        let Some(cidr) = cidrs.get(&network_id) else {
             continue;
         };
-        if cidr_contem(&rede.cidr, origem) {
+        if cidr_contem(cidr, origem) {
             compativeis.push(candidato.id);
         }
     }
@@ -347,7 +379,7 @@ async fn rede_que_contem(db: &DatabaseConnection, origem: IpAddr) -> AppResult<O
 /// # Errors
 ///
 /// Propaga erro do banco.
-pub async fn bindings(db: &DatabaseConnection) -> AppResult<HashMap<String, i64>> {
+pub async fn bindings<C: ConnectionTrait>(db: &C) -> AppResult<HashMap<String, i64>> {
     let Some(linha) = system_settings::Entity::find()
         .filter(system_settings::Column::Key.eq(BINDINGS_KEY))
         .one(db)
@@ -377,26 +409,57 @@ pub async fn bindings(db: &DatabaseConnection) -> AppResult<HashMap<String, i64>
 ///
 /// Propaga erro do banco.
 pub async fn bind(db: &DatabaseConnection, chave: &str, device_id: Option<i64>) -> AppResult<()> {
+    bind_tx(db, chave, device_id, None).await
+}
+
+/// Grava um vínculo falhando com `BusinessRule` se a chave já pertence a outro
+/// dispositivo — conferência e escrita na mesma transação `begin_write`.
+///
+/// # Errors
+///
+/// Conflito com outro dispositivo ou erro do banco.
+pub async fn bind_exclusive(
+    db: &DatabaseConnection,
+    chave: &str,
+    device_id: i64,
+    conflict_message: &str,
+) -> AppResult<()> {
+    bind_tx(db, chave, Some(device_id), Some(conflict_message)).await
+}
+
+async fn bind_tx(
+    db: &DatabaseConnection,
+    chave: &str,
+    device_id: Option<i64>,
+    conflict_message: Option<&str>,
+) -> AppResult<()> {
     use sea_orm::{ActiveModelTrait, ActiveValue::Set};
 
-    let mut mapa = bindings(db).await?;
+    let txn = begin_write(db).await?;
+    let mut mapa = bindings(&txn).await?;
     let chave = normalize_bind_key(chave);
+    if let (Some(target_id), Some(message)) = (device_id, conflict_message) {
+        if let Some(&existing_id) = mapa.get(&chave) {
+            if existing_id != target_id {
+                return Err(AppError::business_rule(message));
+            }
+        }
+    }
     match device_id {
         Some(id) => mapa.insert(chave, id),
         None => mapa.remove(&chave),
     };
-    let valor = serde_json::to_string(&mapa)
-        .map_err(|error| crate::services::shared::errors::AppError::Internal(error.into()))?;
+    let valor = serde_json::to_string(&mapa).map_err(|error| AppError::Internal(error.into()))?;
 
     match system_settings::Entity::find()
         .filter(system_settings::Column::Key.eq(BINDINGS_KEY))
-        .one(db)
+        .one(&txn)
         .await?
     {
         Some(linha) => {
             let mut ativo: system_settings::ActiveModel = linha.into();
             ativo.value = Set(Some(valor));
-            ativo.update(db).await?;
+            ativo.update(&txn).await?;
         }
         None => {
             system_settings::ActiveModel {
@@ -404,10 +467,11 @@ pub async fn bind(db: &DatabaseConnection, chave: &str, device_id: Option<i64>) 
                 value: Set(Some(valor)),
                 ..Default::default()
             }
-            .insert(db)
+            .insert(&txn)
             .await?;
         }
     }
+    txn.commit().await?;
     Ok(())
 }
 

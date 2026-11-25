@@ -13,8 +13,7 @@ use loco_rs::app::AppContext;
 use netmonitor_core::classifier::{
     device_identity::{DeviceFacts, DeviceIdentity, IdentitySuggestion},
     interfaces::{InterfaceAdviceOutput, InterfaceCandidate},
-    log_category::LogPattern,
-    suggestion::DeciderSuggestion,
+    log_category::{LogPattern, LogVerdict},
     Classifier, ClassifierFeature, Lane,
 };
 
@@ -88,18 +87,27 @@ impl Classifier for DeciderClassifier {
         lane: Lane,
         pattern: &LogPattern<'_>,
         min_confidence: u8,
-    ) -> Option<DeciderSuggestion> {
+    ) -> LogVerdict {
         let runtime = DeciderRuntime::from_context(ctx);
-        let settings = runtime
+        let Some(settings) = runtime
             .settings_for(&ctx.db, DeciderFeature::LogEvents)
-            .await?;
+            .await
+        else {
+            return LogVerdict::Unavailable;
+        };
         let decision = LogCategory { min_confidence };
-        let outcome = runtime
+        let Some(outcome) = runtime
             .decide_with(&settings, lane, &pattern.state(), &decision)
-            .await?;
-        outcome.value.map(|mut suggestion| {
-            suggestion.model = outcome.model;
-            suggestion
-        })
+            .await
+        else {
+            return LogVerdict::Unavailable;
+        };
+        match outcome.value {
+            Some(mut suggestion) => {
+                suggestion.model = outcome.model;
+                LogVerdict::Suggested(suggestion)
+            }
+            None => LogVerdict::Unsure,
+        }
     }
 }

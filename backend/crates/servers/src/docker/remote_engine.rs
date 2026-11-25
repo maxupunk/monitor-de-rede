@@ -13,10 +13,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use agent_protocol::{Command, DockerCall};
-use netmonitor_core::agents::{
-    bridge,
-    session::{AgentSession, Call},
-};
+use netmonitor_core::agents::{bridge, session::AgentSession};
 
 use super::{
     builds::{
@@ -80,26 +77,30 @@ impl AgentEngine {
         call: DockerCall,
         progress: Progress,
     ) -> Result<DockerActionResponse, DockerError> {
-        let (chunks, mut received) = mpsc::unbounded_channel::<Value>();
-        let forward = tokio::spawn(async move {
-            while let Some(chunk) = received.recv().await {
-                if let Some(line) = chunk.as_str() {
-                    let _ = progress.send(line.to_string());
-                }
-            }
-        });
-        let result = self
+        let cancel = CancellationToken::new();
+        let value = self
             .session
-            .call(Call::new(Command::Docker { call }, OPERATION_TIMEOUT).with_chunks(chunks))
+            .stream(
+                Command::Docker { call },
+                OPERATION_TIMEOUT,
+                &cancel,
+                |chunk| {
+                    if let Some(line) = chunk.as_str() {
+                        let _ = progress.send(line.to_string());
+                    }
+                },
+            )
             .await
-            .map_err(DockerError::from);
-        let _ = forward.await;
-        decode(result?)
+            .map_err(DockerError::from)?;
+        decode(value)
     }
 }
 
 fn decode<T: DeserializeOwned>(value: Value) -> Result<T, DockerError> {
-    serde_json::from_value(value).map_err(|_| DockerError::Engine)
+    serde_json::from_value(value).map_err(|error| {
+        tracing::debug!(%error, "falha ao decodificar resposta Docker do agente");
+        DockerError::Engine
+    })
 }
 
 #[async_trait]
@@ -238,36 +239,31 @@ impl DockerEngine for AgentEngine {
         chunks: mpsc::UnboundedSender<LogChunk>,
         cancel: CancellationToken,
     ) -> Result<(), DockerError> {
-        let (raw, mut received) = mpsc::unbounded_channel::<Value>();
-        let forward = tokio::spawn(async move {
-            while let Some(value) = received.recv().await {
-                if let Ok(chunk) = serde_json::from_value::<LogChunk>(value) {
-                    if chunks.send(chunk).is_err() {
-                        break;
-                    }
-                }
-            }
-        });
-        let call = Call::new(
-            Command::Docker {
-                call: DockerCall::FollowLogs {
-                    id: id.into(),
-                    tail: tail.into(),
+        let result = self
+            .session
+            .stream(
+                Command::Docker {
+                    call: DockerCall::FollowLogs {
+                        id: id.into(),
+                        tail: tail.into(),
+                    },
                 },
-            },
-            FOLLOW_TIMEOUT,
-        )
-        .with_chunks(raw);
-        let request_id = call.id;
-        let result = tokio::select! {
-            result = self.session.call(call) => result.map(|_| ()).map_err(DockerError::from),
-            () = cancel.cancelled() => {
-                self.session.cancel(request_id).await;
-                Ok(())
-            }
-        };
-        let _ = forward.await;
-        result
+                FOLLOW_TIMEOUT,
+                &cancel,
+                |value| {
+                    if let Ok(chunk) = serde_json::from_value::<LogChunk>(value) {
+                        if chunks.send(chunk).is_err() {
+                            cancel.cancel();
+                        }
+                    }
+                },
+            )
+            .await;
+        match result {
+            Ok(_) => Ok(()),
+            Err(_) if cancel.is_cancelled() => Ok(()),
+            Err(error) => Err(DockerError::from(error)),
+        }
     }
 }
 
@@ -339,33 +335,26 @@ impl StackHost for AgentEngine {
         events: StackEvents,
     ) -> Result<StackDeployOutcome, DockerError> {
         request.validate()?;
-        let (chunks, mut received) = mpsc::unbounded_channel::<Value>();
-        let forward = tokio::spawn(async move {
-            while let Some(chunk) = received.recv().await {
-                if let Ok(chunk) = serde_json::from_value::<StackChunk>(chunk) {
-                    if events.send(chunk).is_err() {
-                        break;
-                    }
-                }
-            }
-        });
-        let result = self
+        let cancel = CancellationToken::new();
+        let value = self
             .session
-            .call(
-                Call::new(
-                    Command::Docker {
-                        call: DockerCall::StackDeploy {
-                            request: request.clone(),
-                        },
+            .stream(
+                Command::Docker {
+                    call: DockerCall::StackDeploy {
+                        request: request.clone(),
                     },
-                    OPERATION_TIMEOUT,
-                )
-                .with_chunks(chunks),
+                },
+                OPERATION_TIMEOUT,
+                &cancel,
+                |chunk| {
+                    if let Ok(chunk) = serde_json::from_value::<StackChunk>(chunk) {
+                        let _ = events.send(chunk);
+                    }
+                },
             )
             .await
-            .map_err(DockerError::from);
-        let _ = forward.await;
-        decode(result?)
+            .map_err(DockerError::from)?;
+        decode(value)
     }
 
     async fn stack_readiness(&self, project: &str) -> Result<StackReadiness, DockerError> {
@@ -387,37 +376,32 @@ impl ImageHost for AgentEngine {
         cancel: CancellationToken,
     ) -> Result<ImageBuildOutcome, DockerError> {
         request.validate()?;
-        let (chunks, mut received) = mpsc::unbounded_channel::<Value>();
-        let forward = tokio::spawn(async move {
-            while let Some(chunk) = received.recv().await {
-                if let Ok(chunk) = serde_json::from_value::<BuildChunk>(chunk) {
-                    if events.send(chunk).is_err() {
-                        break;
-                    }
-                }
-            }
-        });
         let timeout = Duration::from_secs(u64::from(request.timeout_secs)) + BUILD_GRACE;
-        let call = Call::new(
-            Command::Docker {
-                call: DockerCall::ImageBuild {
-                    request: request.clone(),
-                },
-            },
-            timeout,
-        )
-        .with_chunks(chunks);
-        let request_id = call.id;
         // Cancelada aqui, o agente recebe o `Cancel` e encerra o `buildx`.
-        let result = tokio::select! {
-            result = self.session.call(call) => result.map_err(DockerError::from),
-            () = cancel.cancelled() => {
-                self.session.cancel(request_id).await;
+        let result = self
+            .session
+            .stream(
+                Command::Docker {
+                    call: DockerCall::ImageBuild {
+                        request: request.clone(),
+                    },
+                },
+                timeout,
+                &cancel,
+                |chunk| {
+                    if let Ok(chunk) = serde_json::from_value::<BuildChunk>(chunk) {
+                        let _ = events.send(chunk);
+                    }
+                },
+            )
+            .await;
+        match result {
+            Ok(value) => decode(value),
+            Err(_) if cancel.is_cancelled() => {
                 Err(DockerError::Validation("Compilação cancelada".into()))
             }
-        };
-        let _ = forward.await;
-        decode(result?)
+            Err(error) => Err(DockerError::from(error)),
+        }
     }
 
     async fn builder_readiness(&self) -> Result<BuilderReadiness, DockerError> {

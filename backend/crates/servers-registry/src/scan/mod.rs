@@ -12,17 +12,23 @@ pub mod osv;
 pub mod packages;
 pub mod version;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet, HashMap},
+    io::Read as _,
+};
 
-use async_compression::tokio::bufread::GzipDecoder;
 use chrono::Utc;
+use flate2::read::GzDecoder;
 use loco_rs::app::AppContext;
-use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, Condition, DatabaseConnection, EntityTrait, QueryFilter, Set,
+};
 use serde_json::{json, Value};
-use tokio::io::{AsyncReadExt, BufReader};
+use tokio::io::AsyncReadExt;
+use tokio_util::io::SyncIoBridge;
 
 use netmonitor_core::{
-    models::{registry_exceptions, registry_findings, registry_manifests},
+    models::{registry_advisories, registry_exceptions, registry_findings, registry_manifests},
     shared::{errors::AppResult, transaction::begin_write},
 };
 use netmonitor_servers::deploys::images::{ScanStatus, ScanVerdict};
@@ -37,7 +43,6 @@ use crate::{
     events,
     manifest::{self, Kind, SPDX_PREDICATE},
     storage::{self, BlobStore},
-    tarstream,
 };
 
 /// Teto de um arquivo de banco de pacotes lido de uma camada.
@@ -107,9 +112,8 @@ async fn packages_of(
     let mut found = BTreeSet::new();
     let mut from_sbom = false;
     let mut images = Vec::new();
-    match parsed.as_ref().map(|parsed| &parsed.kind) {
-        Some(Kind::Index { .. }) => {
-            let parsed = parsed.as_ref().expect("índice lido acima");
+    match parsed.as_ref() {
+        Some(parsed) if matches!(parsed.kind, Kind::Index { .. }) => {
             for image in parsed.images() {
                 if let Some(attestation) = parsed.attestation_of(&image.digest) {
                     if let Some(row) =
@@ -138,12 +142,12 @@ async fn packages_of(
                 images.push(image.digest.clone());
             }
         }
-        Some(Kind::Image { .. }) => images.push(
+        Some(parsed) if matches!(parsed.kind, Kind::Image { .. }) => images.push(
             top.digest
                 .parse()
                 .unwrap_or_else(|_| Digest::of(top.content.as_bytes())),
         ),
-        None => {}
+        _ => {}
     }
     if !from_sbom {
         for image in images {
@@ -157,8 +161,39 @@ async fn packages_of(
     Ok((found.into_iter().collect(), from_sbom))
 }
 
+fn scan_tar_reader<R: std::io::Read>(reader: R) -> BTreeMap<&'static str, String> {
+    let mut files = BTreeMap::new();
+    let mut archive = tar::Archive::new(reader);
+    let Ok(entries) = archive.entries() else {
+        return files;
+    };
+    for entry in entries.flatten() {
+        let Ok(path) = entry.path() else {
+            continue;
+        };
+        let normalized = path.to_string_lossy();
+        let trimmed = normalized.trim_start_matches("./");
+        let key = match trimmed {
+            "etc/os-release" | "usr/lib/os-release" => "os-release",
+            "var/lib/dpkg/status" => "dpkg",
+            "lib/apk/db/installed" => "apk",
+            _ => continue,
+        };
+        if !entry.header().entry_type().is_file() || entry.size() > MAX_DB_FILE {
+            continue;
+        }
+        let mut data = Vec::new();
+        if entry.take(MAX_DB_FILE + 1).read_to_end(&mut data).is_ok()
+            && (data.len() as u64) <= MAX_DB_FILE
+        {
+            files.insert(key, String::from_utf8_lossy(&data).into_owned());
+        }
+    }
+    files
+}
+
 /// Lê `os-release` e os bancos `dpkg`/`apk` das camadas (a última camada
-/// que traz o arquivo vence).
+/// que traz o arquivo vence), fora do executor assíncrono.
 async fn from_layers(store: &dyn BlobStore, image: &registry_manifests::Model) -> Vec<Package> {
     let Ok(parsed) = manifest::parse(image.content.as_bytes(), Some(&image.media_type)) else {
         return Vec::new();
@@ -168,26 +203,28 @@ async fn from_layers(store: &dyn BlobStore, image: &registry_manifests::Model) -
     };
     let mut files: BTreeMap<&'static str, String> = BTreeMap::new();
     for layer in layers {
-        if !layer.media_type.contains("gzip") {
+        let is_gzip = layer.media_type.contains("gzip");
+        let is_plain_tar = !is_gzip
+            && !layer.media_type.contains("zstd")
+            && (layer.media_type.ends_with(".tar")
+                || layer.media_type == "application/vnd.oci.image.layer.v1.tar");
+        if !is_gzip && !is_plain_tar {
             continue;
         }
         let Ok(reader) = store.open(&layer.digest, 0).await else {
             continue;
         };
-        let mut tar = tarstream::Reader::new(GzipDecoder::new(BufReader::new(reader)));
-        while let Ok(Some(entry)) = tar.next().await {
-            let key = match entry.path.as_str() {
-                "etc/os-release" | "usr/lib/os-release" => "os-release",
-                "var/lib/dpkg/status" => "dpkg",
-                "lib/apk/db/installed" => "apk",
-                _ => continue,
-            };
-            if !entry.regular {
-                continue;
+        let extracted = tokio::task::spawn_blocking(move || {
+            let sync = SyncIoBridge::new(reader);
+            if is_gzip {
+                scan_tar_reader(GzDecoder::new(sync))
+            } else {
+                scan_tar_reader(sync)
             }
-            if let Ok(data) = tar.read_all(MAX_DB_FILE).await {
-                files.insert(key, String::from_utf8_lossy(&data).into_owned());
-            }
+        })
+        .await;
+        if let Ok(layer_files) = extracted {
+            files.extend(layer_files);
         }
     }
     let Some((id, version)) = files
@@ -215,6 +252,14 @@ async fn from_layers(store: &dyn BlobStore, image: &registry_manifests::Model) -
 ///
 /// Erro do banco.
 pub async fn run(ctx: &AppContext, top: &registry_manifests::Model) -> AppResult<()> {
+    run_inner(ctx, top, true).await
+}
+
+async fn run_inner(
+    ctx: &AppContext,
+    top: &registry_manifests::Model,
+    publish_event: bool,
+) -> AppResult<()> {
     let db = &ctx.db;
     let store = storage::store();
     let (found, from_sbom) = packages_of(db, store.as_ref(), top.repository_id, top).await?;
@@ -229,36 +274,68 @@ pub async fn run(ctx: &AppContext, top: &registry_manifests::Model) -> AppResult
     for feed in feeds {
         let row = osv::ensure_feed(db, feed).await?;
         if row.synced_at.is_none() {
-            osv::sync(db, &row).await?;
+            // Falhou há pouco (central sem internet): não refaz o download a
+            // cada deploy; a análise fica `failed` e a política decide.
+            if !osv::recently_failed(&row, Utc::now()) {
+                osv::sync(db, &row).await?;
+            }
+            failed_feed |= osv::ensure_feed(db, feed).await?.synced_at.is_none();
         }
-        failed_feed |= osv::ensure_feed(db, feed).await?.synced_at.is_none();
+    }
+
+    // Consulta os avisos em lote por ecossistema em vez de 1 query por pacote.
+    let mut by_ecosystem: BTreeMap<&str, Vec<&Package>> = BTreeMap::new();
+    for package in &found {
+        by_ecosystem
+            .entry(package.ecosystem.as_str())
+            .or_default()
+            .push(package);
     }
 
     let mut findings = Vec::new();
-    for package in &found {
-        for advisory in osv::advisories(db, &package.ecosystem, &package.name).await? {
-            let Some(hit) = advisory::affects(&advisory.data, package) else {
+    for (ecosystem, pkgs) in by_ecosystem {
+        let names: Vec<String> = pkgs
+            .iter()
+            .map(|pkg| pkg.name.clone())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        let rows = osv::advisories_for_ecosystem(db, ecosystem, &names).await?;
+        let mut by_pkg: HashMap<&str, Vec<&registry_advisories::Model>> = HashMap::new();
+        for advisory in &rows {
+            by_pkg
+                .entry(advisory.package.as_str())
+                .or_default()
+                .push(advisory);
+        }
+        for package in pkgs {
+            let Some(advisories) = by_pkg.get(package.name.as_str()) else {
                 continue;
             };
-            findings.push(registry_findings::ActiveModel {
-                manifest_id: Set(top.id),
-                advisory: Set(advisory.advisory.clone()),
-                aliases: Set(advisory.data.get("aliases").cloned().unwrap_or(json!([]))),
-                package: Set(package.name.clone()),
-                ecosystem: Set(package.ecosystem.clone()),
-                installed: Set(package.version.chars().take(128).collect()),
-                fixed: Set(hit.fixed.map(|fixed| fixed.chars().take(128).collect())),
-                severity: Set(advisory::severity(&advisory.data, &package.ecosystem)
-                    .as_str()
-                    .to_string()),
-                summary: Set(advisory
-                    .data
-                    .get("summary")
-                    .and_then(Value::as_str)
-                    .map(ToString::to_string)),
-                created_at: Set(Utc::now().into()),
-                ..Default::default()
-            });
+            for advisory in advisories {
+                let Some(hit) = advisory::affects(&advisory.data, package) else {
+                    continue;
+                };
+                findings.push(registry_findings::ActiveModel {
+                    manifest_id: Set(top.id),
+                    advisory: Set(advisory.advisory.clone()),
+                    aliases: Set(advisory.data.get("aliases").cloned().unwrap_or(json!([]))),
+                    package: Set(package.name.clone()),
+                    ecosystem: Set(package.ecosystem.clone()),
+                    installed: Set(package.version.chars().take(128).collect()),
+                    fixed: Set(hit.fixed.map(|fixed| fixed.chars().take(128).collect())),
+                    severity: Set(advisory::severity(&advisory.data, &package.ecosystem)
+                        .as_str()
+                        .to_string()),
+                    summary: Set(advisory
+                        .data
+                        .get("summary")
+                        .and_then(Value::as_str)
+                        .map(ToString::to_string)),
+                    created_at: Set(Utc::now().into()),
+                    ..Default::default()
+                });
+            }
         }
     }
     let counts = count(findings.iter().map(|finding| match &finding.severity {
@@ -266,19 +343,6 @@ pub async fn run(ctx: &AppContext, top: &registry_manifests::Model) -> AppResult
         _ => Severity::Unknown,
     }));
 
-    // Apagar e regravar juntos: uma falha no meio não deixa a versão sem
-    // achados e com a contagem antiga.
-    let txn = begin_write(db).await?;
-    registry_findings::Entity::delete_many()
-        .filter(registry_findings::Column::ManifestId.eq(top.id))
-        .exec(&txn)
-        .await?;
-    for chunk in findings.chunks(200) {
-        registry_findings::Entity::insert_many(chunk.to_vec())
-            .exec(&txn)
-            .await?;
-    }
-    txn.commit().await?;
     let status = if failed_feed {
         ScanStatus::Failed
     } else if found.is_empty() {
@@ -294,8 +358,23 @@ pub async fn run(ctx: &AppContext, top: &registry_manifests::Model) -> AppResult
         "low": counts[1], "unknown": counts[0], "source": if from_sbom { SPDX_HINT } else { "layers" },
     })));
     active.scanned_at = Set(Some(Utc::now().into()));
-    active.update(db).await?;
-    events::publish_changed(ctx);
+
+    // Apagar achados, gravar os novos e atualizar o resumo do manifest juntos.
+    let txn = begin_write(db).await?;
+    registry_findings::Entity::delete_many()
+        .filter(registry_findings::Column::ManifestId.eq(top.id))
+        .exec(&txn)
+        .await?;
+    for chunk in findings.chunks(200) {
+        registry_findings::Entity::insert_many(chunk.to_vec())
+            .exec(&txn)
+            .await?;
+    }
+    active.update(&txn).await?;
+    txn.commit().await?;
+    if publish_event {
+        events::publish_changed(ctx);
+    }
     Ok(())
 }
 
@@ -316,17 +395,19 @@ impl Exceptions {
     /// Erro do banco.
     pub async fn active(db: &DatabaseConnection, application_id: Option<i64>) -> AppResult<Self> {
         let now = Utc::now();
+        let scope = match application_id {
+            Some(id) => Condition::any()
+                .add(registry_exceptions::Column::ApplicationId.is_null())
+                .add(registry_exceptions::Column::ApplicationId.eq(id)),
+            None => Condition::all().add(registry_exceptions::Column::ApplicationId.is_null()),
+        };
         Ok(Self(
             registry_exceptions::Entity::find()
+                .filter(registry_exceptions::Column::ExpiresAt.gt(now))
+                .filter(scope)
                 .all(db)
                 .await?
                 .into_iter()
-                .filter(|exception| {
-                    exception.expires_at.with_timezone(&Utc) > now
-                        && exception
-                            .application_id
-                            .is_none_or(|id| Some(id) == application_id)
-                })
                 .map(|exception| exception.advisory)
                 .collect(),
         ))
@@ -424,8 +505,11 @@ pub async fn refresh(ctx: &AppContext) -> AppResult<u32> {
         .await?;
     let mut count = 0;
     for manifest in analysed {
-        run(ctx, &manifest).await?;
+        run_inner(ctx, &manifest, false).await?;
         count += 1;
+    }
+    if count > 0 {
+        events::publish_changed(ctx);
     }
     Ok(count)
 }

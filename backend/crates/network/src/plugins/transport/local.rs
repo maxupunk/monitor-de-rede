@@ -11,7 +11,13 @@
 //! as mensagens `Data` do canal chegam aos pedaços enquanto o comando roda.
 //! Telnet e HTTP entregam as linhas no fim.
 
-use std::{collections::HashMap, net::IpAddr, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    hash::Hash,
+    net::IpAddr,
+    sync::{Arc, OnceLock},
+    time::{Duration, Instant},
+};
 
 use async_trait::async_trait;
 use russh::ChannelMsg;
@@ -27,27 +33,115 @@ use netmonitor_core::shared::errors::{AppError, AppResult};
 /// A sessão e a chave de host que o equipamento apresentou nela.
 type SshSession = (Arc<ssh::Sessao>, String);
 
-/// Alvo, usuário e qual chave (se o login é por chave): a sessão de um não
-/// serve ao outro — a rotação do acesso dedicado prova a chave nova com a
-/// antiga ainda aberta.
-type SessionKey = (IpAddr, u16, String, Option<u64>);
+/// Alvo, usuário e o resumo das credenciais (senha, chave e chave de host
+/// fixada): a sessão de um não serve ao outro — a rotação do acesso dedicado
+/// prova a chave nova com a antiga ainda aberta, e a senha trocada (ou
+/// errada) não pode herdar a sessão autenticada com a anterior.
+type SessionKey = (IpAddr, u16, String, [u8; 32]);
 
-fn key_identity(login: &Login) -> Option<u64> {
-    use std::hash::{Hash, Hasher};
-    login.private_key.as_ref().map(|key| {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        key.hash(&mut hasher);
-        hasher.finish()
+/// SHA-256 das credenciais do login — nunca a senha ou a chave em si.
+fn login_identity(login: &Login) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    for part in [&login.password, &login.private_key, &login.host_key] {
+        match part {
+            Some(value) => {
+                hasher.update([1]);
+                hasher.update((value.len() as u64).to_le_bytes());
+                hasher.update(value.as_bytes());
+            }
+            None => hasher.update([0]),
+        }
+    }
+    hasher.finalize().into()
+}
+
+const MAX_CACHED_SSH_SESSIONS: usize = 128;
+/// Sessão parada por mais que isso é fechada: o pool é do processo inteiro
+/// (`LocalTransport::shared`) e não deve segurar conexões esquecidas.
+const SSH_SESSION_IDLE_TTL: Duration = Duration::from_secs(5 * 60);
+
+/// Uma entrada do pool com o último uso, para a ociosidade e a evicção.
+struct Pooled<V> {
+    value: V,
+    last_used: Instant,
+}
+
+/// Tira do pool o que morreu ou ficou ocioso demais e devolve a entrada de
+/// `key`, marcando o uso.
+fn pool_get<K: Eq + Hash, V: Clone>(
+    pool: &mut HashMap<K, Pooled<V>>,
+    key: &K,
+    now: Instant,
+    alive: impl Fn(&V) -> bool,
+) -> Option<V> {
+    pool.retain(|_, entry| {
+        alive(&entry.value) && now.saturating_duration_since(entry.last_used) < SSH_SESSION_IDLE_TTL
+    });
+    pool.get_mut(key).map(|entry| {
+        entry.last_used = now;
+        entry.value.clone()
     })
+}
+
+/// Guarda `value`, abrindo espaço pela entrada usada há mais tempo.
+fn pool_insert<K: Eq + Hash + Clone, V>(
+    pool: &mut HashMap<K, Pooled<V>>,
+    key: K,
+    value: V,
+    now: Instant,
+    max: usize,
+) {
+    if !pool.contains_key(&key) && pool.len() >= max {
+        if let Some(oldest) = pool
+            .iter()
+            .min_by_key(|(_, entry)| entry.last_used)
+            .map(|(key, _)| key.clone())
+        {
+            pool.remove(&oldest);
+        }
+    }
+    pool.insert(
+        key,
+        Pooled {
+            value,
+            last_used: now,
+        },
+    );
 }
 
 pub struct LocalTransport {
     origin: String,
-    ssh_sessions: Mutex<HashMap<SessionKey, SshSession>>,
+    ssh_sessions: Mutex<HashMap<SessionKey, Pooled<SshSession>>>,
     http: reqwest::Client,
 }
 
 impl LocalTransport {
+    /// Instância compartilhada por origem (`"central"` ou `"agente"`),
+    /// reutilizando o cliente HTTP e o pool de sessões SSH.
+    ///
+    /// # Errors
+    ///
+    /// Falha ao montar o cliente HTTP (TLS indisponível).
+    pub fn shared(origin: &'static str) -> AppResult<Arc<Self>> {
+        static INSTANCES: OnceLock<std::sync::Mutex<HashMap<&'static str, Arc<LocalTransport>>>> =
+            OnceLock::new();
+        let map = INSTANCES.get_or_init(std::sync::Mutex::default);
+        {
+            let guard = map
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some(existing) = guard.get(origin) {
+                return Ok(Arc::clone(existing));
+            }
+        }
+        let created = Arc::new(Self::new(origin)?);
+        let mut guard = map
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        Ok(Arc::clone(guard.entry(origin).or_insert(created)))
+    }
+
     /// # Errors
     ///
     /// Falha ao montar o cliente HTTP (TLS indisponível).
@@ -73,17 +167,29 @@ impl LocalTransport {
             ip,
             endpoint.port,
             login.username.clone(),
-            key_identity(login),
+            login_identity(login),
         );
-        let mut sessions = self.ssh_sessions.lock().await;
-        if let Some(session) = sessions.get(&key) {
-            if !session.0.is_closed() {
-                return Ok(session.clone());
+        let alive = |(handle, _): &SshSession| !handle.is_closed();
+        {
+            let mut sessions = self.ssh_sessions.lock().await;
+            if let Some(session) = pool_get(&mut sessions, &key, Instant::now(), alive) {
+                return Ok(session);
             }
         }
         let (session, host_key) = ssh::conecta_vendo_host(ip, endpoint.port, login).await?;
         let session = (Arc::new(session), host_key);
-        sessions.insert(key, session.clone());
+        let mut sessions = self.ssh_sessions.lock().await;
+        let now = Instant::now();
+        if let Some(existing) = pool_get(&mut sessions, &key, now, alive) {
+            return Ok(existing);
+        }
+        pool_insert(
+            &mut sessions,
+            key,
+            session.clone(),
+            now,
+            MAX_CACHED_SSH_SESSIONS,
+        );
         Ok(session)
     }
 
@@ -301,6 +407,42 @@ impl DeviceTransport for LocalTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn identidade_do_login_muda_com_a_senha_e_nao_a_contem() {
+        let a = Login::with_password("root", Some("s3nh4".into()));
+        let b = Login::with_password("root", Some("outra".into()));
+        assert_ne!(login_identity(&a), login_identity(&b));
+        assert_eq!(login_identity(&a), login_identity(&a.clone()));
+        let mut fixado = a.clone();
+        fixado.host_key = Some("SHA256:abc".into());
+        assert_ne!(login_identity(&a), login_identity(&fixado));
+        assert!(!format!("{:?}", login_identity(&a)).contains("s3nh4"));
+    }
+
+    #[test]
+    fn pool_expira_ocioso_e_despeja_o_menos_usado() {
+        let start = Instant::now();
+        let mut pool = HashMap::new();
+        pool_insert(&mut pool, "a", 1, start, 2);
+        pool_insert(&mut pool, "b", 2, start + Duration::from_secs(1), 2);
+        // "a" é usado de novo: o menos recente passa a ser "b".
+        assert_eq!(
+            pool_get(&mut pool, &"a", start + Duration::from_secs(2), |_| true),
+            Some(1)
+        );
+        pool_insert(&mut pool, "c", 3, start + Duration::from_secs(3), 2);
+        assert!(pool.contains_key("a") && pool.contains_key("c"));
+        assert!(!pool.contains_key("b"));
+        // Morta sai na hora; ociosa além do prazo também.
+        assert_eq!(
+            pool_get(&mut pool, &"c", start + Duration::from_secs(4), |v| *v != 3),
+            None
+        );
+        let later = start + Duration::from_secs(2) + SSH_SESSION_IDLE_TTL;
+        assert_eq!(pool_get(&mut pool, &"a", later, |_| true), None);
+        assert!(pool.is_empty());
+    }
 
     #[test]
     fn eco_do_telnet_sai_da_saida() {

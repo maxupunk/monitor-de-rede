@@ -49,14 +49,15 @@ impl AgentTransport {
         &self,
         call: &DeviceIoCall,
         on_line: Option<LineSink<'_>>,
+        cancel: &CancellationToken,
     ) -> AppResult<DeviceIoReply> {
-        let timeout = Duration::from_millis(call.timeout_ms()) + GRACE;
+        let timeout = Duration::from_millis(call.timeout_ms().clamp(1_000, 300_000)) + GRACE;
         let value = self
             .session
             .stream(
                 Command::DeviceIo { call: call.clone() },
                 timeout,
-                &CancellationToken::new(),
+                cancel,
                 |chunk| {
                     if let (Some(on_line), Some(line)) = (on_line, chunk.as_str()) {
                         on_line(line);
@@ -76,7 +77,7 @@ impl AgentTransport {
 #[async_trait]
 impl DeviceTransport for AgentTransport {
     async fn execute(&self, call: &DeviceIoCall) -> AppResult<DeviceIoReply> {
-        self.run(call, None).await
+        self.run(call, None, &CancellationToken::new()).await
     }
 
     async fn execute_streaming(
@@ -84,7 +85,25 @@ impl DeviceTransport for AgentTransport {
         call: &DeviceIoCall,
         on_line: LineSink<'_>,
     ) -> AppResult<DeviceIoReply> {
-        self.run(call, Some(on_line)).await
+        self.run(call, Some(on_line), &CancellationToken::new())
+            .await
+    }
+
+    async fn execute_with_cancel(
+        &self,
+        call: &DeviceIoCall,
+        cancel: &CancellationToken,
+    ) -> AppResult<DeviceIoReply> {
+        self.run(call, None, cancel).await
+    }
+
+    async fn execute_streaming_with_cancel(
+        &self,
+        call: &DeviceIoCall,
+        on_line: LineSink<'_>,
+        cancel: &CancellationToken,
+    ) -> AppResult<DeviceIoReply> {
+        self.run(call, Some(on_line), cancel).await
     }
 
     fn origin(&self) -> String {

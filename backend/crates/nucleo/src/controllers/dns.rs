@@ -1,6 +1,6 @@
 //! Endpoints de benchmark, lookup avulso e histórico de DNS.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use chrono::{Duration, Utc};
 use futures::TryStreamExt;
@@ -163,7 +163,6 @@ struct PerformanceBucket {
     min_latency: Option<f64>,
     max_latency: Option<f64>,
     total: usize,
-    last_checked_at: Option<String>,
     points: Vec<DnsHistoryPoint>,
     point_stride: usize,
     points_seen: usize,
@@ -318,13 +317,6 @@ async fn performance(
             bucket.monitor_ids.push(monitor.id);
         }
         let checked_at = result.finished_at.to_rfc3339();
-        if bucket
-            .last_checked_at
-            .as_ref()
-            .is_none_or(|previous| previous < &checked_at)
-        {
-            bucket.last_checked_at = Some(checked_at.clone());
-        }
         let lookup = data
             .and_then(|value| value.get("avgLookupTimeMs"))
             .and_then(serde_json::Value::as_f64)
@@ -437,6 +429,30 @@ async fn provision(
         .all(&ctx.db)
         .await?;
 
+    let include_ping = input.include_ping.unwrap_or(false);
+    let mut known_ping_hosts: HashSet<String> = if include_ping {
+        monitors::Entity::find()
+            .filter(monitors::Column::Type.eq("ping"))
+            .all(&ctx.db)
+            .await?
+            .into_iter()
+            .flat_map(|m| {
+                let mut hosts = vec![m.target().to_ascii_lowercase()];
+                if let Some(host) = m
+                    .configuration
+                    .get("host")
+                    .and_then(serde_json::Value::as_str)
+                {
+                    hosts.push(host.to_ascii_lowercase());
+                }
+                hosts
+            })
+            .collect()
+    } else {
+        HashSet::new()
+    };
+
+    let mut seen_dns_targets: HashSet<(String, String)> = HashSet::new();
     let mut created_rows = Vec::new();
     let mut already_monitored_count = 0;
 
@@ -447,6 +463,23 @@ async fn provision(
         }
         let protocol = DnsProtocol::parse(item.protocol.as_deref())?;
         let protocol_str = protocol.as_str();
+        let effective_target = if protocol_str == "doh" {
+            item.doh_url
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .unwrap_or(server_addr)
+        } else {
+            server_addr
+        };
+        let dedup_key = (
+            protocol_str.to_string(),
+            effective_target.to_ascii_lowercase(),
+        );
+        if !seen_dns_targets.insert(dedup_key) {
+            already_monitored_count += 1;
+            continue;
+        }
 
         let already_exists = existing_dns_monitors.iter().any(|m| {
             let config = m.configuration.as_object();
@@ -492,13 +525,7 @@ async fn provision(
             config["domains"] = serde_json::json!(all_domains);
         }
         if protocol_str == "doh" {
-            let doh = item
-                .doh_url
-                .as_deref()
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .unwrap_or(server_addr);
-            config["dohUrl"] = serde_json::json!(doh);
+            config["dohUrl"] = serde_json::json!(effective_target);
         } else if protocol_str != "system" {
             config["dnsServer"] = serde_json::json!(server_addr);
         }
@@ -544,28 +571,14 @@ async fn provision(
 
         created_rows.push(inserted);
 
-        if input.include_ping.unwrap_or(false) && protocol_str != "doh" {
+        if include_ping && protocol_str != "doh" {
             let ping_host = if let Ok((host, _)) = parse_server_address(server_addr) {
                 host
             } else {
                 server_addr.to_string()
             };
 
-            let existing_ping = monitors::Entity::find()
-                .filter(monitors::Column::Type.eq("ping"))
-                .all(&ctx.db)
-                .await?;
-
-            let already_has_ping = existing_ping.iter().any(|m| {
-                m.target().eq_ignore_ascii_case(&ping_host)
-                    || m.configuration
-                        .get("host")
-                        .and_then(serde_json::Value::as_str)
-                        .map(|h| h.eq_ignore_ascii_case(&ping_host))
-                        .unwrap_or(false)
-            });
-
-            if !already_has_ping {
+            if known_ping_hosts.insert(ping_host.to_ascii_lowercase()) {
                 let ping_name = format!("Ping {name}");
                 let ping_model = monitors::ActiveModel {
                     device_id: Set(None),

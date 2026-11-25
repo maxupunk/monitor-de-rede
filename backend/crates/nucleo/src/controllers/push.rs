@@ -4,7 +4,9 @@
 
 use axum::http::HeaderMap;
 use loco_rs::prelude::*;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, PaginatorTrait, QueryFilter, Set,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::info;
@@ -109,7 +111,7 @@ async fn save_subscription(
         ));
     }
 
-    let user_id = get_current_user_id(&ctx, &headers).await;
+    let user_id = require_current_user_id(&ctx, &headers).await?;
     let now = chrono::Utc::now().into();
 
     let existing = push_subscriptions::Entity::find()
@@ -118,18 +120,21 @@ async fn save_subscription(
         .await?;
 
     let model = if let Some(sub) = existing {
+        if sub.user_id.is_some_and(|owner| owner != user_id) {
+            return Err(AppError::forbidden(
+                "Esta subscrição Web Push pertence a outro usuário.",
+            ));
+        }
         let mut active: push_subscriptions::ActiveModel = sub.into();
         active.p256dh = Set(input.keys.p256dh.trim().to_string());
         active.auth = Set(input.keys.auth.trim().to_string());
         active.user_agent = Set(input.user_agent);
-        if user_id.is_some() {
-            active.user_id = Set(user_id);
-        }
+        active.user_id = Set(Some(user_id));
         active.updated_at = Set(now);
         active.update(&ctx.db).await?
     } else {
         push_subscriptions::ActiveModel {
-            user_id: Set(user_id),
+            user_id: Set(Some(user_id)),
             endpoint: Set(endpoint.to_string()),
             p256dh: Set(input.keys.p256dh.trim().to_string()),
             auth: Set(input.keys.auth.trim().to_string()),
@@ -158,16 +163,27 @@ async fn save_subscription(
 /// `DELETE /api/push/subscriptions` — Remove uma subscrição Web Push pelo endpoint.
 async fn delete_subscription(
     State(ctx): State<AppContext>,
+    headers: HeaderMap,
     Json(input): Json<DeleteSubscriptionDto>,
 ) -> AppResult<Response> {
+    let user_id = require_current_user_id(&ctx, &headers).await?;
     let endpoint = input.endpoint.trim();
     let res = push_subscriptions::Entity::delete_many()
         .filter(push_subscriptions::Column::Endpoint.eq(endpoint))
+        // Inscrição sem dono (gravada antes de haver usuário, ou órfã de uma
+        // conta removida) sai pelo mesmo critério do `POST`, que a assume:
+        // quem tem o endpoint — o navegador inscrito — pode cancelá-la.
+        .filter(
+            Condition::any()
+                .add(push_subscriptions::Column::UserId.eq(user_id))
+                .add(push_subscriptions::Column::UserId.is_null()),
+        )
         .exec(&ctx.db)
         .await?;
 
     info!(
         endpoint,
+        user_id,
         rows_affected = res.rows_affected,
         "Subscrição Web Push cancelada"
     );
@@ -180,7 +196,7 @@ async fn delete_subscription(
 
 /// `POST /api/push/test` — Dispara uma notificação Web Push de teste para os dispositivos do usuário.
 async fn test_push(State(ctx): State<AppContext>, headers: HeaderMap) -> AppResult<Response> {
-    let user_id = get_current_user_id(&ctx, &headers).await;
+    let user_id = require_current_user_id(&ctx, &headers).await?;
     let payload = json!({
         "title": "🔔 Teste de Notificação Web Push",
         "body": "Sucesso! Seu dispositivo está configurado para receber alertas em segundo plano do NetMonitor.",
@@ -192,9 +208,7 @@ async fn test_push(State(ctx): State<AppContext>, headers: HeaderMap) -> AppResu
             "timestamp": chrono::Utc::now().to_rfc3339()
         }
     });
-    // Sem usuário identificado, o teste vai a todas as inscrições.
-    let audience = user_id.map_or(Audience::Everyone, Audience::User);
-    let delivery = deliver(&ctx.db, audience, &payload).await?;
+    let delivery = deliver(&ctx.db, Audience::User(user_id), &payload).await?;
 
     if delivery.subscriptions == 0 {
         return Ok(format::json(TestPushResponse {
@@ -228,6 +242,12 @@ async fn get_current_user_id(ctx: &AppContext, headers: &HeaderMap) -> Option<i6
         .await
         .ok()
         .map(|u| u.id)
+}
+
+async fn require_current_user_id(ctx: &AppContext, headers: &HeaderMap) -> AppResult<i64> {
+    get_current_user_id(ctx, headers)
+        .await
+        .ok_or_else(|| AppError::unauthorized("Autenticação necessária."))
 }
 
 pub fn routes() -> Routes {

@@ -98,10 +98,8 @@ impl DeviceIoCommand {
         self.networks.check(ip)?;
         let transport: Arc<dyn DeviceTransport> = match &self.device {
             Some(device) => device.clone(),
-            None => Arc::new(
-                LocalTransport::new("agente")
-                    .map_err(|error| RemoteError::new(ErrorCode::Internal, error.to_string()))?,
-            ),
+            None => LocalTransport::shared("agente")
+                .map_err(|error| RemoteError::new(ErrorCode::Internal, error.to_string()))?,
         };
         let reply = transport
             .execute_streaming(call, &|line: &str| {
@@ -123,12 +121,15 @@ impl AgentCommandHandler for DeviceIoCommand {
         &self,
         command: Command,
         chunks: mpsc::UnboundedSender<Value>,
-        _cancel: CancellationToken,
+        cancel: CancellationToken,
     ) -> Result<Value, RemoteError> {
         let Command::DeviceIo { call } = command else {
             return Err(unexpected());
         };
-        self.device_io(&call, chunks).await
+        tokio::select! {
+            result = self.device_io(&call, chunks) => result,
+            () = cancel.cancelled() => Err(RemoteError::new(ErrorCode::Unavailable, "operação cancelada")),
+        }
     }
 }
 

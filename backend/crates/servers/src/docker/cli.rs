@@ -6,9 +6,12 @@
 //! e segredos vão por variável de ambiente do processo filho, nunca na linha
 //! de comando, que qualquer `ps` do host mostraria.
 
-use std::{path::Path, process::Stdio, time::Duration};
+use std::{collections::VecDeque, future::Future, path::Path, process::Stdio, time::Duration};
 
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::{
+    io::{AsyncBufReadExt, BufReader},
+    sync::mpsc,
+};
 
 use super::{maintenance::Progress, DockerError};
 
@@ -101,13 +104,13 @@ impl<'a> Cli<'a> {
         }
         drop(lines_tx);
 
-        let mut tail: Vec<String> = Vec::new();
+        let mut tail: VecDeque<String> = VecDeque::with_capacity(TAIL_LINES + 1);
         let collect = async {
             while let Some(line) = lines_rx.recv().await {
                 let _ = progress.send(line.clone());
-                tail.push(line);
+                tail.push_back(line);
                 if tail.len() > TAIL_LINES {
-                    tail.remove(0);
+                    tail.pop_front();
                 }
             }
             child.wait().await
@@ -118,9 +121,35 @@ impl<'a> Cli<'a> {
             .map_err(|_| DockerError::Engine)?;
         Ok(CliOutcome {
             success: status.success(),
-            tail,
+            tail: tail.into(),
         })
     }
+}
+
+/// Roda `work` com um [`Progress`] cujas linhas são convertidas por `map` e
+/// entregues em `tx`, aguardando o esvaziamento antes de retornar.
+pub async fn forward_lines<C, T, F, Fut>(
+    tx: &mpsc::UnboundedSender<C>,
+    map: impl Fn(String) -> C + Send + 'static,
+    work: F,
+) -> T
+where
+    C: Send + 'static,
+    F: FnOnce(Progress) -> Fut,
+    Fut: Future<Output = T>,
+{
+    let (progress, mut lines) = mpsc::unbounded_channel::<String>();
+    let tx = tx.clone();
+    let forward = tokio::spawn(async move {
+        while let Some(text) = lines.recv().await {
+            if tx.send(map(text)).is_err() {
+                break;
+            }
+        }
+    });
+    let result = work(progress).await;
+    let _ = forward.await;
+    result
 }
 
 /// A saída inteira de um comando curto (`git rev-parse`, `--version`), sem
@@ -135,8 +164,28 @@ pub async fn capture(
     cwd: Option<&Path>,
     timeout: Duration,
 ) -> Result<(bool, String), DockerError> {
+    capture_with_envs(program, args, &[], cwd, timeout).await
+}
+
+/// Igual a [`capture`], passando variáveis de ambiente explícitas ao processo
+/// filho (ex.: `GIT_CONFIG_*` para `safe.directory`).
+///
+/// # Errors
+///
+/// `Unavailable` quando o programa não existe ou estoura o tempo.
+pub async fn capture_with_envs(
+    program: &str,
+    args: &[&str],
+    envs: &[(String, String)],
+    cwd: Option<&Path>,
+    timeout: Duration,
+) -> Result<(bool, String), DockerError> {
     let mut command = tokio::process::Command::new(program);
-    command.args(args).stdin(Stdio::null()).kill_on_drop(true);
+    command
+        .args(args)
+        .envs(envs.iter().map(|(key, value)| (key, value)))
+        .stdin(Stdio::null())
+        .kill_on_drop(true);
     if let Some(cwd) = cwd {
         command.current_dir(cwd);
     }

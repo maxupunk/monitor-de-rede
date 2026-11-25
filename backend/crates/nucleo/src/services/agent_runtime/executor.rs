@@ -92,7 +92,10 @@ impl CommandExecutor for LocalExecutor {
             // O modo ao vivo é da sessão, não do executor.
             Command::SetLive { .. } => Ok(Value::Null),
             // A ponte precisa dos quadros binários do canal: é da sessão.
-            Command::DatabaseTunnel { .. } | Command::VolumeExport { .. } => Err(RemoteError::new(
+            Command::DatabaseTunnel { .. }
+            | Command::VolumeExport { .. }
+            | Command::ImageExport { .. }
+            | Command::ImageImport { .. } => Err(RemoteError::new(
                 ErrorCode::Unsupported,
                 "pontes são atendidas pela sessão do agente",
             )),

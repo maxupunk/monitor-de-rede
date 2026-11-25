@@ -10,12 +10,14 @@
 //! estar com o aparelho: nesse ciclo ele fica sem fato, e a queda do roteador
 //! já é alerta do monitor dele.
 
+use std::collections::HashMap;
+
 use chrono::{DateTime, Utc};
 use loco_rs::app::AppContext;
-use sea_orm::EntityTrait;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde_json::{json, Map};
 
-use super::{collector::FleetReading, rounds, watchlist};
+use super::{collector::FleetReading, roaming, rounds, watchlist};
 use crate::{
     dtos::{WifiDeviceSnapshot, WifiReadStatus, WifiStation},
     wifi_client::{WifiClientFacts, WifiClientPresence},
@@ -23,7 +25,7 @@ use crate::{
 use netmonitor_core::{
     alerts::contracts::{AlertEvaluationContext, AlertEvaluationScope, AlertScopeKey, AlertTarget},
     models::{devices, wifi_watched_clients},
-    shared::errors::AppResult,
+    shared::{errors::AppResult, transaction::begin_write},
 };
 use netmonitor_network::{central::Central, plugins::wifi_source::Requester};
 
@@ -67,29 +69,89 @@ pub async fn observe_fleet(ctx: &AppContext, reading: &FleetReading) -> AppResul
         return Ok(0);
     }
     let now = Utc::now();
-    let mut observed = 0;
-    for client in &watched {
-        let Some(observation) = observe(client, reading, now) else {
-            continue;
-        };
+    // Usa o mesmo desempate de `roaming::detect::locate` (atividade recente
+    // antes de sinal) indexado uma única vez por MAC em O(A*S) + O(1).
+    let stations_by_mac = index_stations(&reading.snapshots);
+    let observations: Vec<(&wifi_watched_clients::Model, Observation)> = watched
+        .iter()
+        .filter_map(|client| {
+            observe_indexed(client, &stations_by_mac, reading.complete, now)
+                .map(|observation| (client, observation))
+        })
+        .collect();
+    if observations.is_empty() {
+        return Ok(0);
+    }
+
+    let device_ids: Vec<i64> = observations
+        .iter()
+        .filter_map(|(_, obs)| obs.device_id)
+        .collect();
+    let device_sites: HashMap<i64, Option<i64>> = if device_ids.is_empty() {
+        HashMap::new()
+    } else {
+        devices::Entity::find()
+            .filter(devices::Column::Id.is_in(device_ids))
+            .all(&ctx.db)
+            .await?
+            .into_iter()
+            .map(|device| (device.id, device.site_id))
+            .collect()
+    };
+
+    let txn = begin_write(&ctx.db).await?;
+    for (client, observation) in &observations {
         let connected_on = matches!(observation.presence, WifiClientPresence::Connected { .. })
             .then_some(observation.device_id)
             .flatten();
-        watchlist::record(&ctx.db, client, connected_on, now).await?;
-        evaluate(ctx, client, &observation).await?;
-        observed += 1;
+        watchlist::record(&txn, client, connected_on, now).await?;
+    }
+    txn.commit().await?;
+
+    let central = Central::from_context(ctx)?;
+    for (client, observation) in &observations {
+        let site_id = observation
+            .device_id
+            .and_then(|id| device_sites.get(&id))
+            .copied()
+            .flatten();
+        evaluate(ctx, &central, client, observation, site_id).await?;
     }
     watchlist::publish(ctx).await;
-    Ok(observed)
+    Ok(observations.len())
 }
 
-/// Onde o aparelho está; `None` quando a leitura não basta para dizer.
-fn observe(
+/// Mapa MAC -> `(snapshot, station)` pelo mesmo critério de localização do
+/// roaming (`inactive_ms` recente vence sobra antiga; empate vai pelo sinal).
+fn index_stations(
+    snapshots: &[WifiDeviceSnapshot],
+) -> HashMap<&str, (&WifiDeviceSnapshot, &WifiStation)> {
+    let located = roaming::detect::locate(snapshots);
+    let mut out = HashMap::with_capacity(located.len());
+    for snapshot in snapshots
+        .iter()
+        .filter(|snapshot| snapshot.status == WifiReadStatus::Ok)
+    {
+        for station in &snapshot.stations {
+            if let Some(winner) = located.get(&station.mac) {
+                if winner.device_id == snapshot.device_id && winner.signal_dbm == station.signal_dbm
+                {
+                    out.entry(station.mac.as_str())
+                        .or_insert((snapshot, station));
+                }
+            }
+        }
+    }
+    out
+}
+
+fn observe_indexed(
     client: &wifi_watched_clients::Model,
-    reading: &FleetReading,
+    stations_by_mac: &HashMap<&str, (&WifiDeviceSnapshot, &WifiStation)>,
+    complete: bool,
     now: DateTime<Utc>,
 ) -> Option<Observation> {
-    if let Some((snapshot, station)) = find_station(&reading.snapshots, &client.mac) {
+    if let Some((snapshot, station)) = stations_by_mac.get(client.mac.as_str()) {
         return Some(Observation {
             device_id: Some(snapshot.device_id),
             presence: WifiClientPresence::Connected {
@@ -100,7 +162,7 @@ fn observe(
             },
         });
     }
-    if !reading.complete {
+    if !complete {
         return None;
     }
     let since = client.last_seen_at.unwrap_or(client.created_at);
@@ -112,34 +174,34 @@ fn observe(
     })
 }
 
+/// Onde o aparelho está; `None` quando a leitura não basta para dizer.
+#[cfg(test)]
+fn observe(
+    client: &wifi_watched_clients::Model,
+    reading: &FleetReading,
+    now: DateTime<Utc>,
+) -> Option<Observation> {
+    let indexed = index_stations(&reading.snapshots);
+    observe_indexed(client, &indexed, reading.complete, now)
+}
+
 /// A estação com o MAC nas leituras bem-sucedidas. Visto por dois APs no
-/// meio de um roaming, vale o de sinal melhor.
+/// meio de um roaming, usa o mesmo critério de localização do roaming
+/// (atividade mais recente e depois sinal melhor).
 pub(super) fn find_station<'a>(
     snapshots: &'a [WifiDeviceSnapshot],
     mac: &str,
 ) -> Option<(&'a WifiDeviceSnapshot, &'a WifiStation)> {
-    snapshots
-        .iter()
-        .filter(|snapshot| snapshot.status == WifiReadStatus::Ok)
-        .flat_map(|snapshot| {
-            snapshot
-                .stations
-                .iter()
-                .filter(|station| station.mac == mac)
-                .map(move |station| (snapshot, station))
-        })
-        .max_by_key(|(_, station)| station.signal_dbm)
+    index_stations(snapshots).remove(mac)
 }
 
 async fn evaluate(
     ctx: &AppContext,
+    central: &Central,
     client: &wifi_watched_clients::Model,
     observation: &Observation,
+    site_id: Option<i64>,
 ) -> AppResult<()> {
-    let device = match observation.device_id {
-        Some(device_id) => devices::Entity::find_by_id(device_id).one(&ctx.db).await?,
-        None => None,
-    };
     let facts = WifiClientFacts {
         name: &client.name,
         presence: &observation.presence,
@@ -149,7 +211,7 @@ async fn evaluate(
     data.insert("mac".into(), json!(client.mac));
     let target = AlertTarget {
         scope: AlertEvaluationScope {
-            site_id: device.as_ref().and_then(|device| device.site_id),
+            site_id,
             device_id: observation.device_id,
             monitor_id: None,
         },
@@ -158,7 +220,7 @@ async fn evaluate(
         data,
     };
 
-    Central::from_context(ctx)?
+    central
         .evaluate_alert(ctx, &AlertEvaluationContext::of(&facts, target))
         .await
 }

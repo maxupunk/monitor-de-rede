@@ -4,20 +4,28 @@
 use std::sync::Arc;
 
 use chrono::Utc;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use serde_json::json;
 
 use super::{
     env::LinkTestEnv,
     events, guard,
     model::{
         as_db, from_db, LinkTest, LinkTestFix, LinkTestPage, LinkTestPlan, LinkTestQuery,
-        LinkTestRequest, LinkTestStatus, LinkTestStepStatus,
+        LinkTestRequest, LinkTestStage, LinkTestStatus, LinkTestStepStatus,
     },
     plan,
     repository::{self, Requester},
     runner::{Job, CANCELLED_TEXT},
     view,
 };
-use netmonitor_core::shared::errors::{AppError, AppResult};
+use netmonitor_core::{
+    models::link_tests,
+    shared::{
+        errors::{AppError, AppResult},
+        transaction::begin_write,
+    },
+};
 
 /// Mensagem quando o pedido chega sem a confirmação explícita.
 pub const CONFIRM_REQUIRED: &str =
@@ -111,25 +119,65 @@ pub async fn start_confirmed(
 ///
 /// `NotFound`; `Conflict` quando o teste já terminou.
 pub async fn cancel(env: &LinkTestEnv, id: i64) -> AppResult<LinkTest> {
-    let mut test = repository::find(&env.db, id).await?;
+    let test = repository::find(&env.db, id).await?;
     let status = from_db::<LinkTestStatus>(&test.status).unwrap_or(LinkTestStatus::Failed);
     if !status.is_active() {
         return Err(AppError::conflict("O teste já terminou."));
     }
     if !guard::cancel(id) {
-        test.status = as_db(&LinkTestStatus::Cancelled);
-        test.error = Some(CANCELLED_TEXT.to_owned());
-        test.finished_at = Some(Utc::now().into());
-        repository::save_test(&env.db, &test).await?;
-        for mut leg in repository::legs_of(&env.db, &[id]).await? {
+        let now = Utc::now();
+        let txn = begin_write(&env.db).await?;
+        let updated = link_tests::Entity::update_many()
+            .col_expr(
+                link_tests::Column::Status,
+                sea_orm::sea_query::Expr::value(as_db(&LinkTestStatus::Cancelled)),
+            )
+            .col_expr(
+                link_tests::Column::Error,
+                sea_orm::sea_query::Expr::value(Some(CANCELLED_TEXT.to_owned())),
+            )
+            .col_expr(
+                link_tests::Column::FinishedAt,
+                sea_orm::sea_query::Expr::value(Some(
+                    chrono::DateTime::<chrono::FixedOffset>::from(now),
+                )),
+            )
+            .col_expr(
+                link_tests::Column::UpdatedAt,
+                sea_orm::sea_query::Expr::value(chrono::DateTime::<chrono::FixedOffset>::from(now)),
+            )
+            .filter(link_tests::Column::Id.eq(id))
+            .filter(link_tests::Column::Status.is_in([
+                as_db(&LinkTestStatus::Queued),
+                as_db(&LinkTestStatus::Running),
+            ]))
+            .exec(&txn)
+            .await?;
+        if updated.rows_affected == 0 {
+            txn.commit().await?;
+            return Err(AppError::conflict("O teste já terminou."));
+        }
+        for mut leg in repository::legs_of(&txn, &[id]).await? {
             let leg_status =
                 from_db::<LinkTestStepStatus>(&leg.status).unwrap_or(LinkTestStepStatus::Pending);
             if !leg_status.is_final() {
+                let mut stages: Vec<LinkTestStage> =
+                    serde_json::from_value(leg.stages.clone()).unwrap_or_default();
+                for stage in &mut stages {
+                    if !stage.status.is_final() {
+                        stage.status = LinkTestStepStatus::Cancelled;
+                        stage.message = Some(CANCELLED_TEXT.to_owned());
+                        stage.finished_at = Some(now.to_rfc3339());
+                    }
+                }
+                leg.stages = json!(stages);
                 leg.status = as_db(&LinkTestStepStatus::Cancelled);
                 leg.error = Some(CANCELLED_TEXT.to_owned());
-                repository::save_leg(&env.db, &leg).await?;
+                leg.finished_at = Some(now.into());
+                repository::save_leg(&txn, &leg).await?;
             }
         }
+        txn.commit().await?;
     }
     let detail = repository::detail(&env.db, id).await?;
     if !guard::is_running(id) {

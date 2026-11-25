@@ -327,14 +327,10 @@ pub async fn associate_identified_hostname(
     hostname: &str,
 ) -> AppResult<()> {
     let bind_key = resolver::hostname_bind_key(hostname);
-    if let Some(existing_device_id) = resolver::bindings(db).await?.get(&bind_key) {
-        if *existing_device_id != device_id {
-            return Err(AppError::business_rule(format!(
-                "A identidade `{hostname}` já está associada a outro dispositivo. Renomeie um dos equipamentos para manter os logs separados."
-            )));
-        }
-    }
-    resolver::bind(db, &bind_key, Some(device_id)).await?;
+    let conflict = format!(
+        "A identidade `{hostname}` já está associada a outro dispositivo. Renomeie um dos equipamentos para manter os logs separados."
+    );
+    resolver::bind_exclusive(db, &bind_key, device_id, &conflict).await?;
     if let Some((resolver, sources)) = runtime {
         resolver.invalidate().await;
         sources.reclassify(&bind_key, &Resolution::Device(device_id));
@@ -398,14 +394,7 @@ impl Drop for PendingConfirmation<'_> {
 /// Espera a linha marcada desta sessão. É o "está funcionando" da tela e não
 /// pode ser confundida com mensagens antigas ou com outro dispositivo.
 async fn aguarda_primeira_mensagem(sources: &SourceRegistry, marker: &str) -> Option<SeenSource> {
-    let ate = tokio::time::Instant::now() + TETO_DA_CONFIRMACAO;
-    while tokio::time::Instant::now() < ate {
-        if let Some(source) = sources.confirmation(marker) {
-            return Some(source);
-        }
-        tokio::time::sleep(Duration::from_millis(400)).await;
-    }
-    None
+    sources.wait_confirmation(marker, TETO_DA_CONFIRMACAO).await
 }
 
 /// Associa ao dispositivo a origem comprovada pela linha marcada emitida
@@ -426,20 +415,14 @@ pub async fn associate_confirmed_source(
     if source.device_id == Some(device_id) {
         return Ok(());
     }
-    if source.masked && source.hostname.is_none() {
-        return Err(AppError::business_rule(
-            "A linha de teste chegou por um gateway compartilhado, mas sem hostname; não é seguro vincular esse endereço a um único dispositivo.",
-        ));
-    }
-
     if source.masked {
-        return associate_identified_hostname(
-            db,
-            Some((resolver, sources)),
-            device_id,
-            source.hostname.as_deref().expect("validado acima"),
-        )
-        .await;
+        let Some(hostname) = source.hostname.as_deref() else {
+            return Err(AppError::business_rule(
+                "A linha de teste chegou por um gateway compartilhado, mas sem hostname; não é seguro vincular esse endereço a um único dispositivo.",
+            ));
+        };
+        return associate_identified_hostname(db, Some((resolver, sources)), device_id, hostname)
+            .await;
     }
 
     resolver::bind(db, &source.bind_key, Some(device_id)).await?;

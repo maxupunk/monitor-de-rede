@@ -107,12 +107,33 @@ pub enum Settled {
 struct Entry {
     proposal: Proposal,
     opened: Instant,
+    remind_task: Option<tokio::task::AbortHandle>,
+    expire_task: Option<tokio::task::AbortHandle>,
+}
+
+impl Drop for Entry {
+    fn drop(&mut self) {
+        if let Some(handle) = self.remind_task.take() {
+            handle.abort();
+        }
+        if let Some(handle) = self.expire_task.take() {
+            handle.abort();
+        }
+    }
+}
+
+/// Chave escopada por usuário + id da chamada: evita colisão entre usuários
+/// quando provedores reutilizam ids sequenciais (`call_0`).
+type ApprovalKey = (i64, String);
+
+fn snapshot_key(user_id: i64, call_id: &str) -> String {
+    format!("{user_id}:{call_id}")
 }
 
 #[derive(Default)]
 struct State {
-    pending: HashMap<String, Entry>,
-    settled: VecDeque<String>,
+    pending: HashMap<ApprovalKey, Entry>,
+    settled: VecDeque<ApprovalKey>,
 }
 
 /// Pendência vencida: o id da chamada e o dono, para avisar as telas dele.
@@ -120,38 +141,42 @@ type Expired = (String, i64);
 
 impl State {
     fn sweep(&mut self, now: Instant) -> Vec<Expired> {
-        let expired: Vec<Expired> = self
+        let expired: Vec<ApprovalKey> = self
             .pending
             .iter()
             .filter(|(_, entry)| now.duration_since(entry.opened) >= EXPIRES_AFTER)
-            .map(|(id, entry)| (id.clone(), entry.proposal.approval.user_id))
+            .map(|(key, _)| key.clone())
             .collect();
-        for (id, _) in &expired {
-            self.pending.remove(id);
+        let mut out = Vec::with_capacity(expired.len());
+        for key in expired {
+            if self.pending.remove(&key).is_some() {
+                out.push((key.1, key.0));
+            }
         }
-        expired
+        out
     }
 
-    fn remember(&mut self, call_id: String) {
+    fn remember(&mut self, key: ApprovalKey) {
         if self.settled.len() >= SETTLED_MEMORY {
             self.settled.pop_front();
         }
-        self.settled.push_back(call_id);
+        self.settled.push_back(key);
     }
 
     fn settle(&mut self, user_id: i64, call_id: &str) -> Settled {
-        if self.settled.iter().any(|id| id == call_id) {
+        let key = (user_id, call_id.to_string());
+        if self.settled.iter().any(|settled| *settled == key) {
             return Settled::AlreadyDecided;
         }
-        match self.pending.get(call_id) {
-            Some(entry) if entry.proposal.approval.user_id == user_id => {
-                let entry = self.pending.remove(call_id).map(|entry| entry.proposal);
-                self.remember(call_id.to_string());
-                entry.map_or(Settled::Unknown, |proposal| {
-                    Settled::Pending(Box::new(proposal))
-                })
+        match self.pending.remove(&key) {
+            Some(entry) => {
+                let proposal = entry.proposal.clone();
+                // Drop do `entry` aqui aborta `remind_task` e `expire_task` imediatamente.
+                drop(entry);
+                self.remember(key);
+                Settled::Pending(Box::new(proposal))
             }
-            _ => Settled::Unknown,
+            None => Settled::Unknown,
         }
     }
 }
@@ -178,8 +203,10 @@ impl ApprovalDesk {
     }
 
     #[must_use]
-    pub fn is_pending(&self, call_id: &str) -> bool {
-        self.lock().pending.contains_key(call_id)
+    pub fn is_pending(&self, user_id: i64, call_id: &str) -> bool {
+        self.lock()
+            .pending
+            .contains_key(&(user_id, call_id.to_string()))
     }
 
     /// Tira o que venceu. Pela idade, não pelo id: um id reutilizado pelo
@@ -192,17 +219,36 @@ impl ApprovalDesk {
         let mut state = self.lock();
         let expired = state.sweep(Instant::now());
         // Provedor que reutiliza ids (`call_0` em toda resposta): a proposta
-        // nova substitui a decisão antiga, em vez de nascer "já decidida".
-        let call_id = &proposal.approval.call_id;
-        state.settled.retain(|id| id != call_id);
+        // nova do mesmo usuário substitui a decisão antiga, em vez de nascer "já decidida".
+        let key = (proposal.approval.user_id, proposal.approval.call_id.clone());
+        state.settled.retain(|settled| *settled != key);
         state.pending.insert(
-            proposal.approval.call_id.clone(),
+            key,
             Entry {
                 proposal,
                 opened: Instant::now(),
+                remind_task: None,
+                expire_task: None,
             },
         );
         expired
+    }
+
+    fn attach_tasks(
+        &self,
+        user_id: i64,
+        call_id: &str,
+        remind_task: tokio::task::AbortHandle,
+        expire_task: tokio::task::AbortHandle,
+    ) {
+        let mut state = self.lock();
+        if let Some(entry) = state.pending.get_mut(&(user_id, call_id.to_string())) {
+            entry.remind_task = Some(remind_task);
+            entry.expire_task = Some(expire_task);
+        } else {
+            remind_task.abort();
+            expire_task.abort();
+        }
     }
 
     fn settle(&self, user_id: i64, call_id: &str) -> Settled {
@@ -258,12 +304,15 @@ pub fn open(ctx: &AppContext, request: ApprovalRequest<'_>) {
     if let Ok(bus) = EventBus::from_context(ctx) {
         bus.publish_snapshot(
             PENDING_EVENT,
-            approval.call_id.clone(),
+            snapshot_key(approval.user_id, &approval.call_id),
             serde_json::to_value(&approval).unwrap_or_default(),
         );
     }
-    tokio::spawn(remind(ctx.clone(), desk.clone(), approval));
-    tokio::spawn(expire(ctx.clone(), desk));
+    let user_id = approval.user_id;
+    let call_id = approval.call_id.clone();
+    let remind_handle = tokio::spawn(remind(ctx.clone(), desk.clone(), approval)).abort_handle();
+    let expire_handle = tokio::spawn(expire(ctx.clone(), desk.clone())).abort_handle();
+    desk.attach_tasks(user_id, &call_id, remind_handle, expire_handle);
 }
 
 /// Vence a pendência no prazo, sem esperar o próximo pedido: ela sai das
@@ -282,7 +331,7 @@ fn announce_expired(ctx: &AppContext, expired: Vec<Expired>) {
         return;
     };
     for (call_id, user_id) in expired {
-        bus.forget_snapshots(&call_id);
+        bus.forget_snapshots(&snapshot_key(user_id, &call_id));
         bus.publish_ephemeral(
             RESOLVED_EVENT,
             json!({ "callId": call_id, "userId": user_id, "decision": EXPIRED }),
@@ -296,7 +345,7 @@ async fn remind(ctx: AppContext, desk: ApprovalDesk, approval: AiPendingApproval
     if Presence::from_context(&ctx).is_online(approval.user_id) {
         tokio::time::sleep(REMINDER_AFTER).await;
     }
-    if !desk.is_pending(&approval.call_id) {
+    if !desk.is_pending(approval.user_id, &approval.call_id) {
         return;
     }
     let payload = notification(&approval);
@@ -342,7 +391,7 @@ pub fn settle(ctx: &AppContext, user_id: i64, call_id: &str, decision: Decision)
     let settled = ApprovalDesk::from_context(ctx).settle(user_id, call_id);
     if matches!(settled, Settled::Pending(_)) {
         if let Ok(bus) = EventBus::from_context(ctx) {
-            bus.forget_snapshots(call_id);
+            bus.forget_snapshots(&snapshot_key(user_id, call_id));
             bus.publish_ephemeral(
                 RESOLVED_EVENT,
                 json!({ "callId": call_id, "userId": user_id, "decision": decision.id() }),
@@ -414,10 +463,10 @@ mod tests {
     fn decidida_uma_vez_e_recusada_na_segunda() {
         let desk = ApprovalDesk::default();
         desk.insert(proposal("c1", 7));
-        assert!(desk.is_pending("c1"));
+        assert!(desk.is_pending(7, "c1"));
 
         assert!(matches!(desk.settle(7, "c1"), Settled::Pending(_)));
-        assert!(!desk.is_pending("c1"));
+        assert!(!desk.is_pending(7, "c1"));
         assert_eq!(desk.settle(7, "c1"), Settled::AlreadyDecided);
         assert!(ensure_undecided(&Settled::AlreadyDecided).is_err());
         assert!(ensure_undecided(&Settled::Unknown).is_ok());
@@ -437,11 +486,25 @@ mod tests {
     }
 
     #[test]
+    fn usuarios_diferentes_nao_colidem_no_mesmo_call_id() {
+        let desk = ApprovalDesk::default();
+        desk.insert(proposal("call_0", 7));
+        desk.insert(proposal("call_0", 8));
+        assert!(desk.is_pending(7, "call_0"));
+        assert!(desk.is_pending(8, "call_0"));
+
+        assert!(matches!(desk.settle(7, "call_0"), Settled::Pending(_)));
+        assert!(!desk.is_pending(7, "call_0"));
+        assert!(desk.is_pending(8, "call_0"));
+        assert!(matches!(desk.settle(8, "call_0"), Settled::Pending(_)));
+    }
+
+    #[test]
     fn so_o_dono_decide() {
         let desk = ApprovalDesk::default();
         desk.insert(proposal("c2", 7));
         assert_eq!(desk.settle(8, "c2"), Settled::Unknown);
-        assert!(desk.is_pending("c2"), "outro usuário não tira da fila");
+        assert!(desk.is_pending(7, "c2"), "outro usuário não tira da fila");
         assert_eq!(desk.settle(7, "desconhecida"), Settled::Unknown);
     }
 
@@ -449,10 +512,12 @@ mod tests {
     fn pendencia_velha_expira() {
         let mut state = State::default();
         state.pending.insert(
-            "velha".into(),
+            (1, "velha".into()),
             Entry {
                 proposal: proposal("velha", 1),
                 opened: Instant::now(),
+                remind_task: None,
+                expire_task: None,
             },
         );
         assert!(state.sweep(Instant::now()).is_empty());
@@ -468,10 +533,13 @@ mod tests {
     fn memoria_de_decididas_e_limitada() {
         let mut state = State::default();
         for index in 0..=SETTLED_MEMORY {
-            state.remember(index.to_string());
+            state.remember((1, index.to_string()));
         }
         assert_eq!(state.settled.len(), SETTLED_MEMORY);
-        assert_eq!(state.settled.front().map(String::as_str), Some("1"));
+        assert_eq!(
+            state.settled.front().map(|(u, id)| (*u, id.as_str())),
+            Some((1, "1"))
+        );
     }
 
     #[test]

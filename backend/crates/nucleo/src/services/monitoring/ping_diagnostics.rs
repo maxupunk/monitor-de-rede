@@ -174,7 +174,7 @@ pub async fn execute_ping(checker: &PingChecker, config: PingConfig) -> CheckRes
     }
 
     if used > 1 {
-        ensure_data_object(&mut result).insert("attempts".into(), json!(used));
+        insert_data_field(&mut result, "attempts", json!(used));
     }
     if is_icmp_no_reply(&result) {
         apply_tcp_confirmation(&mut result, &config).await;
@@ -238,15 +238,14 @@ fn apply_tcp_observations(
     let proof = observations
         .iter()
         .find(|(_, _, observation)| observation.state.proves_reachability());
-    let data = ensure_data_object(result);
-    data.insert("tcpEvidence".into(), Value::Array(evidence));
+    insert_data_field(result, "tcpEvidence", Value::Array(evidence));
 
     let Some((port, _, _)) = proof else {
-        data.insert("tcpConfirmation".into(), json!("inconclusive"));
+        insert_data_field(result, "tcpConfirmation", json!("inconclusive"));
         return;
     };
-    data.insert(REACHABILITY_CAUSE.into(), json!(ICMP_FILTERED));
-    data.insert("tcpConfirmation".into(), json!("reachable"));
+    insert_data_field(result, REACHABILITY_CAUSE, json!(ICMP_FILTERED));
+    insert_data_field(result, "tcpConfirmation", json!("reachable"));
     result.status = MonitorStatus::Warning;
     result.success = true;
     result.message = Some(format!(
@@ -270,11 +269,13 @@ async fn probe_with_retry(
     (port, attempts, observation)
 }
 
-fn ensure_data_object(result: &mut CheckResult) -> &mut serde_json::Map<String, Value> {
+fn insert_data_field(result: &mut CheckResult, key: &str, value: Value) {
     if !result.data.is_object() {
         result.data = json!({});
     }
-    result.data.as_object_mut().expect("objeto recém-criado")
+    if let Value::Object(map) = &mut result.data {
+        map.insert(key.into(), value);
+    }
 }
 
 #[cfg(test)]

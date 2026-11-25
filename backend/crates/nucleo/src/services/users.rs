@@ -7,11 +7,10 @@
 use std::str::FromStr;
 
 use axum::http::Method;
-use chrono::Local;
-use loco_rs::{hash, model::ModelError};
+use loco_rs::model::ModelError;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel, ModelTrait,
-    PaginatorTrait, QueryFilter, QueryOrder, Set,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait,
+    IntoActiveModel, ModelTrait, PaginatorTrait, QueryFilter, QueryOrder, Set,
 };
 use validator::Validate;
 
@@ -23,7 +22,10 @@ use crate::{
     },
     services::{
         auth::setup::map_model_error,
-        shared::errors::{AppError, AppResult},
+        shared::{
+            errors::{AppError, AppResult},
+            transaction::begin_write,
+        },
     },
 };
 
@@ -78,6 +80,31 @@ pub fn request_is_allowed(role: Role, method: &Method, path: &str) -> bool {
     }
     if path == "/api/mcp" || path.starts_with("/api/mcp/") {
         return true;
+    }
+
+    // Tokens pessoais do registry (ADR 023): qualquer papel autenticado pode
+    // gerenciar seus próprios tokens (escopo pull-only para Viewer).
+    if path == "/api/registry/tokens" || path.starts_with("/api/registry/tokens/") {
+        return true;
+    }
+
+    // Mudar a configuração, os provedores e os modelos da IA é do
+    // administrador. Ler não: a aba IA (Núcleo) abre para todo papel e mostra
+    // o Decisor, o benchmark e os catálogos de modelos — um `GET` barrado ali
+    // viraria 403 na tela de quem só consulta.
+    if path == "/api/ai/test-connection" {
+        return role.can_manage_users();
+    }
+    if (path == "/api/ai/settings"
+        || path == "/api/ai/decider"
+        || path.starts_with("/api/ai/decider/")
+        || path == "/api/ai/ollama"
+        || path.starts_with("/api/ai/ollama/")
+        || path == "/api/ai/opencode/models"
+        || path == "/api/ai/openrouter/models")
+        && !matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS)
+    {
+        return role.can_manage_users();
     }
 
     // Um agente tem o Docker de outro servidor nas mãos: cadastrar, emitir
@@ -143,23 +170,35 @@ impl<'a> UserService<'a> {
         input.validate()?;
         let role = Role::from_str(input.role.trim())?;
         let area_roles = AreaAccess::parse_area_roles(&input.area_roles)?;
-        let user = user_model::Model::create_with_password_and_role(
-            self.db,
-            &RegisterParams {
-                name: input.name.clone(),
-                email: input.email.clone(),
-                password: input.password.clone(),
+        let register = RegisterParams {
+            name: input.name.clone(),
+            email: input.email.clone(),
+            password: input.password.clone(),
+        };
+        register.validate()?;
+
+        let password_hash = user_model::hash_password_off_runtime(register.password.clone())
+            .await
+            .map_err(map_model_error)?;
+
+        let txn = begin_write(self.db).await?;
+        let user = user_model::Model::insert_new(
+            &txn,
+            user_model::NewUser {
+                name: &register.name,
+                email: &register.email,
+                password_hash,
+                role: role.as_str(),
+                active: input.active.unwrap_or(true),
+                area_roles: Some(AreaAccess::to_json(&area_roles)),
+                email_verified: true,
             },
-            role.as_str(),
         )
         .await
         .map_err(map_model_error)?;
 
-        let mut active = user.into_active_model();
-        active.active = Set(input.active.unwrap_or(true));
-        active.area_roles = Set(Some(AreaAccess::to_json(&area_roles)));
-        active.email_verified_at = Set(Some(Local::now().into()));
-        active.update(self.db).await.map_err(AppError::from)
+        txn.commit().await?;
+        Ok(user)
     }
 
     pub async fn update(
@@ -169,10 +208,30 @@ impl<'a> UserService<'a> {
         input: &UpdateUserInput,
     ) -> AppResult<users::Model> {
         input.validate()?;
-        let current = self.find(id).await?;
         let role = Role::from_str(input.role.trim())?;
         let area_roles = AreaAccess::parse_area_roles(&input.area_roles)?;
         let active = input.active;
+        let email = input.email.trim().to_lowercase();
+
+        let new_password_hash = if let Some(password) = input
+            .password
+            .as_deref()
+            .filter(|password| !password.trim().is_empty())
+        {
+            user_model::validate_password(password).map_err(validation_error_for_password)?;
+            let hashed = user_model::hash_password_off_runtime(password.to_owned())
+                .await
+                .map_err(map_model_error)?;
+            Some(hashed)
+        } else {
+            None
+        };
+
+        let txn = begin_write(self.db).await?;
+        let current = users::Entity::find_by_id(id)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| AppError::not_found("Usuário não encontrado."))?;
 
         if current.pid.to_string() == actor_pid && (role.as_str() != current.role || !active) {
             return Err(AppError::conflict(
@@ -180,14 +239,12 @@ impl<'a> UserService<'a> {
             ));
         }
 
-        self.ensure_active_admin_survives(&current, role, active)
-            .await?;
+        Self::ensure_active_admin_survives(&txn, &current, role, active).await?;
 
-        let email = input.email.trim().to_lowercase();
         let duplicate = users::Entity::find()
             .filter(users::Column::Email.eq(&email))
             .filter(users::Column::Id.ne(id))
-            .one(self.db)
+            .one(&txn)
             .await?;
         if duplicate.is_some() {
             return Err(AppError::conflict("Já existe um usuário com este e-mail."));
@@ -200,38 +257,38 @@ impl<'a> UserService<'a> {
         model.area_roles = Set(Some(AreaAccess::to_json(&area_roles)));
         model.active = Set(active);
 
-        if let Some(password) = input
-            .password
-            .as_deref()
-            .filter(|password| !password.trim().is_empty())
-        {
-            user_model::validate_password(password).map_err(validation_error_for_password)?;
-            model.password =
-                Set(hash::hash_password(password)
-                    .map_err(|error| AppError::Internal(error.into()))?);
+        if let Some(hashed) = new_password_hash {
+            model.password = Set(hashed);
         }
 
-        model
-            .update(self.db)
+        let updated = model
+            .update(&txn)
             .await
-            .map_err(|error| map_model_error(ModelError::DbErr(error)))
+            .map_err(|error| map_model_error(ModelError::DbErr(error)))?;
+
+        txn.commit().await?;
+        Ok(updated)
     }
 
     pub async fn delete(&self, actor_pid: &str, id: i64) -> AppResult<()> {
-        let current = self.find(id).await?;
+        let txn = begin_write(self.db).await?;
+        let current = users::Entity::find_by_id(id)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| AppError::not_found("Usuário não encontrado."))?;
         if current.pid.to_string() == actor_pid {
             return Err(AppError::conflict(
                 "Você não pode excluir sua própria conta.",
             ));
         }
-        self.ensure_active_admin_survives(&current, Role::Viewer, false)
-            .await?;
-        current.delete(self.db).await?;
+        Self::ensure_active_admin_survives(&txn, &current, Role::Viewer, false).await?;
+        current.delete(&txn).await?;
+        txn.commit().await?;
         Ok(())
     }
 
-    async fn ensure_active_admin_survives(
-        &self,
+    async fn ensure_active_admin_survives<C: ConnectionTrait>(
+        db: &C,
         current: &users::Model,
         next_role: Role,
         next_active: bool,
@@ -246,7 +303,7 @@ impl<'a> UserService<'a> {
         let active_admins = users::Entity::find()
             .filter(users::Column::Role.eq(Role::ADMIN))
             .filter(users::Column::Active.eq(true))
-            .count(self.db)
+            .count(db)
             .await?;
         if active_admins <= 1 {
             return Err(AppError::conflict(
@@ -372,6 +429,49 @@ mod tests {
                 role,
                 &Method::DELETE,
                 "/api/mcp/tokens/1"
+            ));
+        }
+    }
+
+    #[test]
+    fn ai_config_e_provedores_so_admin_e_registry_tokens_para_todos() {
+        for (method, path) in [
+            (Method::PUT, "/api/ai/settings"),
+            (Method::PUT, "/api/ai/decider"),
+            (Method::POST, "/api/ai/decider/pull"),
+            (Method::POST, "/api/ai/decider/models"),
+            (Method::POST, "/api/ai/test-connection"),
+            (Method::POST, "/api/ai/ollama/pull"),
+            (Method::DELETE, "/api/ai/ollama/models"),
+        ] {
+            assert!(request_is_allowed(Role::Admin, &method, path), "{path}");
+            assert!(!request_is_allowed(Role::Operator, &method, path), "{path}");
+            assert!(!request_is_allowed(Role::Viewer, &method, path), "{path}");
+        }
+        // A aba IA abre para todo papel: a leitura não pode virar 403.
+        for path in [
+            "/api/ai/settings",
+            "/api/ai/decider",
+            "/api/ai/decider/providers",
+            "/api/ai/decider/benchmark",
+            "/api/ai/ollama/models",
+            "/api/ai/opencode/models",
+            "/api/ai/openrouter/models",
+        ] {
+            for role in [Role::Admin, Role::Operator, Role::Viewer] {
+                assert!(request_is_allowed(role, &Method::GET, path), "{path}");
+            }
+        }
+        for role in [Role::Admin, Role::Operator, Role::Viewer] {
+            assert!(request_is_allowed(
+                role,
+                &Method::POST,
+                "/api/registry/tokens"
+            ));
+            assert!(request_is_allowed(
+                role,
+                &Method::DELETE,
+                "/api/registry/tokens/42"
             ));
         }
     }

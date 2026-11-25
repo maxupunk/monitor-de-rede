@@ -51,6 +51,7 @@ pub const SIGMA_ANOMALY_MULTIPLIER: f64 = 3.0;
 /// TTL do cache em memória, em segundos. A baseline muda lentamente (só quando
 /// fecha um novo bucket), então 1h é suficiente e barato.
 const CACHE_TTL_SECONDS: u64 = 3_600;
+const MAX_CACHE_ENTRIES: usize = 4_096;
 
 /// Métricas de baseline estatística calculadas para um monitor.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
@@ -154,6 +155,19 @@ where
         let mut cache = cache()
             .lock()
             .map_err(|error| AppError::Internal(anyhow::anyhow!(error.to_string())))?;
+        if cache.len() >= MAX_CACHE_ENTRIES && !cache.contains_key(&key) {
+            let ttl = Duration::from_secs(CACHE_TTL_SECONDS);
+            cache.retain(|_, entry| entry.fetched_at.elapsed() < ttl);
+            if cache.len() >= MAX_CACHE_ENTRIES {
+                if let Some(oldest_key) = cache
+                    .iter()
+                    .min_by_key(|(_, entry)| entry.fetched_at)
+                    .map(|(k, _)| *k)
+                {
+                    cache.remove(&oldest_key);
+                }
+            }
+        }
         cache.insert(
             key,
             CacheEntry {

@@ -5,7 +5,7 @@
 //! da tela: mesmas recusas, mesmo evento SSE, mesma auditoria.
 
 use netmonitor_core::areas::Area;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use async_trait::async_trait;
 use chrono::{Duration, Utc};
@@ -52,35 +52,98 @@ fn condition_text(condition: &Value) -> String {
     )
 }
 
+/// Nomes de escopo carregados em lote para evitar consultas N+1.
+struct ScopeNames {
+    monitors: HashMap<i64, String>,
+    devices: HashMap<i64, String>,
+    sites: HashMap<i64, String>,
+}
+
+impl ScopeNames {
+    async fn load(ctx: &AppContext, rules: &[alert_rules::Model]) -> AppResult<Self> {
+        let monitor_ids: HashSet<i64> = rules.iter().filter_map(|r| r.monitor_id).collect();
+        let device_ids: HashSet<i64> = rules.iter().filter_map(|r| r.device_id).collect();
+        let site_ids: HashSet<i64> = rules.iter().filter_map(|r| r.site_id).collect();
+
+        let monitors = if monitor_ids.is_empty() {
+            HashMap::new()
+        } else {
+            monitors::Entity::find()
+                .filter(monitors::Column::Id.is_in(monitor_ids))
+                .all(&ctx.db)
+                .await?
+                .into_iter()
+                .map(|m| (m.id, m.name))
+                .collect()
+        };
+        let devices = if device_ids.is_empty() {
+            HashMap::new()
+        } else {
+            devices::Entity::find()
+                .filter(devices::Column::Id.is_in(device_ids))
+                .all(&ctx.db)
+                .await?
+                .into_iter()
+                .map(|d| (d.id, d.name))
+                .collect()
+        };
+        let sites = if site_ids.is_empty() {
+            HashMap::new()
+        } else {
+            sites::Entity::find()
+                .filter(sites::Column::Id.is_in(site_ids))
+                .all(&ctx.db)
+                .await?
+                .into_iter()
+                .map(|s| (s.id, s.name))
+                .collect()
+        };
+
+        Ok(Self {
+            monitors,
+            devices,
+            sites,
+        })
+    }
+
+    fn label(&self, rule: &alert_rules::Model) -> String {
+        let mut parts = Vec::new();
+        if let Some(id) = rule.monitor_id {
+            let name = self
+                .monitors
+                .get(&id)
+                .cloned()
+                .unwrap_or_else(|| format!("#{id}"));
+            parts.push(format!("monitor {name}"));
+        }
+        if let Some(id) = rule.device_id {
+            let name = self
+                .devices
+                .get(&id)
+                .cloned()
+                .unwrap_or_else(|| format!("#{id}"));
+            parts.push(format!("dispositivo {name}"));
+        }
+        if let Some(id) = rule.site_id {
+            let name = self
+                .sites
+                .get(&id)
+                .cloned()
+                .unwrap_or_else(|| format!("#{id}"));
+            parts.push(format!("site {name}"));
+        }
+        if parts.is_empty() {
+            "global (todos os dispositivos)".to_string()
+        } else {
+            parts.join(", ")
+        }
+    }
+}
+
 /// Onde a regra vale, com nomes no lugar dos ids.
 async fn scope_label(ctx: &AppContext, rule: &alert_rules::Model) -> AppResult<String> {
-    let mut parts = Vec::new();
-    if let Some(id) = rule.monitor_id {
-        let name = monitors::Entity::find_by_id(id)
-            .one(&ctx.db)
-            .await?
-            .map_or_else(|| format!("#{id}"), |monitor| monitor.name);
-        parts.push(format!("monitor {name}"));
-    }
-    if let Some(id) = rule.device_id {
-        let name = devices::Entity::find_by_id(id)
-            .one(&ctx.db)
-            .await?
-            .map_or_else(|| format!("#{id}"), |device| device.name);
-        parts.push(format!("dispositivo {name}"));
-    }
-    if let Some(id) = rule.site_id {
-        let name = sites::Entity::find_by_id(id)
-            .one(&ctx.db)
-            .await?
-            .map_or_else(|| format!("#{id}"), |site| site.name);
-        parts.push(format!("site {name}"));
-    }
-    Ok(if parts.is_empty() {
-        "global (todos os dispositivos)".to_string()
-    } else {
-        parts.join(", ")
-    })
+    let names = ScopeNames::load(ctx, std::slice::from_ref(rule)).await?;
+    Ok(names.label(rule))
 }
 
 /// Disparos de cada regra desde `since`.
@@ -221,18 +284,21 @@ impl AiToolHandler for ListAlertRules {
 
         let ids: Vec<i64> = shown.iter().map(|rule| rule.id).collect();
         let fired = firings_since(ctx, ids.clone(), Utc::now() - Duration::hours(24)).await?;
-        let open_rows: Vec<Option<i64>> = alert_events::Entity::find()
-            .select_only()
-            .column(alert_events::Column::AlertRuleId)
-            .filter(alert_events::Column::AlertRuleId.is_in(ids))
-            .filter(alert_events::Column::Status.is_in(AlertStatus::OPEN))
-            .into_tuple()
-            .all(&ctx.db)
-            .await?;
         let mut open: HashMap<i64, u64> = HashMap::new();
-        for id in open_rows.into_iter().flatten() {
-            *open.entry(id).or_insert(0) += 1;
+        if !ids.is_empty() {
+            let open_rows: Vec<Option<i64>> = alert_events::Entity::find()
+                .select_only()
+                .column(alert_events::Column::AlertRuleId)
+                .filter(alert_events::Column::AlertRuleId.is_in(ids))
+                .filter(alert_events::Column::Status.is_in(AlertStatus::OPEN))
+                .into_tuple()
+                .all(&ctx.db)
+                .await?;
+            for id in open_rows.into_iter().flatten() {
+                *open.entry(id).or_insert(0) += 1;
+            }
         }
+        let scope_names = ScopeNames::load(ctx, &shown).await?;
 
         let mut items = Vec::with_capacity(shown.len());
         for rule in &shown {
@@ -242,7 +308,7 @@ impl AiToolHandler for ListAlertRules {
                 "name": rule.name,
                 "condition": condition_text(&rule.condition),
                 "severity": rule.severity,
-                "scope": scope_label(ctx, rule).await?,
+                "scope": scope_names.label(rule),
                 "enabled": rule.enabled,
                 "duration_s": rule.duration_seconds,
                 "recovery_window_s": rule.recovery_window_seconds,
@@ -631,6 +697,51 @@ impl AiToolHandler for CreateAlertRule {
     }
 }
 
+/// Resolve o `rule_id` diretamente ou a partir de um `alert_id` e carrega a regra.
+async fn resolve_rule_from_args(
+    ctx: &AppContext,
+    args: &ToolArgs,
+) -> AppResult<Result<alert_rules::Model, ToolOutput>> {
+    let id_opt = match args.integer("rule_id") {
+        Some(id) => Some(id),
+        None => match args.integer("alert_id") {
+            Some(alert_id) => {
+                let event = alert_events::Entity::find_by_id(alert_id)
+                    .one(&ctx.db)
+                    .await?;
+                match event {
+                    Some(e) => match e.alert_rule_id {
+                        Some(r_id) => Some(r_id),
+                        None => {
+                            return Ok(Err(ToolOutput::not_found(format!(
+                                "O alerta #{alert_id} não possui regra vinculada (alerta de sistema ou baseline)"
+                            ))))
+                        }
+                    },
+                    None => {
+                        return Ok(Err(ToolOutput::not_found(format!(
+                            "Alerta #{alert_id} não encontrado"
+                        ))))
+                    }
+                }
+            }
+            None => None,
+        },
+    };
+    let Some(id) = id_opt else {
+        return Ok(Err(ToolOutput::not_found(
+            "Informe rule_id ou alert_id (de list_alert_rules ou explain_alert)",
+        )));
+    };
+    match rules::find(ctx, id).await {
+        Ok(rule) => Ok(Ok(rule)),
+        Err(AppError::NotFound(_)) => Ok(Err(ToolOutput::not_found(format!(
+            "Regra {id} não encontrada; use list_alert_rules"
+        )))),
+        Err(error) => Err(error),
+    }
+}
+
 pub struct DeleteAlertRule;
 
 impl DeleteAlertRule {
@@ -638,47 +749,12 @@ impl DeleteAlertRule {
         ctx: &AppContext,
         args: &ToolArgs,
     ) -> AppResult<Result<(alert_rules::Model, u64), ToolOutput>> {
-        let id_opt = match args.integer("rule_id") {
-            Some(id) => Some(id),
-            None => match args.integer("alert_id") {
-                Some(alert_id) => {
-                    let event = alert_events::Entity::find_by_id(alert_id)
-                        .one(&ctx.db)
-                        .await?;
-                    match event {
-                        Some(e) => match e.alert_rule_id {
-                            Some(r_id) => Some(r_id),
-                            None => {
-                                return Ok(Err(ToolOutput::not_found(format!(
-                                    "O alerta #{alert_id} não possui regra vinculada (alerta de sistema ou baseline)"
-                                ))))
-                            }
-                        },
-                        None => {
-                            return Ok(Err(ToolOutput::not_found(format!(
-                                "Alerta #{alert_id} não encontrado"
-                            ))))
-                        }
-                    }
-                }
-                None => None,
-            },
+        let rule = match resolve_rule_from_args(ctx, args).await? {
+            Ok(rule) => rule,
+            Err(output) => return Ok(Err(output)),
         };
-        let Some(id) = id_opt else {
-            return Ok(Err(ToolOutput::not_found(
-                "Informe rule_id ou alert_id (de list_alert_rules ou explain_alert)",
-            )));
-        };
-        match rules::find(ctx, id).await {
-            Ok(rule) => {
-                let events = rules::event_count(ctx, rule.id).await?;
-                Ok(Ok((rule, events)))
-            }
-            Err(AppError::NotFound(_)) => Ok(Err(ToolOutput::not_found(format!(
-                "Regra {id} não encontrada; use list_alert_rules"
-            )))),
-            Err(error) => Err(error),
-        }
+        let events = rules::event_count(ctx, rule.id).await?;
+        Ok(Ok((rule, events)))
     }
 }
 
@@ -756,49 +832,16 @@ impl ToggleAlertRule {
         ctx: &AppContext,
         args: &ToolArgs,
     ) -> AppResult<Result<(alert_rules::Model, bool), ToolOutput>> {
-        let id_opt = match args.integer("rule_id") {
-            Some(id) => Some(id),
-            None => match args.integer("alert_id") {
-                Some(alert_id) => {
-                    let event = alert_events::Entity::find_by_id(alert_id)
-                        .one(&ctx.db)
-                        .await?;
-                    match event {
-                        Some(e) => match e.alert_rule_id {
-                            Some(r_id) => Some(r_id),
-                            None => {
-                                return Ok(Err(ToolOutput::not_found(format!(
-                                    "O alerta #{alert_id} não possui regra vinculada (alerta de sistema ou baseline)"
-                                ))))
-                            }
-                        },
-                        None => {
-                            return Ok(Err(ToolOutput::not_found(format!(
-                                "Alerta #{alert_id} não encontrado"
-                            ))))
-                        }
-                    }
-                }
-                None => None,
-            },
-        };
-        let Some(id) = id_opt else {
-            return Ok(Err(ToolOutput::not_found(
-                "Informe rule_id ou alert_id (de list_alert_rules ou explain_alert)",
-            )));
+        let rule = match resolve_rule_from_args(ctx, args).await? {
+            Ok(rule) => rule,
+            Err(output) => return Ok(Err(output)),
         };
         let Some(enabled) = args.raw("enabled").and_then(Value::as_bool) else {
             return Ok(Err(ToolOutput::not_found(
                 "Informe enabled (true para ativar, false para desativar)",
             )));
         };
-        match rules::find(ctx, id).await {
-            Ok(rule) => Ok(Ok((rule, enabled))),
-            Err(AppError::NotFound(_)) => Ok(Err(ToolOutput::not_found(format!(
-                "Regra {id} não encontrada; use list_alert_rules"
-            )))),
-            Err(error) => Err(error),
-        }
+        Ok(Ok((rule, enabled)))
     }
 }
 

@@ -15,9 +15,12 @@ use ts_rs::TS;
 use netmonitor_core::shared::errors::{AppError, AppResult};
 
 use super::{request, Ask, BuildTrigger};
-use crate::deploys::{
-    applications, connections,
-    refs::{self, GitRef},
+use crate::{
+    deploys::{
+        applications, connections,
+        refs::{self, GitRef},
+    },
+    dtos::deploys::Builder,
 };
 
 pub const SIGNATURE_HEADER: &str = "x-hub-signature-256";
@@ -132,7 +135,7 @@ pub async fn handle(
 
     let mut created = Vec::new();
     for application in applications::by_repository(&ctx.db, &payload.repository.full_name).await? {
-        if application.builder != "netmonitor"
+        if Builder::parse(&application.builder) != Builder::Netmonitor
             || application.github_connection_id != Some(connection.id)
         {
             continue;

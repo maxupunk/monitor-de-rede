@@ -615,6 +615,7 @@ pub async fn analyze<C: ConnectionTrait>(
         })?;
 
     let all_devices = devices::Entity::find().all(db).await?;
+    let graph = build_dependency_graph(db, &all_devices).await?;
     let devices_map: HashMap<i64, devices::Model> =
         all_devices.into_iter().map(|d| (d.id, d)).collect();
 
@@ -630,9 +631,6 @@ pub async fn analyze<C: ConnectionTrait>(
         .filter(alert_events_entity::Column::StartedAt.lte(to))
         .all(db)
         .await?;
-
-    let all_devices_vec: Vec<devices::Model> = devices_map.values().cloned().collect();
-    let graph = build_dependency_graph(db, &all_devices_vec).await?;
 
     let target_node_summary = target_device.map(|d| DependencyNodeSummary {
         id: d.id,
@@ -783,7 +781,8 @@ pub async fn analyze<C: ConnectionTrait>(
     let (common_site_id, common_network_id) =
         common_scopes(target_device, &candidates, &devices_map);
 
-    let relations = AlertRelations::load(db, &candidates).await?;
+    // Carrega relações incluindo o evento alvo (que pode ser escolhido como `primary_cause`).
+    let relations = AlertRelations::load(db, &all_incident_events).await?;
     let mut serialized: Vec<SerializedAlertEvent> = candidates
         .iter()
         .map(|e| serialize_event(e, &relations))
@@ -833,62 +832,89 @@ pub async fn analyze_active_clusters<C: ConnectionTrait>(
     }
 
     let all_devices = devices::Entity::find().all(db).await?;
+    let graph = build_dependency_graph(db, &all_devices).await?;
     let devices_map: HashMap<i64, devices::Model> =
         all_devices.into_iter().map(|d| (d.id, d)).collect();
-    let all_devices_vec: Vec<devices::Model> = devices_map.values().cloned().collect();
-    let graph = build_dependency_graph(db, &all_devices_vec).await?;
 
     let relations = AlertRelations::load(db, &open_events).await?;
 
-    // Agrupamento de eventos em clusters por conectividade de grafo ou proximidade temporal no mesmo site/rede
-    let mut clusters_events: Vec<Vec<alert_events::Model>> = Vec::new();
-    let mut assigned: HashSet<i64> = HashSet::new();
+    // Pré-calcula descendentes uma única vez por dispositivo falhando (evita O(N²·(V+E))).
+    let unique_event_devices: HashSet<i64> =
+        open_events.iter().filter_map(|e| e.device_id).collect();
+    let descendants_by_device: HashMap<i64, HashSet<i64>> = unique_event_devices
+        .into_iter()
+        .map(|id| (id, graph.reachable_descendants(id)))
+        .collect();
 
-    for event in &open_events {
-        if assigned.contains(&event.id) {
-            continue;
+    // Agrupamento transitivo via Union-Find por conectividade no grafo ou proximidade temporal no mesmo site/rede.
+    let n = open_events.len();
+    let mut parent: Vec<usize> = (0..n).collect();
+    fn uf_find(parent: &mut [usize], mut x: usize) -> usize {
+        while parent[x] != x {
+            parent[x] = parent[parent[x]];
+            x = parent[x];
         }
+        x
+    }
+    let event_times: Vec<i64> = open_events
+        .iter()
+        .map(|e| e.started_at.with_timezone(&Utc).timestamp())
+        .collect();
 
-        let mut cluster = vec![event.clone()];
-        assigned.insert(event.id);
-
-        let event_dev = event.device_id.and_then(|id| devices_map.get(&id));
-        let event_time = event.started_at.with_timezone(&Utc);
-
-        for other in &open_events {
-            if assigned.contains(&other.id) {
+    for i in 0..n {
+        let dev_a = open_events[i].device_id.and_then(|id| devices_map.get(&id));
+        for j in (i + 1)..n {
+            if uf_find(&mut parent, i) == uf_find(&mut parent, j) {
                 continue;
             }
-
-            let other_time = other.started_at.with_timezone(&Utc);
-            let time_diff = (event_time - other_time).num_seconds().abs();
-
-            let are_connected = match (event.device_id, other.device_id) {
+            let are_connected = match (open_events[i].device_id, open_events[j].device_id) {
                 (Some(id_a), Some(id_b)) => {
                     id_a == id_b
-                        || graph.reachable_descendants(id_a).contains(&id_b)
-                        || graph.reachable_descendants(id_b).contains(&id_a)
+                        || descendants_by_device
+                            .get(&id_a)
+                            .is_some_and(|set| set.contains(&id_b))
+                        || descendants_by_device
+                            .get(&id_b)
+                            .is_some_and(|set| set.contains(&id_a))
                 }
                 _ => false,
             };
-
-            let other_dev = other.device_id.and_then(|id| devices_map.get(&id));
-            let same_scope = match (event_dev, other_dev) {
-                (Some(da), Some(db)) => {
-                    (da.site_id.is_some() && da.site_id == db.site_id)
-                        || (da.network_id.is_some() && da.network_id == db.network_id)
+            let time_diff = (event_times[i] - event_times[j]).abs();
+            let same_scope = if !are_connected && time_diff <= window {
+                let dev_b = open_events[j].device_id.and_then(|id| devices_map.get(&id));
+                match (dev_a, dev_b) {
+                    (Some(da), Some(db)) => {
+                        (da.site_id.is_some() && da.site_id == db.site_id)
+                            || (da.network_id.is_some() && da.network_id == db.network_id)
+                    }
+                    _ => false,
                 }
-                _ => false,
+            } else {
+                false
             };
-
-            if are_connected || (same_scope && time_diff <= window) {
-                cluster.push(other.clone());
-                assigned.insert(other.id);
+            if are_connected || same_scope {
+                let ra = uf_find(&mut parent, i);
+                let rb = uf_find(&mut parent, j);
+                if ra != rb {
+                    parent[rb] = ra;
+                }
             }
         }
-
-        clusters_events.push(cluster);
     }
+
+    let mut cluster_map: HashMap<usize, Vec<alert_events::Model>> = HashMap::new();
+    let mut cluster_order: Vec<usize> = Vec::new();
+    for (idx, event) in open_events.into_iter().enumerate() {
+        let root = uf_find(&mut parent, idx);
+        if !cluster_map.contains_key(&root) {
+            cluster_order.push(root);
+        }
+        cluster_map.entry(root).or_default().push(event);
+    }
+    let clusters_events: Vec<Vec<alert_events::Model>> = cluster_order
+        .into_iter()
+        .filter_map(|root| cluster_map.remove(&root))
+        .collect();
 
     let mut active_clusters = Vec::new();
     let mut total_correlated = 0;

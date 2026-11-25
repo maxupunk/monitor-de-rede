@@ -38,7 +38,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use super::adapters::{registry, DeviceAccessMethod, DevicePlatform};
+use super::adapters::{registry, DeviceAccessMethod, DeviceAdapter, DevicePlatform};
 
 /// Um sistema do catálogo.
 pub type OperatingSystem = DevicePlatform;
@@ -302,7 +302,7 @@ pub fn detect(evidencia: &Evidence) -> Detection {
     }
 
     achado(
-        find(FALLBACK).expect("o padrão precisa estar no catálogo"),
+        find(FALLBACK).unwrap_or_else(|| super::adapters::platforms::OTHER.platform()),
         source::DEFAULT,
         "sistema não identificado — as evidências não permitem determinar o firmware; selecione manualmente se souber".to_owned(),
     )

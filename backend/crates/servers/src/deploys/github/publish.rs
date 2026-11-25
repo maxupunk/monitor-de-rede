@@ -143,7 +143,12 @@ pub async fn status(
     let mut out = unavailable(String::new(), can_write);
     out.unavailable_reason = None;
     let result: Result<(), GitHubError> = async {
-        let repo: Repo = client.get(&format!("/repos/{repository}")).await?;
+        let repo_path = format!("/repos/{repository}");
+        let (repo, pull, build) = tokio::try_join!(
+            client.get::<Repo>(&repo_path),
+            open_pull(client, repository),
+            last_build(client, repository),
+        )?;
         let current = client
             .raw(&format!(
                 "/repos/{repository}/contents/{WORKFLOW_PATH}?ref={}",
@@ -157,8 +162,8 @@ pub async fn status(
                 repo.default_branch
             ));
         }
-        out.pull_request = open_pull(client, repository).await?.map(pull_view);
-        out.last_build = last_build(client, repository).await?;
+        out.pull_request = pull.map(pull_view);
+        out.last_build = build;
         Ok(())
     }
     .await;

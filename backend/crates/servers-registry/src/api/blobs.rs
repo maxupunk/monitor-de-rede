@@ -21,20 +21,59 @@ pub(super) fn parse_digest(raw: &str) -> OciResult<Digest> {
     })
 }
 
-/// `bytes=início-fim` (fim opcional, inclusivo).
-fn range(headers: &HeaderMap, size: u64) -> Option<(u64, u64)> {
-    let raw = headers
-        .get(header::RANGE)?
-        .to_str()
-        .ok()?
-        .strip_prefix("bytes=")?;
-    let (start, end) = raw.split_once('-')?;
-    let start: u64 = start.trim().parse().ok()?;
-    let end: u64 = match end.trim() {
-        "" => size.checked_sub(1)?,
-        value => value.parse::<u64>().ok()?.min(size.checked_sub(1)?),
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RangeSpec {
+    None,
+    Valid(u64, u64),
+    Unsatisfiable,
+}
+
+/// `bytes=início-fim` (fim opcional, inclusivo) ou o sufixo `bytes=-N`.
+///
+/// O que não dá para atender como uma faixa só (sintaxe inválida, outra
+/// unidade, várias faixas, blob vazio) é ignorado e vira `200` com o blob
+/// inteiro, como manda a RFC 9110 (§14.2); `416` só quando a faixa começa
+/// depois do fim.
+fn range(headers: &HeaderMap, size: u64) -> RangeSpec {
+    let Some(raw) = headers
+        .get(header::RANGE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.trim().strip_prefix("bytes="))
+    else {
+        return RangeSpec::None;
     };
-    (start <= end).then_some((start, end))
+    if raw.contains(',') {
+        return RangeSpec::None;
+    }
+    let Some((start, end)) = raw.split_once('-') else {
+        return RangeSpec::None;
+    };
+    let Some(last) = size.checked_sub(1) else {
+        return RangeSpec::None;
+    };
+    let (start, end) = (start.trim(), end.trim());
+    if start.is_empty() {
+        return match end.parse::<u64>() {
+            Ok(0) => RangeSpec::Unsatisfiable,
+            Ok(suffix) => RangeSpec::Valid(size.saturating_sub(suffix), last),
+            Err(_) => RangeSpec::None,
+        };
+    }
+    let Ok(start) = start.parse::<u64>() else {
+        return RangeSpec::None;
+    };
+    let end = match end {
+        "" => last,
+        value => match value.parse::<u64>() {
+            Ok(parsed) if parsed >= start => parsed.min(last),
+            _ => return RangeSpec::None,
+        },
+    };
+    if start > last {
+        RangeSpec::Unsatisfiable
+    } else {
+        RangeSpec::Valid(start, end)
+    }
 }
 
 pub(super) async fn get(
@@ -65,13 +104,21 @@ pub(super) async fn get(
         (header::ACCEPT_RANGES, "bytes".to_string()),
     ];
     let (status, offset, length, content_range) = match range(headers, size) {
-        Some((start, end)) => (
+        RangeSpec::Valid(start, end) => (
             StatusCode::PARTIAL_CONTENT,
             start,
             end - start + 1,
             Some(format!("bytes {start}-{end}/{size}")),
         ),
-        None => (StatusCode::OK, 0, size, None),
+        RangeSpec::None => (StatusCode::OK, 0, size, None),
+        RangeSpec::Unsatisfiable => {
+            return Err(OciError::new(
+                StatusCode::RANGE_NOT_SATISFIABLE,
+                Code::SizeInvalid,
+                "faixa de bytes inválida",
+            )
+            .with_header(header::CONTENT_RANGE, format!("bytes */{size}")));
+        }
     };
     let mut response = if head {
         (status, Body::empty()).into_response()
@@ -124,10 +171,36 @@ mod tests {
     fn faixas() {
         let mut headers = HeaderMap::new();
         headers.insert(header::RANGE, "bytes=10-19".parse().unwrap());
-        assert_eq!(range(&headers, 100), Some((10, 19)));
+        assert_eq!(range(&headers, 100), RangeSpec::Valid(10, 19));
         headers.insert(header::RANGE, "bytes=90-".parse().unwrap());
-        assert_eq!(range(&headers, 100), Some((90, 99)));
-        headers.insert(header::RANGE, "bytes=50-10".parse().unwrap());
-        assert_eq!(range(&headers, 100), None);
+        assert_eq!(range(&headers, 100), RangeSpec::Valid(90, 99));
+        headers.insert(header::RANGE, "bytes=150-200".parse().unwrap());
+        assert_eq!(range(&headers, 100), RangeSpec::Unsatisfiable);
+        headers.insert(header::RANGE, "bytes=100-".parse().unwrap());
+        assert_eq!(range(&headers, 100), RangeSpec::Unsatisfiable);
+        assert_eq!(range(&HeaderMap::new(), 100), RangeSpec::None);
+    }
+
+    #[test]
+    fn faixas_que_a_rfc_manda_ignorar_ou_atender() {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::RANGE, "bytes=-30".parse().unwrap());
+        assert_eq!(range(&headers, 100), RangeSpec::Valid(70, 99));
+        headers.insert(header::RANGE, "bytes=-500".parse().unwrap());
+        assert_eq!(range(&headers, 100), RangeSpec::Valid(0, 99));
+        headers.insert(header::RANGE, "bytes=-0".parse().unwrap());
+        assert_eq!(range(&headers, 100), RangeSpec::Unsatisfiable);
+        for ignored in [
+            "bytes=50-10",
+            "bytes=0-1,5-9",
+            "items=0-1",
+            "bytes=x-",
+            "bytes=5",
+        ] {
+            headers.insert(header::RANGE, ignored.parse().unwrap());
+            assert_eq!(range(&headers, 100), RangeSpec::None, "{ignored}");
+        }
+        headers.insert(header::RANGE, "bytes=0-10".parse().unwrap());
+        assert_eq!(range(&headers, 0), RangeSpec::None, "blob vazio");
     }
 }

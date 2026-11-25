@@ -64,6 +64,11 @@ static KNOWN: LazyLock<Mutex<HashMap<String, Seen>>> = LazyLock::new(Mutex::defa
 /// rodada, que o recupera do banco (sobrevive a restart).
 static FLAGGED: LazyLock<Mutex<Option<BTreeSet<String>>>> = LazyLock::new(Mutex::default);
 
+/// Serializa a detecção/gravação de roaming no processo para que duas rodadas
+/// simultâneas (ex.: "Ler agora" + rotina) não corram em `KNOWN`, `FLAGGED` ou
+/// na contagem de ping-pong no PostgreSQL (`READ COMMITTED`).
+static TRACK_LOCK: LazyLock<tokio::sync::Mutex<()>> = LazyLock::new(|| tokio::sync::Mutex::new(()));
+
 /// Uma rodada de leitura terminou: grava as trocas de AP, publica e avalia o
 /// ping-pong. Devolve as trocas gravadas.
 ///
@@ -74,6 +79,21 @@ pub async fn track(
     ctx: &AppContext,
     round: &[WifiDeviceSnapshot],
 ) -> AppResult<Vec<WifiRoamEvent>> {
+    let settings = settings::load(&ctx.db).await?;
+    track_with_settings(ctx, round, &settings).await
+}
+
+/// Como [`track`], reutilizando as configurações já carregadas na rodada.
+///
+/// # Errors
+///
+/// Erro do banco.
+pub async fn track_with_settings(
+    ctx: &AppContext,
+    round: &[WifiDeviceSnapshot],
+    settings: &WifiSettings,
+) -> AppResult<Vec<WifiRoamEvent>> {
+    let _track_guard = TRACK_LOCK.lock().await;
     let now = Utc::now();
     let current = detect::locate(round);
     let roams = {
@@ -85,26 +105,82 @@ pub async fn track(
         return Ok(Vec::new());
     }
 
-    let settings = settings::load(&ctx.db).await?;
-    let mut recorded = Vec::with_capacity(roams.len());
-    for roam in &roams {
-        let event = record(&ctx.db, roam, &settings, now).await?;
-        publish(ctx, &event);
-        recorded.push(event);
-    }
-    if !roams.is_empty() {
+    let (recorded, counts_by_mac) = if roams.is_empty() {
+        (Vec::new(), HashMap::new())
+    } else {
+        let (events, counts) = record_batch(&ctx.db, &roams, settings, now).await?;
+        for event in &events {
+            publish(ctx, event);
+        }
         Central::from_context(ctx)?
             .ensure_wifi_roaming_rules(&ctx.db)
             .await?;
-    }
+        (events, counts)
+    };
 
     // Quem trocou agora e quem estava em ping-pong: o veredito de cada um.
     let mut evaluate_macs: BTreeSet<String> = flagged;
     evaluate_macs.extend(roams.iter().map(|roam| roam.mac.clone()));
+
+    let mac_list: Vec<String> = evaluate_macs.iter().cloned().collect();
+    let watched_names: HashMap<String, String> = if mac_list.is_empty() {
+        HashMap::new()
+    } else {
+        wifi_watched_clients::Entity::find()
+            .filter(wifi_watched_clients::Column::Mac.is_in(mac_list))
+            .all(&ctx.db)
+            .await?
+            .into_iter()
+            .map(|client| (client.mac, client.name))
+            .collect()
+    };
+
+    let roam_by_mac: HashMap<&str, &Roam> =
+        roams.iter().map(|roam| (roam.mac.as_str(), roam)).collect();
+    let device_ids: Vec<i64> = evaluate_macs
+        .iter()
+        .filter_map(|mac| {
+            roam_by_mac
+                .get(mac.as_str())
+                .map(|roam| roam.to.device_id)
+                .or_else(|| current.get(mac).map(|loc| loc.device_id))
+        })
+        .collect();
+    let device_sites: HashMap<i64, Option<i64>> = if device_ids.is_empty() {
+        HashMap::new()
+    } else {
+        devices::Entity::find()
+            .filter(devices::Column::Id.is_in(device_ids))
+            .all(&ctx.db)
+            .await?
+            .into_iter()
+            .map(|device| (device.id, device.site_id))
+            .collect()
+    };
+
     for mac in evaluate_macs {
-        let last = roams.iter().find(|roam| roam.mac == mac);
+        let last = roam_by_mac.get(mac.as_str()).copied();
         let location = last.map(|roam| &roam.to).or_else(|| current.get(&mac));
-        let ping_pong = evaluate(ctx, &mac, location, last, &settings, now).await?;
+        let count = match counts_by_mac.get(&mac).copied() {
+            Some(count) => count,
+            None => count_in_window(&ctx.db, &mac, settings, now).await?,
+        };
+        let watched_name = watched_names.get(&mac).map(String::as_str);
+        let site_id = location
+            .and_then(|loc| device_sites.get(&loc.device_id))
+            .copied()
+            .flatten();
+        let ping_pong = evaluate(
+            ctx,
+            &mac,
+            location,
+            last,
+            count,
+            watched_name,
+            site_id,
+            settings,
+        )
+        .await?;
         let mut guard = FLAGGED.lock().unwrap_or_else(PoisonError::into_inner);
         let set = guard.get_or_insert_with(BTreeSet::new);
         if ping_pong {
@@ -156,33 +232,41 @@ async fn count_in_window<C: ConnectionTrait>(
         .await?)
 }
 
-/// Grava a troca; a contagem e a gravação na mesma transação, para duas
-/// rodadas simultâneas não marcarem o ping-pong duas vezes.
-async fn record(
+/// Grava todas as trocas da rodada em uma única transação e devolve os eventos
+/// gravados junto com a nova contagem na janela de cada MAC (evitando nova
+/// consulta na avaliação de ping-pong).
+async fn record_batch(
     db: &DatabaseConnection,
-    roam: &Roam,
+    roams: &[Roam],
     settings: &WifiSettings,
     now: DateTime<Utc>,
-) -> AppResult<WifiRoamEvent> {
+) -> AppResult<(Vec<WifiRoamEvent>, HashMap<String, u64>)> {
     let txn = begin_write(db).await?;
-    let before = count_in_window(&txn, &roam.mac, settings, now).await?;
-    let ping_pong = detect::is_ping_pong(before + 1, settings.ping_pong_count);
-    let row = wifi_roaming_events::ActiveModel {
-        mac: Set(roam.mac.clone()),
-        from_device_id: Set(Some(roam.from.device_id)),
-        from_device_name: Set(roam.from.device_name.clone()),
-        to_device_id: Set(Some(roam.to.device_id)),
-        to_device_name: Set(roam.to.device_name.clone()),
-        signal_before_dbm: Set(Some(roam.from.signal_dbm)),
-        signal_after_dbm: Set(Some(roam.to.signal_dbm)),
-        ping_pong: Set(ping_pong),
-        created_at: Set(now.into()),
-        ..Default::default()
+    let mut recorded = Vec::with_capacity(roams.len());
+    let mut counts = HashMap::with_capacity(roams.len());
+    for roam in roams {
+        let before = count_in_window(&txn, &roam.mac, settings, now).await?;
+        let count_after = before + 1;
+        let ping_pong = detect::is_ping_pong(count_after, settings.ping_pong_count);
+        let row = wifi_roaming_events::ActiveModel {
+            mac: Set(roam.mac.clone()),
+            from_device_id: Set(Some(roam.from.device_id)),
+            from_device_name: Set(roam.from.device_name.clone()),
+            to_device_id: Set(Some(roam.to.device_id)),
+            to_device_name: Set(roam.to.device_name.clone()),
+            signal_before_dbm: Set(Some(roam.from.signal_dbm)),
+            signal_after_dbm: Set(Some(roam.to.signal_dbm)),
+            ping_pong: Set(ping_pong),
+            created_at: Set(now.into()),
+            ..Default::default()
+        }
+        .insert(&txn)
+        .await?;
+        counts.insert(roam.mac.clone(), count_after);
+        recorded.push(to_dto(row));
     }
-    .insert(&txn)
-    .await?;
     txn.commit().await?;
-    Ok(to_dto(row))
+    Ok((recorded, counts))
 }
 
 fn publish(ctx: &AppContext, event: &WifiRoamEvent) {
@@ -199,30 +283,24 @@ fn publish(ctx: &AppContext, event: &WifiRoamEvent) {
 
 /// Entrega o veredito do aparelho ao motor de alertas; devolve se está em
 /// ping-pong.
+#[allow(clippy::too_many_arguments)]
 async fn evaluate(
     ctx: &AppContext,
     mac: &str,
     location: Option<&Location>,
     last: Option<&Roam>,
+    count: u64,
+    watched_name: Option<&str>,
+    site_id: Option<i64>,
     settings: &WifiSettings,
-    now: DateTime<Utc>,
 ) -> AppResult<bool> {
-    let count = count_in_window(&ctx.db, mac, settings, now).await?;
     let ping_pong = detect::is_ping_pong(count, settings.ping_pong_count);
     // O nome de vigiado vale mais que o do DHCP.
-    let watched = wifi_watched_clients::Entity::find()
-        .filter(wifi_watched_clients::Column::Mac.eq(mac))
-        .one(&ctx.db)
-        .await?;
-    let label = watched
-        .map(|client| client.name)
+    let label = watched_name
+        .map(str::to_owned)
         .or_else(|| location.map(|location| location.label.clone()))
         .unwrap_or_else(|| format!("Aparelho {mac}"));
     let device_id = location.map(|location| location.device_id);
-    let device = match device_id {
-        Some(id) => devices::Entity::find_by_id(id).one(&ctx.db).await?,
-        None => None,
-    };
     let facts = WifiRoamingFacts {
         label: &label,
         count,
@@ -234,7 +312,7 @@ async fn evaluate(
     data.insert("mac".into(), json!(mac));
     let target = AlertTarget {
         scope: AlertEvaluationScope {
-            site_id: device.as_ref().and_then(|device| device.site_id),
+            site_id,
             device_id,
             monitor_id: None,
         },

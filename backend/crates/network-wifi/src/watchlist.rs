@@ -21,7 +21,10 @@ use netmonitor_core::{
     events::EventBus,
     models::{devices, wifi_watched_clients},
     network_tools::neighbor_cache::normalize_mac,
-    shared::errors::{AppError, AppResult},
+    shared::{
+        db_errors::is_unique_violation,
+        errors::{AppError, AppResult},
+    },
 };
 use netmonitor_network::central::Central;
 use netmonitor_network::vendors::builtin::is_locally_administered;
@@ -47,13 +50,17 @@ pub async fn list<C: ConnectionTrait>(db: &C) -> AppResult<Vec<WifiWatchedClient
         .iter()
         .filter_map(|model| model.last_device_id)
         .collect();
-    let names: HashMap<i64, String> = devices::Entity::find()
-        .filter(devices::Column::Id.is_in(device_ids))
-        .all(db)
-        .await?
-        .into_iter()
-        .map(|device| (device.id, device.name))
-        .collect();
+    let names: HashMap<i64, String> = if device_ids.is_empty() {
+        HashMap::new()
+    } else {
+        devices::Entity::find()
+            .filter(devices::Column::Id.is_in(device_ids))
+            .all(db)
+            .await?
+            .into_iter()
+            .map(|device| (device.id, device.name))
+            .collect()
+    };
     Ok(models
         .into_iter()
         .map(|model| {
@@ -87,7 +94,7 @@ pub async fn create(
     let now: DateTime<FixedOffset> = Utc::now().into();
     let snapshots = collector::current_snapshots(ctx);
     let seen = watch::find_station(&snapshots, &mac).map(|(snapshot, _)| snapshot);
-    let model = wifi_watched_clients::ActiveModel {
+    let model = match (wifi_watched_clients::ActiveModel {
         mac: Set(mac.clone()),
         name: Set(name),
         last_state: Set(seen.map(|_| STATE_CONNECTED.to_owned())),
@@ -103,9 +110,16 @@ pub async fn create(
         created_at: Set(now),
         updated_at: Set(now),
         ..Default::default()
-    }
+    })
     .insert(&ctx.db)
-    .await?;
+    .await
+    {
+        Ok(model) => model,
+        Err(error) if is_unique_violation(&error) => {
+            return Err(AppError::conflict("Este aparelho já está sendo vigiado."));
+        }
+        Err(error) => return Err(error.into()),
+    };
 
     // As regras de Wi-Fi entram com o primeiro vigiado, uma vez na vida.
     Central::from_context(ctx)?
@@ -165,6 +179,8 @@ pub async fn remove(ctx: &AppContext, id: i64) -> AppResult<()> {
 
 /// Grava o que a leitura viu: conectado em `device_id` agora (`Some`), ou fora.
 ///
+/// Quando o aparelho já estava `offline`, evita uma escrita redundante no banco.
+///
 /// # Errors
 ///
 /// Erro do banco.
@@ -174,6 +190,9 @@ pub async fn record<C: ConnectionTrait>(
     connected_on: Option<i64>,
     now: DateTime<Utc>,
 ) -> AppResult<()> {
+    if connected_on.is_none() && model.last_state.as_deref() == Some(STATE_OFFLINE) {
+        return Ok(());
+    }
     let mut active: wifi_watched_clients::ActiveModel = model.clone().into();
     match connected_on {
         Some(device_id) => {

@@ -1,10 +1,20 @@
 //! Cliente e serviços de catálogo de modelos para o provedor OpenCode Go / Zen.
 
-use std::time::Duration;
+use std::{sync::OnceLock, time::Duration};
 
 use serde::Deserialize;
 
 use crate::dtos::{OpenCodeModelItem, OpenCodeModelsResponse};
+
+fn http() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(Duration::from_secs(8))
+            .build()
+            .unwrap_or_default()
+    })
+}
 
 /// Lista padrão curada de modelos suportados pelo OpenCode Zen.
 pub fn curated_opencode_models() -> Vec<OpenCodeModelItem> {
@@ -84,21 +94,7 @@ struct OpenAiModelEntry {
 pub async fn list_models(base_url: &str, api_key: Option<&str>) -> OpenCodeModelsResponse {
     let clean_url = format!("{}/models", base_url.trim_end_matches('/'));
 
-    let client = match reqwest::Client::builder()
-        .timeout(Duration::from_secs(8))
-        .build()
-    {
-        Ok(c) => c,
-        Err(e) => {
-            return OpenCodeModelsResponse {
-                models: curated_opencode_models(),
-                is_online: false,
-                error_message: Some(format!("Erro ao criar cliente HTTP: {e}")),
-            };
-        }
-    };
-
-    let mut req = client.get(&clean_url);
+    let mut req = http().get(&clean_url);
     if let Some(key) = api_key {
         let trimmed = key.trim();
         if !trimmed.is_empty() {

@@ -20,6 +20,7 @@ use std::path::Path;
 
 use async_trait::async_trait;
 use base64::Engine;
+use futures::TryStreamExt;
 use opendal::{EntryMode, Operator};
 
 use super::config::{join_key, StorageConfig};
@@ -98,9 +99,17 @@ impl CloudExplorer {
         }
     }
 
-    /// Converte um caminho do `opendal` de volta em chave da API.
+    /// Converte um caminho do `opendal` de volta em chave relativa ao prefixo do destino.
+    ///
+    /// Sem retirar `self.prefix`, uma chave devolvida por `list_objects`
+    /// (`dumps/12/a.gz`) receberia o prefixo de novo em `read_object`,
+    /// `delete_object` e `next_cursor` (`dumps/dumps/12/a.gz`).
     fn to_key(&self, path: &str) -> String {
-        super::normalize_path(path)
+        let normalized = super::normalize_path(path);
+        if !self.prefix.is_empty() && normalized == self.prefix {
+            return String::new();
+        }
+        super::config::strip_prefix(&self.prefix, &normalized)
     }
 
     fn describe(&self, error: &opendal::Error) -> StorageError {
@@ -122,37 +131,40 @@ impl StorageExplorer for CloudExplorer {
     ) -> Result<ListPage, StorageError> {
         let limit = options.effective_limit();
         let target = self.absolute(path, true);
+        let normalized_target = super::normalize_path(&target);
 
-        // `recursive(false)` é o que produz a visão de pastas: o `opendal` usa
-        // o delimitador `/` e devolve os prefixos comuns como entradas de
-        // diretório. Sem isso, um bucket com milhares de backups viria inteiro
-        // numa lista plana.
-        let mut request = self
-            .operator
-            .list_with(&target)
-            .recursive(false)
-            .limit(limit + 1);
+        // `lister_with` transmite página a página: o corte de `limit + 1`
+        // acontece **depois** de pular o próprio diretório e aplicar o filtro
+        // de prefixo, evitando falsos `is_truncated = false`.
+        let mut request = self.operator.lister_with(&target).recursive(false);
 
         if let Some(cursor) = options.cursor.as_deref().filter(|value| !value.is_empty()) {
             request = request.start_after(cursor);
         }
 
-        let entries = request.await.map_err(|err| self.describe(&err))?;
+        let mut lister = request.await.map_err(|err| self.describe(&err))?;
 
         let filter = options
             .prefix
             .as_deref()
             .map(str::trim)
             .filter(|v| !v.is_empty());
-        let mut objects = Vec::with_capacity(entries.len());
+        let mut objects = Vec::with_capacity(limit + 1);
+        let mut raw_paths = Vec::with_capacity(limit + 1);
 
-        for entry in entries {
-            let key = self.to_key(entry.path());
+        while let Some(entry) = lister.try_next().await.map_err(|err| self.describe(&err))? {
+            let raw_path = entry.path().to_string();
+            let normalized_entry = super::normalize_path(&raw_path);
 
             // O próprio diretório consultado volta na lista em alguns
             // backends; incluí-lo faria a interface exibir uma pasta dentro
             // dela mesma.
-            if key.is_empty() || key == super::normalize_path(&target) {
+            if normalized_entry.is_empty() || normalized_entry == normalized_target {
+                continue;
+            }
+
+            let key = self.to_key(&normalized_entry);
+            if key.is_empty() {
                 continue;
             }
 
@@ -175,18 +187,18 @@ impl StorageExplorer for CloudExplorer {
                     file
                 }
             });
+            raw_paths.push(raw_path);
+
+            if objects.len() > limit {
+                break;
+            }
         }
 
         let is_truncated = objects.len() > limit;
         objects.truncate(limit);
+        raw_paths.truncate(limit);
 
-        let next_cursor = is_truncated
-            .then(|| {
-                objects
-                    .last()
-                    .map(|object| self.absolute(&object.key, false))
-            })
-            .flatten();
+        let next_cursor = is_truncated.then(|| raw_paths.pop()).flatten();
 
         Ok(ListPage {
             objects,
@@ -212,7 +224,8 @@ impl StorageExplorer for CloudExplorer {
     }
 
     async fn delete_object(&self, key: &str, is_directory: bool) -> Result<(), StorageError> {
-        let target = self.absolute(key, is_directory);
+        let deletable = super::assert_deletable(key)?;
+        let target = self.absolute(&deletable, is_directory);
 
         if is_directory {
             // `remove_all` apaga a árvore. Num bucket não existe "pasta": o que
@@ -241,9 +254,17 @@ impl StorageExplorer for CloudExplorer {
     async fn put_file(&self, key: &str, source: &Path) -> Result<(), StorageError> {
         use tokio::io::AsyncReadExt;
 
+        const CHUNK_SIZE: usize = 5 * 1024 * 1024;
+
         let mut file = tokio::fs::File::open(source)
             .await
             .map_err(StorageError::backend)?;
+        let file_len = file
+            .metadata()
+            .await
+            .ok()
+            .and_then(|meta| usize::try_from(meta.len()).ok());
+        let buf_cap = file_len.map_or(CHUNK_SIZE, |len| len.clamp(4096, CHUNK_SIZE));
 
         let mut writer = self
             .operator
@@ -251,25 +272,42 @@ impl StorageExplorer for CloudExplorer {
             .await
             .map_err(|err| self.describe(&err))?;
 
-        // Em blocos, e não `read_to_end`: um backup de dezenas de gigabytes
-        // carregado inteiro na memória derrubaria o processo — que é o mesmo
-        // cuidado que o pipeline de dump já toma do outro lado.
-        let mut chunk = vec![0_u8; 8 * 1024 * 1024];
-        loop {
-            let read = file.read(&mut chunk).await.map_err(StorageError::backend)?;
-            if read == 0 {
-                break;
+        // Move o `Vec<u8>` lido direto para o writer (sem segunda cópia via
+        // `.to_vec()`), e aborta o multipart upload se qualquer etapa falhar.
+        let upload_result: Result<(), StorageError> = async {
+            loop {
+                let mut chunk = Vec::with_capacity(buf_cap);
+                let mut filled = 0;
+                while filled < buf_cap {
+                    let read = file
+                        .read_buf(&mut chunk)
+                        .await
+                        .map_err(StorageError::backend)?;
+                    if read == 0 {
+                        break;
+                    }
+                    filled += read;
+                }
+                if chunk.is_empty() {
+                    break;
+                }
+                writer
+                    .write(chunk)
+                    .await
+                    .map_err(|err| self.describe(&err))?;
             }
 
-            writer
-                .write(chunk[..read].to_vec())
-                .await
-                .map_err(|err| self.describe(&err))?;
+            // `close` é o que finaliza o multipart upload. Sem ele o objeto não
+            // aparece no bucket, e nenhum erro é levantado.
+            writer.close().await.map_err(|err| self.describe(&err))?;
+            Ok(())
         }
+        .await;
 
-        // `close` é o que finaliza o multipart upload. Sem ele o objeto não
-        // aparece no bucket, e nenhum erro é levantado.
-        writer.close().await.map_err(|err| self.describe(&err))?;
+        if let Err(err) = upload_result {
+            let _ = writer.abort().await;
+            return Err(err);
+        }
 
         Ok(())
     }
@@ -695,5 +733,23 @@ mod tests {
         .expect("adapter");
 
         assert_eq!(explorer.absolute("", true), "/");
+    }
+
+    #[test]
+    fn to_key_strips_destination_prefix_to_prevent_double_prefixing() {
+        let explorer = CloudExplorer::new(
+            &StorageConfig::S3(S3Config {
+                bucket: "backups".to_string(),
+                prefix: Some("dumps".to_string()),
+                ..S3Config::default()
+            }),
+            Some(StorageProvider::AwsS3),
+        )
+        .expect("adapter");
+
+        let key = explorer.to_key("dumps/12/a.gz");
+        assert_eq!(key, "12/a.gz");
+        assert_eq!(explorer.absolute(&key, false), "dumps/12/a.gz");
+        assert_eq!(explorer.to_key("dumps/"), "");
     }
 }

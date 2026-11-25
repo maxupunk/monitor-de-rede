@@ -282,12 +282,9 @@ pub fn authorize_call(
                 return Ok(());
             }
             _ => {
-                if !token_allows_listing(handler, token_scopes) {
-                    return Err(AppError::forbidden(
-                        "Este token MCP não possui escopo para executar ou aprovar deploys.",
-                    ));
-                }
-                return Ok(());
+                return Err(AppError::forbidden(format!(
+                    "Subação de deploy desconhecida ou não autorizada via MCP: '{action}'."
+                )));
             }
         }
     }
@@ -562,6 +559,18 @@ mod tests {
             &[McpScope::DeploysWrite],
         )
         .is_ok());
+
+        // Fail-closed: subação desconhecida nunca passa, mesmo com ambos os escopos
+        let unknown_args = ToolArgs::from_value(json!({ "action": "promote", "targetId": 1 }));
+        assert!(authorize_call(
+            &deploy_action,
+            &unknown_args,
+            true,
+            &admin_access,
+            AreaSet::ALL,
+            &[McpScope::DeploysWrite, McpScope::DeploysApprove],
+        )
+        .is_err());
     }
 
     #[test]

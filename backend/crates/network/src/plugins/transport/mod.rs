@@ -17,6 +17,7 @@ pub mod local;
 pub mod shell;
 
 use async_trait::async_trait;
+use tokio_util::sync::CancellationToken;
 
 use netmonitor_core::shared::errors::AppResult;
 
@@ -49,6 +50,27 @@ pub trait DeviceTransport: Send + Sync {
         let reply = self.execute(call).await?;
         feed_lines(&reply, on_line);
         Ok(reply)
+    }
+
+    /// Igual a [`Self::execute`], propagando cancelamento ao transporte quando
+    /// suportado (ex.: `Body::Cancel` enviado ao agente remoto).
+    async fn execute_with_cancel(
+        &self,
+        call: &DeviceIoCall,
+        _cancel: &CancellationToken,
+    ) -> AppResult<DeviceIoReply> {
+        self.execute(call).await
+    }
+
+    /// Igual a [`Self::execute_streaming`], propagando cancelamento ao
+    /// transporte quando suportado.
+    async fn execute_streaming_with_cancel(
+        &self,
+        call: &DeviceIoCall,
+        on_line: LineSink<'_>,
+        _cancel: &CancellationToken,
+    ) -> AppResult<DeviceIoReply> {
+        self.execute_streaming(call, on_line).await
     }
 
     /// De onde a chamada parte, para o transcript ("central", "agente Filial").

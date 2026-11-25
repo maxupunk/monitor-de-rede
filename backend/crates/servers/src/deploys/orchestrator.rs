@@ -36,7 +36,10 @@ use agent_protocol::{
 use netmonitor_core::{
     agents::hub::AgentHub,
     models::{deploy_applications, deploy_runs, deploy_targets},
-    shared::errors::{AppError, AppResult},
+    shared::{
+        errors::{AppError, AppResult},
+        transaction::begin_write,
+    },
 };
 
 use super::{
@@ -107,31 +110,6 @@ fn scheduled_status(
     }
 }
 
-/// Marca como substituídos os pendentes do alvo.
-async fn supersede(ctx: &AppContext, target_id: i64) -> AppResult<()> {
-    for run in runs::with_status(&ctx.db, &RunStatus::PENDING).await? {
-        if run.target_id != target_id {
-            continue;
-        }
-        if runs::transition(
-            &ctx.db,
-            run.id,
-            &RunStatus::PENDING,
-            RunStatus::Superseded,
-            Change {
-                error: Some(Some("Uma versão mais nova chegou antes desta rodar".into())),
-                finished: true,
-                ..Change::default()
-            },
-        )
-        .await?
-        {
-            events::publish_run(ctx, run.id).await;
-        }
-    }
-    Ok(())
-}
-
 struct Ask<'a> {
     application: &'a deploy_applications::Model,
     target: &'a deploy_targets::Model,
@@ -147,11 +125,29 @@ struct Ask<'a> {
 }
 
 async fn create(ctx: &AppContext, ask: Ask<'_>) -> AppResult<deploy_runs::Model> {
-    supersede(ctx, ask.target.id).await?;
+    let txn = begin_write(&ctx.db).await?;
+    let mut superseded = Vec::new();
+    for run in runs::pending_for_target(&txn, ask.target.id).await? {
+        if runs::transition_in(
+            &txn,
+            run.id,
+            &RunStatus::PENDING,
+            RunStatus::Superseded,
+            Change {
+                error: Some(Some("Uma versão mais nova chegou antes desta rodar".into())),
+                finished: true,
+                ..Change::default()
+            },
+        )
+        .await?
+        {
+            superseded.push(run.id);
+        }
+    }
     let (status, scheduled_for) =
         initial_status(ask.target, ask.approver.is_some(), ask.when, Local::now());
     let run = runs::insert(
-        &ctx.db,
+        &txn,
         NewRun {
             application_id: ask.application.id,
             target_id: ask.target.id,
@@ -171,6 +167,10 @@ async fn create(ctx: &AppContext, ask: Ask<'_>) -> AppResult<deploy_runs::Model>
         },
     )
     .await?;
+    txn.commit().await?;
+    for id in superseded {
+        events::publish_run(ctx, id).await;
+    }
     events::publish_run(ctx, run.id).await;
     match status {
         RunStatus::AwaitingApproval => {
@@ -557,15 +557,24 @@ async fn recover_interrupted(ctx: &AppContext) -> AppResult<()> {
     Ok(())
 }
 
-/// Desde quando o deploy está na fila: a aprovação, a abertura da janela ou
-/// a criação, o que for mais recente.
-fn queued_since(run: &deploy_runs::Model) -> DateTime<Utc> {
-    [Some(run.created_at), run.approved_at, run.scheduled_for]
-        .into_iter()
-        .flatten()
-        .map(|at| at.with_timezone(&Utc))
-        .max()
-        .unwrap_or_else(Utc::now)
+/// Desde quando o deploy está pronto na fila: a aprovação, a abertura da
+/// janela, o fim do alvo anterior na sequência ou a criação — o que for mais
+/// recente.
+fn queued_since(
+    run: &deploy_runs::Model,
+    upstream_finished: Option<sea_orm::prelude::DateTimeWithTimeZone>,
+) -> DateTime<Utc> {
+    [
+        Some(run.created_at),
+        run.approved_at,
+        run.scheduled_for,
+        upstream_finished,
+    ]
+    .into_iter()
+    .flatten()
+    .map(|at| at.with_timezone(&Utc))
+    .max()
+    .unwrap_or_else(Utc::now)
 }
 
 async fn fail(ctx: &AppContext, run_id: i64, to: RunStatus, message: String) -> AppResult<()> {
@@ -600,19 +609,89 @@ async fn fail(ctx: &AppContext, run_id: i64, to: RunStatus, message: String) -> 
 ///
 /// Banco.
 pub async fn dispatch(ctx: &AppContext, now: DateTime<Utc>) -> AppResult<usize> {
+    // Cancela pendentes (`awaiting_approval`/`scheduled`) cujo predecessor na
+    // sequência já terminou sem sucesso, evitando aprovações ou agendamentos órfãos.
+    let pending = runs::with_status(
+        &ctx.db,
+        &[RunStatus::AwaitingApproval, RunStatus::Scheduled],
+    )
+    .await?;
+    // Os predecessores numa consulta só, sem o log (até 256 KiB cada).
+    let upstream_ids: Vec<i64> = pending.iter().filter_map(|run| run.after_run_id).collect();
+    let upstreams = runs::find_many_without_log(&ctx.db, &upstream_ids).await?;
+    for run in pending {
+        let Some(after) = run.after_run_id else {
+            continue;
+        };
+        // O predecessor sumiu: nada a encadear.
+        if let Some(upstream) = upstreams.get(&after) {
+            let status = runs::status_of(upstream);
+            if status.is_terminal()
+                && status != RunStatus::Succeeded
+                && runs::transition(
+                    &ctx.db,
+                    run.id,
+                    &[RunStatus::AwaitingApproval, RunStatus::Scheduled],
+                    RunStatus::Cancelled,
+                    Change {
+                        error: Some(Some(
+                            "O alvo anterior da sequência não subiu: este ficou de fora para \
+                                 não espalhar a falha"
+                                .into(),
+                        )),
+                        finished: true,
+                        ..Change::default()
+                    },
+                )
+                .await?
+            {
+                events::publish_run(ctx, run.id).await;
+            }
+        }
+    }
+
+    let local_now = now.with_timezone(&Local);
     for run in runs::with_status(&ctx.db, &[RunStatus::Scheduled]).await? {
         let due = run
             .scheduled_for
             .is_none_or(|at| at.with_timezone(&Utc) <= now);
-        if due
-            && runs::transition(
-                &ctx.db,
-                run.id,
-                &[RunStatus::Scheduled],
-                RunStatus::Queued,
-                Change::default(),
-            )
-            .await?
+        if !due {
+            continue;
+        }
+        // Se a central ficou fora e passou do fim da janela de manutenção,
+        // reagenda para a próxima abertura em vez de disparar fora da janela.
+        if let Ok(target) = applications::find_target(&ctx.db, run.target_id).await {
+            if let Ok(Some(window)) =
+                Window::from_columns(target.window_start.as_deref(), target.window_end.as_deref())
+            {
+                if !window.contains(local_now.time()) {
+                    let next = window.next_opening(local_now).with_timezone(&Utc);
+                    if runs::transition(
+                        &ctx.db,
+                        run.id,
+                        &[RunStatus::Scheduled],
+                        RunStatus::Scheduled,
+                        Change {
+                            scheduled_for: Some(Some(next)),
+                            ..Change::default()
+                        },
+                    )
+                    .await?
+                    {
+                        events::publish_run(ctx, run.id).await;
+                    }
+                    continue;
+                }
+            }
+        }
+        if runs::transition(
+            &ctx.db,
+            run.id,
+            &[RunStatus::Scheduled],
+            RunStatus::Queued,
+            Change::default(),
+        )
+        .await?
         {
             events::publish_run(ctx, run.id).await;
         }
@@ -621,8 +700,10 @@ pub async fn dispatch(ctx: &AppContext, now: DateTime<Utc>) -> AppResult<usize> 
     let hub = AgentHub::from_context(ctx).ok();
     let mut started = 0;
     for run in runs::with_status(&ctx.db, &[RunStatus::Queued]).await? {
-        let Ok(target) = applications::find_target(&ctx.db, run.target_id).await else {
-            continue;
+        let target = match applications::find_target(&ctx.db, run.target_id).await {
+            Ok(target) => target,
+            Err(AppError::NotFound(_)) => continue,
+            Err(error) => return Err(error),
         };
         if !target.enabled {
             fail(
@@ -637,25 +718,30 @@ pub async fn dispatch(ctx: &AppContext, now: DateTime<Utc>) -> AppResult<usize> 
         if runs::running_on(&ctx.db, target.id).await? {
             continue;
         }
+        let mut upstream_finished = None;
         if let Some(after) = run.after_run_id {
-            match runs::find(&ctx.db, after)
-                .await
-                .map(|run| runs::status_of(&run))
-            {
-                Ok(RunStatus::Succeeded) | Err(_) => {}
-                Ok(status) if !status.is_terminal() => continue,
-                Ok(_) => {
-                    fail(
-                        ctx,
-                        run.id,
-                        RunStatus::Cancelled,
-                        "O alvo anterior da sequência não subiu: este ficou de fora para não \
-                         espalhar a falha"
-                            .into(),
-                    )
-                    .await?;
-                    continue;
+            match runs::find_without_log(&ctx.db, after).await {
+                Ok(upstream) => {
+                    let status = runs::status_of(&upstream);
+                    if status == RunStatus::Succeeded {
+                        upstream_finished = upstream.finished_at;
+                    } else if !status.is_terminal() {
+                        continue;
+                    } else {
+                        fail(
+                            ctx,
+                            run.id,
+                            RunStatus::Cancelled,
+                            "O alvo anterior da sequência não subiu: este ficou de fora para não \
+                             espalhar a falha"
+                                .into(),
+                        )
+                        .await?;
+                        continue;
+                    }
                 }
+                Err(AppError::NotFound(_)) => {}
+                Err(error) => return Err(error),
             }
         }
         let Some(probe_id) = target.probe_id else {
@@ -669,7 +755,7 @@ pub async fn dispatch(ctx: &AppContext, now: DateTime<Utc>) -> AppResult<usize> 
             continue;
         };
         let Some(session) = hub.as_ref().and_then(|hub| hub.get(probe_id)) else {
-            if now - queued_since(&run) > AGENT_PATIENCE {
+            if now - queued_since(&run, upstream_finished) > AGENT_PATIENCE {
                 fail(
                     ctx,
                     run.id,

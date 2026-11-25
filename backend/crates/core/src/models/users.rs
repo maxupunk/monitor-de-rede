@@ -1,6 +1,6 @@
 use crate::shared::transaction::begin_write;
 use async_trait::async_trait;
-use chrono::{offset::Local, Duration};
+use chrono::{Duration, Utc};
 use loco_rs::{auth::jwt, hash, prelude::*};
 use serde::{Deserialize, Serialize};
 use serde_json::Map;
@@ -14,7 +14,7 @@ pub const RESET_TOKEN_EXPIRATION_MIN: i64 = 30;
 
 /// Valida a política de senha do sistema: no mínimo 8 caracteres e ao menos 1 letra maiúscula.
 pub fn validate_password(password: &str) -> std::result::Result<(), validator::ValidationError> {
-    if password.len() < 8 {
+    if password.chars().count() < 8 {
         let mut err = validator::ValidationError::new("length");
         err.message = Some("A senha precisa ter ao menos 8 caracteres.".into());
         return Err(err);
@@ -62,19 +62,47 @@ impl std::fmt::Debug for RegisterParams {
     }
 }
 
+/// O que uma conta nova leva além de nome e e-mail — ver
+/// [`Model::insert_new`]. A senha chega já em hash
+/// ([`hash_password_off_runtime`]): o Argon2 roda antes de abrir a transação,
+/// para não segurar a trava de escrita do SQLite.
+pub struct NewUser<'a> {
+    pub name: &'a str,
+    pub email: &'a str,
+    pub password_hash: String,
+    pub role: &'a str,
+    pub active: bool,
+    pub area_roles: Option<serde_json::Value>,
+    /// Conta criada por quem já está dentro (ou no cadastro inicial) nasce
+    /// com o e-mail confirmado.
+    pub email_verified: bool,
+}
+
+/// Hash Argon2 fora das threads de E/S do Tokio (`spawn_blocking`).
+///
+/// # Errors
+///
+/// Falha do hash ou da tarefa bloqueante.
+pub async fn hash_password_off_runtime(raw_password: String) -> ModelResult<String> {
+    tokio::task::spawn_blocking(move || hash::hash_password(&raw_password))
+        .await
+        .map_err(|e| ModelError::Any(e.into()))?
+        .map_err(|e| ModelError::Any(e.into()))
+}
+
 #[derive(Debug, Validate, Deserialize)]
 pub struct Validator {
     #[validate(length(min = 2, message = "O nome precisa ter ao menos 2 caracteres."))]
-    pub name: String,
+    pub name: Option<String>,
     #[validate(email(message = "Informe um e-mail válido."))]
-    pub email: String,
+    pub email: Option<String>,
 }
 
 impl Validatable for ActiveModel {
     fn validator(&self) -> Box<dyn Validate> {
         Box::new(Validator {
-            name: self.name.as_ref().to_owned(),
-            email: self.email.as_ref().to_owned(),
+            name: self.name.try_as_ref().cloned(),
+            email: self.email.try_as_ref().cloned(),
         })
     }
 }
@@ -163,7 +191,7 @@ impl Model {
 
         let user = user.ok_or_else(|| ModelError::EntityNotFound)?;
         if let Some(expired_at) = user.magic_link_expiration {
-            if expired_at >= Local::now() {
+            if expired_at >= Utc::now() {
                 Ok(user)
             } else {
                 tracing::debug!(
@@ -199,7 +227,7 @@ impl Model {
 
         let user = user.ok_or_else(|| ModelError::EntityNotFound)?;
         if let Some(sent_at) = user.reset_sent_at {
-            if sent_at + Duration::minutes(RESET_TOKEN_EXPIRATION_MIN) >= Local::now() {
+            if sent_at + Duration::minutes(RESET_TOKEN_EXPIRATION_MIN) >= Utc::now() {
                 Ok(user)
             } else {
                 tracing::debug!(
@@ -222,7 +250,7 @@ impl Model {
     /// # Errors
     ///
     /// When could not find user  or DB query error
-    pub async fn find_by_pid(db: &DatabaseConnection, pid: &str) -> ModelResult<Self> {
+    pub async fn find_by_pid<C: ConnectionTrait>(db: &C, pid: &str) -> ModelResult<Self> {
         let parse_uuid = Uuid::parse_str(pid).map_err(|e| ModelError::Any(e.into()))?;
         let user = users::Entity::find()
             .filter(
@@ -262,6 +290,15 @@ impl Model {
         hash::verify_password(password, &self.password)
     }
 
+    /// Versão assíncrona de [`Self::verify_password`] que executa o Argon2 em
+    /// `spawn_blocking`, evitando bloquear workers do Tokio.
+    pub async fn verify_password_async(&self, password: String) -> bool {
+        let stored_hash = self.password.clone();
+        tokio::task::spawn_blocking(move || hash::verify_password(&password, &stored_hash))
+            .await
+            .unwrap_or(false)
+    }
+
     /// Asynchronously creates a user with a password and saves it to the
     /// database.
     ///
@@ -286,16 +323,44 @@ impl Model {
         role: &str,
     ) -> ModelResult<Self> {
         validator::Validate::validate(params).map_err(|e| ModelError::Validation(e.into()))?;
-
-        // Único ponto de gravação de usuário no sistema, e por isso o lugar
-        // certo para normalizar o e-mail. `find_by_email` compara por igualdade
-        // exata: sem isto, quem se cadastrasse como `Admin@Casa.com` nunca mais
-        // entraria digitando `admin@casa.com`, e o mesmo endereço em duas
-        // caixas diferentes passaria pela checagem de duplicidade abaixo.
-        let email = params.email.trim().to_lowercase();
-        let name = params.name.trim().to_string();
+        let password_hash = hash_password_off_runtime(params.password.clone()).await?;
 
         let txn = begin_write(db).await?;
+        let user = Self::insert_new(
+            &txn,
+            NewUser {
+                name: &params.name,
+                email: &params.email,
+                password_hash,
+                role,
+                active: true,
+                area_roles: None,
+                email_verified: false,
+            },
+        )
+        .await?;
+        txn.commit().await?;
+
+        Ok(user)
+    }
+
+    /// Grava uma conta nova dentro da transação de escrita que o chamador já
+    /// abriu (`begin_write`) — o cadastro inicial, o de um administrador e o
+    /// [`Self::create_with_password_and_role`] passam todos por aqui.
+    ///
+    /// Único ponto de gravação de usuário no sistema, e por isso o lugar certo
+    /// para normalizar o e-mail. `find_by_email` compara por igualdade exata:
+    /// sem isto, quem se cadastrasse como `Admin@Casa.com` nunca mais entraria
+    /// digitando `admin@casa.com`, e o mesmo endereço em duas caixas diferentes
+    /// passaria pela checagem de duplicidade abaixo.
+    ///
+    /// # Errors
+    ///
+    /// `EntityAlreadyExists` com o e-mail já cadastrado; reprovação de nome ou
+    /// e-mail (`before_save`) ou erro do banco.
+    pub async fn insert_new<C: ConnectionTrait>(db: &C, new: NewUser<'_>) -> ModelResult<Self> {
+        let email = new.email.trim().to_lowercase();
+        let name = new.name.trim().to_string();
 
         if users::Entity::find()
             .filter(
@@ -303,26 +368,25 @@ impl Model {
                     .eq(users::Column::Email, &email)
                     .build(),
             )
-            .one(&txn)
+            .one(db)
             .await?
             .is_some()
         {
             return Err(ModelError::EntityAlreadyExists {});
         }
 
-        let password_hash =
-            hash::hash_password(&params.password).map_err(|e| ModelError::Any(e.into()))?;
         let user = users::ActiveModel {
             email: ActiveValue::set(email),
-            password: ActiveValue::set(password_hash),
+            password: ActiveValue::set(new.password_hash),
             name: ActiveValue::set(name),
-            role: ActiveValue::set(role.to_string()),
+            role: ActiveValue::set(new.role.to_string()),
+            active: ActiveValue::set(new.active),
+            area_roles: ActiveValue::set(new.area_roles),
+            email_verified_at: ActiveValue::set(new.email_verified.then(|| Utc::now().into())),
             ..Default::default()
         }
-        .insert(&txn)
+        .insert(db)
         .await?;
-
-        txn.commit().await?;
 
         Ok(user)
     }
@@ -353,7 +417,7 @@ impl ActiveModel {
         mut self,
         db: &DatabaseConnection,
     ) -> ModelResult<Model> {
-        self.email_verification_sent_at = ActiveValue::set(Some(Local::now().into()));
+        self.email_verification_sent_at = ActiveValue::set(Some(Utc::now().into()));
         self.email_verification_token = ActiveValue::Set(Some(Uuid::new_v4().to_string()));
         self.update(db).await.map_err(ModelError::from)
     }
@@ -371,7 +435,7 @@ impl ActiveModel {
     ///
     /// when has DB query error
     pub async fn set_forgot_password_sent(mut self, db: &DatabaseConnection) -> ModelResult<Model> {
-        self.reset_sent_at = ActiveValue::set(Some(Local::now().into()));
+        self.reset_sent_at = ActiveValue::set(Some(Utc::now().into()));
         self.reset_token = ActiveValue::Set(Some(Uuid::new_v4().to_string()));
         self.update(db).await.map_err(ModelError::from)
     }
@@ -386,7 +450,7 @@ impl ActiveModel {
     ///
     /// when has DB query error
     pub async fn verified(mut self, db: &DatabaseConnection) -> ModelResult<Model> {
-        self.email_verified_at = ActiveValue::set(Some(Local::now().into()));
+        self.email_verified_at = ActiveValue::set(Some(Utc::now().into()));
         // Invalidate the verification token so it cannot be replayed after use.
         self.email_verification_token = ActiveValue::Set(None);
         self.update(db).await.map_err(ModelError::from)
@@ -411,8 +475,12 @@ impl ActiveModel {
             errors.add("password", e);
             ModelError::Validation(errors.into())
         })?;
-        self.password =
-            ActiveValue::set(hash::hash_password(password).map_err(|e| ModelError::Any(e.into()))?);
+        let raw_password = password.to_owned();
+        let hashed = tokio::task::spawn_blocking(move || hash::hash_password(&raw_password))
+            .await
+            .map_err(|e| ModelError::Any(e.into()))?
+            .map_err(|e| ModelError::Any(e.into()))?;
+        self.password = ActiveValue::set(hashed);
         self.reset_token = ActiveValue::Set(None);
         self.reset_sent_at = ActiveValue::Set(None);
         self.update(db).await.map_err(ModelError::from)
@@ -427,7 +495,7 @@ impl ActiveModel {
     /// - Returns an error if database update fails
     pub async fn create_magic_link(mut self, db: &DatabaseConnection) -> ModelResult<Model> {
         let random_str = hash::random_string(MAGIC_LINK_LENGTH as usize);
-        let expired = Local::now() + Duration::minutes(MAGIC_LINK_EXPIRATION_MIN.into());
+        let expired = Utc::now() + Duration::minutes(MAGIC_LINK_EXPIRATION_MIN.into());
 
         self.magic_link_token = ActiveValue::set(Some(random_str));
         self.magic_link_expiration = ActiveValue::set(Some(expired.into()));

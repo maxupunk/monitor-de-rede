@@ -32,11 +32,9 @@ pub fn dependency_order<T>(items: Vec<T>, deps: impl Fn(usize) -> Vec<usize>) ->
             !placed.contains(index) && dependencies[*index].iter().all(|dep| placed.contains(dep))
         });
         // Ciclo: o primeiro que faltar entra assim mesmo.
-        let next = ready.unwrap_or_else(|| {
-            (0..total)
-                .find(|index| !placed.contains(index))
-                .expect("ainda há item por posicionar")
-        });
+        let Some(next) = ready.or_else(|| (0..total).find(|index| !placed.contains(index))) else {
+            break;
+        };
         placed.insert(next);
         order.push(next);
     }

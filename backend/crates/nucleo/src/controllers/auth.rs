@@ -7,12 +7,16 @@ use crate::{
     services::{
         audit::{AuditAction, AuditActor, AuditEntryInput, AuditService, ResourceType},
         auth::setup::{map_model_error, SetupParams, SetupService},
-        shared::errors::{AppError, AppResult},
+        shared::{
+            errors::{AppError, AppResult},
+            transaction::begin_write,
+        },
     },
     views::auth::{LoginResponse, SetupStatusResponse, UserResponse},
 };
 use axum::http::HeaderMap;
 use loco_rs::prelude::*;
+use sea_orm::sea_query::Expr;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
@@ -136,20 +140,32 @@ async fn register(
 /// Verify register user. if the user not verified his email, he can't login to
 /// the system.
 #[debug_handler]
-async fn verify(State(ctx): State<AppContext>, Path(token): Path<String>) -> Result<Response> {
+async fn verify(
+    headers: HeaderMap,
+    State(ctx): State<AppContext>,
+    Path(token): Path<String>,
+) -> AppResult<Response> {
+    enforce_auth_rate_limit(
+        &ctx,
+        "verify",
+        &crate::services::shared::rate_limit::extract_client_ip(&headers),
+    )?;
     let Ok(user) = users::Model::find_by_verification_token(&ctx.db, &token).await else {
-        return unauthorized("invalid token");
+        return Err(AppError::unauthorized("invalid token"));
     };
 
     if user.email_verified_at.is_some() {
         tracing::info!(pid = user.pid.to_string(), "user already verified");
     } else {
         let active_model = user.into_active_model();
-        let user = active_model.verified(&ctx.db).await?;
+        let user = active_model
+            .verified(&ctx.db)
+            .await
+            .map_err(map_model_error)?;
         tracing::info!(pid = user.pid.to_string(), "user verified");
     }
 
-    format::json(())
+    Ok(format::json(())?)
 }
 
 /// In case the user forgot his password  this endpoints generate a forgot token
@@ -167,7 +183,8 @@ async fn forgot(
         "forgot",
         &crate::services::shared::rate_limit::extract_client_ip(&headers),
     )?;
-    let Ok(user) = users::Model::find_by_email(&ctx.db, &params.email).await else {
+    let email = params.email.trim().to_lowercase();
+    let Ok(user) = users::Model::find_by_email(&ctx.db, &email).await else {
         // we don't want to expose our users email. if the email is invalid we still
         // returning success to the caller
         return Ok(format::json(())?);
@@ -249,7 +266,7 @@ async fn login(
         return Err(AppError::unauthorized(RECUSA));
     };
 
-    if !user.verify_password(&params.password) {
+    if !user.verify_password_async(params.password.clone()).await {
         tracing::debug!(email, "login recusado: senha incorreta");
         return Err(AppError::unauthorized(RECUSA));
     }
@@ -282,9 +299,16 @@ async fn login(
 }
 
 #[debug_handler]
-async fn current(auth: auth::JWT, State(ctx): State<AppContext>) -> Result<Response> {
-    let user = users::Model::find_by_pid(&ctx.db, &auth.claims.pid).await?;
-    format::json(UserResponse::new(&user))
+async fn current(auth: auth::JWT, State(ctx): State<AppContext>) -> AppResult<Response> {
+    let user = users::Model::find_by_pid(&ctx.db, &auth.claims.pid)
+        .await
+        .map_err(map_model_error)?;
+    if !user.active {
+        return Err(AppError::unauthorized(
+            "Este usuário está desativado. Procure um administrador.",
+        ));
+    }
+    Ok(format::json(UserResponse::new(&user))?)
 }
 
 /// JWT é stateless: o logout confirma a operação e o cliente descarta o token.
@@ -293,7 +317,7 @@ async fn logout(
     auth: auth::JWT,
     State(ctx): State<AppContext>,
     headers: HeaderMap,
-) -> Result<Response> {
+) -> AppResult<Response> {
     if let Ok(user) = users::Model::find_by_pid(&ctx.db, &auth.claims.pid).await {
         let _ = AuditService::new(&ctx.db)
             .log(
@@ -310,7 +334,9 @@ async fn logout(
             .await;
     }
 
-    format::json(serde_json::json!({ "message": "Sessão encerrada com sucesso" }))
+    Ok(format::json(
+        serde_json::json!({ "message": "Sessão encerrada com sucesso" }),
+    )?)
 }
 
 /// Magic link authentication provides a secure and passwordless way to log in to the application.
@@ -338,10 +364,11 @@ async fn magic_link(
         &crate::services::shared::rate_limit::extract_client_ip(&headers),
     )?;
 
-    let Ok(user) = users::Model::find_by_email(&ctx.db, &params.email).await else {
+    let email = params.email.trim().to_lowercase();
+    let Ok(user) = users::Model::find_by_email(&ctx.db, &email).await else {
         // we don't want to expose our users email. if the email is invalid we still
         // returning success to the caller
-        tracing::debug!(email = params.email, "user not found by email");
+        tracing::debug!(email, "user not found by email");
         return Ok(format::empty_json()?);
     };
 
@@ -366,11 +393,27 @@ async fn magic_link_verify(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
 ) -> AppResult<Response> {
-    let Ok(user) = users::Model::find_by_magic_token(&ctx.db, &token).await else {
-        // we don't want to expose our users email. if the email is invalid we still
-        // returning success to the caller
+    enforce_auth_rate_limit(
+        &ctx,
+        "magic_link_verify",
+        &crate::services::shared::rate_limit::extract_client_ip(&headers),
+    )?;
+
+    let txn = begin_write(&ctx.db).await?;
+    let Some(user) = users::Entity::find()
+        .filter(users::Column::MagicLinkToken.eq(&token))
+        .one(&txn)
+        .await?
+    else {
         return Err(AppError::unauthorized("Link inválido ou expirado."));
     };
+
+    if user
+        .magic_link_expiration
+        .is_none_or(|expired_at| expired_at < chrono::Utc::now())
+    {
+        return Err(AppError::unauthorized("Link inválido ou expirado."));
+    }
 
     if !user.active {
         tracing::info!(user_pid = %user.pid, "magic link recusado na verificação: usuário desativado");
@@ -379,11 +422,25 @@ async fn magic_link_verify(
         ));
     }
 
-    let user = user
-        .into_active_model()
-        .clear_magic_link(&ctx.db)
-        .await
-        .map_err(map_model_error)?;
+    let consumed = users::Entity::update_many()
+        .col_expr(
+            users::Column::MagicLinkToken,
+            Expr::value(Option::<String>::None),
+        )
+        .col_expr(
+            users::Column::MagicLinkExpiration,
+            Expr::value(Option::<sea_orm::prelude::DateTimeWithTimeZone>::None),
+        )
+        .filter(users::Column::Id.eq(user.id))
+        .filter(users::Column::MagicLinkToken.eq(&token))
+        .exec(&txn)
+        .await?;
+
+    if consumed.rows_affected == 0 {
+        return Err(AppError::unauthorized("Link inválido ou expirado."));
+    }
+
+    txn.commit().await?;
 
     let _ = AuditService::new(&ctx.db)
         .log(
@@ -404,15 +461,19 @@ async fn magic_link_verify(
 
 #[debug_handler]
 async fn resend_verification_email(
+    headers: HeaderMap,
     State(ctx): State<AppContext>,
     Json(params): Json<ResendVerificationParams>,
-) -> Result<Response> {
-    let Ok(user) = users::Model::find_by_email(&ctx.db, &params.email).await else {
-        tracing::info!(
-            email = params.email,
-            "User not found for resend verification"
-        );
-        return format::json(());
+) -> AppResult<Response> {
+    enforce_auth_rate_limit(
+        &ctx,
+        "resend_verification",
+        &crate::services::shared::rate_limit::extract_client_ip(&headers),
+    )?;
+    let email = params.email.trim().to_lowercase();
+    let Ok(user) = users::Model::find_by_email(&ctx.db, &email).await else {
+        tracing::info!(email, "User not found for resend verification");
+        return Ok(format::json(())?);
     };
 
     if user.email_verified_at.is_some() {
@@ -420,18 +481,19 @@ async fn resend_verification_email(
             pid = user.pid.to_string(),
             "User already verified, skipping resend"
         );
-        return format::json(());
+        return Ok(format::json(())?);
     }
 
     let user = user
         .into_active_model()
         .set_email_verification_sent(&ctx.db)
-        .await?;
+        .await
+        .map_err(map_model_error)?;
 
     AuthMailer::send_welcome(&ctx, &user).await?;
     tracing::info!(pid = user.pid.to_string(), "Verification email re-sent");
 
-    format::json(())
+    Ok(format::json(())?)
 }
 
 pub fn routes() -> Routes {

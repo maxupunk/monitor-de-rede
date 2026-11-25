@@ -12,22 +12,43 @@ use std::{collections::HashMap, io};
 use serde::Deserialize;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 
-use netmonitor_core::shared::errors::{AppError, AppResult};
+use netmonitor_core::shared::{
+    errors::{AppError, AppResult},
+    transaction::begin_write,
+};
 
 use crate::{
     catalog::{self, Push},
     digest::{Digest, Hasher},
     manifest::{self, MAX_MANIFEST_BYTES},
-    storage::{BlobStore, Staged},
+    storage::{self, BlobStore, Staged},
     tarstream,
 };
-use sea_orm::DatabaseConnection;
+use sea_orm::{ConnectionTrait, DatabaseConnection};
 
 /// Profundidade máxima de índices dentro de índices.
 const MAX_DEPTH: usize = 4;
 
 fn io_error(error: io::Error) -> AppError {
     AppError::validation(format!("O arquivo da imagem chegou quebrado: {error}"))
+}
+
+/// Soma `data[..len]` ao hash. O buffer vai e volta (sem cópia por leitura).
+async fn update_hasher(
+    mut hasher: Hasher,
+    data: Vec<u8>,
+    len: usize,
+) -> AppResult<(Hasher, Vec<u8>)> {
+    if len < 16 * 1024 {
+        hasher.update(&data[..len]);
+        return Ok((hasher, data));
+    }
+    tokio::task::spawn_blocking(move || {
+        hasher.update(&data[..len]);
+        (hasher, data)
+    })
+    .await
+    .map_err(|error| AppError::Internal(anyhow::anyhow!(error.to_string())))
 }
 
 #[derive(Debug, Deserialize)]
@@ -78,37 +99,53 @@ async fn unpack<R: AsyncRead + Unpin>(
         let expected: Digest = format!("sha256:{hex}")
             .parse()
             .map_err(|_| AppError::validation(format!("Blob com nome inválido: {}", entry.path)))?;
-        total = total.saturating_add(entry.size);
-        if total > limit {
-            return Err(AppError::business_rule(
-                "A imagem não cabe na cota do registry: libere espaço em Registry ou aumente a cota",
-            ));
+        let already_stored = store.size(&expected).await.map_err(io_error)?.is_some();
+        if !already_stored {
+            total = total.saturating_add(entry.size);
+            if total > limit {
+                return Err(AppError::business_rule(
+                    "A imagem não cabe na cota do registry: libere espaço em Registry ou aumente a cota",
+                ));
+            }
         }
         let mut staged = Staged::new(store).await.map_err(io_error)?;
-        let mut file = tokio::fs::File::create(&staged.path)
-            .await
-            .map_err(io_error)?;
+        let mut file = if already_stored {
+            None
+        } else {
+            Some(
+                tokio::fs::File::create(&staged.path)
+                    .await
+                    .map_err(io_error)?,
+            )
+        };
         let mut hasher = Hasher::new();
         loop {
             let count = reader.read(&mut buffer).await.map_err(io_error)?;
             if count == 0 {
                 break;
             }
-            hasher.update(&buffer[..count]);
-            file.write_all(&buffer[..count]).await.map_err(io_error)?;
+            if let Some(ref mut out) = file {
+                out.write_all(&buffer[..count]).await.map_err(io_error)?;
+            }
+            let (next_hasher, returned) = update_hasher(hasher, buffer, count).await?;
+            hasher = next_hasher;
+            buffer = returned;
         }
-        file.flush().await.map_err(io_error)?;
-        drop(file);
+        if let Some(mut out) = file {
+            out.flush().await.map_err(io_error)?;
+        }
         if hasher.finish() != expected {
             return Err(AppError::validation(format!(
                 "O conteúdo de {expected} não confere com o digest"
             )));
         }
-        store
-            .commit(&staged.path, &expected)
-            .await
-            .map_err(io_error)?;
-        staged.keep();
+        if !already_stored {
+            store
+                .commit(&staged.path, &expected)
+                .await
+                .map_err(io_error)?;
+            staged.keep();
+        }
         blobs.insert(expected, entry.size);
     }
     let index = index.ok_or_else(|| {
@@ -144,8 +181,8 @@ async fn read_text(store: &dyn BlobStore, digest: &Digest) -> AppResult<String> 
 }
 
 /// Grava o manifest `digest` e, antes, os que ele referencia.
-async fn put_tree(
-    db: &DatabaseConnection,
+async fn put_tree<C: ConnectionTrait>(
+    db: &C,
     store: &dyn BlobStore,
     repository_id: i64,
     digest: &Digest,
@@ -188,16 +225,20 @@ pub async fn ingest<R: AsyncRead + Unpin>(
     push: &Push,
     room: u64,
 ) -> AppResult<Digest> {
+    // Do primeiro arquivo ao vínculo no banco, a coleta não apaga blob.
+    let _push = storage::push_gate().read().await;
     let unpacked = unpack(store, archive, room).await?;
+    let txn = begin_write(db).await?;
     for (digest, size) in &unpacked.blobs {
-        catalog::link_blob(db, repository_id, digest, *size).await?;
+        catalog::link_blob(&txn, repository_id, digest, *size).await?;
     }
     for digest in &unpacked.top {
-        put_tree(db, store, repository_id, digest, push, 0).await?;
+        put_tree(&txn, store, repository_id, digest, push, 0).await?;
     }
     let top = unpacked.top[0].clone();
     for tag in tags {
-        catalog::set_tag(db, repository_id, tag, &top).await?;
+        catalog::set_tag(&txn, repository_id, tag, &top).await?;
     }
+    txn.commit().await?;
     Ok(top)
 }

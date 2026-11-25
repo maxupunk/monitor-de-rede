@@ -119,11 +119,32 @@ impl Checker for HostResourcesChecker {
 
     async fn execute(&self, config: Self::Config) -> CheckResult {
         let started_at = Utc::now();
-        let mut reader = HostMetricsReader::from_env();
-        // A primeira leitura só serve de base para a CPU.
-        let _ = reader.sample();
+        // A primeira leitura só serve de base para a CPU (offload de `/proc` + `statvfs`).
+        let reader = tokio::task::spawn_blocking(|| {
+            let mut reader = HostMetricsReader::from_env();
+            let _ = reader.sample();
+            reader
+        })
+        .await;
+        let Ok(mut reader) = reader else {
+            let finished_at = Utc::now();
+            return CheckResult {
+                success: false,
+                status: MonitorStatus::Unknown,
+                started_at,
+                finished_at,
+                duration_ms: (finished_at - started_at).num_milliseconds().max(0),
+                message: Some("Falha ao coletar métricas do host".to_string()),
+                metrics: Vec::new(),
+                data: serde_json::json!({}),
+            };
+        };
         tokio::time::sleep(CPU_WINDOW).await;
-        let (status, message, metrics) = match reader.sample() {
+        let sample = tokio::task::spawn_blocking(move || reader.sample())
+            .await
+            .ok()
+            .flatten();
+        let (status, message, metrics) = match sample {
             Some(sample) => evaluate(&sample, &config),
             None => (
                 MonitorStatus::Unknown,

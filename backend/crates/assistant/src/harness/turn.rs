@@ -337,9 +337,59 @@ pub fn requested_groups(arguments: &Value) -> Vec<ToolGroup> {
 /// Marcador que substitui os itens cortados de uma lista.
 const OMITTED_KEY: &str = "_omitidos";
 
-/// Tamanho serializado de um valor, em caracteres.
+/// Tamanho serializado estimado de um valor em caracteres, sem alocar `String`.
 fn size(value: &Value) -> usize {
-    value.to_string().chars().count()
+    match value {
+        Value::Null => 4,
+        Value::Bool(true) => 4,
+        Value::Bool(false) => 5,
+        Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                let mut v = i.unsigned_abs();
+                let mut digits = if i < 0 { 2 } else { 1 };
+                while v >= 10 {
+                    v /= 10;
+                    digits += 1;
+                }
+                digits
+            } else if let Some(mut v) = n.as_u64() {
+                let mut digits = 1;
+                while v >= 10 {
+                    v /= 10;
+                    digits += 1;
+                }
+                digits
+            } else {
+                // Floats arredondados pelo `lean` são curtos (ex: 12.35).
+                n.to_string().len()
+            }
+        }
+        Value::String(s) => {
+            let escaped_extra = s
+                .chars()
+                .filter(|c| matches!(c, '"' | '\\' | '\n' | '\r' | '\t'))
+                .count();
+            2 + s.chars().count() + escaped_extra
+        }
+        Value::Array(items) => {
+            if items.is_empty() {
+                2
+            } else {
+                2 + items.len().saturating_sub(1) + items.iter().map(size).sum::<usize>()
+            }
+        }
+        Value::Object(map) => {
+            if map.is_empty() {
+                2
+            } else {
+                2 + map.len().saturating_sub(1)
+                    + map
+                        .iter()
+                        .map(|(k, v)| 3 + k.chars().count() + size(v))
+                        .sum::<usize>()
+            }
+        }
+    }
 }
 
 /// Passo do caminho até um valor dentro do JSON.

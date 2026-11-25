@@ -158,9 +158,29 @@ pub async fn claim<C: ConnectionTrait>(
     installation_id: i64,
 ) -> AppResult<deploy_github_connections::Model> {
     for row in list(db).await? {
-        let app = app_client(&row)?;
-        if let Some(installation) = app::installation(&app, installation_id).await? {
-            return apply(db, row, Some(&installation)).await;
+        let app = match app_client(&row) {
+            Ok(app) => app,
+            Err(error) => {
+                tracing::warn!(
+                    connection_id = row.id,
+                    account = %row.account_login,
+                    %error,
+                    "ignora conexão GitHub com chave ilegível ao identificar instalação"
+                );
+                continue;
+            }
+        };
+        match app::installation(&app, installation_id).await {
+            Ok(Some(installation)) => return apply(db, row, Some(&installation)).await,
+            Ok(None) => {}
+            Err(error) => {
+                tracing::warn!(
+                    connection_id = row.id,
+                    account = %row.account_login,
+                    %error,
+                    "falha ao consultar instalação no GitHub para esta conexão"
+                );
+            }
         }
     }
     Err(AppError::not_found(

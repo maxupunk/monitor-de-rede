@@ -78,36 +78,46 @@ impl SftpExplorer {
     /// Sempre com `/` inicial: um caminho relativo seria resolvido contra o
     /// diretório de login, que muda conforme a conta e tornaria o mesmo destino
     /// diferente para dois usuários.
-    fn absolute(&self, key: &str) -> String {
-        format!("/{}", join_key(&self.prefix, key))
+    fn absolute(&self, key: &str) -> Result<String, StorageError> {
+        let trimmed = key.trim();
+        if trimmed.contains('\0') || trimmed.starts_with('/') || trimmed.starts_with('\\') {
+            return Err(StorageError::PathTraversal);
+        }
+        // `:` só é perigoso no primeiro segmento, onde indicaria letra de
+        // unidade (`C:`) ou esquema (`sftp:`); no meio é nome POSIX legítimo.
+        for (index, segment) in trimmed.split(['/', '\\']).enumerate() {
+            if segment == ".." || (index == 0 && segment.contains(':')) {
+                return Err(StorageError::PathTraversal);
+            }
+        }
+        Ok(format!("/{}", join_key(&self.prefix, trimmed)))
     }
 
-    /// Abre uma sessão SFTP autenticada.
+    /// Abre uma sessão SFTP autenticada com timeout cobrindo conexão,
+    /// autenticação e abertura do subsistema SFTP.
     async fn connect(&self) -> Result<SftpSession, StorageError> {
+        let host = self.config.host.trim();
+        let port = self.config.port.unwrap_or(DEFAULT_SFTP_PORT);
+        tokio::time::timeout(CONNECT_TIMEOUT, self.connect_inner(host, port))
+            .await
+            .map_err(|_| {
+                StorageError::Backend(format!("Tempo esgotado ao conectar em {host}:{port}"))
+            })?
+    }
+
+    async fn connect_inner(&self, host: &str, port: u16) -> Result<SftpSession, StorageError> {
         let config = Arc::new(client::Config {
             inactivity_timeout: Some(INACTIVITY_TIMEOUT),
             ..client::Config::default()
         });
-        let address = (
-            self.config.host.trim(),
-            self.config.port.unwrap_or(DEFAULT_SFTP_PORT),
-        );
+        let address = (host, port);
         let expected = self.expected_fingerprint();
         let handler = PinnedHostKey {
             expected: expected.clone(),
             observed: Arc::clone(&self.observed),
         };
 
-        let connected =
-            tokio::time::timeout(CONNECT_TIMEOUT, client::connect(config, address, handler))
-                .await
-                .map_err(|_| {
-                    StorageError::Backend(format!(
-                        "Tempo esgotado ao conectar em {}:{}",
-                        address.0, address.1
-                    ))
-                })?;
-        let mut session = match connected {
+        let mut session = match client::connect(config, address, handler).await {
             Ok(session) => session,
             Err(err) => {
                 let observed = self.observed_identity();
@@ -215,6 +225,27 @@ impl SftpExplorer {
     }
 }
 
+fn is_sftp_not_found(err: &russh_sftp::client::error::Error) -> bool {
+    matches!(
+        err,
+        russh_sftp::client::error::Error::Status(status)
+            if status.status_code == russh_sftp::protocol::StatusCode::NoSuchFile
+    )
+}
+
+/// Diretório ausente na listagem: além de `NoSuchFile`, vários servidores
+/// (OpenSSH antigo, appliances) respondem o genérico `Failure` ao `opendir`
+/// de uma pasta inexistente. Só a listagem aceita o `Failure`: numa remoção
+/// ou leitura ele continua sendo erro.
+fn is_sftp_missing_dir(err: &russh_sftp::client::error::Error) -> bool {
+    is_sftp_not_found(err)
+        || matches!(
+            err,
+            russh_sftp::client::error::Error::Status(status)
+                if status.status_code == russh_sftp::protocol::StatusCode::Failure
+        )
+}
+
 #[async_trait]
 impl StorageExplorer for SftpExplorer {
     async fn list_objects(
@@ -222,14 +253,22 @@ impl StorageExplorer for SftpExplorer {
         path: &str,
         options: &ListOptions,
     ) -> Result<ListPage, StorageError> {
+        let target = self.absolute(path)?;
         let session = self.connect().await?;
-        let target = self.absolute(path);
         let limit = options.effective_limit();
 
-        let Ok(entries) = session.read_dir(&target).await else {
-            // Diretório ausente vira página vazia, como no adapter local: a
-            // interface trata "pasta vazia" e "pasta inexistente" igual.
-            return Ok(ListPage::default());
+        let entries = match session.read_dir(&target).await {
+            Ok(entries) => entries,
+            Err(err) if is_sftp_missing_dir(&err) => {
+                // Diretório ausente vira página vazia, como no adapter local: a
+                // interface trata "pasta vazia" e "pasta inexistente" igual.
+                return Ok(ListPage::default());
+            }
+            Err(err) => {
+                return Err(StorageError::Backend(format!(
+                    "Erro ao listar \"{path}\": {err}"
+                )));
+            }
         };
 
         let filter = options
@@ -263,13 +302,11 @@ impl StorageExplorer for SftpExplorer {
             objects.push(if entry.file_type() == FileType::Dir {
                 BucketObject::directory(key)
             } else {
-                let mut file = BucketObject::file(
+                BucketObject::file(
                     key,
                     i64::try_from(metadata.size.unwrap_or(0)).unwrap_or(i64::MAX),
-                    modified.clone(),
-                );
-                file.last_modified = modified;
-                file
+                    modified,
+                )
             });
         }
 
@@ -296,12 +333,16 @@ impl StorageExplorer for SftpExplorer {
     }
 
     async fn object_metadata(&self, key: &str) -> Result<ObjectMetadata, StorageError> {
+        let target = self.absolute(key)?;
         let session = self.connect().await?;
 
-        let metadata = session
-            .metadata(self.absolute(key))
-            .await
-            .map_err(|_| StorageError::NotFound(format!("Arquivo \"{key}\"")))?;
+        let metadata = session.metadata(target).await.map_err(|err| {
+            if is_sftp_not_found(&err) {
+                StorageError::NotFound(format!("Arquivo \"{key}\""))
+            } else {
+                StorageError::Backend(format!("Erro ao ler metadados de \"{key}\": {err}"))
+            }
+        })?;
 
         Ok(ObjectMetadata {
             key: key.to_string(),
@@ -316,22 +357,29 @@ impl StorageExplorer for SftpExplorer {
     }
 
     async fn delete_object(&self, key: &str, is_directory: bool) -> Result<(), StorageError> {
+        let deletable = super::assert_deletable(key)?;
+        let target = self.absolute(&deletable)?;
+        if target == self.absolute("")? || target == "/" {
+            return Err(StorageError::RootDeletion);
+        }
         let session = self.connect().await?;
-        let target = self.absolute(key);
 
         if is_directory {
             remove_tree(&session, &target).await
         } else {
-            session
-                .remove_file(&target)
-                .await
-                .map_err(|err| StorageError::Backend(format!("Erro ao excluir \"{key}\": {err}")))
+            session.remove_file(&target).await.map_err(|err| {
+                if is_sftp_not_found(&err) {
+                    StorageError::NotFound(format!("Arquivo \"{key}\""))
+                } else {
+                    StorageError::Backend(format!("Erro ao excluir \"{key}\": {err}"))
+                }
+            })
         }
     }
 
     async fn test_connection(&self) -> Result<(), StorageError> {
+        let target = self.absolute("")?;
         let session = self.connect().await?;
-        let target = self.absolute("");
 
         session.read_dir(&target).await.map_err(|err| {
             StorageError::Backend(format!("Diretório \"{target}\" não acessível: {err}"))
@@ -343,8 +391,8 @@ impl StorageExplorer for SftpExplorer {
     async fn put_file(&self, key: &str, source: &Path) -> Result<(), StorageError> {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+        let target = self.absolute(key)?;
         let session = self.connect().await?;
-        let target = self.absolute(key);
 
         // O SFTP não cria diretório intermediário sozinho, e o destino de um
         // backup é sempre `<id da conexão>/arquivo`.
@@ -381,12 +429,16 @@ impl StorageExplorer for SftpExplorer {
     }
 
     async fn read_object(&self, key: &str) -> Result<ObjectReader, StorageError> {
+        let target = self.absolute(key)?;
         let session = self.connect().await?;
 
-        let file = session
-            .open(self.absolute(key))
-            .await
-            .map_err(|_| StorageError::NotFound(format!("Arquivo \"{key}\"")))?;
+        let file = session.open(target).await.map_err(|err| {
+            if is_sftp_not_found(&err) {
+                StorageError::NotFound(format!("Arquivo \"{key}\""))
+            } else {
+                StorageError::Backend(format!("Erro ao abrir \"{key}\": {err}"))
+            }
+        })?;
 
         Ok(Box::pin(file))
     }
@@ -480,10 +532,10 @@ mod tests {
         let explorer = SftpExplorer::new(&config());
 
         assert_eq!(
-            explorer.absolute("12/vendas.sql.gz"),
+            explorer.absolute("12/vendas.sql.gz").unwrap(),
             "/home/tester/backups/12/vendas.sql.gz"
         );
-        assert_eq!(explorer.absolute(""), "/home/tester/backups");
+        assert_eq!(explorer.absolute("").unwrap(), "/home/tester/backups");
     }
 
     #[test]
@@ -494,8 +546,72 @@ mod tests {
             ..SftpConfig::default()
         });
 
-        assert_eq!(explorer.absolute("12/a.gz"), "/12/a.gz");
-        assert_eq!(explorer.absolute(""), "/");
+        assert_eq!(explorer.absolute("12/a.gz").unwrap(), "/12/a.gz");
+        assert_eq!(explorer.absolute("").unwrap(), "/");
+    }
+
+    #[test]
+    fn refuses_path_traversal_on_sftp_keys() {
+        let explorer = SftpExplorer::new(&config());
+        for escape in [
+            "..",
+            "../etc/passwd",
+            "12/../../etc/shadow",
+            "12\\..\\..",
+            "/etc/passwd",
+            "\\windows\\system32",
+            "C:/Windows",
+            "12/a\0.gz",
+        ] {
+            assert!(
+                matches!(explorer.absolute(escape), Err(StorageError::PathTraversal)),
+                "aceitou {escape:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn aceita_dois_pontos_fora_do_primeiro_segmento() {
+        let explorer = SftpExplorer::new(&config());
+        assert!(explorer.absolute("12/backup-10:30.gz").is_ok());
+        assert!(matches!(
+            explorer.absolute("sftp://host/x"),
+            Err(StorageError::PathTraversal)
+        ));
+    }
+
+    #[test]
+    fn listagem_trata_failure_como_pasta_ausente() {
+        use russh_sftp::{
+            client::error::Error,
+            protocol::{Status, StatusCode},
+        };
+        let status = |status_code| {
+            Error::Status(Status {
+                id: 0,
+                status_code,
+                error_message: String::new(),
+                language_tag: String::new(),
+            })
+        };
+        assert!(is_sftp_missing_dir(&status(StatusCode::NoSuchFile)));
+        assert!(is_sftp_missing_dir(&status(StatusCode::Failure)));
+        assert!(!is_sftp_missing_dir(&status(StatusCode::PermissionDenied)));
+        assert!(!is_sftp_not_found(&status(StatusCode::Failure)));
+    }
+
+    #[tokio::test]
+    async fn refuses_root_deletion_on_sftp() {
+        let explorer = SftpExplorer::new(&config());
+        for root in ["", " ", "/", "."] {
+            assert!(
+                matches!(
+                    explorer.delete_object(root, true).await,
+                    Err(StorageError::RootDeletion)
+                ),
+                "aceitou apagar raiz {root:?}"
+            );
+        }
     }
 
     #[test]

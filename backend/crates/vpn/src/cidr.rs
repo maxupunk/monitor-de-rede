@@ -30,9 +30,19 @@ pub fn is_ip_in_cidr(ip: Ipv4Addr, cidr: &str) -> AppResult<bool> {
     cidr::is_ip_in_cidr(ip, cidr)
 }
 
-/// Itera os endereços utilizáveis da faixa (exclui rede e broadcast).
+/// Itera os endereços utilizáveis da faixa da VPN (exclui rede e broadcast;
+/// `/31` e `/32` não possuem faixa de hosts para peers WireGuard).
 pub fn iterate_usable_addresses(cidr: &str) -> AppResult<impl Iterator<Item = Ipv4Addr>> {
-    cidr::iterate_usable_addresses(cidr)
+    let range = parse_cidr(cidr)?;
+    let (start, end) = if range.usable_hosts == 0 {
+        (1_u32, 0_u32)
+    } else {
+        (
+            u32::from(range.network_address).saturating_add(1),
+            u32::from(range.broadcast_address).saturating_sub(1),
+        )
+    };
+    Ok((start..=end).map(Ipv4Addr::from))
 }
 
 #[cfg(test)]

@@ -27,12 +27,15 @@ pub async fn route_options(
     permission: Permission,
 ) -> AppResult<Vec<AgentRouteOption>> {
     let hub = AgentHub::from_context(ctx).ok();
-    Ok(identity::list(&ctx.db)
+    Ok(identity::list_active(&ctx.db)
         .await?
         .into_iter()
         .filter(|agent| !identity::is_local(agent))
         .map(|agent| {
-            let session = hub.as_ref().and_then(|hub| hub.get(agent.id));
+            let session = hub
+                .as_ref()
+                .and_then(|hub| hub.get(agent.id))
+                .filter(|session| !session.is_closed());
             AgentRouteOption {
                 id: agent.id,
                 name: agent.name,

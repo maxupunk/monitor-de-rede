@@ -13,11 +13,13 @@ pub mod push;
 pub mod runner;
 pub mod secrets;
 
+use std::collections::HashMap;
+
 use chrono::Utc;
 use loco_rs::app::AppContext;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder,
-    QuerySelect, Set,
+    sea_query::Expr, ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
+    QueryOrder, QuerySelect, Set,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -157,26 +159,41 @@ fn stage_of(raw: Option<&str>) -> Option<BuildStage> {
     raw.and_then(|raw| serde_json::from_value(json!(raw)).ok())
 }
 
-/// # Errors
-///
-/// Banco.
-pub async fn view<C: ConnectionTrait>(
-    db: &C,
+fn select_without_log() -> sea_orm::Select<deploy_builds::Entity> {
+    use deploy_builds::Column as C;
+    deploy_builds::Entity::find()
+        .select_only()
+        .columns([
+            C::Id,
+            C::ApplicationId,
+            C::Reference,
+            C::CommitSha,
+            C::CommitMessage,
+            C::Trigger,
+            C::TriggeredBy,
+            C::ProbeId,
+            C::Status,
+            C::Stage,
+            C::CurrentImage,
+            C::NoCache,
+            C::DeliveryId,
+            C::Images,
+            C::Error,
+            C::StartedAt,
+            C::FinishedAt,
+            C::DurationMs,
+            C::CreatedAt,
+            C::UpdatedAt,
+        ])
+        .column_as(Expr::cust("CAST(NULL AS TEXT)"), "log")
+}
+
+fn build_view(
     build: &deploy_builds::Model,
-) -> AppResult<BuildView> {
-    let application = deploy_applications::Entity::find_by_id(build.application_id)
-        .one(db)
-        .await?
-        .map(|app| app.name)
-        .unwrap_or_default();
-    let agent = match build.probe_id {
-        Some(id) => probes::Entity::find_by_id(id)
-            .one(db)
-            .await?
-            .map(|probe| probe.name),
-        None => None,
-    };
-    Ok(BuildView {
+    application: String,
+    agent: Option<String>,
+) -> BuildView {
+    BuildView {
         id: build.id,
         application_id: build.application_id,
         application,
@@ -197,7 +214,79 @@ pub async fn view<C: ConnectionTrait>(
         finished_at: build.finished_at.map(|at| at.to_rfc3339()),
         duration_ms: build.duration_ms,
         created_at: build.created_at.to_rfc3339(),
-    })
+    }
+}
+
+/// # Errors
+///
+/// Banco.
+pub async fn view<C: ConnectionTrait>(
+    db: &C,
+    build: &deploy_builds::Model,
+) -> AppResult<BuildView> {
+    let application = deploy_applications::Entity::find_by_id(build.application_id)
+        .one(db)
+        .await?
+        .map(|app| app.name)
+        .unwrap_or_default();
+    let agent = match build.probe_id {
+        Some(id) => probes::Entity::find_by_id(id)
+            .one(db)
+            .await?
+            .map(|probe| probe.name),
+        None => None,
+    };
+    Ok(build_view(build, application, agent))
+}
+
+/// Hidrata uma lista de compilações em lote (2 consultas no máximo).
+///
+/// # Errors
+///
+/// Banco.
+pub async fn views<C: ConnectionTrait>(
+    db: &C,
+    rows: &[deploy_builds::Model],
+) -> AppResult<Vec<BuildView>> {
+    if rows.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut app_ids: Vec<i64> = rows.iter().map(|row| row.application_id).collect();
+    app_ids.sort_unstable();
+    app_ids.dedup();
+    let apps: HashMap<i64, String> = deploy_applications::Entity::find()
+        .filter(deploy_applications::Column::Id.is_in(app_ids))
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|app| (app.id, app.name))
+        .collect();
+
+    let mut probe_ids: Vec<i64> = rows.iter().filter_map(|row| row.probe_id).collect();
+    probe_ids.sort_unstable();
+    probe_ids.dedup();
+    let agents: HashMap<i64, String> = if probe_ids.is_empty() {
+        HashMap::new()
+    } else {
+        probes::Entity::find()
+            .filter(probes::Column::Id.is_in(probe_ids))
+            .all(db)
+            .await?
+            .into_iter()
+            .map(|probe| (probe.id, probe.name))
+            .collect()
+    };
+
+    Ok(rows
+        .iter()
+        .map(|row| {
+            build_view(
+                row,
+                apps.get(&row.application_id).cloned().unwrap_or_default(),
+                row.probe_id.and_then(|id| agents.get(&id).cloned()),
+            )
+        })
+        .collect())
 }
 
 fn snapshot_key(id: i64) -> String {
@@ -210,7 +299,11 @@ pub async fn publish(ctx: &AppContext, id: i64) {
     let Ok(bus) = EventBus::from_context(ctx) else {
         return;
     };
-    let Ok(Some(build)) = deploy_builds::Entity::find_by_id(id).one(&ctx.db).await else {
+    let Ok(Some(build)) = select_without_log()
+        .filter(deploy_builds::Column::Id.eq(id))
+        .one(&ctx.db)
+        .await
+    else {
         return;
     };
     let Ok(view) = view(&ctx.db, &build).await else {
@@ -252,7 +345,7 @@ pub async fn recent<C: ConnectionTrait>(
     application_id: Option<i64>,
     limit: u64,
 ) -> AppResult<Vec<deploy_builds::Model>> {
-    let mut query = deploy_builds::Entity::find().order_by_desc(deploy_builds::Column::Id);
+    let mut query = select_without_log().order_by_desc(deploy_builds::Column::Id);
     if let Some(id) = application_id {
         query = query.filter(deploy_builds::Column::ApplicationId.eq(id));
     }
@@ -272,7 +365,7 @@ pub async fn recent_for_applications<C: ConnectionTrait>(
     if application_ids.is_empty() {
         return Ok(Vec::new());
     }
-    Ok(deploy_builds::Entity::find()
+    Ok(select_without_log()
         .filter(deploy_builds::Column::ApplicationId.is_in(application_ids.iter().copied()))
         .order_by_desc(deploy_builds::Column::Id)
         .limit(limit)
@@ -306,7 +399,11 @@ pub async fn request(ctx: &AppContext, ask: Ask) -> AppResult<Option<deploy_buil
     let txn = begin_write(&ctx.db).await?;
     if let Some(delivery) = &ask.delivery_id {
         let seen = deploy_builds::Entity::find()
+            .select_only()
+            .column(deploy_builds::Column::Id)
+            .filter(deploy_builds::Column::ApplicationId.eq(ask.application_id))
             .filter(deploy_builds::Column::DeliveryId.eq(delivery.as_str()))
+            .into_tuple::<i64>()
             .one(&txn)
             .await?;
         if seen.is_some() {
@@ -321,9 +418,12 @@ pub async fn request(ctx: &AppContext, ask: Ask) -> AppResult<Option<deploy_buil
         &["queued", "running"]
     };
     let same = deploy_builds::Entity::find()
+        .select_only()
+        .column(deploy_builds::Column::Id)
         .filter(deploy_builds::Column::ApplicationId.eq(ask.application_id))
         .filter(deploy_builds::Column::CommitSha.eq(commit.as_str()))
         .filter(deploy_builds::Column::Status.is_in(busy.iter().copied()))
+        .into_tuple::<i64>()
         .one(&txn)
         .await?;
     if same.is_some() {
@@ -331,21 +431,33 @@ pub async fn request(ctx: &AppContext, ask: Ask) -> AppResult<Option<deploy_buil
     }
     // A que ainda espera, da mesma aplicação e ref, sai da fila.
     let mut waiting = deploy_builds::Entity::find()
+        .select_only()
+        .column(deploy_builds::Column::Id)
         .filter(deploy_builds::Column::ApplicationId.eq(ask.application_id))
         .filter(deploy_builds::Column::Status.eq("queued"));
     waiting = match &ask.reference {
         Some(reference) => waiting.filter(deploy_builds::Column::Reference.eq(reference.as_str())),
         None => waiting.filter(deploy_builds::Column::Reference.is_null()),
     };
-    let mut superseded = Vec::new();
-    for old in waiting.all(&txn).await? {
-        superseded.push(old.id);
-        let mut active: deploy_builds::ActiveModel = old.into();
-        active.status = Set(BuildStatus::Superseded.as_str().to_string());
-        active.finished_at = Set(Some(Utc::now().into()));
-        active.update(&txn).await?;
+    let superseded: Vec<i64> = waiting.into_tuple::<i64>().all(&txn).await?;
+    let now_utc = Utc::now();
+    if !superseded.is_empty() {
+        deploy_builds::Entity::update_many()
+            .col_expr(
+                deploy_builds::Column::Status,
+                Expr::value(BuildStatus::Superseded.as_str()),
+            )
+            .col_expr(
+                deploy_builds::Column::FinishedAt,
+                Expr::value(Some(now_utc)),
+            )
+            .col_expr(deploy_builds::Column::UpdatedAt, Expr::value(now_utc))
+            .filter(deploy_builds::Column::Id.is_in(superseded.iter().copied()))
+            .filter(deploy_builds::Column::Status.eq("queued"))
+            .exec(&txn)
+            .await?;
     }
-    let now = Utc::now().into();
+    let now = now_utc.into();
     let build = deploy_builds::ActiveModel {
         application_id: Set(ask.application_id),
         reference: Set(ask
@@ -513,23 +625,128 @@ pub fn branch_of(build: &deploy_builds::Model) -> String {
         .unwrap_or_default()
 }
 
+pub(crate) async fn set_probe<C: ConnectionTrait>(db: &C, id: i64, probe_id: i64) -> AppResult<()> {
+    deploy_builds::Entity::update_many()
+        .col_expr(deploy_builds::Column::ProbeId, Expr::value(Some(probe_id)))
+        .col_expr(deploy_builds::Column::UpdatedAt, Expr::value(Utc::now()))
+        .filter(deploy_builds::Column::Id.eq(id))
+        .exec(db)
+        .await?;
+    Ok(())
+}
+
+pub(crate) async fn save_log<C: ConnectionTrait>(db: &C, id: i64, log: &str) -> AppResult<()> {
+    deploy_builds::Entity::update_many()
+        .col_expr(
+            deploy_builds::Column::Log,
+            Expr::value(Some(log.to_string())),
+        )
+        .filter(deploy_builds::Column::Id.eq(id))
+        .exec(db)
+        .await?;
+    Ok(())
+}
+
+pub(crate) async fn set_stage<C: ConnectionTrait>(
+    db: &C,
+    id: i64,
+    stage: Option<String>,
+    current_image: Option<String>,
+) -> AppResult<()> {
+    deploy_builds::Entity::update_many()
+        .col_expr(deploy_builds::Column::Stage, Expr::value(stage))
+        .col_expr(
+            deploy_builds::Column::CurrentImage,
+            Expr::value(current_image),
+        )
+        .col_expr(deploy_builds::Column::UpdatedAt, Expr::value(Utc::now()))
+        .filter(deploy_builds::Column::Id.eq(id))
+        .exec(db)
+        .await?;
+    Ok(())
+}
+
+pub(crate) async fn start_running<C: ConnectionTrait>(db: &C, id: i64) -> AppResult<bool> {
+    let now = Utc::now();
+    let updated = deploy_builds::Entity::update_many()
+        .col_expr(
+            deploy_builds::Column::Status,
+            Expr::value(BuildStatus::Running.as_str()),
+        )
+        .col_expr(deploy_builds::Column::StartedAt, Expr::value(Some(now)))
+        .col_expr(deploy_builds::Column::UpdatedAt, Expr::value(now))
+        .filter(deploy_builds::Column::Id.eq(id))
+        .filter(deploy_builds::Column::Status.eq(BuildStatus::Queued.as_str()))
+        .exec(db)
+        .await?;
+    Ok(updated.rows_affected == 1)
+}
+
+pub(crate) async fn finish_status<C: ConnectionTrait>(
+    db: &C,
+    id: i64,
+    from: &[BuildStatus],
+    status: BuildStatus,
+    error: Option<String>,
+    result: Option<(Vec<StoredImage>, i64)>,
+) -> AppResult<bool> {
+    let now = Utc::now();
+    let mut update = deploy_builds::Entity::update_many()
+        .col_expr(deploy_builds::Column::Status, Expr::value(status.as_str()))
+        .col_expr(
+            deploy_builds::Column::CurrentImage,
+            Expr::value(Option::<String>::None),
+        )
+        .col_expr(deploy_builds::Column::Error, Expr::value(error))
+        .col_expr(deploy_builds::Column::FinishedAt, Expr::value(Some(now)))
+        .col_expr(deploy_builds::Column::UpdatedAt, Expr::value(now))
+        .filter(deploy_builds::Column::Id.eq(id))
+        .filter(deploy_builds::Column::Status.is_in(from.iter().map(|expected| expected.as_str())));
+    // Falhou: a etapa fica, para a tela mostrar onde parou.
+    if status == BuildStatus::Succeeded {
+        update = update.col_expr(
+            deploy_builds::Column::Stage,
+            Expr::value(Option::<String>::None),
+        );
+    }
+    if let Some((images, elapsed)) = result {
+        if !images.is_empty() {
+            update = update.col_expr(deploy_builds::Column::Images, Expr::value(json!(images)));
+        }
+        update = update.col_expr(
+            deploy_builds::Column::DurationMs,
+            Expr::value(Some(elapsed)),
+        );
+    }
+    let updated = update.exec(db).await?;
+    Ok(updated.rows_affected == 1)
+}
+
 /// Cancela uma compilação na fila ou em curso.
 ///
 /// # Errors
 ///
 /// `404`; `Conflict` quando já terminou.
 pub async fn cancel(ctx: &AppContext, id: i64) -> AppResult<deploy_builds::Model> {
-    let build = find(&ctx.db, id).await?;
-    if BuildStatus::parse(&build.status).is_terminal() {
+    let now = Utc::now();
+    let updated = deploy_builds::Entity::update_many()
+        .col_expr(
+            deploy_builds::Column::Status,
+            Expr::value(BuildStatus::Cancelled.as_str()),
+        )
+        .col_expr(deploy_builds::Column::FinishedAt, Expr::value(Some(now)))
+        .col_expr(deploy_builds::Column::UpdatedAt, Expr::value(now))
+        .filter(deploy_builds::Column::Id.eq(id))
+        .filter(deploy_builds::Column::Status.is_in(["queued", "running"]))
+        .exec(&ctx.db)
+        .await?;
+    if updated.rows_affected == 0 {
+        find(&ctx.db, id).await?;
         return Err(AppError::conflict("Esta compilação já terminou"));
     }
     runner::cancel(id);
-    let mut active: deploy_builds::ActiveModel = build.into();
-    active.status = Set(BuildStatus::Cancelled.as_str().to_string());
-    active.finished_at = Set(Some(Utc::now().into()));
-    let saved = active.update(&ctx.db).await?;
     publish(ctx, id).await;
-    Ok(saved)
+    find(&ctx.db, id).await
 }
 
 /// Na subida da central: o que estava em curso morreu com ela.
@@ -538,22 +755,33 @@ pub async fn cancel(ctx: &AppContext, id: i64) -> AppResult<deploy_builds::Model
 ///
 /// Banco.
 pub async fn recover(ctx: &AppContext) -> AppResult<()> {
-    let stuck = deploy_builds::Entity::find()
+    let stuck = select_without_log()
         .filter(deploy_builds::Column::Status.is_in(["queued", "running"]))
         .all(&ctx.db)
         .await?;
+    let now = Utc::now();
     for build in stuck {
         if build.status == "queued" {
             runner::spawn(ctx, build.id);
             continue;
         }
-        let mut active: deploy_builds::ActiveModel = build.into();
-        active.status = Set(BuildStatus::Failed.as_str().to_string());
-        active.error = Set(Some(
-            "A central reiniciou durante a compilação: peça de novo".to_string(),
-        ));
-        active.finished_at = Set(Some(Utc::now().into()));
-        active.update(&ctx.db).await?;
+        deploy_builds::Entity::update_many()
+            .col_expr(
+                deploy_builds::Column::Status,
+                Expr::value(BuildStatus::Failed.as_str()),
+            )
+            .col_expr(
+                deploy_builds::Column::Error,
+                Expr::value(Some(
+                    "A central reiniciou durante a compilação: peça de novo".to_string(),
+                )),
+            )
+            .col_expr(deploy_builds::Column::FinishedAt, Expr::value(Some(now)))
+            .col_expr(deploy_builds::Column::UpdatedAt, Expr::value(now))
+            .filter(deploy_builds::Column::Id.eq(build.id))
+            .filter(deploy_builds::Column::Status.eq("running"))
+            .exec(&ctx.db)
+            .await?;
     }
     Ok(())
 }

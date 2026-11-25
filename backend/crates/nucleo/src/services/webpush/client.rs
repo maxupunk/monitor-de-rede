@@ -2,11 +2,24 @@
 
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_ENCODING, CONTENT_TYPE};
 use serde_json::Value;
-use std::time::Duration;
+use std::{sync::OnceLock, time::Duration};
 use tracing::{debug, warn};
 
 use super::crypto::{build_vapid_header, encrypt_payload, SubscriptionKeys, VapidKeyPair};
 use crate::services::shared::errors::{AppError, AppResult};
+
+static WEBPUSH_HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+fn http_client() -> AppResult<&'static reqwest::Client> {
+    if let Some(client) = WEBPUSH_HTTP_CLIENT.get() {
+        return Ok(client);
+    }
+    let built = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("Erro ao criar cliente HTTP: {e}")))?;
+    Ok(WEBPUSH_HTTP_CLIENT.get_or_init(|| built))
+}
 
 /// Desfecho do envio de uma notificação Web Push.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,10 +64,7 @@ pub async fn send_push(
             .map_err(|e| AppError::Internal(anyhow::anyhow!("Header VAPID inválido: {e}")))?,
     );
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .map_err(|e| AppError::Internal(anyhow::anyhow!("Erro ao criar cliente HTTP: {e}")))?;
+    let client = http_client()?;
 
     let res = client
         .post(endpoint)

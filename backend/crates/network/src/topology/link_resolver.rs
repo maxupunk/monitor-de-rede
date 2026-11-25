@@ -1,6 +1,6 @@
 //! Deduplicação e persistência dos enlaces físicos/lógicos.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use chrono::Utc;
 use sea_orm::{ActiveModelTrait, ConnectionTrait, EntityTrait, Set};
@@ -51,6 +51,16 @@ pub fn resolve_links(raw: Vec<NetworkLink>) -> Vec<NetworkLink> {
     deduplicated.into_values().collect()
 }
 
+/// Alinha `(source_interface_id, target_interface_id)` de `link` à orientação
+/// da linha `row` gravada no banco.
+fn aligned_interfaces(row: &device_links::Model, link: &NetworkLink) -> (Option<i64>, Option<i64>) {
+    if row.source_device_id == link.source_device_id {
+        (link.source_interface_id, link.target_interface_id)
+    } else {
+        (link.target_interface_id, link.source_interface_id)
+    }
+}
+
 /// O enlace mudou de forma que interessa ao grafo?
 ///
 /// `last_seen_at` fica **de fora** de propósito (matriz de paridade #49): ele é
@@ -60,8 +70,9 @@ pub fn resolve_links(raw: Vec<NetworkLink>) -> Vec<NetworkLink> {
 /// mudou no cabeamento.
 #[must_use]
 pub fn is_material_change(row: &device_links::Model, link: &NetworkLink) -> bool {
-    row.source_interface_id != link.source_interface_id
-        || row.target_interface_id != link.target_interface_id
+    let (source_interface_id, target_interface_id) = aligned_interfaces(row, link);
+    row.source_interface_id != source_interface_id
+        || row.target_interface_id != target_interface_id
         || row.link_type != link.link_type
         || row.discovery_method != link.discovery_method
         || row.confidence != link.confidence
@@ -103,12 +114,7 @@ pub fn plan_upsert(row: Option<&device_links::Model>, link: &NetworkLink) -> Ups
     }
     // As interfaces vêm na orientação do enlace que chegou; se o par está
     // gravado ao contrário, as pontas trocam de lugar.
-    let same_direction = row.source_device_id == link.source_device_id;
-    let (incoming_source, incoming_target) = if same_direction {
-        (link.source_interface_id, link.target_interface_id)
-    } else {
-        (link.target_interface_id, link.source_interface_id)
-    };
+    let (incoming_source, incoming_target) = aligned_interfaces(row, link);
     UpsertPlan::Keep {
         source_interface_id: row.source_interface_id.or(incoming_source),
         target_interface_id: row.target_interface_id.or(incoming_target),
@@ -158,26 +164,35 @@ pub async fn persist_links_in<C: ConnectionTrait>(
         });
     }
     let existing = device_links::Entity::find().all(txn).await?;
+    let mut existing_by_pair: HashMap<(i64, i64), &device_links::Model> =
+        HashMap::with_capacity(existing.len());
+    for row in &existing {
+        let key = (
+            row.source_device_id.min(row.target_device_id),
+            row.source_device_id.max(row.target_device_id),
+        );
+        existing_by_pair.entry(key).or_insert(row);
+    }
     let mut saved = Vec::new();
     let mut created = 0;
     let mut updated = 0;
     for link in links {
-        let row = existing.iter().find(|row| {
-            (row.source_device_id == link.source_device_id
-                && row.target_device_id == link.target_device_id)
-                || (row.source_device_id == link.target_device_id
-                    && row.target_device_id == link.source_device_id)
-        });
+        let key = (
+            link.source_device_id.min(link.target_device_id),
+            link.source_device_id.max(link.target_device_id),
+        );
+        let row = existing_by_pair.get(&key).copied();
         let now = Utc::now();
         let saved_row = match (plan_upsert(row, &link), row) {
             (UpsertPlan::Overwrite { changed }, Some(row)) => {
                 if changed {
                     updated += 1;
                 }
+                let (source_interface_id, target_interface_id) = aligned_interfaces(row, &link);
                 device_links::ActiveModel {
                     id: Set(row.id),
-                    source_interface_id: Set(link.source_interface_id),
-                    target_interface_id: Set(link.target_interface_id),
+                    source_interface_id: Set(source_interface_id),
+                    target_interface_id: Set(target_interface_id),
                     link_type: Set(link.link_type),
                     discovery_method: Set(link.discovery_method),
                     confidence: Set(link.confidence),
@@ -481,5 +496,54 @@ mod tests {
             plan_upsert(Some(&linha), &manual_novo),
             UpsertPlan::Overwrite { changed: true }
         ));
+    }
+
+    #[test]
+    fn overwrite_em_direcao_inversa_preserva_orientacao_das_interfaces() {
+        let linha = device_links::Model {
+            id: 9,
+            source_device_id: 1,
+            target_device_id: 2,
+            source_interface_id: Some(10),
+            target_interface_id: Some(20),
+            link_type: "lldp".into(),
+            discovery_method: "lldp".into(),
+            confidence: 95,
+            confirmed: false,
+            last_seen_at: None,
+            created_at: Utc::now().into(),
+            updated_at: Utc::now().into(),
+        };
+        // Mesmo enlace visto a partir do dispositivo 2 (2:20 -> 1:10): não é mudança material.
+        let mesmo_inverso = NetworkLink {
+            source_device_id: 2,
+            target_device_id: 1,
+            source_interface_id: Some(20),
+            target_interface_id: Some(10),
+            link_type: "lldp".into(),
+            discovery_method: "lldp".into(),
+            confidence: 95,
+            confirmed: false,
+        };
+        assert!(!is_material_change(&linha, &mesmo_inverso));
+        assert_eq!(
+            plan_upsert(Some(&linha), &mesmo_inverso),
+            UpsertPlan::Overwrite { changed: false }
+        );
+        assert_eq!(
+            aligned_interfaces(&linha, &mesmo_inverso),
+            (Some(10), Some(20))
+        );
+
+        // Troca de porta no dispositivo 1 vista a partir do dispositivo 2 (2:20 -> 1:15).
+        let porta_trocada = NetworkLink {
+            target_interface_id: Some(15),
+            ..mesmo_inverso
+        };
+        assert!(is_material_change(&linha, &porta_trocada));
+        assert_eq!(
+            aligned_interfaces(&linha, &porta_trocada),
+            (Some(15), Some(20))
+        );
     }
 }

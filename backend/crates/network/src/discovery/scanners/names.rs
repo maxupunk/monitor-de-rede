@@ -172,11 +172,14 @@ async fn reverse_dns(ips: &[Ipv4Addr], servers: &[SocketAddr]) -> BTreeMap<Ipv4A
     let deadline = Instant::now() + WINDOW;
     let mut buffer = [0_u8; 1_500];
     while names.len() < ips.len() {
-        let Ok(Ok((read, _))) =
+        let Ok(Ok((read, source))) =
             tokio::time::timeout_at(deadline, socket.recv_from(&mut buffer)).await
         else {
             break;
         };
+        if !servers.contains(&source) {
+            continue;
+        }
         let Ok(message) = Message::from_bytes(&buffer[..read]) else {
             continue;
         };
@@ -213,6 +216,7 @@ async fn netbios(ips: &[Ipv4Addr]) -> BTreeMap<Ipv4Addr, NetbiosNode> {
     for ip in ips {
         let _ = socket.send_to(&query, (*ip, 137)).await;
     }
+    let expected: std::collections::HashSet<Ipv4Addr> = ips.iter().copied().collect();
     let deadline = Instant::now() + WINDOW;
     let mut buffer = [0_u8; 1_500];
     while nodes.len() < ips.len() {
@@ -224,6 +228,9 @@ async fn netbios(ips: &[Ipv4Addr]) -> BTreeMap<Ipv4Addr, NetbiosNode> {
         let IpAddr::V4(ip) = source.ip() else {
             continue;
         };
+        if !expected.contains(&ip) {
+            continue;
+        }
         if let Some(node) = parse_node_status(&buffer[..read]) {
             nodes.entry(ip).or_insert(node);
         }

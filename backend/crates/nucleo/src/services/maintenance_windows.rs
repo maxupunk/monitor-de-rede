@@ -49,9 +49,7 @@ where
         .add(maintenance_windows::Column::EndsAt.gte(now));
 
     if let Some(device_id) = device_id {
-        let by_device = Condition::all()
-            .add(maintenance_windows::Column::DeviceId.eq(device_id))
-            .add(maintenance_windows::Column::SiteId.is_null());
+        let by_device = Condition::all().add(maintenance_windows::Column::DeviceId.eq(device_id));
 
         if let Some(site_id) = effective_site_id {
             let by_site = Condition::all()
@@ -200,6 +198,11 @@ fn validate(input: &MaintenanceWindowInput) -> AppResult<()> {
             "A janela deve estar vinculada a um site ou a um dispositivo",
         ));
     }
+    if input.site_id.is_some() && input.device_id.is_some() {
+        return Err(AppError::validation(
+            "Informe um site ou um dispositivo, não ambos",
+        ));
+    }
     if input.ends_at <= input.starts_at {
         return Err(AppError::validation(
             "O horário de término deve ser posterior ao de início",
@@ -294,6 +297,19 @@ mod tests {
             description: None,
             starts_at: Utc::now(),
             ends_at: Utc::now() - Duration::hours(1),
+        };
+        assert!(validate(&input).is_err());
+    }
+
+    #[test]
+    fn recusa_site_e_dispositivo_ao_mesmo_tempo() {
+        let input = MaintenanceWindowInput {
+            site_id: Some(1),
+            device_id: Some(2),
+            name: "Manutenção".into(),
+            description: None,
+            starts_at: Utc::now(),
+            ends_at: Utc::now() + Duration::hours(1),
         };
         assert!(validate(&input).is_err());
     }

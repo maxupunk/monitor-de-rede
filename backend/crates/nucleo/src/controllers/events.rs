@@ -8,9 +8,14 @@ use axum::response::{
 };
 use chrono::Utc;
 use loco_rs::prelude::*;
-use netmonitor_core::{areas::AreaPolicies, events::EventAudience, roles::AreaAccess};
-use sea_orm::{EntityTrait, QueryOrder};
+use netmonitor_core::{
+    areas::AreaPolicies,
+    events::{EncodedEvent, EventAudience},
+    roles::AreaAccess,
+};
+use sea_orm::{EntityTrait, QueryOrder, QuerySelect};
 use std::convert::Infallible;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 
@@ -83,48 +88,68 @@ async fn stream(
     // ver. Sem usuário identificado, só o Núcleo.
     let access = AreaAccess::load(&ctx.db, user_id).await;
     let mut audience = EventAudience::new(user_id, access, AreaPolicies::from_context(&ctx));
-    let mut updates = bus.subscribe();
-    let snapshots = bus.current_snapshots();
-    let (sender, receiver) = mpsc::channel(32);
+    let mut updates = bus.subscribe_encoded();
+    let snapshots = bus.current_encoded_snapshots();
+    let (sender, receiver) = mpsc::channel::<(Arc<str>, bool)>(32);
     tokio::spawn(async move {
-        let connected = DomainEvent {
+        let connected = EncodedEvent::new(DomainEvent {
             event_type: "stream:connected".into(),
             payload: serde_json::json!({}),
             occurred_at: Utc::now().to_rfc3339(),
-        };
+        });
         // `retry` vai junto do primeiro quadro (§11.1): o `EventSource` do
         // navegador tem backoff próprio, e sem esta linha uma queda de rede
         // pode deixar o painel mudo por muito mais do que os 3 s combinados.
-        if sender.send((connected, true)).await.is_err() {
+        if sender
+            .send((Arc::clone(&connected.json), true))
+            .await
+            .is_err()
+        {
             return;
         }
         // Estado inicial dos recursos em tempo real (Docker de cada host):
         // chega logo após o `connected`, sem esperar o próximo ciclo.
         for snapshot in snapshots {
-            if !audience.admits(&snapshot) {
+            if !audience.admits(&snapshot.event) {
                 continue;
             }
-            if sender.send((snapshot, false)).await.is_err() {
+            if sender
+                .send((Arc::clone(&snapshot.json), false))
+                .await
+                .is_err()
+            {
                 return;
             }
         }
         loop {
-            match updates.recv().await {
-                Ok(event) => {
-                    if !audience.admits(&event) {
+            let received = tokio::select! {
+                () = sender.closed() => return,
+                res = updates.recv() => res,
+            };
+            match received {
+                Ok(encoded) => {
+                    if !audience.admits(&encoded.event) {
                         continue;
                     }
-                    if sender.send((event, false)).await.is_err() {
+                    if sender
+                        .send((Arc::clone(&encoded.json), false))
+                        .await
+                        .is_err()
+                    {
                         return;
                     }
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                    let resync = DomainEvent {
+                    let resync = EncodedEvent::new(DomainEvent {
                         event_type: "stream:resync".into(),
                         payload: serde_json::json!({ "skipped": skipped }),
                         occurred_at: Utc::now().to_rfc3339(),
-                    };
-                    if sender.send((resync, false)).await.is_err() {
+                    });
+                    if sender
+                        .send((Arc::clone(&resync.json), false))
+                        .await
+                        .is_err()
+                    {
                         return;
                     }
                 }
@@ -132,12 +157,11 @@ async fn stream(
             }
         }
     });
-    let stream = ReceiverStream::new(receiver).map(move |(event, first)| {
+    let stream = ReceiverStream::new(receiver).map(move |(json, first)| {
         // Os guardas vivem com o stream: o navegador fechou, eles caem junto.
         let _presence = &presence;
         let _interest = &interest;
-        let frame =
-            Event::default().data(serde_json::to_string(&event).unwrap_or_else(|_| "{}".into()));
+        let frame = Event::default().data(json.as_ref());
         Ok::<Event, Infallible>(if first {
             frame.retry(std::time::Duration::from_millis(3_000))
         } else {
@@ -188,12 +212,16 @@ async fn hourly_distribution(
         });
     }
 
-    // 2. Consulta eventos criados desde o início do período
+    // 2. Consulta apenas `created_at` e `severity` criados no período (sem transferir JSON `data`)
     let cutoff = now - Duration::hours(hours_count);
-    let mut rows = alert_events::Entity::find()
+    let rows: Vec<(sea_orm::prelude::DateTimeWithTimeZone, String)> = alert_events::Entity::find()
+        .select_only()
+        .column(crate::models::_entities::alert_events::Column::CreatedAt)
+        .column(crate::models::_entities::alert_events::Column::Severity)
         .filter(crate::models::_entities::alert_events::Column::CreatedAt.gte(cutoff))
         .filter(crate::models::_entities::alert_events::Column::CreatedAt.lte(now))
-        .stream(&ctx.db)
+        .into_tuple()
+        .all(&ctx.db)
         .await?;
 
     let mut totals = HourlyDistributionTotals {
@@ -204,26 +232,24 @@ async fn hourly_distribution(
     };
 
     // 3. Distribui os eventos nos baldes
-    while let Some(row) = futures::TryStreamExt::try_next(&mut rows).await? {
-        let row_time = row.created_at.with_timezone(&Utc);
+    for (created_at, severity) in rows {
+        let row_time = created_at.with_timezone(&Utc);
         let hours_ago = (now - row_time).num_hours();
 
         if hours_ago >= 0 && hours_ago < hours_count {
             let bin_idx = (hours_count - 1 - hours_ago) as usize;
             if let Some(bin) = bins.get_mut(bin_idx) {
-                match row.severity.to_lowercase().as_str() {
-                    "critical" | "error" => {
-                        bin.critical += 1;
-                        totals.critical += 1;
-                    }
-                    "warning" => {
-                        bin.warning += 1;
-                        totals.warning += 1;
-                    }
-                    _ => {
-                        bin.info += 1;
-                        totals.info += 1;
-                    }
+                if severity.eq_ignore_ascii_case("critical")
+                    || severity.eq_ignore_ascii_case("error")
+                {
+                    bin.critical += 1;
+                    totals.critical += 1;
+                } else if severity.eq_ignore_ascii_case("warning") {
+                    bin.warning += 1;
+                    totals.warning += 1;
+                } else {
+                    bin.info += 1;
+                    totals.info += 1;
                 }
                 totals.total += 1;
             }

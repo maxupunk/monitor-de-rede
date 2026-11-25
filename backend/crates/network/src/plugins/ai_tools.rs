@@ -121,13 +121,16 @@ async fn require_admin(ctx: &AppContext, args: &ToolArgs) -> AppResult<i64> {
     .await
 }
 
-async fn auto_accept_active(ctx: &AppContext, args: &ToolArgs, device_id: i64) -> bool {
+async fn auto_accept_active(
+    ctx: &AppContext,
+    args: &ToolArgs,
+    device_id: i64,
+    user_id: i64,
+) -> bool {
     match args.conversation() {
-        Some(key) => auto_accept::active(&ctx.db, key, device_id)
+        Some(key) => auto_accept::active_for_user(&ctx.db, key, device_id, user_id)
             .await
-            .ok()
-            .flatten()
-            .is_some(),
+            .unwrap_or(false),
         None => false,
     }
 }
@@ -447,6 +450,7 @@ impl AiToolHandler for RunPluginTests {
     }
 
     async fn execute(&self, ctx: &AppContext, args: &ToolArgs) -> AppResult<ToolOutput> {
+        require_admin(ctx, args).await?;
         let model = match plugin_arg(ctx, args).await {
             Ok(model) => model,
             Err(output) => return Ok(output),
@@ -837,30 +841,42 @@ impl AiToolHandler for RunPluginAction {
 
     async fn preview(&self, ctx: &AppContext, args: &ToolArgs) -> AppResult<String> {
         let action_id = args.text("action").unwrap_or_default();
-        let (plugin_name, action_line, active) = match plugin_arg(ctx, args).await {
+        let (plugin_name, action_line, active, masked_params) = match plugin_arg(ctx, args).await {
             Ok(model) => {
                 let package = service::package_of(&model)?;
-                let line = package.manifest.action(&action_id).map_or_else(
+                let action = package.manifest.action(&action_id);
+                let line = action.map_or_else(
                     || format!("{action_id} (ação inexistente)"),
                     |action| format!("{} — efeito: {}", action.title, effect_label(action.effect)),
                 );
+                let params_text = match (args.raw("params"), action) {
+                    (Some(raw), Some(action)) => {
+                        super::params::mask_secrets(action.params.as_ref(), raw).to_string()
+                    }
+                    (Some(_), None) => "(parâmetros ocultados — ação inexistente)".into(),
+                    (None, _) => "nenhum".into(),
+                };
                 (
                     model.name.clone(),
                     line,
                     model.status == service::status::ACTIVE,
+                    params_text,
                 )
             }
             Err(_) => (
                 args.text("plugin").unwrap_or_else(|| "?".into()),
                 action_id,
                 false,
+                if args.raw("params").is_some() {
+                    "(parâmetros ocultados — plugin não encontrado)".into()
+                } else {
+                    "nenhum".into()
+                },
             ),
         };
         Ok(format!(
-            "Executar \"{action_line}\" do plugin {plugin_name} em {}.\nParâmetros: {}{}\n{}",
+            "Executar \"{action_line}\" do plugin {plugin_name} em {}.\nParâmetros: {masked_params}{}\n{}",
             device_label(ctx, args).await,
-            args.raw("params")
-                .map_or_else(|| "nenhum".into(), ToString::to_string),
             if active {
                 String::new()
             } else {
@@ -894,7 +910,7 @@ async fn run_plugin(
     action: String,
     user_id: i64,
 ) -> AppResult<ToolOutput> {
-    let auto = auto_accept_active(ctx, args, device.id).await;
+    let auto = auto_accept_active(ctx, args, device.id, user_id).await;
     let approval = runs::approval_for(&plugin, Origin::Ai, auto);
     let spec = RunSpec {
         plugin,

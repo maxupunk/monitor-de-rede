@@ -12,7 +12,7 @@
 //! Os parsers são funções puras sobre o JSON: a parte HTTP é fina e os
 //! formatos ficam cobertos por teste sem rede.
 
-use std::{collections::HashMap, time::Duration};
+use std::{collections::HashMap, sync::OnceLock, time::Duration};
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -27,6 +27,13 @@ pub const OLLAMA_DEFAULT_NUM_CTX: u64 = 16_384;
 pub const MODELS_DEV_URL: &str = "https://models.dev/api.json";
 
 const FETCH_TIMEOUT: Duration = Duration::from_secs(8);
+
+/// Serializa mutações de manifesto (`POST /api/create`) no Ollama para que
+/// duas requisições simultâneas não sobrescrevam o mesmo modelo em corrida.
+fn ollama_create_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
 
 /// Uma janela aprendida e o quanto ela é certa.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,10 +71,17 @@ pub trait WindowLookup: Send + Sync {
 }
 
 fn client() -> Option<reqwest::Client> {
-    reqwest::Client::builder()
-        .timeout(FETCH_TIMEOUT)
-        .build()
-        .ok()
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    Some(
+        CLIENT
+            .get_or_init(|| {
+                reqwest::Client::builder()
+                    .timeout(FETCH_TIMEOUT)
+                    .build()
+                    .unwrap_or_default()
+            })
+            .clone(),
+    )
 }
 
 async fn get_json(url: &str, bearer: Option<&str>) -> Option<Value> {
@@ -355,6 +369,7 @@ impl WindowLookup for OllamaLookup {
         {
             let desired = max.map_or(forced, |limit| forced.min(limit));
             if num_ctx != Some(desired) {
+                let _create_guard = ollama_create_lock().lock().await;
                 let parameters = merged_ollama_parameters(show_json, desired);
                 if let Ok(res) = http
                     .post(format!("{}/api/create", self.base_url))

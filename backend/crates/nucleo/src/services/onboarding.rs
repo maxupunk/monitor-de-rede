@@ -85,9 +85,10 @@ pub async fn get_status(
         .and_then(|e| e.value.clone().or_else(|| e.detected.clone()))
     {
         Some(ip) => Some(ip),
-        None => netmonitor_core::network_tools::public_ip::detect_public_ip()
+        None if !stored.completed => netmonitor_core::network_tools::public_ip::detect_public_ip()
             .await
             .map(|ip| ip.to_string()),
+        None => None,
     };
 
     // Só cobra site e rede de quem vai gerenciar rede (ADR 017): quem escolheu
@@ -169,13 +170,23 @@ pub async fn apply_intent(
         ));
     }
     let service = AreaService::new(db, policies);
-    let mut changes = Vec::new();
-    let mut snapshot = service.snapshot().await?;
-    for (area, enabled) in [
+    let desired = [
         (Area::Network, intent.network),
         (Area::Servers, intent.servers),
         (Area::Vpn, intent.vpn),
-    ] {
+    ];
+    let mut snapshot = service.snapshot().await?;
+    // Pré-valida todos os desligamentos antes de gravar qualquer mudança,
+    // evitando estado parcialmente aplicado quando uma área tem bloqueio.
+    for (area, enabled) in desired {
+        if snapshot.is_enabled(area) && !enabled {
+            if let Some(blocker) = service.impact(area).await?.blocker {
+                return Err(AppError::conflict(blocker.message));
+            }
+        }
+    }
+    let mut changes = Vec::new();
+    for (area, enabled) in desired {
         let before = snapshot.is_enabled(area);
         if before != enabled {
             snapshot = service.set(area, enabled).await?;

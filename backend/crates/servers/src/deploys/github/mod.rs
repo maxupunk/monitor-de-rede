@@ -15,7 +15,7 @@ pub mod compose;
 pub mod discovery;
 pub mod publish;
 
-use std::time::Duration;
+use std::{sync::OnceLock, time::Duration};
 
 use reqwest::{header, Method, RequestBuilder, Response, StatusCode};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -30,6 +30,19 @@ const TIMEOUT: Duration = Duration::from_secs(15);
 const USER_AGENT: &str = "netmonitor-deploy";
 /// Itens por página nas listagens (o máximo do GitHub).
 pub const PER_PAGE: usize = 100;
+
+fn shared_http() -> Result<reqwest::Client, GitHubError> {
+    static HTTP: OnceLock<Result<reqwest::Client, String>> = OnceLock::new();
+    HTTP.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(TIMEOUT)
+            .user_agent(USER_AGENT)
+            .build()
+            .map_err(|error| error.to_string())
+    })
+    .clone()
+    .map_err(GitHubError::Unreachable)
+}
 
 /// O que deu errado ao falar com o GitHub, já em palavras de quem opera.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -87,11 +100,7 @@ impl Client {
     ///
     /// `Unreachable` quando o cliente HTTP não pode ser montado.
     pub fn with_base(base: &str, token: Option<String>) -> Result<Self, GitHubError> {
-        let http = reqwest::Client::builder()
-            .timeout(TIMEOUT)
-            .user_agent(USER_AGENT)
-            .build()
-            .map_err(|error| GitHubError::Unreachable(error.to_string()))?;
+        let http = shared_http()?;
         Ok(Self {
             http,
             base: base.trim_end_matches('/').to_string(),

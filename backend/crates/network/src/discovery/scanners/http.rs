@@ -8,7 +8,12 @@
 //! Só o próprio IP é visitado: redirecionamento para outro host é anotado,
 //! nunca seguido. O cliente é um só por varredura (ver [`client`]).
 
-use std::{collections::BTreeMap, net::IpAddr, sync::LazyLock, time::Duration};
+use std::{
+    collections::BTreeMap,
+    net::IpAddr,
+    sync::{LazyLock, OnceLock},
+    time::Duration,
+};
 
 use futures::{stream, StreamExt};
 use regex::Regex;
@@ -46,14 +51,19 @@ static SCRIPT_REDIRECT: LazyLock<Regex> = LazyLock::new(|| {
 ///
 /// Falha só se o TLS do processo não inicializa.
 pub fn client() -> AppResult<Client> {
-    Client::builder()
+    static SHARED: OnceLock<Client> = OnceLock::new();
+    if let Some(client) = SHARED.get() {
+        return Ok(client.clone());
+    }
+    let built = Client::builder()
         .danger_accept_invalid_certs(true)
         .redirect(Policy::none())
         .connect_timeout(Duration::from_millis(1_200))
         .timeout(Duration::from_millis(2_500))
         .user_agent("NetMonitor-Discovery/1.0")
         .build()
-        .map_err(|error| AppError::Internal(anyhow::Error::new(error)))
+        .map_err(|error| AppError::Internal(anyhow::Error::new(error)))?;
+    Ok(SHARED.get_or_init(|| built).clone())
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]

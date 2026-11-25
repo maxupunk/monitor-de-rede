@@ -1,10 +1,10 @@
 //! DTO de apresentação compartilhado pela lista global e pela aba de dispositivos.
 
-use std::collections::{hash_map::Entry, HashMap};
+use std::collections::{HashMap, HashSet};
 
 use sea_orm::{
-    ColumnTrait, DatabaseBackend, DatabaseConnection, EntityTrait, FromQueryResult, QueryFilter,
-    QueryOrder, QuerySelect, Statement, Value,
+    ColumnTrait, ConnectionTrait, DatabaseBackend, DatabaseConnection, EntityTrait,
+    FromQueryResult, QueryFilter, QueryOrder, QuerySelect, Statement, Value,
 };
 use serde::Serialize;
 
@@ -171,38 +171,67 @@ pub async fn present_monitors(
     monitor_rows: Vec<monitors::Model>,
     recent_limit: u64,
 ) -> AppResult<Vec<MonitorPresentation>> {
-    let mut device_cache: HashMap<i64, NamedResource> = HashMap::new();
-    let mut probe_cache: HashMap<i64, NamedResource> = HashMap::new();
+    if monitor_rows.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Carrega dispositivos e probes em lote (evita N+1 por monitor).
+    let device_ids: Vec<i64> = {
+        let mut seen = HashSet::new();
+        monitor_rows
+            .iter()
+            .filter_map(|m| m.device_id)
+            .filter(|id| seen.insert(*id))
+            .collect()
+    };
+    let mut device_cache: HashMap<i64, NamedResource> = HashMap::with_capacity(device_ids.len());
+    for chunk in device_ids.chunks(400) {
+        let rows: Vec<(i64, String)> = devices::Entity::find()
+            .select_only()
+            .column(devices::Column::Id)
+            .column(devices::Column::Name)
+            .filter(devices::Column::Id.is_in(chunk.to_vec()))
+            .into_tuple()
+            .all(db)
+            .await?;
+        for (id, name) in rows {
+            device_cache.insert(id, NamedResource { id, name });
+        }
+    }
+
+    let probe_ids: Vec<i64> = {
+        let mut seen = HashSet::new();
+        monitor_rows
+            .iter()
+            .filter_map(|m| m.probe_id)
+            .filter(|id| seen.insert(*id))
+            .collect()
+    };
+    let mut probe_cache: HashMap<i64, NamedResource> = HashMap::with_capacity(probe_ids.len());
+    for chunk in probe_ids.chunks(400) {
+        let rows: Vec<(i64, String)> = probes::Entity::find()
+            .select_only()
+            .column(probes::Column::Id)
+            .column(probes::Column::Name)
+            .filter(probes::Column::Id.is_in(chunk.to_vec()))
+            .into_tuple()
+            .all(db)
+            .await?;
+        for (id, name) in rows {
+            probe_cache.insert(id, NamedResource { id, name });
+        }
+    }
+
     let mut recent_results_by_monitor =
         fetch_recent_results(db, &monitor_rows, recent_limit).await?;
     let mut output = Vec::with_capacity(monitor_rows.len());
     for monitor in monitor_rows {
-        let device = if let Some(id) = monitor.device_id {
-            if let Entry::Vacant(entry) = device_cache.entry(id) {
-                if let Some(model) = devices::Entity::find_by_id(id).one(db).await? {
-                    entry.insert(NamedResource {
-                        id,
-                        name: model.name,
-                    });
-                }
-            }
-            device_cache.get(&id).cloned()
-        } else {
-            None
-        };
-        let probe = if let Some(id) = monitor.probe_id {
-            if let Entry::Vacant(entry) = probe_cache.entry(id) {
-                if let Some(model) = probes::Entity::find_by_id(id).one(db).await? {
-                    entry.insert(NamedResource {
-                        id,
-                        name: model.name,
-                    });
-                }
-            }
-            probe_cache.get(&id).cloned()
-        } else {
-            None
-        };
+        let device = monitor
+            .device_id
+            .and_then(|id| device_cache.get(&id).cloned());
+        let probe = monitor
+            .probe_id
+            .and_then(|id| probe_cache.get(&id).cloned());
         let recent_results = recent_results_by_monitor
             .remove(&monitor.id)
             .unwrap_or_default();
@@ -246,53 +275,60 @@ pub async fn present_monitors(
 }
 
 /// Busca os últimos resultados com uma window function, preservando o limite
-/// por monitor em uma única consulta nos dois dialetos suportados.
+/// por monitor em lotes seguros para o teto de parâmetros do SQLite.
 async fn fetch_recent_results(
     db: &DatabaseConnection,
     monitors: &[monitors::Model],
     recent_limit: u64,
 ) -> AppResult<HashMap<i64, Vec<MonitorResultPresentation>>> {
-    if monitors.is_empty() || recent_limit == 0 {
-        return Ok(HashMap::new());
-    }
-
     let monitor_ids: Vec<i64> = monitors.iter().map(|monitor| monitor.id).collect();
-    let backend = db.get_database_backend();
-    let marker = |position: usize| match backend {
-        DatabaseBackend::Postgres => format!("${position}"),
-        _ => "?".to_string(),
-    };
-    let monitor_markers = (1..=monitor_ids.len())
-        .map(marker)
-        .collect::<Vec<_>>()
-        .join(", ");
-    let limit_marker = marker(monitor_ids.len() + 1);
-    let sql = format!(
-        "SELECT id, monitor_id, probe_id, status, started_at, finished_at, duration_ms, \
-         latency_ms, message, data, created_at FROM (\
-           SELECT mr.id, mr.monitor_id, mr.probe_id, mr.status, mr.started_at, mr.finished_at, \
-                  mr.duration_ms, mr.latency_ms, mr.message, mr.data, mr.created_at, \
-                  ROW_NUMBER() OVER (PARTITION BY mr.monitor_id ORDER BY mr.started_at DESC, mr.id DESC) AS result_rank \
-           FROM monitor_results mr WHERE mr.monitor_id IN ({monitor_markers})\
-         ) ranked WHERE result_rank <= {limit_marker} \
-         ORDER BY monitor_id ASC, started_at ASC, id ASC"
-    );
-    let mut values: Vec<Value> = monitor_ids.into_iter().map(Into::into).collect();
-    values.push((recent_limit.min(i64::MAX as u64) as i64).into());
-    let rows = monitor_results::Model::find_by_statement(Statement::from_sql_and_values(
-        backend, sql, values,
-    ))
-    .all(db)
-    .await?;
-
     let mut grouped: HashMap<i64, Vec<MonitorResultPresentation>> = HashMap::new();
-    for row in rows {
+    for row in fetch_recent_result_rows(db, &monitor_ids, recent_limit).await? {
         grouped
             .entry(row.monitor_id)
             .or_default()
             .push(MonitorResultPresentation::from(row));
     }
     Ok(grouped)
+}
+
+/// Os `limit` resultados mais recentes de cada monitor, por `ROW_NUMBER()`
+/// (SQLite e PostgreSQL), sem ler o histórico inteiro. Ordem: monitor e
+/// `started_at` crescentes.
+pub(crate) async fn fetch_recent_result_rows<C>(
+    db: &C,
+    monitor_ids: &[i64],
+    recent_limit: u64,
+) -> AppResult<Vec<monitor_results::Model>>
+where
+    C: ConnectionTrait,
+{
+    if monitor_ids.is_empty() || recent_limit == 0 {
+        return Ok(Vec::new());
+    }
+
+    let backend = db.get_database_backend();
+    let marker = |position: usize| match backend {
+        DatabaseBackend::Postgres => format!("${position}"),
+        _ => "?".to_string(),
+    };
+    let mut all_rows = Vec::new();
+    for chunk in monitor_ids.chunks(400) {
+        let monitor_markers = (1..=chunk.len()).map(marker).collect::<Vec<_>>().join(", ");
+        let limit_marker = marker(chunk.len() + 1);
+        let sql = format!(
+            "SELECT id, monitor_id, probe_id, status, started_at, finished_at, duration_ms,              latency_ms, message, data, created_at FROM (               SELECT mr.id, mr.monitor_id, mr.probe_id, mr.status, mr.started_at, mr.finished_at,                       mr.duration_ms, mr.latency_ms, mr.message, mr.data, mr.created_at,                       ROW_NUMBER() OVER (PARTITION BY mr.monitor_id ORDER BY mr.started_at DESC, mr.id DESC) AS result_rank                FROM monitor_results mr WHERE mr.monitor_id IN ({monitor_markers})             ) ranked WHERE result_rank <= {limit_marker}              ORDER BY monitor_id ASC, started_at ASC, id ASC"
+        );
+        let mut values: Vec<Value> = chunk.iter().copied().map(Into::into).collect();
+        values.push((recent_limit.min(i64::MAX as u64) as i64).into());
+        let rows = monitor_results::Model::find_by_statement(Statement::from_sql_and_values(
+            backend, sql, values,
+        ))
+        .all(db)
+        .await?;
+        all_rows.extend(rows);
+    }
+    Ok(all_rows)
 }
 
 async fn fetch_gauge_metrics(

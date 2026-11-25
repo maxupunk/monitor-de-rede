@@ -12,9 +12,8 @@ use std::collections::HashSet;
 use async_trait::async_trait;
 use netmonitor_core::areas::{Area, AreaSet};
 
-use sea_orm::{ConnectionTrait, EntityTrait, QueryOrder};
+use sea_orm::{ConnectionTrait, EntityTrait, QueryOrder, QuerySelect};
 
-use super::harness::tools::device_matches;
 use crate::dtos::{AiMention, AiMentionKind};
 use netmonitor_core::{
     models::{devices, monitors},
@@ -111,26 +110,38 @@ fn contains(haystack: &str, term: &str) -> bool {
     term.is_empty() || fold(haystack).contains(term)
 }
 
-fn device_mention(device: &devices::Model) -> AiMention {
+type DeviceRow = (i64, String, String, Option<String>, Option<String>, String);
+type MonitorRow = (i64, String, String, String);
+
+fn device_row_matches(row: &DeviceRow, term: &str) -> bool {
+    netmonitor_core::ai::lookup::device_fields_match(
+        &row.1,
+        row.3.as_deref(),
+        row.4.as_deref(),
+        term,
+    )
+}
+
+fn device_mention(row: &DeviceRow) -> AiMention {
     AiMention {
         kind: AiMentionKind::Device,
-        id: device.id.to_string(),
-        label: device.name.clone(),
+        id: row.0.to_string(),
+        label: row.1.clone(),
         detail: Some(format!(
             "{} · {} · {}",
-            device.r#type,
-            device.ip_address.as_deref().unwrap_or("sem IP"),
-            device.status
+            row.2,
+            row.3.as_deref().unwrap_or("sem IP"),
+            row.5
         )),
     }
 }
 
-fn monitor_mention(monitor: &monitors::Model) -> AiMention {
+fn monitor_mention(row: &MonitorRow) -> AiMention {
     AiMention {
         kind: AiMentionKind::Monitor,
-        id: monitor.id.to_string(),
-        label: monitor.name.clone(),
-        detail: Some(format!("{} · {}", monitor.r#type, monitor.status)),
+        id: row.0.to_string(),
+        label: row.1.clone(),
+        detail: Some(format!("{} · {}", row.2, row.3)),
     }
 }
 
@@ -170,6 +181,66 @@ async fn container_mentions(docker: Option<&dyn ContainerDirectory>, term: &str)
         .collect()
 }
 
+/// Sugestões para o que o usuário digitou depois do `@`, usando o conjunto de
+/// áreas já carregado pelo chamador (evita consulta duplicada e evita consultar
+/// o agente Docker quando `Area::Servers` está desligada).
+///
+/// # Errors
+///
+/// Falha do banco.
+pub async fn search_with_areas<C: ConnectionTrait>(
+    db: &C,
+    docker: Option<&dyn ContainerDirectory>,
+    query: &str,
+    areas: AreaSet,
+) -> AppResult<Vec<AiMention>> {
+    let term = fold(query);
+    let device_rows: Vec<DeviceRow> = devices::Entity::find()
+        .select_only()
+        .columns([
+            devices::Column::Id,
+            devices::Column::Name,
+            devices::Column::Type,
+            devices::Column::IpAddress,
+            devices::Column::Vendor,
+            devices::Column::Status,
+        ])
+        .order_by_asc(devices::Column::Name)
+        .into_tuple()
+        .all(db)
+        .await?;
+    let mut mentions: Vec<AiMention> = device_rows
+        .iter()
+        .filter(|row| device_row_matches(row, &term))
+        .take(PER_KIND)
+        .map(device_mention)
+        .collect();
+    let monitor_rows: Vec<MonitorRow> = monitors::Entity::find()
+        .select_only()
+        .columns([
+            monitors::Column::Id,
+            monitors::Column::Name,
+            monitors::Column::Type,
+            monitors::Column::Status,
+        ])
+        .order_by_asc(monitors::Column::Name)
+        .into_tuple()
+        .all(db)
+        .await?;
+    mentions.extend(
+        monitor_rows
+            .iter()
+            .filter(|row| contains(&row.1, &term))
+            .take(PER_KIND)
+            .map(monitor_mention),
+    );
+    mentions.extend(source_mentions(&term, areas));
+    if areas.contains(Area::Servers) {
+        mentions.extend(container_mentions(docker, &term).await);
+    }
+    Ok(mentions)
+}
+
 /// Sugestões para o que o usuário digitou depois do `@`: dispositivos,
 /// monitores, fontes e containers. Termo vazio lista os primeiros de cada.
 ///
@@ -181,34 +252,8 @@ pub async fn search<C: ConnectionTrait>(
     docker: Option<&dyn ContainerDirectory>,
     query: &str,
 ) -> AppResult<Vec<AiMention>> {
-    let term = fold(query);
-    let mut mentions: Vec<AiMention> = devices::Entity::find()
-        .order_by_asc(devices::Column::Name)
-        .all(db)
-        .await?
-        .iter()
-        .filter(|device| device_matches(device, &term))
-        .take(PER_KIND)
-        .map(device_mention)
-        .collect();
-    mentions.extend(
-        monitors::Entity::find()
-            .order_by_asc(monitors::Column::Name)
-            .all(db)
-            .await?
-            .iter()
-            .filter(|monitor| contains(&monitor.name, &term))
-            .take(PER_KIND)
-            .map(monitor_mention),
-    );
-    // Lido aqui, e não passado por quem chama: quem pede sugestões é sempre a
-    // tela, e a área desligada (ADR 017) tira containers e a fonte Docker.
     let areas = AreaSet::from_enabled(&netmonitor_core::areas::load(db).await?);
-    mentions.extend(source_mentions(&term, areas));
-    if areas.contains(Area::Servers) {
-        mentions.extend(container_mentions(docker, &term).await);
-    }
-    Ok(mentions)
+    search_with_areas(db, docker, query, areas).await
 }
 
 /// O que vale das marcações recebidas: sem repetição, sem rótulo vazio, sem

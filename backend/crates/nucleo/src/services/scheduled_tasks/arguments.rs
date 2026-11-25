@@ -76,10 +76,10 @@ fn integer_like(value: &Value) -> bool {
 }
 
 fn number_like(value: &Value) -> bool {
-    value.is_number()
+    value.as_f64().is_some_and(f64::is_finite)
         || value
             .as_str()
-            .is_some_and(|text| text.trim().parse::<f64>().is_ok())
+            .is_some_and(|text| text.trim().parse::<f64>().is_ok_and(f64::is_finite))
 }
 
 fn check_value(spec: &Value, value: &Value) -> Option<String> {

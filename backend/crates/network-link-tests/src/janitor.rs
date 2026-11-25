@@ -8,17 +8,19 @@
 //! 2. Todo teste que constava como em curso vira `failed` com
 //!    [`INTERRUPTED`]; pernas e etapas por terminar também.
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 
 use super::{
     env::LinkTestEnv,
+    events, guard,
     model::{as_db, from_db, LinkTestStage, LinkTestStatus, LinkTestStepStatus},
     repository,
     runner::PendingCleanup,
+    schedules,
 };
-use netmonitor_core::shared::errors::AppResult;
+use netmonitor_core::shared::{errors::AppResult, transaction::begin_write};
 use netmonitor_network::plugins::{
     invoke::{RunStatus, ServiceRunRequest},
     runs::Origin,
@@ -72,8 +74,25 @@ async fn stop_one(env: &LinkTestEnv, cleanup: &PendingCleanup, test_id: i64) -> 
 ///
 /// Erro do banco.
 pub async fn recover(env: &LinkTestEnv) -> AppResult<RecoverStats> {
+    recover_before(env, Utc::now()).await
+}
+
+/// Desfaz apenas pendências e testes ativos anteriores a `boot_time` que não
+/// estejam rodando neste processo — impede corrida quando `recover` roda em
+/// segundo plano enquanto a API já aceita novos testes.
+///
+/// # Errors
+///
+/// Erro do banco.
+pub async fn recover_before(
+    env: &LinkTestEnv,
+    boot_time: DateTime<Utc>,
+) -> AppResult<RecoverStats> {
     let mut stats = RecoverStats::default();
     for mut leg in repository::pending_cleanups(&env.db).await? {
+        if guard::is_running(leg.test_id) || leg.created_at.to_utc() > boot_time {
+            continue;
+        }
         let Some(cleanup) = leg
             .cleanup
             .clone()
@@ -94,7 +113,11 @@ pub async fn recover(env: &LinkTestEnv) -> AppResult<RecoverStats> {
 
     let now = Utc::now();
     for mut test in repository::active(&env.db).await? {
-        for mut leg in repository::legs_of(&env.db, &[test.id]).await? {
+        if guard::is_running(test.id) || test.created_at.to_utc() > boot_time {
+            continue;
+        }
+        let txn = begin_write(&env.db).await?;
+        for mut leg in repository::legs_of(&txn, &[test.id]).await? {
             let status =
                 from_db::<LinkTestStepStatus>(&leg.status).unwrap_or(LinkTestStepStatus::Pending);
             if status.is_final() {
@@ -113,12 +136,24 @@ pub async fn recover(env: &LinkTestEnv) -> AppResult<RecoverStats> {
             leg.status = as_db(&LinkTestStepStatus::Failed);
             leg.error = Some(INTERRUPTED.to_owned());
             leg.finished_at = Some(now.into());
-            repository::save_leg(&env.db, &leg).await?;
+            repository::save_leg(&txn, &leg).await?;
         }
         test.status = as_db(&LinkTestStatus::Failed);
         test.error = Some(INTERRUPTED.to_owned());
         test.finished_at = Some(now.into());
-        repository::save_test(&env.db, &test).await?;
+        repository::save_test(&txn, &test).await?;
+        txn.commit().await?;
+
+        if let Ok(detail) = repository::detail(&env.db, test.id).await {
+            events::publish_test(env.bus.as_ref(), &detail);
+        }
+        if let Some(schedule_id) = test.schedule_id {
+            if let Err(error) =
+                schedules::record_result(env, schedule_id, test.id, LinkTestStatus::Failed).await
+            {
+                tracing::warn!(%error, schedule_id, test_id = test.id, "falha ao atualizar agendamento interrompido");
+            }
+        }
         stats.interrupted += 1;
     }
     if stats != RecoverStats::default() {

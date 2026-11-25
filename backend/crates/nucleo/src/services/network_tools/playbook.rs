@@ -4,11 +4,19 @@
 //! emitindo eventos de progresso passo a passo e gerando uma síntese diagnóstica
 //! conclusiva com recomendações acionáveis.
 
-use std::{net::IpAddr, time::Duration};
+use std::{
+    net::{IpAddr, Ipv4Addr},
+    time::Duration,
+};
 
+use futures::StreamExt;
 use serde_json::json;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
+
+const CLOUDFLARE_DNS_IP: IpAddr = IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1));
+/// Acima disso a resolução DNS vira alerta no diagnóstico de internet.
+const DNS_WARNING_THRESHOLD_MS: f64 = 300.0;
 
 use super::{
     dns::latency::{measure_dns_lookup, DnsLookupOptions, DnsProtocol},
@@ -46,12 +54,10 @@ pub async fn run_internet_health_playbook(
         );
     } else if dns_step.status == "warning" && overall_status != "failed" {
         overall_status = "warning".into();
-        recommendations.push("O tempo de resposta do DNS está elevado (>200ms). Considere configurar DNS com menor latência.".into());
+        recommendations.push(format!("O tempo de resposta do DNS está elevado (>{DNS_WARNING_THRESHOLD_MS:.0}ms). Considere configurar DNS com menor latência."));
     }
     steps.push(dns_step.clone());
-    let _ = sender.send(PlaybookEvent::Step(dns_step)).await;
-
-    if cancel.is_cancelled() {
+    if sender.send(PlaybookEvent::Step(dns_step)).await.is_err() || cancel.is_cancelled() {
         return build_cancelled_summary("internet_health", steps);
     }
 
@@ -69,9 +75,7 @@ pub async fn run_internet_health_playbook(
             .push("Latência externa elevada ou perda intermitente de pacotes detectada.".into());
     }
     steps.push(ping_step.clone());
-    let _ = sender.send(PlaybookEvent::Step(ping_step)).await;
-
-    if cancel.is_cancelled() {
+    if sender.send(PlaybookEvent::Step(ping_step)).await.is_err() || cancel.is_cancelled() {
         return build_cancelled_summary("internet_health", steps);
     }
 
@@ -83,9 +87,7 @@ pub async fn run_internet_health_playbook(
             .push("Possível instabilidade em saltos intermediários da rota da operadora.".into());
     }
     steps.push(trace_step.clone());
-    let _ = sender.send(PlaybookEvent::Step(trace_step)).await;
-
-    if cancel.is_cancelled() {
+    if sender.send(PlaybookEvent::Step(trace_step)).await.is_err() || cancel.is_cancelled() {
         return build_cancelled_summary("internet_health", steps);
     }
 
@@ -97,7 +99,9 @@ pub async fn run_internet_health_playbook(
             .push("A taxa de transferência medida está abaixo do perfil ótimo da conexão.".into());
     }
     steps.push(speed_step.clone());
-    let _ = sender.send(PlaybookEvent::Step(speed_step)).await;
+    if sender.send(PlaybookEvent::Step(speed_step)).await.is_err() || cancel.is_cancelled() {
+        return build_cancelled_summary("internet_health", steps);
+    }
 
     // Diagnóstico consolidado
     let diagnosis = match overall_status.as_str() {
@@ -147,9 +151,7 @@ pub async fn run_device_reachability_playbook(
     let ping_step = run_device_icmp_check(target_ip, &cancel).await;
     let icmp_ok = ping_step.status == "success";
     steps.push(ping_step.clone());
-    let _ = sender.send(PlaybookEvent::Step(ping_step)).await;
-
-    if cancel.is_cancelled() {
+    if sender.send(PlaybookEvent::Step(ping_step)).await.is_err() || cancel.is_cancelled() {
         return build_cancelled_summary("device_reachability", steps);
     }
 
@@ -157,16 +159,16 @@ pub async fn run_device_reachability_playbook(
     let tcp_step = run_device_tcp_check(target_ip, &cancel).await;
     let tcp_proves_alive = tcp_step.status == "success";
     steps.push(tcp_step.clone());
-    let _ = sender.send(PlaybookEvent::Step(tcp_step)).await;
-
-    if cancel.is_cancelled() {
+    if sender.send(PlaybookEvent::Step(tcp_step)).await.is_err() || cancel.is_cancelled() {
         return build_cancelled_summary("device_reachability", steps);
     }
 
     // Passo 3: Rota até o dispositivo (Traceroute)
     let trace_step = run_device_traceroute_check(target_ip, &cancel).await;
     steps.push(trace_step.clone());
-    let _ = sender.send(PlaybookEvent::Step(trace_step)).await;
+    if sender.send(PlaybookEvent::Step(trace_step)).await.is_err() || cancel.is_cancelled() {
+        return build_cancelled_summary("device_reachability", steps);
+    }
 
     // Síntese diagnóstica baseada em evidências
     let diagnosis = if icmp_ok {
@@ -222,7 +224,7 @@ async fn run_dns_check(cancel: &CancellationToken) -> PlaybookStepResult {
 
     if sample.success {
         let latency = sample.lookup_time_ms.unwrap_or(0.0);
-        let status = if latency > 300.0 {
+        let status = if latency > DNS_WARNING_THRESHOLD_MS {
             "warning"
         } else {
             "success"
@@ -258,7 +260,7 @@ async fn run_dns_check(cancel: &CancellationToken) -> PlaybookStepResult {
 }
 
 async fn run_external_ping_check(cancel: &CancellationToken) -> PlaybookStepResult {
-    let target: IpAddr = "1.1.1.1".parse().unwrap();
+    let target = CLOUDFLARE_DNS_IP;
     let options = IcmpProbeOptions::new(3, Duration::from_millis(2_000));
     let res = probe_icmp(target, &options, cancel).await;
 
@@ -299,7 +301,7 @@ async fn run_external_ping_check(cancel: &CancellationToken) -> PlaybookStepResu
 }
 
 async fn run_internet_traceroute_check(cancel: &CancellationToken) -> PlaybookStepResult {
-    let target: IpAddr = "1.1.1.1".parse().unwrap();
+    let target = CLOUDFLARE_DNS_IP;
     let (tx, mut rx) = mpsc::channel(32);
     let options = TracerouteOptions {
         max_hops: 12,
@@ -424,18 +426,31 @@ async fn run_device_icmp_check(target: IpAddr, cancel: &CancellationToken) -> Pl
 async fn run_device_tcp_check(target: IpAddr, cancel: &CancellationToken) -> PlaybookStepResult {
     let common_ports: &[u16] = &[80, 443, 22, 53, 8080, 3389, 445];
     let timeout = std::time::Duration::from_millis(800);
-    let mut open_ports = Vec::new();
-
-    for &port in common_ports {
-        if cancel.is_cancelled() {
-            return cancelled_step(2, "Sonda TCP de Portas");
-        }
-        let addr = std::net::SocketAddr::new(target, port);
-        let obs = probe_tcp(addr, timeout).await;
-        if obs.state == TcpProbeState::Open {
-            open_ports.push(port);
-        }
+    if cancel.is_cancelled() {
+        return cancelled_step(2, "Sonda TCP de Portas");
     }
+
+    let probes = futures::stream::iter(common_ports.iter().copied())
+        .map(|port| async move {
+            let addr = std::net::SocketAddr::new(target, port);
+            let obs = probe_tcp(addr, timeout).await;
+            (obs.state == TcpProbeState::Open).then_some(port)
+        })
+        .buffer_unordered(16);
+
+    let open_ports: Option<Vec<u16>> = tokio::select! {
+        biased;
+        _ = cancel.cancelled() => None,
+        results = probes.collect::<Vec<_>>() => {
+            let mut ports: Vec<u16> = results.into_iter().flatten().collect();
+            ports.sort_unstable();
+            Some(ports)
+        }
+    };
+
+    let Some(open_ports) = open_ports else {
+        return cancelled_step(2, "Sonda TCP de Portas");
+    };
 
     if !open_ports.is_empty() {
         PlaybookStepResult {

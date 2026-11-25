@@ -21,6 +21,8 @@
 //! InnoDB saem de um instante só, sem travar a escrita (é o `--single-transaction`
 //! do `mysqldump`). MyISAM não tem transação — é o mesmo limite do `mysqldump`.
 
+use std::collections::HashMap;
+
 use async_trait::async_trait;
 use futures::TryStreamExt;
 use sqlx::{
@@ -165,6 +167,7 @@ impl Driver for MysqlDriver {
             out,
             progress,
             stats: DumpStats::default(),
+            columns_by_table: HashMap::new(),
         };
         dumper.run().await?;
         let stats = dumper.stats;
@@ -248,11 +251,18 @@ impl RestoreSession for MysqlSession {
     }
 }
 
+struct ColumnMeta {
+    name: String,
+    data_type: String,
+    extra: String,
+}
+
 struct Dumper<'a> {
     conn: &'a mut MySqlConnection,
     out: &'a mut DumpWriter,
     progress: &'a dyn Progress,
     stats: DumpStats,
+    columns_by_table: HashMap<String, Vec<ColumnMeta>>,
 }
 
 impl Dumper<'_> {
@@ -300,6 +310,7 @@ impl Dumper<'_> {
             self.stats.tables += 1;
         }
 
+        self.load_all_columns().await?;
         self.out.section("Dados").await?;
         for table in &tables {
             self.table_data(table).await?;
@@ -327,26 +338,54 @@ impl Dumper<'_> {
         .map_err(|error| DatabaseError::query(&error))
     }
 
-    async fn table_data(&mut self, table: &str) -> Result<(), DatabaseError> {
-        let columns = sqlx::query(
-            "SELECT COLUMN_NAME, DATA_TYPE, EXTRA FROM information_schema.COLUMNS \
-             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION",
+    async fn load_all_columns(&mut self) -> Result<(), DatabaseError> {
+        let rows = sqlx::query(
+            "SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, EXTRA FROM information_schema.COLUMNS \
+             WHERE TABLE_SCHEMA = DATABASE() ORDER BY TABLE_NAME, ORDINAL_POSITION",
         )
-        .bind(table)
         .fetch_all(&mut *self.conn)
         .await
         .map_err(|error| DatabaseError::query(&error))?;
+        self.columns_by_table.clear();
+        let mut spatial_columns = 0_usize;
+        for row in &rows {
+            let table = required_text(row, 0)?;
+            let name = required_text(row, 1)?;
+            let data_type = required_text(row, 2)?;
+            let extra = text(row, 3)?.unwrap_or_default();
+            if is_spatial_type(&data_type) {
+                spatial_columns += 1;
+            }
+            self.columns_by_table
+                .entry(table)
+                .or_default()
+                .push(ColumnMeta {
+                    name,
+                    data_type,
+                    extra,
+                });
+        }
+        if spatial_columns > 0 {
+            self.stats.warnings.push(format!(
+                "{spatial_columns} coluna(s) espacial(is) (GEOMETRY/POINT): verifique a restauração em MySQL 8+"
+            ));
+        }
+        Ok(())
+    }
+
+    async fn table_data(&mut self, table: &str) -> Result<(), DatabaseError> {
+        let Some(columns) = self.columns_by_table.get(table) else {
+            return Ok(());
+        };
         let mut names = Vec::new();
         let mut values = Vec::new();
-        for row in &columns {
-            let extra = text(row, 2)?.unwrap_or_default();
-            if is_generated(&extra) {
+        for col in columns {
+            if is_generated(&col.extra) {
                 continue;
             }
-            let name = required_text(row, 0)?;
-            let data_type = required_text(row, 1)?;
-            values.push(value_expression(&quote_ident(FAMILY, &name), &data_type));
-            names.push(quote_ident(FAMILY, &name));
+            let quoted = quote_ident(FAMILY, &col.name);
+            values.push(value_expression(&quoted, &col.data_type));
+            names.push(quoted);
         }
         if names.is_empty() {
             return Ok(());
@@ -365,7 +404,11 @@ impl Dumper<'_> {
             .await
             .map_err(|error| DatabaseError::query(&error))?
         {
-            let tuple = required_text(&row, 0)?;
+            let tuple = text(&row, 0)?.ok_or_else(|| {
+                DatabaseError::Query(format!(
+                    "tabela {table}: linha excedeu o limite max_allowed_packet do servidor no CONCAT_WS"
+                ))
+            })?;
             if batch.is_empty() {
                 batch.push_str(&insert);
                 batch.push('\n');
@@ -556,15 +599,54 @@ pub fn value_expression(column: &str, data_type: &str) -> String {
     }
 }
 
-/// Tira o `DEFINER=...` de um `CREATE`.
+fn is_spatial_type(data_type: &str) -> bool {
+    matches!(
+        data_type.to_ascii_lowercase().as_str(),
+        "geometry"
+            | "point"
+            | "linestring"
+            | "polygon"
+            | "multipoint"
+            | "multilinestring"
+            | "multipolygon"
+            | "geometrycollection"
+            | "geomcollection"
+    )
+}
+
+/// Tira o `DEFINER=...` (ou `DEFINER = ...`) do cabeçalho de um `CREATE`.
 #[must_use]
 pub fn strip_definer(sql: &str) -> String {
     let upper = sql.to_ascii_uppercase();
-    let Some(start) = upper.find("DEFINER=") else {
+    // Limita a busca ao cabeçalho `CREATE ...` antes do tipo de objeto para
+    // nunca mexer em texto literal dentro do corpo da view/routine/trigger.
+    let header_end = [
+        " VIEW ",
+        " PROCEDURE ",
+        " FUNCTION ",
+        " TRIGGER ",
+        " EVENT ",
+    ]
+    .iter()
+    .filter_map(|kw| upper.find(kw))
+    .min()
+    .unwrap_or(upper.len());
+    let header = &upper[..header_end];
+    let Some(start) = header.find("DEFINER") else {
         return sql.to_string();
     };
-    let mut end = start + "DEFINER=".len();
     let bytes = sql.as_bytes();
+    let mut after_kw = start + "DEFINER".len();
+    while after_kw < header_end && bytes[after_kw].is_ascii_whitespace() {
+        after_kw += 1;
+    }
+    if after_kw >= header_end || bytes[after_kw] != b'=' {
+        return sql.to_string();
+    }
+    let mut end = after_kw + 1;
+    while end < header_end && bytes[end].is_ascii_whitespace() {
+        end += 1;
+    }
     let mut quote: Option<u8> = None;
     while end < bytes.len() {
         let byte = bytes[end];
@@ -619,6 +701,14 @@ mod tests {
         assert_eq!(
             strip_definer("CREATE DEFINER=root@localhost TRIGGER t BEFORE INSERT ON x FOR EACH ROW SET @a = 1"),
             "CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW SET @a = 1"
+        );
+        assert_eq!(
+            strip_definer("CREATE DEFINER = `root`@`%` VIEW `v` AS SELECT 'DEFINER=x'"),
+            "CREATE VIEW `v` AS SELECT 'DEFINER=x'"
+        );
+        assert_eq!(
+            strip_definer("CREATE VIEW `v` AS SELECT 'DEFINER=root@localhost'"),
+            "CREATE VIEW `v` AS SELECT 'DEFINER=root@localhost'"
         );
         assert_eq!(
             strip_definer("CREATE TABLE t (a int)"),

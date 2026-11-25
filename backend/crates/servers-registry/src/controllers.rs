@@ -286,6 +286,14 @@ async fn remove_exception(
 async fn sync_advisories(State(ctx): State<AppContext>, headers: HeaderMap) -> AppResult<Response> {
     require_admin(&ctx, &headers).await?;
     let guard = scan::refresh_guard()?;
+    audit(
+        &ctx,
+        &headers,
+        AuditAction::Execute,
+        (0, "registry"),
+        "Atualização manual da base de vulnerabilidades (OSV) iniciada".into(),
+    )
+    .await;
     let ctx_bg = ctx.clone();
     tokio::spawn(async move {
         let _guard = guard;

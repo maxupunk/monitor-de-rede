@@ -2,14 +2,17 @@
 //! as ferramentas de leitura e grava no próprio alerta a causa provável e a
 //! primeira ação. A tela recebe o resumo pelo barramento (`alert:ai_summary`).
 
-use std::sync::Arc;
+use std::{
+    collections::HashSet,
+    sync::{Arc, Mutex as StdMutex, PoisonError},
+};
 
 use chrono::Utc;
 use loco_rs::prelude::AppContext;
 use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tokio::sync::{broadcast::error::RecvError, Mutex};
+use tokio::sync::{broadcast::error::RecvError, Mutex, Semaphore};
 use ts_rs::TS;
 
 use super::{
@@ -22,8 +25,42 @@ use netmonitor_core::{
     alerts::{contracts::AlertStatus, feed},
     events::EventBus,
     models::alert_events,
-    shared::errors::{AppError, AppResult},
+    shared::{
+        errors::{AppError, AppResult},
+        transaction::begin_write,
+    },
 };
+
+/// Máximo de resumos/triagens simultâneos disparados por alertas em tempestade.
+const MAX_CONCURRENT_SUMMARIES: usize = 2;
+
+/// Garante que o mesmo `alert_id` não rode em paralelo e libera na saída.
+struct InFlightGuard {
+    set: Arc<StdMutex<HashSet<i64>>>,
+    alert_id: i64,
+}
+
+impl InFlightGuard {
+    fn acquire(set: &Arc<StdMutex<HashSet<i64>>>, alert_id: i64) -> Option<Self> {
+        let inserted = set
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(alert_id);
+        inserted.then(|| Self {
+            set: Arc::clone(set),
+            alert_id,
+        })
+    }
+}
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        self.set
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&self.alert_id);
+    }
+}
 
 /// O que a tela mostra quando pedem um resumo com a IA desligada.
 pub const DISABLED_MESSAGE: &str =
@@ -119,18 +156,20 @@ pub async fn summarize_alert(
         completion_tokens: answer.usage.completion_tokens,
     };
 
-    // Relê antes de gravar: o motor de alertas pode ter mexido no `data`
-    // (silêncio, reconhecimento) enquanto a IA pensava.
-    let Some(current) = alert_events::Entity::find_by_id(alert_id)
-        .one(&ctx.db)
-        .await?
-    else {
+    // Relê e grava numa transação de escrita: o motor de alertas pode ter
+    // mexido no `data` (silêncio, reconhecimento) enquanto a IA pensava.
+    let tx = begin_write(&ctx.db).await?;
+    let Some(current) = alert_events::Entity::find_by_id(alert_id).one(&tx).await? else {
         return Ok(None);
     };
+    if has_summary(&current) {
+        return Ok(None);
+    }
     let data = with_summary(current.data.clone(), &summary);
     let mut active: alert_events::ActiveModel = current.into();
     active.data = Set(Some(data));
-    let updated = active.update(&ctx.db).await?;
+    let updated = active.update(&tx).await?;
+    tx.commit().await?;
 
     feed::publish(
         ctx,
@@ -165,6 +204,8 @@ pub fn spawn_listener(ctx: AppContext, drivers: Arc<dyn DriverFactory>) {
     };
     let mut receiver = bus.subscribe();
     let limiter = Arc::new(Mutex::new(HourlyLimiter::default()));
+    let concurrency = Arc::new(Semaphore::new(MAX_CONCURRENT_SUMMARIES));
+    let in_flight = Arc::new(StdMutex::new(HashSet::<i64>::new()));
 
     tokio::spawn(async move {
         loop {
@@ -186,17 +227,26 @@ pub fn spawn_listener(ctx: AppContext, drivers: Arc<dyn DriverFactory>) {
                 .payload
                 .get("severity")
                 .and_then(Value::as_str)
-                .unwrap_or_default();
-            let Some(max_per_hour) = wants_summary(&ctx, severity).await else {
-                continue;
-            };
+                .unwrap_or_default()
+                .to_string();
 
-            // A triagem e o teto ficam na task: o laço não espera o Decisor (o
-            // barramento atrasaria), e alerta suprimido não gasta o teto.
+            // Consulta de config, triagem e teto ficam na task para o laço do
+            // barramento nunca bloquear e não perder eventos (`Lagged`).
             let ctx = ctx.clone();
             let drivers = Arc::clone(&drivers);
             let limiter = Arc::clone(&limiter);
+            let concurrency = Arc::clone(&concurrency);
+            let in_flight = Arc::clone(&in_flight);
             tokio::spawn(async move {
+                let Some(_in_flight) = InFlightGuard::acquire(&in_flight, alert_id) else {
+                    return;
+                };
+                let Some(max_per_hour) = wants_summary(&ctx, &severity).await else {
+                    return;
+                };
+                let Ok(_permit) = concurrency.acquire_owned().await else {
+                    return;
+                };
                 match triage::assess(&ctx, alert_id).await {
                     Ok(Some((opinion, _))) if opinion.suppressed => {
                         tracing::info!(

@@ -7,7 +7,7 @@
 //! saem daqui.
 
 use netmonitor_core::areas::Area;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
@@ -107,14 +107,18 @@ e no nome do recurso; 'resource_type' (device, monitor, alert_rule, plugin, syst
         let page = AuditService::new(&ctx.db)
             .list(filters, Some(1), Some(limit))
             .await?;
-        let user_ids: Vec<i64> = page.data.iter().filter_map(|entry| entry.user_id).collect();
-        let user_names: HashMap<i64, String> = users::Entity::find()
-            .filter(users::Column::Id.is_in(user_ids))
-            .all(&ctx.db)
-            .await?
-            .into_iter()
-            .map(|user| (user.id, user.name))
-            .collect();
+        let user_ids: HashSet<i64> = page.data.iter().filter_map(|entry| entry.user_id).collect();
+        let user_names: HashMap<i64, String> = if user_ids.is_empty() {
+            HashMap::new()
+        } else {
+            users::Entity::find()
+                .filter(users::Column::Id.is_in(user_ids))
+                .all(&ctx.db)
+                .await?
+                .into_iter()
+                .map(|user| (user.id, user.name))
+                .collect()
+        };
         Ok(ToolOutput::data(json!({
             "from": from.to_rfc3339(),
             "until": until.to_rfc3339(),

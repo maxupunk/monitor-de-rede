@@ -18,7 +18,7 @@ use netmonitor_core::{
 };
 use netmonitor_network::plugins::wifi_source::Requester;
 
-use crate::{rounds, settings};
+use crate::{dtos::WifiSettings, rounds, settings};
 
 /// Sem ninguém olhando, de quanto em quanto tempo o laço confere o interesse:
 /// o mapa aberto começa a ser lido em até 2 s.
@@ -85,7 +85,7 @@ pub fn spawn(ctx: AppContext) {
                 LiveStep::Read => settings::load(&ctx.db)
                     .await
                     .map(|settings| settings.live_interval_s)
-                    .unwrap_or_default(),
+                    .unwrap_or_else(|_| WifiSettings::default().live_interval_s),
                 _ => 0,
             };
             tokio::time::sleep(next_wait(

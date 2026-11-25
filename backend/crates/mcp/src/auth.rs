@@ -67,7 +67,7 @@ pub fn check_browser_origin(headers: &HeaderMap) -> AppResult<()> {
     };
     let refused = || {
         AppError::forbidden(
-            "Origem do navegador recusada pelo servidor MCP: só a própria central pode chamá-lo              de uma página.",
+            "Origem do navegador recusada pelo servidor MCP: só a própria central pode chamá-lo de uma página.",
         )
     };
     let origin_host = origin

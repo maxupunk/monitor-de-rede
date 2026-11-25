@@ -27,12 +27,15 @@ use loco_rs::app::AppContext;
 use sea_orm::{
     sea_query::{Expr, OnConflict},
     ActiveValue::Set,
-    ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
+    ColumnTrait, Condition, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
 };
 use tokio::sync::mpsc;
 
 use netmonitor_core::classifier::{
-    self, log_category::LogPattern, suggestion::DeciderSuggestion, ClassifierFeature, Lane,
+    self,
+    log_category::{LogPattern, LogVerdict},
+    suggestion::DeciderSuggestion,
+    ClassifierFeature, Lane,
 };
 
 use super::{queue::PendingLog, template::normalize_message};
@@ -50,6 +53,9 @@ const EXAMPLE_CHARS: usize = 500;
 /// fora do ar quando o padrão apareceu).
 const BACKFILL_EVERY: Duration = Duration::from_secs(60);
 const BACKFILL_BATCH: u64 = 50;
+/// Intervalo antes de tentar novamente um padrão que o classificador não soube
+/// categorizar (`None`), evitando tempestade de chamadas repetidas a cada 60 s.
+const RETRY_COOLDOWN_HOURS: i64 = 24;
 pub const CLASSIFIED_EVENT: &str = "logs:template_classified";
 
 /// Um padrão a gravar e classificar.
@@ -81,7 +87,7 @@ impl TemplateJob {
 pub trait TemplateClassifier: Send + Sync {
     /// Vale a pena tentar agora? Falso com a frente desligada.
     async fn ready(&self) -> bool;
-    async fn classify(&self, job: &TemplateJob) -> Option<DeciderSuggestion>;
+    async fn classify(&self, job: &TemplateJob) -> LogVerdict;
 }
 
 /// Pede a categoria ao `Classifier` instalado no processo: o Decisor quando o
@@ -107,11 +113,14 @@ impl TemplateClassifier for ProcessTemplateClassifier {
             .is_some()
     }
 
-    async fn classify(&self, job: &TemplateJob) -> Option<DeciderSuggestion> {
+    async fn classify(&self, job: &TemplateJob) -> LogVerdict {
         let classifier = classifier::from_context(&self.ctx);
-        let min_confidence = classifier
+        let Some(min_confidence) = classifier
             .min_confidence(&self.ctx, ClassifierFeature::LogEvents)
-            .await?;
+            .await
+        else {
+            return LogVerdict::Unavailable;
+        };
         classifier
             .categorize_log(&self.ctx, Lane::Background, &job.pattern(), min_confidence)
             .await
@@ -226,7 +235,7 @@ async fn store_classification(
         .exec(db)
         .await;
     if let Err(error) = result {
-        tracing::debug!(%error, "log_templates: falha ao gravar categoria");
+        tracing::warn!(%error, "log_templates: falha ao gravar categoria");
         return;
     }
     // O evento leva o padrão como a tela o conhece (o mesmo da confirmação do
@@ -241,6 +250,23 @@ async fn store_classification(
     }
 }
 
+/// Marca que o modelo respondeu sem confiança, para o `backfill` não reenviar
+/// o mesmo padrão a cada 60 s. Falha da chamada não marca: o padrão volta na
+/// próxima passada, em vez de ficar congelado por [`RETRY_COOLDOWN_HOURS`].
+async fn mark_attempted(db: &DatabaseConnection, hash: i64) {
+    let result = log_templates::Entity::update_many()
+        .col_expr(
+            log_templates::Column::ClassifiedAt,
+            Expr::value(chrono::DateTime::<chrono::FixedOffset>::from(Utc::now())),
+        )
+        .filter(log_templates::Column::TemplateHash.eq(hash))
+        .exec(db)
+        .await;
+    if let Err(error) = result {
+        tracing::warn!(%error, hash, "log_templates: falha ao marcar tentativa de classificação");
+    }
+}
+
 async fn handle(
     db: &DatabaseConnection,
     classifier: &dyn TemplateClassifier,
@@ -248,8 +274,15 @@ async fn handle(
     job: &TemplateJob,
 ) {
     store_template(db, job).await;
-    if let Some(suggestion) = classifier.classify(job).await {
-        store_classification(db, job.hash, &suggestion, events).await;
+    if !classifier.ready().await {
+        return;
+    }
+    match classifier.classify(job).await {
+        LogVerdict::Suggested(suggestion) => {
+            store_classification(db, job.hash, &suggestion, events).await;
+        }
+        LogVerdict::Unsure => mark_attempted(db, job.hash).await,
+        LogVerdict::Unavailable => {}
     }
 }
 
@@ -263,14 +296,26 @@ pub async fn backfill(
     if !classifier.ready().await {
         return 0;
     }
-    let pending = log_templates::Entity::find()
+    let retry_before = Utc::now() - chrono::Duration::hours(RETRY_COOLDOWN_HOURS);
+    let pending = match log_templates::Entity::find()
         .filter(log_templates::Column::Category.is_null())
         .filter(log_templates::Column::UserCategory.is_null())
+        .filter(
+            Condition::any()
+                .add(log_templates::Column::ClassifiedAt.is_null())
+                .add(log_templates::Column::ClassifiedAt.lt(retry_before)),
+        )
         .order_by_desc(log_templates::Column::FirstSeenAt)
         .limit(limit)
         .all(db)
         .await
-        .unwrap_or_default();
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::warn!(%error, "log_templates: falha ao listar padrões pendentes");
+            return 0;
+        }
+    };
     let mut classified = 0;
     for row in pending {
         let job = TemplateJob {
@@ -281,9 +326,14 @@ pub async fn backfill(
             topics: None,
             severity: None,
         };
-        if let Some(suggestion) = classifier.classify(&job).await {
-            store_classification(db, job.hash, &suggestion, events).await;
-            classified += 1;
+        match classifier.classify(&job).await {
+            LogVerdict::Suggested(suggestion) => {
+                store_classification(db, job.hash, &suggestion, events).await;
+                classified += 1;
+            }
+            LogVerdict::Unsure => mark_attempted(db, job.hash).await,
+            // Fora do ar: o resto do lote daria no mesmo.
+            LogVerdict::Unavailable => break,
         }
     }
     classified
@@ -299,14 +349,17 @@ pub async fn run_worker(
     events: Option<EventBus>,
 ) {
     // Padrões já gravados não voltam para a fila depois de um restart.
-    if let Ok(known) = log_templates::Entity::find()
+    match log_templates::Entity::find()
         .select_only()
         .column(log_templates::Column::TemplateHash)
+        .order_by_desc(log_templates::Column::FirstSeenAt)
+        .limit(MAX_SEEN as u64)
         .into_tuple::<i64>()
         .all(&db)
         .await
     {
-        catalog.remember(known);
+        Ok(known) => catalog.remember(known),
+        Err(error) => tracing::warn!(%error, "log_templates: falha ao pré-carregar padrões"),
     }
 
     let mut tick = tokio::time::interval(BACKFILL_EVERY);
@@ -346,12 +399,12 @@ mod tests {
             self.ready
         }
 
-        async fn classify(&self, _job: &TemplateJob) -> Option<DeciderSuggestion> {
+        async fn classify(&self, _job: &TemplateJob) -> LogVerdict {
             if !self.ready {
-                return None;
+                return LogVerdict::Unavailable;
             }
             self.calls.fetch_add(1, Ordering::SeqCst);
-            Some(DeciderSuggestion {
+            LogVerdict::Suggested(DeciderSuggestion {
                 value: "auth_failure".into(),
                 confidence: 91.0,
                 model: "stub".into(),
@@ -498,6 +551,56 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(row.effective_category(), Some("link_change"));
+    }
+
+    /// Responde sempre o mesmo veredito.
+    struct Fixed(LogVerdict);
+
+    #[async_trait]
+    impl TemplateClassifier for Fixed {
+        async fn ready(&self) -> bool {
+            true
+        }
+
+        async fn classify(&self, _job: &TemplateJob) -> LogVerdict {
+            self.0.clone()
+        }
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn so_a_resposta_sem_confianca_espera_a_proxima_tentativa() {
+        let db = banco().await;
+        let (template, hash) = template_of("ether3 link down");
+        log_templates::ActiveModel {
+            template_hash: Set(hash),
+            template: Set(template),
+            example: Set("ether3 link down".into()),
+            first_seen_at: Set(Utc::now().into()),
+            ..Default::default()
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+        let classified_at = || async {
+            log_templates::Entity::find_by_id(hash)
+                .one(&db)
+                .await
+                .unwrap()
+                .unwrap()
+                .classified_at
+        };
+
+        // Modelo fora do ar: o padrão não congela e volta na próxima passada.
+        assert_eq!(
+            backfill(&db, &Fixed(LogVerdict::Unavailable), None, 10).await,
+            0
+        );
+        assert_eq!(classified_at().await, None);
+
+        // Respondeu sem confiança: espera o intervalo antes de perguntar de novo.
+        assert_eq!(backfill(&db, &Fixed(LogVerdict::Unsure), None, 10).await, 0);
+        assert!(classified_at().await.is_some());
     }
 
     #[test]

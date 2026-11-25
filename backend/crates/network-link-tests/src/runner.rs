@@ -507,6 +507,10 @@ impl Job {
         events::publish_test(self.env.bus.as_ref(), &self.snapshot());
     }
 
+    /// Grava a perna com as amostras que já chegaram: o detalhe de um teste
+    /// em andamento (`GET`) mostra o parcial, como a tela vê pelo SSE. O
+    /// custo é baixo — as listas têm teto (`MAX_SAMPLES_PER_FLOW`) e a perna
+    /// só é gravada quando muda de etapa, não a cada amostra.
     async fn persist(&mut self, idx: usize) {
         let seq = self.plan[idx].view.seq;
         let samples = self.book.of(seq);

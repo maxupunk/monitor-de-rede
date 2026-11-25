@@ -135,7 +135,12 @@ where
     let paginator = query.paginate(db, per_page);
     let total = paginator.num_items().await?;
     // O paginator do SeaORM é 0-based; o contrato HTTP é 1-based.
-    let rows = paginator.fetch_page(page - 1).await?;
+    // Evita segunda consulta quando o conjunto está vazio ou a página está fora do intervalo.
+    let rows = if total == 0 || (page - 1).saturating_mul(per_page) >= total {
+        Vec::new()
+    } else {
+        paginator.fetch_page(page - 1).await?
+    };
 
     Ok(PaginatedResponse {
         data: rows.into_iter().map(map).collect(),

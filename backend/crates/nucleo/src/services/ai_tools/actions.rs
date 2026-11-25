@@ -129,6 +129,19 @@ impl AiToolHandler for AcknowledgeAlert {
             Err(output) => return Ok(output),
         };
         let event = alert_actions::acknowledge(ctx, event).await?;
+        audit(
+            ctx,
+            args,
+            AuditEntryInput {
+                action: AuditAction::Update,
+                resource_type: ResourceType::AlertEvent,
+                resource_id: Some(event.id),
+                resource_label: Some(label.clone()),
+                description: Some(format!("Alerta #{} reconhecido ({VIA_AI})", event.id)),
+                changes: None,
+            },
+        )
+        .await;
         Ok(ToolOutput::data(json!({
             "done": true,
             "alert": label,
@@ -190,6 +203,22 @@ impl AiToolHandler for SilenceAlert {
             Err(output) => return Ok(output),
         };
         let event = alert_actions::silence(ctx, event, minutes).await?;
+        audit(
+            ctx,
+            args,
+            AuditEntryInput {
+                action: AuditAction::Update,
+                resource_type: ResourceType::AlertEvent,
+                resource_id: Some(event.id),
+                resource_label: Some(label.clone()),
+                description: Some(format!(
+                    "Alerta #{} silenciado por {minutes} min ({VIA_AI})",
+                    event.id
+                )),
+                changes: None,
+            },
+        )
+        .await;
         Ok(ToolOutput::data(json!({
             "done": true,
             "alert": label,

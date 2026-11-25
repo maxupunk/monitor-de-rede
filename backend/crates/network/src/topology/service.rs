@@ -4,7 +4,7 @@
 //! [`edge_state`], inferência em [`inference`], menor caminho em [`path`] — e
 //! aqui só se carrega o banco e monta a resposta.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use chrono::Utc;
 use sea_orm::{
@@ -679,6 +679,7 @@ pub async fn create_unmanaged_switch(
     }
     let port_count = input.port_count.clamp(1, 128);
     let now = chrono::Utc::now();
+    let txn = begin_write(db).await?;
     let device_model = devices::ActiveModel {
         name: sea_orm::Set(input.name.trim().to_string()),
         r#type: sea_orm::Set("unmanaged_switch".to_string()),
@@ -694,15 +695,14 @@ pub async fn create_unmanaged_switch(
         updated_at: sea_orm::Set(now.into()),
         ..Default::default()
     }
-    .insert(db)
+    .insert(&txn)
     .await?;
 
-    for i in 1..=port_count {
-        let port_name = format!("Porta {i}");
-        device_interfaces::ActiveModel {
+    let ports: Vec<device_interfaces::ActiveModel> = (1..=port_count)
+        .map(|i| device_interfaces::ActiveModel {
             device_id: sea_orm::Set(device_model.id),
             snmp_index: sea_orm::Set(Some(i as i32)),
-            name: sea_orm::Set(port_name),
+            name: sea_orm::Set(format!("Porta {i}")),
             description: sea_orm::Set(Some(format!("Porta física #{i}"))),
             r#type: sea_orm::Set(Some("ethernetCsmacd".to_string())),
             speed: sea_orm::Set(Some(1_000_000_000)), // 1 Gbps
@@ -711,10 +711,14 @@ pub async fn create_unmanaged_switch(
             created_at: sea_orm::Set(now.into()),
             updated_at: sea_orm::Set(now.into()),
             ..Default::default()
-        }
-        .insert(db)
-        .await?;
+        })
+        .collect();
+    if !ports.is_empty() {
+        device_interfaces::Entity::insert_many(ports)
+            .exec_without_returning(&txn)
+            .await?;
     }
+    txn.commit().await?;
 
     Ok(device_model)
 }
@@ -869,47 +873,93 @@ pub async fn resolve_discovered_neighbors(
     source: &devices::Model,
     neighbors: &[LldpNeighbor],
 ) -> AppResult<Vec<device_links::Model>> {
+    if neighbors.is_empty() {
+        return Ok(Vec::new());
+    }
     let candidates = devices::Entity::find().all(&ctx.db).await?;
     let source_interfaces = device_interfaces::Entity::find()
         .filter(device_interfaces_entity::Column::DeviceId.eq(source.id))
         .all(&ctx.db)
         .await?;
-    let mut raw = Vec::new();
-    for neighbor in neighbors {
-        let target = candidates.iter().find(|device| {
-            device.id != source.id
-                && (neighbor.remote_sys_name.as_ref().is_some_and(|name| {
-                    device.name.eq_ignore_ascii_case(name)
-                        || device
-                            .ip_address
-                            .as_ref()
-                            .is_some_and(|ip| ip.eq_ignore_ascii_case(name))
-                }) || neighbor
-                    .remote_mgmt_address
-                    .as_ref()
-                    .is_some_and(|address| {
-                        device.ip_address.as_ref().is_some_and(|ip| ip == address)
-                    }))
-        });
-        let Some(target) = target else {
+
+    let mut by_name_lower: HashMap<String, i64> = HashMap::with_capacity(candidates.len());
+    let mut by_ip_lower: HashMap<String, i64> = HashMap::with_capacity(candidates.len());
+    for device in &candidates {
+        if device.id == source.id {
             continue;
-        };
-        let target_interfaces = device_interfaces::Entity::find()
-            .filter(device_interfaces_entity::Column::DeviceId.eq(target.id))
+        }
+        by_name_lower
+            .entry(device.name.to_ascii_lowercase())
+            .or_insert(device.id);
+        if let Some(ip) = device.ip_address.as_deref().filter(|ip| !ip.is_empty()) {
+            by_ip_lower
+                .entry(ip.to_ascii_lowercase())
+                .or_insert(device.id);
+        }
+    }
+
+    let matched: Vec<(&LldpNeighbor, i64)> = neighbors
+        .iter()
+        .filter_map(|neighbor| {
+            let target_id = neighbor
+                .remote_sys_name
+                .as_deref()
+                .and_then(|name| {
+                    let key = name.to_ascii_lowercase();
+                    by_name_lower
+                        .get(&key)
+                        .or_else(|| by_ip_lower.get(&key))
+                        .copied()
+                })
+                .or_else(|| {
+                    neighbor
+                        .remote_mgmt_address
+                        .as_deref()
+                        .and_then(|addr| by_ip_lower.get(&addr.to_ascii_lowercase()).copied())
+                })?;
+            Some((neighbor, target_id))
+        })
+        .collect();
+    if matched.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let target_ids: Vec<i64> = matched
+        .iter()
+        .map(|(_, id)| *id)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let mut target_interfaces_by_device: HashMap<i64, Vec<device_interfaces::Model>> =
+        HashMap::new();
+    for chunk in target_ids.chunks(IDS_PER_QUERY) {
+        let rows = device_interfaces::Entity::find()
+            .filter(device_interfaces_entity::Column::DeviceId.is_in(chunk.to_vec()))
             .all(&ctx.db)
             .await?;
+        for iface in rows {
+            target_interfaces_by_device
+                .entry(iface.device_id)
+                .or_default()
+                .push(iface);
+        }
+    }
+
+    let source_by_index: HashMap<i32, i64> = source_interfaces
+        .iter()
+        .filter_map(|iface| iface.snmp_index.map(|idx| (idx, iface.id)))
+        .collect();
+
+    let mut raw = Vec::with_capacity(matched.len());
+    for (neighbor, target_id) in matched {
         let source_interface_id = neighbor
             .local_port
             .parse::<i32>()
             .ok()
-            .and_then(|index| {
-                source_interfaces
-                    .iter()
-                    .find(|interface| interface.snmp_index == Some(index))
-            })
-            .map(|interface| interface.id);
+            .and_then(|index| source_by_index.get(&index).copied());
         let target_interface_id = neighbor.remote_port.as_ref().and_then(|port| {
-            target_interfaces
+            target_interfaces_by_device
+                .get(&target_id)?
                 .iter()
                 .find(|interface| {
                     interface.name.eq_ignore_ascii_case(port)
@@ -924,7 +974,7 @@ pub async fn resolve_discovered_neighbors(
         };
         raw.push(NetworkLink {
             source_device_id: source.id,
-            target_device_id: target.id,
+            target_device_id: target_id,
             source_interface_id,
             target_interface_id,
             link_type: neighbor.protocol.clone(),

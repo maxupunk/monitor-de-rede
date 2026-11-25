@@ -113,6 +113,69 @@ pub struct ResolvedAccess {
     pub reason: String,
 }
 
+/// CIDR pré-analisado da faixa do túnel VPN.
+#[derive(Debug, Clone)]
+struct ParsedVpnCidr {
+    raw: String,
+    v4_range: Option<(u32, u32)>,
+}
+
+impl ParsedVpnCidr {
+    fn new(cidr: String) -> Self {
+        let v4_range = parse_cidr(&cidr).ok().map(|faixa| {
+            (
+                u32::from(faixa.network_address),
+                u32::from(faixa.broadcast_address),
+            )
+        });
+        Self {
+            raw: cidr,
+            v4_range,
+        }
+    }
+
+    fn contains_v4(&self, ip: Ipv4Addr) -> bool {
+        let bruto = u32::from(ip);
+        self.v4_range
+            .is_some_and(|(start, end)| bruto >= start && bruto <= end)
+    }
+}
+
+/// Rede cadastrada pré-analisada uma única vez em [`AccessContext::load`].
+#[derive(Debug, Clone)]
+struct ParsedNetwork {
+    info: (String, String),
+    net: Option<IpNet>,
+    v4_range: Option<(u32, u32)>,
+}
+
+impl ParsedNetwork {
+    fn new(name: String, cidr: String) -> Self {
+        let net = cidr.parse::<IpNet>().ok();
+        let v4_range = parse_cidr(&cidr).ok().map(|faixa| {
+            (
+                u32::from(faixa.network_address),
+                u32::from(faixa.broadcast_address),
+            )
+        });
+        Self {
+            info: (name, cidr),
+            net,
+            v4_range,
+        }
+    }
+
+    fn contains_v4(&self, ip: Ipv4Addr) -> bool {
+        let bruto = u32::from(ip);
+        self.v4_range
+            .is_some_and(|(start, end)| bruto >= start && bruto <= end)
+    }
+
+    fn contains(&self, ip: IpAddr) -> bool {
+        self.net.is_some_and(|rede| rede.contains(&ip))
+    }
+}
+
 /// O que se consulta uma vez para julgar muitos dispositivos.
 ///
 /// Existe como contexto, e não como função por dispositivo, porque
@@ -122,9 +185,9 @@ pub struct ResolvedAccess {
 pub struct AccessContext {
     peers: HashSet<i64>,
     vpn_network_id: Option<i64>,
-    vpn_cidr: Option<String>,
-    /// `(nome, cidr)` das redes cadastradas, exceto a do túnel.
-    redes: Vec<(String, String)>,
+    vpn_cidr: Option<ParsedVpnCidr>,
+    /// Redes cadastradas pré-analisadas, exceto a do túnel.
+    redes: Vec<ParsedNetwork>,
 }
 
 impl AccessContext {
@@ -147,9 +210,9 @@ impl AccessContext {
         let mut redes = Vec::new();
         for rede in networks::Entity::find().all(db).await? {
             if Some(rede.id) == vpn_network_id {
-                vpn_cidr = Some(rede.cidr);
+                vpn_cidr = Some(ParsedVpnCidr::new(rede.cidr));
             } else {
-                redes.push((rede.name, rede.cidr));
+                redes.push(ParsedNetwork::new(rede.name, rede.cidr));
             }
         }
 
@@ -171,7 +234,8 @@ impl AccessContext {
     pub fn rede_em_comum(&self, a: IpAddr, b: IpAddr) -> Option<&(String, String)> {
         self.redes
             .iter()
-            .find(|(_, cidr)| contem(cidr, a) && contem(cidr, b))
+            .find(|rede| rede.contains(a) && rede.contains(b))
+            .map(|rede| &rede.info)
     }
 
     /// A conclusão para um dispositivo.
@@ -233,11 +297,11 @@ impl AccessContext {
         if network_id.is_some() && network_id == self.vpn_network_id {
             return deduzido(AccessMode::Vpn, "está cadastrado na rede do túnel");
         }
-        if let (Some(IpAddr::V4(v4)), Some(cidr)) = (ip, self.vpn_cidr.as_deref()) {
-            if dentro(v4, cidr) {
+        if let (Some(IpAddr::V4(v4)), Some(vpn)) = (ip, self.vpn_cidr.as_ref()) {
+            if vpn.contains_v4(v4) {
                 return deduzido(
                     AccessMode::Vpn,
-                    &format!("o IP está dentro da faixa do túnel ({cidr})"),
+                    &format!("o IP está dentro da faixa do túnel ({})", vpn.raw),
                 );
             }
         }
@@ -252,8 +316,9 @@ impl AccessContext {
         };
 
         if let IpAddr::V4(v4) = ip {
-            for (nome, cidr) in &self.redes {
-                if dentro(v4, cidr) {
+            for rede in &self.redes {
+                if rede.contains_v4(v4) {
+                    let (nome, cidr) = &rede.info;
                     return deduzido(
                         AccessMode::Local,
                         &format!("o IP está na rede cadastrada \"{nome}\" ({cidr})"),
@@ -282,23 +347,6 @@ fn deduzido(mode: AccessMode, motivo: &str) -> ResolvedAccess {
         declared: false,
         reason: motivo.to_owned(),
     }
-}
-
-/// Se um IPv4 cai dentro de um CIDR. CIDR ilegível responde `false` — uma rede
-/// mal cadastrada não pode classificar equipamento nenhum.
-fn dentro(ip: Ipv4Addr, cidr: &str) -> bool {
-    let Ok(faixa) = parse_cidr(cidr) else {
-        return false;
-    };
-    let bruto = u32::from(ip);
-    bruto >= u32::from(faixa.network_address) && bruto <= u32::from(faixa.broadcast_address)
-}
-
-/// O mesmo teste para qualquer versão de IP — o [`dentro`] é IPv4 porque a
-/// dedução de acesso só tem faixa de túnel em v4; a rede em comum precisa
-/// valer também para v6.
-fn contem(cidr: &str, ip: IpAddr) -> bool {
-    cidr.parse::<IpNet>().is_ok_and(|rede| rede.contains(&ip))
 }
 
 /// Faixas que não trafegam pela internet.
@@ -353,8 +401,11 @@ mod tests {
         AccessContext {
             peers: HashSet::new(),
             vpn_network_id: Some(7),
-            vpn_cidr: Some("10.8.0.0/24".to_owned()),
-            redes: vec![("Matriz".to_owned(), "192.168.1.0/24".to_owned())],
+            vpn_cidr: Some(ParsedVpnCidr::new("10.8.0.0/24".to_owned())),
+            redes: vec![ParsedNetwork::new(
+                "Matriz".to_owned(),
+                "192.168.1.0/24".to_owned(),
+            )],
         }
     }
 
@@ -381,9 +432,10 @@ mod tests {
 
         // CIDR mal cadastrado não classifica nada, em vez de derrubar a tela.
         let mut quebrado = contexto();
-        quebrado
-            .redes
-            .push(("Quebrada".to_owned(), "não é cidr".to_owned()));
+        quebrado.redes.push(ParsedNetwork::new(
+            "Quebrada".to_owned(),
+            "não é cidr".to_owned(),
+        ));
         assert!(quebrado
             .rede_em_comum(
                 "192.168.1.10".parse().unwrap(),

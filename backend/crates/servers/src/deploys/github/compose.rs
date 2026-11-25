@@ -171,7 +171,8 @@ pub fn analyze(content: &str, path: &str, repository: &str) -> Result<ComposeAna
                 if registry.as_deref() != Some("ghcr.io") {
                     out.notes.push(format!(
                         "O serviço {service_name} usa a imagem {image}, fora do ghcr.io: o \
-                         workflow do GitHub Actions publica no ghcr.io (compilando no NetMonitor,                          o nome é só o que o host usa)"
+                         workflow do GitHub Actions publica no ghcr.io (compilando no NetMonitor, \
+                         o nome é só o que o host usa)"
                     ));
                 }
                 match variable {
@@ -182,8 +183,7 @@ pub fn analyze(content: &str, path: &str, repository: &str) -> Result<ComposeAna
                     }
                     None => out.notes.push(format!(
                         "A imagem do serviço {service_name} não usa uma variável na tag: use \
-                         {image_base}:${{IMAGE_TAG:-latest}} para o deploy escolher a versão",
-                        image_base = image.split(':').next().unwrap_or(image)
+                         {path}:${{IMAGE_TAG:-latest}} para o deploy escolher a versão"
                     )),
                 }
                 (name, Some(path))
@@ -280,6 +280,20 @@ services:
         let analysis = analyze(compose, "docker-compose.yml", "acme/api").expect("ok");
         assert_eq!(analysis.notes.len(), 2);
         assert!(analysis.image_tag_variable.is_none());
+    }
+
+    #[test]
+    fn aviso_de_tag_preserva_porta_do_registry() {
+        let compose = "services:\n  api:\n    image: localhost:5000/acme/api:1.0\n    build: .\n";
+        let analysis = analyze(compose, "docker-compose.yml", "acme/api").expect("ok");
+        assert!(
+            analysis
+                .notes
+                .iter()
+                .any(|note| note.contains("localhost:5000/acme/api:${IMAGE_TAG:-latest}")),
+            "{:?}",
+            analysis.notes
+        );
     }
 
     #[test]

@@ -442,7 +442,7 @@ impl Shell {
         }
         match tipo {
             ptype::DATA => {
-                self.recebidos = contador + u32::try_from(carga.len()).unwrap_or(0);
+                self.recebidos = contador.wrapping_add(u32::try_from(carga.len()).unwrap_or(0));
                 let carga = carga.to_vec();
                 self.confirma().await?;
                 Ok(Some(carga))

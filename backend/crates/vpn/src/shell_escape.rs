@@ -27,10 +27,7 @@ pub fn escape_wg_value(s: &str) -> String {
 /// inserindo uma aspas simples escapada e reabrindo.
 #[must_use]
 pub fn escape_uci(s: &str) -> String {
-    s.chars()
-        .filter(|c| !c.is_control() && *c != '\r' && *c != '\n' && *c != '\t')
-        .collect::<String>()
-        .replace('\'', "'\\''")
+    strip_controls(s).replace('\'', "'\\''")
 }
 
 /// Escape para comandos RouterOS (MikroTik).
@@ -38,11 +35,7 @@ pub fn escape_uci(s: &str) -> String {
 /// Remove controles/quebras e escapa aspas duplas e barras invertidas.
 #[must_use]
 pub fn escape_routeros(s: &str) -> String {
-    s.chars()
-        .filter(|c| !c.is_control() && *c != '\r' && *c != '\n' && *c != '\t')
-        .collect::<String>()
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
+    strip_controls(s).replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 /// Sanitiza um nome para uso em nome de arquivo.

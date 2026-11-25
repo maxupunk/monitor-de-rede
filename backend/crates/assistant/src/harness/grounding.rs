@@ -11,8 +11,8 @@
 use std::{net::IpAddr, ops::Range, sync::LazyLock};
 
 use loco_rs::prelude::AppContext;
-use regex::Regex;
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder};
+use regex::{Regex, RegexBuilder};
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use serde_json::{json, Value};
 
 use crate::drivers::traits::AiMessage;
@@ -113,26 +113,56 @@ fn grounded_in_conversation(conversation: &[AiMessage], target: &str) -> bool {
         .any(|content| mentions(content, target))
 }
 
+/// Fotografia leve do inventário carregada uma única vez por verificação,
+/// projetando só as colunas de nome/IP/alvo em vez de todas as colunas.
+struct InventorySnapshot {
+    devices: Vec<(String, Option<String>)>,
+    monitors: Vec<(String, Value)>,
+}
+
+impl InventorySnapshot {
+    async fn load<C: ConnectionTrait>(db: &C) -> AppResult<Self> {
+        let devices = devices::Entity::find()
+            .select_only()
+            .columns([devices::Column::Name, devices::Column::IpAddress])
+            .into_tuple()
+            .all(db)
+            .await?;
+        let monitors = monitors::Entity::find()
+            .select_only()
+            .columns([monitors::Column::Name, monitors::Column::Configuration])
+            .into_tuple()
+            .all(db)
+            .await?;
+        Ok(Self { devices, monitors })
+    }
+
+    fn contains(&self, target: &str) -> bool {
+        let wanted = normalize(target);
+        if wanted.is_empty() {
+            return false;
+        }
+        let same = |value: &str| {
+            let value = normalize(value);
+            value == wanted || mentions(&value, &wanted)
+        };
+        if self
+            .devices
+            .iter()
+            .any(|(name, ip)| same(name) || ip.as_deref().is_some_and(same))
+        {
+            return true;
+        }
+        self.monitors.iter().any(|(name, config)| {
+            same(name) || super::tools::monitor_target(config).is_some_and(same)
+        })
+    }
+}
+
 /// O alvo é o IP de um dispositivo ou o alvo de um monitor cadastrado (o
 /// resultado da consulta pode ter sido podado da conversa).
 async fn registered<C: ConnectionTrait>(db: &C, target: &str) -> AppResult<bool> {
-    let wanted = normalize(target);
-    let same = |value: &str| {
-        let value = normalize(value);
-        value == wanted || mentions(&value, &wanted)
-    };
-    let devices = devices::Entity::find().all(db).await?;
-    if devices
-        .iter()
-        .any(|device| same(&device.name) || device.ip_address.as_deref().is_some_and(same))
-    {
-        return Ok(true);
-    }
-    let monitors = monitors::Entity::find().all(db).await?;
-    Ok(monitors.iter().any(|monitor| {
-        same(&monitor.name)
-            || super::tools::monitor_target(&monitor.configuration).is_some_and(same)
-    }))
+    Ok(InventorySnapshot::load(db).await?.contains(target))
 }
 
 /// Mensagem devolvida à IA quando o alvo foi inventado; `None` quando ele tem
@@ -566,12 +596,19 @@ pub async fn sanitize_ask_user_arguments(
         None => Vec::new(),
     };
 
+    let mut inventory: Option<Option<InventorySnapshot>> = None;
     let mut grounded_options: Vec<String> = Vec::new();
     for opt in raw_options {
         let in_conv = grounded_in_conversation(conversation, &opt);
         let in_candidates = option_matches_candidate(&opt, &candidates);
         let in_db = if !in_conv && !in_candidates {
-            registered(&ctx.db, &opt).await.unwrap_or(false)
+            if inventory.is_none() {
+                inventory = Some(InventorySnapshot::load(&ctx.db).await.ok());
+            }
+            inventory
+                .as_ref()
+                .and_then(Option::as_ref)
+                .is_some_and(|snapshot| snapshot.contains(&opt))
         } else {
             false
         };
@@ -679,23 +716,31 @@ fn is_constant_or_quantity(span: &str) -> bool {
 /// O que fica no lugar de um nome inventado que a IA insistiu em citar.
 pub const UNCONFIRMED: &str = "[não confirmado]";
 
-/// Troca cada nome inventado por [`UNCONFIRMED`], só onde ele aparece
-/// inteiro (`10.0.0.1` não mexe em `10.0.0.10`).
+/// Troca cada nome inventado por [`UNCONFIRMED`], sem diferenciar caixa e só
+/// onde ele aparece inteiro (`10.0.0.1` não mexe em `10.0.0.10`).
 #[must_use]
 pub fn redact(answer: &str, names: &[String]) -> String {
     let mut text = answer.to_string();
     for name in names.iter().filter(|name| !name.is_empty()) {
+        let Ok(re) = RegexBuilder::new(&regex::escape(name))
+            .case_insensitive(true)
+            .build()
+        else {
+            continue;
+        };
         let mut out = String::with_capacity(text.len());
         let mut last = 0;
-        for (start, found) in text.match_indices(name.as_str()) {
+        for found in re.find_iter(&text) {
+            let start = found.start();
+            let end = found.end();
             let before = text[..start].chars().next_back();
-            let after = text[start + found.len()..].chars().next();
+            let after = text[end..].chars().next();
             let whole = before.is_none_or(|c| !continues_host(c))
                 && after.is_none_or(|c| !continues_host(c));
             if whole && start >= last {
                 out.push_str(&text[last..start]);
                 out.push_str(UNCONFIRMED);
-                last = start + found.len();
+                last = end;
             }
         }
         out.push_str(&text[last..]);
@@ -741,16 +786,18 @@ pub async fn invented_in_answer<C: ConnectionTrait>(
     seen: &SeenResults,
     is_tool: impl Fn(&str) -> bool,
 ) -> Vec<String> {
-    let mut invented = Vec::new();
-    for candidate in unsupported_identifiers(answer, conversation, earlier, is_tool) {
-        if seen.mentions(&candidate) {
-            continue;
-        }
-        if !registered(db, &candidate).await.unwrap_or(false) {
-            invented.push(candidate);
-        }
+    let candidates: Vec<String> = unsupported_identifiers(answer, conversation, earlier, is_tool)
+        .into_iter()
+        .filter(|candidate| !seen.mentions(candidate))
+        .collect();
+    if candidates.is_empty() {
+        return Vec::new();
     }
-    invented
+    let snapshot = InventorySnapshot::load(db).await.ok();
+    candidates
+        .into_iter()
+        .filter(|candidate| !snapshot.as_ref().is_some_and(|inv| inv.contains(candidate)))
+        .collect()
 }
 
 /// A chave do aviso da conferência na tela: cada estado substitui o anterior.
@@ -1212,10 +1259,10 @@ mod tests {
         let nomes = vec!["agente-west-01".to_string(), "10.0.0.1".to_string()];
         assert_eq!(
             redact(
-                "No `agente-west-01` (10.0.0.1); o 10.0.0.10 e o agente-west-012 ficam.",
+                "No `agente-west-01` e no `Agente-West-01` (10.0.0.1); o 10.0.0.10 e o agente-west-012 ficam.",
                 &nomes
             ),
-            "No `[não confirmado]` ([não confirmado]); o 10.0.0.10 e o agente-west-012 ficam."
+            "No `[não confirmado]` e no `[não confirmado]` ([não confirmado]); o 10.0.0.10 e o agente-west-012 ficam."
         );
     }
 

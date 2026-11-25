@@ -8,6 +8,17 @@ use std::sync::OnceLock;
 /// no Linux pelo `extra_hosts: host-gateway` do compose).
 pub const DOCKER_HOST_ALIAS: &str = "host.docker.internal";
 
+/// O processo está rodando em ambiente de produção (`LOCO_ENV=production` ou
+/// `ENVIRONMENT=production`)?
+#[must_use]
+pub fn is_production_environment() -> bool {
+    ["LOCO_ENV", "ENVIRONMENT"].into_iter().any(|var| {
+        std::env::var(var)
+            .ok()
+            .is_some_and(|value| value.trim().eq_ignore_ascii_case("production"))
+    })
+}
+
 /// O processo roda dentro de um container?
 #[must_use]
 pub fn in_container() -> bool {

@@ -6,7 +6,7 @@
 
 use std::{
     collections::HashMap,
-    sync::{Mutex, OnceLock},
+    sync::{Mutex, OnceLock, PoisonError},
     time::{Duration, Instant},
 };
 
@@ -15,6 +15,9 @@ pub const PRIVATE_KEY_UNAVAILABLE: &str = "<CHAVE-PRIVADA-INDISPONIVEL-ROTACIONE
 
 /// Janela em que o artefato ainda pode ser buscado depois de criado o peer.
 const DEFAULT_TTL: Duration = Duration::from_secs(15 * 60);
+
+/// Teto de entradas simultâneas em memória para evitar crescimento ilimitado.
+const MAX_ENTRIES: usize = 4_096;
 
 struct StoredSecret {
     value: String,
@@ -42,59 +45,82 @@ impl EphemeralSecretStore {
     }
 
     pub fn put(&self, key: impl Into<String>, value: impl Into<String>) {
-        let Ok(mut secrets) = self.secrets.lock() else {
-            return;
-        };
-        purge_expired(&mut secrets);
+        let mut secrets = self.secrets.lock().unwrap_or_else(PoisonError::into_inner);
+        let key = key.into();
+        let now = Instant::now();
+        // Vencido sai a cada gravação: uma chave privada nunca baixada não pode
+        // ficar no heap até o cofre encher (AGENTS §7).
+        purge_expired(&mut secrets, now);
+        if secrets.len() >= MAX_ENTRIES && !secrets.contains_key(&key) {
+            if let Some(oldest_key) = secrets
+                .iter()
+                .min_by_key(|(_, entry)| entry.expires_at)
+                .map(|(k, _)| k.clone())
+            {
+                secrets.remove(&oldest_key);
+            }
+        }
         secrets.insert(
-            key.into(),
+            key,
             StoredSecret {
                 value: value.into(),
-                expires_at: Instant::now() + self.ttl,
+                expires_at: now + self.ttl,
             },
         );
     }
 
     /// Lê e descarta: a segunda chamada devolve `None`.
     pub fn consume(&self, key: &str) -> Option<String> {
-        let mut secrets = self.secrets.lock().ok()?;
-        purge_expired(&mut secrets);
-        secrets.remove(key).map(|secret| secret.value)
+        let mut secrets = self.secrets.lock().unwrap_or_else(PoisonError::into_inner);
+        let now = Instant::now();
+        secrets
+            .remove(key)
+            .filter(|secret| secret.expires_at > now)
+            .map(|secret| secret.value)
     }
 
     /// Lê **sem** descartar — para o segredo de sessão que vale por várias
     /// leituras até expirar (senha de equipamento pedida a cada sessão).
     pub fn get(&self, key: &str) -> Option<String> {
-        let mut secrets = self.secrets.lock().ok()?;
-        purge_expired(&mut secrets);
-        secrets.get(key).map(|secret| secret.value.clone())
+        let mut secrets = self.secrets.lock().unwrap_or_else(PoisonError::into_inner);
+        let now = Instant::now();
+        match secrets.get(key) {
+            Some(secret) if secret.expires_at > now => Some(secret.value.clone()),
+            Some(_) => {
+                secrets.remove(key);
+                None
+            }
+            None => None,
+        }
     }
 
     /// Descarta o segredo, se houver.
     pub fn forget(&self, key: &str) {
-        if let Ok(mut secrets) = self.secrets.lock() {
-            secrets.remove(key);
-        }
+        let mut secrets = self.secrets.lock().unwrap_or_else(PoisonError::into_inner);
+        secrets.remove(key);
     }
 
     /// Indica se ainda existe segredo disponível, **sem** consumi-lo.
     pub fn has(&self, key: &str) -> bool {
-        let Ok(mut secrets) = self.secrets.lock() else {
-            return false;
-        };
-        purge_expired(&mut secrets);
-        secrets.contains_key(key)
+        let mut secrets = self.secrets.lock().unwrap_or_else(PoisonError::into_inner);
+        let now = Instant::now();
+        match secrets.get(key) {
+            Some(secret) if secret.expires_at > now => true,
+            Some(_) => {
+                secrets.remove(key);
+                false
+            }
+            None => false,
+        }
     }
 
     pub fn clear(&self) {
-        if let Ok(mut secrets) = self.secrets.lock() {
-            secrets.clear();
-        }
+        let mut secrets = self.secrets.lock().unwrap_or_else(PoisonError::into_inner);
+        secrets.clear();
     }
 }
 
-fn purge_expired(secrets: &mut HashMap<String, StoredSecret>) {
-    let now = Instant::now();
+fn purge_expired(secrets: &mut HashMap<String, StoredSecret>, now: Instant) {
     secrets.retain(|_, secret| secret.expires_at > now);
 }
 
@@ -140,6 +166,17 @@ mod tests {
         store.put("vpn-peer:2", "chave");
         assert!(!store.has("vpn-peer:2"));
         assert_eq!(store.consume("vpn-peer:2"), None);
+    }
+
+    #[test]
+    fn gravar_expurga_os_vencidos_abaixo_do_teto() {
+        let store = EphemeralSecretStore::new(Duration::from_millis(0));
+        store.put("vpn-peer:a", "chave");
+        store.put("vpn-peer:b", "chave");
+        let secrets = store.secrets.lock().unwrap_or_else(PoisonError::into_inner);
+        // Só a última gravação resta: a anterior, vencida, saiu no `put`.
+        assert_eq!(secrets.len(), 1);
+        assert!(secrets.contains_key("vpn-peer:b"));
     }
 
     #[test]

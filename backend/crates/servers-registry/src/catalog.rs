@@ -4,6 +4,8 @@
 //! que o vinculam (RS-06): por envio, por montagem autorizada ou por ingestão.
 //! Conhecer um digest não dá acesso a ele.
 
+use std::collections::{HashMap, HashSet};
+
 use chrono::Utc;
 use sea_orm::{
     sea_query::OnConflict, ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait,
@@ -248,29 +250,63 @@ pub async fn put_manifest<C: ConnectionTrait>(
 ) -> AppResult<registry_manifests::Model> {
     let digest = Digest::of(content.as_bytes());
     let mut total = i64::try_from(content.len()).unwrap_or(i64::MAX);
-    for blob in parsed.blobs() {
-        if linked_blob(db, repository_id, &blob.digest)
-            .await?
-            .is_none()
-        {
-            return Err(AppError::validation(format!(
-                "MANIFEST_BLOB_UNKNOWN: o blob {} não foi enviado a este repositório",
-                blob.digest
-            )));
+    let blobs = parsed.blobs();
+    if !blobs.is_empty() {
+        let wanted: Vec<String> = blobs
+            .iter()
+            .map(|blob| blob.digest.to_string())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        let mut present: HashSet<String> = HashSet::with_capacity(wanted.len());
+        for chunk in wanted.chunks(400) {
+            let rows = registry_repository_blobs::Entity::find()
+                .filter(registry_repository_blobs::Column::RepositoryId.eq(repository_id))
+                .filter(registry_repository_blobs::Column::Digest.is_in(chunk.iter().cloned()))
+                .all(db)
+                .await?;
+            present.extend(rows.into_iter().map(|row| row.digest));
         }
-        total = total.saturating_add(blob.size);
+        for blob in &blobs {
+            if !present.contains(blob.digest.as_str()) {
+                return Err(AppError::validation(format!(
+                    "MANIFEST_BLOB_UNKNOWN: o blob {} não foi enviado a este repositório",
+                    blob.digest
+                )));
+            }
+            total = total.saturating_add(blob.size);
+        }
     }
     let mut platform = None;
-    for child in parsed.children() {
-        let Some(found) = manifest_by_digest(db, repository_id, child.digest.as_str()).await?
-        else {
-            return Err(AppError::validation(format!(
-                "MANIFEST_BLOB_UNKNOWN: o manifest {} não foi enviado a este repositório",
-                child.digest
-            )));
-        };
-        if child.attests().is_none() {
-            total = total.saturating_add(found.total_size);
+    let children = parsed.children();
+    if !children.is_empty() {
+        let wanted: Vec<String> = children
+            .iter()
+            .map(|child| child.digest.to_string())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        let mut found_children: HashMap<String, i64> = HashMap::with_capacity(wanted.len());
+        for chunk in wanted.chunks(400) {
+            let rows = registry_manifests::Entity::find()
+                .filter(registry_manifests::Column::RepositoryId.eq(repository_id))
+                .filter(registry_manifests::Column::Digest.is_in(chunk.iter().cloned()))
+                .all(db)
+                .await?;
+            for row in rows {
+                found_children.insert(row.digest, row.total_size);
+            }
+        }
+        for child in children {
+            let Some(&child_total) = found_children.get(child.digest.as_str()) else {
+                return Err(AppError::validation(format!(
+                    "MANIFEST_BLOB_UNKNOWN: o manifest {} não foi enviado a este repositório",
+                    child.digest
+                )));
+            };
+            if child.attests().is_none() {
+                total = total.saturating_add(child_total);
+            }
         }
     }
     if let Some(first) = parsed.images().first() {
@@ -287,7 +323,7 @@ pub async fn put_manifest<C: ConnectionTrait>(
         return Ok(existing);
     }
     let now = Utc::now().into();
-    Ok(registry_manifests::ActiveModel {
+    registry_manifests::Entity::insert(registry_manifests::ActiveModel {
         repository_id: Set(repository_id),
         digest: Set(digest.to_string()),
         media_type: Set(parsed.media_type.clone()),
@@ -315,9 +351,20 @@ pub async fn put_manifest<C: ConnectionTrait>(
         created_at: Set(now),
         updated_at: Set(now),
         ..Default::default()
-    }
-    .insert(db)
-    .await?)
+    })
+    .on_conflict(
+        OnConflict::columns([
+            registry_manifests::Column::RepositoryId,
+            registry_manifests::Column::Digest,
+        ])
+        .do_nothing()
+        .to_owned(),
+    )
+    .exec_without_returning(db)
+    .await?;
+    manifest_by_digest(db, repository_id, digest.as_str())
+        .await?
+        .ok_or_else(|| AppError::not_found("Manifest não encontrado após gravação"))
 }
 
 /// Aponta a tag para o manifest. Tag de commit é imutável (RF-04): mudar o
@@ -337,32 +384,56 @@ pub async fn set_tag<C: ConnectionTrait>(
         return Err(AppError::validation(format!("Tag inválida: {name}")));
     }
     let now = Utc::now().into();
-    match tag(db, repository_id, name).await? {
-        Some(existing) if existing.manifest_digest == digest.as_str() => Ok(()),
-        Some(_) if names::is_commit_tag(name) => Err(AppError::conflict(format!(
-            "A tag {name} é de um commit e não muda de conteúdo (imutável)"
-        ))),
-        Some(existing) => {
-            let mut active: registry_tags::ActiveModel = existing.into();
-            active.manifest_digest = Set(digest.to_string());
-            active.updated_at = Set(now);
-            active.update(db).await?;
-            Ok(())
-        }
-        None => {
-            registry_tags::ActiveModel {
-                repository_id: Set(repository_id),
-                name: Set(name.to_string()),
-                manifest_digest: Set(digest.to_string()),
-                created_at: Set(now),
-                updated_at: Set(now),
-                ..Default::default()
-            }
-            .insert(db)
-            .await?;
-            Ok(())
+    if let Some(existing) = tag(db, repository_id, name).await? {
+        return update_existing_tag(db, existing, name, digest, now).await;
+    }
+    registry_tags::Entity::insert(registry_tags::ActiveModel {
+        repository_id: Set(repository_id),
+        name: Set(name.to_string()),
+        manifest_digest: Set(digest.to_string()),
+        created_at: Set(now),
+        updated_at: Set(now),
+        ..Default::default()
+    })
+    .on_conflict(
+        OnConflict::columns([
+            registry_tags::Column::RepositoryId,
+            registry_tags::Column::Name,
+        ])
+        .do_nothing()
+        .to_owned(),
+    )
+    .exec_without_returning(db)
+    .await?;
+    // Em corrida de inserção, o segundo concorrente confere o registro gravado.
+    if let Some(existing) = tag(db, repository_id, name).await? {
+        if existing.manifest_digest != digest.as_str() {
+            return update_existing_tag(db, existing, name, digest, now).await;
         }
     }
+    Ok(())
+}
+
+async fn update_existing_tag<C: ConnectionTrait>(
+    db: &C,
+    existing: registry_tags::Model,
+    name: &str,
+    digest: &Digest,
+    now: sea_orm::prelude::DateTimeWithTimeZone,
+) -> AppResult<()> {
+    if existing.manifest_digest == digest.as_str() {
+        return Ok(());
+    }
+    if names::is_commit_tag(name) {
+        return Err(AppError::conflict(format!(
+            "A tag {name} é de um commit e não muda de conteúdo (imutável)"
+        )));
+    }
+    let mut active: registry_tags::ActiveModel = existing.into();
+    active.manifest_digest = Set(digest.to_string());
+    active.updated_at = Set(now);
+    active.update(db).await?;
+    Ok(())
 }
 
 /// As tags do repositório, em ordem, com a paginação da especificação

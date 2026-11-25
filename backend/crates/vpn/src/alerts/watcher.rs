@@ -9,9 +9,11 @@
 //! Não decide o que é alerta: a política ("túnel caído é crítico", "instável só
 //! avisa depois de 5 minutos") vive nas regras do catálogo `vpn_*`.
 
+use std::collections::HashMap;
+
 use chrono::Utc;
 use loco_rs::app::AppContext;
-use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use serde_json::json;
 
 use netmonitor_core::{
@@ -37,13 +39,64 @@ use crate::central::Central;
 ///
 /// Propaga erro do banco.
 pub async fn evaluate_server_peers(ctx: &AppContext, vpn_server_id: i64) -> AppResult<usize> {
-    let central = Central::from_context(ctx)?;
     let peers = vpn_peers::Entity::find_enabled_for_server(vpn_server_id)
         .all(&ctx.db)
         .await?;
+    evaluate_server_peers_loaded(ctx, peers).await
+}
+
+/// Avalia uma lista de peers já carregada (evita uma nova consulta a
+/// `vpn_peers` e só busca `devices` para os peers que realmente mudaram de
+/// estado).
+///
+/// # Errors
+///
+/// Propaga erro do banco.
+pub async fn evaluate_server_peers_loaded(
+    ctx: &AppContext,
+    peers: Vec<vpn_peers::Model>,
+) -> AppResult<usize> {
+    if peers.is_empty() {
+        return Ok(0);
+    }
+    // Filtra antes de qualquer consulta a `devices`: em 99% dos ciclos de 10 s
+    // nenhum túnel muda de estado e não há nada a consultar.
+    let changed_peers: Vec<(
+        vpn_peers::Model,
+        vpn_peers::VpnPeerConnectionStatus,
+        Option<vpn_peers::VpnPeerConnectionStatus>,
+    )> = peers
+        .into_iter()
+        .filter_map(|peer| {
+            let status = peer.connection_status();
+            let previous_status = peer
+                .last_connection_status
+                .as_deref()
+                .and_then(parse_status);
+            (previous_status != Some(status)).then_some((peer, status, previous_status))
+        })
+        .collect();
+    if changed_peers.is_empty() {
+        return Ok(0);
+    }
+
+    let central = Central::from_context(ctx)?;
+    let device_ids: Vec<i64> = changed_peers
+        .iter()
+        .map(|(peer, _, _)| peer.device_id)
+        .collect();
+    let devices_by_id: HashMap<i64, devices::Model> = devices::Entity::find()
+        .filter(devices::Column::Id.is_in(device_ids))
+        .all(&ctx.db)
+        .await?
+        .into_iter()
+        .map(|device| (device.id, device))
+        .collect();
+
     let mut transitions = 0;
-    for peer in peers {
-        if evaluate_peer(ctx, &central, peer).await? {
+    for (peer, status, previous_status) in changed_peers {
+        let device = devices_by_id.get(&peer.device_id);
+        if evaluate_peer_with_device(ctx, &central, peer, status, previous_status, device).await? {
             transitions += 1;
         }
     }
@@ -60,18 +113,32 @@ pub async fn evaluate_peer(
     central: &Central,
     peer: vpn_peers::Model,
 ) -> AppResult<bool> {
-    let device = devices::Entity::find_by_id(peer.device_id)
-        .one(&ctx.db)
-        .await?;
-    let peer_name = device.as_ref().map_or_else(
-        || format!("Peer #{}", peer.id),
-        |device| device.name.clone(),
-    );
     let status = peer.connection_status();
     let previous_status = peer
         .last_connection_status
         .as_deref()
         .and_then(parse_status);
+    if previous_status == Some(status) {
+        return Ok(false);
+    }
+    let device = devices::Entity::find_by_id(peer.device_id)
+        .one(&ctx.db)
+        .await?;
+    evaluate_peer_with_device(ctx, central, peer, status, previous_status, device.as_ref()).await
+}
+
+async fn evaluate_peer_with_device(
+    ctx: &AppContext,
+    central: &Central,
+    peer: vpn_peers::Model,
+    status: vpn_peers::VpnPeerConnectionStatus,
+    previous_status: Option<vpn_peers::VpnPeerConnectionStatus>,
+    device: Option<&devices::Model>,
+) -> AppResult<bool> {
+    let peer_name = device.map_or_else(
+        || format!("Peer #{}", peer.id),
+        |device| device.name.clone(),
+    );
 
     let dataset = VpnPeerDataset::new(&VpnPeerFacts {
         peer_name: &peer_name,
@@ -102,7 +169,7 @@ pub async fn evaluate_peer(
         peer_id,
         vpn_server_id,
         device_id,
-        device.as_ref(),
+        device,
         &dataset.0,
         &message,
     )
@@ -115,7 +182,7 @@ pub async fn evaluate_peer(
     // `destabilized` já é fato.
     let target = AlertTarget {
         scope: AlertEvaluationScope {
-            site_id: device.as_ref().and_then(|device| device.site_id),
+            site_id: device.and_then(|device| device.site_id),
             device_id: Some(device_id),
             monitor_id: None,
         },

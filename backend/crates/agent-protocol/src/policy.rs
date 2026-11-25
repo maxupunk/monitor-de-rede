@@ -97,9 +97,10 @@ impl FromStr for Permission {
     type Err = String;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let trimmed = value.trim();
         Self::ALL
             .into_iter()
-            .find(|permission| permission.as_str() == value.trim().to_ascii_lowercase())
+            .find(|permission| permission.as_str().eq_ignore_ascii_case(trimmed))
             .ok_or_else(|| format!("permissão desconhecida: {value}"))
     }
 }

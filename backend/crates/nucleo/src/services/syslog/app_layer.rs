@@ -27,7 +27,10 @@
 //! emitiriam outro `INSERT`. A fila é o que desacopla o request do banco e o
 //! que corta a recursão.
 
-use std::sync::{Arc, RwLock};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, RwLock,
+};
 
 use chrono::Utc;
 use tracing::{Event, Level, Subscriber};
@@ -58,11 +61,13 @@ pub const LOCAL_SOURCE_IP: &str = "127.0.0.1";
 /// o segundo `build` grava numa fila cujo escritor já morreu, e a linha some
 /// sem erro. A leitura é sob `read()`, sem contenção no caminho comum.
 static QUEUE: RwLock<Option<LogQueue>> = RwLock::new(None);
+static QUEUE_INSTALLED: AtomicBool = AtomicBool::new(false);
 
 /// Publica a fila para a camada. Chamado quando o pipeline monta.
 pub fn install_queue(queue: LogQueue) {
     if let Ok(mut atual) = QUEUE.write() {
         *atual = Some(queue);
+        QUEUE_INSTALLED.store(true, Ordering::Release);
     }
 }
 
@@ -73,6 +78,7 @@ pub fn install_queue(queue: LogQueue) {
 pub fn clear_queue() {
     if let Ok(mut atual) = QUEUE.write() {
         *atual = None;
+        QUEUE_INSTALLED.store(false, Ordering::Release);
     }
 }
 
@@ -196,6 +202,11 @@ where
     S: Subscriber + for<'a> LookupSpan<'a>,
 {
     fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
+        // Antes de o pipeline montar (boot, CLI, migrations) não há fila: sair
+        // antes evita formatar `Achatador` e alocar strings à toa.
+        if !QUEUE_INSTALLED.load(Ordering::Acquire) {
+            return;
+        }
         let metadata = event.metadata();
         if !deve_gravar(metadata.target(), *metadata.level()) {
             return;

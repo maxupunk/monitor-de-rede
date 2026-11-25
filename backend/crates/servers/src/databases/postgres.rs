@@ -24,6 +24,8 @@
 //! e de intervalo, regras, tabelas estrangeiras e objetos grandes. Cada um que
 //! existir no banco vira um aviso no histórico do backup.
 
+use std::collections::HashMap;
+
 use async_trait::async_trait;
 use futures::TryStreamExt;
 use sqlx::{
@@ -180,6 +182,8 @@ impl Driver for PostgresDriver {
             progress,
             stats: DumpStats::default(),
             version_num,
+            sequences: Vec::new(),
+            columns_by_table: HashMap::new(),
         };
         dumper
             .out
@@ -285,6 +289,7 @@ impl RestoreSession for PgSession {
         &mut self,
         statement: &str,
         input: &mut LineReader,
+        progress: &dyn Progress,
     ) -> Result<u64, DatabaseError> {
         let mut copy = self
             .conn
@@ -293,35 +298,60 @@ impl RestoreSession for PgSession {
             .map_err(|error| DatabaseError::query(&error))?;
         let mut batch = Vec::with_capacity(COPY_BATCH_BYTES);
         let mut rows = 0_u64;
+        let mut batch_rows = 0_u64;
         loop {
-            let Some(line) = input.next_line().await? else {
+            let Some(line) = input.next_line_ref().await? else {
                 let _ = copy.abort("fim do arquivo dentro de um COPY").await;
                 return Err(DatabaseError::Io(
                     "o arquivo acabou no meio dos dados de uma tabela".to_string(),
                 ));
             };
-            if line == "\\." {
+            let trimmed = line.strip_suffix('\r').unwrap_or(line);
+            if trimmed == "\\." {
                 break;
             }
-            batch.extend_from_slice(line.as_bytes());
+            batch.extend_from_slice(trimmed.as_bytes());
             batch.push(b'\n');
             rows += 1;
+            batch_rows += 1;
             if batch.len() >= COPY_BATCH_BYTES {
-                copy.send(std::mem::take(&mut batch))
+                // `send` copia para o buffer da conexão: o lote é reaproveitado.
+                copy.send(batch.as_slice())
                     .await
                     .map_err(|error| DatabaseError::query(&error))?;
+                batch.clear();
+                progress.rows(batch_rows);
+                progress.bytes(input.bytes());
+                batch_rows = 0;
             }
         }
         if !batch.is_empty() {
-            copy.send(batch)
+            copy.send(batch.as_slice())
                 .await
                 .map_err(|error| DatabaseError::query(&error))?;
+        }
+        if batch_rows > 0 {
+            progress.rows(batch_rows);
+            progress.bytes(input.bytes());
         }
         copy.finish()
             .await
             .map_err(|error| DatabaseError::query(&error))?;
         Ok(rows)
     }
+}
+
+/// Sequência avulsa/serial em cache para evitar 3 consultas idênticas ao catálogo.
+struct SequenceInfo {
+    qname: String,
+    owned_by: Option<String>,
+}
+
+/// Coluna de tabela em cache (evita 2*N consultas `pg_attribute` no dump).
+struct TableColumn {
+    quoted_name: String,
+    definition: String,
+    generated: bool,
 }
 
 /// Um dump em andamento.
@@ -331,6 +361,8 @@ struct Dumper<'a> {
     progress: &'a dyn Progress,
     stats: DumpStats,
     version_num: i32,
+    sequences: Vec<SequenceInfo>,
+    columns_by_table: HashMap<i64, Vec<TableColumn>>,
 }
 
 /// Tabela a copiar.
@@ -508,12 +540,14 @@ impl Dumper<'_> {
 
     async fn sequences_create(&mut self) -> Result<(), DatabaseError> {
         let list = rows(self.conn, &self.sequences_query()).await?;
+        self.sequences = Vec::with_capacity(list.len());
         if list.is_empty() {
             return Ok(());
         }
         self.out.section("Sequências").await?;
         for row in &list {
             let name: String = get(row, "q")?;
+            let owned_by: Option<String> = get(row, "owned_by")?;
             let data_type: String = get(row, "data_type")?;
             let cycle = if get::<bool>(row, "cycle")? {
                 "CYCLE"
@@ -531,13 +565,16 @@ impl Dumper<'_> {
                     get::<i64>(row, "cache")?,
                 ))
                 .await?;
+            self.sequences.push(SequenceInfo {
+                qname: name,
+                owned_by,
+            });
         }
         Ok(())
     }
 
     /// Valor atual de cada sequência, depois dos dados.
     async fn sequence_values(&mut self) -> Result<(), DatabaseError> {
-        let standalone = rows(self.conn, &self.sequences_query()).await?;
         let identity = rows(
             self.conn,
             &format!(
@@ -553,17 +590,18 @@ impl Dumper<'_> {
             ),
         )
         .await?;
-        if standalone.is_empty() && identity.is_empty() {
+        if self.sequences.is_empty() && identity.is_empty() {
             return Ok(());
         }
         self.out.section("Valores das sequências").await?;
-        for row in &standalone {
-            let name: String = get(row, "q")?;
-            let (value, called) = self.sequence_state(&name).await?;
+        let standalone_names: Vec<String> =
+            self.sequences.iter().map(|s| s.qname.clone()).collect();
+        for name in &standalone_names {
+            let (value, called) = self.sequence_state(name).await?;
             self.out
                 .statement(&format!(
                     "SELECT pg_catalog.setval({}, {value}, {called})",
-                    quote_literal(FAMILY, &name)
+                    quote_literal(FAMILY, name)
                 ))
                 .await?;
         }
@@ -594,14 +632,15 @@ impl Dumper<'_> {
     }
 
     async fn sequences_owned(&mut self) -> Result<(), DatabaseError> {
-        let list = rows(self.conn, &self.sequences_query()).await?;
-        for row in &list {
-            if let Some(owner) = get::<Option<String>>(row, "owned_by")? {
-                let name: String = get(row, "q")?;
-                self.out
-                    .statement(&format!("ALTER SEQUENCE {name} OWNED BY {owner}"))
-                    .await?;
-            }
+        let owned: Vec<(String, String)> = self
+            .sequences
+            .iter()
+            .filter_map(|seq| Some((seq.qname.clone(), seq.owned_by.clone()?)))
+            .collect();
+        for (name, owner) in owned {
+            self.out
+                .statement(&format!("ALTER SEQUENCE {name} OWNED BY {owner}"))
+                .await?;
         }
         Ok(())
     }
@@ -661,6 +700,7 @@ impl Dumper<'_> {
             ),
         )
         .await?;
+        self.load_all_columns().await?;
         self.out.section("Tabelas").await?;
         let mut tables = Vec::with_capacity(list.len());
         for row in &list {
@@ -682,7 +722,11 @@ impl Dumper<'_> {
                 let bound: String = get(row, "bound")?;
                 format!("{create} {} PARTITION OF {parent} {bound}", table.qname)
             } else {
-                let columns = self.column_definitions(table.oid).await?;
+                let columns: Vec<&str> = self
+                    .columns_by_table
+                    .get(&table.oid)
+                    .map(|cols| cols.iter().map(|c| c.definition.as_str()).collect())
+                    .unwrap_or_default();
                 let mut sql = format!(
                     "{create} {} (\n    {}\n)",
                     table.qname,
@@ -700,72 +744,85 @@ impl Dumper<'_> {
         Ok(tables)
     }
 
-    async fn column_definitions(&mut self, oid: i64) -> Result<Vec<String>, DatabaseError> {
-        let list = sqlx::query(
-            "SELECT quote_ident(a.attname) AS q, format_type(a.atttypid, a.atttypmod) AS typ, \
-             a.attnotnull AS notnull, pg_get_expr(ad.adbin, ad.adrelid) AS def, \
-             a.attidentity::text AS identity, a.attgenerated::text AS generated, \
-             CASE WHEN a.attcollation <> 0 AND a.attcollation <> t.typcollation THEN \
-               (SELECT format('%I.%I', cn.nspname, co.collname) FROM pg_collation co \
-                JOIN pg_namespace cn ON cn.oid = co.collnamespace WHERE co.oid = a.attcollation) \
-             END AS collation \
-             FROM pg_attribute a JOIN pg_type t ON t.oid = a.atttypid \
-             LEFT JOIN pg_attrdef ad ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum \
-             WHERE a.attrelid = $1::bigint::oid AND a.attnum > 0 AND NOT a.attisdropped \
-             ORDER BY a.attnum",
+    /// Carrega todas as colunas de todas as tabelas de usuário numa única
+    /// consulta (evita 2*N round-trips ao catálogo no túnel do agente).
+    async fn load_all_columns(&mut self) -> Result<(), DatabaseError> {
+        let list = rows(
+            self.conn,
+            &format!(
+                "SELECT a.attrelid::bigint AS oid, quote_ident(a.attname) AS q, \
+                 format_type(a.atttypid, a.atttypmod) AS typ, \
+                 a.attnotnull AS notnull, pg_get_expr(ad.adbin, ad.adrelid) AS def, \
+                 a.attidentity::text AS identity, a.attgenerated::text AS generated, \
+                 CASE WHEN a.attcollation <> 0 AND a.attcollation <> t.typcollation THEN \
+                   (SELECT format('%I.%I', cn.nspname, co.collname) FROM pg_collation co \
+                    JOIN pg_namespace cn ON cn.oid = co.collnamespace WHERE co.oid = a.attcollation) \
+                 END AS collation \
+                 FROM pg_attribute a \
+                 JOIN pg_class c ON c.oid = a.attrelid \
+                 JOIN pg_namespace n ON n.oid = c.relnamespace \
+                 JOIN pg_type t ON t.oid = a.atttypid \
+                 LEFT JOIN pg_attrdef ad ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum \
+                 WHERE c.relkind IN ('r', 'p') AND {USER_NAMESPACES} AND {} \
+                 AND a.attnum > 0 AND NOT a.attisdropped \
+                 ORDER BY a.attrelid, a.attnum",
+                not_from_extension("pg_class", "c.oid")
+            ),
         )
-        .bind(oid)
-        .fetch_all(&mut *self.conn)
-        .await
-        .map_err(|error| DatabaseError::query(&error))?;
+        .await?;
 
-        list.iter()
-            .map(|row| {
-                let mut column = format!(
-                    "{} {}",
-                    get::<String>(row, "q")?,
-                    get::<String>(row, "typ")?
-                );
-                if let Some(collation) = get::<Option<String>>(row, "collation")? {
-                    column.push_str(&format!(" COLLATE {collation}"));
-                }
-                let def: Option<String> = get(row, "def")?;
-                match (
-                    get::<String>(row, "generated")?.as_str(),
-                    get::<String>(row, "identity")?.as_str(),
-                ) {
-                    ("s", _) => column.push_str(&format!(
-                        " GENERATED ALWAYS AS ({}) STORED",
-                        def.unwrap_or_default()
-                    )),
-                    (_, "a") => column.push_str(" GENERATED ALWAYS AS IDENTITY"),
-                    (_, "d") => column.push_str(" GENERATED BY DEFAULT AS IDENTITY"),
-                    _ => {
-                        if let Some(def) = def {
-                            column.push_str(&format!(" DEFAULT {def}"));
-                        }
+        self.columns_by_table.clear();
+        for row in &list {
+            let oid: i64 = get(row, "oid")?;
+            let quoted_name: String = get(row, "q")?;
+            let mut column = format!("{quoted_name} {}", get::<String>(row, "typ")?);
+            if let Some(collation) = get::<Option<String>>(row, "collation")? {
+                column.push_str(&format!(" COLLATE {collation}"));
+            }
+            let def: Option<String> = get(row, "def")?;
+            let generated_kind: String = get(row, "generated")?;
+            let identity_kind: String = get(row, "identity")?;
+            match (generated_kind.as_str(), identity_kind.as_str()) {
+                ("s", _) => column.push_str(&format!(
+                    " GENERATED ALWAYS AS ({}) STORED",
+                    def.unwrap_or_default()
+                )),
+                (_, "a") => column.push_str(" GENERATED ALWAYS AS IDENTITY"),
+                (_, "d") => column.push_str(" GENERATED BY DEFAULT AS IDENTITY"),
+                _ => {
+                    if let Some(def) = def {
+                        column.push_str(&format!(" DEFAULT {def}"));
                     }
                 }
-                if get::<bool>(row, "notnull")? {
-                    column.push_str(" NOT NULL");
-                }
-                Ok(column)
-            })
-            .collect()
+            }
+            if get::<bool>(row, "notnull")? {
+                column.push_str(" NOT NULL");
+            }
+            self.columns_by_table
+                .entry(oid)
+                .or_default()
+                .push(TableColumn {
+                    quoted_name,
+                    definition: column,
+                    generated: !generated_kind.is_empty(),
+                });
+        }
+        Ok(())
     }
 
     async fn data(&mut self, tables: &[TableInfo]) -> Result<(), DatabaseError> {
         self.out.section("Dados").await?;
         for table in tables.iter().filter(|table| table.kind == "r") {
-            let columns: Vec<String> = sqlx::query_scalar(
-                "SELECT quote_ident(attname) FROM pg_attribute \
-                 WHERE attrelid = $1::bigint::oid AND attnum > 0 AND NOT attisdropped \
-                 AND attgenerated = '' ORDER BY attnum",
-            )
-            .bind(table.oid)
-            .fetch_all(&mut *self.conn)
-            .await
-            .map_err(|error| DatabaseError::query(&error))?;
+            let columns: Vec<String> = self
+                .columns_by_table
+                .get(&table.oid)
+                .map(|cols| {
+                    cols.iter()
+                        .filter(|c| !c.generated)
+                        .map(|c| c.quoted_name.clone())
+                        .collect()
+                })
+                .unwrap_or_default();
             if columns.is_empty() {
                 continue;
             }

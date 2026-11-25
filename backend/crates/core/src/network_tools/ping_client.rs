@@ -3,7 +3,7 @@
 
 use std::{
     net::IpAddr,
-    sync::{Arc, Mutex, PoisonError},
+    sync::{Arc, Mutex, OnceLock, PoisonError},
 };
 
 use loco_rs::app::AppContext;
@@ -46,11 +46,16 @@ impl PingClient {
     }
 
     /// Cliente do processo, aberto agora se o boot não conseguiu.
+    ///
+    /// Quando o contexto não registrou uma [`PingClientCell`] (ex.: testes
+    /// unitários sem `after_context`), usa uma célula fallback única por
+    /// processo em vez de abrir um socket novo a cada chamada.
     pub fn from_context(ctx: &AppContext) -> AppResult<Self> {
-        ctx.shared_store
-            .get::<PingClientCell>()
-            .unwrap_or_default()
-            .client()
+        if let Some(cell) = ctx.shared_store.get::<PingClientCell>() {
+            return cell.client();
+        }
+        static FALLBACK: OnceLock<PingClientCell> = OnceLock::new();
+        FALLBACK.get_or_init(PingClientCell::default).client()
     }
 
     #[must_use]

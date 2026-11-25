@@ -679,10 +679,12 @@ async fn approval(
 
 async fn auto_accept_show(
     State(ctx): State<AppContext>,
+    headers: HeaderMap,
     Query(query): Query<AutoAcceptQuery>,
 ) -> AppResult<Response> {
+    let user = authenticated_user(&ctx, &headers).await?;
     Ok(format::json(
-        actions::auto_accept_state(&ctx, &query.conversation_key, query.device_id).await?,
+        actions::auto_accept_state(&ctx, &query.conversation_key, query.device_id, user.id).await?,
     )?)
 }
 
@@ -714,7 +716,7 @@ async fn auto_accept_store(
     )
     .await;
     Ok(format::json(
-        actions::auto_accept_state(&ctx, &input.conversation_key, input.device_id).await?,
+        actions::auto_accept_state(&ctx, &input.conversation_key, input.device_id, user.id).await?,
     )?)
 }
 
@@ -723,8 +725,13 @@ async fn auto_accept_destroy(
     headers: HeaderMap,
     Json(input): Json<AutoAcceptQuery>,
 ) -> AppResult<Response> {
+    let user = authenticated_user(&ctx, &headers).await?;
     let device = actions::device(&ctx, input.device_id).await?;
-    auto_accept::revoke(&ctx.db, &input.conversation_key, input.device_id).await?;
+    // Cada um desliga o próprio aceite; o administrador, o de qualquer um.
+    let only_user = (!<netmonitor_core::roles::Role as std::str::FromStr>::from_str(&user.role)?
+        .can_manage_users())
+    .then_some(user.id);
+    auto_accept::revoke(&ctx.db, &input.conversation_key, input.device_id, only_user).await?;
     audit(
         &ctx,
         &headers,
@@ -735,7 +742,7 @@ async fn auto_accept_destroy(
     )
     .await;
     Ok(format::json(
-        actions::auto_accept_state(&ctx, &input.conversation_key, input.device_id).await?,
+        actions::auto_accept_state(&ctx, &input.conversation_key, input.device_id, user.id).await?,
     )?)
 }
 

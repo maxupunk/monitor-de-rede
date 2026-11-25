@@ -182,7 +182,10 @@ pub fn severity(data: &Value, ecosystem: &str) -> Severity {
 
 /// `Ubuntu:22.04:LTS` vale para `Ubuntu:22.04`; o resto é igualdade.
 fn same_ecosystem(advisory: &str, package: &str) -> bool {
-    advisory == package || advisory.starts_with(&format!("{package}:"))
+    advisory == package
+        || advisory
+            .strip_prefix(package)
+            .is_some_and(|rest| rest.starts_with(':'))
 }
 
 /// O que um aviso diz de um pacote.

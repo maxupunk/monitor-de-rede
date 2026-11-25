@@ -11,7 +11,7 @@
 //! mesmo AP.
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     sync::{Mutex, OnceLock, PoisonError},
 };
 
@@ -71,10 +71,13 @@ pub async fn refresh(
         forget_others(ctx, &device_ids);
     }
 
+    let full_fleet = device_id.is_none();
     let claimed = claim(ctx, targets);
     if !claimed.is_empty() {
         let ctx = ctx.clone();
-        tokio::spawn(async move { read_all(&ctx, claimed, Requester::user(user_id)).await });
+        tokio::spawn(
+            async move { read_all(&ctx, claimed, Requester::user(user_id), full_fleet).await },
+        );
     }
     Ok(WifiRefreshStarted { device_ids })
 }
@@ -90,7 +93,7 @@ pub async fn read_fleet(ctx: &AppContext, requester: Requester) -> AppResult<Fle
     let device_ids: Vec<i64> = targets.iter().map(|target| target.device.id).collect();
     forget_others(ctx, &device_ids);
 
-    let snapshots = read_all(ctx, claim(ctx, targets), requester).await;
+    let snapshots = read_all(ctx, claim(ctx, targets), requester, true).await;
     let complete = !device_ids.is_empty()
         && snapshots.len() == device_ids.len()
         && snapshots
@@ -109,8 +112,22 @@ fn claim(ctx: &AppContext, targets: Vec<Target>) -> Vec<(Target, ReadingGuard)> 
         .into_iter()
         .filter_map(|target| ReadingGuard::claim(target.device.id).map(|guard| (target, guard)))
         .collect();
+    if claimed.is_empty() {
+        return claimed;
+    }
+    let previous_by_device: HashMap<i64, WifiDeviceSnapshot> = EventBus::from_context(ctx)
+        .ok()
+        .map(|bus| {
+            stored(&bus)
+                .map(|snapshot| (snapshot.device_id, snapshot))
+                .collect()
+        })
+        .unwrap_or_default();
     for (target, _) in &claimed {
-        publish(ctx, &reading(ctx, target));
+        publish(
+            ctx,
+            &reading_from(previous_by_device.get(&target.device.id), target),
+        );
     }
     claimed
 }
@@ -130,6 +147,9 @@ async fn target(ctx: &AppContext, device_id: i64) -> AppResult<Target> {
 
 async fn every_target(ctx: &AppContext) -> AppResult<Vec<Target>> {
     let mut sources = source::all(&ctx.db).await?;
+    if sources.is_empty() {
+        return Ok(Vec::new());
+    }
     let devices = devices::Entity::find()
         .filter(devices::Column::Id.is_in(sources.keys().copied().collect::<Vec<_>>()))
         .all(&ctx.db)
@@ -148,14 +168,15 @@ async fn read_all(
     ctx: &AppContext,
     targets: Vec<(Target, ReadingGuard)>,
     requester: Requester,
+    full_fleet: bool,
 ) -> Vec<WifiDeviceSnapshot> {
     // O fabricante de cada MAC sai da memória do processo.
     vendors::service::ensure_loaded(&ctx.db).await;
     let settings = settings::load(&ctx.db).await.unwrap_or_default();
-    let settings = &settings;
+    let settings_ref = &settings;
     let snapshots = futures::stream::iter(targets)
         .map(|(target, guard)| async move {
-            let environment = settings.environment_for(target.device.id);
+            let environment = settings_ref.environment_for(target.device.id);
             let snapshot = read(ctx, &target, requester, environment).await;
             publish(ctx, &snapshot);
             drop(guard);
@@ -165,7 +186,21 @@ async fn read_all(
         .collect::<Vec<_>>()
         .await;
     // Quem trocou de AP desde a rodada anterior: histórico, mapa e ping-pong.
-    if let Err(error) = roaming::track(ctx, &snapshots).await {
+    // Numa leitura de um único AP, combina com os snapshots atuais dos demais
+    // APs para que uma sobra de associação antiga não dispare falso roaming.
+    let roaming_view = if full_fleet {
+        snapshots.clone()
+    } else {
+        let mut by_device: HashMap<i64, WifiDeviceSnapshot> = current_snapshots(ctx)
+            .into_iter()
+            .map(|snapshot| (snapshot.device_id, snapshot))
+            .collect();
+        for snapshot in &snapshots {
+            by_device.insert(snapshot.device_id, snapshot.clone());
+        }
+        by_device.into_values().collect()
+    };
+    if let Err(error) = roaming::track_with_settings(ctx, &roaming_view, settings_ref).await {
         tracing::warn!(%error, "falha ao registrar o roaming Wi-Fi");
     }
     snapshots
@@ -222,12 +257,9 @@ async fn stations(
 }
 
 /// O estado "lendo", com o que a leitura anterior trouxe.
-fn reading(ctx: &AppContext, target: &Target) -> WifiDeviceSnapshot {
-    let previous = EventBus::from_context(ctx)
-        .ok()
-        .and_then(|bus| previous(&bus, target.device.id));
+fn reading_from(previous: Option<&WifiDeviceSnapshot>, target: &Target) -> WifiDeviceSnapshot {
     let (read_at, stations) = previous
-        .map(|snapshot| (snapshot.read_at, snapshot.stations))
+        .map(|snapshot| (snapshot.read_at.clone(), snapshot.stations.clone()))
         .unwrap_or_default();
     snapshot(target, WifiReadStatus::Reading, read_at, None, stations)
 }
@@ -267,10 +299,6 @@ pub(super) fn current_snapshots(ctx: &AppContext) -> Vec<WifiDeviceSnapshot> {
     EventBus::from_context(ctx)
         .map(|bus| stored(&bus).collect())
         .unwrap_or_default()
-}
-
-fn previous(bus: &EventBus, device_id: i64) -> Option<WifiDeviceSnapshot> {
-    stored(bus).find(|snapshot| snapshot.device_id == device_id)
 }
 
 /// Equipamento que perdeu o plugin Wi-Fi não volta a quem conectar depois.

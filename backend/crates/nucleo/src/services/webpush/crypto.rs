@@ -123,15 +123,26 @@ pub fn build_vapid_header(
     Ok(format!("vapid t={}, k={}", token, vapid.public_key_base64))
 }
 
+/// Tamanho máximo de payload plaintext para registro único RFC 8188 (`rs = 4096`):
+/// `4096 - 1` (delimitador `0x02`) `- 16` (tag AES-128-GCM) = `4079` bytes.
+const MAX_SINGLE_RECORD_PAYLOAD: usize = 4096 - 1 - 16;
+
 /// Criptografa o payload da notificação usando AES-128-GCM (RFC 8291 + RFC 8188).
 ///
 /// # Errors
 ///
-/// Retorna erro se as chaves da subscrição forem inválidas ou a cifra falhar.
+/// Retorna erro se as chaves da subscrição forem inválidas, o payload exceder
+/// o limite de registro único ou a cifra falhar.
 pub fn encrypt_payload(
     subscription: &SubscriptionKeys,
     payload_bytes: &[u8],
 ) -> AppResult<Vec<u8>> {
+    if payload_bytes.len() > MAX_SINGLE_RECORD_PAYLOAD {
+        return Err(AppError::bad_request(format!(
+            "Payload Web Push excede o limite de {MAX_SINGLE_RECORD_PAYLOAD} bytes ({} bytes)",
+            payload_bytes.len()
+        )));
+    }
     let client_public_bytes = base64url_decode(&subscription.p256dh)?;
     let client_auth_bytes = base64url_decode(&subscription.auth)?;
 
@@ -285,5 +296,20 @@ mod tests {
         assert_eq!(idlen, 65);
         let server_pub_tag = encrypted[21];
         assert_eq!(server_pub_tag, 0x04);
+    }
+
+    #[test]
+    fn recusa_payload_acima_do_limite_de_registro_unico() {
+        let client_secret = SigningKey::random(&mut OsRng);
+        let client_pub = EncodedPoint::from(client_secret.verifying_key());
+        let mut client_auth = [0u8; 16];
+        OsRng.fill_bytes(&mut client_auth);
+        let sub = SubscriptionKeys {
+            p256dh: base64url_encode(client_pub.as_bytes()),
+            auth: base64url_encode(&client_auth),
+        };
+
+        assert!(encrypt_payload(&sub, &[0u8; MAX_SINGLE_RECORD_PAYLOAD]).is_ok());
+        assert!(encrypt_payload(&sub, &[0u8; MAX_SINGLE_RECORD_PAYLOAD + 1]).is_err());
     }
 }

@@ -12,22 +12,28 @@ pub struct SiteInput {
     pub active: Option<bool>,
 }
 
-fn deserialize_some<'de, T, D>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+/// Distingue "campo ausente" de "campo `null`" num payload parcial.
+///
+/// `#[serde(default)]` dá `None` quando a chave não veio; este desserializador
+/// embrulha o valor lido em `Some`, de modo que `null` explícito chega como
+/// `Some(None)`. É o único jeito de um `PUT` parcial poder **limpar** um
+/// campo opcional em vez de só preenchê-lo.
+fn presente<'de, T, D>(deserializer: D) -> Result<Option<T>, D::Error>
 where
     T: Deserialize<'de>,
     D: serde::Deserializer<'de>,
 {
-    Deserialize::deserialize(deserializer).map(Some)
+    T::deserialize(deserializer).map(Some)
 }
 
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceInput {
-    #[serde(default, deserialize_with = "deserialize_some")]
+    #[serde(default, deserialize_with = "presente")]
     pub site_id: Option<Option<i64>>,
-    #[serde(default, deserialize_with = "deserialize_some")]
+    #[serde(default, deserialize_with = "presente")]
     pub network_id: Option<Option<i64>>,
-    #[serde(default, deserialize_with = "deserialize_some")]
+    #[serde(default, deserialize_with = "presente")]
     pub parent_id: Option<Option<i64>>,
     pub ip_address: Option<String>,
     pub mac_address: Option<String>,
@@ -95,20 +101,6 @@ pub struct ProbeInput {
     pub status: Option<String>,
     pub version: Option<String>,
     pub configuration: Option<serde_json::Value>,
-}
-
-/// Distingue "campo ausente" de "campo `null`" num payload parcial.
-///
-/// `#[serde(default)]` dá `None` quando a chave não veio; este desserializador
-/// embrulha o valor lido em `Some`, de modo que `null` explícito chega como
-/// `Some(None)`. É o único jeito de um `PUT` parcial poder **limpar** um
-/// campo opcional em vez de só preenchê-lo.
-fn presente<'de, T, D>(deserializer: D) -> Result<Option<T>, D::Error>
-where
-    T: Deserialize<'de>,
-    D: serde::Deserializer<'de>,
-{
-    T::deserialize(deserializer).map(Some)
 }
 
 /// Regra de alerta vinda da tela "Regras Configuradas".

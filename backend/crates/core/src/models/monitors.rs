@@ -1,4 +1,8 @@
-use sea_orm::{entity::prelude::*, ExprTrait, QueryOrder, QuerySelect};
+use sea_orm::{
+    entity::prelude::*,
+    sea_query::{NullOrdering, Order},
+    ExprTrait, QueryOrder, QuerySelect,
+};
 
 pub use super::_entities::monitors::{ActiveModel, Column, Entity, Model};
 
@@ -78,7 +82,10 @@ impl Entity {
         Entity::find()
             .filter(Column::Enabled.eq(true))
             .filter(Column::NextRunAt.is_null().or(Column::NextRunAt.lte(now)))
-            .order_by_asc(Column::NextRunAt)
+            // `NULLS FIRST` explícito: no SQLite `ASC` já coloca nulos na frente,
+            // mas no PostgreSQL o padrão é `NULLS LAST`, o que deixava monitores
+            // recém-criados presos atrás de filas com >50 vencidos.
+            .order_by_with_nulls(Column::NextRunAt, Order::Asc, NullOrdering::First)
             .limit(DUE_BATCH_LIMIT)
     }
 

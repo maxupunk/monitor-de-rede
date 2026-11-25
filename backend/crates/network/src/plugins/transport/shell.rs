@@ -3,7 +3,15 @@
 //! ativação do log no roteador (`services::syslog::provision`, que digita os
 //! comandos numa shell).
 
+use crate::plugins::transport::MAX_OUTPUT_BYTES;
 use netmonitor_core::shared::errors::{AppError, AppResult};
+
+fn push_capped(buffer: &mut Vec<u8>, data: &[u8]) {
+    let room = MAX_OUTPUT_BYTES.saturating_sub(buffer.len());
+    if room > 0 {
+        buffer.extend_from_slice(&data[..data.len().min(room)]);
+    }
+}
 
 /// Os prazos de uma sessão com o equipamento são do núcleo (o MAC-Telnet da
 /// ativação do log usa os mesmos); o caminho da área continua valendo.
@@ -166,9 +174,17 @@ pub mod ssh {
                     Err(_) => break,
                     // Canal fechado pelo equipamento.
                     Ok(None) => break,
-                    Ok(Some(ChannelMsg::Data { data })) => bruto.extend_from_slice(&data),
+                    Ok(Some(ChannelMsg::Data { data })) => {
+                        super::push_capped(&mut bruto, &data);
+                        if bruto.len() >= super::MAX_OUTPUT_BYTES {
+                            break;
+                        }
+                    }
                     Ok(Some(ChannelMsg::ExtendedData { data, .. })) => {
-                        bruto.extend_from_slice(&data);
+                        super::push_capped(&mut bruto, &data);
+                        if bruto.len() >= super::MAX_OUTPUT_BYTES {
+                            break;
+                        }
                     }
                     Ok(Some(ChannelMsg::Eof | ChannelMsg::Close)) => break,
                     // Ajuste de janela, status de saída e afins não são saída.
@@ -283,6 +299,10 @@ pub mod telnet {
                                 .write_all(&respostas)
                                 .await
                                 .map_err(falha_de_acesso)?;
+                        }
+                        if util.len() >= super::MAX_OUTPUT_BYTES {
+                            util.truncate(super::MAX_OUTPUT_BYTES);
+                            break;
                         }
                     }
                 }

@@ -14,7 +14,7 @@
 use std::{
     collections::BTreeSet,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, OnceLock},
     time::Duration,
 };
 
@@ -28,8 +28,36 @@ use tokio_stream::wrappers::ReceiverStream;
 use crate::dtos::ModelPullProgress;
 use netmonitor_core::shared::errors::{AppError, AppResult};
 
+/// Instalações no volume do Ollaya, uma de cada vez: o arquivo parcial de
+/// cada camada tem nome fixo (a próxima tentativa sobrescreve o que uma queda
+/// deixou, em vez de acumular gigabytes de órfãos), e duas instalações ao mesmo
+/// tempo disputariam o mesmo arquivo.
+fn store_install_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
+/// O arquivo parcial de uma camada: um por camada, serializado pelo
+/// [`store_install_lock`].
+fn partial_blob_path(blobs_dir: &Path, hex: &str) -> PathBuf {
+    blobs_dir.join(format!("sha256-{hex}.partial"))
+}
+
 /// Downloads de modelos grandes podem levar vários minutos.
 const PULL_TIMEOUT: Duration = Duration::from_secs(3600);
+
+/// Pool HTTP compartilhado para downloads longos de modelos.
+fn pull_client() -> reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                .timeout(PULL_TIMEOUT)
+                .build()
+                .unwrap_or_default()
+        })
+        .clone()
+}
 
 /// Passo mínimo entre notificações de progresso do download HTTP (1 MiB).
 const PROGRESS_STEP_BYTES: u64 = 1024 * 1024;
@@ -260,7 +288,8 @@ async fn pipe_ndjson_response(
     emit_final_on_eof: bool,
 ) -> bool {
     let mut byte_stream = res.bytes_stream();
-    let mut line_buffer = String::new();
+    let mut buffer: Vec<u8> = Vec::new();
+    let mut offset = 0usize;
 
     while let Some(item) = byte_stream.next().await {
         let bytes = match item {
@@ -275,13 +304,42 @@ async fn pipe_ndjson_response(
                 return true;
             }
         };
-        line_buffer.push_str(&String::from_utf8_lossy(&bytes));
+        buffer.extend_from_slice(&bytes);
 
-        while let Some(pos) = line_buffer.find('\n') {
-            let line: String = line_buffer.drain(..=pos).collect();
+        while let Some(rel) = buffer[offset..].iter().position(|&b| b == b'\n') {
+            let end = offset + rel;
+            let raw = buffer[offset..end]
+                .strip_suffix(b"\r")
+                .unwrap_or(&buffer[offset..end]);
+            let line = String::from_utf8_lossy(raw);
+            offset = end + 1;
             let Some(mut progress) = parse_line(&line, service) else {
                 continue;
             };
+            if progress.done && !emit_final_on_eof && progress.error.is_none() {
+                progress.done = false;
+            }
+            let finished = progress.done;
+            if tx.send(progress).await.is_err() || finished {
+                return true;
+            }
+        }
+
+        if offset == buffer.len() {
+            buffer.clear();
+            offset = 0;
+        } else if offset >= 4096 && offset * 2 >= buffer.len() {
+            buffer.drain(..offset);
+            offset = 0;
+        }
+    }
+
+    if offset < buffer.len() {
+        let raw = buffer[offset..]
+            .strip_suffix(b"\r")
+            .unwrap_or(&buffer[offset..]);
+        let line = String::from_utf8_lossy(raw);
+        if let Some(mut progress) = parse_line(&line, service) {
             if progress.done && !emit_final_on_eof && progress.error.is_none() {
                 progress.done = false;
             }
@@ -312,10 +370,7 @@ async fn pipe_ndjson_response(
 /// Inicia o pull e transmite o progresso até `success`, erro ou fim do corpo.
 pub async fn stream_pull(target: PullTarget<'_>) -> AppResult<ReceiverStream<ModelPullProgress>> {
     let service = target.service;
-    let client = reqwest::Client::builder()
-        .timeout(PULL_TIMEOUT)
-        .build()
-        .map_err(|e| AppError::service_unavailable(format!("Erro ao criar cliente HTTP: {e}")))?;
+    let client = pull_client();
 
     let mut request = client.post(&target.url).json(&target.body);
     if let Some(token) = target.bearer.filter(|token| !token.trim().is_empty()) {
@@ -355,10 +410,7 @@ pub async fn stream_bundled_ollama_install(
     requested_name: String,
     spec: &'static BundledOllamaModel,
 ) -> AppResult<ReceiverStream<ModelPullProgress>> {
-    let client = reqwest::Client::builder()
-        .timeout(PULL_TIMEOUT)
-        .build()
-        .map_err(|e| AppError::service_unavailable(format!("Erro ao criar cliente HTTP: {e}")))?;
+    let client = pull_client();
 
     let root = ollama_root.trim_end_matches('/').to_string();
     let blob_endpoint = format!("{root}/api/blobs/{}", spec.gguf_digest);
@@ -635,10 +687,7 @@ async fn check_graph_references(spec: &BundledStoreModel, blobs_dir: &Path) -> R
 pub async fn stream_bundled_store_install(
     spec: &'static BundledStoreModel,
 ) -> AppResult<ReceiverStream<ModelPullProgress>> {
-    let client = reqwest::Client::builder()
-        .timeout(PULL_TIMEOUT)
-        .build()
-        .map_err(|e| AppError::service_unavailable(format!("Erro ao criar cliente HTTP: {e}")))?;
+    let client = pull_client();
 
     let store_root = spec.store_root();
     let blobs_dir = store_root.join("blobs");
@@ -665,6 +714,8 @@ pub async fn stream_bundled_store_install(
     let (tx, rx) = mpsc::channel::<ModelPullProgress>(100);
 
     tokio::spawn(async move {
+        // A segunda instalação espera a primeira e encontra as camadas prontas.
+        let _install = store_install_lock().lock().await;
         let total_bytes: u64 = spec.layers.iter().map(|l| l.size).sum();
         let mut completed_bytes: u64 = 0;
         let mut last_reported_bytes: u64 = 0;
@@ -726,7 +777,7 @@ pub async fn stream_bundled_store_install(
                 }
             };
 
-            let partial_path = blobs_dir.join(format!("sha256-{hex}-partial"));
+            let partial_path = partial_blob_path(&blobs_dir, hex);
             let mut file = match tokio::fs::File::create(&partial_path).await {
                 Ok(f) => f,
                 Err(e) => {
@@ -866,6 +917,15 @@ pub async fn stream_bundled_store_install(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parcial_da_camada_tem_nome_fixo() {
+        let dir = Path::new("blobs");
+        let first = partial_blob_path(dir, "abc");
+        assert_eq!(first, dir.join("sha256-abc.partial"));
+        // A nova tentativa reaproveita o mesmo arquivo: nada de órfão por queda.
+        assert_eq!(first, partial_blob_path(dir, "abc"));
+    }
 
     #[test]
     fn reconhece_modelo_instalado_por_tag_e_variante() {

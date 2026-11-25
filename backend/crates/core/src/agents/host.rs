@@ -105,9 +105,6 @@ impl HostDocker for NoHostDocker {
     }
 
     async fn export_volume(&self, _name: &str) -> Result<TunnelStream, RemoteError> {
-        Err(RemoteError::new(
-            ErrorCode::Unsupported,
-            "Docker não está disponível neste agente",
-        ))
+        Err(docker_missing())
     }
 }

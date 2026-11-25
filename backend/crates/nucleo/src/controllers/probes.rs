@@ -12,7 +12,9 @@ use axum::{
 use chrono::Utc;
 use loco_rs::prelude::*;
 use netmonitor_core::agents::command::AgentCommandDispatchers;
-use sea_orm::{ActiveModelTrait, EntityTrait, QueryOrder, Set};
+use sea_orm::{
+    sea_query::Expr, ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set,
+};
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -347,7 +349,11 @@ async fn revoke(
 
     Ok(format::json(ProbeResponse::from(saved))?)
 }
-async fn test(Path(id): Path<i64>) -> AppResult<Response> {
+async fn test(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
+    probes::Entity::find_by_id(id)
+        .one(&ctx.db)
+        .await?
+        .ok_or_else(|| AppError::not_found("Probe não encontrado"))?;
     Ok(format::json(
         serde_json::json!({"message":format!("Teste de conectividade enviado para o probe ID {id}")}),
     )?)
@@ -362,22 +368,40 @@ async fn heartbeat(
     body: String,
 ) -> AppResult<Response> {
     let input: HeartbeatInput = optional_body(&body);
-    let probe = authenticate(&ctx, &headers, input.token.as_deref()).await?;
+    let mut probe = authenticate(&ctx, &headers, input.token.as_deref()).await?;
     let previous_status = probe.status.clone();
-    let mut active: probes::ActiveModel = probe.into();
-    active.status = Set(STATUS_ONLINE.into());
-    active.last_seen_at = Set(Some(Utc::now().into()));
+    let now: sea_orm::prelude::DateTimeWithTimeZone = Utc::now().into();
+    let mut query = probes::Entity::update_many()
+        .col_expr(probes::Column::Status, Expr::value(STATUS_ONLINE))
+        .col_expr(probes::Column::LastSeenAt, Expr::value(Some(now)))
+        .col_expr(probes::Column::UpdatedAt, Expr::value(now))
+        .filter(probes::Column::Id.eq(probe.id))
+        .filter(probes::Column::Status.ne(probes::STATUS_REVOKED));
+    if let Some(version) = input.version.clone() {
+        query = query.col_expr(probes::Column::Version, Expr::value(Some(version)));
+    }
+    if let Some(configuration) = input.configuration.clone() {
+        query = query.col_expr(
+            probes::Column::Configuration,
+            Expr::value(Some(configuration)),
+        );
+    }
+    let updated = query.exec(&ctx.db).await?;
+    if updated.rows_affected == 0 {
+        return Err(AppError::unauthorized("Probe revogado ou removido"));
+    }
+    probe.status = STATUS_ONLINE.into();
+    probe.last_seen_at = Some(now);
     if let Some(version) = input.version {
-        active.version = Set(Some(version));
+        probe.version = Some(version);
     }
     if let Some(configuration) = input.configuration {
-        active.configuration = Set(Some(configuration));
+        probe.configuration = Some(configuration);
     }
-    let saved = active.update(&ctx.db).await?;
-    emit_status_if_changed(&ctx, &saved, &previous_status).await;
+    emit_status_if_changed(&ctx, &probe, &previous_status).await;
     Ok(format::json(serde_json::json!({
         "status": "ok",
-        "probeId": saved.id,
+        "probeId": probe.id,
     }))?)
 }
 

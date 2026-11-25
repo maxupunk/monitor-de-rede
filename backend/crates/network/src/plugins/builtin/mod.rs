@@ -6,6 +6,8 @@
 //! `cargo test` exige que cada um valide, passe nos próprios testes e saia da
 //! análise estática com risco baixo: exemplo quebrado ensina errado.
 
+use std::sync::OnceLock;
+
 use super::package::PluginPackage;
 
 const SOURCES: &[(&str, &str)] = &[
@@ -37,6 +39,21 @@ const SOURCES: &[(&str, &str)] = &[
     ),
 ];
 
+pub(crate) fn cached() -> &'static [(PluginPackage, String)] {
+    static CACHE: OnceLock<Vec<(PluginPackage, String)>> = OnceLock::new();
+    CACHE.get_or_init(|| {
+        SOURCES
+            .iter()
+            .map(|(slug, json)| {
+                let package: PluginPackage = serde_json::from_str(json)
+                    .unwrap_or_else(|error| panic!("plugin embutido {slug} inválido: {error}"));
+                let checksum = package.checksum();
+                (package, checksum)
+            })
+            .collect()
+    })
+}
+
 /// Os pacotes embutidos.
 ///
 /// # Panics
@@ -44,12 +61,9 @@ const SOURCES: &[(&str, &str)] = &[
 /// Nunca em build testado: o teste abaixo garante que todos parseiam.
 #[must_use]
 pub fn packages() -> Vec<PluginPackage> {
-    SOURCES
+    cached()
         .iter()
-        .map(|(slug, json)| {
-            serde_json::from_str(json)
-                .unwrap_or_else(|error| panic!("plugin embutido {slug} inválido: {error}"))
-        })
+        .map(|(package, _)| package.clone())
         .collect()
 }
 

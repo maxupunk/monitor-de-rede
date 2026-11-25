@@ -25,10 +25,12 @@ use axum::{
             CACHE_CONTROL, CONTENT_SECURITY_POLICY, REFERRER_POLICY, X_CONTENT_TYPE_OPTIONS,
             X_FRAME_OPTIONS,
         },
-        HeaderValue,
+        HeaderValue, StatusCode,
     },
-    Router,
+    routing::any,
+    Json, Router,
 };
+use serde_json::json;
 use tower_http::{
     services::{ServeDir, ServeFile},
     set_header::SetResponseHeaderLayer,
@@ -86,7 +88,7 @@ pub fn mount(router: Router, root: &Path) -> Router {
     // devolver o `index.html` para a SPA resolver o caminho no cliente.
     let shell = ServeDir::new(root)
         .precompressed_gzip()
-        .fallback(ServeFile::new(&index));
+        .fallback(ServeFile::new(&index).precompressed_gzip());
 
     tracing::info!(root = %root.display(), "SPA servida pelo processo da API");
 
@@ -117,15 +119,72 @@ pub fn mount(router: Router, root: &Path) -> Router {
             HeaderValue::from_static(CSP_VALUE),
         ));
 
+    // Caminhos não casados sob `/api` ou `/v2` nunca podem receber `index.html`
+    // com HTTP 200 — clientes HTTP/Docker esperam 404 JSON.
+    let api_not_found = any(|| async {
+        (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "message": "Rota não encontrada" })),
+        )
+    });
+    let fallback = Router::new()
+        .route("/api", api_not_found.clone())
+        .route("/api/{*rest}", api_not_found.clone())
+        .route("/v2", api_not_found.clone())
+        .route("/v2/{*rest}", api_not_found)
+        .fallback_service(spa_service);
+
     // Último recurso do roteador: as rotas da API já foram registradas e
     // continuam ganhando de qualquer arquivo de mesmo caminho.
-    router.fallback_service(spa_service)
+    router.fallback_service(fallback)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serial_test::serial;
+
+    #[tokio::test]
+    async fn rotas_api_e_v2_desconhecidas_respondem_404_json_e_spa_continua_200() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("index.html"), "<html>spa</html>").unwrap();
+
+        let app = mount(Router::new(), tmp.path());
+
+        for path in [
+            "/api",
+            "/api/inexistente",
+            "/v2",
+            "/v2/repo/manifests/latest",
+        ] {
+            let res = app
+                .clone()
+                .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(res.status(), StatusCode::NOT_FOUND, "{path}");
+            let ct = res
+                .headers()
+                .get(axum::http::header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or_default();
+            assert!(ct.contains("application/json"), "{path}: {ct}");
+        }
+
+        let spa_res = app
+            .oneshot(
+                Request::builder()
+                    .uri("/devices/7")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(spa_res.status(), StatusCode::OK);
+    }
 
     #[test]
     fn sem_index_o_roteador_volta_intacto() {

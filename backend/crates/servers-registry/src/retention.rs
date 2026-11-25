@@ -23,7 +23,7 @@ use netmonitor_core::{
         registry_tags, registry_uploads,
     },
     routines::{cadence::is_due, Cycle, Routine},
-    shared::errors::AppResult,
+    shared::{errors::AppResult, run_guard::RunGuard, transaction::begin_write},
 };
 
 use netmonitor_servers::deploys::usage::images_in_use;
@@ -53,6 +53,11 @@ fn referenced(content: &str) -> Vec<Digest> {
 ///
 /// Erro do banco.
 pub async fn collect(ctx: &AppContext) -> AppResult<u64> {
+    let _guard = RunGuard::acquire(
+        "registry_collect",
+        0,
+        "A limpeza do registry já está em andamento",
+    )?;
     let db = &ctx.db;
     let keep_versions = settings::load(db).await?.keep_versions as usize;
     let usage = images_in_use(db).await?;
@@ -75,11 +80,15 @@ pub async fn collect(ctx: &AppContext) -> AppResult<u64> {
                     .push(tag.name.as_str());
                 map
             });
-        // As versões (manifests com tag), da mais nova para a mais velha.
+        // As versões (manifests com tag), da mais nova para a mais velha, mais
+        // os recém-chegados sem tag ainda dentro da carência.
         let mut kept: BTreeSet<String> = BTreeSet::new();
         let mut versions = 0;
         for row in &manifests {
             let Some(row_tags) = tagged.get(row.digest.as_str()) else {
+                if row.created_at.with_timezone(&Utc) > grace {
+                    kept.insert(row.digest.clone());
+                }
                 continue;
             };
             versions += 1;
@@ -90,13 +99,23 @@ pub async fn collect(ctx: &AppContext) -> AppResult<u64> {
                 kept.insert(row.digest.clone());
             }
         }
-        // O que as versões guardadas citam continua (filhos, attestations).
+        // O que as versões guardadas (ou em carência) citam continua: filhos,
+        // blobs e referrers (incluindo referrers em cadeia).
         let mut alive: HashSet<String> = HashSet::new();
         let mut queue: Vec<String> = kept.iter().cloned().collect();
         let by_digest: BTreeMap<&str, &registry_manifests::Model> = manifests
             .iter()
             .map(|row| (row.digest.as_str(), row))
             .collect();
+        let mut by_subject: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+        for row in &manifests {
+            if let Some(subject) = row.subject_digest.as_deref() {
+                by_subject
+                    .entry(subject)
+                    .or_default()
+                    .push(row.digest.as_str());
+            }
+        }
         while let Some(digest) = queue.pop() {
             if !alive.insert(digest.clone()) {
                 continue;
@@ -106,29 +125,23 @@ pub async fn collect(ctx: &AppContext) -> AppResult<u64> {
                     queue.push(child.to_string());
                 }
             }
-        }
-        for row in &manifests {
-            let referenced_by_subject = row
-                .subject_digest
-                .as_ref()
-                .is_some_and(|subject| alive.contains(subject));
-            if alive.contains(&row.digest) || referenced_by_subject {
-                if referenced_by_subject {
-                    alive.insert(row.digest.clone());
-                    for child in referenced(&row.content) {
-                        alive.insert(child.to_string());
-                    }
+            if let Some(referrers) = by_subject.get(digest.as_str()) {
+                for referrer in referrers {
+                    queue.push((*referrer).to_string());
                 }
-                continue;
             }
-            // Recém-chegado sem tag (um push em andamento): espera a carência.
-            if !tagged.contains_key(row.digest.as_str())
-                && row.created_at.with_timezone(&Utc) > grace
-            {
-                alive.insert(row.digest.clone());
-                continue;
+        }
+        let expired_manifests: Vec<&str> = manifests
+            .iter()
+            .filter(|row| !alive.contains(&row.digest))
+            .map(|row| row.digest.as_str())
+            .collect();
+        if !expired_manifests.is_empty() {
+            let txn = begin_write(db).await?;
+            for digest in expired_manifests {
+                catalog::delete_manifest(&txn, repo.id, digest).await?;
             }
-            catalog::delete_manifest(db, repo.id, &row.digest).await?;
+            txn.commit().await?;
         }
         // Vínculos de blob que nenhum manifest vivo cita.
         let links = registry_repository_blobs::Entity::find()
@@ -162,7 +175,9 @@ pub async fn collect(ctx: &AppContext) -> AppResult<u64> {
             .await?;
     }
 
-    // Blobs sem nenhum vínculo: o arquivo sai do storage.
+    // Blobs sem nenhum vínculo: confirma sob transação de escrita e com o
+    // portão dos envios fechado antes de apagar do disco, para não colidir
+    // com um envio que reaproveita o arquivo (`storage::push_gate`).
     let linked: HashSet<String> = registry_repository_blobs::Entity::find()
         .all(db)
         .await?
@@ -174,11 +189,32 @@ pub async fn collect(ctx: &AppContext) -> AppResult<u64> {
         if linked.contains(&blob.digest) || blob.created_at.with_timezone(&Utc) > grace {
             continue;
         }
-        if let Ok(digest) = blob.digest.parse::<Digest>() {
-            if store.delete(&digest).await.is_ok() {
-                registry_blobs::Entity::delete_by_id(blob.id)
-                    .exec(db)
-                    .await?;
+        let Ok(digest) = blob.digest.parse::<Digest>() else {
+            continue;
+        };
+        // Envio em andamento: ele pode estar reaproveitando este arquivo.
+        // A coleta não espera — fica para a próxima passada.
+        let Ok(_collecting) = storage::push_gate().try_write() else {
+            break;
+        };
+        let txn = begin_write(db).await?;
+        let still_linked = registry_repository_blobs::Entity::find()
+            .filter(registry_repository_blobs::Column::Digest.eq(blob.digest.as_str()))
+            .one(&txn)
+            .await?
+            .is_some();
+        if still_linked {
+            txn.commit().await?;
+            continue;
+        }
+        let deleted = registry_blobs::Entity::delete_by_id(blob.id)
+            .exec(&txn)
+            .await?;
+        txn.commit().await?;
+        if deleted.rows_affected > 0 {
+            if let Err(error) = store.delete(&digest).await {
+                tracing::warn!(%digest, %error, "falha ao remover blob do disco na coleta");
+            } else {
                 freed += u64::try_from(blob.size).unwrap_or(0);
             }
         }

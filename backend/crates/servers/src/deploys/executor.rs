@@ -29,7 +29,7 @@ use netmonitor_core::{
 use super::{
     access,
     applications::{self, compose_files_of, repository_url},
-    console::{human_bytes, Console, ConsoleSink},
+    console::{human_bytes, Console, ConsoleSink, PUBLISH_EVERY},
     env_versions, events,
     notify::{self, Moment},
     runs::{self, Change},
@@ -155,10 +155,19 @@ async fn deliver(
     let (events, mut received) = mpsc::unbounded_channel::<StackChunk>();
     let stacks = host.stacks.clone();
     let task = tokio::spawn(async move { stacks.deploy_stack(&request, events).await });
-    while let Some(chunk) = received.recv().await {
-        match chunk {
-            StackChunk::Stage { stage } => console.stage(stage.into()).await,
-            StackChunk::Line { text } => console.line(text).await,
+    let mut flush_tick = tokio::time::interval(PUBLISH_EVERY);
+    flush_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    flush_tick.tick().await;
+    loop {
+        tokio::select! {
+            chunk = received.recv() => match chunk {
+                Some(StackChunk::Stage { stage }) => console.stage(stage.into()).await,
+                Some(StackChunk::Line { text }) => console.line(text).await,
+                None => break,
+            },
+            _ = flush_tick.tick() => {
+                console.flush_pending();
+            }
         }
     }
     task.await
@@ -322,21 +331,36 @@ pub async fn execute(ctx: AppContext, run_id: i64) {
             return;
         }
     };
-    let changed = runs::transition(
-        &ctx.db,
-        run_id,
-        &[RunStatus::Running],
-        ending.status,
-        Change {
-            stage: Some(None),
-            error: Some(ending.error),
-            finished: true,
-            ..Change::default()
-        },
-    )
-    .await;
-    if let Err(error) = changed {
-        tracing::warn!(run_id, %error, "o fim do deploy não foi gravado");
+    let mut recorded = false;
+    for attempt in 0..3u64 {
+        match runs::transition(
+            &ctx.db,
+            run_id,
+            &[RunStatus::Running],
+            ending.status,
+            Change {
+                stage: Some(None),
+                error: Some(ending.error.clone()),
+                finished: true,
+                ..Change::default()
+            },
+        )
+        .await
+        {
+            Ok(_) => {
+                recorded = true;
+                break;
+            }
+            Err(error) => {
+                tracing::warn!(run_id, attempt, %error, "o fim do deploy não foi gravado");
+                if attempt < 2 {
+                    tokio::time::sleep(std::time::Duration::from_millis(200 * (attempt + 1))).await;
+                }
+            }
+        }
+    }
+    if !recorded {
+        tracing::error!(run_id, "o fim do deploy falhou em todas as tentativas");
     }
     events::publish_run(&ctx, run_id).await;
     events::publish_updated(&ctx);
@@ -365,6 +389,11 @@ async fn run_deploy(
         ))
         .await;
 
+    if plan.from_central {
+        console.stage(DeployStage::Image).await;
+        verify_images(ctx, &plan, run, console).await?;
+    }
+
     let mut backed_up = false;
     if let Some(connection_id) = plan.target.backup_connection_id {
         console.stage(DeployStage::Backup).await;
@@ -387,10 +416,6 @@ async fn run_deploy(
         }
     }
 
-    if plan.from_central {
-        console.stage(DeployStage::Image).await;
-        verify_images(ctx, &plan, run, console).await?;
-    }
     let request = request_for(ctx, &plan, run).await?;
     let failure = match deliver(ctx, &plan, request, console).await {
         Ok(outcome) => {
@@ -413,7 +438,9 @@ async fn run_deploy(
 
     let Some(previous) = previous.filter(|previous| {
         plan.target.auto_rollback
-            && (previous.commit_sha != run.commit_sha || previous.image_tag != run.image_tag)
+            && (previous.commit_sha != run.commit_sha
+                || previous.image_tag != run.image_tag
+                || previous.env_version_id != run.env_version_id)
     }) else {
         return Ok(Ending {
             status: RunStatus::Failed,

@@ -418,6 +418,20 @@ pub async fn rotate_on<C: ConnectionTrait>(
             "A chave nova não foi aceita; a atual continua valendo. {error}"
         )));
     }
+    // Grava a chave nova no banco ANTES de retirar a antiga do equipamento:
+    // se a gravação falhar, a chave antiga continua válida e o equipamento não
+    // fica inacessível.
+    let saved = credentials::save_dedicated(
+        db,
+        device_id,
+        implementation.username(),
+        &key.private_openssh,
+        &record(access.platform, &key, access.host_key),
+        target.port,
+        target.via_probe_id,
+    )
+    .await?;
+
     let leftovers = device
         .best_effort(
             implementation,
@@ -433,16 +447,7 @@ pub async fn rotate_on<C: ConnectionTrait>(
         );
     }
 
-    credentials::save_dedicated(
-        db,
-        device_id,
-        implementation.username(),
-        &key.private_openssh,
-        &record(access.platform, &key, access.host_key),
-        target.port,
-        target.via_probe_id,
-    )
-    .await
+    Ok(saved)
 }
 
 /// Retira a chave do equipamento e apaga a credencial.

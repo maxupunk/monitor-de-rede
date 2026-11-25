@@ -116,6 +116,11 @@ pub fn render(spec: &WorkflowSpec<'_>) -> String {
              \x20     - uses: docker/setup-buildx-action@v3\n",
         );
         for image in spec.images {
+            let target_line = image
+                .target
+                .as_deref()
+                .map(|target| format!("          target: {}\n", quoted(target)))
+                .unwrap_or_default();
             let _ = write!(
                 out,
                 "\n      - name: Imagem {name}\n\
@@ -123,6 +128,7 @@ pub fn render(spec: &WorkflowSpec<'_>) -> String {
                  \x20       with:\n\
                  \x20         context: {context}\n\
                  \x20         file: {file}\n\
+                 {target_line}\
                  \x20         push: true\n\
                  \x20         tags: ${{{{ env.IMAGE_PREFIX }}}}/{name}:${{{{ github.sha }}}}\n\
                  \x20         cache-from: type=gha,scope={name}\n\
@@ -241,5 +247,24 @@ mod tests {
         assert!(!yaml.contains("build-push-action"));
         assert!(!yaml.contains("needs: build"));
         assert!(yaml.contains("branches: ['main']"));
+    }
+
+    #[test]
+    fn emite_target_quando_estagio_configurado() {
+        let images = vec![BuildImage {
+            name: "api".into(),
+            dockerfile: "Dockerfile".into(),
+            context: ".".into(),
+            target: Some("production".into()),
+            reference: None,
+        }];
+        let yaml = render(&WorkflowSpec {
+            application_name: "App",
+            images: &images,
+            references: &["main".to_string()],
+            audience: "aud",
+            central_url: None,
+        });
+        assert!(yaml.contains("          target: 'production'\n"));
     }
 }

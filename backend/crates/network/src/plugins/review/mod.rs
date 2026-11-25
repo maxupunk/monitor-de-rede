@@ -103,6 +103,16 @@ impl ReviewReport {
 #[must_use]
 pub fn build_report(package: &PluginPackage, ai: Result<AiReview, String>) -> ReviewReport {
     let findings = static_scan::scan(package);
+    build_report_with_findings(package, findings, ai)
+}
+
+/// Junta achados da análise estática já calculados e, se houver, a revisão da IA.
+#[must_use]
+pub fn build_report_with_findings(
+    package: &PluginPackage,
+    findings: Vec<Finding>,
+    ai: Result<AiReview, String>,
+) -> ReviewReport {
     let static_risk = findings
         .iter()
         .map(|finding| finding.severity)

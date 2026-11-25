@@ -157,7 +157,10 @@ pub async fn process_result(
     // O histórico aceita toda observação, mas apenas um resultado mais novo
     // pode alterar o estado corrente. A condição fica no UPDATE (e não só num
     // `if` em Rust) para fechar a corrida entre dois probes que respondem ao
-    // mesmo tempo.
+    // mesmo tempo. Compara pelo fim da execução (execuções sobrepostas: a que
+    // termina depois vence) e é estrito: o reenvio idêntico de um resultado já
+    // aplicado (o `ProbeBuffer` repostando após falha) não reavalia o estado
+    // nem os alertas uma segunda vez.
     let updated = monitors::Entity::update_many()
         .col_expr(
             monitors::Column::Status,
@@ -172,7 +175,7 @@ pub async fn process_result(
         .filter(
             Condition::any()
                 .add(monitors::Column::LastRunAt.is_null())
-                .add(monitors::Column::LastRunAt.lt(result.started_at.fixed_offset())),
+                .add(monitors::Column::LastRunAt.lt(result.finished_at.fixed_offset())),
         )
         .exec(&txn)
         .await?;
@@ -187,7 +190,7 @@ pub async fn process_result(
         return Ok(Some(stored));
     }
 
-    let mut device_name = None;
+    let mut loaded_device = None;
     if let Some(device_id) = monitor.device_id {
         if let Some(device) = devices::Entity::find_by_id(device_id).one(&ctx.db).await? {
             let observed = match result.status {
@@ -197,16 +200,22 @@ pub async fn process_result(
                 MonitorStatus::Unknown | MonitorStatus::Disabled => None,
             };
             let seen_at = (result.status == MonitorStatus::Up).then_some(result.finished_at);
-            device_name = Some(device.name.clone());
             device_status::refresh_from_monitors(ctx, &device, observed, seen_at).await?;
+            loaded_device = Some(device);
         }
     }
+    let device_name = loaded_device.as_ref().map(|device| device.name.clone());
 
     // Avaliar alertas é best-effort pelo mesmo motivo da publicação: a
     // observação técnica já está gravada e não pode ser desfeita porque o
     // motor de alertas topou com uma regra corrompida.
-    let adaptive_latency = match alerts::manager::evaluate_monitor_result(ctx, &monitor, result)
-        .await
+    let adaptive_latency = match alerts::manager::evaluate_monitor_result_with_device(
+        ctx,
+        &monitor,
+        loaded_device.as_ref(),
+        result,
+    )
+    .await
     {
         Ok(assessment) => Some(assessment),
         Err(error) => {

@@ -8,7 +8,6 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use ts_rs::TS;
@@ -1249,7 +1248,7 @@ fn validate_matcher(matcher: &MatchRule, problems: &mut Vec<String>) {
         ("httpFingerprint", &matcher.http_fingerprint),
     ] {
         if let Some(pattern) = pattern {
-            if let Err(error) = Regex::new(pattern) {
+            if let Err(error) = super::runtime::script_regex(pattern) {
                 problems.push(format!("`match.{field}` é uma regex inválida: {error}"));
             }
         }

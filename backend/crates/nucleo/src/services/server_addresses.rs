@@ -288,6 +288,14 @@ fn rotulo_do_tipo(tipo: &str) -> &'static str {
 /// configuração, e faz o aparelho mandar o tráfego para si mesmo.
 fn valida_endereco(valor: &str, campo: &str) -> AppResult<()> {
     if hints::sanitiza_endereco(Some(valor)).is_none() {
+        if !hints::aponta_para_si_mesmo(valor) {
+            return Err(AppError::validation(format!(
+                "`{}` não serve como {campo}: não é um IP nem um nome válido. Use um IP \
+                 (192.168.1.10), um nome (netmonitor.empresa.lan) ou um deles com a porta \
+                 (192.168.1.10:3333), sem espaços nem símbolos.",
+                valor.trim()
+            )));
+        }
         return Err(AppError::validation(format!(
             "`{}` não serve como {campo}: é um endereço que aponta o equipamento para ele mesmo. \
              Informe o IP ou o nome pelo qual ele alcança este servidor.",
@@ -345,7 +353,7 @@ pub fn valida_dominio(valor: &str) -> AppResult<CheckedDomain> {
             .is_some_and(|tld| tld.chars().any(|c| c.is_ascii_alphabetic()));
     if !nome_valido || host.parse::<IpAddr>().is_ok() {
         return Err(AppError::validation(format!(
-            "`{limpo}` não é um domínio. Informe o nome, como monitor.empresa.com.br, ou a URL              com proxy HTTPS, como https://monitor.empresa.com.br. Para IP use \"Rede local\" ou \"Internet\"."
+            "`{limpo}` não é um domínio. Informe o nome, como monitor.empresa.com.br, ou a URL com proxy HTTPS, como https://monitor.empresa.com.br. Para IP use \"Rede local\" ou \"Internet\"."
         )));
     }
     valida_endereco(resto, "o domínio")?;
@@ -848,6 +856,19 @@ mod tests {
                 format!("{erro:?}").contains("aponta o equipamento para ele mesmo"),
                 "aceitou {ruim}"
             );
+        }
+    }
+
+    #[test]
+    fn formato_invalido_tem_mensagem_propria() {
+        for ruim in ["host$(id)", "10.0.0.1; id", "127.1", "espaco no meio"] {
+            let erro = valida_endereco(ruim, "o endereço").expect_err("devia recusar");
+            let texto = format!("{erro:?}");
+            assert!(
+                texto.contains("não é um IP nem um nome válido"),
+                "{ruim}: {texto}"
+            );
+            assert!(!texto.contains("ele mesmo"), "{ruim}: {texto}");
         }
     }
 

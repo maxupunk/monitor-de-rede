@@ -21,7 +21,7 @@ use netmonitor_core::{
     routines::{cadence::is_device_collection_due, Cycle, Routine},
     shared::errors::{AppError, AppResult},
 };
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QuerySelect, Set};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
 
 use crate::{
     discovery::queue::{process_pending_runs, schedule_due_networks, spawn_pending_run},
@@ -61,13 +61,19 @@ pub async fn execute_snmp_device_group(
         .filter(monitors::Column::ProbeId.is_null())
         .all(&ctx.db)
         .await?;
-    let next_run_at = (scheduled_at
-        + chrono::Duration::seconds(i64::from(device.snmp_poll_interval_seconds.max(1))))
-    .into();
-    for monitor in &monitored_items {
-        let mut active: monitors::ActiveModel = monitor.clone().into();
-        active.next_run_at = Set(Some(next_run_at));
-        active.update(&ctx.db).await?;
+    if !monitored_items.is_empty() {
+        let next_run_at: chrono::DateTime<chrono::FixedOffset> = (scheduled_at
+            + chrono::Duration::seconds(i64::from(device.snmp_poll_interval_seconds.max(1))))
+        .into();
+        let ids: Vec<i64> = monitored_items.iter().map(|m| m.id).collect();
+        monitors::Entity::update_many()
+            .col_expr(
+                monitors::Column::NextRunAt,
+                sea_orm::sea_query::Expr::value(Some(next_run_at)),
+            )
+            .filter(monitors::Column::Id.is_in(ids))
+            .exec(&ctx.db)
+            .await?;
     }
     Ok(snmp_service::poll_device_monitors(ctx, &device, &monitored_items).await)
 }
@@ -166,12 +172,20 @@ impl MonitorGroup for SnmpDeviceGroup {
         ctx: &AppContext,
         monitor: &monitors::Model,
     ) -> Option<AppResult<Vec<(i64, CheckResult)>>> {
-        if monitor.r#type != "snmp" {
-            return None;
-        }
-        let device_id = monitor.device_id?;
+        // Só os monitores que a coleta consolidada inclui (ligados e locais);
+        // os demais seguem o fluxo genérico, senão a resposta não os teria.
+        let device_id = run_now_device_id(monitor)?;
         Some(poll_device_now(ctx, device_id).await)
     }
+}
+
+/// O dispositivo cuja coleta consolidada responde ao "Testar agora" deste
+/// monitor — o mesmo filtro de [`poll_device_now`].
+fn run_now_device_id(monitor: &monitors::Model) -> Option<i64> {
+    monitor
+        .enabled
+        .then(|| local_snmp_device_id(monitor))
+        .flatten()
 }
 
 /// A coleta consolidada de todos os monitores SNMP do dispositivo, pedida pela
@@ -187,6 +201,8 @@ async fn poll_device_now(ctx: &AppContext, device_id: i64) -> AppResult<Vec<(i64
     let related = monitors::Entity::find()
         .filter(monitors::Column::DeviceId.eq(Some(device_id)))
         .filter(monitors::Column::Type.eq("snmp"))
+        .filter(monitors::Column::Enabled.eq(true))
+        .filter(monitors::Column::ProbeId.is_null())
         .all(&ctx.db)
         .await?;
     Ok(snmp_service::poll_device_monitors(ctx, &device, &related).await)
@@ -261,4 +277,40 @@ pub fn routines() -> Vec<Arc<dyn Routine>> {
 #[must_use]
 pub fn monitor_groups() -> Vec<Arc<dyn MonitorGroup>> {
     vec![Arc::new(SnmpDeviceGroup)]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn monitor(enabled: bool, probe_id: Option<i64>, kind: &str) -> monitors::Model {
+        let now = Utc::now().fixed_offset();
+        monitors::Model {
+            id: 1,
+            device_id: Some(7),
+            interface_id: None,
+            probe_id,
+            r#type: kind.into(),
+            name: "SNMP".into(),
+            configuration: serde_json::json!({}),
+            interval_seconds: 60,
+            timeout_seconds: 5,
+            retry_count: 0,
+            enabled,
+            next_run_at: None,
+            last_run_at: None,
+            status: "up".into(),
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[test]
+    fn testar_agora_so_consolida_monitor_que_a_coleta_inclui() {
+        assert_eq!(run_now_device_id(&monitor(true, None, "snmp")), Some(7));
+        // Desligado ou com probe: fora da coleta consolidada, fluxo genérico.
+        assert_eq!(run_now_device_id(&monitor(false, None, "snmp")), None);
+        assert_eq!(run_now_device_id(&monitor(true, Some(3), "snmp")), None);
+        assert_eq!(run_now_device_id(&monitor(true, None, "ping")), None);
+    }
 }

@@ -5,10 +5,11 @@
 //! labels, que costumam carregar senha e token. Os logs de um container são
 //! lidos pelo `grep` (fonte `docker`), que devolve só o que casa.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use futures::future::{join_all, try_join_all};
 use loco_rs::prelude::AppContext;
 use netmonitor_core::areas::Area;
 use serde_json::{json, Value};
@@ -158,31 +159,39 @@ async fn resolve_container(
 /// Nomes de containers reais nos hosts conectados (central primeiro, depois
 /// agentes remotos online), sem repetição.
 pub async fn list_all_container_names(ctx: &AppContext) -> Vec<String> {
-    let mut names: Vec<String> = Vec::new();
-    let mut push_from = |list: Vec<DockerContainerSummary>| {
-        for container in list {
-            let name = container.display_name();
-            if !name.is_empty() && !names.iter().any(|seen| seen.eq_ignore_ascii_case(&name)) {
-                names.push(name);
-            }
-        }
-    };
+    let mut seen_keys: HashSet<String> = HashSet::new();
+    let mut engines = Vec::new();
     if let Ok(Some(default)) = hosts::default_host(ctx).await {
-        if let Ok(list) = engine::list_containers(default.engine.as_ref()).await {
-            push_from(list);
-        }
+        seen_keys.insert(default.key.to_string());
+        engines.push(default.engine);
     }
     if let Ok(listed) = hosts::list(ctx).await {
         for view in listed
             .into_iter()
             .filter(|view| view.online && view.docker_available)
         {
+            if !seen_keys.insert(view.key.clone()) {
+                continue;
+            }
             if let Ok(key) = view.key.parse::<HostKey>() {
                 if let Ok(host) = hosts::resolve(ctx, key) {
-                    if let Ok(list) = engine::list_containers(host.engine.as_ref()).await {
-                        push_from(list);
-                    }
+                    engines.push(host.engine);
                 }
+            }
+        }
+    }
+    let lists = join_all(
+        engines
+            .iter()
+            .map(|source| engine::list_containers(source.as_ref())),
+    )
+    .await;
+    let mut names: Vec<String> = Vec::new();
+    for list in lists.into_iter().flatten() {
+        for container in list {
+            let name = container.display_name();
+            if !name.is_empty() && !names.iter().any(|seen| seen.eq_ignore_ascii_case(&name)) {
+                names.push(name);
             }
         }
     }
@@ -689,15 +698,19 @@ impl AiToolHandler for DockerUsageChart {
             }
         };
 
-        let mut raw = Vec::with_capacity(names.len());
-        for name in names {
-            let points = store::container_history(&ctx.db, &host_key, &name, range, now).await?;
-            let values = points
-                .iter()
-                .map(|point| (point.at.clone(), metric.of(point)))
-                .collect();
-            raw.push((name, values));
-        }
+        let raw = try_join_all(names.into_iter().map(|name| {
+            let db = &ctx.db;
+            let host_key = &host_key;
+            async move {
+                let points = store::container_history(db, host_key, &name, range, now).await?;
+                let values = points
+                    .iter()
+                    .map(|point| (point.at.clone(), metric.of(point)))
+                    .collect();
+                AppResult::Ok((name, values))
+            }
+        }))
+        .await?;
         let aligned = align_series(&raw);
         let summary: Vec<Value> = aligned
             .iter()

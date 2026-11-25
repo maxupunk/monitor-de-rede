@@ -1,10 +1,20 @@
 //! Cliente e catálogo de modelos para o provedor OpenRouter.
 
-use std::time::Duration;
+use std::{sync::OnceLock, time::Duration};
 
 use serde::Deserialize;
 
 use crate::dtos::{OpenRouterModelItem, OpenRouterModelsResponse};
+
+fn http() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(Duration::from_secs(8))
+            .build()
+            .unwrap_or_default()
+    })
+}
 
 /// Catálogo curado de modelos populares e gratuitos do OpenRouter.
 pub fn curated_openrouter_models() -> Vec<OpenRouterModelItem> {
@@ -102,21 +112,7 @@ struct OpenRouterPricing {
 
 /// Consulta os modelos disponíveis no OpenRouter (`GET /api/v1/models`).
 pub async fn list_models(api_key: Option<&str>) -> OpenRouterModelsResponse {
-    let client = match reqwest::Client::builder()
-        .timeout(Duration::from_secs(8))
-        .build()
-    {
-        Ok(c) => c,
-        Err(e) => {
-            return OpenRouterModelsResponse {
-                models: curated_openrouter_models(),
-                is_online: false,
-                error_message: Some(format!("Erro ao criar cliente HTTP: {e}")),
-            };
-        }
-    };
-
-    let mut req = client.get("https://openrouter.ai/api/v1/models");
+    let mut req = http().get("https://openrouter.ai/api/v1/models");
     if let Some(key) = api_key {
         let trimmed = key.trim();
         if !trimmed.is_empty() {

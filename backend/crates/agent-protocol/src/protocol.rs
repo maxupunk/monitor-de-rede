@@ -93,9 +93,9 @@ pub enum TunnelPayload {
 /// Binário e não JSON: o dado de um banco atravessaria em base64, um terço
 /// maior, e passaria duas vezes pelo serializador.
 ///
-/// Dados podem ir crus ou comprimidos com zstd ([`TunnelFrame::encode_data`]);
-/// quem recebe não precisa saber qual — [`TunnelFrame::decode`] devolve sempre
-/// os bytes originais.
+/// Dados podem ir crus ou comprimidos com zstd ([`TunnelFrame::encode_raw`] /
+/// [`TunnelFrame::encode_compressed`]); quem recebe não precisa saber qual —
+/// [`TunnelFrame::decode`] devolve sempre os bytes originais.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TunnelFrame {
     pub id: Uuid,
@@ -109,25 +109,45 @@ const KIND_DATA_ZSTD: u8 = 3;
 
 /// Nível do zstd: o mais rápido. A ponte comprime em tempo real, no caminho de
 /// um dump; ganhar uns pontos de taxa não vale segurar o banco.
-const ZSTD_LEVEL: i32 = 1;
+pub const ZSTD_LEVEL: i32 = 1;
 
 impl TunnelFrame {
+    /// Lê apenas o `id` (primeiros 16 bytes) sem decodificar nem descomprimir o
+    /// corpo — permite rotear quadros fora do laço principal do WebSocket.
+    #[must_use]
+    pub fn peek_id(bytes: &[u8]) -> Option<Uuid> {
+        let header = bytes.get(..16)?;
+        Uuid::from_slice(header).ok()
+    }
+
+    /// Codifica um quadro de dados cru direto da fatia, sem alocar `Vec` intermediário.
+    #[must_use]
+    pub fn encode_raw(id: Uuid, data: &[u8]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(17 + data.len());
+        out.extend_from_slice(id.as_bytes());
+        out.push(KIND_DATA);
+        out.extend_from_slice(data);
+        out
+    }
+
     #[must_use]
     pub fn encode(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(17 + TUNNEL_DATA_MAX);
-        out.extend_from_slice(self.id.as_bytes());
         match &self.payload {
-            TunnelPayload::Data(bytes) => {
-                out.push(KIND_DATA);
-                out.extend_from_slice(bytes);
-            }
+            TunnelPayload::Data(bytes) => Self::encode_raw(self.id, bytes),
             TunnelPayload::Ack(credit) => {
+                let mut out = Vec::with_capacity(21);
+                out.extend_from_slice(self.id.as_bytes());
                 out.push(KIND_ACK);
                 out.extend_from_slice(&credit.to_be_bytes());
+                out
             }
-            TunnelPayload::Eof => out.push(KIND_EOF),
+            TunnelPayload::Eof => {
+                let mut out = Vec::with_capacity(17);
+                out.extend_from_slice(self.id.as_bytes());
+                out.push(KIND_EOF);
+                out
+            }
         }
-        out
     }
 
     /// Quadro de dados comprimido, se a compressão compensar.
@@ -137,22 +157,49 @@ impl TunnelFrame {
     /// poupa o outro lado de descomprimir à toa.
     #[must_use]
     pub fn encode_compressed(id: Uuid, data: &[u8]) -> Option<Vec<u8>> {
-        let packed = zstd::bulk::compress(data, ZSTD_LEVEL).ok()?;
-        if packed.len() * 10 > data.len() * 9 {
+        let mut compressor = zstd::bulk::Compressor::new(ZSTD_LEVEL).ok()?;
+        Self::encode_compressed_with(id, data, &mut compressor)
+    }
+
+    /// Como [`Self::encode_compressed`], reutilizando um `Compressor` (`ZSTD_CCtx`)
+    /// e escrevendo direto no buffer de saída após o cabeçalho de 17 bytes.
+    #[must_use]
+    pub fn encode_compressed_with(
+        id: Uuid,
+        data: &[u8],
+        compressor: &mut zstd::bulk::Compressor<'_>,
+    ) -> Option<Vec<u8>> {
+        let max_packed = (data.len() * 9) / 10;
+        if max_packed == 0 {
             return None;
         }
-        let mut out = Vec::with_capacity(17 + packed.len());
-        out.extend_from_slice(id.as_bytes());
-        out.push(KIND_DATA_ZSTD);
-        out.extend_from_slice(&packed);
+        let mut out = vec![0_u8; 17 + max_packed];
+        out[..16].copy_from_slice(id.as_bytes());
+        out[16] = KIND_DATA_ZSTD;
+        let written = compressor.compress_to_buffer(data, &mut out[17..]).ok()?;
+        out.truncate(17 + written);
         Some(out)
     }
 
     /// # Errors
     ///
-    /// Quadro curto, tipo desconhecido, dados acima de [`TUNNEL_DATA_MAX`] —
-    /// também depois de descomprimidos — ou compressão inválida.
+    /// Quadro curto, tipo desconhecido, dados vazios ou acima de [`TUNNEL_DATA_MAX`] —
+    /// também depois de descomprimidos — crédito zero ou compressão inválida.
     pub fn decode(bytes: &[u8]) -> Result<Self, ProtocolError> {
+        let mut decompressor = zstd::bulk::Decompressor::new()
+            .map_err(|error| ProtocolError::Malformed(format!("quadro de ponte: {error}")))?;
+        Self::decode_with(bytes, &mut decompressor)
+    }
+
+    /// Como [`Self::decode`], reutilizando um `Decompressor` (`ZSTD_DCtx`).
+    ///
+    /// # Errors
+    ///
+    /// Ver [`Self::decode`].
+    pub fn decode_with(
+        bytes: &[u8],
+        decompressor: &mut zstd::bulk::Decompressor<'_>,
+    ) -> Result<Self, ProtocolError> {
         let malformed = |why: &str| ProtocolError::Malformed(format!("quadro de ponte {why}"));
         if bytes.len() < 17 {
             return Err(malformed("curto demais"));
@@ -160,19 +207,31 @@ impl TunnelFrame {
         let id = Uuid::from_slice(&bytes[..16]).map_err(|_| malformed("sem id"))?;
         let rest = &bytes[17..];
         let payload = match bytes[16] {
+            KIND_DATA if rest.is_empty() => return Err(malformed("de dados vazio")),
             KIND_DATA if rest.len() <= TUNNEL_DATA_MAX => TunnelPayload::Data(rest.to_vec()),
             KIND_DATA => return Err(ProtocolError::FrameTooLarge),
-            KIND_ACK => TunnelPayload::Ack(u32::from_be_bytes(
-                rest.try_into()
-                    .map_err(|_| malformed("com crédito inválido"))?,
-            )),
+            KIND_ACK => {
+                let credit = u32::from_be_bytes(
+                    rest.try_into()
+                        .map_err(|_| malformed("com crédito inválido"))?,
+                );
+                if credit == 0 {
+                    return Err(malformed("com crédito zero"));
+                }
+                TunnelPayload::Ack(credit)
+            }
             KIND_EOF if rest.is_empty() => TunnelPayload::Eof,
             // O teto vale para o descomprimido: um quadro pequeno não pode
             // virar gigabytes do outro lado.
-            KIND_DATA_ZSTD => TunnelPayload::Data(
-                zstd::bulk::decompress(rest, TUNNEL_DATA_MAX)
-                    .map_err(|_| malformed("com compressão inválida ou grande demais"))?,
-            ),
+            KIND_DATA_ZSTD => {
+                let data = decompressor
+                    .decompress(rest, TUNNEL_DATA_MAX)
+                    .map_err(|_| malformed("com compressão inválida ou grande demais"))?;
+                if data.is_empty() {
+                    return Err(malformed("de dados vazio"));
+                }
+                TunnelPayload::Data(data)
+            }
             _ => return Err(malformed("de tipo desconhecido")),
         };
         Ok(Self { id, payload })
@@ -205,12 +264,19 @@ impl Envelope {
 
     /// # Errors
     ///
-    /// Quadro acima de [`MAX_FRAME_BYTES`] ou JSON inválido.
+    /// Quadro acima de [`MAX_FRAME_BYTES`], versão divergente ou JSON inválido.
     pub fn decode(text: &str) -> Result<Self, ProtocolError> {
         if text.len() > MAX_FRAME_BYTES {
             return Err(ProtocolError::FrameTooLarge);
         }
-        serde_json::from_str(text).map_err(|error| ProtocolError::Malformed(error.to_string()))
+        let envelope: Self = serde_json::from_str(text)
+            .map_err(|error| ProtocolError::Malformed(error.to_string()))?;
+        // `Hello` carrega a própria versão em `hello.protocol` e é validado pelo
+        // handshake para reportar `HandshakeError::Protocol(v)` ao operador.
+        if !matches!(envelope.body, Body::Hello(_)) && envelope.v != PROTOCOL_VERSION {
+            return Err(ProtocolError::UnsupportedVersion(envelope.v));
+        }
+        Ok(envelope)
     }
 
     /// # Errors
@@ -230,6 +296,8 @@ impl Envelope {
 pub enum ProtocolError {
     #[error("quadro acima do limite do protocolo")]
     FrameTooLarge,
+    #[error("versão de protocolo não suportada: {0} (esperado {PROTOCOL_VERSION})")]
+    UnsupportedVersion(u16),
     #[error("quadro inválido: {0}")]
     Malformed(String),
 }
@@ -492,18 +560,20 @@ pub enum DockerCall {
 impl Command {
     /// Nome curto do pedido para o log — `monitor`, `docker.container_action`.
     /// É a etiqueta do fio (`op` e, no Docker, `call`), nunca os argumentos:
-    /// não carrega id, caminho nem segredo.
+    /// não carrega id, caminho nem segredo e não faz alocação.
     #[must_use]
-    pub fn label(&self) -> String {
-        fn tag(value: serde_json::Result<Value>, key: &str) -> String {
-            value
-                .ok()
-                .and_then(|value| value.get(key)?.as_str().map(str::to_string))
-                .unwrap_or_else(|| "desconhecido".to_string())
-        }
+    pub const fn label(&self) -> &'static str {
         match self {
-            Self::Docker { call } => format!("docker.{}", tag(serde_json::to_value(call), "call")),
-            other => tag(serde_json::to_value(other), "op"),
+            Self::Docker { call } => call.label(),
+            Self::Monitor { .. } => "monitor",
+            Self::Discovery { .. } => "discovery",
+            Self::SetLive { .. } => "set_live",
+            Self::DeviceIo { .. } => "device_io",
+            Self::DatabaseTunnel { .. } => "database_tunnel",
+            Self::VolumeExport { .. } => "volume_export",
+            Self::ImageExport { .. } => "image_export",
+            Self::ImageImport { .. } => "image_import",
+            Self::Throughput { .. } => "throughput",
         }
     }
 
@@ -526,6 +596,40 @@ impl Command {
 }
 
 impl DockerCall {
+    #[must_use]
+    pub const fn label(&self) -> &'static str {
+        match self {
+            Self::Status => "docker.status",
+            Self::ListContainers => "docker.list_containers",
+            Self::InspectContainer { .. } => "docker.inspect_container",
+            Self::ContainerAction { .. } => "docker.container_action",
+            Self::Logs { .. } => "docker.logs",
+            Self::FollowLogs { .. } => "docker.follow_logs",
+            Self::ClearLogs { .. } => "docker.clear_logs",
+            Self::Metrics => "docker.metrics",
+            Self::ListVolumes => "docker.list_volumes",
+            Self::InspectVolume { .. } => "docker.inspect_volume",
+            Self::RemoveVolume { .. } => "docker.remove_volume",
+            Self::ListNetworks => "docker.list_networks",
+            Self::InspectNetwork { .. } => "docker.inspect_network",
+            Self::CreateNetwork { .. } => "docker.create_network",
+            Self::RemoveNetwork { .. } => "docker.remove_network",
+            Self::ConnectNetwork { .. } => "docker.connect_network",
+            Self::DisconnectNetwork { .. } => "docker.disconnect_network",
+            Self::ListImages => "docker.list_images",
+            Self::InspectImage { .. } => "docker.inspect_image",
+            Self::RemoveImage { .. } => "docker.remove_image",
+            Self::PruneImages => "docker.prune_images",
+            Self::PullImage { .. } => "docker.pull_image",
+            Self::UpdateContainer { .. } => "docker.update_container",
+            Self::Compose { .. } => "docker.compose",
+            Self::StackDeploy { .. } => "docker.stack_deploy",
+            Self::StackReadiness { .. } => "docker.stack_readiness",
+            Self::ImageBuild { .. } => "docker.image_build",
+            Self::BuilderReadiness => "docker.builder_readiness",
+        }
+    }
+
     #[must_use]
     pub const fn permission(&self) -> Permission {
         match self {
@@ -688,13 +792,39 @@ mod tests {
         let id = Uuid::new_v4();
         for payload in [
             TunnelPayload::Data(b"SELECT 1".to_vec()),
-            TunnelPayload::Data(Vec::new()),
             TunnelPayload::Ack(256 * 1024),
             TunnelPayload::Eof,
         ] {
             let frame = TunnelFrame { id, payload };
-            assert_eq!(TunnelFrame::decode(&frame.encode()).unwrap(), frame);
+            let encoded = frame.encode();
+            assert_eq!(TunnelFrame::peek_id(&encoded), Some(id));
+            assert_eq!(TunnelFrame::decode(&encoded).unwrap(), frame);
         }
+        // Capacidade exata: Ack (21 B) e Eof (17 B) não superalocam 64 KiB.
+        assert_eq!(
+            TunnelFrame {
+                id,
+                payload: TunnelPayload::Ack(1)
+            }
+            .encode()
+            .capacity(),
+            21
+        );
+        assert_eq!(
+            TunnelFrame {
+                id,
+                payload: TunnelPayload::Eof
+            }
+            .encode()
+            .capacity(),
+            17
+        );
+        // Dados vazios e crédito zero são recusados.
+        assert!(TunnelFrame::decode(&TunnelFrame::encode_raw(id, &[])).is_err());
+        let mut zero_ack = id.as_bytes().to_vec();
+        zero_ack.push(KIND_ACK);
+        zero_ack.extend_from_slice(&0_u32.to_be_bytes());
+        assert!(TunnelFrame::decode(&zero_ack).is_err());
     }
 
     #[test]
@@ -876,6 +1006,15 @@ mod tests {
             Envelope::decode(r#"{"v":1}"#),
             Err(ProtocolError::Malformed(_))
         ));
+        let wrong_version = format!(
+            r#"{{"v":{},"id":"{}","body":{{"kind":"cancel"}}}}"#,
+            PROTOCOL_VERSION - 1,
+            Uuid::nil()
+        );
+        assert_eq!(
+            Envelope::decode(&wrong_version).unwrap_err(),
+            ProtocolError::UnsupportedVersion(PROTOCOL_VERSION - 1)
+        );
     }
 
     #[test]

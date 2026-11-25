@@ -22,11 +22,82 @@ use uuid::Uuid;
 
 use agent_protocol::{
     policy::Permission, tunnel::INBOUND_CAPACITY, AgentEvent, Body, Command, Envelope, ErrorCode,
-    Hello, RemoteError, TunnelFrame, TunnelPayload, WireFrame,
+    Hello, RemoteError, TunnelFrame, WireFrame,
 };
 
 /// Pedido que levou isto ou mais aparece no log da aplicação.
 const SLOW_REQUEST: Duration = Duration::from_secs(5);
+
+/// Limite para despachar `Body::Cancel` quando a fila de saída está cheia.
+const CANCEL_SEND_TIMEOUT: Duration = Duration::from_secs(1);
+
+const fn permission_bit(permission: Permission) -> u16 {
+    match permission {
+        Permission::Read => 1 << 0,
+        Permission::Lifecycle => 1 << 1,
+        Permission::Update => 1 << 2,
+        Permission::Compose => 1 << 3,
+        Permission::Monitor => 1 << 4,
+        Permission::Discovery => 1 << 5,
+        Permission::DeviceIo => 1 << 6,
+        Permission::Database => 1 << 7,
+        Permission::VolumeExport => 1 << 8,
+        Permission::Throughput => 1 << 9,
+        Permission::Deploy => 1 << 10,
+        Permission::Build => 1 << 11,
+    }
+}
+
+fn policy_mask(permissions: &[Permission]) -> u16 {
+    permissions
+        .iter()
+        .fold(0_u16, |mask, &permission| mask | permission_bit(permission))
+}
+
+/// Remove um pedido pendente ao ser descartado caso o futuro seja cancelado no
+/// meio — e avisa o agente com um `Cancel`, para ele não seguir executando o
+/// que ninguém mais espera (operação ou deploy cuja tarefa foi abortada).
+struct PendingGuard<'a> {
+    session: &'a AgentSession,
+    id: Uuid,
+    armed: bool,
+}
+
+impl<'a> PendingGuard<'a> {
+    const fn new(session: &'a AgentSession, id: Uuid) -> Self {
+        Self {
+            session,
+            id,
+            armed: true,
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for PendingGuard<'_> {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        let removed = self
+            .session
+            .lock_pending()
+            .as_mut()
+            .and_then(|pending| pending.remove(&self.id))
+            .is_some();
+        if removed && !self.session.is_closed() {
+            // `Drop` não espera: com a fila cheia o aviso se perde, e o prazo
+            // do próprio pedido encerra a execução no agente.
+            let _ = self
+                .session
+                .outbound
+                .try_send(Envelope::reply(self.id, Body::Cancel));
+        }
+    }
+}
 
 /// Um pedido à espera de resposta.
 struct Pending {
@@ -66,14 +137,17 @@ pub struct AgentSession {
     pub name: String,
     pub hello: Hello,
     pub connected_at: DateTime<Utc>,
+    policy_mask: u16,
     outbound: mpsc::Sender<Envelope>,
     /// Fila dos quadros binários de ponte — separada e de menor prioridade
     /// que a de controle, para um dump não atrasar monitores e Docker.
     tunnel_out: Option<mpsc::Sender<WireFrame>>,
-    /// Pontes abertas: para onde vão os quadros binários de cada uma.
-    tunnels: Mutex<HashMap<Uuid, mpsc::Sender<TunnelPayload>>>,
-    pending: Mutex<HashMap<Uuid, Pending>>,
+    /// Pontes abertas: `None` após [`Self::close`], impedindo inserções pós-fechamento.
+    tunnels: Mutex<Option<HashMap<Uuid, mpsc::Sender<Vec<u8>>>>>,
+    /// Pedidos pendentes: `None` após [`Self::close`], impedindo inserções pós-fechamento.
+    pending: Mutex<Option<HashMap<Uuid, Pending>>>,
     closed: AtomicBool,
+    close_token: CancellationToken,
 }
 
 impl AgentSession {
@@ -84,17 +158,26 @@ impl AgentSession {
         hello: Hello,
         outbound: mpsc::Sender<Envelope>,
     ) -> Self {
+        let policy_mask = policy_mask(&hello.policy);
         Self {
             probe_id,
             name: name.into(),
             hello,
             connected_at: Utc::now(),
+            policy_mask,
             outbound,
             tunnel_out: None,
-            tunnels: Mutex::new(HashMap::new()),
-            pending: Mutex::new(HashMap::new()),
+            tunnels: Mutex::new(Some(HashMap::new())),
+            pending: Mutex::new(Some(HashMap::new())),
             closed: AtomicBool::new(false),
+            close_token: CancellationToken::new(),
         }
+    }
+
+    /// Token cancelado quando [`Self::close`] encerra a sessão (revogação ou substituição).
+    #[must_use]
+    pub fn close_token(&self) -> CancellationToken {
+        self.close_token.clone()
     }
 
     /// Liga a fila de quadros binários (sem ela, a sessão não abre pontes).
@@ -110,41 +193,61 @@ impl AgentSession {
         self.tunnel_out.clone()
     }
 
-    /// Reserva a rota dos quadros que chegarem para a ponte `id`.
-    pub fn register_tunnel(&self, id: Uuid) -> mpsc::Receiver<TunnelPayload> {
+    /// Reserva a rota dos quadros binários crus que chegarem para a ponte `id`.
+    /// Devolve `None` se a sessão já foi fechada.
+    #[must_use]
+    pub fn register_tunnel(&self, id: Uuid) -> Option<mpsc::Receiver<Vec<u8>>> {
+        let mut tunnels = self.lock_tunnels();
+        let map = tunnels.as_mut()?;
         let (tx, rx) = mpsc::channel(INBOUND_CAPACITY);
-        self.lock_tunnels().insert(id, tx);
-        rx
+        map.insert(id, tx);
+        Some(rx)
     }
 
     pub fn unregister_tunnel(&self, id: Uuid) {
-        self.lock_tunnels().remove(&id);
+        if let Some(tunnels) = self.lock_tunnels().as_mut() {
+            tunnels.remove(&id);
+        }
     }
 
-    /// Entrega um quadro binário à ponte dele. Quadro inválido, de ponte
-    /// desconhecida ou que estoura a janela é descartado — no último caso a
-    /// ponte cai, porque o outro lado violou o crédito.
+    /// Entrega um quadro binário cru à ponte dele sem descomprimir no laço do
+    /// WebSocket. Quadro sem id válido, de ponte desconhecida ou que estoura a
+    /// janela é descartado — no último caso a ponte cai e o agente recebe `Cancel`.
     pub fn handle_tunnel_frame(&self, bytes: &[u8]) {
-        let frame = match TunnelFrame::decode(bytes) {
-            Ok(frame) => frame,
-            Err(error) => {
-                tracing::warn!(%error, agent = %self.name, "quadro de ponte inválido");
-                return;
-            }
-        };
-        let mut tunnels = self.lock_tunnels();
-        let Some(route) = tunnels.get(&frame.id) else {
+        self.handle_tunnel_frame_owned(bytes.to_vec());
+    }
+
+    /// Versão zero-copy de [`Self::handle_tunnel_frame`] quando o chamador já
+    /// possui o `Vec<u8>` do quadro WebSocket.
+    pub fn handle_tunnel_frame_owned(&self, bytes: Vec<u8>) {
+        let Some(id) = TunnelFrame::peek_id(&bytes) else {
+            tracing::warn!(agent = %self.name, "quadro de ponte inválido (curto demais)");
             return;
         };
-        if route.try_send(frame.payload).is_err() {
-            tracing::warn!(agent = %self.name, "ponte excedeu a janela de crédito; encerrada");
-            tunnels.remove(&frame.id);
+        let mut tunnels = self.lock_tunnels();
+        let Some(map) = tunnels.as_mut() else {
+            return;
+        };
+        let Some(route) = map.get(&id) else {
+            return;
+        };
+        match route.try_send(bytes) {
+            Ok(()) => {}
+            Err(mpsc::error::TrySendError::Full(_)) => {
+                tracing::warn!(agent = %self.name, "ponte excedeu a janela de crédito; encerrada");
+                map.remove(&id);
+                drop(tunnels);
+                let _ = self.outbound.try_send(Envelope::reply(id, Body::Cancel));
+            }
+            Err(mpsc::error::TrySendError::Closed(_)) => {
+                map.remove(&id);
+            }
         }
     }
 
     fn lock_tunnels(
         &self,
-    ) -> std::sync::MutexGuard<'_, HashMap<Uuid, mpsc::Sender<TunnelPayload>>> {
+    ) -> std::sync::MutexGuard<'_, Option<HashMap<Uuid, mpsc::Sender<Vec<u8>>>>> {
         self.tunnels
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -154,12 +257,12 @@ impl AgentSession {
     /// evita mandar pedidos que seriam recusados.
     #[must_use]
     pub fn allows(&self, permission: Permission) -> bool {
-        self.hello.policy.contains(&permission)
+        (self.policy_mask & permission_bit(permission)) != 0
     }
 
     #[must_use]
     pub fn is_closed(&self) -> bool {
-        self.closed.load(Ordering::SeqCst)
+        self.closed.load(Ordering::Acquire)
     }
 
     /// Pedido com resposta única.
@@ -195,13 +298,13 @@ impl AgentSession {
         let started = std::time::Instant::now();
         let timeout = call.timeout;
         let result = self.send_and_wait(call).await;
-        self.log_outcome(&label, started.elapsed(), timeout, &result);
+        self.log_outcome(label, started.elapsed(), timeout, &result);
         result
     }
 
     /// O que o operador precisa achar no log quando a tela falha: qual agente,
     /// qual pedido, quanto tempo. Erro de negócio (não encontrado, conflito)
-    /// não entra — é resposta, não falha do canal.
+    /// e cancelamento explícito não entram — não são falhas do canal.
     fn log_outcome(
         &self,
         label: &str,
@@ -211,6 +314,7 @@ impl AgentSession {
     ) {
         let elapsed_ms = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
         match result {
+            Err(error) if *error == RemoteError::cancelled() => {}
             Err(error) if matches!(error.code, ErrorCode::Timeout) => tracing::warn!(
                 agent = %self.name,
                 command = label,
@@ -250,13 +354,20 @@ impl AgentSession {
 
     async fn send_and_wait(&self, call: Call) -> Result<Value, RemoteError> {
         let (reply, response) = oneshot::channel();
-        self.lock_pending().insert(
-            call.id,
-            Pending {
-                chunks: call.chunks,
-                reply,
-            },
-        );
+        {
+            let mut pending = self.lock_pending();
+            let Some(map) = pending.as_mut() else {
+                return Err(RemoteError::disconnected());
+            };
+            map.insert(
+                call.id,
+                Pending {
+                    chunks: call.chunks,
+                    reply,
+                },
+            );
+        }
+        let mut guard = PendingGuard::new(self, call.id);
         let deadline_ms = u64::try_from(call.timeout.as_millis()).unwrap_or(u64::MAX);
         let request = Envelope::reply(
             call.id,
@@ -266,17 +377,24 @@ impl AgentSession {
             },
         );
         if self.outbound.send(request).await.is_err() {
-            self.lock_pending().remove(&call.id);
             return Err(RemoteError::disconnected());
         }
-        match tokio::time::timeout(call.timeout, response).await {
-            Ok(Ok(result)) => result,
-            Ok(Err(_)) => Err(RemoteError::disconnected()),
+        let outcome = match tokio::time::timeout(call.timeout, response).await {
+            Ok(Ok(result)) => {
+                guard.disarm();
+                result
+            }
+            Ok(Err(_)) => {
+                guard.disarm();
+                Err(RemoteError::disconnected())
+            }
             Err(_) => {
+                guard.disarm();
                 self.cancel(call.id).await;
                 Err(RemoteError::timeout())
             }
-        }
+        };
+        outcome
     }
 
     /// Pedido cujos chunks vão a `on_chunk`, na ordem, no próprio laço de
@@ -295,6 +413,9 @@ impl AgentSession {
         cancel: &CancellationToken,
         mut on_chunk: impl FnMut(Value) + Send,
     ) -> Result<Value, RemoteError> {
+        if cancel.is_cancelled() {
+            return Err(RemoteError::cancelled());
+        }
         let (chunks, mut received) = mpsc::unbounded_channel();
         let call = Call::new(command, timeout).with_chunks(chunks);
         let id = call.id;
@@ -320,12 +441,22 @@ impl AgentSession {
     }
 
     /// Interrompe um pedido em andamento. A espera local é resolvida na hora;
-    /// o agente recebe o `Cancel` e para o que estiver fazendo.
+    /// o agente recebe o `Cancel` em melhor esforço sem bloquear indefinidamente.
     pub async fn cancel(&self, id: Uuid) {
-        if let Some(pending) = self.lock_pending().remove(&id) {
+        if let Some(pending) = self.lock_pending().as_mut().and_then(|map| map.remove(&id)) {
             let _ = pending.reply.send(Err(RemoteError::cancelled()));
         }
-        let _ = self.outbound.send(Envelope::reply(id, Body::Cancel)).await;
+        if self.is_closed() {
+            return;
+        }
+        let envelope = Envelope::reply(id, Body::Cancel);
+        match self.outbound.try_send(envelope) {
+            Ok(()) | Err(mpsc::error::TrySendError::Closed(_)) => {}
+            Err(mpsc::error::TrySendError::Full(envelope)) => {
+                let _ =
+                    tokio::time::timeout(CANCEL_SEND_TIMEOUT, self.outbound.send(envelope)).await;
+            }
+        }
     }
 
     /// Entrega o quadro recebido a quem o espera. Devolve os eventos
@@ -335,7 +466,8 @@ impl AgentSession {
             Body::Chunk { data } => {
                 if let Some(chunks) = self
                     .lock_pending()
-                    .get(&envelope.id)
+                    .as_ref()
+                    .and_then(|map| map.get(&envelope.id))
                     .and_then(|pending| pending.chunks.as_ref())
                 {
                     let _ = chunks.send(data);
@@ -343,7 +475,11 @@ impl AgentSession {
                 None
             }
             Body::Response { outcome } => {
-                if let Some(pending) = self.lock_pending().remove(&envelope.id) {
+                if let Some(pending) = self
+                    .lock_pending()
+                    .as_mut()
+                    .and_then(|map| map.remove(&envelope.id))
+                {
                     let _ = pending.reply.send(outcome.into());
                 }
                 None
@@ -354,22 +490,26 @@ impl AgentSession {
         }
     }
 
-    /// Canal caiu: todo pedido pendente termina com `Disconnected`.
+    /// Canal caiu: todo pedido pendente termina com `Disconnected` e nenhuma
+    /// nova chamada ou ponte consegue se registrar nesta sessão.
     pub fn close(&self) {
-        self.closed.store(true, Ordering::SeqCst);
+        self.closed.store(true, Ordering::Release);
+        self.close_token.cancel();
         // Sem rota, as bombas das pontes veem o fim e encerram.
-        self.lock_tunnels().clear();
-        for (_, pending) in self.lock_pending().drain() {
-            let _ = pending.reply.send(Err(RemoteError::disconnected()));
+        let _ = self.lock_tunnels().take();
+        if let Some(mut pending) = self.lock_pending().take() {
+            for (_, entry) in pending.drain() {
+                let _ = entry.reply.send(Err(RemoteError::disconnected()));
+            }
         }
     }
 
     #[must_use]
     pub fn pending_count(&self) -> usize {
-        self.lock_pending().len()
+        self.lock_pending().as_ref().map_or(0, HashMap::len)
     }
 
-    fn lock_pending(&self) -> std::sync::MutexGuard<'_, HashMap<Uuid, Pending>> {
+    fn lock_pending(&self) -> std::sync::MutexGuard<'_, Option<HashMap<Uuid, Pending>>> {
         self.pending
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -561,5 +701,51 @@ mod tests {
             .await
             .expect_err("fechado");
         assert_eq!(again.code, ErrorCode::Disconnected);
+        assert!(session.close_token().is_cancelled());
+        assert!(session.register_tunnel(Uuid::new_v4()).is_none());
+    }
+
+    #[tokio::test]
+    async fn descartar_futuro_de_pedido_limpa_pendente_sem_vazar() {
+        let (session, mut outbound) = session(vec![Permission::Read]);
+        let session = std::sync::Arc::new(session);
+        let task = {
+            let session = session.clone();
+            tokio::spawn(async move { session.request(list(), Duration::from_secs(30)).await })
+        };
+        let _ = outbound.recv().await.expect("pedido");
+        assert_eq!(session.pending_count(), 1);
+        task.abort();
+        let _ = task.await;
+        assert_eq!(session.pending_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn descartar_futuro_de_pedido_avisa_o_agente() {
+        let (session, mut outbound) = session(vec![Permission::Read]);
+        let session = std::sync::Arc::new(session);
+        let task = {
+            let session = session.clone();
+            tokio::spawn(async move { session.request(list(), Duration::from_secs(30)).await })
+        };
+        let pedido = outbound.recv().await.expect("pedido");
+        task.abort();
+        let _ = task.await;
+        let aviso = outbound.recv().await.expect("cancel");
+        assert_eq!(aviso.id, pedido.id);
+        assert!(matches!(aviso.body, Body::Cancel));
+    }
+
+    #[tokio::test]
+    async fn cancelar_com_fila_cheia_nao_trava_indefinidamente() {
+        let (tx, _rx) = mpsc::channel(1);
+        let session = AgentSession::new(7, "srv", hello(vec![Permission::Read]), tx.clone());
+        // Enche a fila de saída com um quadro que ninguém lê.
+        tx.send(Envelope::reply(Uuid::new_v4(), Body::Cancel))
+            .await
+            .unwrap();
+        let result =
+            tokio::time::timeout(Duration::from_secs(2), session.cancel(Uuid::new_v4())).await;
+        assert!(result.is_ok(), "cancel não deve travar com fila cheia");
     }
 }

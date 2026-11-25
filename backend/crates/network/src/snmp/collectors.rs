@@ -200,34 +200,56 @@ pub fn parse_arp_table(
 ) -> Vec<SnmpArpEntry> {
     let mut result = Vec::new();
     for entry in entries {
-        if let Some(mac) = entry
+        let Some(mac) = entry
             .value
             .mac()
             .and_then(|m| netmonitor_core::network_tools::neighbor_cache::normalize_mac(&m))
+        else {
+            continue;
+        };
+        let oid = entry.oid.trim_start_matches('.');
+        let ip = if let Some(suffix) = oid
+            .strip_prefix(OID_IP_NET_TO_PHYSICAL_PHYS_ADDRESS)
+            .and_then(|rest| rest.strip_prefix('.'))
         {
-            let parts: Vec<&str> = entry.oid.split('.').collect();
+            // RFC 4293: <ifIndex>.<addrType>.<addrLen>.<octets...>
+            // Apenas IPv4 (addrType == 1, addrLen == 4).
+            let parts: Vec<&str> = suffix.split('.').collect();
+            if parts.len() == 7 && parts[1] == "1" && parts[2] == "4" {
+                format!("{}.{}.{}.{}", parts[3], parts[4], parts[5], parts[6])
+                    .parse::<std::net::Ipv4Addr>()
+                    .ok()
+            } else {
+                None
+            }
+        } else {
+            let parts: Vec<&str> = oid.split('.').collect();
             if parts.len() >= 4 {
                 let len = parts.len();
-                let ip_str = format!(
+                format!(
                     "{}.{}.{}.{}",
                     parts[len - 4],
                     parts[len - 3],
                     parts[len - 2],
                     parts[len - 1]
-                );
-                if let Ok(ip) = ip_str.parse::<std::net::Ipv4Addr>() {
-                    let s = ip.to_string();
-                    if !ip.is_multicast()
-                        && !ip.is_broadcast()
-                        && !ip.is_unspecified()
-                        && !s.ends_with(".255")
-                    {
-                        result.push(SnmpArpEntry {
-                            ip_address: s,
-                            mac_address: mac,
-                        });
-                    }
-                }
+                )
+                .parse::<std::net::Ipv4Addr>()
+                .ok()
+            } else {
+                None
+            }
+        };
+        if let Some(ip) = ip {
+            let s = ip.to_string();
+            if !ip.is_multicast()
+                && !ip.is_broadcast()
+                && !ip.is_unspecified()
+                && !s.ends_with(".255")
+            {
+                result.push(SnmpArpEntry {
+                    ip_address: s,
+                    mac_address: mac,
+                });
             }
         }
     }
@@ -262,6 +284,24 @@ fn non_empty_text(value: Option<SnmpValue>) -> Option<String> {
     value
         .map(|value| value.text())
         .filter(|text| !text.is_empty())
+}
+
+/// Mapeia `ifAdminStatus`/`ifOperStatus` (RFC 2863) para o estado do monitor.
+#[must_use]
+pub const fn interface_monitor_status(
+    admin: u64,
+    oper: u64,
+) -> agent_protocol::monitoring::MonitorStatus {
+    use agent_protocol::monitoring::MonitorStatus;
+    if admin == 2 {
+        MonitorStatus::Disabled
+    } else if oper == 1 {
+        MonitorStatus::Up
+    } else if oper == 2 {
+        MonitorStatus::Down
+    } else {
+        MonitorStatus::Warning
+    }
 }
 
 /// Rótulo textual de `ifAdminStatus`/`ifOperStatus` (RFC 2863).
@@ -391,14 +431,14 @@ pub fn calculate_rates_detailed(
         .zip(current_uptime)
         .map(|(previous, current)| current < previous)
         .unwrap_or(false);
-    if seconds <= 0.0 || reboot_detected {
+    if seconds <= 0.0 || reboot_detected || previous.counter_bits != current.counter_bits {
         return TrafficRates {
             in_bps: 0.0,
             out_bps: 0.0,
             reboot_detected,
         };
     }
-    let counter_bits = previous.counter_bits.max(current.counter_bits);
+    let counter_bits = current.counter_bits;
     TrafficRates {
         in_bps: counter_diff(previous.in_octets, current.in_octets, counter_bits) as f64 * 8.0
             / seconds,
@@ -411,9 +451,18 @@ fn counter_diff(previous: u64, current: u64, counter_bits: u8) -> u64 {
     if current >= previous {
         current - previous
     } else if counter_bits >= 64 {
-        current.wrapping_sub(previous)
+        // Um contador de 64 bits só faz wrap legítimo perto de u64::MAX
+        // (~1.15e18 bytes = 1 EiB); uma queda de valores menores é reset de
+        // contador sem reboot (ex.: interface resetada), não wrap.
+        if previous >= (1_u64 << 60) {
+            current.wrapping_sub(previous)
+        } else {
+            0
+        }
+    } else if previous <= u64::from(u32::MAX) {
+        current + (u64::from(u32::MAX) + 1) - previous
     } else {
-        current + (u32::MAX as u64 + 1) - previous
+        0
     }
 }
 
@@ -1130,5 +1179,60 @@ mod tests {
             Some("10.48.65.66")
         );
         assert_eq!(vizinhos[0].protocol, "cdp");
+    }
+
+    #[test]
+    fn counter_diff_trata_reset_64bits_mismatch_e_wrap_legitimo() {
+        // Reset de contador 64-bit sem reboot (ex.: interface zerada) não vira 2^64 bytes.
+        assert_eq!(counter_diff(5_000_000, 1_000, 64), 0);
+        // Wrap legítimo próximo a u64::MAX funciona.
+        assert_eq!(counter_diff(u64::MAX - 99, 50, 64), 150);
+        // 32-bit com valor anterior maior que u32::MAX não causa underflow.
+        assert_eq!(counter_diff(u64::from(u32::MAX) + 500, 10, 32), 0);
+        // Wrap legítimo de 32-bit funciona.
+        assert_eq!(counter_diff(u64::from(u32::MAX) - 9, 5, 32), 15);
+
+        // Mistura de 64-bit com 32-bit devolve taxa zero em vez de lixo.
+        let now = Utc::now();
+        let prev = InterfaceTraffic {
+            if_index: 1,
+            in_octets: u64::from(u32::MAX) + 10_000,
+            out_octets: u64::from(u32::MAX) + 10_000,
+            in_errors: 0,
+            out_errors: 0,
+            counter_bits: 64,
+            recorded_at: now - chrono::Duration::seconds(10),
+        };
+        let curr = InterfaceTraffic {
+            if_index: 1,
+            in_octets: 1_000,
+            out_octets: 1_000,
+            in_errors: 0,
+            out_errors: 0,
+            counter_bits: 32,
+            recorded_at: now,
+        };
+        let rates = calculate_rates_detailed(&prev, &curr, None, None);
+        assert_eq!(rates.in_bps, 0.0);
+        assert_eq!(rates.out_bps, 0.0);
+    }
+
+    #[test]
+    fn parse_arp_table_ignora_entradas_ipv6_de_ip_net_to_physical() {
+        let entries = vec![
+            SnmpWalkEntry {
+                // IPv6 (addrType=2, addrLen=16)
+                oid: "1.3.6.1.2.1.4.35.1.4.2.2.16.254.128.0.0.0.0.0.0.0.0.0.0.10.0.0.1".into(),
+                value: SnmpValue::Bytes(vec![0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff]),
+            },
+            SnmpWalkEntry {
+                // IPv4 (addrType=1, addrLen=4)
+                oid: "1.3.6.1.2.1.4.35.1.4.2.1.4.192.168.1.50".into(),
+                value: SnmpValue::Bytes(vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55]),
+            },
+        ];
+        let parsed = parse_arp_table(entries);
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].ip_address, "192.168.1.50");
     }
 }

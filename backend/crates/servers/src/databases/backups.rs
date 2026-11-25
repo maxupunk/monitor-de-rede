@@ -13,21 +13,27 @@
 //! **antes** de devolver, para o segundo clique receber `409` na hora, e não
 //! um job que falha depois.
 
+use std::collections::HashMap;
+
+use async_compression::tokio::bufread::GzipDecoder;
 use chrono::{DateTime, Utc};
 use loco_rs::app::AppContext;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set,
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder,
+    QuerySelect, Set,
 };
+use sha2::{Digest, Sha256};
+use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 
 use super::{
-    dump::{DumpFile, DumpStats, DumpWriter},
+    dump::{create_private, DumpFile, DumpStats, DumpWriter, TempFile},
     jobs::{DatabaseJobKind, DatabaseJobSnapshot, DatabaseJobStatus, Job},
     notify::{self, FailureKind},
     reach::{reach, Reached},
     restore::LineReader,
     service::{self, Connection},
     sql::validate_database_name,
-    DatabaseError, DatabaseTarget, Progress, RestoreMode,
+    DatabaseError, DatabaseTarget, EngineFamily, RestoreMode,
 };
 use netmonitor_core::{
     events::EventBus,
@@ -39,8 +45,50 @@ use netmonitor_core::{
     storage::{self, service::Destination},
 };
 
+/// Um backup por conexão de cada vez.
 pub const BACKUP_SCOPE: &str = "database-backup";
+/// Uma restauração por conexão de cada vez.
 pub const RESTORE_SCOPE: &str = "database-restore";
+
+const BACKUP_BUSY: &str = "Já há um backup em andamento para esta conexão";
+const RESTORE_BUSY: &str = "Já há uma restauração em andamento nesta conexão";
+
+/// Backup e restauração também se excluem na mesma conexão: um `Replace`
+/// apagando o banco no meio do dump gravaria uma cópia pela metade, e o dump
+/// leria o banco a meio caminho da restauração. A trava é por conexão, não por
+/// banco: o backup cobre todos os bancos dela, e com a lista vazia só descobre
+/// quais são depois de conectar.
+///
+/// Cada lado pega a própria vez **antes** de olhar a do outro: com as duas
+/// inserções feitas sob o mesmo mutex, pelo menos um dos dois vê o outro, e
+/// nunca os dois seguem juntos. A mensagem diz o que está em curso.
+///
+/// # Errors
+///
+/// `409` com a operação em curso.
+pub fn acquire_exclusive(kind: DatabaseJobKind, connection_id: i64) -> AppResult<RunGuard> {
+    let (own, own_busy, other, other_busy) = match kind {
+        DatabaseJobKind::Backup => (
+            BACKUP_SCOPE,
+            BACKUP_BUSY,
+            RESTORE_SCOPE,
+            "Há uma restauração em andamento nesta conexão — aguarde terminar para fazer o backup",
+        ),
+        DatabaseJobKind::Restore => (
+            RESTORE_SCOPE,
+            RESTORE_BUSY,
+            BACKUP_SCOPE,
+            "Há um backup em andamento nesta conexão — aguarde terminar para restaurar",
+        ),
+    };
+    let guard = RunGuard::acquire(own, connection_id, own_busy)?;
+    if RunGuard::is_running(other, connection_id) {
+        return Err(AppError::conflict(other_busy));
+    }
+    Ok(guard)
+}
+
+const HISTORY_LIMIT: u64 = 500;
 
 pub const STATUS_RUNNING: &str = "running";
 pub const STATUS_SUCCESS: &str = "success";
@@ -122,11 +170,7 @@ pub async fn start_backup(
     connection_id: i64,
     trigger: Trigger,
 ) -> AppResult<DatabaseJobSnapshot> {
-    let guard = RunGuard::acquire(
-        BACKUP_SCOPE,
-        connection_id,
-        "Já há um backup em andamento para esta conexão",
-    )?;
+    let guard = acquire_exclusive(DatabaseJobKind::Backup, connection_id)?;
     let connection = service::load(&ctx.db, connection_id).await?;
     let destination = destination_of(&ctx.db, &connection).await?;
     let job = Job::start(
@@ -153,11 +197,7 @@ pub async fn start_backup(
 ///
 /// `409` com outro backup da conexão em andamento; o motivo da falha.
 pub async fn backup_before_deploy(ctx: &AppContext, connection_id: i64) -> AppResult<Vec<i64>> {
-    let _guard = RunGuard::acquire(
-        BACKUP_SCOPE,
-        connection_id,
-        "Já há um backup em andamento para esta conexão",
-    )?;
+    let _guard = acquire_exclusive(DatabaseJobKind::Backup, connection_id)?;
     let connection = service::load(&ctx.db, connection_id).await?;
     let destination = destination_of(&ctx.db, &connection).await?;
     let job = Job::start(
@@ -312,7 +352,7 @@ async fn backup_all(
     let db = &ctx.db;
     let explorer = destination.explorer()?;
     if connection.row.via_probe_id.is_some() {
-        job.stage("Abrindo a ponte pelo agente");
+        job.milestone("Abrindo a ponte pelo agente");
     }
     // A ponte (se houver) vive até o último banco ser copiado.
     let reached = reach(ctx, connection.target(), connection.row.via_probe_id).await?;
@@ -402,6 +442,7 @@ async fn backup_one(run: &Run<'_>, database: &str) -> AppResult<()> {
         // Cada tentativa recria o arquivo: refazer é começar do zero.
         let attempted = reached
             .retrying(job, || {
+                job.reset_database_progress();
                 dump_to(connection, &reached.target, database, &temp, job)
             })
             .await?;
@@ -413,7 +454,7 @@ async fn backup_one(run: &Run<'_>, database: &str) -> AppResult<()> {
                 attempted.attempts
             ));
         }
-        job.stage("Enviando ao armazenamento");
+        job.milestone("Enviando ao armazenamento");
         let key = object_key(&connection.row, database, started);
         explorer
             .put_file(&key, &file.path)
@@ -487,33 +528,96 @@ async fn prune(db: &DatabaseConnection, connection: &Connection, database: &str)
         .filter(|row| row.status != STATUS_RUNNING)
         .partition(|row| row.status == STATUS_SUCCESS);
 
+    let mut explorers: HashMap<i64, OldStorage> = HashMap::new();
+    let mut delete_ids: Vec<i64> = Vec::new();
     for old in successes.into_iter().skip(keep) {
+        let mut can_delete_row = true;
         if let (Some(destination_id), Some(key)) = (old.storage_destination_id, &old.object_key) {
-            match storage::service::load(db, destination_id).await {
-                Ok(destination) => {
-                    destination
-                        .explorer()?
-                        .delete_object(key, false)
-                        .await
-                        .or_else(|error| match error {
-                            // Já não estava lá: o objetivo foi alcançado.
-                            storage::StorageError::NotFound(_) => Ok(()),
-                            other => Err(other),
-                        })?;
+            if let std::collections::hash_map::Entry::Vacant(slot) = explorers.entry(destination_id)
+            {
+                let opened = storage::service::load(db, destination_id)
+                    .await
+                    .and_then(|destination| destination.explorer());
+                slot.insert(OldStorage::classify(destination_id, opened));
+            }
+            match explorers.get(&destination_id) {
+                Some(OldStorage::Ready(explorer)) => {
+                    match explorer.delete_object(key, false).await {
+                        Ok(()) | Err(storage::StorageError::NotFound(_)) => {}
+                        Err(error) => {
+                            tracing::warn!(%error, backup_id = old.id, key, "falha ao remover cópia antiga do armazenamento; mantendo registro para próxima retenção");
+                            can_delete_row = false;
+                        }
+                    }
                 }
-                Err(error) => tracing::debug!(%error, "armazenamento da cópia antiga não abre"),
+                Some(OldStorage::Unavailable) => can_delete_row = false,
+                Some(OldStorage::Gone) | None => {}
             }
         }
-        database_backups::Entity::delete_by_id(old.id)
-            .exec(db)
-            .await?;
+        if can_delete_row {
+            delete_ids.push(old.id);
+        }
     }
-    for old in failures.into_iter().skip(KEEP_FAILED) {
-        database_backups::Entity::delete_by_id(old.id)
+    delete_ids.extend(failures.into_iter().skip(KEEP_FAILED).map(|old| old.id));
+    if !delete_ids.is_empty() {
+        database_backups::Entity::delete_many()
+            .filter(database_backups::Column::Id.is_in(delete_ids))
             .exec(db)
             .await?;
     }
     Ok(())
+}
+
+/// O armazenamento de uma cópia além da retenção.
+enum OldStorage {
+    Ready(Box<dyn storage::StorageExplorer>),
+    /// O cadastro foi removido: o arquivo ficou inalcançável, a linha pode ir.
+    Gone,
+    /// Existe mas não abriu agora (banco, chave, configuração): a linha fica
+    /// para a próxima retenção, senão o arquivo vira órfão fora dela.
+    Unavailable,
+}
+
+impl OldStorage {
+    fn classify(destination_id: i64, opened: AppResult<Box<dyn storage::StorageExplorer>>) -> Self {
+        match opened {
+            Ok(explorer) => Self::Ready(explorer),
+            Err(AppError::NotFound(_)) => Self::Gone,
+            Err(error) => {
+                tracing::warn!(%error, destination_id, "armazenamento da cópia antiga não abre; mantendo registro para próxima retenção");
+                Self::Unavailable
+            }
+        }
+    }
+}
+
+/// Marca linhas `running` órfãs (sem `RunGuard` ativo no processo) como
+/// `failed`, evitando histórico preso após queda ou reinício do servidor.
+///
+/// # Errors
+///
+/// Erro do banco.
+pub async fn recover_stuck_running(db: &DatabaseConnection) -> AppResult<u64> {
+    let stuck = database_backups::Entity::find()
+        .filter(database_backups::Column::Status.eq(STATUS_RUNNING))
+        .all(db)
+        .await?;
+    let now = Utc::now();
+    let mut recovered = 0_u64;
+    for row in stuck {
+        if RunGuard::is_running(BACKUP_SCOPE, row.connection_id) {
+            continue;
+        }
+        let mut active: database_backups::ActiveModel = row.into();
+        active.status = Set(STATUS_FAILED.to_string());
+        active.error = Set(Some(
+            "Interrompido por reinício do servidor antes de concluir".to_string(),
+        ));
+        active.finished_at = Set(Some(now.into()));
+        active.update(db).await?;
+        recovered += 1;
+    }
+    Ok(recovered)
 }
 
 /// Histórico de uma conexão, mais recentes primeiro.
@@ -528,8 +632,72 @@ pub async fn history(
     Ok(database_backups::Entity::find()
         .filter(database_backups::Column::ConnectionId.eq(connection_id))
         .order_by_desc(database_backups::Column::StartedAt)
+        .limit(HISTORY_LIMIT)
         .all(db)
         .await?)
+}
+
+/// Verifica integridade gzip e SHA-256 do backup antes de operações
+/// destrutivas que não têm rollback transacional (ex.: `DROP DATABASE` no MySQL).
+async fn verify_backup_integrity(
+    reader: storage::ObjectReader,
+    expected_checksum: Option<&str>,
+    job: &Job,
+) -> AppResult<()> {
+    job.milestone("Verificando integridade do backup");
+    let mut decoder = GzipDecoder::new(BufReader::with_capacity(256 * 1024, reader));
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0_u8; 64 * 1024];
+    loop {
+        let read = decoder
+            .read(&mut buf)
+            .await
+            .map_err(|error| AppError::from(DatabaseError::io(error)))?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buf[..read]);
+    }
+    if let Some(expected) = expected_checksum {
+        let actual = hex::encode(hasher.finalize());
+        if actual != expected {
+            return Err(AppError::from(DatabaseError::Checksum));
+        }
+    }
+    Ok(())
+}
+
+/// Baixa a cópia para um temporário local privado, apagado quando o
+/// [`TempFile`] devolvido sair de escopo.
+async fn download_private(
+    explorer: &dyn storage::StorageExplorer,
+    key: &str,
+    connection_id: i64,
+    job: &Job,
+) -> AppResult<TempFile> {
+    job.milestone("Baixando a cópia");
+    let temp = TempFile(std::env::temp_dir().join(format!(
+        "netmonitor-restore-{connection_id}-{}.sql.gz",
+        uuid::Uuid::new_v4()
+    )));
+    let mut reader = explorer.read_object(key).await.map_err(AppError::from)?;
+    let mut file = create_private(&temp.0)
+        .await
+        .map_err(|error| AppError::from(DatabaseError::io(error)))?;
+    tokio::io::copy(&mut reader, &mut file)
+        .await
+        .map_err(|error| AppError::from(DatabaseError::io(error)))?;
+    file.flush()
+        .await
+        .map_err(|error| AppError::from(DatabaseError::io(error)))?;
+    Ok(temp)
+}
+
+async fn open_local(path: &std::path::Path) -> AppResult<storage::ObjectReader> {
+    let file = tokio::fs::File::open(path)
+        .await
+        .map_err(|error| AppError::from(DatabaseError::io(error)))?;
+    Ok(Box::pin(file))
 }
 
 /// O que a restauração precisa saber.
@@ -576,11 +744,7 @@ pub async fn start_restore(
         .ok_or_else(|| AppError::business_rule("O armazenamento desta cópia foi removido"))?;
     let destination = storage::service::load(&ctx.db, destination_id).await?;
 
-    let guard = RunGuard::acquire(
-        RESTORE_SCOPE,
-        target.row.id,
-        "Já há uma restauração em andamento nesta conexão",
-    )?;
+    let guard = acquire_exclusive(DatabaseJobKind::Restore, target.row.id)?;
     let job = Job::start(
         EventBus::from_context(ctx).ok(),
         DatabaseJobKind::Restore,
@@ -594,15 +758,29 @@ pub async fn start_restore(
     tokio::spawn(async move {
         let _guard = guard;
         let result = async {
+            let explorer = destination.explorer()?;
+            // No MySQL/MariaDB, `DROP DATABASE` não pode ser desfeito: confirma
+            // gzip e SHA-256 antes de tocar no banco existente. A cópia é baixada
+            // uma vez só, para um temporário local (0600, apagado no fim), e a
+            // verificação e a restauração leem dele.
+            let local = if target.engine.family() == EngineFamily::Mysql
+                && request.mode == RestoreMode::Replace
+            {
+                let local = download_private(explorer.as_ref(), &key, target.row.id, &job).await?;
+                verify_backup_integrity(open_local(&local.0).await?, checksum.as_deref(), &job)
+                    .await?;
+                Some(local)
+            } else {
+                None
+            };
             if target.row.via_probe_id.is_some() {
-                job.stage("Abrindo a ponte pelo agente");
+                job.milestone("Abrindo a ponte pelo agente");
             }
             let reached = reach(&ctx, target.target(), target.row.via_probe_id).await?;
-            let reader = destination
-                .explorer()?
-                .read_object(&key)
-                .await
-                .map_err(AppError::from)?;
+            let reader = match &local {
+                Some(local) => open_local(&local.0).await?,
+                None => explorer.read_object(&key).await.map_err(AppError::from)?,
+            };
             let mut lines = LineReader::gzip(reader, checksum);
             let stats = target
                 .engine
@@ -646,6 +824,39 @@ pub async fn start_restore(
 mod tests {
     use super::*;
     use chrono::TimeZone;
+
+    #[test]
+    fn backup_e_restauracao_se_excluem_na_mesma_conexao_com_a_mensagem_certa() {
+        let id = -9_001;
+        let backup = acquire_exclusive(DatabaseJobKind::Backup, id).unwrap();
+        let busy = acquire_exclusive(DatabaseJobKind::Restore, id).unwrap_err();
+        assert!(busy.to_string().contains("backup em andamento"), "{busy}");
+        assert!(
+            !RunGuard::is_running(RESTORE_SCOPE, id),
+            "a recusa solta a vez"
+        );
+        let again = acquire_exclusive(DatabaseJobKind::Backup, id).unwrap_err();
+        assert!(again.to_string().contains("Já há um backup"), "{again}");
+        assert!(acquire_exclusive(DatabaseJobKind::Restore, id - 1).is_ok());
+        drop(backup);
+
+        let restore = acquire_exclusive(DatabaseJobKind::Restore, id).unwrap();
+        let busy = acquire_exclusive(DatabaseJobKind::Backup, id).unwrap_err();
+        assert!(
+            busy.to_string().contains("restauração em andamento"),
+            "{busy}"
+        );
+        drop(restore);
+        assert!(acquire_exclusive(DatabaseJobKind::Backup, id).is_ok());
+    }
+
+    #[test]
+    fn a_retencao_so_esquece_a_linha_quando_o_armazenamento_sumiu() {
+        let gone = OldStorage::classify(1, Err(AppError::not_found("removido")));
+        assert!(matches!(gone, OldStorage::Gone));
+        let broken = OldStorage::classify(1, Err(AppError::validation("config inválida")));
+        assert!(matches!(broken, OldStorage::Unavailable));
+    }
 
     #[test]
     fn resume_a_lista_de_bancos_copiados() {

@@ -19,14 +19,14 @@
 //! - **Auditoria**: "por que não fui avisado?" tem resposta — a linha
 //!   suprimida guarda o motivo.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use chrono::{DateTime, Duration, Utc};
 use loco_rs::app::AppContext;
 use netmonitor_core::areas::Area;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, EntityTrait, QueryFilter,
-    QueryOrder, QuerySelect, Set,
+    ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DatabaseConnection, EntityTrait,
+    QueryFilter, QueryOrder, QuerySelect, Set,
 };
 
 use crate::{
@@ -43,14 +43,21 @@ use crate::{
             },
             NotificationService,
         },
-        shared::errors::AppResult,
+        shared::{errors::AppResult, transaction::begin_write},
     },
 };
 
 /// Valores de `notification_outbox.status`.
 const PENDING: &str = "pending";
+const PROCESSING: &str = "processing";
 const SENT: &str = "sent";
 const SUPPRESSED: &str = "suppressed";
+
+/// Prazo após o qual uma linha presa em `processing` (crash no meio do envio)
+/// volta a ficar elegível para entrega. A passagem viva renova o carimbo
+/// (`sent_at`) a cada grupo entregue ([`refresh_claim`]), então só um claim
+/// sem progresso por todo esse prazo — processo morto — é recuperado.
+const STALE_CLAIM_MINUTES: i64 = 5;
 
 /// Quantas linhas um despacho processa por passagem.
 ///
@@ -210,39 +217,52 @@ pub async fn enqueue(ctx: &AppContext, request: NotificationRequest) -> AppResul
 /// Propaga erro do banco.
 pub async fn dispatch_pending(ctx: &AppContext) -> AppResult<DispatchStats> {
     let now = Utc::now();
-    let due = notification_outbox::Entity::find()
-        .filter(notification_outbox::Column::Status.eq(PENDING))
-        .filter(notification_outbox::Column::DeliverAfter.lte(now))
-        .order_by_asc(notification_outbox::Column::Id)
-        .limit(DISPATCH_BATCH)
-        .all(&ctx.db)
-        .await?;
+    let due = claim_pending_batch(&ctx.db, now).await?;
     if due.is_empty() {
         return Ok(DispatchStats::default());
     }
 
+    // Pré-carrega ancestrais em alerta em lote (evita N+1 durante tempestade em cascata).
+    let inhibitable_devices: Vec<i64> = due
+        .iter()
+        .filter(|row| row.inhibitable)
+        .filter_map(|row| row.device_id)
+        .collect();
+    let explaining_by_device =
+        inhibition::explaining_ancestors(&ctx.db, &inhibitable_devices).await?;
+
     let mut stats = DispatchStats::default();
-    let mut deliverable = Vec::new();
+    let mut deliverable = Vec::with_capacity(due.len());
+    let mut suppressed_ids = Vec::new();
     for row in due {
-        if let Some(ancestor) = inhibiting_ancestor(ctx, &row).await? {
+        let ancestor = if row.inhibitable {
+            row.device_id
+                .and_then(|id| explaining_by_device.get(&id).copied())
+        } else {
+            None
+        };
+        if let Some(ancestor) = ancestor {
             tracing::debug!(
                 notification_id = row.id,
                 device_id = row.device_id,
                 ancestor,
                 "notificação inibida: o pai do dispositivo está em alerta"
             );
-            mark(
-                ctx,
-                &[row.id],
-                SUPPRESSED,
-                Some(SuppressReason::Inhibited),
-                now,
-            )
-            .await?;
+            suppressed_ids.push(row.id);
             stats.suppressed += 1;
             continue;
         }
         deliverable.push(row);
+    }
+    if !suppressed_ids.is_empty() {
+        mark(
+            ctx,
+            &suppressed_ids,
+            SUPPRESSED,
+            Some(SuppressReason::Inhibited),
+            now,
+        )
+        .await?;
     }
     if deliverable.is_empty() {
         return Ok(stats);
@@ -251,7 +271,11 @@ pub async fn dispatch_pending(ctx: &AppContext) -> AppResult<DispatchStats> {
     // Uma instância só de canais por passagem: antes da Fase 4, cada alerta
     // relia o ambiente para montar os quatro destinos do zero.
     let channels = NotificationService::with_default_channels();
+    let claimed_ids: Vec<i64> = deliverable.iter().map(|row| row.id).collect();
     for (group, rows) in by_group(deliverable) {
+        // Heartbeat do claim: uma passagem lenta (canal demorando) não pode
+        // parecer abandonada e ser devolvida a `pending` por outra.
+        refresh_claim(&ctx.db, &claimed_ids).await?;
         let ids: Vec<i64> = rows.iter().map(|row| row.id).collect();
         let mut message = if rows.len() == 1 {
             stats.delivered += 1;
@@ -277,18 +301,100 @@ pub async fn dispatch_pending(ctx: &AppContext) -> AppResult<DispatchStats> {
     Ok(stats)
 }
 
-/// O ancestral em alerta que justifica engolir esta linha.
-async fn inhibiting_ancestor(
-    ctx: &AppContext,
-    row: &notification_outbox::Model,
-) -> AppResult<Option<i64>> {
-    if !row.inhibitable {
-        return Ok(None);
+/// Reserva atomicamente um lote de notificações vencidas dentro de `begin_write`,
+/// impedindo envios duplicados quando duas passagens do agendador se sobrepõem.
+///
+/// No PostgreSQL o `SELECT ... FOR UPDATE SKIP LOCKED` trava as linhas lidas
+/// até o commit: outra passagem simultânea pula essas linhas em vez de lê-las
+/// como `pending`. No SQLite a cláusula some e o `BEGIN IMMEDIATE` já
+/// serializa as passagens. O lote devolvido é só o que **esta** passagem
+/// efetivamente marcou (`rows_affected` conferido; divergência relê).
+async fn claim_pending_batch(
+    db: &DatabaseConnection,
+    now: DateTime<Utc>,
+) -> AppResult<Vec<notification_outbox::Model>> {
+    let txn = begin_write(db).await?;
+    let stale_before: sea_orm::prelude::DateTimeWithTimeZone =
+        (now - Duration::minutes(STALE_CLAIM_MINUTES)).into();
+    // Recupera linhas presas em `processing` caso o processo tenha morrido no meio.
+    notification_outbox::Entity::update_many()
+        .col_expr(
+            notification_outbox::Column::Status,
+            sea_orm::sea_query::Expr::value(PENDING),
+        )
+        .col_expr(
+            notification_outbox::Column::SentAt,
+            sea_orm::sea_query::Expr::value(Option::<sea_orm::prelude::DateTimeWithTimeZone>::None),
+        )
+        .filter(notification_outbox::Column::Status.eq(PROCESSING))
+        .filter(notification_outbox::Column::SentAt.lt(stale_before))
+        .exec(&txn)
+        .await?;
+
+    let due = notification_outbox::Entity::find()
+        .filter(notification_outbox::Column::Status.eq(PENDING))
+        .filter(notification_outbox::Column::DeliverAfter.lte(now))
+        .order_by_asc(notification_outbox::Column::Id)
+        .limit(DISPATCH_BATCH)
+        .lock_with_behavior(
+            sea_orm::sea_query::LockType::Update,
+            sea_orm::sea_query::LockBehavior::SkipLocked,
+        )
+        .all(&txn)
+        .await?;
+    if due.is_empty() {
+        txn.commit().await?;
+        return Ok(Vec::new());
     }
-    let Some(device_id) = row.device_id else {
-        return Ok(None);
+
+    let ids: Vec<i64> = due.iter().map(|row| row.id).collect();
+    let stamp: sea_orm::prelude::DateTimeWithTimeZone = now.into();
+    let claimed = notification_outbox::Entity::update_many()
+        .col_expr(
+            notification_outbox::Column::Status,
+            sea_orm::sea_query::Expr::value(PROCESSING),
+        )
+        .col_expr(
+            notification_outbox::Column::SentAt,
+            sea_orm::sea_query::Expr::value(Some(stamp)),
+        )
+        .filter(notification_outbox::Column::Id.is_in(ids.clone()))
+        .filter(notification_outbox::Column::Status.eq(PENDING))
+        .exec(&txn)
+        .await?;
+    let due = if claimed.rows_affected == due.len() as u64 {
+        due
+    } else {
+        // Alguma linha mudou de dono entre a leitura e o UPDATE: devolve só o
+        // que ficou com o carimbo desta passagem.
+        notification_outbox::Entity::find()
+            .filter(notification_outbox::Column::Id.is_in(ids))
+            .filter(notification_outbox::Column::Status.eq(PROCESSING))
+            .filter(notification_outbox::Column::SentAt.eq(stamp))
+            .order_by_asc(notification_outbox::Column::Id)
+            .all(&txn)
+            .await?
     };
-    inhibition::explaining_ancestor(&ctx.db, device_id).await
+    txn.commit().await?;
+    Ok(due)
+}
+
+/// Renova o carimbo das linhas que esta passagem ainda tem em `processing`.
+async fn refresh_claim<C: ConnectionTrait>(db: &C, ids: &[i64]) -> AppResult<()> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+    let stamp: sea_orm::prelude::DateTimeWithTimeZone = Utc::now().into();
+    notification_outbox::Entity::update_many()
+        .col_expr(
+            notification_outbox::Column::SentAt,
+            sea_orm::sea_query::Expr::value(Some(stamp)),
+        )
+        .filter(notification_outbox::Column::Id.is_in(ids.iter().copied()))
+        .filter(notification_outbox::Column::Status.eq(PROCESSING))
+        .exec(db)
+        .await?;
+    Ok(())
 }
 
 /// Agrupa preservando a ordem de chegada dos grupos e das linhas.
@@ -326,14 +432,22 @@ async fn area_of_rows<C: ConnectionTrait>(
     db: &C,
     rows: &[notification_outbox::Model],
 ) -> AppResult<Area> {
-    let rule_ids: Vec<i64> = rows.iter().filter_map(|row| row.alert_rule_id).collect();
-    if rule_ids.len() != rows.len() {
-        return Ok(Area::Core);
+    let mut unique_ids = HashSet::with_capacity(rows.len());
+    for row in rows {
+        let Some(id) = row.alert_rule_id else {
+            return Ok(Area::Core);
+        };
+        unique_ids.insert(id);
     }
+    let rule_ids: Vec<i64> = unique_ids.into_iter().collect();
     let rules = alert_rules::Entity::find()
-        .filter(alert_rules::Column::Id.is_in(rule_ids))
+        .filter(alert_rules::Column::Id.is_in(rule_ids.clone()))
         .all(db)
         .await?;
+    // Alguma regra do lote foi removida: cai para o Núcleo para não vazar/esconder.
+    if rules.len() != rule_ids.len() {
+        return Ok(Area::Core);
+    }
     let mut areas = rules.iter().map(|rule| {
         rule.template_key
             .as_deref()
@@ -569,5 +683,74 @@ mod tests {
         };
         assert_eq!(stats.total(), 13);
         assert_eq!(DispatchStats::default().total(), 0);
+    }
+
+    async fn banco() -> DatabaseConnection {
+        use crate::test_schema::{MigratorTrait, TestMigrator as Migrator};
+        let db = sea_orm::Database::connect(
+            sea_orm::ConnectOptions::new("sqlite::memory:".to_owned())
+                .max_connections(1)
+                .min_connections(1)
+                .to_owned(),
+        )
+        .await
+        .expect("banco");
+        Migrator::up(&db, None).await.expect("migrations");
+        db
+    }
+
+    async fn enfileirada(
+        db: &DatabaseConnection,
+        status: &str,
+        sent_at: Option<DateTime<Utc>>,
+    ) -> i64 {
+        let now = Utc::now();
+        notification_outbox::ActiveModel {
+            group_key: Set(GLOBAL_GROUP.into()),
+            kind: Set("problem".into()),
+            title: Set("t".into()),
+            body: Set("b".into()),
+            severity: Set("warning".into()),
+            metadata: Set(json!({})),
+            status: Set(status.into()),
+            inhibitable: Set(false),
+            deliver_after: Set((now - Duration::seconds(1)).into()),
+            sent_at: Set(sent_at.map(Into::into)),
+            created_at: Set(now.into()),
+            ..Default::default()
+        }
+        .insert(db)
+        .await
+        .expect("linha")
+        .id
+    }
+
+    #[tokio::test]
+    async fn o_claim_entrega_cada_linha_a_uma_passagem_so() {
+        let db = banco().await;
+        let id = enfileirada(&db, PENDING, None).await;
+
+        let primeira = claim_pending_batch(&db, Utc::now()).await.expect("claim");
+        let segunda = claim_pending_batch(&db, Utc::now()).await.expect("claim");
+
+        assert_eq!(primeira.iter().map(|row| row.id).collect::<Vec<_>>(), [id]);
+        assert!(segunda.is_empty(), "a linha já é da primeira passagem");
+    }
+
+    #[tokio::test]
+    async fn so_o_claim_sem_progresso_volta_para_a_fila() {
+        let db = banco().await;
+        let now = Utc::now();
+        let abandonada = enfileirada(&db, PROCESSING, Some(now - Duration::minutes(10))).await;
+        let viva = enfileirada(&db, PROCESSING, Some(now - Duration::minutes(10))).await;
+        // A passagem viva renovou o carimbo do claim dela.
+        refresh_claim(&db, &[viva]).await.expect("heartbeat");
+
+        let lote = claim_pending_batch(&db, now).await.expect("claim");
+
+        assert_eq!(
+            lote.iter().map(|row| row.id).collect::<Vec<_>>(),
+            [abandonada]
+        );
     }
 }

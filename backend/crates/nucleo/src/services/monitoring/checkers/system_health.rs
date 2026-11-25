@@ -37,7 +37,7 @@ impl Checker for SystemHealthChecker {
         // tráfego, então o coordenador precisa sobreviver entre ciclos: um
         // coordenador novo a cada execução reportaria "primeira amostra" para
         // sempre.
-        coordinator().collect()
+        coordinator().collect_async().await
     }
 }
 

@@ -236,7 +236,8 @@ fn hex_little_endian(texto: &str) -> Option<Ipv4Addr> {
 /// Informa se o processo atual possui visão L2 da rede local (modo `host` ou fora do container).
 #[must_use]
 pub fn can_inspect_l2() -> bool {
-    !NatDetector::detect().bridged_container()
+    static CAN_INSPECT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *CAN_INSPECT.get_or_init(|| !NatDetector::detect().bridged_container())
 }
 
 #[cfg(test)]

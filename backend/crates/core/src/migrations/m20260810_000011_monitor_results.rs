@@ -39,14 +39,21 @@ impl MigrationTrait for Migration {
 
         m.create_table(append_only(stmt.take())).await?;
 
-        // Tabela de maior volume e de escrita quente — só dois índices, ambos
-        // pagos por consultas de laço: o histórico por monitor (listagem,
-        // sparkline, dashboard DNS) e a purga do `DataPrunerService`.
+        // Tabela de maior volume e de escrita quente — só três índices, todos
+        // pagos por consultas recorrentes: o histórico por monitor (listagem,
+        // sparkline, dashboard DNS), a limpeza dos resultados de um probe
+        // removido (`resource_cleanup`) e a purga do `DataPrunerService`.
         // O B-tree ascendente atende o `ORDER BY started_at DESC` lendo ao contrário.
         m.create_index(index(
             "monitor_results_monitor_started_index",
             "monitor_results",
             &["monitor_id", "started_at"],
+        ))
+        .await?;
+        m.create_index(index(
+            "monitor_results_probe_id_index",
+            "monitor_results",
+            &["probe_id"],
         ))
         .await?;
         m.create_index(index(

@@ -161,6 +161,44 @@ pub async fn record_failure(
     Ok(())
 }
 
+/// Remove o arquivo temporário no `Drop` (inclusive em cancelamento ou erro).
+struct TempFileGuard(std::path::PathBuf);
+
+impl TempFileGuard {
+    fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+impl Drop for TempFileGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// Cria um arquivo temporário restrito (`0600` no Unix) com `body` e garante
+/// remoção no `Drop`.
+async fn write_private_temp(path: std::path::PathBuf, body: Vec<u8>) -> AppResult<TempFileGuard> {
+    tokio::task::spawn_blocking(move || -> std::io::Result<TempFileGuard> {
+        use std::io::Write;
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        let mut file = opts.open(&path)?;
+        let guard = TempFileGuard(path);
+        file.write_all(&body)?;
+        file.flush()?;
+        Ok(guard)
+    })
+    .await
+    .map_err(|err| AppError::Internal(anyhow::anyhow!("gravar temporário: {err}")))?
+    .map_err(|err| AppError::Internal(anyhow::anyhow!("gravar temporário: {err}")))
+}
+
 async fn upload(
     db: &DatabaseConnection,
     destination: &Destination,
@@ -170,25 +208,25 @@ async fn upload(
 ) -> AppResult<RunOutcome> {
     let explorer = destination.explorer()?;
     let file = backup::export(db, app_version).await?;
-    let body = serde_json::to_vec(&file)
+    let body = tokio::task::spawn_blocking(move || serde_json::to_vec(&file))
+        .await
+        .map_err(|err| AppError::Internal(anyhow::anyhow!("serializar backup: {err}")))?
         .map_err(|err| AppError::Internal(anyhow::anyhow!("serializar backup: {err}")))?;
+    let body_len = body.len();
 
     let name = file_name_for(at);
     let key = format!("{BACKUP_DIR}/{name}");
     // O adapter envia a partir de um arquivo (o SFTP e o `opendal` fazem
     // streaming dele). O temporário leva o id do destino e um sufixo aleatório:
     // dois destinos no mesmo segundo não disputam o mesmo arquivo.
-    let temp = std::env::temp_dir().join(format!(
+    let temp_path = std::env::temp_dir().join(format!(
         "netmonitor-backup-{}-{}.json",
         destination.row.id,
         uuid::Uuid::new_v4()
     ));
-    tokio::fs::write(&temp, &body)
-        .await
-        .map_err(|err| AppError::Internal(anyhow::anyhow!("gravar temporário: {err}")))?;
-    let sent = explorer.put_file(&key, &temp).await;
-    let _ = tokio::fs::remove_file(&temp).await;
-    sent?;
+    let temp = write_private_temp(temp_path, body).await?;
+    explorer.put_file(&key, temp.path()).await?;
+    drop(temp);
 
     // Primeiro uso de um SFTP: a identidade vista no envio passa a valer.
     service::remember_identity(db, destination, explorer.as_ref()).await?;
@@ -209,7 +247,7 @@ async fn upload(
         entry: BackupEntry {
             key,
             name,
-            size: i64::try_from(body.len()).ok(),
+            size: i64::try_from(body_len).ok(),
             last_modified: Some(at.to_rfc3339()),
         },
         pruned,
@@ -268,8 +306,12 @@ async fn prune(explorer: &dyn StorageExplorer, retention: i32) -> Result<usize, 
     let entries = list_with(explorer).await?;
     let mut pruned = 0;
     for old in entries.iter().skip(keep) {
-        explorer.delete_object(&old.key, false).await?;
-        pruned += 1;
+        match explorer.delete_object(&old.key, false).await {
+            Ok(()) => pruned += 1,
+            Err(error) => {
+                tracing::warn!(key = %old.key, %error, "falha ao remover cópia antiga do backup");
+            }
+        }
     }
     Ok(pruned)
 }
@@ -281,13 +323,14 @@ async fn prune(explorer: &dyn StorageExplorer, retention: i32) -> Result<usize, 
 /// Chave que não é de backup, arquivo grande demais, ausente ou que não é um
 /// JSON de backup.
 pub async fn read(destination: &Destination, key: &str) -> AppResult<BackupFile> {
-    if !is_backup_key(key) {
+    let key = normalize_path(key);
+    if !is_backup_key(&key) {
         return Err(AppError::validation(
             "Escolha um arquivo de backup da pasta netmonitor-backups",
         ));
     }
     let explorer = destination.explorer()?;
-    let reader = explorer.read_object(key).await?;
+    let reader = explorer.read_object(&key).await?;
     let mut body = Vec::new();
     reader
         .take(MAX_BACKUP_BYTES + 1)
@@ -299,7 +342,9 @@ pub async fn read(destination: &Destination, key: &str) -> AppResult<BackupFile>
             "O arquivo passa de 256 MB — não é um backup deste sistema",
         ));
     }
-    serde_json::from_slice(&body)
+    tokio::task::spawn_blocking(move || serde_json::from_slice(&body))
+        .await
+        .map_err(|err| AppError::Internal(anyhow::anyhow!("ler backup: {err}")))?
         .map_err(|err| AppError::validation(format!("O arquivo não é um backup válido: {err}")))
 }
 

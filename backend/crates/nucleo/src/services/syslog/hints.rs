@@ -83,25 +83,26 @@ pub async fn collect(
         .filter(|valor| !valor.is_empty())
         .and_then(|texto| texto.parse::<IpAddr>().ok());
 
-    // A descrição do SNMP identifica o **sistema**; o `vendor` do cadastro
-    // costuma vir do OUI do MAC, que identifica o fabricante da placa. Por isso
-    // vale a consulta ao vivo quando o SNMP está ligado.
-    let sistema_snmp = match host {
-        Some(endereco) if dispositivo.snmp_enabled => {
-            sistema_por_snmp(access, endereco, dispositivo).await
+    // SNMP, sondas SSH/Telnet e busca do MAC correm em paralelo para não somar
+    // os timeouts na abertura do diálogo.
+    let snmp_fut = async {
+        match host {
+            Some(endereco) if dispositivo.snmp_enabled => {
+                sistema_por_snmp(access, endereco, dispositivo).await
+            }
+            _ => None,
         }
-        _ => None,
     };
-
-    // As duas sondas em paralelo: em série elas somariam o teto de cada uma na
-    // abertura do diálogo. A da 22 lê de quebra a identificação do servidor
-    // SSH, que é o que separa OpenWrt de Linux quando o agente SNMP responde só
-    // o `uname`.
-    let (ssh, telnet_open) = match host {
-        Some(endereco) => tokio::join!(sonda_ssh(endereco), porta_aberta(endereco, 23)),
-        None => ((false, None), false),
+    let probes_fut = async {
+        match host {
+            Some(endereco) => tokio::join!(sonda_ssh(endereco), porta_aberta(endereco, 23)),
+            None => ((false, None), false),
+        }
     };
+    let (sistema_snmp, (ssh, telnet_open), mac_address) =
+        tokio::join!(snmp_fut, probes_fut, mac_conhecido(db, dispositivo));
     let (ssh_open, ssh_banner) = ssh;
+    let mac_address = mac_address?;
 
     let deteccao = systems::detect(&systems::Evidence {
         declared: dispositivo.operating_system.as_deref(),
@@ -143,7 +144,7 @@ pub async fn collect(
         operating_system: deteccao.system.id.to_owned(),
         operating_system_source: deteccao.source,
         operating_system_reason: deteccao.reason,
-        mac_address: mac_conhecido(db, dispositivo).await?,
+        mac_address,
         // A difusão do MAC-Telnet não atravessa a ponte do Docker.
         layer2_reachable: !nat.bridged_container(),
     })
@@ -179,6 +180,7 @@ pub async fn mac_conhecido(
     Ok(discovery_results::Entity::find()
         .filter(discovery_results::Column::IpAddress.eq(ip))
         .filter(discovery_results::Column::MacAddress.is_not_null())
+        .order_by_desc(discovery_results::Column::Id)
         .one(db)
         .await?
         .and_then(|linha| linha.mac_address)
@@ -262,24 +264,88 @@ fn link_local(endereco: IpAddr) -> bool {
     }
 }
 
-/// Filtra um endereço vindo da tela. Texto vazio ou inútil vira `None`, para o
+/// Valida hostname segundo RFC 1123 (`[a-zA-Z0-9.-]`, rótulos de 1..=63 bytes,
+/// sem hífen nas pontas e sem caracteres de controle/shell).
+///
+/// Como o valor é interpolado em comandos SSH/Telnet enviados a roteadores e
+/// hosts, restringir o conjunto de caracteres bloqueia injeção de comandos.
+///
+/// Nome todo numérico (`127.1`, `10.0.0.256`) não é hostname: o resolvedor de
+/// muito equipamento o lê como IP abreviado — `127.1` é o loopback — e ele
+/// escaparia do crivo de [`utilizavel`]. O ponto final (`127.0.0.1.`) sai pelo
+/// mesmo motivo: é a forma de contrabandear um IP como "nome".
+fn is_valid_hostname(host: &str) -> bool {
+    if host.is_empty() || host.len() > 253 || host.ends_with('.') {
+        return false;
+    }
+    let ultimo_rotulo = host.rsplit('.').next().unwrap_or(host);
+    if ultimo_rotulo.bytes().all(|byte| byte.is_ascii_digit()) {
+        return false;
+    }
+    host.split('.').all(|label| {
+        !label.is_empty()
+            && label.len() <= 63
+            && !label.starts_with('-')
+            && !label.ends_with('-')
+            && label
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+    })
+}
+
+/// Filtra um endereço vindo da tela (`IP`, `IP:porta`, `[IPv6]:porta`,
+/// `hostname` ou `hostname:porta`). Texto vazio ou inútil vira `None`, para o
 /// chamador cair no palpite do servidor em vez de gravar lixo no equipamento.
 #[must_use]
 pub fn sanitiza_endereco(bruto: Option<&str>) -> Option<String> {
     let limpo = bruto.map(str::trim).filter(|valor| !valor.is_empty())?;
-    // Um nome (não um IP) não pode ser validado aqui: `netmonitor.local` pode
-    // muito bem ser resolvível pelo roteador. Só o que **é** endereço passa
-    // pelo crivo — e `localhost` é o nome que todo mundo resolve para o lugar
-    // errado, então ele sai pelo nome mesmo.
-    if limpo.eq_ignore_ascii_case("localhost")
-        || limpo.eq_ignore_ascii_case("localhost.localdomain")
-    {
-        return None;
-    }
     if let Ok(endereco) = limpo.parse::<IpAddr>() {
         return utilizavel(endereco).then(|| limpo.to_owned());
     }
-    Some(limpo.to_owned())
+    if let Ok(socket) = limpo.parse::<SocketAddr>() {
+        return (socket.port() > 0 && utilizavel(socket.ip())).then(|| limpo.to_owned());
+    }
+    let host = match limpo.rsplit_once(':') {
+        Some((host, porta)) if porta.parse::<u16>().is_ok_and(|porta| porta > 0) => host,
+        Some(_) => return None,
+        None => limpo,
+    };
+    // `localhost` é o nome que todo mundo resolve para o lugar errado, então
+    // sai pelo nome mesmo.
+    if host.eq_ignore_ascii_case("localhost") || host.eq_ignore_ascii_case("localhost.localdomain")
+    {
+        return None;
+    }
+    is_valid_hostname(host).then(|| limpo.to_owned())
+}
+
+/// Separa a porta de um endereço já saneado (`IP:porta`, `[IPv6]:porta`,
+/// `nome:porta`). Sem porta, devolve o próprio endereço.
+#[must_use]
+pub fn sem_porta(endereco: &str) -> &str {
+    if endereco.parse::<IpAddr>().is_ok() {
+        return endereco;
+    }
+    if endereco.parse::<SocketAddr>().is_ok() {
+        // `[::1]:80` → `::1`; `10.0.0.1:80` → `10.0.0.1`.
+        let host = endereco.rsplit_once(':').map_or(endereco, |(host, _)| host);
+        return host.trim_start_matches('[').trim_end_matches(']');
+    }
+    match endereco.rsplit_once(':') {
+        Some((host, porta)) if porta.parse::<u16>().is_ok() => host,
+        _ => endereco,
+    }
+}
+
+/// O endereço foi recusado por apontar o equipamento para ele mesmo
+/// (`localhost`, loopback, não-especificado, link-local) — e não por ter um
+/// formato inválido. É o que separa as duas mensagens de erro da tela.
+#[must_use]
+pub fn aponta_para_si_mesmo(bruto: &str) -> bool {
+    let host = sem_porta(bruto.trim());
+    host.eq_ignore_ascii_case("localhost")
+        || host.eq_ignore_ascii_case("localhost.localdomain")
+        || host.parse::<IpAddr>().is_ok_and(|ip| !utilizavel(ip))
 }
 
 /// Sonda TCP de porta única. Conexão recusada e tempo esgotado dão o mesmo
@@ -368,9 +434,13 @@ mod tests {
         // mandar o log para si mesmo, sem erro e sem nada chegando.
         assert_eq!(sanitiza_endereco(Some("localhost")), None);
         assert_eq!(sanitiza_endereco(Some("LOCALHOST")), None);
+        assert_eq!(sanitiza_endereco(Some("localhost:8080")), None);
         assert_eq!(sanitiza_endereco(Some(" 127.0.0.1 ")), None);
+        assert_eq!(sanitiza_endereco(Some("127.0.0.1:8080")), None);
         assert_eq!(sanitiza_endereco(Some("::1")), None);
+        assert_eq!(sanitiza_endereco(Some("[::1]:8080")), None);
         assert_eq!(sanitiza_endereco(Some("0.0.0.0")), None);
+        assert_eq!(sanitiza_endereco(Some("172.20.0.5:0")), None);
     }
 
     #[test]
@@ -379,12 +449,88 @@ mod tests {
             sanitiza_endereco(Some(" 192.168.1.10 ")),
             Some("192.168.1.10".to_owned())
         );
+        assert_eq!(
+            sanitiza_endereco(Some("172.20.0.5:9000")),
+            Some("172.20.0.5:9000".to_owned())
+        );
         // Nome que não é `localhost` continua valendo: o roteador pode muito
         // bem resolvê-lo, e recusar aqui tiraria uma opção legítima.
         assert_eq!(
             sanitiza_endereco(Some("netmonitor.lan")),
             Some("netmonitor.lan".to_owned())
         );
+        assert_eq!(
+            sanitiza_endereco(Some("casa.ddns.net:8080")),
+            Some("casa.ddns.net:8080".to_owned())
+        );
+    }
+
+    #[test]
+    fn hostname_com_metacaracteres_de_shell_e_recusado() {
+        for invalido in [
+            "10.0.0.1; id",
+            "host$(whoami)",
+            "host|cat /etc/passwd",
+            "host\nid",
+            "-inicia-com-hifen",
+            "termina-com-hifen-",
+            "espaco no meio",
+        ] {
+            assert_eq!(
+                sanitiza_endereco(Some(invalido)),
+                None,
+                "aceitou hostname perigoso: {invalido:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn nome_todo_numerico_e_ponto_final_nao_contrabandeiam_ip() {
+        for invalido in [
+            "127.0.0.1.",
+            "127.1",
+            "127.1:514",
+            "10.0.0.256",
+            "1.2.3.4.5",
+            "2130706433",
+            "netmonitor.lan.",
+        ] {
+            assert_eq!(
+                sanitiza_endereco(Some(invalido)),
+                None,
+                "aceitou {invalido:?}"
+            );
+        }
+        // Rótulo numérico no meio do nome continua valendo.
+        assert_eq!(
+            sanitiza_endereco(Some("10.rede.lan")),
+            Some("10.rede.lan".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_porta_sai_sem_levar_o_host_junto() {
+        assert_eq!(sem_porta("172.20.0.5:9000"), "172.20.0.5");
+        assert_eq!(sem_porta("[2001:db8::1]:9000"), "2001:db8::1");
+        assert_eq!(sem_porta("2001:db8::1"), "2001:db8::1");
+        assert_eq!(sem_porta("casa.ddns.net:8080"), "casa.ddns.net");
+        assert_eq!(sem_porta("netmonitor.lan"), "netmonitor.lan");
+    }
+
+    #[test]
+    fn so_loopback_e_afins_contam_como_apontar_para_si() {
+        for proprio in [
+            "localhost",
+            "localhost:8080",
+            "127.0.0.1",
+            "[::1]:80",
+            "0.0.0.0",
+        ] {
+            assert!(aponta_para_si_mesmo(proprio), "{proprio}");
+        }
+        for formato in ["127.1", "host$(id)", "10.0.0.1; id", "127.0.0.1."] {
+            assert!(!aponta_para_si_mesmo(formato), "{formato}");
+        }
     }
 
     #[test]

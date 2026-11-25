@@ -14,7 +14,7 @@ use std::collections::HashMap;
 
 use chrono::Utc;
 use loco_rs::app::AppContext;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, Set};
 use serde_json::{json, Value};
 
 use crate::{
@@ -31,7 +31,7 @@ use crate::{
             policy::{NotificationKind, NotificationPolicy},
             Severity,
         },
-        shared::errors::AppResult,
+        shared::{errors::AppResult, transaction::begin_write},
     },
 };
 
@@ -108,7 +108,15 @@ pub async fn note_degraded_scope(
     let policies = policies_of(ctx, &open).await?;
     let mut touched = 0;
 
-    for event in open {
+    for listed in open {
+        // Releitura dentro da transação de escrita: o `data` gravado sai da
+        // linha atual, não da lista lida antes — senão um reconhecimento ou
+        // silêncio concorrente (`acknowledgedAt`, `silencedUntil`) some.
+        let txn = begin_write(&ctx.db).await?;
+        let Some(event) = reload_open(&txn, listed.id).await? else {
+            txn.commit().await?;
+            continue;
+        };
         let now = Utc::now();
         let rule_policies = policy_for(&policies, &event);
         let policy = rule_policies.episode;
@@ -138,7 +146,8 @@ pub async fn note_degraded_scope(
             Transition::Relapse { recurrence, status } => {
                 touched += 1;
                 episode::mark_relapse(&mut data, recurrence, now, policy);
-                let saved = episode::persist(ctx, &event, status, data).await?;
+                let saved = episode::persist_on(&txn, &event, status, data).await?;
+                txn.commit().await?;
                 feed::publish(ctx, "alert:updated", feed::event_payload(&saved)).await;
             }
             Transition::StartFlapping {
@@ -151,7 +160,8 @@ pub async fn note_degraded_scope(
                     state_machine::FLAPPING_SINCE.into(),
                     json!(now.to_rfc3339()),
                 );
-                let saved = episode::persist(ctx, &event, AlertStatus::Flapping, data).await?;
+                let saved = episode::persist_on(&txn, &event, AlertStatus::Flapping, data).await?;
+                txn.commit().await?;
                 feed::publish(ctx, "alert:updated", feed::event_payload(&saved)).await;
                 notify_flapping(ctx, &saved, transitions, rule_policies).await;
             }
@@ -163,11 +173,12 @@ pub async fn note_degraded_scope(
                 );
                 let mut active: alert_events::ActiveModel = event.into();
                 active.data = Set(Some(Value::Object(data)));
-                active.update(&ctx.db).await?;
+                active.update(&txn).await?;
+                txn.commit().await?;
             }
             // Evento fechado não é tocado; `Resolve`/`EnterRecovering` não
             // aparecem neste caminho (`recovered` é falso aqui).
-            _ => {}
+            _ => txn.commit().await?,
         }
     }
 
@@ -306,7 +317,14 @@ async fn run(
 
     let mut resolved = 0;
 
-    for event in open {
+    for listed in open {
+        // Mesma releitura de `note_degraded_scope`: decide e grava sobre a
+        // linha atual, dentro da transação.
+        let txn = begin_write(&ctx.db).await?;
+        let Some(event) = reload_open(&txn, listed.id).await? else {
+            txn.commit().await?;
+            continue;
+        };
         let now = Utc::now();
         let rule_policies = policy_for(&policies, &event);
         let policy = observed_policy(rule_policies.episode, event.monitor_id.is_some());
@@ -338,7 +356,8 @@ async fn run(
                     .and_then(|data| data.get(problem_kind::PROBLEM_KIND))
                     .and_then(Value::as_str)
                     .and_then(problem_kind::ProblemKind::parse);
-                let saved = persist_resolve(ctx, event, now).await?;
+                let saved = persist_resolve(&txn, event, now).await?;
+                txn.commit().await?;
                 let request = NotificationRequest {
                     alert_rule_id: saved.alert_rule_id,
                     scope_key: saved.scope_key.clone(),
@@ -371,28 +390,40 @@ async fn run(
             Transition::EnterRecovering => {
                 // Entrada em recovering não notifica: a notícia boa de verdade
                 // é a resolução ao fim da janela.
-                let saved = persist_enter_recovering(ctx, event).await?;
+                let saved = persist_enter_recovering(&txn, event).await?;
+                txn.commit().await?;
                 feed::publish(ctx, "alert:updated", feed::event_payload(&saved)).await;
             }
             // `None` não aparece neste caminho: `condition_matched` é sempre
             // falso aqui, então recaída e "problema em curso" são impossíveis.
-            _ => {}
+            _ => txn.commit().await?,
         }
     }
 
     Ok(resolved)
 }
 
+/// O evento como está agora, se ainda aberto.
+async fn reload_open<C: ConnectionTrait>(
+    db: &C,
+    id: i64,
+) -> AppResult<Option<alert_events::Model>> {
+    Ok(alert_events::Entity::find_by_id(id)
+        .filter(alert_events_entity::Column::Status.is_in(AlertStatus::OPEN))
+        .one(db)
+        .await?)
+}
+
 /// Persiste o fechamento do episódio.
-async fn persist_resolve(
-    ctx: &AppContext,
+async fn persist_resolve<C: ConnectionTrait>(
+    db: &C,
     event: alert_events::Model,
     resolved_at: chrono::DateTime<Utc>,
 ) -> AppResult<alert_events::Model> {
     let mut active: alert_events::ActiveModel = event.into();
     active.status = Set(AlertStatus::Resolved.as_str().into());
     active.resolved_at = Set(Some(resolved_at.into()));
-    Ok(active.update(&ctx.db).await?)
+    Ok(active.update(db).await?)
 }
 
 /// Persiste a entrada em observação de estabilidade.
@@ -400,8 +431,8 @@ async fn persist_resolve(
 /// O `lastProblemAt` registrado é mantido — é ele que ancora a janela no
 /// último problema. Na falta (evento aberto antes da Fase 1), ancora na
 /// abertura do evento, e o contador de recaídas nasce em zero.
-async fn persist_enter_recovering(
-    ctx: &AppContext,
+async fn persist_enter_recovering<C: ConnectionTrait>(
+    db: &C,
     event: alert_events::Model,
 ) -> AppResult<alert_events::Model> {
     let mut data = event
@@ -418,7 +449,7 @@ async fn persist_enter_recovering(
     let mut active: alert_events::ActiveModel = event.into();
     active.status = Set(AlertStatus::Recovering.as_str().into());
     active.data = Set(Some(Value::Object(data)));
-    Ok(active.update(&ctx.db).await?)
+    Ok(active.update(db).await?)
 }
 
 #[cfg(test)]

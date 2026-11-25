@@ -41,15 +41,28 @@ pub async fn get<C: ConnectionTrait>(db: &C) -> AppResult<system_backup_plan::Mo
     {
         return Ok(plan);
     }
-    Ok(system_backup_plan::ActiveModel {
+    system_backup_plan::Entity::insert(system_backup_plan::ActiveModel {
         id: Set(PLAN_ID),
         backup_enabled: Set(false),
         backup_interval_hours: Set(24),
         backup_retention: Set(14),
         ..Default::default()
-    }
-    .insert(db)
-    .await?)
+    })
+    .on_conflict(
+        sea_orm::sea_query::OnConflict::column(system_backup_plan::Column::Id)
+            .do_nothing()
+            .to_owned(),
+    )
+    .exec_without_returning(db)
+    .await?;
+    system_backup_plan::Entity::find_by_id(PLAN_ID)
+        .one(db)
+        .await?
+        .ok_or_else(|| {
+            AppError::Internal(anyhow::anyhow!(
+                "plano de backup do NetMonitor não encontrado após inserção"
+            ))
+        })
 }
 
 /// Grava o plano.

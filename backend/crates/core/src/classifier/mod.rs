@@ -23,8 +23,7 @@ pub mod suggestion;
 
 use device_identity::{DeviceFacts, DeviceIdentity, IdentitySuggestion};
 use interfaces::{InterfaceAdviceOutput, InterfaceCandidate};
-use log_category::LogPattern;
-use suggestion::DeciderSuggestion;
+use log_category::{LogPattern, LogVerdict};
 
 /// Quem espera pela resposta.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,14 +72,15 @@ pub trait Classifier: Send + Sync {
         min_confidence: u8,
     ) -> Option<(InterfaceAdviceOutput, String)>;
 
-    /// A categoria de um padrão de log, com o modelo que respondeu.
+    /// A categoria de um padrão de log, com o modelo que respondeu — ou se
+    /// ele respondeu sem confiança, ou se não deu para perguntar.
     async fn categorize_log(
         &self,
         ctx: &AppContext,
         lane: Lane,
         pattern: &LogPattern<'_>,
         min_confidence: u8,
-    ) -> Option<DeciderSuggestion>;
+    ) -> LogVerdict;
 }
 
 /// O padrão sem assistente: nenhuma frente ligada, nenhum palpite. A
@@ -121,8 +121,8 @@ impl Classifier for HeuristicClassifier {
         _lane: Lane,
         _pattern: &LogPattern<'_>,
         _min_confidence: u8,
-    ) -> Option<DeciderSuggestion> {
-        None
+    ) -> LogVerdict {
+        LogVerdict::Unavailable
     }
 }
 

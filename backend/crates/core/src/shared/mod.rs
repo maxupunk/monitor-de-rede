@@ -5,6 +5,7 @@ pub mod body;
 pub mod cidr;
 pub mod client_addr;
 pub mod crypto;
+pub mod db_errors;
 pub mod errors;
 pub mod incident;
 pub mod pagination;

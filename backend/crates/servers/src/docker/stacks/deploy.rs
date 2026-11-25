@@ -11,21 +11,22 @@
 //! uma revisão.
 
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeSet, HashMap},
     future::Future,
     path::{Path, PathBuf},
+    sync::{Arc, LazyLock, Mutex},
     time::Duration,
 };
 
 use agent_protocol::docker::{stacks::validate_project, views::DockerContainerSummary};
-use tokio::sync::mpsc;
 
 use super::{
     super::{
-        cli::{Cli, CliOutcome},
-        compose::{self, PROJECT_LABEL, SERVICE_LABEL},
+        cli::{self, Cli, CliOutcome},
+        compose::{PROJECT_LABEL, SERVICE_LABEL},
         engine,
         maintenance::Progress,
+        protection::is_current_container,
         source::DockerEngine,
         DockerError,
     },
@@ -34,6 +35,55 @@ use super::{
     StackChunk, StackDeployOutcome, StackDeployRequest, StackEvents, StackServiceState, StackStage,
     StacksRoot,
 };
+
+static PROJECT_LOCKS: LazyLock<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn project_lock(project: &str) -> Arc<tokio::sync::Mutex<()>> {
+    let mut locks = PROJECT_LOCKS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    locks
+        .entry(project.to_string())
+        .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+        .clone()
+}
+
+/// A vez de um projeto: um deploy por projeto de cada vez. Ao sair, quem foi
+/// o último a usar a trava a tira do mapa — senão cada projeto já deployado
+/// ficaria nele para sempre.
+struct ProjectTurn {
+    project: String,
+    guard: Option<tokio::sync::OwnedMutexGuard<()>>,
+}
+
+impl ProjectTurn {
+    async fn acquire(project: &str) -> Self {
+        let guard = project_lock(project).lock_owned().await;
+        Self {
+            project: project.to_string(),
+            guard: Some(guard),
+        }
+    }
+}
+
+impl Drop for ProjectTurn {
+    fn drop(&mut self) {
+        // Solta a vez (e a cópia do `Arc` que o guarda segura) antes de contar.
+        drop(self.guard.take());
+        let mut locks = PROJECT_LOCKS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // Clonar do mapa só acontece sob este mesmo mutex: contagem 1 é só o
+        // mapa, ninguém esperando nem prestes a esperar.
+        if locks
+            .get(&self.project)
+            .is_some_and(|lock| Arc::strong_count(lock) == 1)
+        {
+            locks.remove(&self.project);
+        }
+    }
+}
 
 /// Folga sobre o `--wait-timeout`: o compose ainda recria containers antes
 /// de começar a esperar.
@@ -59,20 +109,7 @@ where
     F: FnOnce(Progress) -> Fut,
     Fut: Future<Output = T>,
 {
-    let (progress, mut lines) = mpsc::unbounded_channel::<String>();
-    let forward = {
-        let events = events.clone();
-        tokio::spawn(async move {
-            while let Some(text) = lines.recv().await {
-                if events.send(StackChunk::Line { text }).is_err() {
-                    break;
-                }
-            }
-        })
-    };
-    let result = work(progress).await;
-    let _ = forward.await;
-    result
+    cli::forward_lines(events, |text| StackChunk::Line { text }, work).await
 }
 
 /// `docker compose` do projeto, com os arquivos do repositório.
@@ -204,10 +241,9 @@ pub fn failed_services(services: &[StackServiceState]) -> Vec<String> {
 
 async fn refuse_protected(engine: &dyn DockerEngine, project: &str) -> Result<(), DockerError> {
     let containers = engine::list_containers(engine).await?;
-    if compose::projects(&containers)
-        .iter()
-        .any(|known| known.name == project && known.protected)
-    {
+    if containers.iter().any(|container| {
+        belongs(container, project) && (container.protected || is_current_container(&container.id))
+    }) {
         return Err(DockerError::Forbidden(
             "Projeto da instalação NetMonitor: o deploy derrubaria a própria central".into(),
         ));
@@ -255,16 +291,17 @@ pub async fn run(
 ) -> Result<StackDeployOutcome, DockerError> {
     request.validate()?;
     validate_project(&request.project)?;
+    let _turn = ProjectTurn::acquire(&request.project).await;
     root.check().await.map_err(DockerError::Validation)?;
     refuse_protected(engine, &request.project).await?;
     let dir: PathBuf = root.project_dir(&request.project);
 
     stage(events, StackStage::Sync);
+    let sync_dir = dir.clone();
     let commit = with_lines(events, |progress| async move {
-        git::sync(&dir, &request.source, &progress).await
+        git::sync(&sync_dir, &request.source, &progress).await
     })
     .await?;
-    let dir = root.project_dir(&request.project);
     line(events, format!("Repositório no commit {commit}"));
 
     if let Some(env) = &request.env_file {
@@ -273,11 +310,10 @@ pub async fn run(
         line(events, ".env gravado (0600)");
     }
 
-    let registry = request
-        .registry
-        .as_ref()
-        .map(EphemeralDockerConfig::create)
-        .transpose()?;
+    let registry = match &request.registry {
+        Some(auth) => Some(EphemeralDockerConfig::create_async(auth).await?),
+        None => None,
+    };
     let envs = compose_env(request, registry.as_ref().map(EphemeralDockerConfig::path));
     let compose = Compose {
         project: &request.project,
@@ -291,6 +327,9 @@ pub async fn run(
         .run(events, pull_command(request.pull), PULL_TIMEOUT)
         .await?;
     if !pulled.success {
+        if let Some(registry) = registry {
+            registry.cleanup().await;
+        }
         return Err(DockerError::Validation(format!(
             "Não foi possível baixar as imagens da tag {}: {}",
             request.image_tag,
@@ -309,7 +348,9 @@ pub async fn run(
         )
         .await?;
     // A credencial não precisa durar além do `up` (que ainda pode baixar).
-    drop(registry);
+    if let Some(registry) = registry {
+        registry.cleanup().await;
+    }
 
     let containers = engine::list_containers(engine).await?;
     let services = services_of(&containers, &request.project);
@@ -391,6 +432,27 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
+
+    fn has_lock(project: &str) -> bool {
+        PROJECT_LOCKS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains_key(project)
+    }
+
+    #[tokio::test]
+    async fn a_trava_do_projeto_sai_do_mapa_quando_ninguem_mais_a_usa() {
+        let project = "teste-trava-poda";
+        let first = ProjectTurn::acquire(project).await;
+        assert!(has_lock(project));
+        let waiting = tokio::spawn(async move { ProjectTurn::acquire(project).await });
+        tokio::task::yield_now().await;
+        drop(first);
+        let second = waiting.await.expect("a segunda vez chega");
+        assert!(has_lock(project), "quem ainda segura a vez mantém a trava");
+        drop(second);
+        assert!(!has_lock(project), "a trava ficou no mapa");
+    }
 
     fn container(
         project: &str,

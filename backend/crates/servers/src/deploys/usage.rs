@@ -4,16 +4,16 @@
 //! Uma regra só para a retenção do registry (o que não pode ser coletado),
 //! para o apagar da tela e da API `/v2`, e para o "No ar em…" da tela.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder};
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 
 use netmonitor_core::{
     models::{deploy_applications, deploy_runs, deploy_targets},
     shared::errors::AppResult,
 };
 
-use super::{applications::images_of, images::repository_for, runs::status_of, RunStatus};
+use super::{applications::images_of, images::repository_for, RunStatus};
 
 /// `(repositório no registry, tag)`.
 pub type ImageKey = (String, String);
@@ -42,7 +42,8 @@ impl ImagesInUse {
     }
 }
 
-/// Monta o uso a partir dos deploys de cada alvo.
+/// Monta o uso a partir dos deploys de cada alvo (lê apenas as 3 colunas
+/// necessárias, sem carregar os logs de `deploy_runs`).
 ///
 /// # Errors
 ///
@@ -57,7 +58,11 @@ pub async fn images_in_use<C: ConnectionTrait>(db: &C) -> AppResult<ImagesInUse>
             .into_iter()
             .map(|application| (application.id, application))
             .collect();
-    let runs = deploy_runs::Entity::find()
+    let rows: Vec<(i64, String, String)> = deploy_runs::Entity::find()
+        .select_only()
+        .column(deploy_runs::Column::TargetId)
+        .column(deploy_runs::Column::Status)
+        .column(deploy_runs::Column::ImageTag)
         .order_by_desc(deploy_runs::Column::Id)
         .filter(deploy_runs::Column::Status.is_in([
             RunStatus::Succeeded.as_str(),
@@ -66,18 +71,29 @@ pub async fn images_in_use<C: ConnectionTrait>(db: &C) -> AppResult<ImagesInUse>
             RunStatus::AwaitingApproval.as_str(),
             RunStatus::Scheduled.as_str(),
         ]))
+        .into_tuple()
         .all(db)
         .await?;
+    let mut by_target: HashMap<i64, Vec<(String, String)>> = HashMap::new();
+    for (target_id, status, image_tag) in rows {
+        by_target
+            .entry(target_id)
+            .or_default()
+            .push((status, image_tag));
+    }
     for target in targets {
         let Some(application) = applications.get(&target.application_id) else {
+            continue;
+        };
+        let Some(target_runs) = by_target.get(&target.id) else {
             continue;
         };
         let images = images_of(application);
         // A versão no ar e as anteriores que o alvo guarda para o rollback.
         let window = usize::try_from(target.keep_images.max(0)).unwrap_or(3) + 1;
         let mut succeeded = 0;
-        for run in runs.iter().filter(|run| run.target_id == target.id) {
-            let status = status_of(run);
+        for (status_raw, image_tag) in target_runs {
+            let status = RunStatus::parse(status_raw).unwrap_or(RunStatus::Failed);
             let live = status == RunStatus::Succeeded && succeeded == 0;
             if status == RunStatus::Succeeded {
                 succeeded += 1;
@@ -88,7 +104,7 @@ pub async fn images_in_use<C: ConnectionTrait>(db: &C) -> AppResult<ImagesInUse>
             for image in &images {
                 let key = (
                     repository_for(&application.slug, &image.name),
-                    run.image_tag.clone(),
+                    image_tag.clone(),
                 );
                 if live {
                     usage

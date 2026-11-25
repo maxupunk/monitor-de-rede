@@ -180,10 +180,23 @@ pub(super) struct StatusScanner {
 
 impl StatusScanner {
     pub(super) fn feed(&mut self, data: &[u8]) {
-        for &byte in data {
-            if self.filled > 0 {
-                self.buf[self.filled] = byte;
-                self.filled += 1;
+        let mut i = 0;
+        while i < data.len() {
+            if self.filled == 0 {
+                // Fast-skip blocos zerados (o fluxo TCP quase inteiro é 0x00).
+                let Some(pos) = data[i..].iter().position(|&b| b == STATUS_ID) else {
+                    break;
+                };
+                i += pos;
+                self.buf[0] = STATUS_ID;
+                self.filled = 1;
+                i += 1;
+            } else {
+                let need = STATUS_LEN - self.filled;
+                let take = need.min(data.len() - i);
+                self.buf[self.filled..self.filled + take].copy_from_slice(&data[i..i + take]);
+                self.filled += take;
+                i += take;
                 if self.filled == STATUS_LEN {
                     self.filled = 0;
                     if let Some(status) = Status::decode(&self.buf) {
@@ -191,9 +204,6 @@ impl StatusScanner {
                         self.peer_received += u64::from(status.received);
                     }
                 }
-            } else if byte == STATUS_ID {
-                self.buf[0] = byte;
-                self.filled = 1;
             }
         }
     }

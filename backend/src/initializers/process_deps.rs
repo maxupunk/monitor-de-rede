@@ -20,7 +20,7 @@ use netmonitor_nucleo::{
     services::monitoring::checkers::ping::PingClientCell,
 };
 
-use netmonitor_assistant::approvals::ApprovalDesk;
+use netmonitor_assistant::{approvals::ApprovalDesk, decider::runtime::DeciderRuntime};
 
 use netmonitor_network::discovery::service::ScanSessionService;
 
@@ -47,6 +47,7 @@ pub fn install(ctx: &AppContext) {
     // vivo do Docker (ARQ-05).
     Interests::install(ctx);
     ApprovalDesk::install(ctx);
+    DeciderRuntime::install(ctx);
     // Os tipos de monitor das áreas (ADR 017, `MonitorChecker`). Na central
     // não há Docker Engine (ADR 014): o monitor de container responde que o
     // Docker daqui é do agente local quando a execução local de reserva o roda.

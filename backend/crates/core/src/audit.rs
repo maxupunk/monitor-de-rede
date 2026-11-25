@@ -7,8 +7,8 @@
 use axum::http::HeaderMap;
 use chrono::{DateTime, Utc};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DatabaseConnection, EntityTrait,
-    QueryFilter, QueryOrder, Set,
+    ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, EntityTrait, QueryFilter,
+    QueryOrder, Set,
 };
 use serde_json::Value;
 
@@ -233,7 +233,7 @@ impl AuditActor {
     /// # Errors
     ///
     /// Propaga erro do banco ao buscar o usuário.
-    pub async fn from_headers(headers: &HeaderMap, db: &DatabaseConnection) -> AppResult<Self> {
+    pub async fn from_headers<C: ConnectionTrait>(headers: &HeaderMap, db: &C) -> AppResult<Self> {
         let pid = headers
             .get(AUTHENTICATED_USER_HEADER)
             .and_then(|value| value.to_str().ok());
@@ -275,8 +275,8 @@ pub struct AuditEntryInput {
 /// É o atalho que os controllers usam: o ator sai dos cabeçalhos e uma falha de
 /// gravação vira só log — a operação principal não falha porque a auditoria
 /// falhou.
-pub async fn record(
-    db: &DatabaseConnection,
+pub async fn record<C: ConnectionTrait>(
+    db: &C,
     headers: &HeaderMap,
     action: AuditAction,
     resource_type: ResourceType,

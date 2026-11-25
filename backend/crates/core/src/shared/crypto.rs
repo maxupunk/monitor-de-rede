@@ -57,7 +57,7 @@ fn resolve_secret() -> String {
         return secret;
     }
 
-    let is_production = std::env::var("LOCO_ENV").map(|env| env == "production") == Ok(true);
+    let is_production = crate::shared::runtime::is_production_environment();
     assert!(
         !is_production,
         "{ENCRYPTION_KEY_ENV} é obrigatória em production: sem ela as chaves privadas do \
@@ -75,11 +75,12 @@ fn non_empty_env(key: &str) -> Option<String> {
         .filter(|value| !value.trim().is_empty())
 }
 
-fn cipher() -> XChaCha20Poly1305 {
+fn cipher() -> AppResult<XChaCha20Poly1305> {
     // `new_from_slice` em vez de `Key::from_slice`: o segundo é `GenericArray`,
     // depreciado na transição do `generic-array` 1.x. O tamanho é infalível —
     // `encryption_key()` devolve exatamente 32 bytes por construção.
-    XChaCha20Poly1305::new_from_slice(encryption_key()).expect("encryption_key tem 32 bytes")
+    XChaCha20Poly1305::new_from_slice(encryption_key())
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("chave de cifra inválida: {e}")))
 }
 
 /// Cifra `plain` e devolve `base64(nonce || ciphertext)`.
@@ -93,7 +94,7 @@ fn cipher() -> XChaCha20Poly1305 {
 /// por falta de memória).
 pub fn encrypt(plain: &str) -> AppResult<String> {
     let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
-    let ciphertext = cipher()
+    let ciphertext = cipher()?
         .encrypt(&nonce, plain.as_bytes())
         .map_err(|e| AppError::Internal(anyhow::anyhow!("falha ao cifrar: {e}")))?;
 
@@ -126,7 +127,7 @@ pub fn decrypt(cipher_text: &str) -> AppResult<String> {
     let mut nonce = XNonce::default();
     nonce.copy_from_slice(nonce_bytes);
 
-    let plain = cipher().decrypt(&nonce, ciphertext).map_err(|_| {
+    let plain = cipher()?.decrypt(&nonce, ciphertext).map_err(|_| {
         AppError::Internal(anyhow::anyhow!(
             "falha ao decifrar: chave incorreta ou dado adulterado"
         ))

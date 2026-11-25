@@ -7,7 +7,7 @@
 
 use std::{
     collections::HashMap,
-    sync::Mutex,
+    sync::{Mutex, PoisonError},
     time::{Duration, Instant},
 };
 
@@ -37,7 +37,7 @@ impl<V: Clone> TtlCache<V> {
     }
 
     fn get_at(&self, key: &str, now: Instant) -> Option<V> {
-        let entries = self.entries.lock().ok()?;
+        let entries = self.entries.lock().unwrap_or_else(PoisonError::into_inner);
         entries
             .get(key)
             .filter(|(stored, _)| now.duration_since(*stored) < self.ttl)
@@ -46,9 +46,7 @@ impl<V: Clone> TtlCache<V> {
 
     /// Cheio, sai primeiro o vencido e depois o mais antigo.
     fn insert_at(&self, key: String, value: V, now: Instant) {
-        let Ok(mut entries) = self.entries.lock() else {
-            return;
-        };
+        let mut entries = self.entries.lock().unwrap_or_else(PoisonError::into_inner);
         entries.retain(|_, (stored, _)| now.duration_since(*stored) < self.ttl);
         if entries.len() >= self.capacity && !entries.contains_key(&key) {
             let oldest = entries

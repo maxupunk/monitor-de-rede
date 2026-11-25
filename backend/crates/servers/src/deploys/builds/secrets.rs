@@ -4,7 +4,7 @@
 
 use chrono::Utc;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, Set,
+    sea_query::OnConflict, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, Set,
 };
 use serde::Serialize;
 use ts_rs::TS;
@@ -70,32 +70,28 @@ pub async fn save<C: ConnectionTrait>(
         ));
     }
     let encrypted = crypto::encrypt(value)?;
-    let existing = deploy_build_secrets::Entity::find()
-        .filter(deploy_build_secrets::Column::ApplicationId.eq(application_id))
-        .filter(deploy_build_secrets::Column::Name.eq(name))
-        .one(db)
-        .await?;
-    let now = Utc::now().into();
-    match existing {
-        Some(row) => {
-            let mut active: deploy_build_secrets::ActiveModel = row.into();
-            active.value_encrypted = Set(encrypted);
-            active.updated_at = Set(now);
-            active.update(db).await?;
-        }
-        None => {
-            deploy_build_secrets::ActiveModel {
-                application_id: Set(application_id),
-                name: Set(name.to_string()),
-                value_encrypted: Set(encrypted),
-                created_at: Set(now),
-                updated_at: Set(now),
-                ..Default::default()
-            }
-            .insert(db)
-            .await?;
-        }
-    }
+    let now: sea_orm::prelude::DateTimeWithTimeZone = Utc::now().into();
+    deploy_build_secrets::Entity::insert(deploy_build_secrets::ActiveModel {
+        application_id: Set(application_id),
+        name: Set(name.to_string()),
+        value_encrypted: Set(encrypted),
+        created_at: Set(now),
+        updated_at: Set(now),
+        ..Default::default()
+    })
+    .on_conflict(
+        OnConflict::columns([
+            deploy_build_secrets::Column::ApplicationId,
+            deploy_build_secrets::Column::Name,
+        ])
+        .update_columns([
+            deploy_build_secrets::Column::ValueEncrypted,
+            deploy_build_secrets::Column::UpdatedAt,
+        ])
+        .to_owned(),
+    )
+    .exec_without_returning(db)
+    .await?;
     Ok(())
 }
 

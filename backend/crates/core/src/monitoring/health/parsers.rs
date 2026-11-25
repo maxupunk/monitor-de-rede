@@ -34,11 +34,9 @@ pub fn parse_proc_stat(conteudo: &str) -> Option<CpuTimes> {
     if campos.len() < 4 {
         return None;
     }
-    let idle = campos[3] + campos.get(4).copied().unwrap_or(0);
-    Some(CpuTimes {
-        total: campos.iter().sum(),
-        idle,
-    })
+    let idle = campos[3].saturating_add(campos.get(4).copied().unwrap_or(0));
+    let total = campos.iter().copied().fold(0_u64, u64::saturating_add);
+    Some(CpuTimes { total, idle })
 }
 
 /// Percentual de uso entre duas leituras de [`parse_proc_stat`].
@@ -93,19 +91,21 @@ impl MemoryInfo {
 /// documenta.
 #[must_use]
 pub fn parse_meminfo(conteudo: &str) -> Option<MemoryInfo> {
-    let campo = |nome: &str| -> Option<u64> {
+    let campo = |prefixo: &str| -> Option<u64> {
         conteudo
             .lines()
-            .find(|linha| linha.starts_with(&format!("{nome}:")))
+            .find(|linha| linha.starts_with(prefixo))
             .and_then(|linha| linha.split_whitespace().nth(1))
             .and_then(|valor| valor.parse::<u64>().ok())
             // `/proc/meminfo` publica em kB.
-            .map(|kb| kb * 1024)
+            .map(|kb| kb.saturating_mul(1024))
     };
-    let total_bytes = campo("MemTotal")?;
-    let available_bytes = match campo("MemAvailable") {
+    let total_bytes = campo("MemTotal:")?;
+    let available_bytes = match campo("MemAvailable:") {
         Some(valor) => valor,
-        None => campo("MemFree")? + campo("Buffers").unwrap_or(0) + campo("Cached").unwrap_or(0),
+        None => campo("MemFree:")?
+            .saturating_add(campo("Buffers:").unwrap_or(0))
+            .saturating_add(campo("Cached:").unwrap_or(0)),
     };
     Some(MemoryInfo {
         total_bytes,
@@ -116,7 +116,8 @@ pub fn parse_meminfo(conteudo: &str) -> Option<MemoryInfo> {
 /// Carga média de 1 minuto, de `/proc/loadavg`.
 #[must_use]
 pub fn parse_loadavg_1m(conteudo: &str) -> Option<f64> {
-    conteudo.split_whitespace().next()?.parse::<f64>().ok()
+    let valor = conteudo.split_whitespace().next()?.parse::<f64>().ok()?;
+    (valor.is_finite() && valor >= 0.0).then_some(valor)
 }
 
 /// Uptime do host em segundos, de `/proc/uptime`.
@@ -137,7 +138,7 @@ pub fn parse_process_rss_bytes(conteudo: &str) -> Option<u64> {
         .find(|linha| linha.starts_with("VmRSS:"))
         .and_then(|linha| linha.split_whitespace().nth(1))
         .and_then(|valor| valor.parse::<u64>().ok())
-        .map(|kb| kb * 1024)
+        .map(|kb| kb.saturating_mul(1024))
 }
 
 /// Tráfego agregado das interfaces do host, de `/proc/net/dev`.
@@ -170,8 +171,8 @@ pub fn parse_net_dev(conteudo: &str) -> Option<NetTotals> {
         if campos.len() < 9 {
             continue;
         }
-        totais.rx_bytes += campos[0];
-        totais.tx_bytes += campos[8];
+        totais.rx_bytes = totais.rx_bytes.saturating_add(campos[0]);
+        totais.tx_bytes = totais.tx_bytes.saturating_add(campos[8]);
         viu_alguma = true;
     }
     viu_alguma.then_some(totais)

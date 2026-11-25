@@ -4,9 +4,7 @@ use axum::{extract::Query, http::HeaderMap, http::StatusCode, response::IntoResp
 use chrono::Utc;
 use loco_rs::prelude::*;
 use netmonitor_core::monitoring::MonitorGroups;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
 
 use crate::{
     dtos::{
@@ -106,29 +104,27 @@ async fn show(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<R
         .one(&ctx.db)
         .await?
         .ok_or_else(|| AppError::not_found("Monitor não encontrado"))?;
-    let results = monitor_results::Entity::find()
-        .filter(monitor_results::Column::MonitorId.eq(id))
-        .order_by_desc(monitor_results::Column::StartedAt)
-        .limit(100)
-        .all(&ctx.db)
-        .await?;
-    let latencies: Vec<f64> = results
+    let presented = present_monitors(&ctx.db, vec![row], 100).await?.remove(0);
+    // `recent_results` vem em ordem cronológica ascendente (`started_at ASC`).
+    let latencies: Vec<f64> = presented
+        .recent_results
         .iter()
         .filter_map(|result| result.latency_ms)
         .collect();
-    let total_checks = results.len();
-    let up_checks = results
+    let total_checks = presented.recent_results.len();
+    let up_checks = presented
+        .recent_results
         .iter()
         .filter(|result| result.status == "up")
         .count();
-    let view = serde_json::to_value(present_monitors(&ctx.db, vec![row], 100).await?.remove(0))
-        .map_err(|error| AppError::Internal(error.into()))?;
+    let view =
+        serde_json::to_value(&presented).map_err(|error| AppError::Internal(error.into()))?;
     let stats = MonitorStats {
         avg_latency: (!latencies.is_empty())
             .then(|| (latencies.iter().sum::<f64>() / latencies.len() as f64).round() as i64),
         min_latency: latencies.iter().copied().reduce(f64::min),
         max_latency: latencies.iter().copied().reduce(f64::max),
-        last_latency: latencies.first().copied(),
+        last_latency: latencies.last().copied(),
         uptime_percentage: if total_checks == 0 {
             100.0
         } else {
@@ -402,6 +398,13 @@ async fn toggle(
         .one(&ctx.db)
         .await?
         .ok_or_else(|| AppError::not_found("Monitor não encontrado"))?;
+    managed::ensure_editable(
+        &current,
+        &ProposedMonitor {
+            enabled: Some(enabled),
+            ..Default::default()
+        },
+    )?;
     let mut active: monitors::ActiveModel = current.clone().into();
     active.enabled = Set(enabled);
     let row = active.update(&ctx.db).await?;

@@ -4,7 +4,7 @@
 use std::{
     io,
     net::{IpAddr, SocketAddr},
-    sync::{Arc, OnceLock},
+    sync::{Arc, Mutex, OnceLock},
     time::{Duration, Instant},
 };
 
@@ -12,7 +12,7 @@ use futures::{stream, StreamExt};
 use serde::Serialize;
 use tokio::{
     net::UdpSocket,
-    sync::{mpsc, Mutex, Semaphore},
+    sync::{mpsc, Semaphore},
 };
 use tokio_util::sync::CancellationToken;
 
@@ -197,7 +197,7 @@ pub async fn scan(
     cancel: CancellationToken,
 ) -> Vec<PortScanItem> {
     let adaptive = Arc::new(Mutex::new(AdaptiveTimeout::default()));
-    let all = Arc::new(Mutex::new(Vec::with_capacity(ports.len())));
+    let mut results = Vec::with_capacity(ports.len());
     let configured_concurrency = strategy.batch_size.clamp(16, 4_096).min(ports.len().max(1));
 
     let started = Instant::now();
@@ -210,50 +210,65 @@ pub async fn scan(
         let min_timeout = strategy.min_timeout;
         let max_retries = strategy.max_retries;
         let retry_delay = strategy.retry_delay;
-        let concurrency = adaptive.lock().await.concurrency(configured_concurrency);
-        stream::iter(batch.iter().copied())
-            .for_each_concurrent(concurrency, |port| {
+        let concurrency = adaptive
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .concurrency(configured_concurrency);
+        let batch_items: Vec<PortScanItem> = stream::iter(batch.iter().copied())
+            .map(|port| {
                 let cancel = cancel.clone();
                 let adaptive = Arc::clone(&adaptive);
-                let all = Arc::clone(&all);
                 let sender = on_result.clone();
                 async move {
                     if cancel.is_cancelled() {
-                        return;
+                        return None;
                     }
-                    let timeout =
-                        adaptive
-                            .lock()
-                            .await
-                            .next(base_timeout, min_timeout, adaptive_enabled);
-                    let Ok(_permit) = global_concurrency().acquire().await else {
-                        return;
+                    let timeout = adaptive
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .next(base_timeout, min_timeout, adaptive_enabled);
+                    let permit = tokio::select! {
+                        permit = global_concurrency().acquire() => permit.ok()?,
+                        () = cancel.cancelled() => return None,
                     };
                     let item = match protocol {
                         PortProtocol::Tcp => {
-                            scan_tcp(host, port, timeout, max_retries, retry_delay).await
+                            scan_tcp(host, port, timeout, max_retries, retry_delay, &cancel).await
                         }
                         PortProtocol::Udp => {
-                            scan_udp(host, port, timeout, max_retries, retry_delay).await
+                            scan_udp(host, port, timeout, max_retries, retry_delay, &cancel).await
                         }
                     };
+                    drop(permit);
+                    if cancel.is_cancelled() {
+                        return None;
+                    }
                     if adaptive_enabled {
-                        let mut adaptive = adaptive.lock().await;
+                        let mut guard = adaptive
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
                         if matches!(item.status.as_str(), "open" | "closed") {
-                            adaptive.observe(Duration::from_secs_f64(item.latency_ms / 1_000.0));
+                            guard.observe(Duration::from_secs_f64(item.latency_ms / 1_000.0));
                         } else {
-                            adaptive.observe_failure();
+                            guard.observe_failure();
                         }
                     }
-                    all.lock().await.push(item.clone());
-                    if sender.send(PortScanEvent::Result(item)).await.is_err() {
+                    if sender
+                        .send(PortScanEvent::Result(item.clone()))
+                        .await
+                        .is_err()
+                    {
                         cancel.cancel();
                     }
+                    Some(item)
                 }
             })
+            .buffer_unordered(concurrency)
+            .filter_map(std::future::ready)
+            .collect()
             .await;
+        results.extend(batch_items);
     }
-    let mut results = all.lock().await.clone();
     results.sort_by_key(|item| item.port);
     tracing::info!(
         target = %host,
@@ -276,17 +291,29 @@ async fn scan_tcp(
     timeout: Duration,
     max_retries: u8,
     retry_delay: Duration,
+    cancel: &CancellationToken,
 ) -> PortScanItem {
     let started = Instant::now();
     let mut attempts = 0;
     let (status, error) = loop {
         attempts += 1;
-        let observation = probe_tcp(SocketAddr::new(host, port), timeout).await;
+        let observation = tokio::select! {
+            obs = probe_tcp(SocketAddr::new(host, port), timeout) => obs,
+            () = cancel.cancelled() => {
+                break (
+                    netmonitor_core::network_tools::tcp_probe::TcpProbeState::Filtered,
+                    Some("cancelado".into()),
+                );
+            }
+        };
         let status = observation.state;
         if status.proves_reachability() || !status.retryable() || attempts > max_retries {
             break (status, observation.error);
         }
-        tokio::time::sleep(retry_backoff(retry_delay, attempts)).await;
+        tokio::select! {
+            () = tokio::time::sleep(retry_backoff(retry_delay, attempts)) => {}
+            () = cancel.cancelled() => break (status, Some("cancelado".into())),
+        }
     };
     PortScanItem {
         port,
@@ -330,24 +357,53 @@ async fn scan_udp(
     timeout: Duration,
     max_retries: u8,
     retry_delay: Duration,
+    cancel: &CancellationToken,
 ) -> PortScanItem {
     let started = Instant::now();
+    let bind = if host.is_ipv4() {
+        "0.0.0.0:0"
+    } else {
+        "[::]:0"
+    };
+    let socket = match UdpSocket::bind(bind).await {
+        Ok(socket) => match socket.connect(SocketAddr::new(host, port)).await {
+            Ok(()) => socket,
+            Err(error) => {
+                return PortScanItem {
+                    port,
+                    protocol: "udp".into(),
+                    status: "open|filtered".into(),
+                    service: udp_service(port),
+                    latency_ms: duration_to_ms(started.elapsed()),
+                    attempts: 1,
+                    error: Some(error.to_string()),
+                };
+            }
+        },
+        Err(error) => {
+            return PortScanItem {
+                port,
+                protocol: "udp".into(),
+                status: "open|filtered".into(),
+                service: udp_service(port),
+                latency_ms: duration_to_ms(started.elapsed()),
+                attempts: 1,
+                error: Some(error.to_string()),
+            };
+        }
+    };
+    let payload = probe_for(port);
+    let mut reply = [0_u8; 4_096];
     let mut attempts = 0;
     let (status, error) = loop {
         attempts += 1;
-        let outcome = tokio::time::timeout(timeout, async {
-            let bind = if host.is_ipv4() {
-                "0.0.0.0:0"
-            } else {
-                "[::]:0"
-            };
-            let socket = UdpSocket::bind(bind).await?;
-            socket.connect(SocketAddr::new(host, port)).await?;
-            socket.send(&probe_for(port)).await?;
-            let mut reply = [0_u8; 4_096];
-            socket.recv(&mut reply).await.map(|_| ())
-        })
-        .await;
+        let outcome = tokio::select! {
+            res = tokio::time::timeout(timeout, async {
+                socket.send(&payload).await?;
+                socket.recv(&mut reply).await.map(|_| ())
+            }) => res,
+            () = cancel.cancelled() => break ("open|filtered", Some("cancelado".into())),
+        };
         let (status, error) = match outcome {
             Err(error) => ("open|filtered", Some(error.to_string())),
             Ok(Ok(())) => ("open", None),
@@ -358,7 +414,10 @@ async fn scan_udp(
         if !retryable || attempts > max_retries {
             break (status, error);
         }
-        tokio::time::sleep(retry_backoff(retry_delay, attempts)).await;
+        tokio::select! {
+            () = tokio::time::sleep(retry_backoff(retry_delay, attempts)) => {}
+            () = cancel.cancelled() => break (status, Some("cancelado".into())),
+        }
     };
     PortScanItem {
         port,

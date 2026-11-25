@@ -24,6 +24,8 @@
 //! não existir (SQLite sem FTS5, banco anterior à migration, Postgres sem
 //! permissão). O `LIKE` é o fundo do poço que sempre funciona.
 
+use std::sync::atomic::{AtomicU8, Ordering};
+
 use async_trait::async_trait;
 use sea_orm::{
     sea_query::{Expr, ExprTrait, SimpleExpr},
@@ -34,10 +36,27 @@ use crate::{models::logs::device_logs, services::shared::sql_like};
 
 /// Acima de quantos casamentos o termo é considerado denso.
 ///
-/// Dez mil ids cabem numa cláusula `IN` sem estourar o limite de parâmetros
-/// (a lista vai como literal, não como bind) e ainda representam um conjunto
-/// que o banco filtra rápido. Acima disso, quem sai na frente é o `LIKE`.
+/// Dez mil ids ainda representam um conjunto que o banco filtra rápido; acima
+/// disso, quem sai na frente é o `LIKE`. A lista vai fatiada em blocos de
+/// [`IN_CHUNK_SIZE`], então o teto de parâmetros dos dialetos não pesa aqui.
 pub const DENSITY_LIMIT: usize = 10_000;
+
+/// Tamanho máximo de cada sub-cláusula `IN (...)`.
+const IN_CHUNK_SIZE: usize = 1_000;
+
+const CAP_UNKNOWN: u8 = 0;
+const CAP_UNAVAILABLE: u8 = 1;
+const CAP_AVAILABLE: u8 = 2;
+
+static SQLITE_FTS_CAP: AtomicU8 = AtomicU8::new(CAP_UNKNOWN);
+static POSTGRES_GIN_CAP: AtomicU8 = AtomicU8::new(CAP_UNKNOWN);
+
+/// Limpa o cache de detecção do índice textual (chamado ao abrir um novo banco
+/// de logs ou em testes que trocam o esquema em memória).
+pub(crate) fn clear_capability_cache() {
+    SQLITE_FTS_CAP.store(CAP_UNKNOWN, Ordering::Relaxed);
+    POSTGRES_GIN_CAP.store(CAP_UNKNOWN, Ordering::Relaxed);
+}
 
 /// Como uma busca textual vira condição SQL.
 #[async_trait]
@@ -118,14 +137,24 @@ impl LogSearch for TsVectorSearch {
     async fn condition(&self, db: &DatabaseConnection, termo: &str) -> SimpleExpr {
         // `simple`, e não `portuguese`: a configuração de idioma aplica
         // *stemming*, e mensagem de roteador é vocabulário técnico em inglês
-        // misturado com identificadores. Reduzir `ether1` ao radical de alguma
-        // língua só produziria casamento errado.
-        let sql = format!(
-            "SELECT id FROM device_logs \
-             WHERE to_tsvector('simple', message) @@ plainto_tsquery('simple', {}) LIMIT {}",
-            literal(termo),
-            DENSITY_LIMIT + 1
-        );
+        // misturado com identificadores. Quando o termo é composto por tokens
+        // alfanuméricos, usa `to_tsquery` com `:*` no último token para igualar
+        // a busca por prefixo do FTS5 no SQLite.
+        let sql = if let Some(prefix_query) = tsquery_prefix(termo) {
+            format!(
+                "SELECT id FROM device_logs \
+                 WHERE to_tsvector('simple', message) @@ to_tsquery('simple', {}) LIMIT {}",
+                literal(&prefix_query),
+                DENSITY_LIMIT + 1
+            )
+        } else {
+            format!(
+                "SELECT id FROM device_logs \
+                 WHERE to_tsvector('simple', message) @@ plainto_tsquery('simple', {}) LIMIT {}",
+                literal(termo),
+                DENSITY_LIMIT + 1
+            )
+        };
         match sonda_ids(db, DatabaseBackend::Postgres, &sql).await {
             Some(ids) if ids.len() <= DENSITY_LIMIT => id_in(ids),
             _ => LikeSearch::expr(termo),
@@ -133,13 +162,48 @@ impl LogSearch for TsVectorSearch {
     }
 }
 
+/// Monta uma expressão `to_tsquery` com busca por prefixo (`:*`) quando o termo
+/// contém apenas tokens alfanuméricos separados por espaço. Termos com
+/// pontuação caem em `plainto_tsquery`.
+fn tsquery_prefix(termo: &str) -> Option<String> {
+    let trimmed = termo.trim();
+    if trimmed.is_empty()
+        || !trimmed
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c.is_ascii_whitespace())
+    {
+        return None;
+    }
+    let tokens: Vec<&str> = trimmed.split_whitespace().collect();
+    if tokens.is_empty() {
+        return None;
+    }
+    let last = tokens.len() - 1;
+    let parts: Vec<String> = tokens
+        .into_iter()
+        .enumerate()
+        .map(|(idx, token)| {
+            if idx == last {
+                format!("{token}:*")
+            } else {
+                token.to_owned()
+            }
+        })
+        .collect();
+    Some(parts.join(" & "))
+}
+
 /// Lista de ids como condição. Vazia vira `1 = 0` — sem isso, um `IN ()` seria
-/// SQL inválido em vez de "nenhum resultado".
+/// SQL inválido em vez de "nenhum resultado". Fatiada em blocos de
+/// [`IN_CHUNK_SIZE`] para manter o número de parâmetros sob controle.
 fn id_in(ids: Vec<i64>) -> SimpleExpr {
     if ids.is_empty() {
         return Expr::val(1).eq(0);
     }
-    Expr::col(device_logs::Column::Id).is_in(ids)
+    ids.chunks(IN_CHUNK_SIZE)
+        .map(|chunk| Expr::col(device_logs::Column::Id).is_in(chunk.iter().copied()))
+        .reduce(ExprTrait::or)
+        .unwrap_or_else(|| Expr::val(1).eq(0))
 }
 
 /// Sonda o índice. `None` quando a consulta falha — o chamador cai no `LIKE`.
@@ -198,13 +262,53 @@ pub fn frase_fts5(termo: &str) -> String {
 /// otimizada produziria erro de SQL em toda busca.
 pub async fn select(db: &DatabaseConnection) -> Box<dyn LogSearch> {
     match db.get_database_backend() {
-        DatabaseBackend::Sqlite if tem_tabela_fts(db).await => Box::new(Fts5Search),
-        DatabaseBackend::Postgres if tem_indice_gin(db).await => Box::new(TsVectorSearch),
+        DatabaseBackend::Sqlite if tem_tabela_fts_cached(db).await => Box::new(Fts5Search),
+        DatabaseBackend::Postgres if tem_indice_gin_cached(db).await => Box::new(TsVectorSearch),
         _ => Box::new(LikeSearch),
     }
 }
 
-async fn tem_tabela_fts(db: &DatabaseConnection) -> bool {
+async fn tem_tabela_fts_cached(db: &DatabaseConnection) -> bool {
+    match SQLITE_FTS_CAP.load(Ordering::Relaxed) {
+        CAP_AVAILABLE => true,
+        CAP_UNAVAILABLE => false,
+        // Só a resposta do catálogo vai para o cache: um erro transitório
+        // (conexão caída, pool esgotado) cai no `LIKE` desta vez e volta a
+        // sondar na próxima, em vez de desligar o índice até o restart.
+        _ => match tem_tabela_fts(db).await {
+            Some(ok) => {
+                SQLITE_FTS_CAP.store(
+                    if ok { CAP_AVAILABLE } else { CAP_UNAVAILABLE },
+                    Ordering::Relaxed,
+                );
+                ok
+            }
+            None => false,
+        },
+    }
+}
+
+async fn tem_indice_gin_cached(db: &DatabaseConnection) -> bool {
+    match POSTGRES_GIN_CAP.load(Ordering::Relaxed) {
+        CAP_AVAILABLE => true,
+        CAP_UNAVAILABLE => false,
+        // Só a resposta do catálogo vai para o cache: um erro transitório
+        // (conexão caída, pool esgotado) cai no `LIKE` desta vez e volta a
+        // sondar na próxima, em vez de desligar o índice até o restart.
+        _ => match tem_indice_gin(db).await {
+            Some(ok) => {
+                POSTGRES_GIN_CAP.store(
+                    if ok { CAP_AVAILABLE } else { CAP_UNAVAILABLE },
+                    Ordering::Relaxed,
+                );
+                ok
+            }
+            None => false,
+        },
+    }
+}
+
+async fn tem_tabela_fts(db: &DatabaseConnection) -> Option<bool> {
     consulta_existe(
         db,
         DatabaseBackend::Sqlite,
@@ -213,7 +317,7 @@ async fn tem_tabela_fts(db: &DatabaseConnection) -> bool {
     .await
 }
 
-async fn tem_indice_gin(db: &DatabaseConnection) -> bool {
+async fn tem_indice_gin(db: &DatabaseConnection) -> Option<bool> {
     consulta_existe(
         db,
         DatabaseBackend::Postgres,
@@ -222,10 +326,16 @@ async fn tem_indice_gin(db: &DatabaseConnection) -> bool {
     .await
 }
 
-async fn consulta_existe(db: &DatabaseConnection, backend: DatabaseBackend, sql: &str) -> bool {
+/// `Some(existe)` quando o catálogo respondeu; `None` em erro do banco.
+async fn consulta_existe(
+    db: &DatabaseConnection,
+    backend: DatabaseBackend,
+    sql: &str,
+) -> Option<bool> {
     db.query_one_raw(Statement::from_string(backend, sql))
         .await
-        .is_ok_and(|linha| linha.is_some())
+        .ok()
+        .map(|linha| linha.is_some())
 }
 
 #[cfg(test)]
@@ -298,6 +408,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn sem_o_indice_a_busca_cai_no_like() {
+        clear_capability_cache();
         // Banco sem a migration do índice: a escolha degrada sozinha, senão
         // toda busca viraria erro de SQL.
         let db = sea_orm::Database::connect(

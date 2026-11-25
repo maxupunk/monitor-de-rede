@@ -71,11 +71,8 @@ async fn list(
     State(ctx): State<AppContext>,
     Query(query): Query<ListQuery>,
 ) -> AppResult<Response> {
-    let mut views = Vec::new();
-    for build in builds::recent(&ctx.db, query.application_id, 30).await? {
-        views.push(builds::view(&ctx.db, &build).await?);
-    }
-    Ok(format::json(views)?)
+    let rows = builds::recent(&ctx.db, query.application_id, 30).await?;
+    Ok(format::json(builds::views(&ctx.db, &rows).await?)?)
 }
 
 async fn log(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {

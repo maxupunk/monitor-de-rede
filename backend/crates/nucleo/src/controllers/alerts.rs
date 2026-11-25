@@ -367,11 +367,17 @@ async fn acknowledge(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppR
     }
 
     let event = alert_actions::acknowledge(&ctx, event).await?;
+    // A recuperação pode ter fechado o alerta no meio do caminho.
+    let resolved = event.status == AlertStatus::Resolved.as_str();
 
     Ok(format::json(json!({
-        "message": format!("Alerta #{id} reconhecido"),
+        "message": if resolved {
+            format!("Alerta #{id} foi resolvido antes do reconhecimento")
+        } else {
+            format!("Alerta #{id} reconhecido")
+        },
         "event": serialize_one(&ctx, &event).await?,
-        "resolved": false,
+        "resolved": resolved,
     }))?)
 }
 
@@ -422,6 +428,9 @@ async fn close(
 }
 
 async fn verify_all(State(ctx): State<AppContext>) -> AppResult<Response> {
+    use futures::stream::{self, StreamExt};
+    use std::collections::HashSet;
+
     let pending = alert_events::Entity::find()
         .filter(alert_events_entity::Column::Status.is_in(AlertStatus::OPEN))
         .all(&ctx.db)
@@ -432,12 +441,42 @@ async fn verify_all(State(ctx): State<AppContext>) -> AppResult<Response> {
         .into_iter()
         .partition(|event| event.monitor_id.is_some());
     let total_checked = checkable.len();
-    let mut resolved_count = 0;
-    for event in checkable {
-        if check_and_resolve(&ctx, event).await?.status == AlertStatus::Resolved.as_str() {
-            resolved_count += 1;
-        }
+
+    // Executa uma única checagem por `monitor_id` em paralelo limitado (evita
+    // timeout HTTP em quedas em cascata e checagens duplicadas do mesmo monitor).
+    let mut seen_monitors = HashSet::new();
+    let representative_events: Vec<alert_events::Model> = checkable
+        .iter()
+        .filter(|event| {
+            event
+                .monitor_id
+                .is_some_and(|monitor_id| seen_monitors.insert(monitor_id))
+        })
+        .cloned()
+        .collect();
+
+    let outcomes: Vec<AppResult<alert_events::Model>> = stream::iter(representative_events)
+        .map(|event| {
+            let ctx = ctx.clone();
+            async move { check_and_resolve(&ctx, event).await }
+        })
+        .buffer_unordered(8)
+        .collect()
+        .await;
+    for outcome in outcomes {
+        outcome?;
     }
+
+    let checkable_ids: Vec<i64> = checkable.iter().map(|event| event.id).collect();
+    let resolved_count = if checkable_ids.is_empty() {
+        0
+    } else {
+        alert_events::Entity::find()
+            .filter(alert_events_entity::Column::Id.is_in(checkable_ids))
+            .filter(alert_events_entity::Column::Status.eq(AlertStatus::Resolved.as_str()))
+            .count(&ctx.db)
+            .await? as usize
+    };
     let mut message =
         format!("{resolved_count} de {total_checked} alerta(s) de monitor resolvido(s)");
     if !event_driven.is_empty() {

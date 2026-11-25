@@ -230,6 +230,7 @@ pub async fn login(db: &DatabaseConnection, headers: &HeaderMap) -> Result<Princ
         .await
         .ok()
         .flatten()
+        .filter(|user| user.active)
         .ok_or(Refusal::Invalid)?;
     Ok(Principal {
         token_scope: tokens::scope_of(&token),

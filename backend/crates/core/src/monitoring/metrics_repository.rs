@@ -5,7 +5,7 @@
 
 use std::collections::BTreeSet;
 
-use sea_orm::{DatabaseBackend, DatabaseConnection, FromQueryResult, Statement, Value};
+use sea_orm::{ConnectionTrait, DatabaseBackend, FromQueryResult, Statement, Value};
 
 use crate::{models::metrics, shared::errors::AppResult};
 
@@ -13,13 +13,50 @@ use crate::{models::metrics, shared::errors::AppResult};
 /// SQLite, mesmo com várias séries por interface.
 const INTERFACES_PER_QUERY: usize = 400;
 
+fn placeholder(backend: DatabaseBackend, position: usize) -> String {
+    match backend {
+        DatabaseBackend::Postgres => format!("${position}"),
+        _ => "?".to_string(),
+    }
+}
+
+fn build_values_markers(
+    backend: DatabaseBackend,
+    ids: &[i64],
+    names: &[&str],
+    values: &mut Vec<Value>,
+) -> (String, String, usize) {
+    let mut next_position = 1;
+    let id_markers = ids
+        .iter()
+        .map(|id| {
+            let current = placeholder(backend, next_position);
+            next_position += 1;
+            values.push((*id).into());
+            format!("(CAST({current} AS BIGINT))")
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let name_markers = names
+        .iter()
+        .map(|name| {
+            let current = placeholder(backend, next_position);
+            next_position += 1;
+            values.push((*name).to_owned().into());
+            format!("(CAST({current} AS TEXT))")
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    (id_markers, name_markers, next_position)
+}
+
 /// Busca uma única amostra por `(interface_id, name)`.
 ///
 /// Cada par solicitado faz um `ORDER BY ... LIMIT 1` apoiado pelos índices da
 /// série. Assim nem o processo nem o SQLite ordenam o histórico inteiro. `id`
 /// é o desempate estável para coletas gravadas no mesmo instante.
-pub async fn latest_for_interfaces(
-    db: &DatabaseConnection,
+pub async fn latest_for_interfaces<C: ConnectionTrait>(
+    db: &C,
     device_id: Option<i64>,
     interface_ids: &[i64],
     names: &[&str],
@@ -47,43 +84,22 @@ pub async fn latest_for_interfaces(
     Ok(latest)
 }
 
-async fn latest_for_interface_batch(
-    db: &DatabaseConnection,
+async fn latest_for_interface_batch<C: ConnectionTrait>(
+    db: &C,
     device_id: Option<i64>,
     interface_ids: &[i64],
     names: &[&str],
 ) -> AppResult<Vec<metrics::Model>> {
     let backend = db.get_database_backend();
-    let marker = |position: usize| match backend {
-        DatabaseBackend::Postgres => format!("${position}"),
-        _ => "?".to_string(),
-    };
-    let mut values = Vec::<Value>::new();
-    let mut next_position = 1;
-
-    let interface_markers = interface_ids
-        .iter()
-        .map(|id| {
-            let current = marker(next_position);
-            next_position += 1;
-            values.push((*id).into());
-            format!("(CAST({current} AS BIGINT))")
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-    let name_markers = names
-        .iter()
-        .map(|name| {
-            let current = marker(next_position);
-            next_position += 1;
-            values.push((*name).to_owned().into());
-            format!("(CAST({current} AS TEXT))")
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
+    let mut values = Vec::<Value>::with_capacity(interface_ids.len() + names.len() + 1);
+    let (interface_markers, name_markers, next_position) =
+        build_values_markers(backend, interface_ids, names, &mut values);
 
     let device_filter = if let Some(device_id) = device_id {
-        let filter = format!("candidate.device_id = {} AND ", marker(next_position));
+        let filter = format!(
+            "candidate.device_id = {} AND ",
+            placeholder(backend, next_position)
+        );
         values.push(device_id.into());
         filter
     } else {
@@ -119,8 +135,8 @@ async fn latest_for_interface_batch(
 /// por `(device_id, name)` — CPU e memória no mapa. Mesma régua do
 /// [`latest_for_interfaces`]: um `ORDER BY ... LIMIT 1` por par, apoiado no
 /// índice `(device_id, name, recorded_at)`.
-pub async fn latest_for_devices(
-    db: &DatabaseConnection,
+pub async fn latest_for_devices<C: ConnectionTrait>(
+    db: &C,
     device_ids: &[i64],
     names: &[&str],
 ) -> AppResult<Vec<metrics::Model>> {
@@ -146,38 +162,15 @@ pub async fn latest_for_devices(
     Ok(latest)
 }
 
-async fn latest_for_device_batch(
-    db: &DatabaseConnection,
+async fn latest_for_device_batch<C: ConnectionTrait>(
+    db: &C,
     device_ids: &[i64],
     names: &[&str],
 ) -> AppResult<Vec<metrics::Model>> {
     let backend = db.get_database_backend();
-    let marker = |position: usize| match backend {
-        DatabaseBackend::Postgres => format!("${position}"),
-        _ => "?".to_string(),
-    };
-    let mut values = Vec::<Value>::new();
-    let mut next_position = 1;
-    let device_markers = device_ids
-        .iter()
-        .map(|id| {
-            let current = marker(next_position);
-            next_position += 1;
-            values.push((*id).into());
-            format!("(CAST({current} AS BIGINT))")
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-    let name_markers = names
-        .iter()
-        .map(|name| {
-            let current = marker(next_position);
-            next_position += 1;
-            values.push((*name).to_owned().into());
-            format!("(CAST({current} AS TEXT))")
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
+    let mut values = Vec::<Value>::with_capacity(device_ids.len() + names.len());
+    let (device_markers, name_markers, _) =
+        build_values_markers(backend, device_ids, names, &mut values);
 
     let sql = format!(
         "WITH requested_devices(device_id) AS (VALUES {device_markers}), \

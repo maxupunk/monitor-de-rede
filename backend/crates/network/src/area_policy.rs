@@ -42,11 +42,20 @@ impl AreaPolicy for NetworkPolicy {
             "/api/devices/*/snmp",
             "/api/devices/*/plugins",
             "/api/devices/*/credentials",
+            "/api/devices/*/access",
+            "/api/devices/*/interfaces",
         ]
     }
 
     fn event_prefixes(&self) -> &'static [&'static str] {
-        &["discovery:", "topology:", "plugin:", "link_test", "wifi:"]
+        &[
+            "discovery:",
+            "topology:",
+            "plugin:",
+            "link_test",
+            "wifi:",
+            "interface:",
+        ]
     }
 
     fn tables(&self) -> &'static [&'static str] {

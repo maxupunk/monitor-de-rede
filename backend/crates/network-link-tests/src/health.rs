@@ -16,12 +16,16 @@
 //!
 //! Só leitura, sempre: nada aqui muda o equipamento.
 
-use std::{collections::BTreeMap, sync::Arc, time::Duration};
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, Mutex, PoisonError},
+    time::Duration,
+};
 
 use async_trait::async_trait;
 use sea_orm::DatabaseConnection;
 use serde::{Deserialize, Serialize};
-use tokio::task::JoinHandle;
+use tokio::{sync::OnceCell, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use ts_rs::TS;
 
@@ -296,36 +300,59 @@ impl HealthReader for SnmpHealth {
     }
 }
 
-/// A própria central, pelo `/proc`.
-pub struct LocalHealth(HostSourceLinux);
+/// A própria central, pelo `/proc` (executado em `spawn_blocking` para não
+/// travar o executor assíncrono com leitura síncrona de arquivos).
+pub struct LocalHealth(Arc<Mutex<HostSourceLinux>>);
 
 #[async_trait]
 impl HealthReader for LocalHealth {
     async fn read(&mut self) -> HealthReading {
-        let reading = self.0.read();
-        let value = |name: &str| {
-            reading
-                .measures
-                .iter()
-                .find(|measure| measure.name == name)
-                .map(|measure| measure.value)
-        };
-        HealthReading {
-            cpu: value(series::CPU_USAGE),
-            memory: value(series::MEMORY_USAGE),
-        }
+        let source = Arc::clone(&self.0);
+        tokio::task::spawn_blocking(move || {
+            let guard = source.lock().unwrap_or_else(PoisonError::into_inner);
+            let reading = guard.read();
+            let value = |name: &str| {
+                reading
+                    .measures
+                    .iter()
+                    .find(|measure| measure.name == name)
+                    .map(|measure| measure.value)
+            };
+            HealthReading {
+                cpu: value(series::CPU_USAGE),
+                memory: value(series::MEMORY_USAGE),
+            }
+        })
+        .await
+        .unwrap_or_default()
     }
 }
 
 /// O padrão: SNMP no equipamento que o tem ligado, `/proc` na central.
 pub struct DefaultHealthReaders {
     db: DatabaseConnection,
+    default_snmp_community: OnceCell<String>,
 }
 
 impl DefaultHealthReaders {
     #[must_use]
-    pub const fn new(db: DatabaseConnection) -> Self {
-        Self { db }
+    pub fn new(db: DatabaseConnection) -> Self {
+        Self {
+            db,
+            default_snmp_community: OnceCell::new(),
+        }
+    }
+
+    async fn snmp_community(&self) -> &str {
+        self.default_snmp_community
+            .get_or_init(|| async {
+                preferences::load(&self.db).await.map_or_else(
+                    |_| preferences::DEFAULT_SNMP_COMMUNITY.to_owned(),
+                    |prefs| prefs.default_snmp_community,
+                )
+            })
+            .await
+            .as_str()
     }
 }
 
@@ -333,9 +360,9 @@ impl DefaultHealthReaders {
 impl HealthReaders for DefaultHealthReaders {
     async fn reader_for(&self, target: HealthTarget<'_>) -> Option<Box<dyn HealthReader>> {
         match target {
-            HealthTarget::Central => Some(Box::new(LocalHealth(HostSourceLinux::new(
-                ProcRoot::default(),
-            )))),
+            HealthTarget::Central => Some(Box::new(LocalHealth(Arc::new(Mutex::new(
+                HostSourceLinux::new(ProcRoot::default()),
+            ))))),
             HealthTarget::Device(device) => {
                 let has_ip = device
                     .ip_address
@@ -344,11 +371,8 @@ impl HealthReaders for DefaultHealthReaders {
                 if !device.snmp_enabled || !has_ip {
                     return None;
                 }
-                let community = preferences::load(&self.db).await.map_or_else(
-                    |_| preferences::DEFAULT_SNMP_COMMUNITY.to_owned(),
-                    |prefs| prefs.default_snmp_community,
-                );
-                let mut config = device_config_with(device, &community).ok()?;
+                let community = self.snmp_community().await;
+                let mut config = device_config_with(device, community).ok()?;
                 config.timeout_ms = u64::try_from(READ_TIMEOUT.as_millis()).unwrap_or(900);
                 Some(Box::new(SnmpHealth::new(SnmpClient::new(config))))
             }

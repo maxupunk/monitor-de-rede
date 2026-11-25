@@ -48,11 +48,12 @@ pub trait CentralServices: Send + Sync {
     /// cadastrá-la ali mesmo.
     fn missing_device_access(&self, error: &AppError) -> Option<(i64, Value)>;
 
-    /// O modo "Aceitar automaticamente" está ligado para esta conversa e este
-    /// equipamento (ADR 012)?
+    /// O modo "Aceitar automaticamente" está ligado para este usuário, esta
+    /// conversa e este equipamento (ADR 012)?
     async fn device_auto_accepted(
         &self,
         db: &DatabaseConnection,
+        user_id: i64,
         conversation_key: &str,
         device_id: i64,
     ) -> bool;

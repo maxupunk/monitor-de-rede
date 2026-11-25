@@ -16,7 +16,7 @@ use agent_protocol::policy::Permission;
 use netmonitor_core::{
     agents::{identity, routes::route_options},
     audit::{AuditAction, ResourceType},
-    models::database_connections,
+    models::{database_connections, probes, storage_destinations},
     shared::errors::AppResult,
     storage,
 };
@@ -59,18 +59,51 @@ struct Names {
 }
 
 async fn storage_names(ctx: &AppContext) -> AppResult<Names> {
+    let (storages, agents) =
+        tokio::try_join!(storage::service::list(&ctx.db), identity::list(&ctx.db))?;
     Ok(Names {
-        storages: storage::service::list(&ctx.db)
-            .await?
-            .into_iter()
-            .map(|row| (row.id, row.name))
-            .collect(),
-        agents: identity::list(&ctx.db)
-            .await?
-            .into_iter()
-            .map(|row| (row.id, row.name))
-            .collect(),
+        storages: storages.into_iter().map(|row| (row.id, row.name)).collect(),
+        agents: agents.into_iter().map(|row| (row.id, row.name)).collect(),
     })
+}
+
+/// Resolve apenas os nomes de armazenamento e agente referenciados por uma
+/// única conexão, evitando carregar tabelas inteiras.
+async fn respond_one(
+    ctx: &AppContext,
+    row: &database_connections::Model,
+) -> AppResult<DatabaseConnectionResponse> {
+    let (storage_name, agent_name) = tokio::try_join!(
+        async {
+            if let Some(id) = row.storage_destination_id {
+                Ok::<_, sea_orm::DbErr>(
+                    storage_destinations::Entity::find_by_id(id)
+                        .one(&ctx.db)
+                        .await?
+                        .map(|m| m.name),
+                )
+            } else {
+                Ok(None)
+            }
+        },
+        async {
+            if let Some(id) = row.via_probe_id {
+                Ok::<_, sea_orm::DbErr>(
+                    probes::Entity::find_by_id(id)
+                        .one(&ctx.db)
+                        .await?
+                        .map(|m| m.name),
+                )
+            } else {
+                Ok(None)
+            }
+        }
+    )?;
+    Ok(DatabaseConnectionResponse::new(
+        row,
+        storage_name,
+        agent_name,
+    ))
 }
 
 fn respond(row: &database_connections::Model, names: &Names) -> DatabaseConnectionResponse {
@@ -84,8 +117,7 @@ fn respond(row: &database_connections::Model, names: &Names) -> DatabaseConnecti
 }
 
 async fn index(State(ctx): State<AppContext>) -> AppResult<Response> {
-    let names = storage_names(&ctx).await?;
-    let rows = service::list(&ctx.db).await?;
+    let (names, rows) = tokio::try_join!(storage_names(&ctx), service::list(&ctx.db))?;
     Ok(format::json(
         rows.iter()
             .map(|row| respond(row, &names))
@@ -95,7 +127,7 @@ async fn index(State(ctx): State<AppContext>) -> AppResult<Response> {
 
 async fn show(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
     let row = service::find(&ctx.db, id).await?;
-    Ok(format::json(respond(&row, &storage_names(&ctx).await?))?)
+    Ok(format::json(respond_one(&ctx, &row).await?)?)
 }
 
 async fn store(
@@ -117,11 +149,7 @@ async fn store(
         ),
     )
     .await;
-    Ok((
-        StatusCode::CREATED,
-        Json(respond(&row, &storage_names(&ctx).await?)),
-    )
-        .into_response())
+    Ok((StatusCode::CREATED, Json(respond_one(&ctx, &row).await?)).into_response())
 }
 
 async fn update(
@@ -140,7 +168,7 @@ async fn update(
         format!("Conexão de banco '{}' atualizada", row.name),
     )
     .await;
-    Ok(format::json(respond(&row, &storage_names(&ctx).await?))?)
+    Ok(format::json(respond_one(&ctx, &row).await?)?)
 }
 
 async fn destroy(
@@ -177,11 +205,12 @@ async fn route_note(ctx: &AppContext, row: &database_connections::Model) -> Stri
     let Some(probe_id) = row.via_probe_id else {
         return String::new();
     };
-    let name = storage_names(ctx)
+    let name = probes::Entity::find_by_id(probe_id)
+        .one(&ctx.db)
         .await
         .ok()
-        .and_then(|names| names.agents.get(&probe_id).cloned())
-        .unwrap_or_else(|| format!("#{probe_id}"));
+        .flatten()
+        .map_or_else(|| format!("#{probe_id}"), |probe| probe.name);
     format!(" pela ponte do agente '{name}'")
 }
 
@@ -202,8 +231,9 @@ async fn resolve_container(
     State(ctx): State<AppContext>,
     Json(input): Json<DatabaseContainerResolveInput>,
 ) -> AppResult<Response> {
+    let container_id = crate::docker::validate_identifier(&input.container_id, "Container")?;
     Ok(format::json(
-        discovery::resolve(&ctx, &input.host_key, &input.container_id).await?,
+        discovery::resolve(&ctx, &input.host_key, &container_id).await?,
     )?)
 }
 

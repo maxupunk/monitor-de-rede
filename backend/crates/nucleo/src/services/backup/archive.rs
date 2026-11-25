@@ -38,12 +38,19 @@ use tokio_util::io::{ReaderStream, StreamReader, SyncIoBridge};
 
 use super::{
     catalog::{self, BackupScope, Rows, Store},
+    plan::PLAN_ID,
     service::FORMAT_VERSION,
 };
 use crate::{
     models::tables,
-    services::shared::errors::{AppError, AppResult},
+    services::shared::{
+        errors::{AppError, AppResult},
+        run_guard::RunGuard,
+    },
 };
+
+/// Escopo da trava de exportação completa simultânea.
+pub(super) const FULL_EXPORT_SCOPE: &str = "system-backup-full-export";
 
 /// Quanto o escritor junta antes de entregar um pedaço ao corpo da resposta.
 const CHUNK_BYTES: usize = 64 * 1024;
@@ -138,21 +145,38 @@ struct Header<'a> {
 /// A escrita roda numa tarefa própria. Uma falha no meio vira erro **no
 /// fluxo**: a conexão cai sem o fim do gzip, e o navegador recebe um download
 /// interrompido em vez de um arquivo truncado com cara de inteiro.
+///
+/// # Errors
+///
+/// `409 Conflict` quando já há uma exportação completa em andamento.
 pub fn export_full(
     db: DatabaseConnection,
     logs: Option<DatabaseConnection>,
     app_version: String,
-) -> impl Stream<Item = io::Result<Bytes>> {
+) -> AppResult<impl Stream<Item = io::Result<Bytes>>> {
+    let guard = RunGuard::acquire(
+        FULL_EXPORT_SCOPE,
+        PLAN_ID,
+        "Já há um backup completo ou uma restauração do NetMonitor em andamento",
+    )?;
     let (tx, rx) = mpsc::channel(8);
     tokio::spawn(async move {
         let mut out = Chunker::new(tx.clone());
-        if let Err(error) = write_full(&db, logs.as_ref(), &app_version, &mut out).await {
+        let written = write_full(&db, logs.as_ref(), &app_version, &mut out).await;
+        // Solta a vez **antes** de fechar o fluxo (os remetentes saem no fim
+        // do bloco): quem leu o arquivo até o fim pode restaurá-lo em seguida
+        // sem tropeçar na trava que a restauração também pede.
+        drop(guard);
+        if let Err(error) = written {
             tracing::warn!(%error, "backup completo interrompido");
             let _ = tx.send(Err(io::Error::other(error.to_string()))).await;
         }
     });
     let json = StreamReader::new(ReceiverStream::new(rx));
-    ReaderStream::with_capacity(GzipEncoder::new(json), CHUNK_BYTES)
+    Ok(ReaderStream::with_capacity(
+        GzipEncoder::new(json),
+        CHUNK_BYTES,
+    ))
 }
 
 async fn write_full(
@@ -210,7 +234,7 @@ async fn write_store(db: &DatabaseConnection, store: Store, out: &mut Chunker) -
 
 /// Transação só de leitura com fotografia estável. No PostgreSQL, `REPEATABLE
 /// READ`; no SQLite (WAL), a primeira leitura fixa a fotografia sozinha.
-async fn begin_snapshot(db: &DatabaseConnection) -> AppResult<DatabaseTransaction> {
+pub(super) async fn begin_snapshot(db: &DatabaseConnection) -> AppResult<DatabaseTransaction> {
     let options = if db.get_database_backend() == DatabaseBackend::Postgres {
         TransactionOptions {
             isolation_level: Some(IsolationLevel::RepeatableRead),
@@ -412,9 +436,23 @@ impl<'de> Visitor<'de> for Envelope<'_> {
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<(), A::Error> {
         while let Some(key) = map.next_key::<String>()? {
             match key.as_str() {
-                "formatVersion" => self.state.meta.format_version = Some(map.next_value()?),
+                "formatVersion" => {
+                    if self.state.meta_sent {
+                        return Err(de::Error::custom(
+                            "o campo 'formatVersion' precisa aparecer antes de 'tables' e 'logTables'",
+                        ));
+                    }
+                    self.state.meta.format_version = Some(map.next_value()?);
+                }
                 "appVersion" => self.state.meta.app_version = Some(map.next_value()?),
-                "scope" => self.state.meta.scope = map.next_value()?,
+                "scope" => {
+                    if self.state.meta_sent {
+                        return Err(de::Error::custom(
+                            "o campo 'scope' precisa aparecer antes de 'tables' e 'logTables'",
+                        ));
+                    }
+                    self.state.meta.scope = map.next_value()?;
+                }
                 "tables" | "logTables" => {
                     self.state.send_meta()?;
                     let store = if key == "tables" {
@@ -643,5 +681,20 @@ mod tests {
             ..Meta::default()
         };
         assert!(outra.validate().is_err());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn scope_ou_versao_depois_das_tabelas_e_recusado() {
+        let reordenado = r#"{"appVersion":"t","formatVersion":1,
+            "logTables":{"device_logs":[{"id":1}]},"scope":"full","tables":{}}"#;
+        let (_, done) = events_of(reordenado.as_bytes().to_vec(), true).await;
+        assert!(
+            done.is_err(),
+            "scope tardio não pode descartar logTables em silêncio"
+        );
+
+        let versao_tardia = r#"{"tables":{"sites":[]},"formatVersion":1}"#;
+        let (_, done) = events_of(versao_tardia.as_bytes().to_vec(), false).await;
+        assert!(done.is_err());
     }
 }

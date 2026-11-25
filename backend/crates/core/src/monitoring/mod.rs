@@ -163,7 +163,7 @@ pub fn parse_config<T: serde::de::DeserializeOwned>(
     configuration: &Value,
     name: &str,
 ) -> AppResult<T> {
-    serde_json::from_value(configuration.clone()).map_err(|error| {
+    T::deserialize(configuration).map_err(|error| {
         AppError::validation(format!(
             "Configuração inválida para monitor {name}: {error}"
         ))

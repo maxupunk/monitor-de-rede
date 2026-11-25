@@ -4,8 +4,11 @@
 //! qual versão usou — é isso que deixa o rollback voltar a imagem **e** o
 //! `.env` que funcionava com ela.
 
+use std::collections::HashMap;
+
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, Set,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder,
+    QuerySelect, Set,
 };
 use serde_json::json;
 
@@ -75,6 +78,40 @@ pub async fn current<C: ConnectionTrait>(
         .order_by_desc(deploy_env_versions::Column::Id)
         .one(db)
         .await?)
+}
+
+/// A versão em vigor do `.env` para cada alvo em `target_ids`, em lote (2 consultas).
+///
+/// # Errors
+///
+/// Banco.
+pub async fn current_by_targets<C: ConnectionTrait>(
+    db: &C,
+    target_ids: &[i64],
+) -> AppResult<HashMap<i64, deploy_env_versions::Model>> {
+    if target_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let pairs: Vec<(i64, Option<i64>)> = deploy_env_versions::Entity::find()
+        .select_only()
+        .column(deploy_env_versions::Column::TargetId)
+        .column_as(deploy_env_versions::Column::Id.max(), "max_id")
+        .filter(deploy_env_versions::Column::TargetId.is_in(target_ids.iter().copied()))
+        .group_by(deploy_env_versions::Column::TargetId)
+        .into_tuple::<(i64, Option<i64>)>()
+        .all(db)
+        .await?;
+    let ids: Vec<i64> = pairs.into_iter().filter_map(|(_, id)| id).collect();
+    if ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    Ok(deploy_env_versions::Entity::find()
+        .filter(deploy_env_versions::Column::Id.is_in(ids))
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|version| (version.target_id, version))
+        .collect())
 }
 
 /// # Errors

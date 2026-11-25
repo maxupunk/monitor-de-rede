@@ -826,10 +826,13 @@ async fn rollup_limitado_nao_apaga_o_backlog_ainda_nao_agregado() {
             .all(&ctx.db)
             .await
             .unwrap();
-        assert_eq!(remaining.len(), 2);
+        // Ficam as 2 horas ainda não agregadas e as 3 que o próximo ciclo
+        // recalcula (lookback de 2 h + a hora do fim): purgá-las faria o
+        // bucket perder checagens.
+        assert_eq!(remaining.len(), 5);
         assert!(remaining
             .iter()
-            .all(|row| { row.started_at.with_timezone(&Utc) >= base + Duration::hours(168) }));
+            .all(|row| { row.started_at.with_timezone(&Utc) >= base + Duration::hours(165) }));
     })
     .await;
 }

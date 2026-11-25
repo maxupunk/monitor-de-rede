@@ -68,7 +68,8 @@ fn build_checks(facts: &BuildFacts, allow_variable: &str, out: &mut Vec<Readines
             Error,
             format!("A política local ({allow_variable}) não libera compilar neste servidor"),
             Some(format!(
-                "No servidor, acrescente `build` a {allow_variable} e recrie o agente — ou                  escolha outro servidor em \"Onde compilar\""
+                "No servidor, acrescente `build` a {allow_variable} e recrie o agente — ou \
+                 escolha outro servidor em \"Onde compilar\""
             )),
         ));
         return;
@@ -429,7 +430,7 @@ pub async fn inspect(
         let allows_build = session
             .as_ref()
             .is_some_and(|session| session.allows(Permission::Build));
-        let (readiness, error) = if connected {
+        let (readiness, error) = if connected && allows_build {
             match hosts::resolve(ctx, HostKey::agent(probe_id)) {
                 Ok(host) => match host.images.builder_readiness().await {
                     Ok(readiness) => (Some(readiness), None),

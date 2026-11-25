@@ -2,7 +2,7 @@
 
 use chrono::{DateTime, Utc};
 use loco_rs::app::AppContext;
-use sea_orm::{ActiveModelTrait, Set};
+use sea_orm::{sea_query::Expr, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 
 use crate::{
     events::EventBus,
@@ -10,6 +10,9 @@ use crate::{
     shared::errors::AppResult,
 };
 use agent_protocol::monitoring::MonitorStatus;
+
+/// Tentativas do compare-and-set de [`apply`] antes de desistir da gravação.
+const CAS_ATTEMPTS: usize = 3;
 
 /// Estado agregado que o frontend usa para um equipamento.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -117,26 +120,88 @@ pub async fn apply(
     status: DeviceStatus,
     seen_at: Option<DateTime<Utc>>,
 ) -> AppResult<DeviceStatusTransition> {
-    let previous_status = DeviceStatus::parse(&device.status);
-    let changed = previous_status != status;
-    let mut last_seen_at = device.last_seen_at;
-    if changed || seen_at.is_some() {
-        let mut active: devices::ActiveModel = device.clone().into();
-        active.status = Set(status.as_str().to_string());
-        if let Some(seen_at) = seen_at {
-            last_seen_at = Some(seen_at.into());
-            active.last_seen_at = Set(last_seen_at);
-        }
-        active.update(&ctx.db).await?;
-    }
-    if changed {
-        publish_transition(ctx, device, status, last_seen_at).await;
+    let outcome = persist(&ctx.db, device, status, seen_at).await?;
+    if outcome.changed {
+        publish_transition(
+            ctx,
+            &outcome.current,
+            outcome.previous_status,
+            status,
+            outcome.last_seen_at,
+        )
+        .await;
     }
     Ok(DeviceStatusTransition {
-        changed,
-        previous_status,
+        changed: outcome.changed,
+        previous_status: outcome.previous_status,
         status,
     })
+}
+
+/// O que [`persist`] gravou: a linha lida e se o status mudou por esta chamada.
+struct PersistOutcome {
+    current: devices::Model,
+    previous_status: DeviceStatus,
+    changed: bool,
+    last_seen_at: Option<chrono::DateTime<chrono::FixedOffset>>,
+}
+
+/// Grava o status por compare-and-set.
+///
+/// O `UPDATE` só vale se o status no banco ainda for o lido. Duas checagens
+/// concorrentes comparam contra o mesmo valor antigo, mas só uma afeta a linha
+/// e publica `device:status` — nos dois dialetos, sem depender do isolamento
+/// da transação (READ COMMITTED no PostgreSQL). Quem perde relê e tenta de novo.
+async fn persist<C: ConnectionTrait>(
+    db: &C,
+    device: &devices::Model,
+    status: DeviceStatus,
+    seen_at: Option<DateTime<Utc>>,
+) -> AppResult<PersistOutcome> {
+    let mut outcome = PersistOutcome {
+        current: device.clone(),
+        previous_status: DeviceStatus::parse(&device.status),
+        changed: false,
+        last_seen_at: device.last_seen_at,
+    };
+    for _ in 0..CAS_ATTEMPTS {
+        let Some(current) = devices::Entity::find_by_id(device.id).one(db).await? else {
+            break;
+        };
+        outcome.previous_status = DeviceStatus::parse(&current.status);
+        outcome.last_seen_at = seen_at.map(Into::into).or(current.last_seen_at);
+        outcome.current = current;
+        let changed = outcome.previous_status != status;
+        if !changed && seen_at.is_none() {
+            break;
+        }
+        if try_swap(db, &outcome.current, status, seen_at).await? {
+            outcome.changed = changed;
+            break;
+        }
+    }
+    Ok(outcome)
+}
+
+/// Uma tentativa do compare-and-set: `true` se a linha ainda tinha o status
+/// de `current` e foi gravada.
+async fn try_swap<C: ConnectionTrait>(
+    db: &C,
+    current: &devices::Model,
+    status: DeviceStatus,
+    seen_at: Option<DateTime<Utc>>,
+) -> AppResult<bool> {
+    let now: chrono::DateTime<chrono::FixedOffset> = Utc::now().into();
+    let mut update = devices::Entity::update_many()
+        .col_expr(devices::Column::Status, Expr::value(status.as_str()))
+        .col_expr(devices::Column::UpdatedAt, Expr::value(now))
+        .filter(devices::Column::Id.eq(current.id))
+        .filter(devices::Column::Status.eq(current.status.as_str()));
+    if let Some(seen_at) = seen_at {
+        let seen_at: chrono::DateTime<chrono::FixedOffset> = seen_at.into();
+        update = update.col_expr(devices::Column::LastSeenAt, Expr::value(seen_at));
+    }
+    Ok(update.exec(db).await?.rows_affected == 1)
 }
 
 /// Publica a transição no contrato de eventos em tempo real.
@@ -147,6 +212,7 @@ pub async fn apply(
 async fn publish_transition(
     ctx: &AppContext,
     device: &devices::Model,
+    previous_status: DeviceStatus,
     status: DeviceStatus,
     last_seen_at: Option<chrono::DateTime<chrono::FixedOffset>>,
 ) {
@@ -160,7 +226,7 @@ async fn publish_transition(
         "deviceId": device.id,
         "name": device.name,
         "status": status.as_str(),
-        "previousStatus": DeviceStatus::parse(&device.status).as_str(),
+        "previousStatus": previous_status.as_str(),
         "ipAddress": device.ip_address,
         "lastSeenAt": last_seen_at.map(|value| value.to_rfc3339()),
         "changedAt": Utc::now().to_rfc3339(),
@@ -173,6 +239,85 @@ async fn publish_transition(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::migrations::{CoreMigrator as Migrator, MigratorTrait};
+    use sea_orm::{ActiveModelTrait, DatabaseConnection, Set};
+
+    async fn banco() -> DatabaseConnection {
+        let db = sea_orm::Database::connect(
+            sea_orm::ConnectOptions::new("sqlite::memory:".to_owned())
+                .max_connections(1)
+                .min_connections(1)
+                .to_owned(),
+        )
+        .await
+        .expect("banco");
+        Migrator::up(&db, None).await.expect("migrations");
+        db
+    }
+
+    async fn dispositivo(db: &DatabaseConnection, status: &str) -> devices::Model {
+        let now: chrono::DateTime<chrono::FixedOffset> = Utc::now().into();
+        devices::ActiveModel {
+            name: Set("roteador".into()),
+            r#type: Set("router".into()),
+            is_monitored: Set(true),
+            snmp_enabled: Set(false),
+            snmp_poll_interval_seconds: Set(60),
+            status: Set(status.into()),
+            created_at: Set(now),
+            updated_at: Set(now),
+            ..Default::default()
+        }
+        .insert(db)
+        .await
+        .expect("dispositivo")
+    }
+
+    #[tokio::test]
+    async fn so_a_primeira_gravacao_da_transicao_conta_como_mudanca() {
+        let db = banco().await;
+        let device = dispositivo(&db, "online").await;
+
+        let primeira = persist(&db, &device, DeviceStatus::Offline, None)
+            .await
+            .unwrap();
+        assert!(primeira.changed);
+        assert_eq!(primeira.previous_status, DeviceStatus::Online);
+
+        // A segunda checagem chega com o modelo antigo em mãos: relê e não
+        // publica de novo.
+        let segunda = persist(&db, &device, DeviceStatus::Offline, Some(Utc::now()))
+            .await
+            .unwrap();
+        assert!(!segunda.changed);
+        // `last_seen_at` avança mesmo sem transição.
+        let gravado = devices::Entity::find_by_id(device.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(gravado.last_seen_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn troca_com_status_obsoleto_nao_afeta_a_linha() {
+        let db = banco().await;
+        let obsoleto = dispositivo(&db, "online").await;
+        assert!(try_swap(&db, &obsoleto, DeviceStatus::Offline, None)
+            .await
+            .unwrap());
+        // Outra checagem leu "online" antes da gravação acima: o UPDATE dela
+        // não casa mais e ela não publica a transição duplicada.
+        assert!(!try_swap(&db, &obsoleto, DeviceStatus::Offline, None)
+            .await
+            .unwrap());
+        let gravado = devices::Entity::find_by_id(obsoleto.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(gravado.status, "offline");
+    }
 
     #[test]
     fn inconclusivos_nao_trocam_o_status() {

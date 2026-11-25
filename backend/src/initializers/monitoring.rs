@@ -14,7 +14,7 @@ use loco_rs::{
     Result,
 };
 
-use netmonitor_core::vpn_probe::probe_is_external;
+use netmonitor_core::{events::EventBus, vpn_probe::probe_is_external};
 
 use netmonitor_nucleo::{
     services::agents::{background as agents_background, local as local_agent},
@@ -42,7 +42,14 @@ impl Initializer for MonitoringInitializer {
     }
 
     async fn before_run(&self, ctx: &AppContext) -> Result<()> {
-        spawn_event_relay(ctx.clone());
+        if let Ok(bus) = EventBus::from_context(ctx) {
+            if let Err(error) = bus.seed_from_outbox(&ctx.db).await {
+                tracing::warn!(%error, "não foi possível posicionar cursor do event_outbox no boot");
+            }
+        }
+        if ctx.environment != Environment::Test {
+            spawn_event_relay(ctx.clone());
+        }
         // Canal dos agentes — o local e os remotos: modo ao vivo e entrega de
         // tarefas (ADR 011). O Docker e o histórico de métricas deste host
         // chegam pelo agente local (ADR 014).
@@ -136,7 +143,11 @@ fn spawn_scheduler(ctx: AppContext) {
         return;
     }
     let seconds = scheduler_run::resolve_interval_seconds(None);
-    tokio::spawn(async move { scheduler_run::run_forever(&ctx, seconds).await });
+    // Sem handler de sinal próprio: o laço vive enquanto o servidor viver, e
+    // o encerramento é o do Loco (que drena as conexões antes de sair).
+    tokio::spawn(async move {
+        scheduler_run::run_forever(&ctx, seconds, std::future::pending()).await;
+    });
 }
 
 /// Ligado por padrão. Só `false`/`0` desligam — qualquer outro valor mantém o

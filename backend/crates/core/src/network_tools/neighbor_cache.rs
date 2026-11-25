@@ -37,6 +37,10 @@ pub fn is_valid_mac(mac: &str) -> bool {
     normalize_mac(mac).is_some()
 }
 
+/// Tempo máximo aguardado para `ip neigh` / `arp -a` responderem.
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+const NEIGHBOR_CMD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Lê as entradas de vizinhos do sistema operacional.
 pub async fn read_system_neighbors() -> Vec<NeighborEntry> {
     #[cfg(target_os = "linux")]
@@ -45,11 +49,9 @@ pub async fn read_system_neighbors() -> Vec<NeighborEntry> {
         // `/proc/net/arp` não tem estado e só completa o que faltar — a
         // deduplicação fica com a primeira observação de cada par.
         let mut entries = Vec::new();
-        if let Ok(output) = tokio::process::Command::new("ip")
-            .args(["neigh", "show"])
-            .output()
-            .await
-        {
+        let mut cmd = tokio::process::Command::new("ip");
+        cmd.args(["neigh", "show"]).kill_on_drop(true);
+        if let Ok(Ok(output)) = tokio::time::timeout(NEIGHBOR_CMD_TIMEOUT, cmd.output()).await {
             let text = String::from_utf8_lossy(&output.stdout);
             entries.extend(parse_ip_neigh(&text));
         }
@@ -62,7 +64,9 @@ pub async fn read_system_neighbors() -> Vec<NeighborEntry> {
     #[cfg(target_os = "windows")]
     {
         let mut entries = Vec::new();
-        if let Ok(output) = tokio::process::Command::new("arp").arg("-a").output().await {
+        let mut cmd = tokio::process::Command::new("arp");
+        cmd.arg("-a").kill_on_drop(true);
+        if let Ok(Ok(output)) = tokio::time::timeout(NEIGHBOR_CMD_TIMEOUT, cmd.output()).await {
             let text = String::from_utf8_lossy(&output.stdout);
             entries.extend(parse_windows_arp(&text));
         }
@@ -169,9 +173,6 @@ pub fn parse_windows_arp(content: &str) -> Vec<NeighborEntry> {
             continue;
         }
         let ip_str = ip.to_string();
-        if ip_str.ends_with(".255") {
-            continue;
-        }
 
         let Some(mac) = normalize_mac(raw_mac) else {
             continue;
@@ -374,5 +375,18 @@ Interface: 192.168.1.50 --- 0x3
         assert_eq!(parsed[2].ip_address, "192.168.1.1");
         assert_eq!(parsed[2].mac_address, "00:11:22:33:44:55");
         assert_eq!(parsed[2].interface.as_deref(), Some("192.168.1.50"));
+    }
+
+    #[test]
+    fn arp_windows_preserva_host_valido_terminado_em_255_em_subrede_maior() {
+        let sample = "\
+Interface: 10.0.0.170 --- 0x2
+  10.0.0.255            d6-8c-72-59-65-fc     dinâmico
+  10.0.3.255            ff-ff-ff-ff-ff-ff     estático
+";
+        let parsed = parse_windows_arp(sample);
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].ip_address, "10.0.0.255");
+        assert_eq!(parsed[0].mac_address, "d6:8c:72:59:65:fc");
     }
 }

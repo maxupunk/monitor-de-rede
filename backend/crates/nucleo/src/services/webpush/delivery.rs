@@ -3,7 +3,10 @@
 //!
 //! Inscrição que o serviço de push dá como expirada sai do banco aqui mesmo.
 
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder};
+use futures::StreamExt;
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, TransactionTrait,
+};
 use serde_json::Value;
 use tracing::warn;
 
@@ -42,7 +45,10 @@ async fn with_access<C: ConnectionTrait>(
     subscriptions: Vec<push_subscriptions::Model>,
     area: Area,
 ) -> AppResult<Vec<push_subscriptions::Model>> {
-    let user_ids: Vec<i64> = subscriptions.iter().filter_map(|s| s.user_id).collect();
+    let user_ids: HashSet<i64> = subscriptions.iter().filter_map(|s| s.user_id).collect();
+    if user_ids.is_empty() {
+        return Ok(Vec::new());
+    }
     let allowed: HashSet<i64> = users::Entity::find()
         .filter(users::Column::Id.is_in(user_ids))
         .all(db)
@@ -66,7 +72,7 @@ async fn with_access<C: ConnectionTrait>(
 ///
 /// Falha do banco ao listar as inscrições ou ao obter as chaves VAPID. Falha
 /// de entrega a um navegador só vira log: as outras inscrições seguem.
-pub async fn deliver<C: ConnectionTrait>(
+pub async fn deliver<C: ConnectionTrait + TransactionTrait>(
     db: &C,
     audience: Audience,
     payload: &Value,
@@ -89,18 +95,30 @@ pub async fn deliver<C: ConnectionTrait>(
     }
 
     let vapid = get_or_create_vapid_keys(db).await?;
+    let outcomes = futures::stream::iter(subscriptions)
+        .map(|subscription| {
+            let vapid = &vapid;
+            async move {
+                let keys = SubscriptionKeys {
+                    p256dh: subscription.p256dh,
+                    auth: subscription.auth,
+                };
+                let result = send_push(&subscription.endpoint, &keys, vapid, payload).await;
+                (subscription.id, subscription.endpoint, result)
+            }
+        })
+        .buffer_unordered(16)
+        .collect::<Vec<_>>()
+        .await;
+
     let mut expired = Vec::new();
-    for subscription in &subscriptions {
-        let keys = SubscriptionKeys {
-            p256dh: subscription.p256dh.clone(),
-            auth: subscription.auth.clone(),
-        };
-        match send_push(&subscription.endpoint, &keys, &vapid, payload).await {
+    for (subscription_id, endpoint, result) in outcomes {
+        match result {
             Ok(PushOutcome::Success) => delivery.sent += 1,
-            Ok(PushOutcome::Expired) => expired.push(subscription.id),
+            Ok(PushOutcome::Expired) => expired.push(subscription_id),
             Err(error) => warn!(
-                subscription_id = subscription.id,
-                endpoint = %subscription.endpoint,
+                subscription_id,
+                endpoint = %endpoint,
                 %error,
                 "Erro ao entregar Web Push"
             ),

@@ -74,7 +74,16 @@ async fn scan(Json(mut input): Json<PortScanInput>) -> AppResult<Response> {
             tracing::info!(target = %host, scanned = results.len(), "stream da varredura concluído");
         }
     });
-    let output = ReceiverStream::new(receiver).map(|event| {
+    struct CancelOnDrop(CancellationToken);
+    impl Drop for CancelOnDrop {
+        fn drop(&mut self) {
+            self.0.cancel();
+        }
+    }
+
+    let cancel_guard = CancelOnDrop(cancel);
+    let output = ReceiverStream::new(receiver).map(move |event| {
+        let _keep = &cancel_guard;
         let line = match event {
             PortScanEvent::Result(item) => serde_json::json!({ "type": "result", "port": item.port, "protocol": item.protocol, "status": item.status, "service": item.service, "latencyMs": item.latency_ms, "attempts": item.attempts, "error": item.error }),
             PortScanEvent::Done => serde_json::json!({ "type": "done" }),

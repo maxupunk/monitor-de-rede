@@ -57,27 +57,41 @@ pub async fn run_with(
     catalog: Option<&TemplateCatalog>,
 ) {
     let mut lote: Vec<PendingLog> = Vec::with_capacity(batch_size);
+    let mut deadline: Option<tokio::time::Instant> = None;
     loop {
-        let recebido = if lote.is_empty() {
-            // Lote vazio: não há prazo correndo, então espera sem acordar à
-            // toa. Um servidor sem tráfego de log não deve gastar um tique a
-            // cada 200 ms para não fazer nada.
-            receiver.recv().await
-        } else {
-            match tokio::time::timeout(interval, receiver.recv()).await {
-                Ok(recebido) => recebido,
-                Err(_) => {
+        let recebido = match deadline {
+            None => {
+                // Lote vazio: não há prazo correndo, então espera sem acordar à
+                // toa. Um servidor sem tráfego de log não deve gastar um tique a
+                // cada 200 ms para não fazer nada.
+                receiver.recv().await
+            }
+            Some(prazo) => {
+                if tokio::time::Instant::now() >= prazo {
                     descarrega(&db, &mut lote, &metrics, bus.as_ref(), catalog).await;
+                    deadline = None;
                     continue;
+                }
+                match tokio::time::timeout_at(prazo, receiver.recv()).await {
+                    Ok(recebido) => recebido,
+                    Err(_) => {
+                        descarrega(&db, &mut lote, &metrics, bus.as_ref(), catalog).await;
+                        deadline = None;
+                        continue;
+                    }
                 }
             }
         };
 
         match recebido {
             Some(log) => {
+                if lote.is_empty() {
+                    deadline = Some(tokio::time::Instant::now() + interval);
+                }
                 lote.push(log);
                 if lote.len() >= batch_size {
                     descarrega(&db, &mut lote, &metrics, bus.as_ref(), catalog).await;
+                    deadline = None;
                 }
             }
             // Fila fechada: grava o que sobrou antes de sair. Sem isto, um

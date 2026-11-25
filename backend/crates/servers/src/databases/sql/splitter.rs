@@ -70,58 +70,74 @@ impl StatementSplitter {
             }
         }
 
-        let mut text = String::with_capacity(line.len() + 1);
-        text.push_str(line);
-        text.push('\n');
-
         let mut done = Vec::new();
+        self.process_slice(line, &mut done);
+        self.process_slice("\n", &mut done);
+        done
+    }
+
+    fn process_slice(&mut self, text: &str, done: &mut Vec<String>) {
         let mut index = 0;
         while index < text.len() {
             let rest = &text[index..];
-            let c = rest.chars().next().expect("índice dentro do texto");
             let step = match &self.state {
-                State::Normal => self.normal(rest, &mut done),
+                State::Normal => self.normal(rest, done),
                 State::Single { escapes } => self.quoted(rest, '\'', *escapes),
                 State::Double { escapes } => self.quoted(rest, '"', *escapes),
                 State::Backtick => self.quoted(rest, '`', false),
                 // Comentário de linha não vai ao servidor: só a quebra fica.
                 State::LineComment => {
-                    if c == '\n' {
+                    if let Some(nl) = rest.find('\n') {
                         self.state = State::Normal;
-                        self.take(rest, 1)
+                        self.buffer.push('\n');
+                        nl + 1
                     } else {
-                        c.len_utf8()
+                        rest.len()
                     }
                 }
                 State::Block { depth } => {
                     let depth = *depth;
-                    if rest.starts_with("*/") {
-                        self.state = if depth <= 1 {
-                            State::Normal
-                        } else {
-                            State::Block { depth: depth - 1 }
-                        };
-                        self.take(rest, 2)
-                    } else if rest.starts_with("/*") && self.family == EngineFamily::Postgres {
-                        self.state = State::Block { depth: depth + 1 };
-                        self.take(rest, 2)
+                    let close = rest.find("*/");
+                    let open = if self.family == EngineFamily::Postgres {
+                        rest.find("/*")
                     } else {
-                        self.take(rest, c.len_utf8())
+                        None
+                    };
+                    match (open, close) {
+                        (Some(o), Some(c)) if o < c => {
+                            self.state = State::Block { depth: depth + 1 };
+                            self.take(rest, o + 2)
+                        }
+                        (Some(o), None) => {
+                            self.state = State::Block { depth: depth + 1 };
+                            self.take(rest, o + 2)
+                        }
+                        (_, Some(c)) => {
+                            self.state = if depth <= 1 {
+                                State::Normal
+                            } else {
+                                State::Block { depth: depth - 1 }
+                            };
+                            self.take(rest, c + 2)
+                        }
+                        (None, None) => self.take(rest, rest.len()),
                     }
                 }
                 State::Dollar(tag) => {
-                    if rest.starts_with(tag.as_str()) {
-                        let len = tag.len();
+                    if let Some(pos) = rest.find(tag.as_str()) {
+                        let len = pos + tag.len();
                         self.state = State::Normal;
                         self.take(rest, len)
                     } else {
-                        self.take(rest, c.len_utf8())
+                        self.take(rest, rest.len())
                     }
                 }
             };
+            if step == 0 {
+                break;
+            }
             index += step;
         }
-        done
     }
 
     /// O que sobrou no fim do arquivo, se for um comando sem delimitador final.
@@ -150,7 +166,9 @@ impl StatementSplitter {
             return self.delimiter.len();
         }
 
-        let c = rest.chars().next().expect("resto não vazio");
+        let Some(c) = rest.chars().next() else {
+            return 0;
+        };
         let mysql = self.family == EngineFamily::Mysql;
         match c {
             '\'' => {
@@ -175,6 +193,9 @@ impl StatementSplitter {
                 return 1;
             }
             '/' if rest.starts_with("/*") => {
+                if mysql && rest.starts_with("/*!") {
+                    self.has_content = true;
+                }
                 self.state = State::Block { depth: 1 };
                 return self.take(rest, 2);
             }
@@ -187,27 +208,50 @@ impl StatementSplitter {
                 }
                 self.has_content = true;
             }
-            c if !c.is_whitespace() => self.has_content = true,
-            _ => {}
+            _ => {
+                let delim_first = self.delimiter.as_bytes().first().copied();
+                let bytes = rest.as_bytes();
+                let run = bytes[c.len_utf8()..]
+                    .iter()
+                    .position(|&b| {
+                        delim_first == Some(b)
+                            || matches!(b, b'\'' | b'"' | b'`' | b'-' | b'#' | b'/' | b'$')
+                    })
+                    .map_or(rest.len(), |offset| c.len_utf8() + offset);
+                let chunk = &rest[..run];
+                if !self.has_content && chunk.chars().any(|ch| !ch.is_whitespace()) {
+                    self.has_content = true;
+                }
+                return self.take(rest, run);
+            }
         }
         self.take(rest, c.len_utf8())
     }
 
     /// Dentro de aspas: fecha no delimitador não dobrado e não escapado.
     fn quoted(&mut self, rest: &str, quote: char, escapes: bool) -> usize {
-        let c = rest.chars().next().expect("resto não vazio");
-        if escapes && c == '\\' {
+        let quote_byte = quote as u8;
+        let bytes = rest.as_bytes();
+        let Some(&first) = bytes.first() else {
+            return 0;
+        };
+        if escapes && first == b'\\' {
             let next = rest[1..].chars().next().map_or(0, char::len_utf8);
             return self.take(rest, 1 + next);
         }
-        if c == quote {
+        if first == quote_byte {
             // Delimitador dobrado é o próprio caractere, não o fim.
             if rest[1..].starts_with(quote) {
                 return self.take(rest, 2);
             }
             self.state = State::Normal;
+            return self.take(rest, 1);
         }
-        self.take(rest, c.len_utf8())
+        let run = bytes
+            .iter()
+            .position(|&b| b == quote_byte || (escapes && b == b'\\'))
+            .unwrap_or(rest.len());
+        self.take(rest, run)
     }
 
     /// O literal que começa agora é `E'...'` (PostgreSQL, com escapes)?
@@ -389,6 +433,24 @@ mod tests {
             split(PG, "SELECT 1;\nSELECT 2"),
             vec!["SELECT 1", "SELECT 2"]
         );
+    }
+
+    #[test]
+    fn comentario_condicional_do_mysql_nao_e_descartado() {
+        assert_eq!(
+            split(MY, "/*!40101 SET NAMES utf8mb4 */;\nSELECT 1;"),
+            vec!["/*!40101 SET NAMES utf8mb4 */", "SELECT 1"]
+        );
+    }
+
+    #[test]
+    fn crlf_dentro_de_literal_mysql_e_preservado() {
+        let mut splitter = StatementSplitter::new(MY);
+        let mut out = Vec::new();
+        out.extend(splitter.push_line("INSERT INTO t VALUES ('linha 1\r"));
+        out.extend(splitter.push_line("linha 2');"));
+        out.extend(splitter.finish());
+        assert_eq!(out, vec!["INSERT INTO t VALUES ('linha 1\r\nlinha 2')"]);
     }
 
     #[test]

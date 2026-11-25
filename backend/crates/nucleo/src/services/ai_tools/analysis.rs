@@ -415,16 +415,32 @@ async fn monitor_entries(
         .filter(monitors::Column::DeviceId.eq(device.id))
         .all(&ctx.db)
         .await?;
+    if device_monitors.is_empty() {
+        return Ok(Vec::new());
+    }
+    let monitor_ids: Vec<i64> = device_monitors.iter().map(|m| m.id).collect();
+    let all_results = monitor_results::Entity::find()
+        .filter(monitor_results::Column::MonitorId.is_in(monitor_ids))
+        .filter(monitor_results::Column::StartedAt.gte(from))
+        .filter(monitor_results::Column::StartedAt.lte(to))
+        .order_by_asc(monitor_results::Column::StartedAt)
+        .all(&ctx.db)
+        .await?;
+
+    let mut results_by_monitor: std::collections::HashMap<i64, Vec<monitor_results::Model>> =
+        std::collections::HashMap::new();
+    for result in all_results {
+        results_by_monitor
+            .entry(result.monitor_id)
+            .or_default()
+            .push(result);
+    }
+
     let mut entries = Vec::new();
     for monitor in device_monitors {
-        let results = monitor_results::Entity::find()
-            .filter(monitor_results::Column::MonitorId.eq(monitor.id))
-            .filter(monitor_results::Column::StartedAt.gte(from))
-            .filter(monitor_results::Column::StartedAt.lte(to))
-            .order_by_asc(monitor_results::Column::StartedAt)
-            .all(&ctx.db)
-            .await?;
-        entries.extend(status_transitions(&monitor.name, &results));
+        if let Some(results) = results_by_monitor.get(&monitor.id) {
+            entries.extend(status_transitions(&monitor.name, results));
+        }
     }
     Ok(entries)
 }

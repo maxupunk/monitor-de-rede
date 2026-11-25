@@ -9,7 +9,7 @@ use crate::snmp::{
 };
 use netmonitor_core::{
     models::devices,
-    monitoring::execution_guard::try_acquire_snmp_device,
+    monitoring::execution_guard::{try_acquire_snmp_device, DeviceSnmpExecutionGuard},
     shared::errors::{AppError, AppResult},
 };
 
@@ -86,12 +86,35 @@ async fn test(Json(input): Json<SnmpTestInput>) -> AppResult<Response> {
         service::test_connection(config_from_test_input(&input, port)?).await?,
     )?)
 }
+/// Quanto uma mudança de configuração espera a coleta em curso do mesmo
+/// dispositivo terminar antes de desistir com 409: o poll agendado de um
+/// switch grande dura alguns segundos, e o operador não deveria ver erro só
+/// por ter clicado durante ele.
+const CONFIG_GUARD_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+const CONFIG_GUARD_RETRY: std::time::Duration = std::time::Duration::from_millis(100);
+
+async fn wait_snmp_device(id: i64) -> AppResult<DeviceSnmpExecutionGuard> {
+    let deadline = tokio::time::Instant::now() + CONFIG_GUARD_WAIT;
+    loop {
+        if let Some(guard) = try_acquire_snmp_device(id) {
+            return Ok(guard);
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(AppError::conflict(
+                "Já existe uma consulta SNMP em andamento para este dispositivo",
+            ));
+        }
+        tokio::time::sleep(CONFIG_GUARD_RETRY).await;
+    }
+}
+
 async fn device_with_config(ctx: &AppContext, id: i64) -> AppResult<(devices::Model, SnmpConfig)> {
     let device = devices::Entity::find_by_id(id)
         .one(&ctx.db)
         .await?
         .ok_or_else(|| AppError::not_found("Dispositivo não encontrado"))?;
-    let config = service::device_config(&device)?;
+    let prefs = netmonitor_core::preferences::load(&ctx.db).await?;
+    let config = service::device_config_with(&device, &prefs.default_snmp_community)?;
     Ok((device, config))
 }
 async fn scan(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
@@ -118,6 +141,7 @@ async fn apply_monitors(
     Path(id): Path<i64>,
     Json(input): Json<SnmpApplyInput>,
 ) -> AppResult<Response> {
+    let _guard = wait_snmp_device(id).await?;
     let (device, config) = device_with_config(&ctx, id).await?;
     service::apply_monitors(
         &ctx,
@@ -146,6 +170,7 @@ async fn set_interface_monitoring(
     Path((id, interface_id)): Path<(i64, i64)>,
     Json(input): Json<InterfaceMonitoringInput>,
 ) -> AppResult<Response> {
+    let _guard = wait_snmp_device(id).await?;
     let (device, config) = device_with_config(&ctx, id).await?;
     service::set_interface_monitoring(&ctx, &device, config, interface_id, input.enabled).await?;
     Ok(format::json(serde_json::json!({

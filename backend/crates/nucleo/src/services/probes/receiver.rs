@@ -1,9 +1,11 @@
 //! Recepção dos resultados reportados pelos probes (§8.11).
 
+use std::collections::{HashMap, HashSet};
+
 use agent_protocol::AgentEvent;
 use loco_rs::app::AppContext;
 use netmonitor_core::agents::command::AgentCommandDispatchers;
-use sea_orm::EntityTrait;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
 use serde::Deserialize;
 
 use crate::{
@@ -25,27 +27,35 @@ pub struct ProbeResultPayload {
 
 pub use agent_protocol::probes::ProbeDiscoveryResultPayload;
 
-/// Verifica se o monitor informado pertence ao probe autenticado.
-///
-/// Um agente só pode reportar resultados dos monitores que lhe foram
-/// explicitamente atribuídos (`monitors.probe_id`). Qualquer outro `monitor_id`
-/// é descartado com log de segurança — isso fecha a janela de um probe com
-/// token padrão injetar resultados falsos em monitores alheios.
-async fn assert_monitor_belongs_to_probe(
+/// Pré-carrega o `probe_id` de cada monitor do lote em uma única consulta
+/// (evita N+1 por item recebido do probe).
+async fn load_monitor_owners(
     ctx: &AppContext,
-    monitor_id: i64,
-    probe_id: i64,
-) -> AppResult<()> {
-    let Some(monitor) = monitors::Entity::find_by_id(monitor_id)
-        .one(&ctx.db)
-        .await?
-    else {
-        return Err(AppError::not_found("monitor não encontrado"));
+    payloads: &[ProbeResultPayload],
+) -> AppResult<HashMap<i64, Option<i64>>> {
+    let ids: Vec<i64> = {
+        let mut seen = HashSet::with_capacity(payloads.len());
+        payloads
+            .iter()
+            .map(|item| item.monitor_id)
+            .filter(|id| seen.insert(*id))
+            .collect()
     };
-    if monitor.probe_id != Some(probe_id) {
-        return Err(AppError::unauthorized("monitor não pertence a este probe"));
+    let mut owners = HashMap::with_capacity(ids.len());
+    for chunk in ids.chunks(400) {
+        let rows: Vec<(i64, Option<i64>)> = monitors::Entity::find()
+            .select_only()
+            .column(monitors::Column::Id)
+            .column(monitors::Column::ProbeId)
+            .filter(monitors::Column::Id.is_in(chunk.to_vec()))
+            .into_tuple()
+            .all(&ctx.db)
+            .await?;
+        for (id, owner) in rows {
+            owners.insert(id, owner);
+        }
     }
-    Ok(())
+    Ok(owners)
 }
 
 /// Processa um lote inteiro.
@@ -63,9 +73,18 @@ pub async fn receive_batch_results(
     probe_id: i64,
     payloads: &[ProbeResultPayload],
 ) -> AppResult<usize> {
+    if payloads.is_empty() {
+        return Ok(0);
+    }
+    let owners = load_monitor_owners(ctx, payloads).await?;
     let mut processed = 0;
     for item in payloads {
-        if let Err(error) = assert_monitor_belongs_to_probe(ctx, item.monitor_id, probe_id).await {
+        let allowed = match owners.get(&item.monitor_id) {
+            Some(Some(owner)) if *owner == probe_id => Ok(()),
+            Some(_) => Err(AppError::unauthorized("monitor não pertence a este probe")),
+            None => Err(AppError::not_found("monitor não encontrado")),
+        };
+        if let Err(error) = allowed {
             tracing::warn!(
                 %error,
                 monitor_id = item.monitor_id,

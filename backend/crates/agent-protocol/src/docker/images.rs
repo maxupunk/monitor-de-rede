@@ -20,8 +20,8 @@ use uuid::Uuid;
 
 use super::{
     stacks::{
-        validate_commit, validate_image_tag, validate_relative_path, validate_repository_url,
-        validate_variable, GitSource, Secret,
+        validate_commit, validate_env_secret, validate_image_tag, validate_relative_path_for,
+        validate_repository_url, validate_variable, GitSource, Secret,
     },
     DockerError,
 };
@@ -129,6 +129,10 @@ pub fn validate_target(target: &str) -> Result<(), DockerError> {
     let valid = !target.is_empty()
         && target.len() <= 64
         && target
+            .as_bytes()
+            .first()
+            .is_some_and(u8::is_ascii_alphanumeric)
+        && target
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
     if valid {
@@ -153,11 +157,30 @@ pub fn validate_reference(reference: &str) -> Result<(), DockerError> {
         Some(at) => (&reference[..slash + at], Some(&reference[slash + at + 1..])),
         None => (reference, None),
     };
+    let valid_segments = repository.split('/').enumerate().all(|(idx, seg)| {
+        if seg.is_empty() || seg == "." || seg == ".." {
+            return false;
+        }
+        // Só o primeiro segmento (host do registry) pode carregar `:porta`.
+        if let Some((host, port)) = seg.split_once(':') {
+            idx == 0
+                && !host.is_empty()
+                && !port.is_empty()
+                && port.bytes().all(|b| b.is_ascii_digit())
+                && !host.starts_with(['.', '-'])
+        } else {
+            !seg.starts_with(['.', '-'])
+        }
+    });
     let valid_repository = !repository.is_empty()
         && repository.len() <= 255
-        && !repository.starts_with('/')
+        && repository
+            .as_bytes()
+            .first()
+            .is_some_and(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
         && !repository.ends_with('/')
         && !repository.contains("//")
+        && valid_segments
         && repository.chars().all(|c| {
             c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '-' | '/' | ':')
         });
@@ -179,6 +202,9 @@ impl ImageBuildRequest {
     pub fn validate(&self) -> Result<(), DockerError> {
         validate_repository_url(&self.source.repository_url)?;
         validate_commit(&self.source.commit)?;
+        if let Some(token) = &self.source.token {
+            validate_env_secret("Token do repositório", token)?;
+        }
         if self.images.is_empty() {
             return Err(invalid("Nada a compilar: nenhuma imagem com Dockerfile"));
         }
@@ -189,8 +215,8 @@ impl ImageBuildRequest {
         }
         for image in &self.images {
             validate_image_name(&image.name)?;
-            validate_relative_path(&image.dockerfile)?;
-            validate_relative_path(&image.context)?;
+            validate_relative_path_for(&image.dockerfile, "Dockerfile")?;
+            validate_relative_path_for(&image.context, "Contexto de build")?;
             if let Some(target) = &image.target {
                 validate_target(target)?;
             }
@@ -213,8 +239,15 @@ impl ImageBuildRequest {
                 "No máximo {MAX_BUILD_VALUES} argumentos e segredos de build"
             )));
         }
+        let mut arg_names = std::collections::HashSet::with_capacity(self.build_args.len());
         for arg in &self.build_args {
             validate_variable(&arg.name)?;
+            if !arg_names.insert(arg.name.as_str()) {
+                return Err(invalid(format!(
+                    "Argumento de build duplicado: {}",
+                    arg.name
+                )));
+            }
             if arg.value.len() > MAX_BUILD_ARG_BYTES || arg.value.chars().any(char::is_control) {
                 return Err(invalid(format!(
                     "Valor do argumento {} inválido (sem quebra de linha, até 4 KB)",
@@ -222,8 +255,16 @@ impl ImageBuildRequest {
                 )));
             }
         }
+        let mut secret_ids = std::collections::HashSet::with_capacity(self.secrets.len());
         for secret in &self.secrets {
             validate_variable(&secret.id)?;
+            if !secret_ids.insert(secret.id.as_str()) {
+                return Err(invalid(format!(
+                    "Segredo de build duplicado: {}",
+                    secret.id
+                )));
+            }
+            validate_env_secret(&format!("Segredo {}", secret.id), &secret.value)?;
         }
         if self.timeout_secs == 0 || self.timeout_secs > MAX_BUILD_TIMEOUT_SECS {
             return Err(invalid(format!(

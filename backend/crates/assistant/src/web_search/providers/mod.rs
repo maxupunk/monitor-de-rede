@@ -126,12 +126,14 @@ async fn fetch(source: &str, url: Url, accept: &str) -> Result<Fetched, Provider
     let mut body = Vec::new();
     while body.len() < MAX_BODY_BYTES {
         match response.chunk().await {
-            Ok(Some(chunk)) => body.extend_from_slice(&chunk),
+            Ok(Some(chunk)) => {
+                let remaining = MAX_BODY_BYTES - body.len();
+                body.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
+            }
             Ok(None) => break,
             Err(error) => return Err(request_error(source, &error)),
         }
     }
-    body.truncate(MAX_BODY_BYTES);
     Ok(Fetched {
         status,
         body: String::from_utf8_lossy(&body).into_owned(),

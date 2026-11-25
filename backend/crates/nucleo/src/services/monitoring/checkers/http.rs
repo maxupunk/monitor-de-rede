@@ -58,7 +58,8 @@ impl Checker for HttpChecker {
 
     async fn execute(&self, config: Self::Config) -> CheckResult {
         let started_at = Utc::now();
-        let method = Method::from_bytes(config.method.as_bytes()).unwrap_or(Method::GET);
+        let method_upper = config.method.trim().to_ascii_uppercase();
+        let method = Method::from_bytes(method_upper.as_bytes()).unwrap_or(Method::GET);
         let client_source = if config.validate_certificate {
             default_client()
         } else {

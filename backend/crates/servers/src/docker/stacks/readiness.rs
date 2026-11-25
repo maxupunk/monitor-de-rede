@@ -1,9 +1,10 @@
 //! O que falta no host para deployar uma stack — a checagem de prontidão
 //! que o assistente da tela mostra antes do primeiro deploy. Só lê.
 
-use std::time::Duration;
+use std::{collections::BTreeSet, time::Duration};
 
 use agent_protocol::docker::stacks::validate_project;
+use futures::{stream, StreamExt};
 use serde_json::Value;
 
 use super::{
@@ -53,43 +54,59 @@ pub async fn inspect(
         Ok(root) => (Some(root.path().display().to_string()), None),
         Err(reason) => (None, Some(reason.clone())),
     };
-    let git_version = cli::capture("git", &["--version"], None, CHECK_TIMEOUT)
-        .await
+    let (git_res, compose_res, df_res, containers_res) = tokio::join!(
+        cli::capture("git", &["--version"], None, CHECK_TIMEOUT),
+        compose::availability(),
+        async {
+            if let Some(path) = &stacks_dir {
+                cli::capture("df", &["-Pk", path], None, CHECK_TIMEOUT)
+                    .await
+                    .ok()
+                    .and_then(|(_, output)| parse_df(&output))
+            } else {
+                None
+            }
+        },
+        engine::list_containers(engine),
+    );
+    let git_version = git_res
         .ok()
         .filter(|(ok, _)| *ok)
         .map(|(_, version)| version);
-    let compose_version = compose::availability().await.ok();
-    let free_bytes = if let Some(path) = &stacks_dir {
-        cli::capture("df", &["-Pk", path], None, CHECK_TIMEOUT)
-            .await
-            .ok()
-            .and_then(|(_, output)| parse_df(&output))
-    } else {
-        None
-    };
+    let compose_version = compose_res.ok();
+    let free_bytes = df_res;
     let project_dir_exists = checked
         .as_ref()
         .is_ok_and(|root| root.project_dir(project).join(".git").exists());
 
-    let containers = engine::list_containers(engine).await.unwrap_or_default();
+    let containers = containers_res.unwrap_or_default();
     let known = compose::projects(&containers);
     let found = known.iter().find(|known| known.name == project);
-    let mut services_without_healthcheck = Vec::new();
-    for container in containers.iter().filter(|container| {
-        container.labels.get(PROJECT_LABEL).map(String::as_str) == Some(project)
-    }) {
-        let Some(service) = container.labels.get(SERVICE_LABEL) else {
-            continue;
-        };
-        if services_without_healthcheck.contains(service) {
-            continue;
-        }
-        if let Ok(inspected) = engine.inspect_container_raw(&container.id).await {
-            if !has_healthcheck(&inspected) {
-                services_without_healthcheck.push(service.clone());
+    let mut seen_services = BTreeSet::new();
+    let to_inspect: Vec<(String, String)> = containers
+        .iter()
+        .filter(|container| {
+            container.labels.get(PROJECT_LABEL).map(String::as_str) == Some(project)
+        })
+        .filter_map(|container| {
+            let service = container.labels.get(SERVICE_LABEL)?;
+            if !seen_services.insert(service.clone()) {
+                return None;
             }
-        }
-    }
+            Some((container.id.clone(), service.clone()))
+        })
+        .collect();
+    let mut services_without_healthcheck: Vec<String> = stream::iter(to_inspect)
+        .map(|(id, service)| async move {
+            match engine.inspect_container_raw(&id).await {
+                Ok(inspected) if !has_healthcheck(&inspected) => Some(service),
+                _ => None,
+            }
+        })
+        .buffer_unordered(8)
+        .filter_map(|item| async move { item })
+        .collect()
+        .await;
     services_without_healthcheck.sort();
 
     Ok(StackReadiness {

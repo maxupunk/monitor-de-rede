@@ -176,6 +176,11 @@ async fn download(
         .chars()
         .filter(|c| !matches!(c, '"' | '\\' | '\r' | '\n'))
         .collect();
+    let filename = if filename.is_empty() {
+        "download".to_string()
+    } else {
+        filename
+    };
     Ok((
         StatusCode::OK,
         [

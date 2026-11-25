@@ -37,8 +37,8 @@
 //! da execução. `device.progress(#{ flow, bps })` emite à mão.
 
 use std::{
-    collections::BTreeMap,
-    sync::{Arc, Mutex, MutexGuard},
+    collections::{BTreeMap, HashMap},
+    sync::{Arc, Mutex, MutexGuard, OnceLock},
     time::{Duration, Instant},
 };
 
@@ -46,6 +46,7 @@ use regex::Regex;
 use rhai::{Dynamic, Engine, EvalAltResult, Map, Scope, AST};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use tokio_util::sync::CancellationToken;
 use ts_rs::TS;
 
@@ -287,6 +288,60 @@ pub struct ExecutionOutcome {
     pub transcript: Vec<TranscriptEntry>,
 }
 
+const AST_CACHE_MAX: usize = 256;
+const REGEX_CACHE_MAX: usize = 512;
+
+fn compile_cached(script: &str) -> Result<AST, String> {
+    static COMPILER: OnceLock<Engine> = OnceLock::new();
+    static CACHE: OnceLock<Mutex<HashMap<[u8; 32], AST>>> = OnceLock::new();
+
+    let key: [u8; 32] = Sha256::digest(script.as_bytes()).into();
+    let cache = CACHE.get_or_init(Mutex::default);
+    if let Some(ast) = lock(cache).get(&key).cloned() {
+        return Ok(ast);
+    }
+    let engine = COMPILER.get_or_init(|| sandboxed_engine(Limits::default(), None));
+    let ast = engine.compile(script).map_err(|error| error.to_string())?;
+    let mut guard = lock(cache);
+    if guard.len() >= AST_CACHE_MAX {
+        guard.clear();
+    }
+    guard.insert(key, ast.clone());
+    Ok(ast)
+}
+
+/// Teto do programa compilado de uma regex vinda de plugin (o padrão do
+/// `regex` é 10 MiB cada): com até [`REGEX_CACHE_MAX`] delas no cache, um
+/// padrão inflado (`\w{1000}`) não pode reter centenas de MiB.
+const SCRIPT_REGEX_SIZE_LIMIT: usize = 1 << 20;
+const SCRIPT_REGEX_DFA_SIZE_LIMIT: usize = 2 << 20;
+
+/// Compila uma regex vinda de plugin (script, manifesto ou parâmetro) com os
+/// limites de memória do sandbox. A validação do pacote usa a mesma função,
+/// para o que passou na instalação não falhar na execução.
+pub(crate) fn script_regex(pattern: &str) -> Result<Regex, regex::Error> {
+    regex::RegexBuilder::new(pattern)
+        .size_limit(SCRIPT_REGEX_SIZE_LIMIT)
+        .dfa_size_limit(SCRIPT_REGEX_DFA_SIZE_LIMIT)
+        .build()
+}
+
+/// Compila e mantém em cache limitado as regexes usadas pelos plugins.
+pub(crate) fn cached_regex(pattern: &str) -> Result<Regex, regex::Error> {
+    static CACHE: OnceLock<Mutex<HashMap<String, Regex>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(Mutex::default);
+    if let Some(re) = lock(cache).get(pattern).cloned() {
+        return Ok(re);
+    }
+    let re = script_regex(pattern)?;
+    let mut guard = lock(cache);
+    if guard.len() >= REGEX_CACHE_MAX {
+        guard.clear();
+    }
+    guard.insert(pattern.to_owned(), re.clone());
+    Ok(re)
+}
+
 /// As funções do script com a aridade — a validação do pacote confere que
 /// cada ação tem a sua `fn <id>(device, params)`.
 ///
@@ -294,9 +349,7 @@ pub struct ExecutionOutcome {
 ///
 /// Erro de sintaxe, com linha e coluna.
 pub fn entry_points(script: &str) -> Result<Vec<(String, usize)>, String> {
-    let ast = sandboxed_engine(Limits::default(), None)
-        .compile(script)
-        .map_err(|error| error.to_string())?;
+    let ast = compile_cached(script)?;
     Ok(ast
         .iter_functions()
         .map(|function| (function.name.to_string(), function.params.len()))
@@ -304,11 +357,39 @@ pub fn entry_points(script: &str) -> Result<Vec<(String, usize)>, String> {
 }
 
 /// Executa `action` do `script` com os `params` já validados.
+///
+/// A senha de acesso nunca chega ao script (AGENTS §7): é mascarada no que
+/// ele lê do equipamento. Os segredos da configuração (a chave Wi-Fi que a
+/// ação edita) chegam intactos ao script e são mascarados no que sai da
+/// execução — saída final, erro e transcrição (que alimenta o SSE e o
+/// histórico).
 pub async fn execute(
     script: &str,
     action: &str,
     params: Value,
     context: ExecutionContext,
+) -> ExecutionOutcome {
+    run(script, action, params, context, true).await
+}
+
+/// Como [`execute`], mas devolve a saída final sem mascarar: só para
+/// [`super::reveal`], cujo propósito é entregar o segredo pedido a quem pediu.
+/// O erro e a transcrição continuam mascarados.
+pub async fn execute_revealing(
+    script: &str,
+    action: &str,
+    params: Value,
+    context: ExecutionContext,
+) -> ExecutionOutcome {
+    run(script, action, params, context, false).await
+}
+
+async fn run(
+    script: &str,
+    action: &str,
+    params: Value,
+    context: ExecutionContext,
+    mask_output: bool,
 ) -> ExecutionOutcome {
     let limits = context.limits;
     let inner = Arc::new(Inner::new(context));
@@ -319,8 +400,8 @@ pub async fn execute(
     let worker = {
         let inner = inner.clone();
         tokio::task::spawn_blocking(move || {
+            let ast: AST = compile_cached(&script)?;
             let engine = sandboxed_engine(limits, Some(inner.clone()));
-            let ast: AST = engine.compile(&script).map_err(|error| error.to_string())?;
             let params = rhai::serde::to_dynamic(&params).map_err(|error| error.to_string())?;
             let mut scope = Scope::new();
             let result: Dynamic = engine
@@ -334,7 +415,8 @@ pub async fn execute(
         Err(error) => Err(format!("a execução do script falhou: {error}")),
     };
     let output = match output {
-        Ok(value) => Ok(inner.mask_value(value)),
+        Ok(value) if mask_output => Ok(inner.mask_value(value)),
+        Ok(value) => Ok(value),
         Err(message) => Err(inner.mask(&message)),
     };
     let transcript = inner.take_transcript();
@@ -358,8 +440,8 @@ pub async fn reduce(
     let script = script.to_owned();
     let function = function.to_owned();
     let output = tokio::task::spawn_blocking(move || {
+        let ast: AST = compile_cached(&script)?;
         let engine = sandboxed_engine(Limits::default(), None);
-        let ast: AST = engine.compile(&script).map_err(|error| error.to_string())?;
         let results = rhai::serde::to_dynamic(&results).map_err(|error| error.to_string())?;
         let settings = rhai::serde::to_dynamic(&settings).map_err(|error| error.to_string())?;
         let mut scope = Scope::new();
@@ -374,9 +456,13 @@ pub async fn reduce(
 }
 
 fn mask_text(text: &str, secrets: &[String]) -> String {
-    secrets.iter().fold(text.to_owned(), |text, secret| {
-        text.replace(secret, "********")
-    })
+    // Segredo vazio mascararia cada posição do texto.
+    secrets
+        .iter()
+        .filter(|secret| !secret.is_empty())
+        .fold(text.to_owned(), |text, secret| {
+            text.replace(secret.as_str(), "********")
+        })
 }
 
 fn mask_json(value: Value, secrets: &[String]) -> Value {
@@ -480,7 +566,7 @@ fn compile_regex(pattern: &str) -> RhaiResult<Regex> {
     if pattern.len() > 2_000 {
         return fail("regex longa demais");
     }
-    Regex::new(pattern).or_else(|error| fail(format!("regex inválida: {error}")))
+    cached_regex(pattern).or_else(|error| fail(format!("regex inválida: {error}")))
 }
 
 fn register_utils(engine: &mut Engine) {
@@ -629,6 +715,7 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 struct Inner {
     context: ExecutionContext,
     runtime: tokio::runtime::Handle,
+    credential_secrets: Vec<String>,
     secrets: Vec<String>,
     transcript: Mutex<Vec<TranscriptEntry>>,
     cookies: Mutex<BTreeMap<String, String>>,
@@ -640,11 +727,14 @@ struct Inner {
     sample_window: Mutex<(u64, u32)>,
     /// Dentro de um `use_plugin`: o plugin usado não usa outro.
     nested: std::sync::atomic::AtomicBool,
+    /// Transportes permitidos ao plugin aninhado (`use_plugin`), se houver.
+    nested_transports: Mutex<Option<Vec<TransportKind>>>,
 }
 
 impl Inner {
     fn new(context: ExecutionContext) -> Self {
-        let mut secrets = context.credentials.secrets();
+        let credential_secrets = context.credentials.secrets();
+        let mut secrets = credential_secrets.clone();
         secrets.extend(context.extras.secrets.iter().cloned());
         let started = Instant::now();
         let deadline = started + context.limits.deadline;
@@ -652,6 +742,7 @@ impl Inner {
         Self {
             context,
             runtime: tokio::runtime::Handle::current(),
+            credential_secrets,
             secrets,
             transcript: Mutex::default(),
             cookies: Mutex::default(),
@@ -660,6 +751,7 @@ impl Inner {
             ceiling: Mutex::new(ceiling),
             sample_window: Mutex::new((u64::MAX, 0)),
             nested: std::sync::atomic::AtomicBool::new(false),
+            nested_transports: Mutex::new(None),
         }
     }
 
@@ -709,9 +801,12 @@ impl Inner {
     }
 
     fn mask(&self, text: &str) -> String {
-        self.secrets.iter().fold(text.to_owned(), |text, secret| {
-            text.replace(secret, "********")
-        })
+        mask_text(text, &self.secrets)
+    }
+
+    /// O que o script lê do equipamento: sem a senha de acesso.
+    fn mask_credentials(&self, text: &str) -> String {
+        mask_text(text, &self.credential_secrets)
     }
 
     fn should_stop(&self) -> Option<String> {
@@ -806,7 +901,10 @@ impl Inner {
         if let Some(reason) = self.should_stop() {
             return fail(reason);
         }
-        if !self.context.transports.contains(&transport) {
+        let allowed_by_nested = lock(&self.nested_transports)
+            .as_ref()
+            .is_none_or(|transports| transports.contains(&transport));
+        if !self.context.transports.contains(&transport) || !allowed_by_nested {
             let why = format!(
                 "o plugin não declara o transporte `{}` no manifesto",
                 transport.as_str()
@@ -865,10 +963,15 @@ impl Inner {
                     Some(on_line) => {
                         self.context
                             .transport
-                            .execute_streaming(&call, on_line)
+                            .execute_streaming_with_cancel(&call, on_line, &self.context.cancel)
                             .await
                     }
-                    None => self.context.transport.execute(&call).await,
+                    None => {
+                        self.context
+                            .transport
+                            .execute_with_cancel(&call, &self.context.cancel)
+                            .await
+                    }
                 }
             };
             tokio::select! {
@@ -1001,7 +1104,11 @@ impl Inner {
                 stderr,
                 exit_code,
                 ..
-            } => Ok((stdout, stderr, exit_code)),
+            } => Ok((
+                self.mask_credentials(&stdout),
+                self.mask_credentials(&stderr),
+                exit_code,
+            )),
             DeviceIoReply::Http { .. } => fail("resposta inesperada do transporte"),
         }
     }
@@ -1010,7 +1117,7 @@ impl Inner {
         if !spec.path.starts_with('/') || spec.path.starts_with("//") || spec.path.contains("://") {
             return fail("`path` precisa ser um caminho relativo (\"/cgi-bin/luci\"): o plugin só alcança o próprio equipamento");
         }
-        let effect = if spec.login {
+        let effect = if spec.login && spec.method.eq_ignore_ascii_case("POST") {
             Effect::Read
         } else {
             effect::classify_http(&spec.method)
@@ -1075,12 +1182,15 @@ impl Inner {
         self.remember_cookies(&headers);
         let mut header_map = Map::new();
         for (name, value) in &headers {
-            header_map.insert(name.as_str().into(), Dynamic::from(self.mask(value)));
+            header_map.insert(
+                name.as_str().into(),
+                Dynamic::from(self.mask_credentials(value)),
+            );
         }
         let mut result = Map::new();
         result.insert("status".into(), Dynamic::from(i64::from(status)));
         result.insert("headers".into(), Dynamic::from_map(header_map));
-        result.insert("body".into(), Dynamic::from(body));
+        result.insert("body".into(), Dynamic::from(self.mask_credentials(&body)));
         Ok(result)
     }
 
@@ -1432,6 +1542,15 @@ impl DeviceHandle {
     /// atual, e os acessos entram no mesmo transcript.
     fn use_plugin(&mut self, slug: &str, action: &str, params: Map) -> RhaiResult<Dynamic> {
         use std::sync::atomic::Ordering;
+
+        struct NestedGuard<'a>(&'a Inner);
+        impl Drop for NestedGuard<'_> {
+            fn drop(&mut self) {
+                *lock(&self.0.nested_transports) = None;
+                self.0.nested.store(false, Ordering::SeqCst);
+            }
+        }
+
         let inner = self.0.clone();
         let Some(library) = inner
             .context
@@ -1448,6 +1567,9 @@ impl DeviceHandle {
         let Some(declared) = library.manifest.action(action).cloned() else {
             return fail(format!("o plugin `{slug}` não tem a ação `{action}`"));
         };
+        if declared.reveals {
+            return fail(super::reveal::ONLY_HERE);
+        }
         if declared.effect > inner.context.action_effect {
             return fail(format!(
                 "`{slug}.{action}` altera o equipamento; a ação atual é de leitura"
@@ -1459,16 +1581,14 @@ impl DeviceHandle {
         if inner.nested.swap(true, Ordering::SeqCst) {
             return fail("um plugin usado por outro não pode usar um terceiro");
         }
+        *lock(&inner.nested_transports) = Some(library.manifest.transports.clone());
+        let _guard = NestedGuard(&inner);
+        let ast = compile_cached(&library.script).map_err(Box::<EvalAltResult>::from)?;
         let engine = sandboxed_engine(inner.context.limits, Some(inner.clone()));
-        let result = engine
-            .compile(&library.script)
-            .map_err(|error| Box::<EvalAltResult>::from(error.to_string()))
-            .and_then(|ast| {
-                let params = rhai::serde::to_dynamic(&params)?;
-                let mut scope = Scope::new();
-                engine.call_fn::<Dynamic>(&mut scope, &ast, &declared.id, (self.clone(), params))
-            });
-        inner.nested.store(false, Ordering::SeqCst);
+        let params = rhai::serde::to_dynamic(&params)?;
+        let mut scope = Scope::new();
+        let result =
+            engine.call_fn::<Dynamic>(&mut scope, &ast, &declared.id, (self.clone(), params));
         result.or_else(|error| fail(format!("`{slug}.{action}`: {}", describe_error(&error))))
     }
 }
@@ -1816,6 +1936,64 @@ mod tests {
         assert!(!outcome.transcript[0].output.contains("s3nh4"));
     }
 
+    #[tokio::test]
+    async fn senha_de_acesso_nao_chega_ao_script_e_segredo_da_config_so_sai_no_revelar() {
+        let script = r#"
+            fn detect(device, params) {
+                let eco = device.run("echo test");
+                let k = device.run("uci get wireless.k");
+                #{ vazou: eco.contains("s3nh4"), eco: eco, chave: k, leu_chave: k == "senha-wifi" }
+            }
+        "#;
+        let ctx = || {
+            let mut ctx = context(
+                vec![
+                    ssh("echo test", "eco s3nh4"),
+                    ssh("uci get wireless.k", "senha-wifi"),
+                ],
+                Effect::Read,
+            );
+            ctx.extras.secrets = vec!["senha-wifi".into()];
+            ctx
+        };
+        let outcome = execute(script, "detect", json!({}), ctx()).await;
+        let output = outcome.output.unwrap();
+        assert_eq!(output["vazou"], json!(false));
+        assert_eq!(output["eco"], json!("eco ********"));
+        assert_eq!(output["leu_chave"], json!(true));
+        assert_eq!(output["chave"], json!("********"));
+        assert!(outcome
+            .transcript
+            .iter()
+            .all(|entry| !entry.output.contains("senha-wifi") && !entry.output.contains("s3nh4")));
+
+        // Revelar entrega a chave pedida; a senha de acesso continua fora.
+        let outcome = execute_revealing(script, "detect", json!({}), ctx()).await;
+        let output = outcome.output.unwrap();
+        assert_eq!(output["chave"], json!("senha-wifi"));
+        assert_eq!(output["eco"], json!("eco ********"));
+        assert!(outcome
+            .transcript
+            .iter()
+            .all(|entry| !entry.output.contains("senha-wifi")));
+    }
+
+    #[test]
+    fn regex_de_plugin_tem_teto_de_memoria() {
+        assert!(script_regex(r"^\d+ (\w+)$").is_ok());
+        assert!(script_regex(r"\w{2000}\w{2000}").is_err());
+        assert!(cached_regex(r"(\w{1000}){1000}").is_err());
+    }
+
+    #[test]
+    fn segredo_vazio_nao_mascara_o_texto_todo() {
+        assert_eq!(mask_text("abc", &[String::new()]), "abc");
+        assert_eq!(
+            mask_text("x s3nh4 y", &[String::new(), "s3nh4".into()]),
+            "x ******** y"
+        );
+    }
+
     fn library(slug: &str, manifest: serde_json::Value, script: &str) -> LibraryPlugin {
         LibraryPlugin {
             slug: slug.into(),
@@ -2026,5 +2204,42 @@ mod tests {
         let functions = entry_points("fn detect(device, params) { 1 } fn aux(x) { x }").unwrap();
         assert!(functions.contains(&("detect".to_string(), 2)));
         assert!(functions.contains(&("aux".to_string(), 1)));
+    }
+
+    #[tokio::test]
+    async fn use_plugin_recusa_acao_que_revela_segredo() {
+        let revelador = library(
+            "wifi",
+            json!({
+                "slug": "wifi", "name": "Wi-Fi", "version": "1.0.0", "transports": ["ssh"],
+                "actions": [
+                    { "id": "detect", "title": "D", "effect": "read" },
+                    { "id": "show_key", "title": "Ver senha", "effect": "read", "reveals": true }
+                ]
+            }),
+            "fn detect(device, params) { 1 } fn show_key(device, params) { #{ key: \"segredo\" } }",
+        );
+        let script = r#"fn detect(device, params) { device.use_plugin("wifi", "show_key", #{}) }"#;
+        let mut ctx = context(vec![], Effect::Read);
+        ctx.extras.library = vec![revelador];
+        let error = execute(script, "detect", json!({}), ctx)
+            .await
+            .output
+            .unwrap_err();
+        assert!(error.contains(super::super::reveal::ONLY_HERE), "{error}");
+    }
+
+    #[tokio::test]
+    async fn login_true_nao_rebaixa_delete_ou_put_para_leitura() {
+        for method in ["DELETE", "PUT", "PATCH"] {
+            let script = format!(
+                r#"fn detect(device, params) {{ device.http(#{{ method: "{method}", path: "/api/x", login: true }}) }}"#
+            );
+            let outcome =
+                execute(&script, "detect", json!({}), context(vec![], Effect::Read)).await;
+            let error = outcome.output.unwrap_err();
+            assert!(error.contains("leitura"), "{method}: {error}");
+            assert_eq!(outcome.transcript[0].kind, "denied");
+        }
     }
 }

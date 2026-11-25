@@ -458,7 +458,7 @@ fn parse_network_mode(raw: &Value) -> String {
     string(host, &["NetworkMode", "networkMode"])
 }
 
-fn container_detail(raw: &Value) -> DockerContainerDetail {
+pub(crate) fn container_detail(raw: &Value) -> DockerContainerDetail {
     let state = field(raw, &["State", "state"]).unwrap_or(&Value::Null);
     let config = field(raw, &["Config", "config"]).unwrap_or(&Value::Null);
     let host = field(raw, &["HostConfig", "hostConfig"]).unwrap_or(&Value::Null);

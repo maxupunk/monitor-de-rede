@@ -1,4 +1,4 @@
-use sea_orm::{entity::prelude::*, ActiveValue};
+use sea_orm::{entity::prelude::*, sea_query::OnConflict, ActiveValue};
 
 pub use super::_entities::system_settings::{ActiveModel, Column, Entity, Model};
 
@@ -42,11 +42,8 @@ impl Model {
         Ok(Entity::find_by_key(key).one(db).await?)
     }
 
-    /// Grava (ou sobrescreve) um ajuste e devolve a linha resultante.
-    ///
-    /// Feito em duas etapas em vez de um `ON CONFLICT`: o upsert nativo diverge
-    /// entre SQLite e Postgres na cláusula de conflito, e este caminho é frio —
-    /// só o `POST /api/dashboard/layout` passa por aqui.
+    /// Grava (ou sobrescreve) um ajuste via upsert atômico (`ON CONFLICT`),
+    /// evitando corrida TOCTOU em gravações concorrentes no SQLite e PostgreSQL.
     ///
     /// # Errors
     ///
@@ -56,17 +53,26 @@ impl Model {
         key: &str,
         value: Option<String>,
     ) -> AppResult<Self> {
-        if let Some(existing) = Entity::find_by_key(key).one(db).await? {
-            let mut active: ActiveModel = existing.into();
-            active.value = ActiveValue::Set(value);
-            return Ok(active.update(db).await?);
-        }
-
+        let now: DateTimeWithTimeZone = chrono::Utc::now().into();
         let active = ActiveModel {
             key: ActiveValue::Set(key.to_string()),
             value: ActiveValue::Set(value),
+            updated_at: ActiveValue::Set(now),
             ..Default::default()
         };
-        Ok(active.insert(db).await?)
+        Entity::insert(active)
+            .on_conflict(
+                OnConflict::column(Column::Key)
+                    .update_columns([Column::Value, Column::UpdatedAt])
+                    .to_owned(),
+            )
+            .exec(db)
+            .await?;
+
+        Entity::find_by_key(key).one(db).await?.ok_or_else(|| {
+            crate::shared::errors::AppError::Internal(anyhow::anyhow!(
+                "system_settings '{key}' ausente após upsert"
+            ))
+        })
     }
 }

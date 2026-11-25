@@ -42,6 +42,35 @@ const JSONRPC_INVALID_REQUEST: i64 = -32600;
 const JSONRPC_METHOD_NOT_FOUND: i64 = -32601;
 const JSONRPC_INVALID_PARAMS: i64 = -32602;
 const JSONRPC_FORBIDDEN: i64 = -32003;
+/// Máximo de mensagens num único lote JSON-RPC (evita bypass de rate limit e DoS).
+const MAX_BATCH_SIZE: usize = 20;
+
+/// Cache por requisição HTTP: evita recarregar áreas e catálogo a cada item de um lote.
+///
+/// Vale porque nenhuma ferramenta da IA liga ou desliga área (só a tela de
+/// áreas e o onboarding, via `AreaService`): um item do lote não muda as áreas
+/// dos seguintes. Ferramenta que passar a mudá-las precisa invalidar
+/// `enabled_areas` depois de rodar.
+#[derive(Default)]
+struct RequestCache {
+    enabled_areas: Option<AreaSet>,
+    handlers: Option<Vec<Box<dyn AiToolHandler>>>,
+}
+
+impl RequestCache {
+    async fn enabled_areas(&mut self, ctx: &AppContext) -> Result<AreaSet, AppError> {
+        if let Some(areas) = self.enabled_areas {
+            return Ok(areas);
+        }
+        let areas = AreaSet::from_enabled(&areas::load(&ctx.db).await?);
+        self.enabled_areas = Some(areas);
+        Ok(areas)
+    }
+
+    fn handlers(&mut self) -> &[Box<dyn AiToolHandler>] {
+        self.handlers.get_or_insert_with(all_handlers)
+    }
+}
 
 const SERVER_INSTRUCTIONS: &str = "Servidor MCP do NetMonitor. Use tools/list para ver as ferramentas autorizadas para o seu token. Para deploy contínuo, consulte get_deploys e get_deploy_readiness antes de executar deploy_action.";
 
@@ -138,17 +167,23 @@ fn handle_initialize(id: Value, params: &Value) -> Value {
     )
 }
 
-async fn handle_tools_list(ctx: &AppContext, principal: &AuthenticatedMcp, id: Value) -> Value {
-    let enabled_areas = match areas::load(&ctx.db).await {
-        Ok(enabled) => AreaSet::from_enabled(&enabled),
+async fn handle_tools_list(
+    ctx: &AppContext,
+    principal: &AuthenticatedMcp,
+    cache: &mut RequestCache,
+    id: Value,
+) -> Value {
+    let enabled_areas = match cache.enabled_areas(ctx).await {
+        Ok(enabled) => enabled,
         Err(error) => {
             tracing::error!(%error, "falha ao carregar áreas ligadas no MCP tools/list");
             return rpc_err(id, -32603, "Falha interna ao carregar catálogo MCP.");
         }
     };
 
-    let tools: Vec<Value> = all_handlers()
-        .into_iter()
+    let tools: Vec<Value> = cache
+        .handlers()
+        .iter()
         .filter(|handler| {
             scopes::authorize_listing(
                 handler.as_ref(),
@@ -168,6 +203,7 @@ async fn handle_tools_call(
     ctx: &AppContext,
     headers: &HeaderMap,
     principal: &AuthenticatedMcp,
+    cache: &mut RequestCache,
     id: Value,
     params: &Value,
 ) -> Value {
@@ -196,16 +232,15 @@ async fn handle_tools_call(
         );
     }
 
-    let enabled_areas = match areas::load(&ctx.db).await {
-        Ok(enabled) => AreaSet::from_enabled(&enabled),
+    let enabled_areas = match cache.enabled_areas(ctx).await {
+        Ok(enabled) => enabled,
         Err(error) => {
             tracing::error!(%error, "falha ao carregar áreas ligadas no MCP tools/call");
             return rpc_err(id, -32603, "Falha interna ao validar áreas.");
         }
     };
 
-    let handlers = all_handlers();
-    let Some(handler) = handlers.iter().find(|h| h.name() == name) else {
+    let Some(handler) = cache.handlers().iter().find(|h| h.name() == name) else {
         return rpc_err(
             id,
             JSONRPC_INVALID_PARAMS,
@@ -301,6 +336,7 @@ async fn dispatch(
     ctx: &AppContext,
     headers: &HeaderMap,
     principal: &AuthenticatedMcp,
+    cache: &mut RequestCache,
     message: &Value,
     in_batch: bool,
 ) -> Option<Value> {
@@ -344,8 +380,8 @@ async fn dispatch(
         ),
         "initialize" => handle_initialize(id, &params),
         "ping" => rpc_ok(id, json!({})),
-        "tools/list" => handle_tools_list(ctx, principal, id).await,
-        "tools/call" => handle_tools_call(ctx, headers, principal, id, &params).await,
+        "tools/list" => handle_tools_list(ctx, principal, cache, id).await,
+        "tools/call" => handle_tools_call(ctx, headers, principal, cache, id, &params).await,
         method => rpc_err(
             id,
             JSONRPC_METHOD_NOT_FOUND,
@@ -409,6 +445,8 @@ async fn post_mcp(
         .into_response();
     };
 
+    let mut cache = RequestCache::default();
+
     if let Value::Array(batch) = &payload {
         if batch.is_empty() {
             return Json(rpc_err(
@@ -418,9 +456,33 @@ async fn post_mcp(
             ))
             .into_response();
         }
+        if batch.len() > MAX_BATCH_SIZE {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(rpc_err(
+                    Value::Null,
+                    JSONRPC_INVALID_REQUEST,
+                    format!("Lote JSON-RPC excede o limite máximo de {MAX_BATCH_SIZE} mensagens."),
+                )),
+            )
+                .into_response();
+        }
+        let token_key = format!("mcp:token:{}", principal.token.id);
+        for _ in 1..batch.len() {
+            let decision = auth::token_call_limiter().consume(&token_key);
+            if !decision.allowed {
+                return AppError::rate_limited(
+                    "Limite de chamadas MCP excedido para este token. Tente novamente em instantes.",
+                    decision.retry_after_seconds,
+                )
+                .into_response();
+            }
+        }
         let mut replies = Vec::with_capacity(batch.len());
         for message in batch {
-            if let Some(reply) = dispatch(&ctx, &headers, &principal, message, true).await {
+            if let Some(reply) =
+                dispatch(&ctx, &headers, &principal, &mut cache, message, true).await
+            {
                 replies.push(reply);
             }
         }
@@ -431,7 +493,8 @@ async fn post_mcp(
         };
     }
 
-    let Some(reply) = dispatch(&ctx, &headers, &principal, &payload, false).await else {
+    let Some(reply) = dispatch(&ctx, &headers, &principal, &mut cache, &payload, false).await
+    else {
         return StatusCode::ACCEPTED.into_response();
     };
     let mut response = Json(reply).into_response();

@@ -61,29 +61,34 @@ pub struct ScopeInstability {
 /// contagem seja testável sem banco.
 #[must_use]
 pub fn summarize(events: &[alert_events::Model]) -> Vec<ScopeInstability> {
-    let mut by_scope: HashMap<String, ScopeInstability> = HashMap::new();
+    let mut by_scope: HashMap<String, (ScopeInstability, Option<DateTime<Utc>>)> = HashMap::new();
 
     for event in events {
-        // Evento sem escopo é de antes da `scope_key`; o id do monitor ainda o
-        // identifica, e sem nenhum dos dois não há alvo a atribuir.
-        let Some(scope_key) = event
-            .scope_key
-            .clone()
-            .or_else(|| event.monitor_id.map(AlertScopeKey::monitor))
-        else {
+        // Evento de regra sem escopo é de antes da `scope_key`; o id do
+        // monitor ainda o identifica. Sem regra e sem escopo é aviso, não
+        // queda (a troca automática de IP de `ip_reconciliation`): não conta.
+        let Some(scope_key) = event.scope_key.clone().or_else(|| {
+            event
+                .alert_rule_id
+                .and(event.monitor_id)
+                .map(AlertScopeKey::monitor)
+        }) else {
             continue;
         };
 
         let data = event.data.as_ref().and_then(Value::as_object);
-        let entry = by_scope
-            .entry(scope_key.clone())
-            .or_insert_with(|| ScopeInstability {
-                scope_key,
-                oscillations: 0,
-                episodes: 0,
-                flapping: false,
-                last_problem_at: None,
-            });
+        let (entry, last_problem) = by_scope.entry(scope_key.clone()).or_insert_with(|| {
+            (
+                ScopeInstability {
+                    scope_key,
+                    oscillations: 0,
+                    episodes: 0,
+                    flapping: false,
+                    last_problem_at: None,
+                },
+                None,
+            )
+        });
 
         entry.episodes += 1;
         // O episódio em si é uma queda; as recaídas somam a partir dele.
@@ -94,17 +99,18 @@ pub fn summarize(events: &[alert_events::Model]) -> Vec<ScopeInstability> {
         }
 
         let problem_at = state_machine::last_problem_at(data, event.started_at.with_timezone(&Utc));
-        if entry
-            .last_problem_at
-            .as_deref()
-            .and_then(|raw| DateTime::parse_from_rfc3339(raw).ok())
-            .is_none_or(|current| problem_at > current)
-        {
-            entry.last_problem_at = Some(problem_at.to_rfc3339());
+        if last_problem.is_none_or(|current| problem_at > current) {
+            *last_problem = Some(problem_at);
         }
     }
 
-    let mut summary: Vec<ScopeInstability> = by_scope.into_values().collect();
+    let mut summary: Vec<ScopeInstability> = by_scope
+        .into_values()
+        .map(|(mut entry, last_problem)| {
+            entry.last_problem_at = last_problem.map(|at| at.to_rfc3339());
+            entry
+        })
+        .collect();
     // Mais instável primeiro; empate desempata pelo nome, para a ordem ser
     // determinística (a iteração de um HashMap não é).
     summary.sort_by(|a, b| {
@@ -135,7 +141,19 @@ pub async fn load<C: ConnectionTrait>(
             .add(alert_events_entity::Column::Status.is_in(AlertStatus::OPEN)),
     );
     if let Some(scope_key) = scope_key {
-        query = query.filter(alert_events_entity::Column::ScopeKey.eq(scope_key));
+        let mut scope_filter =
+            sea_orm::Condition::any().add(alert_events_entity::Column::ScopeKey.eq(scope_key));
+        if let Some(monitor_id) = scope_key
+            .strip_prefix("monitor:")
+            .and_then(|raw| raw.parse::<i64>().ok())
+        {
+            scope_filter = scope_filter.add(
+                sea_orm::Condition::all()
+                    .add(alert_events_entity::Column::ScopeKey.is_null())
+                    .add(alert_events_entity::Column::MonitorId.eq(monitor_id)),
+            );
+        }
+        query = query.filter(scope_filter);
     }
     Ok(summarize(&query.all(db).await?))
 }
@@ -229,6 +247,15 @@ mod tests {
     fn evento_antigo_sem_scope_key_cai_no_alvo_do_monitor() {
         let eventos = [evento(1, None, "active", None)];
         assert_eq!(summarize(&eventos)[0].scope_key, "monitor:3");
+    }
+
+    #[test]
+    fn aviso_sem_regra_e_sem_escopo_nao_conta_como_queda() {
+        // A troca automática de IP grava um evento `resolved` com o monitor,
+        // sem regra nem `scope_key`: é aviso, não episódio de instabilidade.
+        let mut aviso = evento(1, None, "resolved", None);
+        aviso.alert_rule_id = None;
+        assert!(summarize(&[aviso]).is_empty());
     }
 
     #[test]

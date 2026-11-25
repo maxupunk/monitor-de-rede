@@ -57,7 +57,8 @@ pub async fn conversation_stats<C: ConnectionTrait>(
         .await?)
 }
 
-/// Uma página de conversas do período, das mais antigas para as mais novas.
+/// Uma página de conversas do período por cursor (`id > after_id`), das mais
+/// antigas para as mais novas (sem `OFFSET` O(N²)).
 ///
 /// # Errors
 ///
@@ -65,12 +66,13 @@ pub async fn conversation_stats<C: ConnectionTrait>(
 pub async fn conversation_page<C: ConnectionTrait>(
     db: &C,
     since: Option<DateTime<Utc>>,
-    page: u64,
+    after_id: i64,
 ) -> AppResult<Vec<ai_conversations::Model>> {
     Ok(conversations_since(since)
+        .filter(ai_conversations::Column::Id.gt(after_id))
         .order_by_asc(ai_conversations::Column::Id)
-        .paginate(db, PAGE_SIZE)
-        .fetch_page(page)
+        .limit(PAGE_SIZE)
+        .all(db)
         .await?)
 }
 
@@ -86,17 +88,21 @@ pub async fn count_ai_runs<C: ConnectionTrait>(
     Ok(ai_runs_since(since).count(db).await?)
 }
 
-/// Execuções em equipamento pedidas pela IA no período, em ordem de criação.
+/// Uma página de execuções em equipamento pedidas pela IA por cursor
+/// (`id > after_id`), em ordem de criação.
 ///
 /// # Errors
 ///
 /// Erro do banco.
-pub async fn ai_runs<C: ConnectionTrait>(
+pub async fn ai_runs_page<C: ConnectionTrait>(
     db: &C,
     since: Option<DateTime<Utc>>,
+    after_id: i64,
 ) -> AppResult<Vec<plugin_runs::Model>> {
     Ok(ai_runs_since(since)
+        .filter(plugin_runs::Column::Id.gt(after_id))
         .order_by_asc(plugin_runs::Column::Id)
+        .limit(PAGE_SIZE)
         .all(db)
         .await?)
 }

@@ -93,14 +93,16 @@ pub struct StackDeployRequest {
     pub pull: bool,
 }
 
-/// Teto do `--wait`: além disso, o deploy segura a fila sem motivo.
 const fn pull_by_default() -> bool {
     true
 }
 
+/// Teto do `--wait`: além disso, o deploy segura a fila sem motivo.
 pub const MAX_WAIT_TIMEOUT_SECS: u32 = 1800;
 /// Mais que isso só enche o disco.
 pub const MAX_KEEP_IMAGES: u32 = 20;
+/// Máximo de arquivos compose em um deploy.
+pub const MAX_COMPOSE_FILES: usize = 16;
 
 impl StackDeployRequest {
     /// Confere cada campo antes de qualquer efeito.
@@ -112,19 +114,40 @@ impl StackDeployRequest {
         validate_project(&self.project)?;
         validate_repository_url(&self.source.repository_url)?;
         validate_commit(&self.source.commit)?;
+        if let Some(token) = &self.source.token {
+            validate_env_secret("Token do repositório", token)?;
+        }
         if self.compose_files.is_empty() {
             return Err(invalid("Informe ao menos um arquivo compose"));
         }
+        if self.compose_files.len() > MAX_COMPOSE_FILES {
+            return Err(invalid(format!(
+                "Informe no máximo {MAX_COMPOSE_FILES} arquivos compose"
+            )));
+        }
         for file in &self.compose_files {
-            validate_relative_path(file)?;
+            validate_relative_path_for(file, "Arquivo compose")?;
+            if file == "." {
+                return Err(invalid(
+                    "Arquivo compose inválido: \".\" (informe um arquivo, não diretório)",
+                ));
+            }
+        }
+        if let Some(env_file) = &self.env_file {
+            if env_file.expose().contains('\0') {
+                return Err(invalid("Conteúdo do .env não pode conter byte nulo"));
+            }
         }
         validate_variable(&self.image_tag_variable)?;
         validate_image_tag(&self.image_tag)?;
         if let Some(registry) = &self.registry {
             validate_registry(&registry.registry)?;
-            if registry.username.trim().is_empty() {
-                return Err(invalid("Informe o usuário do registry"));
+            if registry.username.trim().is_empty()
+                || registry.username.chars().any(char::is_control)
+            {
+                return Err(invalid("Informe um usuário válido para o registry"));
             }
+            validate_env_secret("Senha do registry", &registry.secret)?;
         }
         if self.wait_timeout_secs == 0 || self.wait_timeout_secs > MAX_WAIT_TIMEOUT_SECS {
             return Err(invalid(format!(
@@ -277,12 +300,36 @@ pub fn validate_commit(commit: &str) -> Result<(), DockerError> {
     }
 }
 
+/// Valida segredo passado via variável de ambiente de processo filho (sem byte nulo).
+///
+/// # Errors
+///
+/// `Validation` quando contém `\0` ou excede 64 KB.
+pub fn validate_env_secret(label: &str, secret: &Secret) -> Result<(), DockerError> {
+    let raw = secret.expose();
+    if raw.len() > 64 * 1024 || raw.contains('\0') {
+        return Err(invalid(format!(
+            "{label} inválido (sem byte nulo, até 64 KB)"
+        )));
+    }
+    Ok(())
+}
+
 /// Caminho relativo dentro do repositório, sem subir de nível.
 ///
 /// # Errors
 ///
 /// `Validation` para absoluto, `..`, vazio ou caractere de controle.
 pub fn validate_relative_path(path: &str) -> Result<(), DockerError> {
+    validate_relative_path_for(path, "Arquivo compose")
+}
+
+/// Mesmo que [`validate_relative_path`], personalizando o rótulo do campo na mensagem.
+///
+/// # Errors
+///
+/// `Validation` para absoluto, `..`, vazio ou caractere de controle.
+pub fn validate_relative_path_for(path: &str, label: &str) -> Result<(), DockerError> {
     let valid = !path.is_empty()
         && path.len() <= 255
         && !path.starts_with('/')
@@ -297,7 +344,7 @@ pub fn validate_relative_path(path: &str) -> Result<(), DockerError> {
         Ok(())
     } else {
         Err(invalid(format!(
-            "Arquivo compose inválido: \"{path}\" (use um caminho relativo ao repositório)"
+            "{label} inválido: \"{path}\" (use um caminho relativo ao repositório)"
         )))
     }
 }

@@ -5,9 +5,9 @@
 //! despachadas para ele sumiam sem deixar rastro. Aqui a verdade vem de
 //! `last_seen_at`, não do campo `status`.
 
-use chrono::Utc;
+use chrono::{Duration, Utc};
 use loco_rs::app::AppContext;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::{sea_query::Expr, ColumnTrait, Condition, EntityTrait, QueryFilter};
 
 use crate::{
     models::probes,
@@ -63,27 +63,44 @@ pub fn status_payload(probe: &probes::Model) -> serde_json::Value {
 ///
 /// Propaga erro do banco.
 pub async fn mark_stale_probes_offline(ctx: &AppContext) -> AppResult<u64> {
+    let cutoff = Utc::now() - Duration::seconds(PROBE_OFFLINE_AFTER_SECONDS);
     let candidates = probes::Entity::find()
         .filter(probes::Column::Status.is_in(ACTIVE_STATUSES))
+        .filter(
+            Condition::any()
+                .add(probes::Column::LastSeenAt.is_null())
+                .add(probes::Column::LastSeenAt.lt(cutoff)),
+        )
         .all(&ctx.db)
         .await?;
     let mut changed = 0;
 
-    for probe in candidates {
-        if is_probe_alive(Some(&probe)) {
+    for mut probe in candidates {
+        // UPDATE condicional fecha a corrida com um heartbeat concorrente.
+        let updated = probes::Entity::update_many()
+            .col_expr(probes::Column::Status, Expr::value(STATUS_OFFLINE))
+            .col_expr(probes::Column::UpdatedAt, Expr::value(Utc::now()))
+            .filter(probes::Column::Id.eq(probe.id))
+            .filter(probes::Column::Status.is_in(ACTIVE_STATUSES))
+            .filter(
+                Condition::any()
+                    .add(probes::Column::LastSeenAt.is_null())
+                    .add(probes::Column::LastSeenAt.lt(cutoff)),
+            )
+            .exec(&ctx.db)
+            .await?;
+        if updated.rows_affected == 0 {
             continue;
         }
-        let mut active: probes::ActiveModel = probe.into();
-        active.status = Set(STATUS_OFFLINE.into());
-        let saved = active.update(&ctx.db).await?;
+        probe.status = STATUS_OFFLINE.into();
         changed += 1;
 
         if let Ok(bus) = EventBus::from_context(ctx) {
             if let Err(error) = bus
-                .publish(&ctx.db, "probe:status", status_payload(&saved))
+                .publish(&ctx.db, "probe:status", status_payload(&probe))
                 .await
             {
-                tracing::warn!(%error, probe_id = saved.id, "falha ao publicar probe:status");
+                tracing::warn!(%error, probe_id = probe.id, "falha ao publicar probe:status");
             }
         }
     }

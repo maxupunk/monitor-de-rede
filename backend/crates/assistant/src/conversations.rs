@@ -5,17 +5,36 @@
 //! a tela as mostra (texto, ferramentas, gráficos) e nunca consultadas por
 //! dentro — o backend só valida forma e tamanho.
 
+use std::io;
+
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter,
-    QueryOrder, QuerySelect, Set,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait,
+    PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Set,
 };
 use serde_json::Value;
 
 use crate::dtos::{AiConversationDetail, AiConversationInput, AiConversationSummary};
 use netmonitor_core::{
     models::ai_conversations,
-    shared::errors::{AppError, AppResult},
+    shared::{
+        errors::{AppError, AppResult},
+        transaction::begin_write,
+    },
 };
+
+/// Escritor que só conta bytes sem alocar buffer (mede JSON de até 2 MB sem cópia).
+struct ByteCounter(usize);
+
+impl io::Write for ByteCounter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.0 = self.0.saturating_add(buf.len());
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
 
 /// Conversas guardadas por usuário; ao passar disso, as mais antigas saem.
 pub const MAX_CONVERSATIONS_PER_USER: u64 = 100;
@@ -59,9 +78,10 @@ pub fn validate(input: AiConversationInput) -> AppResult<ValidConversation> {
     };
     let message_count = i32::try_from(list.len())
         .map_err(|_| AppError::validation("Conversa com mensagens demais"))?;
-    let size = serde_json::to_vec(&input.messages)
-        .map_err(|error| AppError::Internal(anyhow::Error::new(error)))?
-        .len();
+    let mut counter = ByteCounter(0);
+    serde_json::to_writer(&mut counter, &input.messages)
+        .map_err(|error| AppError::Internal(anyhow::Error::new(error)))?;
+    let size = counter.0;
     if size > MAX_MESSAGES_BYTES {
         return Err(AppError::validation(format!(
             "Conversa grande demais para salvar ({} KB; limite de {} KB). Comece uma conversa nova.",
@@ -185,12 +205,13 @@ async fn prune<C: ConnectionTrait>(db: &C, user_id: i64) -> AppResult<()> {
 /// # Errors
 ///
 /// Conversa inválida ou erro do banco.
-pub async fn create<C: ConnectionTrait>(
-    db: &C,
+pub async fn create(
+    db: &DatabaseConnection,
     user_id: i64,
     input: AiConversationInput,
 ) -> AppResult<AiConversationSummary> {
     let valid = validate(input)?;
+    let tx = begin_write(db).await?;
     let row = ai_conversations::ActiveModel {
         user_id: Set(user_id),
         title: Set(valid.title),
@@ -198,9 +219,10 @@ pub async fn create<C: ConnectionTrait>(
         message_count: Set(valid.message_count),
         ..Default::default()
     }
-    .insert(db)
+    .insert(&tx)
     .await?;
-    prune(db, user_id).await?;
+    prune(&tx, user_id).await?;
+    tx.commit().await?;
     Ok(summary(&row))
 }
 
@@ -209,19 +231,21 @@ pub async fn create<C: ConnectionTrait>(
 /// # Errors
 ///
 /// Conversa inexistente ou de outro usuário, inválida, ou erro do banco.
-pub async fn update<C: ConnectionTrait>(
-    db: &C,
+pub async fn update(
+    db: &DatabaseConnection,
     user_id: i64,
     id: i64,
     input: AiConversationInput,
 ) -> AppResult<AiConversationSummary> {
     let valid = validate(input)?;
-    let mut active: ai_conversations::ActiveModel = owned(db, user_id, id).await?.into();
+    let tx = begin_write(db).await?;
+    let mut active: ai_conversations::ActiveModel = owned(&tx, user_id, id).await?.into();
     active.title = Set(valid.title);
     active.messages = Set(valid.messages);
     active.message_count = Set(valid.message_count);
     active.updated_at = Set(chrono::Utc::now().into());
-    let row = active.update(db).await?;
+    let row = active.update(&tx).await?;
+    tx.commit().await?;
     Ok(summary(&row))
 }
 

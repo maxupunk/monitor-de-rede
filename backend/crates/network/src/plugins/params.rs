@@ -25,7 +25,6 @@
 //! O `pattern` é a defesa contra injeção de comando: parâmetro que vai para uma
 //! linha de shell deveria ter um (e a revisão estática aponta quando não tem).
 
-use regex::Regex;
 use serde_json::{Map, Value};
 
 use super::widgets::{self, VisibleWhen, Widget};
@@ -209,7 +208,7 @@ fn validate_property_schema(
         let pattern = pattern
             .as_str()
             .ok_or_else(|| format!("o `pattern` de `{name}` precisa ser texto"))?;
-        Regex::new(pattern)
+        super::runtime::script_regex(pattern)
             .map_err(|error| format!("o `pattern` de `{name}` é inválido: {error}"))?;
     }
     Ok(())
@@ -403,7 +402,7 @@ fn check_scalar(name: &str, property: &Value, value: &Value) -> Result<Value, St
             // Ancorado: o autor escreve `[a-z]+` pensando no valor inteiro, e
             // sem âncora `rm -rf / ; a` passaria por conter um `a`.
             let anchored = format!("^(?:{pattern})$");
-            let re = Regex::new(&anchored).map_err(|error| error.to_string())?;
+            let re = super::runtime::cached_regex(&anchored).map_err(|error| error.to_string())?;
             if !re.is_match(text) {
                 return Err(format!("`{name}` tem formato inválido"));
             }

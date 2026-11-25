@@ -108,14 +108,16 @@ impl DockerEngine for LocalEngine {
         ) {
             return Err(DockerError::Unavailable);
         }
-        let version = tokio::time::timeout(STATUS_TIMEOUT, client.version())
-            .await
+        let (version_res, info_res) = tokio::join!(
+            tokio::time::timeout(STATUS_TIMEOUT, client.version()),
+            tokio::time::timeout(STATUS_TIMEOUT, client.info()),
+        );
+        let version = version_res
             .ok()
             .and_then(Result::ok)
             .and_then(|value| serde_json::to_value(value).ok())
             .unwrap_or(Value::Null);
-        let info = tokio::time::timeout(STATUS_TIMEOUT, client.info())
-            .await
+        let info = info_res
             .ok()
             .and_then(Result::ok)
             .and_then(|value| serde_json::to_value(value).ok())
@@ -198,7 +200,10 @@ impl DockerEngine for LocalEngine {
                 .await
                 .map_err(|_| DockerError::Unavailable)?;
             let Some(output) = next else { break };
-            let output = output.map_err(|_| DockerError::Engine)?;
+            let output = output.map_err(|error| {
+                tracing::debug!(%error, container = id, "erro ao ler logs do container");
+                DockerError::Engine
+            })?;
             let (stream_name, bytes) = match output {
                 bollard::container::LogOutput::StdOut { message } => ("stdout", message),
                 bollard::container::LogOutput::StdErr { message } => ("stderr", message),
@@ -337,7 +342,10 @@ impl DockerEngine for LocalEngine {
                 next = stream.next() => next,
             };
             let Some(output) = next else { return Ok(()) };
-            let (stream_name, bytes) = match output.map_err(|_| DockerError::Engine)? {
+            let (stream_name, bytes) = match output.map_err(|error| {
+                tracing::debug!(%error, container = id, "erro no stream follow_logs");
+                DockerError::Engine
+            })? {
                 bollard::container::LogOutput::StdOut { message } => ("stdout", message),
                 bollard::container::LogOutput::StdErr { message } => ("stderr", message),
                 _ => continue,
@@ -354,5 +362,8 @@ impl DockerEngine for LocalEngine {
 }
 
 fn to_value<T: Serialize>(value: T) -> Result<Value, DockerError> {
-    serde_json::to_value(value).map_err(|_| DockerError::Engine)
+    serde_json::to_value(value).map_err(|error| {
+        tracing::debug!(%error, "falha ao serializar resposta da Docker Engine");
+        DockerError::Engine
+    })
 }

@@ -35,8 +35,8 @@ pub fn parse_cpu_times(stat: &str) -> Option<CpuTimes> {
     }
     // guest e guest_nice já estão contados em user/nice: somá-los de novo
     // inflaria o total.
-    let total: u64 = values.iter().take(8).sum();
-    let idle = values[3] + values.get(4).copied().unwrap_or(0);
+    let total: u64 = values.iter().take(8).copied().fold(0u64, u64::wrapping_add);
+    let idle = values[3].wrapping_add(values.get(4).copied().unwrap_or(0));
     Some(CpuTimes { total, idle })
 }
 
@@ -62,7 +62,7 @@ pub fn parse_meminfo(meminfo: &str) -> Option<(u64, u64)> {
             .find(|line| line.starts_with(name))
             .and_then(|line| line.split_whitespace().nth(1))
             .and_then(|value| value.parse::<u64>().ok())
-            .map(|kib| kib * 1024)
+            .map(|kib| kib.saturating_mul(1024))
     };
     let total = field("MemTotal:")?;
     let available = field("MemAvailable:").or_else(|| field("MemFree:"))?;
@@ -99,7 +99,9 @@ pub fn parse_net_dev(net_dev: &str) -> (u64, u64) {
                 .collect();
             Some((*values.first()?, *values.get(8)?))
         })
-        .fold((0, 0), |(rx, tx), (r, t)| (rx + r, tx + t))
+        .fold((0u64, 0u64), |(rx, tx), (r, t)| {
+            (rx.wrapping_add(r), tx.wrapping_add(t))
+        })
 }
 
 const REAL_FILESYSTEMS: [&str; 8] = [
@@ -149,7 +151,12 @@ fn disk_usage(path: &Path) -> Option<(u64, u64)> {
         stats.f_bfree as u64,
     );
     // Mesmo critério do `df`: usado = total − livre.
-    Some(((blocks - free.min(blocks)) * block, blocks * block))
+    Some((
+        blocks
+            .saturating_sub(free.min(blocks))
+            .saturating_mul(block),
+        blocks.saturating_mul(block),
+    ))
 }
 
 #[cfg(not(unix))]

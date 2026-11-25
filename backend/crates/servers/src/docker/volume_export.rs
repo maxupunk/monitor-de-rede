@@ -37,14 +37,16 @@ impl AsyncRead for VolumeExport {
 impl Drop for VolumeExport {
     fn drop(&mut self) {
         let id = self.container_id.clone();
-        tokio::spawn(async move {
-            let _ = engine::container_action(
-                &LocalEngine,
-                &id,
-                engine::ContainerAction::Remove { force: true },
-            )
-            .await;
-        });
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move {
+                let _ = engine::container_action(
+                    &LocalEngine,
+                    &id,
+                    engine::ContainerAction::Remove { force: true },
+                )
+                .await;
+            });
+        }
     }
 }
 
@@ -78,15 +80,8 @@ pub async fn export(name: &str) -> Result<VolumeExport, DockerError> {
     if created.id.is_empty() {
         return Err(DockerError::Engine);
     }
-    if let Err(error) = call(client.start_container::<String>(&created.id, None)).await {
-        let _ = engine::container_action(
-            &LocalEngine,
-            &created.id,
-            engine::ContainerAction::Remove { force: true },
-        )
-        .await;
-        return Err(error);
-    }
+    // `GET /containers/{id}/archive` lê volumes montados de container criado
+    // sem precisar iniciá-lo.
 
     let stream = client
         .download_from_container(

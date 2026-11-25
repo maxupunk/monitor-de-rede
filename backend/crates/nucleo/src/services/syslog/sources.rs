@@ -12,10 +12,15 @@
 
 use std::{
     collections::HashMap,
-    sync::{Mutex, PoisonError},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex, PoisonError,
+    },
+    time::Duration,
 };
 
 use chrono::{DateTime, Utc};
+use tokio::sync::Notify;
 
 use super::resolver::Resolution;
 
@@ -87,13 +92,22 @@ impl SeenSource {
     }
 }
 
+struct ConfirmationSlot {
+    source: Option<SeenSource>,
+    notify: Arc<Notify>,
+}
+
 /// O registro, compartilhado entre os listeners e a API.
 #[derive(Default)]
 pub struct SourceRegistry {
     fontes: Mutex<HashMap<String, SeenSource>>,
+    /// Quantas ativações estão aguardando confirmação no momento. Quando zero,
+    /// o caminho quente de ingestão não clona `SeenSource` nem trava o mutex
+    /// `confirmacoes`.
+    pending_confirmations: AtomicUsize,
     /// Confirmações efêmeras aguardadas por ativações em andamento. O valor só
     /// é preenchido pela linha que contém o marcador aleatório daquela sessão.
-    confirmacoes: Mutex<HashMap<String, Option<SeenSource>>>,
+    confirmacoes: Mutex<HashMap<String, ConfirmationSlot>>,
 }
 
 impl SourceRegistry {
@@ -151,14 +165,18 @@ impl SourceRegistry {
 
         entrada.kind = kind;
         entrada.masked = masked;
-        entrada.source_ip = source_ip.to_owned();
+        if entrada.source_ip != source_ip {
+            entrada.source_ip = source_ip.to_owned();
+        }
         entrada.device_id = resolucao.device_id();
-        entrada.candidates = match resolucao {
-            Resolution::Ambiguous(ids) => ids.clone(),
-            _ => Vec::new(),
-        };
+        match resolucao {
+            Resolution::Ambiguous(ids) => entrada.candidates.clone_from(ids),
+            _ => entrada.candidates.clear(),
+        }
         if let Some(nome) = nome {
-            entrada.hostname = Some(nome.to_owned());
+            if entrada.hostname.as_deref() != Some(nome) {
+                entrada.hostname = Some(nome.to_owned());
+            }
         }
         entrada.message_count += 1;
         if kind == SourceKind::Unknown {
@@ -168,6 +186,11 @@ impl SourceRegistry {
         // Truncar aqui, e não na tela: guardar linha de firewall inteira de mil
         // fontes é memória gasta para mostrar as primeiras palavras.
         entrada.last_message = mensagem.chars().take(200).collect();
+
+        if self.pending_confirmations.load(Ordering::Acquire) == 0 {
+            return;
+        }
+
         let fonte_atual = entrada.clone();
         drop(fontes);
 
@@ -178,19 +201,29 @@ impl SourceRegistry {
             .confirmacoes
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        for (marcador, confirmada) in confirmacoes.iter_mut() {
-            if confirmada.is_none() && mensagem.contains(marcador) {
-                *confirmada = Some(fonte_atual.clone());
+        for (marcador, slot) in confirmacoes.iter_mut() {
+            if slot.source.is_none() && mensagem.contains(marcador) {
+                slot.source = Some(fonte_atual.clone());
+                slot.notify.notify_one();
             }
         }
     }
 
     /// Começa a observar uma mensagem correlacionada a uma ativação.
     pub fn expect_confirmation(&self, marker: &str) {
-        self.confirmacoes
+        let mut confirmacoes = self
+            .confirmacoes
             .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(marker.to_owned(), None);
+            .unwrap_or_else(PoisonError::into_inner);
+        confirmacoes.insert(
+            marker.to_owned(),
+            ConfirmationSlot {
+                source: None,
+                notify: Arc::new(Notify::new()),
+            },
+        );
+        self.pending_confirmations
+            .store(confirmacoes.len(), Ordering::Release);
     }
 
     /// Resultado atual, sem encerrar a observação.
@@ -200,16 +233,43 @@ impl SourceRegistry {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .get(marker)
-            .cloned()
-            .flatten()
+            .and_then(|slot| slot.source.clone())
+    }
+
+    /// Aguarda a linha marcada por `marker` até `max_wait`, acordando via
+    /// [`Notify`] sem polling.
+    pub async fn wait_confirmation(&self, marker: &str, max_wait: Duration) -> Option<SeenSource> {
+        let deadline = tokio::time::Instant::now() + max_wait;
+        loop {
+            let notify = {
+                let confirmacoes = self
+                    .confirmacoes
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner);
+                let slot = confirmacoes.get(marker)?;
+                if let Some(source) = &slot.source {
+                    return Some(source.clone());
+                }
+                Arc::clone(&slot.notify)
+            };
+            if tokio::time::timeout_at(deadline, notify.notified())
+                .await
+                .is_err()
+            {
+                return self.confirmation(marker);
+            }
+        }
     }
 
     /// Encerra a observação, com sucesso ou timeout.
     pub fn forget_confirmation(&self, marker: &str) {
-        self.confirmacoes
+        let mut confirmacoes = self
+            .confirmacoes
             .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(marker);
+            .unwrap_or_else(PoisonError::into_inner);
+        confirmacoes.remove(marker);
+        self.pending_confirmations
+            .store(confirmacoes.len(), Ordering::Release);
     }
 
     /// O que se sabe de uma origem específica.

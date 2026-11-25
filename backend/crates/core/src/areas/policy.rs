@@ -106,17 +106,20 @@ pub trait AreaPolicy: Send + Sync {
 #[must_use]
 pub fn path_matches(pattern: &str, path: &str) -> bool {
     let path = path.split(['?', '#']).next().unwrap_or_default();
-    let padrao: Vec<&str> = pattern.trim_end_matches('/').split('/').collect();
-    let caminho: Vec<&str> = path.split('/').collect();
-    let Some((ultimo, antes)) = padrao.split_last() else {
-        return false;
-    };
-    caminho.len() >= padrao.len()
-        && antes
-            .iter()
-            .zip(&caminho)
-            .all(|(esperado, real)| *esperado == "*" || esperado == real)
-        && caminho[antes.len()].starts_with(ultimo)
+    let mut pattern_parts = pattern.trim_end_matches('/').split('/').peekable();
+    let mut path_parts = path.split('/');
+    while let Some(expected) = pattern_parts.next() {
+        let Some(actual) = path_parts.next() else {
+            return false;
+        };
+        if pattern_parts.peek().is_none() {
+            return expected == "*" || actual.starts_with(expected);
+        }
+        if expected != "*" && expected != actual {
+            return false;
+        }
+    }
+    false
 }
 
 /// Monitores nunca param pela área — a confirmação diz quantos seguem rodando.
@@ -216,5 +219,8 @@ mod path_tests {
         ));
         assert!(!path_matches("/api/devices/*/snmp", "/api/devices"));
         assert!(!path_matches("/api/docker", "/api/dashboard"));
+        // `*` vale um segmento qualquer em qualquer posição, inclusive a última.
+        assert!(path_matches("/api/devices/*", "/api/devices/7"));
+        assert!(!path_matches("/api/devices/*", "/api/devices"));
     }
 }

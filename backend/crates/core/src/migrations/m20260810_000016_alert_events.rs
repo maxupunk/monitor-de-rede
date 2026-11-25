@@ -65,6 +65,19 @@ impl MigrationTrait for Migration {
             &["alert_rule_id", "scope_key", "status"],
         ))
         .await?;
+        // Um alerta aberto por (regra, alvo), garantido pelo banco: a leitura
+        // de deduplicação do `trigger_alert` não basta no PostgreSQL, onde
+        // duas transações concorrentes leem "nenhum aberto" e inserem ambas.
+        // Índice parcial (o `sea-query` não o monta) — SQL igual nos dois
+        // dialetos. A lista de status é `AlertStatus::OPEN`.
+        m.get_connection()
+            .execute_unprepared(
+                "CREATE UNIQUE INDEX alert_events_open_rule_scope_unique \
+                 ON alert_events (alert_rule_id, scope_key) \
+                 WHERE alert_rule_id IS NOT NULL AND scope_key IS NOT NULL \
+                 AND status IN ('active', 'acknowledged', 'silenced', 'recovering', 'flapping')",
+            )
+            .await?;
         m.create_index(index(
             "alert_events_device_created_index",
             "alert_events",
@@ -75,6 +88,18 @@ impl MigrationTrait for Migration {
             "alert_events_monitor_created_index",
             "alert_events",
             &["monitor_id", "created_at"],
+        ))
+        .await?;
+        m.create_index(index(
+            "alert_events_created_at_index",
+            "alert_events",
+            &["created_at"],
+        ))
+        .await?;
+        m.create_index(index(
+            "alert_events_status_started_index",
+            "alert_events",
+            &["status", "started_at"],
         ))
         .await?;
         Ok(())

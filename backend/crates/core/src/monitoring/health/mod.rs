@@ -65,6 +65,34 @@ impl HealthCoordinator {
         let finished_at = Utc::now();
         finalize(bruto, started_at, finished_at)
     }
+
+    /// Executa [`Self::collect`] fora das threads de E/S do Tokio (`spawn_blocking`),
+    /// evitando bloquear o executor em leituras de `/proc`, `/sys` e `statvfs`.
+    ///
+    /// Se a coleta entrar em pânico, devolve um resultado `unknown` em vez de
+    /// repeti-la na thread do executor — a mesma fonte entraria em pânico de
+    /// novo, agora bloqueando o Tokio.
+    pub async fn collect_async(&'static self) -> CheckResult {
+        let started_at = Utc::now();
+        tokio::task::spawn_blocking(move || self.collect())
+            .await
+            .unwrap_or_else(|error| collection_failed(started_at, &error.to_string()))
+    }
+}
+
+/// Resultado de uma coleta que não chegou ao fim (pânico ou cancelamento).
+fn collection_failed(started_at: chrono::DateTime<Utc>, reason: &str) -> CheckResult {
+    let finished_at = Utc::now();
+    CheckResult {
+        success: false,
+        status: MonitorStatus::Unknown,
+        started_at,
+        finished_at,
+        duration_ms: (finished_at - started_at).num_milliseconds().max(0),
+        message: Some(format!("A coleta de saúde foi interrompida: {reason}")),
+        metrics: Vec::new(),
+        data: serde_json::Value::Object(serde_json::Map::new()),
+    }
 }
 
 /// Resolve precedência, monta as métricas e descreve o que faltou.
@@ -207,6 +235,31 @@ mod tests {
 
     fn metrica<'a>(resultado: &'a CheckResult, nome: &str) -> Option<&'a CheckMetric> {
         resultado.metrics.iter().find(|m| m.name == nome)
+    }
+
+    /// Fonte que entra em pânico e conta quantas vezes foi lida.
+    struct FontePanica(&'static std::sync::atomic::AtomicUsize);
+
+    impl HealthSource for FontePanica {
+        fn name(&self) -> &'static str {
+            "panica"
+        }
+        fn read(&self) -> Reading {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            panic!("fonte quebrada");
+        }
+    }
+
+    #[tokio::test]
+    async fn panico_na_coleta_vira_unknown_sem_repetir_a_leitura() {
+        static LEITURAS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let coordenador: &'static HealthCoordinator = Box::leak(Box::new(HealthCoordinator::new(
+            vec![Box::new(FontePanica(&LEITURAS))],
+        )));
+        let resultado = coordenador.collect_async().await;
+        assert_eq!(resultado.status, MonitorStatus::Unknown);
+        assert!(!resultado.success);
+        assert_eq!(LEITURAS.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
     #[test]

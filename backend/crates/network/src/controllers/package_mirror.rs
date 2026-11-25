@@ -10,9 +10,10 @@ use axum::{
     http::{header, StatusCode},
     response::IntoResponse,
 };
+use futures::StreamExt;
 use loco_rs::prelude::*;
 
-use crate::package_mirror;
+use crate::package_mirror::{self, fetch::MAX_BYTES};
 use netmonitor_core::shared::errors::AppResult;
 
 async fn openwrt(Path((token, path)): Path<(String, String)>) -> AppResult<Response> {
@@ -22,11 +23,25 @@ async fn openwrt(Path((token, path)): Path<(String, String)>) -> AppResult<Respo
     if let Some(length) = upstream.content_length {
         headers.push((header::CONTENT_LENGTH, length.to_string()));
     }
-    let mut response = (
-        StatusCode::OK,
-        Body::from_stream(upstream.response.bytes_stream()),
-    )
-        .into_response();
+    let mut streamed: u64 = 0;
+    let capped = upstream
+        .response
+        .bytes_stream()
+        .map(move |chunk| match chunk {
+            Ok(bytes) => {
+                streamed = streamed.saturating_add(bytes.len() as u64);
+                if streamed > MAX_BYTES {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::FileTooLarge,
+                        "arquivo excedeu o limite do espelho de pacotes",
+                    ))
+                } else {
+                    Ok(bytes)
+                }
+            }
+            Err(error) => Err(std::io::Error::other(error)),
+        });
+    let mut response = (StatusCode::OK, Body::from_stream(capped)).into_response();
     for (name, value) in headers {
         if let Ok(value) = value.parse() {
             response.headers_mut().insert(name, value);

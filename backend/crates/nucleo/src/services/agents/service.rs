@@ -5,7 +5,7 @@
 //! por aqui; as regras puras (origem pelo túnel, comandos de instalação)
 //! ficam em funções livres, testáveis sem banco.
 
-use std::net::IpAddr;
+use std::{collections::HashMap, net::IpAddr};
 
 use chrono::Utc;
 use loco_rs::app::AppContext;
@@ -28,6 +28,7 @@ use crate::{
         shared::{
             crypto::{random_token, sha256_hex},
             errors::{AppError, AppResult},
+            transaction::begin_write,
         },
         telemetry,
     },
@@ -44,7 +45,7 @@ use netmonitor_core::{
     vpn_probe::vpn_probe_name,
 };
 
-use super::{enrollment, local, protocol::Hello};
+use super::{enrollment, hub::AgentHub, install_address, local, protocol::Hello};
 
 pub use netmonitor_core::agents::identity::{is_agent, ROLE_AGENT};
 /// O cadastro e a URL vista do túnel moram no núcleo (a VPN também os usa).
@@ -84,18 +85,10 @@ pub fn check_tunnel_origin(
         .as_deref()
         .and_then(|ip| ip.trim().parse::<IpAddr>().ok());
     match (expected, peer) {
-        (Some(expected), Some(peer)) if canonical(peer) == canonical(expected) => Ok(()),
+        (Some(expected), Some(peer)) if peer.to_canonical() == expected.to_canonical() => Ok(()),
         _ => Err(AppError::unauthorized(
             "O agente deste servidor só pode se conectar pelo túnel VPN",
         )),
-    }
-}
-
-/// `::ffff:10.8.0.2` e `10.8.0.2` são a mesma origem.
-fn canonical(ip: IpAddr) -> IpAddr {
-    match ip {
-        IpAddr::V6(v6) => v6.to_ipv4_mapped().map_or(ip, IpAddr::V4),
-        IpAddr::V4(_) => ip,
     }
 }
 
@@ -108,7 +101,7 @@ fn agent_image() -> String {
     std::env::var("AGENT_IMAGE")
         .ok()
         .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
+        .filter(|value| !value.is_empty() && install_address::is_safe(value))
         .unwrap_or_else(|| DEFAULT_AGENT_IMAGE.to_string())
 }
 
@@ -301,11 +294,51 @@ impl<'a> AgentService<'a> {
             .await?)
     }
 
+    /// Monta todas as views de agentes sem consulta N+1 nem busca linear O(N²).
+    ///
+    /// # Errors
+    ///
+    /// Propaga erro do banco.
+    pub async fn list_views(&self, hub: Option<&AgentHub>) -> AppResult<Vec<AgentView>> {
+        let agents = self.list().await?;
+        let devices = self.devices_of(&agents).await?;
+        let by_id: HashMap<i64, &devices::Model> =
+            devices.iter().map(|device| (device.id, device)).collect();
+        Ok(agents
+            .iter()
+            .map(|agent| {
+                let device = agent.device_id.and_then(|id| by_id.get(&id).copied());
+                let connected = hub.is_some_and(|hub| hub.get(agent.id).is_some());
+                to_view(agent, device, connected)
+            })
+            .collect())
+    }
+
+    /// Salva a política escolhida no cadastro do agente dono do código de
+    /// enrollment ativo (sem consumir o código).
+    ///
+    /// # Errors
+    ///
+    /// Propaga erro do banco.
+    pub async fn save_policy_for_code(&self, code: &str, policy: &InstallPolicy) -> AppResult<()> {
+        if let Some(probe_id) = enrollment::peek(code) {
+            registration::save_policy(self.db, probe_id, policy).await?;
+        }
+        Ok(())
+    }
+
     /// # Errors
     ///
     /// Validação, agente inexistente ou erro do banco.
     pub async fn update(&self, id: i64, input: &AgentUpdateInput) -> AppResult<probes::Model> {
         let probe = self.find(id).await?;
+        if local::is_local(&probe)
+            && (input.device_id.is_some() || input.enforce_tunnel_ip.is_some())
+        {
+            return Err(AppError::business_rule(
+                "O agente local não pode ser vinculado a dispositivo nem exigir túnel VPN",
+            ));
+        }
         let mut configuration = probe.configuration.clone().unwrap_or_else(|| json!({}));
         let mut active: probes::ActiveModel = probe.into();
         if let Some(name) = &input.name {
@@ -346,9 +379,15 @@ impl<'a> AgentService<'a> {
     /// `unauthorized` para código inválido, expirado ou já usado.
     pub async fn enroll(&self, input: &AgentEnrollInput) -> AppResult<(probes::Model, String)> {
         let invalid = || AppError::unauthorized("Código de enrollment inválido ou expirado");
-        let probe_id = enrollment::redeem(&input.code).ok_or_else(invalid)?;
+        // Valida a existência e o estado antes de consumir o código, para
+        // falhas evitáveis ou probe revogado não queimarem o cofre à toa.
+        let probe_id = enrollment::peek(&input.code).ok_or_else(invalid)?;
         let probe = self.find(probe_id).await.map_err(|_| invalid())?;
         if probe.status == probes::STATUS_REVOKED {
+            return Err(invalid());
+        }
+        let redeemed_id = enrollment::redeem(&input.code).ok_or_else(invalid)?;
+        if redeemed_id != probe.id {
             return Err(invalid());
         }
         let token = random_token();
@@ -362,8 +401,8 @@ impl<'a> AgentService<'a> {
     ///
     /// # Errors
     ///
-    /// `unauthorized` para token inválido, token compartilhado fora do
-    /// `vpn-probe` ou origem fora do túnel exigido.
+    /// `unauthorized` para token inválido, probe que não é agente, token
+    /// compartilhado fora do `vpn-probe` ou origem fora do túnel exigido.
     pub async fn authenticate(
         &self,
         raw_token: &str,
@@ -374,19 +413,37 @@ impl<'a> AgentService<'a> {
         if raw_token.is_empty() {
             return Err(unauthorized());
         }
+        // `token_hash` não é único (AGENTS §6): varremos todas as linhas e
+        // aceitamos somente agentes reais, recusando probes HTTP comuns e o
+        // token compartilhado fora do `vpn-probe`.
         let probe = probes::Entity::find_by_token(raw_token)
             .order_by_asc(probes::Column::Id)
-            .one(self.db)
+            .all(self.db)
             .await?
+            .into_iter()
+            .find(|probe| {
+                is_agent(probe)
+                    && !(raw_token == DEFAULT_VPN_PROBE_TOKEN && probe.name != vpn_probe_name())
+            })
             .ok_or_else(unauthorized)?;
-        // O token compartilhado existe para o `vpn-probe` zero-config (AGENTS
-        // §6). No canal de comando ele daria acesso ao Docker de um host a
-        // quem conhece o valor padrão — por isso só vale para aquele probe.
-        if raw_token == DEFAULT_VPN_PROBE_TOKEN && probe.name != vpn_probe_name() {
-            return Err(unauthorized());
-        }
-        let device = self.ensure_device(probe.device_id).await.ok().flatten();
-        check_tunnel_origin(device.as_ref(), enforce_tunnel_ip(&probe), peer)?;
+        let enforce = enforce_tunnel_ip(&probe);
+        // Fail-closed: erro de banco ou dispositivo sumido com trava ativa
+        // jamais libera a conexão fora do túnel.
+        let device = if let Some(device_id) = probe.device_id {
+            match self.ensure_device(Some(device_id)).await {
+                Ok(device) => device,
+                Err(AppError::Validation(_)) if enforce => {
+                    return Err(AppError::unauthorized(
+                        "O dispositivo vinculado a este agente não foi encontrado",
+                    ));
+                }
+                Err(AppError::Validation(_)) => None,
+                Err(error) => return Err(error),
+            }
+        } else {
+            None
+        };
+        check_tunnel_origin(device.as_ref(), enforce, peer)?;
         Ok(probe)
     }
 
@@ -419,6 +476,19 @@ impl<'a> AgentService<'a> {
     ///
     /// Propaga erro do banco.
     pub async fn touch(&self, probe_id: i64) -> AppResult<()> {
+        self.touch_many(&[probe_id]).await
+    }
+
+    /// Renova `last_seen_at` em lote para todos os agentes conectados numa
+    /// única consulta, evitando N transações a cada ciclo.
+    ///
+    /// # Errors
+    ///
+    /// Propaga erro do banco.
+    pub async fn touch_many(&self, probe_ids: &[i64]) -> AppResult<()> {
+        if probe_ids.is_empty() {
+            return Ok(());
+        }
         probes::Entity::update_many()
             .col_expr(
                 probes::Column::LastSeenAt,
@@ -426,7 +496,7 @@ impl<'a> AgentService<'a> {
                     Utc::now(),
                 )),
             )
-            .filter(probes::Column::Id.eq(probe_id))
+            .filter(probes::Column::Id.is_in(probe_ids.iter().copied()))
             .exec(self.db)
             .await?;
         Ok(())
@@ -453,13 +523,19 @@ impl<'a> AgentService<'a> {
     ///
     /// Agente inexistente ou erro do banco.
     pub async fn revoke(&self, id: i64) -> AppResult<probes::Model> {
-        let probe = self.find(id).await?;
+        let txn = begin_write(self.db).await?;
+        let probe = probes::Entity::find_by_id(id)
+            .one(&txn)
+            .await?
+            .filter(is_agent)
+            .ok_or_else(|| AppError::not_found("Agente não encontrado"))?;
         local::ensure_managed_by_user(&probe, "revogado")?;
         let mut active: probes::ActiveModel = probe.into();
         active.status = Set(probes::STATUS_REVOKED.into());
         active.revoked_at = Set(Some(Utc::now().into()));
-        let saved = active.update(self.db).await?;
-        dispatcher::clear_tasks_for_probe(self.db, saved.id).await?;
+        let saved = active.update(&txn).await?;
+        dispatcher::clear_tasks_for_probe(&txn, saved.id).await?;
+        txn.commit().await?;
         Ok(saved)
     }
 
@@ -471,9 +547,24 @@ impl<'a> AgentService<'a> {
     pub async fn delete(&self, id: i64) -> AppResult<probes::Model> {
         let probe = self.find(id).await?;
         local::ensure_managed_by_user(&probe, "removido")?;
-        telemetry::store::forget_host(self.db, &HostKey::agent(probe.id).to_string()).await?;
+        // Remove o probe (em transação própria) antes de descartar o histórico,
+        // para uma falha na exclusão nunca apagar a telemetria prematuramente.
         ResourceCleanupService::delete_probe(self.db, probe.id).await?;
+        telemetry::store::forget_host(self.db, &HostKey::agent(probe.id).to_string()).await?;
         Ok(probe)
+    }
+}
+
+/// Derruba a sessão ativa do agente no hub (disparando o encerramento imediato
+/// do WebSocket via `close_token`) e limpa seus snapshots SSE em memória.
+pub fn disconnect_session(ctx: &AppContext, probe_id: i64) {
+    if let Ok(hub) = AgentHub::from_context(ctx) {
+        if let Some(session) = hub.get(probe_id) {
+            hub.unregister(&session);
+        }
+    }
+    if let Ok(bus) = EventBus::from_context(ctx) {
+        bus.forget_snapshots(&HostKey::agent(probe_id).to_string());
     }
 }
 
@@ -482,7 +573,7 @@ pub async fn publish_status(ctx: &AppContext, probe: &probes::Model) {
     // O mesmo evento dos probes, mais o que o servidor anunciou ao conectar
     // (hostname, sistema, Docker, política): a tela se atualiza sem consultar.
     let mut payload = status_payload(probe);
-    if let Ok(host) = serde_json::to_value(to_view(probe, None, false).host) {
+    if let Ok(host) = serde_json::to_value(identity::host_info(probe)) {
         payload["host"] = host;
     }
     if let Ok(bus) = EventBus::from_context(ctx) {
@@ -554,5 +645,18 @@ mod tests {
             &InstallPolicy::suggested(),
         );
         assert!(padrao.ends_with(DEFAULT_AGENT_IMAGE));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn imagem_insegura_volta_para_padrao() {
+        std::env::set_var("AGENT_IMAGE", "img; rm -rf /");
+        let (docker, _) = install_commands(
+            "http://10.8.0.1:3333",
+            "nma_abc",
+            &InstallPolicy::suggested(),
+        );
+        std::env::remove_var("AGENT_IMAGE");
+        assert!(docker.ends_with(DEFAULT_AGENT_IMAGE));
     }
 }

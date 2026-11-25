@@ -80,9 +80,11 @@ impl Scope {
         self.repositories.iter().any(|pattern| {
             pattern == "*"
                 || pattern == repository
-                || pattern
-                    .strip_suffix("/*")
-                    .is_some_and(|prefix| repository.starts_with(&format!("{prefix}/")))
+                || pattern.strip_suffix("/*").is_some_and(|prefix| {
+                    repository
+                        .strip_prefix(prefix)
+                        .is_some_and(|rest| rest.starts_with('/'))
+                })
         })
     }
 

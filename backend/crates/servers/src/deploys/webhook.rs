@@ -64,6 +64,16 @@ fn wanted(target: &deploy_targets::Model, reference: &GitRef) -> bool {
     target.enabled && target.probe_id.is_some() && refs::matches(&target.reference, reference)
 }
 
+/// Os eventos que disparam deploy: o `push` do workflow gerado e o
+/// `workflow_dispatch` de quem o acrescentar. Lista de permissão — PR
+/// (`pull_request*`), `schedule`, `workflow_run`, `issue_comment` e o resto
+/// ficam de fora, inclusive evento que o GitHub ainda vá criar.
+const DEPLOY_EVENTS: &[&str] = &["push", "workflow_dispatch"];
+
+fn is_deploy_event(event_name: Option<&str>) -> bool {
+    event_name.is_some_and(|event| DEPLOY_EVENTS.contains(&event))
+}
+
 /// # Errors
 ///
 /// `Validation` para ref que não é branch nem tag, commit ou tag inválidos;
@@ -73,6 +83,12 @@ pub async fn handle(
     claims: &GithubClaims,
     input: &HookInput,
 ) -> AppResult<HookResponse> {
+    if !is_deploy_event(claims.event_name.as_deref()) {
+        return Err(AppError::validation(format!(
+            "O evento {} do GitHub não dispara deploy: só push e workflow_dispatch",
+            claims.event_name.as_deref().unwrap_or("(sem nome)")
+        )));
+    }
     let reference = GitRef::parse(&claims.git_ref)?;
     let commit = claims.sha.to_lowercase();
     validate_commit(&commit).map_err(|error| AppError::validation(error.to_string()))?;
@@ -170,6 +186,23 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn so_eventos_da_lista_disparam_deploy() {
+        assert!(is_deploy_event(Some("push")));
+        assert!(is_deploy_event(Some("workflow_dispatch")));
+        for event in [
+            "pull_request",
+            "pull_request_target",
+            "workflow_run",
+            "schedule",
+            "issue_comment",
+            "Push",
+        ] {
+            assert!(!is_deploy_event(Some(event)), "{event}");
+        }
+        assert!(!is_deploy_event(None));
+    }
+
     fn run(id: i64, status: RunStatus, commit: &str) -> deploy_runs::Model {
         let now = Utc::now().into();
         deploy_runs::Model {
@@ -222,5 +255,13 @@ mod tests {
             !already_there(&queued, "a", "a"),
             "a fila já leva outra versão"
         );
+    }
+
+    #[test]
+    fn recusa_todos_os_eventos_de_pull_request() {
+        assert!(!is_deploy_event(Some("pull_request")));
+        assert!(!is_deploy_event(Some("pull_request_target")));
+        assert!(!is_deploy_event(Some("pull_request_review")));
+        assert!(is_deploy_event(Some("push")));
     }
 }

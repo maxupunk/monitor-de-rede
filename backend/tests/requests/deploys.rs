@@ -68,6 +68,7 @@ fn claims(repository: &str, git_ref: &str, sha: &str) -> GithubClaims {
         "repository": repository,
         "ref": git_ref,
         "sha": sha,
+        "event_name": "push",
         "actor": "maxuel",
         "exp": chrono::Utc::now().timestamp() + 300,
     }))

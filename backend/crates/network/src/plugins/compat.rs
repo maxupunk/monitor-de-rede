@@ -10,7 +10,6 @@
 //!   identificado, firmware ainda não lido). Rodar `detect` resolve;
 //! * **incompatível** — alguma regra contradiz o que se sabe.
 
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -94,7 +93,7 @@ pub struct Verdict {
 }
 
 fn regex_matches(pattern: &str, value: &str) -> bool {
-    Regex::new(&format!("(?i){pattern}")).is_ok_and(|re| re.is_match(value))
+    super::runtime::cached_regex(&format!("(?i){pattern}")).is_ok_and(|re| re.is_match(value))
 }
 
 fn same(a: Option<&str>, b: Option<&str>) -> bool {

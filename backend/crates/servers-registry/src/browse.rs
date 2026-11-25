@@ -4,15 +4,15 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use chrono::Utc;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter,
+    QueryOrder, Set, Statement,
 };
 use serde_json::Value;
 
 use netmonitor_core::{
     models::{
-        deploy_applications, registry_blobs, registry_exceptions, registry_feeds,
-        registry_findings, registry_manifests, registry_repositories, registry_repository_blobs,
-        registry_tags, users,
+        deploy_applications, registry_exceptions, registry_feeds, registry_findings,
+        registry_manifests, registry_repositories, registry_tags, users,
     },
     shared::{
         errors::{AppError, AppResult},
@@ -68,55 +68,74 @@ async fn applications(
         .collect())
 }
 
-async fn repository_view(
-    db: &DatabaseConnection,
-    repo: &registry_repositories::Model,
-    apps: &HashMap<i64, deploy_applications::Model>,
-    sizes: &HashMap<String, i64>,
-) -> AppResult<RegistryRepositoryView> {
-    let tags = registry_tags::Entity::find()
-        .filter(registry_tags::Column::RepositoryId.eq(repo.id))
-        .order_by_desc(registry_tags::Column::UpdatedAt)
-        .all(db)
+async fn repo_bytes_all(db: &DatabaseConnection) -> AppResult<HashMap<i64, i64>> {
+    let rows = db
+        .query_all_raw(Statement::from_string(
+            db.get_database_backend(),
+            "SELECT rb.repository_id, CAST(COALESCE(SUM(b.size), 0) AS BIGINT) AS total \
+             FROM registry_repository_blobs rb \
+             JOIN registry_blobs b ON b.digest = rb.digest \
+             GROUP BY rb.repository_id",
+        ))
         .await?;
+    let mut out = HashMap::with_capacity(rows.len());
+    for row in rows {
+        if let (Ok(repo_id), Ok(total)) = (
+            row.try_get::<i64>("", "repository_id"),
+            row.try_get::<i64>("", "total"),
+        ) {
+            out.insert(repo_id, total);
+        }
+    }
+    Ok(out)
+}
+
+async fn repo_bytes_one(db: &DatabaseConnection, repository_id: i64) -> AppResult<i64> {
+    let backend = db.get_database_backend();
+    let placeholder = match backend {
+        sea_orm::DatabaseBackend::Postgres => "$1",
+        _ => "?",
+    };
+    let sql = format!(
+        "SELECT CAST(COALESCE(SUM(b.size), 0) AS BIGINT) AS total \
+         FROM registry_repository_blobs rb \
+         JOIN registry_blobs b ON b.digest = rb.digest \
+         WHERE rb.repository_id = {placeholder}"
+    );
+    let row = db
+        .query_one_raw(Statement::from_sql_and_values(
+            backend,
+            sql,
+            [repository_id.into()],
+        ))
+        .await?;
+    Ok(row
+        .and_then(|row| row.try_get::<i64>("", "total").ok())
+        .unwrap_or(0))
+}
+
+fn build_repository_view(
+    repo: &registry_repositories::Model,
+    application_name: Option<String>,
+    tags: &[registry_tags::Model],
+    bytes: i64,
+    latest_manifest: Option<&registry_manifests::Model>,
+) -> RegistryRepositoryView {
     let versions: HashSet<&str> = tags
         .iter()
         .map(|tag| tag.manifest_digest.as_str())
         .collect();
-    let bytes = registry_repository_blobs::Entity::find()
-        .filter(registry_repository_blobs::Column::RepositoryId.eq(repo.id))
-        .all(db)
-        .await?
-        .iter()
-        .filter_map(|link| sizes.get(&link.digest))
-        .sum();
-    let latest = match tags.first() {
-        Some(tag) => catalog::manifest_by_digest(db, repo.id, &tag.manifest_digest).await?,
-        None => None,
-    };
-    Ok(RegistryRepositoryView {
+    RegistryRepositoryView {
         id: repo.id,
         name: repo.name.clone(),
         application_id: repo.application_id,
-        application: repo
-            .application_id
-            .and_then(|id| apps.get(&id))
-            .map(|app| app.name.clone()),
+        application: application_name,
         versions: u32::try_from(versions.len()).unwrap_or(u32::MAX),
         bytes,
         latest_tag: tags.first().map(|tag| tag.name.clone()),
         last_push: tags.first().map(|tag| tag.updated_at.to_rfc3339()),
-        latest_scan: latest.as_ref().and_then(summary),
-    })
-}
-
-async fn blob_sizes(db: &DatabaseConnection) -> AppResult<HashMap<String, i64>> {
-    Ok(registry_blobs::Entity::find()
-        .all(db)
-        .await?
-        .into_iter()
-        .map(|blob| (blob.digest, blob.size))
-        .collect())
+        latest_scan: latest_manifest.and_then(summary),
+    }
 }
 
 /// A visão geral.
@@ -127,15 +146,50 @@ async fn blob_sizes(db: &DatabaseConnection) -> AppResult<HashMap<String, i64>> 
 pub async fn overview(db: &DatabaseConnection) -> AppResult<RegistryOverview> {
     let settings = settings::load(db).await?;
     let apps = applications(db).await?;
-    let sizes = blob_sizes(db).await?;
-    let mut repositories = Vec::new();
-    for repo in registry_repositories::Entity::find()
+    let repos = registry_repositories::Entity::find()
         .order_by_asc(registry_repositories::Column::Name)
         .all(db)
-        .await?
-    {
-        repositories.push(repository_view(db, &repo, &apps, &sizes).await?);
+        .await?;
+    let bytes_by_repo = repo_bytes_all(db).await?;
+    let all_tags = registry_tags::Entity::find()
+        .order_by_desc(registry_tags::Column::UpdatedAt)
+        .all(db)
+        .await?;
+    let mut tags_by_repo: HashMap<i64, Vec<registry_tags::Model>> = HashMap::new();
+    for tag in all_tags {
+        tags_by_repo.entry(tag.repository_id).or_default().push(tag);
     }
+    let latest_digests: Vec<String> = tags_by_repo
+        .values()
+        .filter_map(|tags| tags.first().map(|tag| tag.manifest_digest.clone()))
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    let mut latest_manifests: HashMap<(i64, String), registry_manifests::Model> = HashMap::new();
+    for chunk in latest_digests.chunks(400) {
+        for row in registry_manifests::Entity::find()
+            .filter(registry_manifests::Column::Digest.is_in(chunk.iter().cloned()))
+            .all(db)
+            .await?
+        {
+            latest_manifests.insert((row.repository_id, row.digest.clone()), row);
+        }
+    }
+    let repositories: Vec<RegistryRepositoryView> = repos
+        .iter()
+        .map(|repo| {
+            let repo_tags = tags_by_repo.get(&repo.id).map(Vec::as_slice).unwrap_or(&[]);
+            let latest = repo_tags
+                .first()
+                .and_then(|tag| latest_manifests.get(&(repo.id, tag.manifest_digest.clone())));
+            let app_name = repo
+                .application_id
+                .and_then(|id| apps.get(&id))
+                .map(|app| app.name.clone());
+            let bytes = bytes_by_repo.get(&repo.id).copied().unwrap_or(0);
+            build_repository_view(repo, app_name, repo_tags, bytes, latest)
+        })
+        .collect();
     let feeds = registry_feeds::Entity::find()
         .order_by_asc(registry_feeds::Column::Ecosystem)
         .all(db)
@@ -167,27 +221,40 @@ pub async fn detail(db: &DatabaseConnection, id: i64) -> AppResult<RegistryRepos
         .one(db)
         .await?
         .ok_or_else(|| AppError::not_found("Repositório não encontrado"))?;
-    let apps = applications(db).await?;
-    let sizes = blob_sizes(db).await?;
+    let app_name = match repo.application_id {
+        Some(app_id) => deploy_applications::Entity::find_by_id(app_id)
+            .one(db)
+            .await?
+            .map(|app| app.name),
+        None => None,
+    };
+    let bytes = repo_bytes_one(db, repo.id).await?;
     let usage = images_in_use(db).await?;
     let tags = registry_tags::Entity::find()
         .filter(registry_tags::Column::RepositoryId.eq(repo.id))
+        .order_by_desc(registry_tags::Column::UpdatedAt)
         .all(db)
         .await?;
     let mut by_digest: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for tag in tags {
+    for tag in &tags {
         by_digest
-            .entry(tag.manifest_digest)
+            .entry(tag.manifest_digest.clone())
             .or_default()
-            .push(tag.name);
+            .push(tag.name.clone());
     }
-    let mut versions = Vec::new();
-    for row in registry_manifests::Entity::find()
+    let manifests = registry_manifests::Entity::find()
         .filter(registry_manifests::Column::RepositoryId.eq(repo.id))
         .order_by_desc(registry_manifests::Column::CreatedAt)
         .all(db)
-        .await?
-    {
+        .await?;
+    let latest_manifest = tags.first().and_then(|tag| {
+        manifests
+            .iter()
+            .find(|row| row.digest == tag.manifest_digest)
+    });
+    let repository = build_repository_view(&repo, app_name, &tags, bytes, latest_manifest);
+    let mut versions = Vec::new();
+    for row in &manifests {
         let Some(mut row_tags) = by_digest.remove(&row.digest) else {
             continue;
         };
@@ -221,13 +288,13 @@ pub async fn detail(db: &DatabaseConnection, id: i64) -> AppResult<RegistryRepos
             provenance: row.provenance.clone(),
             pinned: row.pinned,
             created_at: row.created_at.to_rfc3339(),
-            scan: summary(&row),
+            scan: summary(row),
             used_by,
             protected,
         });
     }
     Ok(RegistryRepositoryDetail {
-        repository: repository_view(db, &repo, &apps, &sizes).await?,
+        repository,
         versions,
     })
 }
@@ -359,14 +426,32 @@ pub async fn token_views(
     db: &DatabaseConnection,
     user_id: Option<i64>,
 ) -> AppResult<Vec<RegistryTokenView>> {
-    let owners: HashMap<i64, String> = users::Entity::find()
-        .all(db)
-        .await?
-        .into_iter()
-        .map(|user| (user.id, user.name))
-        .collect();
-    Ok(tokens::list(db, user_id)
-        .await?
+    let list = tokens::list(db, user_id).await?;
+    let owners: HashMap<i64, String> = match user_id {
+        Some(id) => users::Entity::find_by_id(id)
+            .one(db)
+            .await?
+            .into_iter()
+            .map(|user| (user.id, user.name))
+            .collect(),
+        None => {
+            let mut ids: Vec<i64> = list.iter().map(|row| row.user_id).collect();
+            ids.sort_unstable();
+            ids.dedup();
+            if ids.is_empty() {
+                HashMap::new()
+            } else {
+                users::Entity::find()
+                    .filter(netmonitor_core::models::_entities::users::Column::Id.is_in(ids))
+                    .all(db)
+                    .await?
+                    .into_iter()
+                    .map(|user| (user.id, user.name))
+                    .collect()
+            }
+        }
+    };
+    Ok(list
         .iter()
         .map(|row| {
             RegistryTokenView::new(row, owners.get(&row.user_id).cloned().unwrap_or_default())

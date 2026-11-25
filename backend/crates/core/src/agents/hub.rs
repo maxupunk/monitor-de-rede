@@ -3,7 +3,7 @@
 //! Vive no `shared_store` do processo da API — é ele que atende o WebSocket.
 //! Um processo `task scheduler_loop` separado não tem hub: as tarefas de
 //! monitor continuam indo pelo banco (`probe_tasks`) e o pump deste processo
-//! as entrega (ver [`super::pump`]).
+//! as entrega.
 
 use std::{
     collections::HashMap,
@@ -72,40 +72,52 @@ impl AgentHub {
 
     #[must_use]
     pub fn get(&self, probe_id: i64) -> Option<Arc<AgentSession>> {
-        self.read().get(&probe_id).cloned()
+        self.read()
+            .get(&probe_id)
+            .filter(|session| !session.is_closed())
+            .cloned()
     }
 
     /// A sessão viva do agente, esperando até `within` que ele (re)conecte.
     ///
     /// Acorda pelo registro da sessão nova, não por consulta repetida.
     pub async fn wait_for(&self, probe_id: i64, within: Duration) -> Option<Arc<AgentSession>> {
-        let deadline = tokio::time::Instant::now() + within;
+        let deadline = tokio::time::Instant::now().checked_add(within);
         loop {
             // Inscrito antes de olhar: um registro entre a consulta e a
             // espera não se perde.
             let arrival = self.arrivals.notified();
             tokio::pin!(arrival);
             arrival.as_mut().enable();
-            if let Some(session) = self.get(probe_id).filter(|session| !session.is_closed()) {
+            if let Some(session) = self.get(probe_id) {
                 return Some(session);
             }
-            tokio::time::timeout_at(deadline, arrival).await.ok()?;
+            match deadline {
+                Some(deadline) => {
+                    tokio::time::timeout_at(deadline, arrival).await.ok()?;
+                }
+                None => arrival.await,
+            }
         }
     }
 
     #[must_use]
     pub fn sessions(&self) -> Vec<Arc<AgentSession>> {
-        self.read().values().cloned().collect()
+        self.read()
+            .values()
+            .filter(|session| !session.is_closed())
+            .cloned()
+            .collect()
     }
 
     #[must_use]
     pub fn live_interval_ms(&self) -> u64 {
-        self.live_interval_ms.load(Ordering::SeqCst)
+        self.live_interval_ms.load(Ordering::Relaxed)
     }
 
     /// Guarda o intervalo vigente; devolve se mudou.
     pub fn set_live_interval_ms(&self, value: u64) -> bool {
-        self.live_interval_ms.swap(value, Ordering::SeqCst) != value
+        self.live_interval_ms.swap(value, Ordering::AcqRel) != value
     }
 
     fn read(&self) -> std::sync::RwLockReadGuard<'_, HashMap<i64, Arc<AgentSession>>> {

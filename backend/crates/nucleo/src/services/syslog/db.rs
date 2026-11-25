@@ -123,6 +123,8 @@ pub async fn connect(url: &str) -> AppResult<LogsDb> {
         .await
         .map_err(|error| AppError::Internal(anyhow::Error::new(error)))?;
 
+    super::search::clear_capability_cache();
+
     Ok(LogsDb(db))
 }
 

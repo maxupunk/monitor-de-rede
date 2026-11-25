@@ -92,18 +92,7 @@ async fn nomes_de_dispositivo(
     rows: &[device_logs::Model],
 ) -> AppResult<HashMap<i64, String>> {
     let ids: HashSet<i64> = rows.iter().filter_map(|linha| linha.device_id).collect();
-    if ids.is_empty() {
-        return Ok(HashMap::new());
-    }
-    let encontrados: Vec<(i64, String)> = devices::Entity::find()
-        .select_only()
-        .column(devices::Column::Id)
-        .column(devices::Column::Name)
-        .filter(devices::Column::Id.is_in(ids))
-        .into_tuple()
-        .all(inventory)
-        .await?;
-    Ok(encontrados.into_iter().collect())
+    nomes_por_id(inventory, ids).await
 }
 
 /// Serializa sem hidratar o nome do dispositivo.
@@ -293,6 +282,13 @@ pub fn export_filename(
     )
 }
 
+/// Escapa um campo CSV (aspas dobradas, quebras de linha neutralizadas e
+/// envolto em aspas para proteger vírgulas).
+fn csv_field(value: &str) -> String {
+    let escaped = value.replace('"', "\"\"").replace(['\r', '\n'], " ");
+    format!("\"{escaped}\"")
+}
+
 /// Serializa as linhas de log para exportação no formato de texto puro ou CSV.
 #[must_use]
 pub fn format_log_export(rows: &[device_logs::Model], is_csv: bool) -> (&'static str, String) {
@@ -308,9 +304,14 @@ pub fn format_log_export(rows: &[device_logs::Model], is_csv: bool) -> (&'static
                 .as_deref()
                 .or(row.topics.as_deref())
                 .unwrap_or("");
-            let message = row.message.replace('"', "\"\"");
             csv.push_str(&format!(
-                "\"{timestamp}\",\"{severity}\",\"{source_ip}\",\"{hostname}\",\"{app_or_topics}\",\"{message}\"\n"
+                "{},{},{},{},{},{}\n",
+                csv_field(&timestamp),
+                csv_field(severity),
+                csv_field(source_ip),
+                csv_field(hostname),
+                csv_field(app_or_topics),
+                csv_field(&row.message),
             ));
         }
         ("text/csv; charset=utf-8", csv)

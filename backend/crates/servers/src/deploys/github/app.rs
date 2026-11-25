@@ -143,6 +143,9 @@ pub fn form_url(organization: Option<&str>, state: &str) -> String {
     }
 }
 
+/// Teto de `state`s simultâneos aguardando retorno do GitHub.
+const MAX_PENDING: usize = 256;
+
 fn pending() -> &'static Mutex<HashMap<String, Instant>> {
     static PENDING: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
     PENDING.get_or_init(|| Mutex::new(HashMap::new()))
@@ -156,6 +159,16 @@ pub fn begin() -> String {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     map.retain(|_, created| created.elapsed() < STATE_TTL);
+    while map.len() >= MAX_PENDING {
+        let Some(oldest) = map
+            .iter()
+            .min_by_key(|(_, created)| **created)
+            .map(|(key, _)| key.clone())
+        else {
+            break;
+        };
+        map.remove(&oldest);
+    }
     map.insert(state.clone(), Instant::now());
     state
 }

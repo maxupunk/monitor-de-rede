@@ -40,7 +40,8 @@
 use async_trait::async_trait;
 use loco_rs::{hash, model::ModelError};
 use sea_orm::{
-    ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter,
+    ColumnTrait, ConnectionTrait, DatabaseBackend, DatabaseConnection, EntityTrait, PaginatorTrait,
+    QueryFilter, Statement,
 };
 use serde::{Deserialize, Serialize};
 use validator::Validate;
@@ -48,11 +49,12 @@ use validator::Validate;
 use crate::models::{
     _entities::{system_settings, users},
     system_settings::Model as SystemSetting,
-    users::RegisterParams,
+    users as user_model,
 };
 use crate::services::shared::{
     crypto::constant_time_eq,
     errors::{AppError, AppResult, FieldError},
+    transaction::begin_write,
 };
 
 /// Variável de ambiente que fixa o token de instalação.
@@ -288,23 +290,48 @@ impl<'a> SetupService<'a> {
             return Err(AppError::unauthorized("Token de instalação inválido."));
         }
 
-        // `create_with_password` normaliza nome e e-mail e recusa duplicata.
-        let user = users::Model::create_with_password(
-            self.db,
-            &RegisterParams {
-                name: params.name.clone(),
-                email: params.email.clone(),
-                password: params.password.clone(),
+        let password_hash = user_model::hash_password_off_runtime(params.password.clone())
+            .await
+            .map_err(map_model_error)?;
+
+        let txn = begin_write(self.db).await?;
+        if txn.get_database_backend() == DatabaseBackend::Postgres {
+            txn.execute_raw(Statement::from_string(
+                DatabaseBackend::Postgres,
+                "SELECT pg_advisory_xact_lock(73918273645)",
+            ))
+            .await?;
+        }
+
+        if users::Entity::find().count(&txn).await? > 0 {
+            return Err(AppError::conflict(
+                "A instalação já foi concluída. Use a tela de login.",
+            ));
+        }
+
+        let user = user_model::Model::insert_new(
+            &txn,
+            user_model::NewUser {
+                name: &params.name,
+                email: &params.email,
+                password_hash,
+                role: "admin",
+                active: true,
+                area_roles: None,
+                email_verified: true,
             },
         )
         .await
         .map_err(map_model_error)?;
 
-        let user = user
-            .into_active_model()
-            .verified(self.db)
-            .await
-            .map_err(map_model_error)?;
+        if self.tokens.origin() == SetupTokenOrigin::Generated {
+            system_settings::Entity::delete_many()
+                .filter(system_settings::Column::Key.eq(SETUP_TOKEN_KEY))
+                .exec(&txn)
+                .await?;
+        }
+
+        txn.commit().await?;
 
         self.tokens.revoke().await?;
 

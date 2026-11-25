@@ -3,8 +3,12 @@
 //! Mede Ping, Jitter, Download e Upload via CDN da Cloudflare Speedtest
 //! de forma assíncrona com streaming contínuo de progresso.
 
-use std::time::{Duration, Instant};
+use std::{
+    sync::OnceLock,
+    time::{Duration, Instant},
+};
 
+use axum::body::Bytes;
 use chrono::Utc;
 use futures::StreamExt;
 use reqwest::Client;
@@ -18,6 +22,45 @@ use crate::{
 
 const CLOUDFLARE_BASE: &str = "https://speed.cloudflare.com";
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(25);
+static SPEEDTEST_HTTP_CLIENT: OnceLock<Client> = OnceLock::new();
+
+fn shared_http_client() -> Result<&'static Client, reqwest::Error> {
+    if let Some(client) = SPEEDTEST_HTTP_CLIENT.get() {
+        return Ok(client);
+    }
+    let mut default_headers = reqwest::header::HeaderMap::new();
+    default_headers.insert(
+        reqwest::header::USER_AGENT,
+        reqwest::header::HeaderValue::from_static(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        ),
+    );
+    default_headers.insert(
+        reqwest::header::REFERER,
+        reqwest::header::HeaderValue::from_static("https://speed.cloudflare.com/"),
+    );
+    default_headers.insert(
+        reqwest::header::ORIGIN,
+        reqwest::header::HeaderValue::from_static("https://speed.cloudflare.com"),
+    );
+    let built = Client::builder()
+        .default_headers(default_headers)
+        .timeout(CLIENT_TIMEOUT)
+        .build()?;
+    Ok(SPEEDTEST_HTTP_CLIENT.get_or_init(|| built))
+}
+
+async fn send_event(
+    sender: &mpsc::Sender<SpeedTestEvent>,
+    cancel: &CancellationToken,
+    event: SpeedTestEvent,
+) -> bool {
+    if sender.send(event).await.is_err() {
+        cancel.cancel();
+        return false;
+    }
+    true
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SpeedTestProfile {
@@ -83,27 +126,7 @@ pub async fn execute_wan_speedtest(
     profile_str: Option<&str>,
 ) -> Option<SpeedTestResult> {
     let profile = SpeedTestProfile::from_opt_str(profile_str);
-    let mut default_headers = reqwest::header::HeaderMap::new();
-    default_headers.insert(
-        reqwest::header::USER_AGENT,
-        reqwest::header::HeaderValue::from_static(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        ),
-    );
-    default_headers.insert(
-        reqwest::header::REFERER,
-        reqwest::header::HeaderValue::from_static("https://speed.cloudflare.com/"),
-    );
-    default_headers.insert(
-        reqwest::header::ORIGIN,
-        reqwest::header::HeaderValue::from_static("https://speed.cloudflare.com"),
-    );
-
-    let client = match Client::builder()
-        .default_headers(default_headers)
-        .timeout(CLIENT_TIMEOUT)
-        .build()
-    {
+    let client = match shared_http_client() {
         Ok(c) => c,
         Err(err) => {
             let _ = sender
@@ -117,7 +140,7 @@ pub async fn execute_wan_speedtest(
 
     // 1. Fase de Ping & Jitter
     let (ping_ms, jitter_ms, server_location) =
-        match measure_ping_jitter(&client, &sender, &cancel, profile.ping_count()).await {
+        match measure_ping_jitter(client, &sender, &cancel, profile.ping_count()).await {
             Some(res) => res,
             None => {
                 if !cancel.is_cancelled() {
@@ -137,7 +160,7 @@ pub async fn execute_wan_speedtest(
 
     // 2. Fase de Download
     let download_mbps = match measure_download(
-        &client,
+        client,
         &sender,
         &cancel,
         ping_ms,
@@ -166,7 +189,7 @@ pub async fn execute_wan_speedtest(
 
     // 3. Fase de Upload
     let upload_mbps = match measure_upload(
-        &client,
+        client,
         &sender,
         &cancel,
         UploadOptions {
@@ -230,8 +253,10 @@ async fn measure_ping_jitter(
     let mut latencies: Vec<f64> = Vec::with_capacity(ping_count);
     let ping_url = format!("{CLOUDFLARE_BASE}/__down?bytes=0");
 
-    let _ = sender
-        .send(SpeedTestEvent::Progress(SpeedTestProgress {
+    if !send_event(
+        sender,
+        cancel,
+        SpeedTestEvent::Progress(SpeedTestProgress {
             phase: "ping".into(),
             progress_pct: 5.0,
             current_mbps: None,
@@ -241,8 +266,12 @@ async fn measure_ping_jitter(
             upload_mbps: None,
             server_name: Some("Cloudflare Edge".into()),
             server_location: None,
-        }))
-        .await;
+        }),
+    )
+    .await
+    {
+        return None;
+    }
 
     for i in 0..ping_count {
         if cancel.is_cancelled() {
@@ -250,7 +279,11 @@ async fn measure_ping_jitter(
         }
 
         let start = Instant::now();
-        let resp = client.get(&ping_url).send().await.ok()?;
+        let resp = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => return None,
+            res = client.get(&ping_url).send() => res.ok()?,
+        };
         let elapsed = duration_to_ms(start.elapsed());
 
         if resp.status().is_success() {
@@ -266,8 +299,10 @@ async fn measure_ping_jitter(
             ))
         };
 
-        let _ = sender
-            .send(SpeedTestEvent::Progress(SpeedTestProgress {
+        if !send_event(
+            sender,
+            cancel,
+            SpeedTestEvent::Progress(SpeedTestProgress {
                 phase: "ping".into(),
                 progress_pct: pct,
                 current_mbps: None,
@@ -277,10 +312,18 @@ async fn measure_ping_jitter(
                 upload_mbps: None,
                 server_name: Some("Cloudflare Edge".into()),
                 server_location: None,
-            }))
-            .await;
+            }),
+        )
+        .await
+        {
+            return None;
+        }
 
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        tokio::select! {
+            biased;
+            _ = cancel.cancelled() => return None,
+            _ = tokio::time::sleep(Duration::from_millis(50)) => {}
+        }
     }
 
     if latencies.is_empty() {
@@ -291,23 +334,33 @@ async fn measure_ping_jitter(
     let jitter = calculate_jitter(&latencies);
 
     // Consulta PoP / cidade no trace
-    let location = fetch_cloudflare_location(client).await;
+    let location = fetch_cloudflare_location(client, cancel).await?;
 
     Some((avg_ping, jitter, location))
 }
 
-async fn fetch_cloudflare_location(client: &Client) -> String {
+async fn fetch_cloudflare_location(client: &Client, cancel: &CancellationToken) -> Option<String> {
     let trace_url = "https://1.1.1.1/cdn-cgi/trace";
-    if let Ok(resp) = client.get(trace_url).send().await {
-        if let Ok(text) = resp.text().await {
+    let resp = tokio::select! {
+        biased;
+        _ = cancel.cancelled() => return None,
+        res = client.get(trace_url).send() => res.ok(),
+    };
+    if let Some(resp) = resp {
+        let text = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => return None,
+            res = resp.text() => res.ok(),
+        };
+        if let Some(text) = text {
             for line in text.lines() {
                 if let Some(colo) = line.strip_prefix("colo=") {
-                    return match_colo_location(colo.trim());
+                    return Some(match_colo_location(colo.trim()));
                 }
             }
         }
     }
-    "São Paulo, BR".into()
+    Some("São Paulo, BR".into())
 }
 
 fn match_colo_location(colo: &str) -> String {
@@ -334,7 +387,11 @@ async fn measure_download(
     download_bytes: usize,
 ) -> Option<f64> {
     let url = format!("{CLOUDFLARE_BASE}/__down?bytes={download_bytes}");
-    let resp = client.get(&url).send().await.ok()?;
+    let resp = tokio::select! {
+        biased;
+        _ = cancel.cancelled() => return None,
+        res = client.get(&url).send() => res.ok()?,
+    };
 
     if !resp.status().is_success() {
         return None;
@@ -345,10 +402,15 @@ async fn measure_download(
     let start = Instant::now();
     let mut last_emit = Instant::now();
 
-    while let Some(chunk_res) = stream.next().await {
-        if cancel.is_cancelled() {
-            return None;
-        }
+    loop {
+        let next_chunk = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => return None,
+            chunk = stream.next() => chunk,
+        };
+        let Some(chunk_res) = next_chunk else {
+            break;
+        };
 
         let chunk = chunk_res.ok()?;
         received_bytes += chunk.len();
@@ -358,8 +420,10 @@ async fn measure_download(
             let mbps = (received_bytes as f64 * 8.0) / (elapsed_sec * 1_000_000.0);
             let pct = 20.0 + (received_bytes as f64 / download_bytes as f64).min(1.0) * 45.0;
 
-            let _ = sender
-                .send(SpeedTestEvent::Progress(SpeedTestProgress {
+            if !send_event(
+                sender,
+                cancel,
+                SpeedTestEvent::Progress(SpeedTestProgress {
                     phase: "download".into(),
                     progress_pct: round_two(pct),
                     current_mbps: Some(round_two(mbps)),
@@ -369,8 +433,12 @@ async fn measure_download(
                     upload_mbps: None,
                     server_name: Some("Cloudflare Edge Network".into()),
                     server_location: Some(location.to_string()),
-                }))
-                .await;
+                }),
+            )
+            .await
+            {
+                return None;
+            }
 
             last_emit = Instant::now();
         }
@@ -398,12 +466,14 @@ async fn measure_upload(
 ) -> Option<f64> {
     let url = format!("{CLOUDFLARE_BASE}/__up");
     let chunk_size = (opts.bytes / opts.chunks).max(1);
-    let payload = vec![0u8; chunk_size];
+    let payload = Bytes::from(vec![0u8; chunk_size]);
     let start = Instant::now();
     let mut sent_bytes: usize = 0;
 
-    let _ = sender
-        .send(SpeedTestEvent::Progress(SpeedTestProgress {
+    if !send_event(
+        sender,
+        cancel,
+        SpeedTestEvent::Progress(SpeedTestProgress {
             phase: "upload".into(),
             progress_pct: 68.0,
             current_mbps: None,
@@ -413,8 +483,12 @@ async fn measure_upload(
             upload_mbps: None,
             server_name: Some("Cloudflare Edge Network".into()),
             server_location: Some(opts.location.to_string()),
-        }))
-        .await;
+        }),
+    )
+    .await
+    {
+        return None;
+    }
 
     for i in 0..opts.chunks {
         if cancel.is_cancelled() {
@@ -422,7 +496,11 @@ async fn measure_upload(
         }
 
         let req = client.post(&url).body(payload.clone());
-        let resp = req.send().await.ok()?;
+        let resp = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => return None,
+            res = req.send() => res.ok()?,
+        };
 
         if !resp.status().is_success() || cancel.is_cancelled() {
             return None;
@@ -433,8 +511,10 @@ async fn measure_upload(
         let current_mbps = (sent_bytes as f64 * 8.0) / (elapsed_sec * 1_000_000.0);
         let pct = 68.0 + ((i + 1) as f64 / opts.chunks as f64) * 28.0;
 
-        let _ = sender
-            .send(SpeedTestEvent::Progress(SpeedTestProgress {
+        if !send_event(
+            sender,
+            cancel,
+            SpeedTestEvent::Progress(SpeedTestProgress {
                 phase: "upload".into(),
                 progress_pct: round_two(pct),
                 current_mbps: Some(round_two(current_mbps)),
@@ -444,8 +524,12 @@ async fn measure_upload(
                 upload_mbps: Some(round_two(current_mbps)),
                 server_name: Some("Cloudflare Edge Network".into()),
                 server_location: Some(opts.location.to_string()),
-            }))
-            .await;
+            }),
+        )
+        .await
+        {
+            return None;
+        }
     }
 
     let elapsed_sec = start.elapsed().as_secs_f64().max(0.001);

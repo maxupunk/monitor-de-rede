@@ -128,30 +128,30 @@ fn dpkg(a: &str, b: &str) -> Ordering {
 
 fn apk(a: &str, b: &str) -> Ordering {
     // `1.2.3_rc1-r4`: o `-rN` é a revisão do pacote.
-    let split = |v: &str| -> (String, u64) {
+    fn split(v: &str) -> (&str, u64) {
         match v.rsplit_once("-r") {
             Some((base, rev)) if rev.chars().all(|c| c.is_ascii_digit()) => {
-                (base.to_string(), rev.parse().unwrap_or(0))
+                (base, rev.parse().unwrap_or(0))
             }
-            _ => (v.to_string(), 0),
+            _ => (v, 0),
         }
-    };
+    }
     let (ba, ra) = split(a);
     let (bb, rb) = split(b);
     // Sufixos de pré-lançamento vêm antes do lançamento.
-    let weight = |s: &str| -> (String, i32) {
+    fn weight(s: &str) -> (&str, i32) {
         for (suffix, rank) in [("_alpha", -4), ("_beta", -3), ("_pre", -2), ("_rc", -1)] {
             if let Some((main, _)) = s.split_once(suffix) {
-                return (main.to_string(), rank);
+                return (main, rank);
             }
         }
-        (s.to_string(), 0)
-    };
-    let (ma, wa) = weight(&ba);
-    let (mb, wb) = weight(&bb);
-    generic(&ma, &mb)
+        (s, 0)
+    }
+    let (ma, wa) = weight(ba);
+    let (mb, wb) = weight(bb);
+    generic(ma, mb)
         .then_with(|| wa.cmp(&wb))
-        .then_with(|| generic(&ba, &bb))
+        .then_with(|| generic(ba, bb))
         .then_with(|| ra.cmp(&rb))
 }
 
@@ -163,14 +163,7 @@ enum Token {
     Text(String),
 }
 
-fn tokens(version: &str) -> (Vec<Token>, bool) {
-    let version = version.trim().trim_start_matches(['v', 'V']);
-    // Pré-lançamento: `-alpha`, `rc1`, `.dev0` contam antes da versão final.
-    let (main, pre) = match version.find(['-', '+']) {
-        Some(at) if version[at..].starts_with('+') => (&version[..at], false),
-        Some(at) => (&version[..at], true),
-        None => (version, false),
-    };
+fn split_tokens(input: &str) -> (Vec<Token>, bool) {
     let mut out = Vec::new();
     let mut current = String::new();
     let mut digit = None;
@@ -185,9 +178,9 @@ fn tokens(version: &str) -> (Vec<Token>, bool) {
             Token::Text(text.to_ascii_lowercase())
         });
     };
-    let mut pre_text = pre;
-    for c in main.chars() {
-        if c == '.' || c == '_' {
+    let mut has_text = false;
+    for c in input.chars() {
+        if c == '.' || c == '_' || c == '-' {
             flush(&mut current, digit, &mut out);
             digit = None;
             continue;
@@ -197,18 +190,53 @@ fn tokens(version: &str) -> (Vec<Token>, bool) {
             flush(&mut current, digit, &mut out);
         }
         if !is_digit {
-            pre_text = true;
+            has_text = true;
         }
         digit = Some(is_digit);
         current.push(c);
     }
     flush(&mut current, digit, &mut out);
-    (out, pre_text)
+    (out, has_text)
+}
+
+fn tokens(version: &str) -> (Vec<Token>, Option<&str>, bool) {
+    let version = version.trim().trim_start_matches(['v', 'V']);
+    // Metadados de build (`+...`) não entram na precedência (SemVer).
+    let without_build = version.split_once('+').map_or(version, |(head, _)| head);
+    // Pré-lançamento: `-alpha.1`, `rc1`, `.dev0` contam antes da versão final.
+    let (main, prerelease) = match without_build.split_once('-') {
+        Some((head, pre)) if !pre.is_empty() => (head, Some(pre)),
+        Some((head, _)) => (head, None),
+        None => (without_build, None),
+    };
+    let (out, has_text) = split_tokens(main);
+    (out, prerelease, prerelease.is_some() || has_text)
+}
+
+fn compare_prerelease(a: &str, b: &str) -> Ordering {
+    let (ta, _) = split_tokens(a);
+    let (tb, _) = split_tokens(b);
+    for index in 0..ta.len().max(tb.len()) {
+        let ordering = match (ta.get(index), tb.get(index)) {
+            (Some(Token::Number(x)), Some(Token::Number(y))) => numeric(x, y),
+            (Some(Token::Text(x)), Some(Token::Text(y))) => x.cmp(y),
+            // SemVer: identificadores numéricos têm menor precedência que texto.
+            (Some(Token::Number(_)), Some(Token::Text(_))) => Ordering::Less,
+            (Some(Token::Text(_)), Some(Token::Number(_))) => Ordering::Greater,
+            (Some(_), None) => Ordering::Greater,
+            (None, Some(_)) => Ordering::Less,
+            (None, None) => Ordering::Equal,
+        };
+        if ordering != Ordering::Equal {
+            return ordering;
+        }
+    }
+    Ordering::Equal
 }
 
 fn generic(a: &str, b: &str) -> Ordering {
-    let (ta, pa) = tokens(a);
-    let (tb, pb) = tokens(b);
+    let (ta, pre_a, pa) = tokens(a);
+    let (tb, pre_b, pb) = tokens(b);
     for index in 0..ta.len().max(tb.len()) {
         let ordering = match (ta.get(index), tb.get(index)) {
             (Some(Token::Number(x)), Some(Token::Number(y))) => numeric(x, y),
@@ -233,11 +261,16 @@ fn generic(a: &str, b: &str) -> Ordering {
             return ordering;
         }
     }
-    // Mesma base: o pré-lançamento vem antes.
+    // Mesma base: o pré-lançamento vem antes da versão final, e dois
+    // pré-lançamentos são comparados pelos seus identificadores.
     match (pa, pb) {
         (true, false) => Ordering::Less,
         (false, true) => Ordering::Greater,
-        _ => Ordering::Equal,
+        (true, true) => match (pre_a, pre_b) {
+            (Some(a), Some(b)) => compare_prerelease(a, b),
+            _ => Ordering::Equal,
+        },
+        (false, false) => Ordering::Equal,
     }
 }
 
@@ -271,6 +304,9 @@ mod tests {
         let lt = |a: &str, b: &str| assert_eq!(generic(a, b), Ordering::Less, "{a} < {b}");
         lt("1.9.0", "1.10.0");
         lt("1.0.0-alpha", "1.0.0");
+        lt("1.0.0-alpha.1", "1.0.0-alpha.2");
+        lt("1.0.0-alpha.1", "1.0.0-rc.2");
+        lt("1.0.0-beta.2", "1.0.0-rc.1");
         lt("v0.17.0", "v0.18.1");
         lt("4.2rc1", "4.2");
         lt("2.0", "2.0.1");

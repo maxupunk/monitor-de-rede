@@ -9,7 +9,7 @@ use loco_rs::app::AppContext;
 use netmonitor_core::{
     areas::{self, Area},
     routines::{cadence::is_due, retention_days, Cycle, RetentionJob, Routine},
-    shared::errors::AppResult,
+    shared::{errors::AppResult, run_guard::RunGuard},
 };
 use sea_orm::DatabaseConnection;
 
@@ -50,10 +50,33 @@ impl Routine for LinkTestSchedules {
         if !areas::is_enabled(&ctx.db, Area::Network).await? {
             return Ok(());
         }
-        let started =
-            link_test_schedules::run_due(LinkTestEnv::from_context(ctx), cycle.now).await?;
-        if started > 0 {
-            tracing::info!(started, "agendamentos de teste de enlace disparados");
+        let Ok(turn) = RunGuard::acquire(
+            "link_test_schedules",
+            0,
+            "agendamentos de teste de enlace em andamento",
+        ) else {
+            return Ok(());
+        };
+        let env = LinkTestEnv::from_context(ctx);
+        let now = cycle.now;
+        let pass = async move {
+            let _turn = turn;
+            match link_test_schedules::run_due(env, now).await {
+                Ok(started) if started > 0 => {
+                    tracing::info!(started, "agendamentos de teste de enlace disparados");
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    tracing::warn!(%error, "falha ao conferir agendamentos de teste de enlace");
+                }
+            }
+        };
+        // No laço do servidor a passada não segura o ciclo; no ciclo avulso
+        // (`task scheduler_run`) ela roda até o fim, como manda o `Cycle`.
+        if cycle.detached {
+            tokio::spawn(pass);
+        } else {
+            pass.await;
         }
         Ok(())
     }

@@ -6,6 +6,12 @@
 //! ping, atualiza o cadastro, registra no histórico de eventos do dispositivo e
 //! suprime o alarme de queda.
 
+use std::{
+    collections::HashMap,
+    sync::{Mutex, OnceLock},
+    time::{Duration, Instant},
+};
+
 use chrono::Utc;
 use loco_rs::app::AppContext;
 use sea_orm::{
@@ -21,9 +27,17 @@ use crate::{
             runner::{run_monitor, RunOptions},
         },
         network_tools::neighbor_cache::{self, normalize_mac},
-        shared::errors::AppResult,
+        shared::{errors::AppResult, transaction::begin_write},
     },
 };
+
+const MAC_LEARN_COOLDOWN: Duration = Duration::from_secs(600);
+const MAC_LEARN_CACHE_CAP: usize = 4_096;
+
+fn mac_learn_cache() -> &'static Mutex<HashMap<i64, Instant>> {
+    static CACHE: OnceLock<Mutex<HashMap<i64, Instant>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 pub use netmonitor_core::network_tools::nat::can_inspect_l2;
 
@@ -247,22 +261,23 @@ pub async fn try_reconcile_device_ip_on_failure(
         return Ok(None);
     }
 
-    // 7. SUCESSO: Atualiza o dispositivo
-    let mut dev_active: devices::ActiveModel = device.clone().into();
-    dev_active.ip_address = Set(Some(new_ip.clone()));
-    dev_active.updated_at = Set(Utc::now().into());
-    let _ = dev_active.update(&ctx.db).await?;
-
-    // 8. Registra no histórico de eventos do dispositivo (/devices/[id] > Histórico de Eventos)
+    // 7-9. SUCESSO: atualiza dispositivo, evento e monitores atomicamente em `begin_write`.
     let mac_label = matched_mac.as_deref().unwrap_or("N/A");
     let event_message = format!(
         "Endereço IP alterado automaticamente de {current_ip} para {new_ip} (detectado via MAC {mac_label})"
     );
     let now = Utc::now();
-    let _ = alert_events::ActiveModel {
+    let txn = begin_write(&ctx.db).await?;
+
+    let mut dev_active: devices::ActiveModel = device.clone().into();
+    dev_active.ip_address = Set(Some(new_ip.clone()));
+    dev_active.updated_at = Set(now.into());
+    dev_active.update(&txn).await?;
+
+    alert_events::ActiveModel {
         device_id: Set(Some(device.id)),
         monitor_id: Set(Some(monitor.id)),
-        status: Set("info".into()),
+        status: Set("resolved".into()),
         severity: Set("info".into()),
         started_at: Set(now.into()),
         resolved_at: Set(Some(now.into())),
@@ -277,10 +292,10 @@ pub async fn try_reconcile_device_ip_on_failure(
         updated_at: Set(now.into()),
         ..Default::default()
     }
-    .insert(&ctx.db)
-    .await;
+    .insert(&txn)
+    .await?;
 
-    // 9. Sincroniza a configuração do monitor atual com o novo IP
+    // Sincroniza a configuração do monitor atual com o novo IP
     let mut mon_active: monitors::ActiveModel = monitor.clone().into();
     let mut new_config = monitor.configuration.clone();
     if let serde_json::Value::Object(ref mut map) = new_config {
@@ -288,42 +303,41 @@ pub async fn try_reconcile_device_ip_on_failure(
     }
     mon_active.configuration = Set(new_config);
     mon_active.updated_at = Set(now.into());
-    let _ = mon_active.update(&ctx.db).await;
+    mon_active.update(&txn).await?;
 
     // Sincroniza outros monitores associados a este dispositivo
-    if let Ok(other_monitors) = monitors::Entity::find()
+    let other_monitors = monitors::Entity::find()
         .filter(monitors::Column::DeviceId.eq(device.id))
-        .all(&ctx.db)
-        .await
-    {
-        for mon in other_monitors {
-            if mon.id == monitor.id {
-                continue;
-            }
-            let mut mon_config = mon.configuration.clone();
-            let mut modified = false;
-            if let serde_json::Value::Object(ref mut map) = mon_config {
-                if let Some(host_val) = map.get_mut("host") {
-                    if host_val.as_str() == Some(&current_ip) {
-                        *host_val = serde_json::Value::String(new_ip.clone());
-                        modified = true;
-                    }
-                }
-                if let Some(ip_val) = map.get_mut("ip") {
-                    if ip_val.as_str() == Some(&current_ip) {
-                        *ip_val = serde_json::Value::String(new_ip.clone());
-                        modified = true;
-                    }
+        .all(&txn)
+        .await?;
+    for mon in other_monitors {
+        if mon.id == monitor.id {
+            continue;
+        }
+        let mut mon_config = mon.configuration.clone();
+        let mut modified = false;
+        if let serde_json::Value::Object(ref mut map) = mon_config {
+            if let Some(host_val) = map.get_mut("host") {
+                if host_val.as_str() == Some(&current_ip) {
+                    *host_val = serde_json::Value::String(new_ip.clone());
+                    modified = true;
                 }
             }
-            if modified {
-                let mut act: monitors::ActiveModel = mon.into();
-                act.configuration = Set(mon_config);
-                act.updated_at = Set(now.into());
-                let _ = act.update(&ctx.db).await;
+            if let Some(ip_val) = map.get_mut("ip") {
+                if ip_val.as_str() == Some(&current_ip) {
+                    *ip_val = serde_json::Value::String(new_ip.clone());
+                    modified = true;
+                }
             }
         }
+        if modified {
+            let mut act: monitors::ActiveModel = mon.into();
+            act.configuration = Set(mon_config);
+            act.updated_at = Set(now.into());
+            act.update(&txn).await?;
+        }
     }
+    txn.commit().await?;
 
     // 10. Notifica a aplicação em tempo real via SSE
     if let Ok(events) = EventBus::from_context(ctx) {
@@ -362,6 +376,17 @@ pub async fn auto_learn_device_mac_if_missing(
     if !can_inspect_l2() {
         return Ok(());
     }
+    {
+        let cache = mac_learn_cache()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if cache
+            .get(&device_id)
+            .is_some_and(|checked_at| checked_at.elapsed() < MAC_LEARN_COOLDOWN)
+        {
+            return Ok(());
+        }
+    }
 
     let count = device_interfaces::Entity::find()
         .filter(device_interfaces::Column::DeviceId.eq(device_id))
@@ -369,16 +394,28 @@ pub async fn auto_learn_device_mac_if_missing(
         .count(db)
         .await?;
 
-    if count > 0 {
-        return Ok(());
+    if count == 0 {
+        let neighbors = neighbor_cache::read_system_neighbors().await;
+        let Some(entry) = neighbors.into_iter().find(|entry| entry.ip_address == ip) else {
+            // ARP ainda sem o vizinho (vazio ou não resolvido): sem carimbo,
+            // para a próxima resposta do ping tentar de novo em vez de
+            // esperar o cooldown inteiro.
+            return Ok(());
+        };
+        associate_device_mac(db, device_id, &entry.mac_address).await?;
     }
 
-    let neighbors = neighbor_cache::read_system_neighbors().await;
-    for entry in neighbors {
-        if entry.ip_address == ip {
-            associate_device_mac(db, device_id, &entry.mac_address).await?;
-            break;
+    {
+        let mut cache = mac_learn_cache()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if cache.len() >= MAC_LEARN_CACHE_CAP && !cache.contains_key(&device_id) {
+            cache.retain(|_, checked_at| checked_at.elapsed() < MAC_LEARN_COOLDOWN);
+            if cache.len() >= MAC_LEARN_CACHE_CAP {
+                cache.clear();
+            }
         }
+        cache.insert(device_id, Instant::now());
     }
 
     Ok(())

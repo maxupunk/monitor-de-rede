@@ -18,7 +18,7 @@ use crate::views::docker::{
 use super::{client, DockerError, DISABLED_REASON, UNAVAILABLE_REASON};
 
 const STATS_TIMEOUT: Duration = Duration::from_secs(4);
-const MAX_CONCURRENT_STATS: usize = 8;
+const MAX_CONCURRENT_STATS: usize = 16;
 
 pub(crate) async fn collect() -> DockerMetricsResponse {
     let client = match client() {

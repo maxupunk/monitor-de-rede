@@ -378,26 +378,22 @@ async fn deploy_target(
 ) -> AppResult<Response> {
     let user = author(&ctx, &headers).await?;
     let run = orchestrator::request_manual(&ctx, id, &input, &user).await?;
-    let target = applications::find_target(&ctx.db, id).await?;
+    let view = events::view(&ctx.db, &run).await?;
     audit(
         &ctx,
         &headers,
         AuditAction::Execute,
-        (target.id, &target.name),
+        (run.target_id, &view.target_name),
         format!(
             "Deploy #{} da versão {} pedido em '{}'{}",
             run.id,
             short_sha(&run.commit_sha),
-            target.name,
+            view.target_name,
             when_note(input.when)
         ),
     )
     .await;
-    Ok((
-        StatusCode::ACCEPTED,
-        Json(events::view(&ctx.db, &run).await?),
-    )
-        .into_response())
+    Ok((StatusCode::ACCEPTED, Json(view)).into_response())
 }
 
 fn when_note(when: DeployWhen) -> &'static str {
@@ -613,20 +609,11 @@ async fn run_backups(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppR
     )?)
 }
 
-async fn run_label(ctx: &AppContext, run_id: i64) -> String {
-    match runs::find(&ctx.db, run_id).await {
-        Ok(run) => match events::view(&ctx.db, &run).await {
-            Ok(view) => format!(
-                "#{} {} / {} ({})",
-                run.id,
-                view.application_name,
-                view.target_name,
-                short_sha(&run.commit_sha)
-            ),
-            Err(_) => format!("#{run_id}"),
-        },
-        Err(_) => format!("#{run_id}"),
-    }
+fn label_of(view: &crate::views::deploys::DeployRunView) -> String {
+    format!(
+        "#{} {} / {} ({})",
+        view.id, view.application_name, view.target_name, view.short_sha
+    )
 }
 
 async fn approve(
@@ -637,15 +624,16 @@ async fn approve(
 ) -> AppResult<Response> {
     let user = author(&ctx, &headers).await?;
     let run = orchestrator::approve(&ctx, id, input.when, &user).await?;
+    let view = events::view(&ctx.db, &run).await?;
     audit(
         &ctx,
         &headers,
         AuditAction::Execute,
-        (run.id, &run_label(&ctx, id).await),
+        (run.id, &label_of(&view)),
         format!("Deploy aprovado{}", when_note(input.when)),
     )
     .await;
-    Ok(format::json(events::view(&ctx.db, &run).await?)?)
+    Ok(format::json(view)?)
 }
 
 async fn reject(
@@ -656,15 +644,16 @@ async fn reject(
 ) -> AppResult<Response> {
     let user = author(&ctx, &headers).await?;
     let run = orchestrator::reject(&ctx, id, &user, input.reason.as_deref()).await?;
+    let view = events::view(&ctx.db, &run).await?;
     audit(
         &ctx,
         &headers,
         AuditAction::Update,
-        (run.id, &run_label(&ctx, id).await),
+        (run.id, &label_of(&view)),
         "Deploy recusado".into(),
     )
     .await;
-    Ok(format::json(events::view(&ctx.db, &run).await?)?)
+    Ok(format::json(view)?)
 }
 
 async fn cancel(
@@ -674,15 +663,16 @@ async fn cancel(
 ) -> AppResult<Response> {
     let user = author(&ctx, &headers).await?;
     let run = orchestrator::cancel(&ctx, id, &user).await?;
+    let view = events::view(&ctx.db, &run).await?;
     audit(
         &ctx,
         &headers,
         AuditAction::Update,
-        (run.id, &run_label(&ctx, id).await),
+        (run.id, &label_of(&view)),
         "Deploy cancelado".into(),
     )
     .await;
-    Ok(format::json(events::view(&ctx.db, &run).await?)?)
+    Ok(format::json(view)?)
 }
 
 async fn restore(
@@ -693,22 +683,19 @@ async fn restore(
 ) -> AppResult<Response> {
     let user = author(&ctx, &headers).await?;
     let run = orchestrator::request_restore(&ctx, id, input.when, &user).await?;
+    let view = events::view(&ctx.db, &run).await?;
     audit(
         &ctx,
         &headers,
         AuditAction::Execute,
-        (run.id, &run_label(&ctx, run.id).await),
+        (run.id, &label_of(&view)),
         format!(
             "Restauração da versão do deploy #{id} pedida{}",
             when_note(input.when)
         ),
     )
     .await;
-    Ok((
-        StatusCode::ACCEPTED,
-        Json(events::view(&ctx.db, &run).await?),
-    )
-        .into_response())
+    Ok((StatusCode::ACCEPTED, Json(view)).into_response())
 }
 
 pub fn routes() -> Routes {
@@ -773,7 +760,15 @@ async fn github_hook(
         serde_json::from_slice(&body)
             .map_err(|_| AppError::bad_request("Corpo inválido: envie JSON"))?
     };
-    let response = webhook::handle(&ctx, &claims, &input).await?;
+    let response = match webhook::handle(&ctx, &claims, &input).await {
+        Ok(response) => response,
+        Err(error) => {
+            if error.status().is_server_error() {
+                oidc::release(&claims);
+            }
+            return Err(error);
+        }
+    };
     tracing::info!(
         repository = %claims.repository,
         git_ref = %claims.git_ref,

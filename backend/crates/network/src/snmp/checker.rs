@@ -5,7 +5,9 @@ use serde::Deserialize;
 
 use crate::snmp::{
     client::{SnmpClient, SnmpConfig, SnmpError, SnmpVersion},
-    collectors::{collect_cpu, collect_memory, status_label, OID_SYS_UPTIME},
+    collectors::{
+        collect_cpu, collect_memory, interface_monitor_status, status_label, OID_SYS_UPTIME,
+    },
     profiles::format_sensor_value,
 };
 use agent_protocol::monitoring::{CheckMetric, CheckResult, MonitorStatus};
@@ -29,6 +31,16 @@ pub struct SnmpCheckerConfig {
     pub version: String,
     #[serde(default = "default_community")]
     pub community: String,
+    #[serde(default)]
+    pub username: Option<String>,
+    #[serde(default)]
+    pub auth_protocol: Option<String>,
+    #[serde(default)]
+    pub auth_key: Option<String>,
+    #[serde(default)]
+    pub priv_protocol: Option<String>,
+    #[serde(default)]
+    pub priv_key: Option<String>,
     #[serde(default = "default_port")]
     pub port: u16,
     #[serde(default = "default_timeout")]
@@ -129,11 +141,11 @@ async fn execute_query(config: &SnmpCheckerConfig) -> Result<SnmpObservation, Sn
         host: config.host.clone(),
         version,
         community: config.community.clone(),
-        username: None,
-        auth_protocol: None,
-        auth_key: None,
-        priv_protocol: None,
-        priv_key: None,
+        username: config.username.clone(),
+        auth_protocol: config.auth_protocol.clone(),
+        auth_key: config.auth_key.clone(),
+        priv_protocol: config.priv_protocol.clone(),
+        priv_key: config.priv_key.clone(),
         port: config.port,
         timeout_ms: config.timeout_ms,
     });
@@ -411,18 +423,6 @@ fn value(
         .and_then(Option::as_ref)
         .and_then(|item| item.number())
         .ok_or_else(|| SnmpError::Oid(format!("OID {oid} não retornou valor numérico")))
-}
-
-fn interface_monitor_status(admin: u64, oper: u64) -> MonitorStatus {
-    if admin == 2 {
-        MonitorStatus::Disabled
-    } else if oper == 1 {
-        MonitorStatus::Up
-    } else if oper == 2 {
-        MonitorStatus::Down
-    } else {
-        MonitorStatus::Warning
-    }
 }
 
 /// Tipo do monitor SNMP (`monitors.type`).

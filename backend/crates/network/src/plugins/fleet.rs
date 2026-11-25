@@ -496,9 +496,19 @@ struct Job {
     writer: tokio::sync::Mutex<()>,
 }
 
+struct BatchState {
+    batch: plugin_batches::Model,
+    devices: Vec<BatchDevice>,
+}
+
 impl Job {
     async fn run(self) -> AppResult<()> {
-        let state = Arc::new(Mutex::new(self.batch.clone()));
+        let devices: Vec<BatchDevice> =
+            serde_json::from_value(self.batch.devices.clone()).unwrap_or_default();
+        let state = Arc::new(Mutex::new(BatchState {
+            batch: self.batch.clone(),
+            devices,
+        }));
         let job = Arc::new(self);
         let tasks = job.targets.clone().into_iter().map(|device| {
             let job = job.clone();
@@ -512,27 +522,29 @@ impl Job {
         job.finish(&state).await
     }
 
-    fn update(&self, state: &Mutex<plugin_batches::Model>, entry: BatchDevice) {
-        let mut batch = state
+    fn update(&self, state: &Mutex<BatchState>, entry: BatchDevice) {
+        let mut guard = state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let mut list: Vec<BatchDevice> =
-            serde_json::from_value(batch.devices.clone()).unwrap_or_default();
-        if let Some(slot) = list
+        if let Some(slot) = guard
+            .devices
             .iter_mut()
             .find(|item| item.device_id == entry.device_id)
         {
             *slot = entry;
         }
-        batch.devices = serde_json::to_value(&list).unwrap_or_else(|_| json!([]));
     }
 
-    async fn save(&self, state: &Mutex<plugin_batches::Model>) {
+    async fn save(&self, state: &Mutex<BatchState>) {
         let _turn = self.writer.lock().await;
-        let batch = state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
+        let batch = {
+            let mut guard = state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            guard.batch.devices =
+                serde_json::to_value(&guard.devices).unwrap_or_else(|_| json!([]));
+            guard.batch.clone()
+        };
         let mut active: plugin_batches::ActiveModel = batch.clone().into();
         active.devices = Set(batch.devices.clone());
         active.status = Set(batch.status.clone());
@@ -545,7 +557,7 @@ impl Job {
         publish(&self.ctx, &batch, &self.manifest);
     }
 
-    async fn member(&self, device: devices::Model, state: &Mutex<plugin_batches::Model>) {
+    async fn member(&self, device: devices::Model, state: &Mutex<BatchState>) {
         let mut entry = BatchDevice {
             device_id: device.id,
             device_name: device.name.clone(),
@@ -585,17 +597,10 @@ impl Job {
                 entry.error = Some(error.to_string());
             }
             Ok(prepared) => {
+                let prepared = prepared.cancelled_by(&self.cancel);
                 entry.run_id = Some(prepared.run_id());
                 self.update(state, entry.clone());
                 self.save(state).await;
-                let cancel_watch = {
-                    let batch_cancel = self.cancel.clone();
-                    let run_id = prepared.run_id();
-                    tokio::spawn(async move {
-                        batch_cancel.cancelled().await;
-                        let _ = runs::cancel(run_id);
-                    })
-                };
                 match runs::run(&self.ctx, prepared).await {
                     Ok(run) => {
                         entry.status = if run.status == "succeeded" {
@@ -611,21 +616,20 @@ impl Job {
                         entry.error = Some(error.to_string());
                     }
                 }
-                cancel_watch.abort();
             }
         }
         self.update(state, entry);
         self.save(state).await;
     }
 
-    async fn finish(&self, state: &Mutex<plugin_batches::Model>) -> AppResult<()> {
+    async fn finish(&self, state: &Mutex<BatchState>) -> AppResult<()> {
         lock_cancellations().remove(&self.batch.id);
-        let mut batch = state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
-        let list: Vec<BatchDevice> =
-            serde_json::from_value(batch.devices.clone()).unwrap_or_default();
+        let (mut batch, list) = {
+            let guard = state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            (guard.batch.clone(), guard.devices.clone())
+        };
         let succeeded = list
             .iter()
             .filter(|item| item.status == "succeeded")
@@ -659,9 +663,12 @@ impl Job {
             }
         }
         batch.finished_at = Some(chrono::Utc::now().into());
-        *state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = batch;
+        {
+            let mut guard = state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            guard.batch = batch;
+        }
         self.save(state).await;
         Ok(())
     }

@@ -5,12 +5,16 @@
 //! salva assina a tarefa e ela roda com o papel dessa pessoa
 //! ([`super::runner`]).
 
-use std::{collections::HashMap, str::FromStr};
+use std::{
+    collections::{HashMap, HashSet},
+    str::FromStr,
+};
 
 use chrono::Utc;
 use loco_rs::prelude::AppContext;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set,
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder,
+    QuerySelect, Set,
 };
 use serde_json::{json, Value};
 
@@ -32,6 +36,7 @@ use crate::{
         shared::{
             errors::{AppError, AppResult},
             pagination::{paginate, PaginatedResponse},
+            transaction::begin_write,
         },
         users::Role,
     },
@@ -201,6 +206,31 @@ async fn check(
     (checked, preview)
 }
 
+/// Exige papel de administrador quando a ferramenta é `admin_only`.
+///
+/// # Errors
+///
+/// `Forbidden` quando um operador tenta gerenciar ou disparar ação exclusiva de
+/// administrador.
+pub(super) fn check_tool_permission(tool: &str, author: &Author) -> AppResult<()> {
+    let admin_only = UnattendedTools::new()
+        .contract(tool)
+        .is_ok_and(|contract| contract.admin_only);
+    if admin_only && author.role != Role::Admin {
+        return Err(AppError::forbidden(
+            "Só o administrador pode gerenciar ou executar esta ação",
+        ));
+    }
+    Ok(())
+}
+
+async fn active_tools(ctx: &AppContext) -> AppResult<UnattendedTools> {
+    let enabled = netmonitor_core::areas::load(&ctx.db).await?;
+    Ok(UnattendedTools::for_areas(
+        netmonitor_core::areas::AreaSet::from_enabled(&enabled),
+    ))
+}
+
 /// A conferência que a tela mostra enquanto o usuário monta a tarefa.
 ///
 /// # Errors
@@ -211,7 +241,8 @@ pub async fn preview(
     input: &ScheduledTaskPreviewInput,
     author: Option<&Author>,
 ) -> AppResult<ScheduledTaskPreview> {
-    Ok(check(ctx, &UnattendedTools::new(), input, author).await.1)
+    let tools = active_tools(ctx).await?;
+    Ok(check(ctx, &tools, input, author).await.1)
 }
 
 fn validate_name(name: &str) -> AppResult<String> {
@@ -244,7 +275,8 @@ async fn validate(
         arguments: input.arguments.clone(),
         cron: input.cron.clone(),
     };
-    let (checked, _) = check(ctx, &UnattendedTools::new(), &probe, Some(author)).await;
+    let tools = active_tools(ctx).await?;
+    let (checked, _) = check(ctx, &tools, &probe, Some(author)).await;
     let checked = checked.map_err(|errors| AppError::validation(errors.join("; ")))?;
     Ok((name, checked))
 }
@@ -263,17 +295,19 @@ async fn owner_names(
     db: &DatabaseConnection,
     rows: &[scheduled_tasks::Model],
 ) -> AppResult<HashMap<i64, String>> {
-    let ids: Vec<i64> = rows.iter().filter_map(|row| row.user_id).collect();
+    let ids: HashSet<i64> = rows.iter().filter_map(|row| row.user_id).collect();
     if ids.is_empty() {
         return Ok(HashMap::new());
     }
-    Ok(users::Entity::find()
+    let found: Vec<(i64, String)> = users::Entity::find()
+        .select_only()
+        .column(users::Column::Id)
+        .column(users::Column::Name)
         .filter(users::Column::Id.is_in(ids))
+        .into_tuple()
         .all(db)
-        .await?
-        .into_iter()
-        .map(|user| (user.id, user.name))
-        .collect())
+        .await?;
+    Ok(found.into_iter().collect())
 }
 
 /// Todas as tarefas, por nome.
@@ -410,8 +444,10 @@ pub async fn update(
     author: &Author,
 ) -> AppResult<ScheduledTask> {
     let current = find(&ctx.db, id).await?;
+    check_tool_permission(&current.tool, author)?;
     let (name, checked) = validate(ctx, input, author).await?;
     let old = snapshot(&current);
+    let now = Utc::now();
     let mut row: scheduled_tasks::ActiveModel = current.into();
     row.name = Set(name);
     row.description = Set(description_of(input));
@@ -421,10 +457,11 @@ pub async fn update(
     row.enabled = Set(input.enabled);
     row.next_run_at = Set(input
         .enabled
-        .then(|| checked.schedule.next_after(Utc::now()))
+        .then(|| checked.schedule.next_after(now))
         .flatten()
         .map(Into::into));
     row.user_id = Set(Some(author.user_id));
+    row.updated_at = Set(now.into());
     let row = row.update(&ctx.db).await?;
     audit(
         ctx,
@@ -464,6 +501,7 @@ pub async fn set_enabled(
     author: &Author,
 ) -> AppResult<ScheduledTask> {
     let current = find(&ctx.db, id).await?;
+    check_tool_permission(&current.tool, author)?;
     if enabled {
         // Quem retoma assina: confere de novo se pode rodar a ferramenta.
         let input = ScheduledTaskInput {
@@ -479,6 +517,7 @@ pub async fn set_enabled(
     let mut row: scheduled_tasks::ActiveModel = current.into();
     row.enabled = Set(false);
     row.next_run_at = Set(None);
+    row.updated_at = Set(Utc::now().into());
     let row = row.update(&ctx.db).await?;
     audit(
         ctx,
@@ -512,15 +551,16 @@ pub async fn delete(
     author: &Author,
 ) -> AppResult<scheduled_tasks::Model> {
     let row = find(&ctx.db, id).await?;
+    check_tool_permission(&row.tool, author)?;
     // O SQLite só aplica o `CASCADE` com `foreign_keys=ON`: o histórico sai à
     // mão, nos dois bancos.
+    let txn = begin_write(&ctx.db).await?;
     scheduled_task_runs::Entity::delete_many()
         .filter(scheduled_task_runs::Column::TaskId.eq(id))
-        .exec(&ctx.db)
+        .exec(&txn)
         .await?;
-    scheduled_tasks::Entity::delete_by_id(id)
-        .exec(&ctx.db)
-        .await?;
+    scheduled_tasks::Entity::delete_by_id(id).exec(&txn).await?;
+    txn.commit().await?;
     audit(
         ctx,
         author,

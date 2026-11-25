@@ -12,7 +12,10 @@ use crate::discovery::{
 };
 use netmonitor_core::{
     models::{discovery_runs, networks},
-    shared::errors::{AppError, AppResult},
+    shared::{
+        errors::{AppError, AppResult},
+        transaction::begin_write,
+    },
 };
 
 pub const MIN_SCAN_INTERVAL_SECONDS: i64 = 300;
@@ -37,6 +40,12 @@ pub fn is_abandoned(run: &discovery_runs::Model) -> bool {
     }
     let started_at = run.started_at.with_timezone(&Utc);
     (Utc::now() - started_at).num_minutes() > running_timeout_minutes(run)
+}
+
+/// `true` quando alguma das runs ainda está viva (não abandonada).
+#[must_use]
+pub fn any_alive(runs: &[discovery_runs::Model]) -> bool {
+    runs.iter().any(|run| !is_abandoned(run))
 }
 
 fn running_timeout_minutes(run: &discovery_runs::Model) -> i64 {
@@ -82,6 +91,8 @@ pub async fn enqueue_network_scan(
         )));
     }
 
+    let txn = begin_write(db).await?;
+
     // `pending` **e** `running`: a mais recente é quem decide.
     let current = discovery_runs::Entity::find()
         .filter(
@@ -92,7 +103,7 @@ pub async fn enqueue_network_scan(
                 .is_in(["pending", "running"]),
         )
         .order_by_desc(netmonitor_core::models::_entities::discovery_runs::Column::Id)
-        .one(db)
+        .one(&txn)
         .await?;
 
     if let Some(current) = current {
@@ -109,7 +120,7 @@ pub async fn enqueue_network_scan(
                 ))),
                 ..Default::default()
             }
-            .update(db)
+            .update(&txn)
             .await?;
         } else {
             let stored_cidr = current
@@ -127,10 +138,12 @@ pub async fn enqueue_network_scan(
                     configuration: Set(Some(run_configuration(network))),
                     ..Default::default()
                 }
-                .update(db)
+                .update(&txn)
                 .await?;
+                txn.commit().await?;
                 return Ok((run, true));
             }
+            txn.commit().await?;
             return Ok((current, true));
         }
     }
@@ -143,8 +156,9 @@ pub async fn enqueue_network_scan(
         configuration: Set(Some(run_configuration(network))),
         ..Default::default()
     }
-    .insert(db)
+    .insert(&txn)
     .await?;
+    txn.commit().await?;
     Ok((run, false))
 }
 
@@ -200,20 +214,22 @@ async fn claim_pending_run(
     ctx: &AppContext,
 ) -> AppResult<Option<(discovery_runs::Model, String, ScanSessionService)>> {
     let session = ScanSessionService::from_context(ctx)?;
+    let txn = begin_write(&ctx.db).await?;
 
     // O loop longevo despacha o trabalho em background. Enquanto houver uma
     // varredura local válida em curso, não reivindica outra: isso preserva o
     // limite global que antes era imposto naturalmente pelo `await` inline.
-    if let Some(running) = discovery_runs::Entity::find()
+    let running = discovery_runs::Entity::find()
         .filter(netmonitor_core::models::_entities::discovery_runs::Column::Status.eq("running"))
         .filter(netmonitor_core::models::_entities::discovery_runs::Column::ProbeId.is_null())
-        .order_by_asc(netmonitor_core::models::_entities::discovery_runs::Column::Id)
-        .one(&ctx.db)
-        .await?
-    {
-        if !is_abandoned(&running) {
-            return Ok(None);
-        }
+        .all(&txn)
+        .await?;
+    // Qualquer uma viva bloqueia — não só a mais antiga, que pode estar
+    // abandonada enquanto uma mais nova roda.
+    if any_alive(&running) {
+        return Ok(None);
+    }
+    for running in running {
         let timeout_minutes = running_timeout_minutes(&running);
         discovery_runs::ActiveModel {
             id: Set(running.id),
@@ -224,7 +240,7 @@ async fn claim_pending_run(
             ))),
             ..Default::default()
         }
-        .update(&ctx.db)
+        .update(&txn)
         .await?;
     }
 
@@ -232,9 +248,10 @@ async fn claim_pending_run(
         .filter(netmonitor_core::models::_entities::discovery_runs::Column::Status.eq("pending"))
         .filter(netmonitor_core::models::_entities::discovery_runs::Column::ProbeId.is_null())
         .order_by_asc(netmonitor_core::models::_entities::discovery_runs::Column::Id)
-        .one(&ctx.db)
+        .one(&txn)
         .await?
     else {
+        txn.commit().await?;
         return Ok(None);
     };
     let cidr = run
@@ -256,8 +273,9 @@ async fn claim_pending_run(
         )
         .filter(netmonitor_core::models::_entities::discovery_runs::Column::Id.eq(run.id))
         .filter(netmonitor_core::models::_entities::discovery_runs::Column::Status.eq("pending"))
-        .exec(&ctx.db)
+        .exec(&txn)
         .await?;
+    txn.commit().await?;
     if claimed.rows_affected == 0 {
         return Ok(None);
     }
@@ -273,11 +291,45 @@ async fn execute_claimed_run(
     cidr: &str,
     session: &ScanSessionService,
 ) -> AppResult<()> {
-    let cancel = session.start(run.id, run.network_id).await;
-    let gateway = networks::Entity::find_by_id(run.network_id)
+    // Reserva a sessão ao vivo como o botão "Escanear": `start` sobrescreveria
+    // a de uma varredura manual (ou de probe) em curso. Ocupada, a run volta
+    // para a fila e o próximo ciclo tenta de novo.
+    let Some(cancel) = session.try_reserve(run.network_id).await else {
+        discovery_runs::Entity::update_many()
+            .col_expr(
+                netmonitor_core::models::_entities::discovery_runs::Column::Status,
+                Expr::value("pending"),
+            )
+            .filter(netmonitor_core::models::_entities::discovery_runs::Column::Id.eq(run.id))
+            .filter(
+                netmonitor_core::models::_entities::discovery_runs::Column::Status.eq("running"),
+            )
+            .exec(&ctx.db)
+            .await?;
+        return Ok(());
+    };
+    session.bind_run(run.id).await;
+    // Daqui em diante a sessão está tomada: toda saída antes do `execute_run`
+    // (que a encerra) precisa encerrá-la e a run também.
+    let gateway = match networks::Entity::find_by_id(run.network_id)
         .one(&ctx.db)
-        .await?
-        .and_then(|network| network.gateway);
+        .await
+    {
+        Ok(network) => network.and_then(|network| network.gateway),
+        Err(error) => {
+            session.finish(Some(error.to_string())).await;
+            let _ = discovery_runs::ActiveModel {
+                id: Set(run.id),
+                status: Set("failed".into()),
+                finished_at: Set(Some(Utc::now().into())),
+                error: Set(Some(error.to_string())),
+                ..Default::default()
+            }
+            .update(&ctx.db)
+            .await;
+            return Err(error.into());
+        }
+    };
     let target = ScanTarget::new(cidr).with_gateway(gateway.as_deref());
     execute_run(ctx, run.id, run.network_id, &target, cancel).await
 }
@@ -347,6 +399,15 @@ mod tests {
             "running",
             RUNNING_RUN_TIMEOUT_MINUTES + 1
         )));
+    }
+
+    #[test]
+    fn qualquer_run_viva_bloqueia_nao_so_a_mais_antiga() {
+        let abandonada = run("running", RUNNING_RUN_TIMEOUT_MINUTES + 1);
+        let viva = run("running", 1);
+        assert!(any_alive(&[abandonada.clone(), viva]));
+        assert!(!any_alive(&[abandonada]));
+        assert!(!any_alive(&[]));
     }
 
     #[test]

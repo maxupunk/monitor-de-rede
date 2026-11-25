@@ -127,10 +127,7 @@ async fn export_logs(
 
     let mut response = body.into_response();
     let headers = response.headers_mut();
-    headers.insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_str(content_type).unwrap(),
-    );
+    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
     headers.insert(
         header::CONTENT_DISPOSITION,
         HeaderValue::try_from(format!("attachment; filename=\"{filename}\""))
@@ -178,20 +175,23 @@ async fn stream(
             return;
         }
         loop {
-            match updates.recv().await {
-                Ok(entry) => {
-                    if !passa_no_filtro(&entry, &query) {
-                        continue;
+            tokio::select! {
+                () = sender.closed() => return,
+                received = updates.recv() => match received {
+                    Ok(entry) => {
+                        if !passa_no_filtro(&entry, &query) {
+                            continue;
+                        }
+                        if sender.send(Some(entry)).await.is_err() {
+                            return;
+                        }
                     }
-                    if sender.send(Some(entry)).await.is_err() {
-                        return;
-                    }
+                    // Atraso do assinante é normal aqui: o tail mostra o que está
+                    // chegando, e o que passou está na paginação. Segue lendo em
+                    // vez de derrubar a conexão.
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
                 }
-                // Atraso do assinante é normal aqui: o tail mostra o que está
-                // chegando, e o que passou está na paginação. Segue lendo em
-                // vez de derrubar a conexão.
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
             }
         }
     });
@@ -816,16 +816,21 @@ fn endereco_do_servidor() -> String {
     // Exige a forma de URL: uma `FRONTEND_ORIGIN` que não é URL é
     // configuração errada, e adivinhar um host a partir dela produziria um
     // snippet que falha em silêncio no roteador.
-    let Some((_, sem_esquema)) = origem.split_once("//") else {
+    let Some((_, sem_esquema)) = origem.trim().split_once("://") else {
         return String::new();
     };
-    let host = sem_esquema.split(['/', ':']).next().unwrap_or_default();
+    let Some(autoridade) = sem_esquema.split('/').next() else {
+        return String::new();
+    };
+    let Some(host) = authority_host(autoridade) else {
+        return String::new();
+    };
     // `localhost` não serve: o roteador precisa alcançar este servidor pela
     // rede, e um snippet com `remote=localhost` falha em silêncio no aparelho.
-    if host.is_empty() || host == "localhost" {
+    if host.eq_ignore_ascii_case("localhost") {
         return String::new();
     }
-    host.to_owned()
+    host
 }
 
 /// `GET /api/logs/templates` — os padrões de log e a categoria de cada um.
@@ -988,6 +993,8 @@ mod tests {
         }
         std::env::set_var("FRONTEND_ORIGIN", "http://192.168.1.10:3333");
         assert_eq!(endereco_do_servidor(), "192.168.1.10");
+        std::env::set_var("FRONTEND_ORIGIN", "http://[fd00::10]:3333/logs");
+        assert_eq!(endereco_do_servidor(), "fd00::10");
         std::env::remove_var("FRONTEND_ORIGIN");
     }
 }

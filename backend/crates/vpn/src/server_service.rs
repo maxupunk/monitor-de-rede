@@ -4,14 +4,20 @@
 //! servidor (uma interface) — a tabela aceita mais de uma linha para não travar
 //! uma evolução futura, mas todo o §7.13 fala no singular.
 
-use std::net::Ipv4Addr;
+use std::{collections::HashMap, net::Ipv4Addr, sync::OnceLock};
 
 use chrono::Utc;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, Set,
+};
+use tokio::sync::Mutex;
 
 use netmonitor_core::{
     models::{devices, networks, sites, vpn_peers, vpn_servers},
-    shared::errors::{AppError, AppResult},
+    shared::{
+        errors::{AppError, AppResult},
+        transaction::begin_write,
+    },
 };
 
 use crate::{
@@ -67,12 +73,20 @@ pub struct VpnServerState {
     pub bytes_tx: i64,
 }
 
+/// Trava de processo que serializa criações do servidor e reescritas do
+/// `wg0.conf`, impedindo que duas mutações concorrentes gravem estado obsoleto
+/// ou dupliquem a linha única de `vpn_servers`.
+fn config_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
 /// Servidor VPN configurado (v1: instância única).
 ///
 /// # Errors
 ///
 /// Propaga erro do banco.
-pub async fn find(db: &sea_orm::DatabaseConnection) -> AppResult<Option<vpn_servers::Model>> {
+pub async fn find<C: ConnectionTrait>(db: &C) -> AppResult<Option<vpn_servers::Model>> {
     Ok(vpn_servers::Entity::find()
         .order_by_asc(vpn_servers::Column::Id)
         .one(db)
@@ -82,7 +96,7 @@ pub async fn find(db: &sea_orm::DatabaseConnection) -> AppResult<Option<vpn_serv
 /// # Errors
 ///
 /// Devolve 400 quando a VPN ainda não foi configurada — é o que o wizard exibe.
-pub async fn find_or_fail(db: &sea_orm::DatabaseConnection) -> AppResult<vpn_servers::Model> {
+pub async fn find_or_fail<C: ConnectionTrait>(db: &C) -> AppResult<vpn_servers::Model> {
     find(db)
         .await?
         .ok_or_else(|| AppError::business_rule("Servidor VPN ainda não foi configurado"))
@@ -93,8 +107,8 @@ pub async fn find_or_fail(db: &sea_orm::DatabaseConnection) -> AppResult<vpn_ser
 /// # Errors
 ///
 /// Propaga erro do banco; 400 se a rede sumiu.
-pub async fn network_of(
-    db: &sea_orm::DatabaseConnection,
+pub async fn network_of<C: ConnectionTrait>(
+    db: &C,
     server: &vpn_servers::Model,
 ) -> AppResult<networks::Model> {
     networks::Entity::find_by_id(server.network_id)
@@ -140,8 +154,8 @@ pub async fn sync_telemetry(db: &sea_orm::DatabaseConnection) {
 /// cadastrado, e seguimos sem vínculo quando não há nenhum — inventar um Site
 /// "Matriz" só para satisfazer a FK poluía a lista de locais de quem nunca
 /// cadastrou um.
-async fn resolve_network(
-    db: &sea_orm::DatabaseConnection,
+async fn resolve_network<C: ConnectionTrait>(
+    db: &C,
     payload: &VpnServerPayload,
 ) -> AppResult<networks::Model> {
     let cidr = payload
@@ -238,58 +252,67 @@ pub async fn create_or_update(
     payload: &VpnServerPayload,
 ) -> AppResult<(vpn_servers::Model, networks::Model)> {
     validate_vpn_server_payload(payload)?;
-    let server = match find(db).await? {
-        None => {
-            let network = resolve_network(db, payload).await?;
-            let key_pair = generate_key_pair();
-            let mut active = vpn_servers::ActiveModel {
-                network_id: Set(network.id),
-                interface_name: Set(DEFAULT_INTERFACE.into()),
-                listen_port: Set(payload.listen_port.unwrap_or_else(default_listen_port)),
-                public_endpoint: Set(payload.public_endpoint.clone()),
-                public_key: Set(key_pair.public_key),
-                allow_peer_to_peer: Set(payload.allow_peer_to_peer.unwrap_or(false)),
-                mtu: Set(payload.mtu.unwrap_or(DEFAULT_MTU)),
-                dns_servers: Set(payload.dns_servers.clone()),
-                active: Set(payload.active.unwrap_or(true)),
-                ..Default::default()
-            };
-            active.set_private_key(&key_pair.private_key)?;
-            active.insert(db).await?
-        }
-        Some(current) => {
-            // Trocar o CIDR mexe na rede, não no servidor: é a rede que carrega
-            // a faixa, e o gateway precisa acompanhar.
-            if let Some(cidr) = payload.cidr.as_deref() {
-                let network = network_of(db, &current).await?;
-                if network.cidr != cidr {
-                    parse_cidr(cidr)?;
-                    let mut active: networks::ActiveModel = network.into();
-                    active.cidr = Set(cidr.to_string());
-                    active.gateway = Set(Some(first_usable_address(cidr)?.to_string()));
-                    active.update(db).await?;
-                }
+    let _guard = config_lock().lock().await;
+    let (server, network) = {
+        let txn = begin_write(db).await?;
+        let server = match find(&txn).await? {
+            None => {
+                let network = resolve_network(&txn, payload).await?;
+                let key_pair = generate_key_pair();
+                let mut active = vpn_servers::ActiveModel {
+                    network_id: Set(network.id),
+                    interface_name: Set(DEFAULT_INTERFACE.into()),
+                    listen_port: Set(payload.listen_port.unwrap_or_else(default_listen_port)),
+                    public_endpoint: Set(payload.public_endpoint.clone()),
+                    public_key: Set(key_pair.public_key),
+                    allow_peer_to_peer: Set(payload.allow_peer_to_peer.unwrap_or(false)),
+                    mtu: Set(payload.mtu.unwrap_or(DEFAULT_MTU)),
+                    dns_servers: Set(payload.dns_servers.clone()),
+                    active: Set(payload.active.unwrap_or(true)),
+                    ..Default::default()
+                };
+                active.set_private_key(&key_pair.private_key)?;
+                active.insert(&txn).await?
             }
-            let mut active: vpn_servers::ActiveModel = current.clone().into();
-            active.listen_port = Set(payload.listen_port.unwrap_or(current.listen_port));
-            active.public_endpoint =
-                Set(payload.public_endpoint.clone().or(current.public_endpoint));
-            active.mtu = Set(payload.mtu.unwrap_or(current.mtu));
-            active.dns_servers = Set(payload.dns_servers.clone().or(current.dns_servers));
-            active.allow_peer_to_peer = Set(payload
-                .allow_peer_to_peer
-                .unwrap_or(current.allow_peer_to_peer));
-            active.active = Set(payload.active.unwrap_or(current.active));
-            active.update(db).await?
-        }
+            Some(current) => {
+                // Trocar o CIDR mexe na rede, não no servidor: é a rede que carrega
+                // a faixa, e o gateway precisa acompanhar.
+                if let Some(cidr) = payload.cidr.as_deref() {
+                    let network = network_of(&txn, &current).await?;
+                    if network.cidr != cidr {
+                        parse_cidr(cidr)?;
+                        let mut active: networks::ActiveModel = network.into();
+                        active.cidr = Set(cidr.to_string());
+                        active.gateway = Set(Some(first_usable_address(cidr)?.to_string()));
+                        active.update(&txn).await?;
+                    }
+                }
+                let mut active: vpn_servers::ActiveModel = current.clone().into();
+                active.listen_port = Set(payload.listen_port.unwrap_or(current.listen_port));
+                active.public_endpoint =
+                    Set(payload.public_endpoint.clone().or(current.public_endpoint));
+                active.mtu = Set(payload.mtu.unwrap_or(current.mtu));
+                active.dns_servers = Set(payload.dns_servers.clone().or(current.dns_servers));
+                active.allow_peer_to_peer = Set(payload
+                    .allow_peer_to_peer
+                    .unwrap_or(current.allow_peer_to_peer));
+                active.active = Set(payload.active.unwrap_or(current.active));
+                active.update(&txn).await?
+            }
+        };
+        let network = network_of(&txn, &server).await?;
+        txn.commit().await?;
+        (server, network)
     };
 
-    let network = network_of(db, &server).await?;
-    apply_configuration(db, &server, &network).await?;
+    apply_configuration_locked(db, &server, &network).await?;
     Ok((server, network))
 }
 
 /// Reescreve o arquivo de configuração com todos os peers habilitados.
+///
+/// Serializada por [`config_lock`] para evitar sobrescrita fora de ordem entre
+/// mutações concorrentes.
 ///
 /// # Errors
 ///
@@ -299,21 +322,41 @@ pub async fn apply_configuration(
     server: &vpn_servers::Model,
     network: &networks::Model,
 ) -> AppResult<String> {
+    let _guard = config_lock().lock().await;
+    apply_configuration_locked(db, server, network).await
+}
+
+async fn apply_configuration_locked(
+    db: &sea_orm::DatabaseConnection,
+    server: &vpn_servers::Model,
+    network: &networks::Model,
+) -> AppResult<String> {
     let peers = vpn_peers::Entity::find_enabled_for_server(server.id)
         .all(db)
         .await?;
 
+    let device_ids: Vec<i64> = peers.iter().map(|peer| peer.device_id).collect();
+    let devices_by_id: HashMap<i64, devices::Model> = if device_ids.is_empty() {
+        HashMap::new()
+    } else {
+        devices::Entity::find()
+            .filter(devices::Column::Id.is_in(device_ids))
+            .all(db)
+            .await?
+            .into_iter()
+            .map(|device| (device.id, device))
+            .collect()
+    };
+
     let mut entries = Vec::with_capacity(peers.len());
     for peer in peers {
-        let device = devices::Entity::find_by_id(peer.device_id).one(db).await?;
+        let device = devices_by_id.get(&peer.device_id);
         entries.push(PeerEntryInput {
-            name: device
-                .as_ref()
-                .map_or_else(|| format!("peer-{}", peer.id), |device| device.name.clone()),
+            name: device.map_or_else(|| format!("peer-{}", peer.id), |device| device.name.clone()),
             public_key: peer.public_key.clone(),
             preshared_key: peer.preshared_key()?,
             ip_address: device
-                .and_then(|device| device.ip_address)
+                .and_then(|device| device.ip_address.clone())
                 .unwrap_or_default(),
             enabled: peer.enabled,
         });
@@ -347,6 +390,19 @@ pub async fn apply_configuration(
 ///
 /// Propaga erro do banco.
 pub async fn get_state(db: &sea_orm::DatabaseConnection) -> AppResult<VpnServerState> {
+    get_state_with_sync(db, true).await
+}
+
+/// Estado agregado do painel, permitindo pular a releitura do `.status` quando
+/// o chamador acabou de sincronizar no mesmo fluxo.
+///
+/// # Errors
+///
+/// Propaga erro do banco.
+pub async fn get_state_with_sync(
+    db: &sea_orm::DatabaseConnection,
+    sync: bool,
+) -> AppResult<VpnServerState> {
     let Some(server) = find(db).await? else {
         return Ok(VpnServerState {
             server: None,
@@ -359,7 +415,9 @@ pub async fn get_state(db: &sea_orm::DatabaseConnection) -> AppResult<VpnServerS
         });
     };
 
-    sync_telemetry(db).await;
+    if sync {
+        sync_telemetry(db).await;
+    }
 
     let network = network_of(db, &server).await?;
     let peers = vpn_peers::Entity::find()

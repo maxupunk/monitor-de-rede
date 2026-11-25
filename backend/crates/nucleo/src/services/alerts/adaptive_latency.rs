@@ -436,11 +436,14 @@ async fn resolve_uplink(
     if let Some(site_id) = site_id {
         candidates = candidates.filter(devices::Column::SiteId.eq(Some(site_id)));
     }
-    let candidates = candidates.all(db).await?;
+    let mut candidates = candidates.limit(2).all(db).await?;
     if candidates.len() != 1 {
         return Ok(None);
     }
-    uplink_from_model(db, candidates.into_iter().next().expect("um candidato")).await
+    let Some(only) = candidates.pop() else {
+        return Ok(None);
+    };
+    uplink_from_model(db, only).await
 }
 
 async fn uplink_for_device(db: &DatabaseConnection, device_id: i64) -> AppResult<Option<Uplink>> {

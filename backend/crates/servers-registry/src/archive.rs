@@ -46,17 +46,12 @@ pub fn qualified(reference: &str) -> String {
     }
 }
 
-/// A imagem (manifest de uma plataforma) de `reference` para a arquitetura.
-///
-/// # Errors
-///
-/// `NotFound` sem a imagem ou sem a arquitetura.
-pub async fn image_for(
+async fn image_parsed(
     db: &DatabaseConnection,
     repository_id: i64,
     reference: &str,
     architecture: &str,
-) -> AppResult<(Digest, String)> {
+) -> AppResult<(Digest, String, manifest::Manifest)> {
     let top = catalog::resolve(db, repository_id, reference)
         .await?
         .ok_or_else(|| AppError::not_found(format!("A imagem {reference} não está no registry")))?;
@@ -68,6 +63,7 @@ pub async fn image_for(
                 .parse()
                 .map_err(|_| AppError::validation("digest inválido no catálogo"))?,
             top.content,
+            parsed,
         )),
         Kind::Index { .. } => {
             let child = parsed.for_architecture(architecture).ok_or_else(|| {
@@ -78,9 +74,26 @@ pub async fn image_for(
             let found = catalog::manifest_by_digest(db, repository_id, child.digest.as_str())
                 .await?
                 .ok_or_else(|| AppError::not_found("Manifest da plataforma ausente"))?;
-            Ok((child.digest.clone(), found.content))
+            let child_parsed = manifest::parse(found.content.as_bytes(), Some(&found.media_type))
+                .map_err(|error| AppError::validation(error.to_string()))?;
+            Ok((child.digest.clone(), found.content, child_parsed))
         }
     }
+}
+
+/// A imagem (manifest de uma plataforma) de `reference` para a arquitetura.
+///
+/// # Errors
+///
+/// `NotFound` sem a imagem ou sem a arquitetura.
+pub async fn image_for(
+    db: &DatabaseConnection,
+    repository_id: i64,
+    reference: &str,
+    architecture: &str,
+) -> AppResult<(Digest, String)> {
+    let (digest, content, _) = image_parsed(db, repository_id, reference, architecture).await?;
+    Ok((digest, content))
 }
 
 /// Escreve o tar do `docker load` em `sink`.
@@ -97,9 +110,8 @@ pub async fn write<W: AsyncWrite + Unpin>(
     repo_tag: &str,
     sink: W,
 ) -> AppResult<W> {
-    let (digest, content) = image_for(db, repository_id, reference, architecture).await?;
-    let parsed = manifest::parse(content.as_bytes(), None)
-        .map_err(|error| AppError::validation(error.to_string()))?;
+    let (digest, content, parsed) =
+        image_parsed(db, repository_id, reference, architecture).await?;
     let Kind::Image { config, layers } = &parsed.kind else {
         return Err(AppError::validation("Esperava a imagem de uma plataforma"));
     };
@@ -117,13 +129,25 @@ pub async fn write<W: AsyncWrite + Unpin>(
         tar.begin_file(&blob_path(&blob.digest), size)
             .await
             .map_err(broken)?;
-        let mut reader = store.open(&blob.digest, 0).await.map_err(broken)?;
+        let mut reader = store
+            .open(&blob.digest, 0)
+            .await
+            .map_err(broken)?
+            .take(size);
+        let mut written: u64 = 0;
         loop {
             let count = reader.read(&mut buffer).await.map_err(broken)?;
             if count == 0 {
                 break;
             }
+            written += count as u64;
             tar.write_data(&buffer[..count]).await.map_err(broken)?;
+        }
+        if written != size {
+            return Err(AppError::service_unavailable(format!(
+                "O blob {} mudou de tamanho durante a entrega ({written}/{size})",
+                blob.digest
+            )));
         }
         tar.end_file(size).await.map_err(broken)?;
     }

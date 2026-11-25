@@ -43,11 +43,13 @@ impl MigrationTrait for Migration {
         m.create_table(append_only(stmt.take())).await?;
 
         // Série temporal com inserção em rajada: cada índice custa em toda coleta
-        // SNMP, então são só os quatro que atendem laços quentes.
+        // SNMP, então são só os cinco que atendem laços quentes.
         //
         // O primeiro serve o "último valor por interface" (tráfego SNMP) e, pelo
         // prefixo `device_id`, também os filtros por equipamento. O segundo serve
         // o "último valor por métrica" (bytes da VPN, sparkline de CPU/memória).
+        // O terceiro, a série de uma interface por nome; o quarto, a limpeza
+        // por monitor (FK `monitor_id`); o quinto, a purga do `DataPrunerService`.
         m.create_index(index(
             "metrics_device_interface_name_recorded_index",
             "metrics",
@@ -63,7 +65,13 @@ impl MigrationTrait for Migration {
         m.create_index(index(
             "metrics_interface_recorded_index",
             "metrics",
-            &["interface_id", "recorded_at"],
+            &["interface_id", "name", "recorded_at"],
+        ))
+        .await?;
+        m.create_index(index(
+            "metrics_monitor_id_index",
+            "metrics",
+            &["monitor_id"],
         ))
         .await?;
         m.create_index(index(

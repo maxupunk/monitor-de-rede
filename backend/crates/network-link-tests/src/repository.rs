@@ -5,7 +5,8 @@ use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 use sea_orm::{
     sea_query::Query, ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, EntityTrait,
-    IntoActiveModel, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Set,
+    PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Set, TransactionSession,
+    TransactionTrait,
 };
 
 use super::{
@@ -153,7 +154,7 @@ pub async fn insert_failed<C: ConnectionTrait>(
     Ok(row.insert(db).await?)
 }
 
-/// Regrava todas as colunas do teste.
+/// Grava apenas as colunas mutáveis do teste.
 ///
 /// # Errors
 ///
@@ -162,12 +163,18 @@ pub async fn save_test<C: ConnectionTrait>(
     db: &C,
     row: &link_tests::Model,
 ) -> AppResult<link_tests::Model> {
-    let mut active = row.clone().into_active_model().reset_all();
+    let mut active: link_tests::ActiveModel = row.clone().into();
+    active.status = Set(row.status.clone());
+    active.summary = Set(row.summary.clone());
+    active.error = Set(row.error.clone());
+    active.started_at = Set(row.started_at);
+    active.finished_at = Set(row.finished_at);
     active.updated_at = Set(Utc::now().into());
     Ok(active.update(db).await?)
 }
 
-/// Regrava todas as colunas da perna.
+/// Grava apenas as colunas mutáveis da perna (evita regravar JSONs imutáveis
+/// como `a`, `b`, `via`, `issues` a cada mudança de etapa).
 ///
 /// # Errors
 ///
@@ -176,7 +183,18 @@ pub async fn save_leg<C: ConnectionTrait>(
     db: &C,
     row: &link_test_legs::Model,
 ) -> AppResult<link_test_legs::Model> {
-    let mut active = row.clone().into_active_model().reset_all();
+    let mut active: link_test_legs::ActiveModel = row.clone().into();
+    active.status = Set(row.status.clone());
+    active.stages = Set(row.stages.clone());
+    active.forward_bps = Set(row.forward_bps);
+    active.reverse_bps = Set(row.reverse_bps);
+    active.retransmits = Set(row.retransmits);
+    active.error = Set(row.error.clone());
+    active.samples = Set(row.samples.clone());
+    active.health = Set(row.health.clone());
+    active.cleanup = Set(row.cleanup.clone());
+    active.started_at = Set(row.started_at);
+    active.finished_at = Set(row.finished_at);
     active.updated_at = Set(Utc::now().into());
     Ok(active.update(db).await?)
 }
@@ -316,7 +334,10 @@ pub async fn page<C: ConnectionTrait>(db: &C, query: &LinkTestQuery) -> AppResul
         .all(db)
         .await?;
     let ids: Vec<i64> = rows.iter().map(|row| row.id).collect();
-    let legs = legs_of(db, &ids).await?;
+    let mut legs_by_test: HashMap<i64, Vec<link_test_legs::Model>> = HashMap::new();
+    for leg in legs_of(db, &ids).await? {
+        legs_by_test.entry(leg.test_id).or_default().push(leg);
+    }
     let user_ids: Vec<i64> = rows.iter().filter_map(|row| row.user_id).collect();
     let users = user_refs(db, user_ids).await?;
     Ok(LinkTestPage {
@@ -324,7 +345,8 @@ pub async fn page<C: ConnectionTrait>(db: &C, query: &LinkTestQuery) -> AppResul
             .iter()
             .map(|row| {
                 let requested_by = row.user_id.and_then(|id| users.get(&id).cloned());
-                view::test(row, &legs, requested_by, false)
+                let test_legs = legs_by_test.get(&row.id).map_or(&[][..], Vec::as_slice);
+                view::test(row, test_legs, requested_by, false)
             })
             .collect(),
         total,
@@ -366,7 +388,10 @@ pub async fn pending_cleanups<C: ConnectionTrait>(db: &C) -> AppResult<Vec<link_
 /// # Errors
 ///
 /// Erro do banco.
-pub async fn prune<C: ConnectionTrait>(db: &C, cutoff: DateTime<Utc>) -> AppResult<u64> {
+pub async fn prune<C: ConnectionTrait + TransactionTrait>(
+    db: &C,
+    cutoff: DateTime<Utc>,
+) -> AppResult<u64> {
     let mut deleted = 0;
     loop {
         let ids: Vec<i64> = link_tests::Entity::find()
@@ -381,15 +406,17 @@ pub async fn prune<C: ConnectionTrait>(db: &C, cutoff: DateTime<Utc>) -> AppResu
         if ids.is_empty() {
             return Ok(deleted);
         }
+        let txn = begin_write(db).await?;
         // Pernas antes: o SQLite só aplica o `CASCADE` com `foreign_keys=ON`.
         link_test_legs::Entity::delete_many()
             .filter(link_test_legs::Column::TestId.is_in(ids.clone()))
-            .exec(db)
+            .exec(&txn)
             .await?;
         deleted += link_tests::Entity::delete_many()
             .filter(link_tests::Column::Id.is_in(ids))
-            .exec(db)
+            .exec(&txn)
             .await?
             .rows_affected;
+        txn.commit().await?;
     }
 }

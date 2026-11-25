@@ -12,9 +12,11 @@
 //! As funções são puras: as mesmas regras servem ao agente (que recusa) e à
 //! central (que marca o container na tela e não oferece o botão).
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::OnceLock};
 
 use serde_json::Value;
+
+use super::stacks::host_path::own_container_id;
 
 /// Label que protege um container das ações da interface.
 pub const PROTECTED_LABEL: &str = "com.netmonitor.protected";
@@ -45,14 +47,37 @@ pub fn is_protected_inspect(inspected: &Value) -> bool {
         .is_some_and(|labels| is_protected(&labels))
 }
 
-/// Container que executa este processo — o Docker usa o id curto como hostname.
+/// ID completo (64 hex) do container em que este processo roda, lido uma vez
+/// de `/proc/self/mountinfo` (funciona mesmo com `hostname:` customizado ou
+/// `network_mode: host`).
+fn cached_own_container_id() -> Option<&'static str> {
+    static OWN_ID: OnceLock<Option<String>> = OnceLock::new();
+    OWN_ID
+        .get_or_init(|| {
+            let mountinfo = std::fs::read_to_string("/proc/self/mountinfo").ok()?;
+            own_container_id(&mountinfo).map(|id| id.to_ascii_lowercase())
+        })
+        .as_deref()
+}
+
+/// Container que executa este processo — prefere o ID completo de
+/// `/proc/self/mountinfo` (cached) e cai no `HOSTNAME` (id curto do Docker).
 #[must_use]
 pub fn is_current_container(id: &str) -> bool {
+    let lower = id.trim().to_ascii_lowercase();
+    if lower.is_empty() {
+        return false;
+    }
+    if let Some(own_id) = cached_own_container_id() {
+        if lower == own_id || (lower.len() >= 12 && own_id.starts_with(&lower)) {
+            return true;
+        }
+    }
     std::env::var("HOSTNAME")
         .ok()
         .map(|hostname| hostname.trim().to_ascii_lowercase())
         .filter(|hostname| hostname.len() >= 12)
-        .is_some_and(|hostname| id.to_ascii_lowercase().starts_with(&hostname))
+        .is_some_and(|hostname| lower.starts_with(&hostname))
 }
 
 #[cfg(test)]

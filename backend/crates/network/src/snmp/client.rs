@@ -3,7 +3,7 @@ use std::{
     net::IpAddr,
     str::FromStr,
     sync::{Arc, Mutex, OnceLock},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use async_snmp::{
@@ -150,6 +150,7 @@ pub enum SnmpError {
 pub struct SnmpClient {
     config: SnmpConfig,
     client: OnceCell<Client>,
+    compatible_client: OnceCell<Client>,
 }
 
 impl SnmpClient {
@@ -158,6 +159,7 @@ impl SnmpClient {
         Self {
             config,
             client: OnceCell::new(),
+            compatible_client: OnceCell::new(),
         }
     }
 
@@ -184,6 +186,10 @@ impl SnmpClient {
 
     pub async fn walk(&self, base_oid: &str) -> Result<Vec<SnmpWalkEntry>, SnmpError> {
         let oid = parse_oid(base_oid)?;
+        let bulk_key = bulk_cache_key(&self.config.host, self.config.port);
+        if self.config.version != SnmpVersion::V1 && bulk_known_broken(&bulk_key) {
+            return Ok(walk_entries(self.compatible_walk(oid).await?));
+        }
         let client = self.client().await?;
         let primary = match client.walk(oid.clone()) {
             Ok(stream) => stream.try_collect::<Vec<_>>().await,
@@ -200,7 +206,27 @@ impl SnmpClient {
                 self.compatible_walk(oid).await?
             }
             Ok(bindings) => bindings,
-            Err(primary_error) if self.config.version != SnmpVersion::V1 => {
+            // GETBULK descartado pelo equipamento chega aqui como Timeout sem
+            // nenhum binding: o GETNEXT é a única forma de coletá-lo. Se ele
+            // responder, o host fica memorizado como "sem GETBULK" para os
+            // próximos walks não pagarem o timeout de novo.
+            Err(primary_error)
+                if self.config.version != SnmpVersion::V1
+                    && matches!(primary_error.as_ref(), AsyncSnmpError::Timeout { .. }) =>
+            {
+                tracing::warn!(
+                    target = %self.config.host,
+                    oid = base_oid,
+                    "SNMP GETBULK sem resposta; repetindo walk com GETNEXT compatível"
+                );
+                let bindings = self.compatible_walk(oid).await?;
+                mark_bulk_broken(&bulk_key);
+                bindings
+            }
+            Err(primary_error)
+                if self.config.version != SnmpVersion::V1
+                    && !matches!(primary_error.as_ref(), AsyncSnmpError::Auth { .. }) =>
+            {
                 tracing::warn!(
                     target = %self.config.host,
                     oid = base_oid,
@@ -212,15 +238,7 @@ impl SnmpClient {
             Err(error) => return Err(map_error(error)),
         };
 
-        Ok(bindings
-            .into_iter()
-            .filter_map(|var_bind| {
-                map_value(var_bind.value).map(|value| SnmpWalkEntry {
-                    oid: var_bind.oid.to_string(),
-                    value,
-                })
-            })
-            .collect())
+        Ok(walk_entries(bindings))
     }
 
     async fn client(&self) -> Result<&Client, SnmpError> {
@@ -231,7 +249,10 @@ impl SnmpClient {
 
     async fn compatible_walk(&self, oid: Oid) -> Result<Vec<async_snmp::VarBind>, SnmpError> {
         let compatible = self
-            .build_client(WalkMode::GetNext, OidOrdering::AllowNonIncreasing)
+            .compatible_client
+            .get_or_try_init(|| {
+                self.build_client(WalkMode::GetNext, OidOrdering::AllowNonIncreasing)
+            })
             .await?;
         compatible
             .walk_getnext(oid)
@@ -265,6 +286,65 @@ impl SnmpClient {
         let transport = shared_transport(target.ip()).await?;
         builder.build_with(transport).await.map_err(map_error)
     }
+}
+
+fn walk_entries(bindings: Vec<async_snmp::VarBind>) -> Vec<SnmpWalkEntry> {
+    bindings
+        .into_iter()
+        .filter_map(|var_bind| {
+            map_value(var_bind.value).map(|value| SnmpWalkEntry {
+                oid: var_bind.oid.to_string(),
+                value,
+            })
+        })
+        .collect()
+}
+
+/// Hosts cujo GETBULK não responde (mas o GETNEXT sim), com o instante da
+/// constatação. Limitado e com validade: o firmware pode ser atualizado.
+static BULK_BROKEN: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+const BULK_BROKEN_MAX: usize = 1_024;
+const BULK_BROKEN_TTL: Duration = Duration::from_secs(60 * 60);
+
+fn bulk_cache_key(host: &str, port: u16) -> String {
+    format!("{host}:{port}")
+}
+
+fn bulk_known_broken(key: &str) -> bool {
+    let Some(cache) = BULK_BROKEN.get() else {
+        return false;
+    };
+    let Ok(mut guard) = cache.lock() else {
+        return false;
+    };
+    match guard.get(key) {
+        Some(since) if since.elapsed() < BULK_BROKEN_TTL => true,
+        Some(_) => {
+            guard.remove(key);
+            false
+        }
+        None => false,
+    }
+}
+
+fn mark_bulk_broken(key: &str) {
+    let cache = BULK_BROKEN.get_or_init(|| Mutex::new(HashMap::new()));
+    let Ok(mut guard) = cache.lock() else {
+        return;
+    };
+    if guard.len() >= BULK_BROKEN_MAX && !guard.contains_key(key) {
+        guard.retain(|_, since| since.elapsed() < BULK_BROKEN_TTL);
+        if guard.len() >= BULK_BROKEN_MAX {
+            if let Some(oldest) = guard
+                .iter()
+                .min_by_key(|(_, since)| **since)
+                .map(|(host, _)| host.clone())
+            {
+                guard.remove(&oldest);
+            }
+        }
+    }
+    guard.insert(key.to_string(), Instant::now());
 }
 
 fn auth(config: &SnmpConfig) -> Result<Auth, SnmpError> {
@@ -304,6 +384,8 @@ fn auth(config: &SnmpConfig) -> Result<Auth, SnmpError> {
     }
 }
 
+const MASTER_KEYS_CACHE_MAX: usize = 512;
+
 fn master_keys(
     config: &SnmpConfig,
     auth_protocol: AuthProtocol,
@@ -320,13 +402,16 @@ fn master_keys(
     hasher.update(config.priv_key.as_deref().unwrap_or_default());
     let cache_key: [u8; 32] = hasher.finalize().into();
     let cache = MASTER_KEYS.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut cache = cache
-        .lock()
-        .map_err(|_| SnmpError::InvalidConfig("cache de chaves SNMP indisponível".to_string()))?;
-    if let Some(keys) = cache.get(&cache_key) {
-        return Ok(keys.clone());
+    {
+        let guard = cache.lock().map_err(|_| {
+            SnmpError::InvalidConfig("cache de chaves SNMP indisponível".to_string())
+        })?;
+        if let Some(keys) = guard.get(&cache_key) {
+            return Ok(keys.clone());
+        }
     }
 
+    // Deriva chaves (1 MB PBKDF) fora do lock para não serializar outros threads.
     let mut keys = MasterKeys::new(auth_protocol, auth_key.as_bytes())
         .map_err(|error| SnmpError::InvalidConfig(error.to_string()))?;
     if let Some(protocol) = priv_protocol {
@@ -340,7 +425,13 @@ fn master_keys(
                 .map_err(|error| SnmpError::InvalidConfig(error.to_string()))?
         };
     }
-    cache.insert(cache_key, keys.clone());
+    let mut guard = cache
+        .lock()
+        .map_err(|_| SnmpError::InvalidConfig("cache de chaves SNMP indisponível".to_string()))?;
+    if guard.len() >= MASTER_KEYS_CACHE_MAX {
+        guard.clear();
+    }
+    guard.insert(cache_key, keys.clone());
     Ok(keys)
 }
 
@@ -554,6 +645,20 @@ mod tests {
         ) -> BoxFuture<'a, HandlerResult<GetNextResult>> {
             Box::pin(async { Ok(GetNextResult::EndOfMibView) })
         }
+    }
+
+    #[test]
+    fn memoriza_host_sem_getbulk_com_limite() {
+        let key = bulk_cache_key("192.0.2.77", 1161);
+        assert!(!bulk_known_broken(&key));
+        mark_bulk_broken(&key);
+        assert!(bulk_known_broken(&key));
+        assert!(!bulk_known_broken(&bulk_cache_key("192.0.2.77", 161)));
+        for index in 0..(BULK_BROKEN_MAX + 10) {
+            mark_bulk_broken(&bulk_cache_key("198.51.100.1", index as u16));
+        }
+        let len = BULK_BROKEN.get().unwrap().lock().unwrap().len();
+        assert!(len <= BULK_BROKEN_MAX);
     }
 
     #[test]

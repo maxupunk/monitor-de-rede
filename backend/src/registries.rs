@@ -229,9 +229,6 @@ impl network::CentralServices for NetworkCentral {
         if !settings.enabled {
             return Ok(None);
         }
-        let driver = drivers::connect(&settings)
-            .await
-            .map_err(|error| error.to_string())?;
         let messages = vec![
             AiMessage {
                 role: "system".into(),
@@ -247,6 +244,9 @@ impl network::CentralServices for NetworkCentral {
             },
         ];
         let work = async {
+            let driver = drivers::connect(&settings)
+                .await
+                .map_err(|error| error.to_string())?;
             let mut stream = driver
                 .chat_stream(
                     &messages,
@@ -534,14 +534,17 @@ impl assistant::CentralServices for AssistantCentral {
     async fn device_auto_accepted(
         &self,
         db: &DatabaseConnection,
+        user_id: i64,
         conversation_key: &str,
         device_id: i64,
     ) -> bool {
-        auto_accept::active(db, conversation_key, device_id)
-            .await
-            .ok()
-            .flatten()
-            .is_some()
+        match auto_accept::active_for_user(db, conversation_key, device_id, user_id).await {
+            Ok(active) => active,
+            Err(error) => {
+                tracing::warn!(%error, user_id, device_id, "falha ao verificar modo automático do dispositivo");
+                false
+            }
+        }
     }
 
     async fn container_names(&self, ctx: &AppContext) -> Vec<String> {

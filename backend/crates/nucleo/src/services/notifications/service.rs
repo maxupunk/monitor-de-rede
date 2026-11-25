@@ -62,10 +62,15 @@ impl NotificationService {
     /// já está gravado no banco quando chegamos aqui — deixar a exceção subir
     /// desfaria o trabalho útil por causa do acessório.
     pub async fn notify(&self, ctx: &AppContext, message: &NotificationMessage) {
-        for channel in &self.channels {
-            let delivered = channel.send(ctx, message).await;
+        let deliveries =
+            futures::future::join_all(self.channels.iter().map(|channel| async move {
+                let delivered = channel.send(ctx, message).await;
+                (channel.name(), delivered)
+            }))
+            .await;
+        for (channel, delivered) in deliveries {
             tracing::debug!(
-                channel = channel.name(),
+                channel,
                 delivered,
                 title = %message.title,
                 "notificação processada"

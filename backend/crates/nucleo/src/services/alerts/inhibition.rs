@@ -16,9 +16,9 @@
 //! A supressão nunca é decidida no enfileiramento: ver
 //! [`super::super::notifications::policy::INHIBITION_GRACE_SECONDS`].
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QuerySelect};
 
 use crate::{
     models::{_entities::alert_events as alert_events_entity, alert_events, devices},
@@ -105,6 +105,115 @@ pub async fn explaining_ancestor<C: ConnectionTrait>(
         .collect();
 
     Ok(chain.into_iter().find(|id| in_alarm.contains(id)))
+}
+
+/// Resolve em lote o ancestral mais próximo em alerta para vários dispositivos,
+/// evitando N+1 durante tempestades em cascata no despacho do outbox.
+///
+/// # Errors
+///
+/// Propaga erro do banco.
+pub async fn explaining_ancestors<C: ConnectionTrait>(
+    db: &C,
+    device_ids: &[i64],
+) -> AppResult<HashMap<i64, i64>> {
+    let unique_ids: Vec<i64> = {
+        let mut seen = HashSet::with_capacity(device_ids.len());
+        device_ids
+            .iter()
+            .copied()
+            .filter(|id| seen.insert(*id))
+            .collect()
+    };
+    if unique_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    // Sobe a hierarquia por ondas em lote (no máximo `MAX_DEPTH` rodadas).
+    let mut parent_by_device: HashMap<i64, Option<i64>> = HashMap::new();
+    let mut frontier = unique_ids.clone();
+    for _ in 0..MAX_DEPTH {
+        if frontier.is_empty() {
+            break;
+        }
+        let mut next_frontier = Vec::new();
+        for chunk in frontier.chunks(400) {
+            let rows: Vec<(i64, Option<i64>)> = devices::Entity::find()
+                .select_only()
+                .column(devices::Column::Id)
+                .column(devices::Column::ParentId)
+                .filter(devices::Column::Id.is_in(chunk.to_vec()))
+                .into_tuple()
+                .all(db)
+                .await?;
+            for (id, parent_id) in rows {
+                parent_by_device.insert(id, parent_id);
+                if let Some(parent) = parent_id {
+                    if !parent_by_device.contains_key(&parent) {
+                        next_frontier.push(parent);
+                    }
+                }
+            }
+        }
+        next_frontier.sort_unstable();
+        next_frontier.dedup();
+        frontier = next_frontier;
+    }
+
+    let mut chains: HashMap<i64, Vec<i64>> = HashMap::with_capacity(unique_ids.len());
+    let mut all_ancestors: HashSet<i64> = HashSet::new();
+    for device_id in unique_ids {
+        let mut chain = Vec::new();
+        let mut visited = HashSet::from([device_id]);
+        let mut current = device_id;
+        while chain.len() < MAX_DEPTH {
+            let Some(Some(parent)) = parent_by_device.get(&current).copied() else {
+                break;
+            };
+            if !visited.insert(parent) {
+                tracing::warn!(
+                    device_id,
+                    parent,
+                    "hierarquia de dispositivos em ciclo; inibição interrompida"
+                );
+                break;
+            }
+            chain.push(parent);
+            all_ancestors.insert(parent);
+            current = parent;
+        }
+        if !chain.is_empty() {
+            chains.insert(device_id, chain);
+        }
+    }
+
+    if all_ancestors.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let ancestor_list: Vec<i64> = all_ancestors.into_iter().collect();
+    let mut in_alarm: HashSet<i64> = HashSet::new();
+    for chunk in ancestor_list.chunks(400) {
+        let rows: Vec<Option<i64>> = alert_events::Entity::find()
+            .select_only()
+            .column(alert_events_entity::Column::DeviceId)
+            .filter(alert_events_entity::Column::DeviceId.is_in(chunk.to_vec()))
+            .filter(alert_events_entity::Column::Status.is_in(EXPLAINING))
+            .into_tuple()
+            .all(db)
+            .await?;
+        for device_id in rows.into_iter().flatten() {
+            in_alarm.insert(device_id);
+        }
+    }
+
+    let mut result = HashMap::new();
+    for (device_id, chain) in chains {
+        if let Some(ancestor) = chain.into_iter().find(|id| in_alarm.contains(id)) {
+            result.insert(device_id, ancestor);
+        }
+    }
+    Ok(result)
 }
 
 #[cfg(test)]

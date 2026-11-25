@@ -127,7 +127,7 @@ pub struct DatabaseBackupResponse {
     pub status: String,
     pub error: Option<String>,
     pub warnings: Vec<String>,
-    /// `manual` | `scheduled`.
+    /// `manual` | `scheduled` | `pre_deploy`.
     pub trigger: String,
     pub started_at: String,
     pub finished_at: Option<String>,

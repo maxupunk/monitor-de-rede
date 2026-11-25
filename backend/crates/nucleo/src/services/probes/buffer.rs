@@ -140,11 +140,19 @@ impl ProbeBuffer {
     /// preserva o resultado mais recente de cada monitor (deduplicação por
     /// `monitor_id`) antes de descartar os itens mais antigos.
     pub async fn save_result_offline(&self, item: BufferedResult) {
+        self.save_results_offline(vec![item]).await;
+    }
+
+    /// Acrescenta um lote de resultados ao buffer em uma única leitura/gravação.
+    pub async fn save_results_offline(&self, items: Vec<BufferedResult>) {
+        if items.is_empty() {
+            return;
+        }
         let mut pending = self.pending_results().await;
-        pending.push(item);
+        pending.extend(items);
         Self::apply_max_results(&mut pending, self.max_results);
-        Self::apply_max_bytes(&mut pending, self.max_bytes);
-        self.write_atomic(&self.file_path, &pending, "buffer do probe")
+        let bytes = Self::apply_max_bytes(&mut pending, self.max_bytes);
+        self.write_atomic_bytes(&self.file_path, bytes, "buffer do probe")
             .await;
     }
 
@@ -192,69 +200,73 @@ impl ProbeBuffer {
         }
     }
 
-    /// Reduz o buffer quando o JSON serializado extrapola `max_bytes`.
+    /// Reduz o buffer quando o JSON serializado extrapola `max_bytes` e
+    /// devolve os bytes do arquivo.
     ///
     /// A estratégia de retenção prioriza o monitoramento: primeiro deduplica
     /// por `monitor_id`, mantendo apenas o resultado mais recente de cada um.
-    /// Se ainda restar excesso, descarta os itens mais antigos. Isso evita que
-    /// um único monitor barulhento monopolize o buffer enquanto outros ficam
-    /// sem histórico para reenviar.
-    fn apply_max_bytes(pending: &mut Vec<BufferedResult>, max_bytes: usize) {
-        if pending.is_empty() {
-            return;
-        }
-        let serialized = || match serde_json::to_vec_pretty(pending) {
-            Ok(bytes) => bytes.len(),
-            Err(_) => usize::MAX,
-        };
-        if serialized() <= max_bytes {
-            return;
-        }
-
-        // Deduplica pelo monitor mais recente, preservando a ordem relativa dos
-        // últimos resultados de cada monitor.
-        let mut seen = std::collections::HashMap::new();
-        for (index, item) in pending.iter().enumerate() {
-            seen.insert(item.monitor_id, index);
-        }
-        let mut keep_indices: Vec<usize> = seen.into_values().collect();
-        keep_indices.sort_unstable();
-        let mut deduplicated: Vec<BufferedResult> = keep_indices
+    /// Se ainda restar excesso, descarta os itens mais antigos (o mais recente
+    /// sempre fica). Isso evita que um único monitor barulhento monopolize o
+    /// buffer enquanto outros ficam sem histórico para reenviar.
+    ///
+    /// Cada item é serializado **uma vez só**: o tamanho do array sai da soma
+    /// dos itens, e o arquivo é montado com os mesmos bytes.
+    fn apply_max_bytes(pending: &mut Vec<BufferedResult>, max_bytes: usize) -> Vec<u8> {
+        let mut entries: Vec<(BufferedResult, Vec<u8>)> = std::mem::take(pending)
             .into_iter()
-            .map(|index| pending[index].clone())
+            .filter_map(|item| match serde_json::to_vec_pretty(&item) {
+                Ok(bytes) => Some((item, bytes)),
+                Err(error) => {
+                    tracing::warn!(%error, "resultado do probe não pôde ser serializado");
+                    None
+                }
+            })
             .collect();
 
-        if deduplicated.len() > 1 && Self::serialized_len(&deduplicated) > max_bytes {
-            let mut low = 0;
-            let mut high = deduplicated.len();
-            while low < high {
-                let mid = (low + high) / 2;
-                let trimmed = &deduplicated[mid..];
-                if Self::serialized_len(trimmed) <= max_bytes {
-                    high = mid;
-                } else {
-                    low = mid + 1;
-                }
+        if Self::array_len(&entries) > max_bytes {
+            // Deduplica pelo monitor mais recente, preservando a ordem relativa
+            // dos últimos resultados de cada monitor.
+            let mut last_index = std::collections::HashMap::new();
+            for (index, (item, _)) in entries.iter().enumerate() {
+                last_index.insert(item.monitor_id, index);
             }
-            deduplicated.drain(0..low);
+            let mut index = 0;
+            entries.retain(|(item, _)| {
+                let keep = last_index.get(&item.monitor_id) == Some(&index);
+                index += 1;
+                keep
+            });
+
+            let mut total = Self::array_len(&entries);
+            let mut drop = 0;
+            while entries.len() - drop > 1 && total > max_bytes {
+                // Sai o item e a vírgula que o separava do seguinte.
+                total -= entries[drop].1.len() + 1;
+                drop += 1;
+            }
+            entries.drain(0..drop);
         }
-        *pending = deduplicated;
+
+        let mut bytes = Vec::with_capacity(Self::array_len(&entries));
+        bytes.push(b'[');
+        for (position, (_, encoded)) in entries.iter().enumerate() {
+            if position > 0 {
+                bytes.push(b',');
+            }
+            bytes.extend_from_slice(encoded);
+        }
+        bytes.push(b']');
+        *pending = entries.into_iter().map(|(item, _)| item).collect();
+        bytes
     }
 
-    fn serialized_len(items: &[BufferedResult]) -> usize {
-        serde_json::to_vec_pretty(items)
-            .map(|bytes| bytes.len())
-            .unwrap_or(usize::MAX)
+    /// Tamanho do array JSON montado a partir dos itens já serializados.
+    fn array_len(entries: &[(BufferedResult, Vec<u8>)]) -> usize {
+        2 + entries.iter().map(|(_, bytes)| bytes.len()).sum::<usize>()
+            + entries.len().saturating_sub(1)
     }
 
     async fn write_atomic<T: Serialize>(&self, path: &Path, value: &T, context: &str) {
-        if let Some(parent) = path.parent() {
-            if let Err(error) = tokio::fs::create_dir_all(parent).await {
-                tracing::warn!(%error, "não foi possível criar o diretório do {context}");
-                return;
-            }
-        }
-
         let bytes = match serde_json::to_vec_pretty(value) {
             Ok(bytes) => bytes,
             Err(error) => {
@@ -262,6 +274,16 @@ impl ProbeBuffer {
                 return;
             }
         };
+        self.write_atomic_bytes(path, bytes, context).await;
+    }
+
+    async fn write_atomic_bytes(&self, path: &Path, bytes: Vec<u8>, context: &str) {
+        if let Some(parent) = path.parent() {
+            if let Err(error) = tokio::fs::create_dir_all(parent).await {
+                tracing::warn!(%error, "não foi possível criar o diretório do {context}");
+                return;
+            }
+        }
 
         let tmp_path = Self::tmp_path(path);
         // Limpa tmp órfão de um crash anterior para não deixar lixo acumulado.
@@ -340,6 +362,25 @@ mod tests {
             result: json!({ "status": "up" }),
             timestamp: "2026-08-11T10:00:00Z".into(),
         }
+    }
+
+    #[test]
+    fn o_tamanho_calculado_e_o_do_arquivo_gravado() {
+        let mut pending = vec![item("a"), item("b"), item("c")];
+        let bytes = ProbeBuffer::apply_max_bytes(&mut pending, usize::MAX);
+        let parsed: Vec<BufferedResult> = serde_json::from_slice(&bytes).expect("json válido");
+        assert_eq!(parsed.len(), 3);
+
+        // Teto exato do array de 2 itens: o mais antigo sai, nada além dele.
+        let mut deduped = vec![item("a"), item("b")];
+        deduped[1].monitor_id = 9;
+        let teto = ProbeBuffer::apply_max_bytes(&mut deduped.clone(), usize::MAX).len();
+        let mut tres = vec![item("x"), deduped[0].clone(), deduped[1].clone()];
+        tres[0].monitor_id = 7;
+        let bytes = ProbeBuffer::apply_max_bytes(&mut tres, teto);
+        assert_eq!(bytes.len(), teto);
+        assert_eq!(tres.len(), 2);
+        assert_eq!(tres[0].task_id, "a");
     }
 
     fn tmp_path_for(path: &Path) -> PathBuf {

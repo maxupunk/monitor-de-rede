@@ -240,17 +240,18 @@ impl HealthSource for HostSourceLinux {
                         let saida =
                             parsers::rate_per_second(antes.tx_bytes, atual.tx_bytes, segundos);
                         match (entrada, saida) {
-                            (Some(entrada), Some(saida)) => {
+                            (Some(entrada_bytes_s), Some(saida_bytes_s)) => {
+                                // `inBps`/`outBps` são bits por segundo (mesma unidade do SNMP).
                                 reading = reading
                                     .measure(Measure::new(
                                         series::IN_BPS,
-                                        entrada,
+                                        entrada_bytes_s * 8.0,
                                         "bps",
                                         MeasureSource::Host,
                                     ))
                                     .measure(Measure::new(
                                         series::OUT_BPS,
-                                        saida,
+                                        saida_bytes_s * 8.0,
                                         "bps",
                                         MeasureSource::Host,
                                     ));
@@ -669,5 +670,35 @@ mod tests {
         let sem = fixtures(&[("self/status", "Name: backend\n")]);
         let reading = ProcessSourceLinux::new(ProcRoot::new(sem.path())).read();
         assert!(faltou(&reading, series::PROCESS_MEMORY_BYTES));
+    }
+
+    #[test]
+    fn trafego_do_host_converte_bytes_por_segundo_para_bits_por_segundo() {
+        use std::sync::atomic::{AtomicI64, Ordering};
+        static CLOCK_SECS: AtomicI64 = AtomicI64::new(1_700_000_000);
+        fn fake_now() -> chrono::DateTime<chrono::Utc> {
+            chrono::DateTime::from_timestamp(CLOCK_SECS.load(Ordering::Relaxed), 0).unwrap()
+        }
+
+        let dev_a = "Inter-|\n face |\n  eth0: 1000 0 0 0 0 0 0 0 2000 0 0 0 0 0 0 0\n";
+        let dev_b = "Inter-|\n face |\n  eth0: 2000 0 0 0 0 0 0 0 4000 0 0 0 0 0 0 0\n";
+        let fx = fixtures(&[("net/dev", dev_a)]);
+        CLOCK_SECS.store(1_700_000_000, Ordering::Relaxed);
+        let fonte = HostSourceLinux::with_clock(ProcRoot::new(fx.path()), fake_now);
+        let _ = fonte.read();
+
+        std::fs::write(fx.path().join("net/dev"), dev_b).unwrap();
+        CLOCK_SECS.store(1_700_000_010, Ordering::Relaxed);
+        let reading = fonte.read();
+
+        // 1000 bytes / 10s = 100 B/s = 800 bps; 2000 bytes / 10s = 200 B/s = 1600 bps.
+        let in_bps = achou(&reading, series::IN_BPS).expect("inBps");
+        let out_bps = achou(&reading, series::OUT_BPS).expect("outBps");
+        assert!((in_bps.value - 800.0).abs() < 1e-6, "veio {}", in_bps.value);
+        assert!(
+            (out_bps.value - 1600.0).abs() < 1e-6,
+            "veio {}",
+            out_bps.value
+        );
     }
 }

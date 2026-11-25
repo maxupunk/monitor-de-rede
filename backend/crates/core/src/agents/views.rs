@@ -16,7 +16,7 @@ pub struct AgentCapabilityView {
 /// O que a última conexão do agente anunciou (guardado em
 /// `probes.configuration`).
 #[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
+#[serde(default, rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct AgentHostInfo {
     pub hostname: Option<String>,

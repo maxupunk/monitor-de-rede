@@ -5,7 +5,7 @@
 //! dela (ADR 014); os demais, de agentes remotos (ADR 011). O handler não
 //! distingue: recebe o [`DockerHost`] já resolvido e usa os mesmos serviços.
 
-use async_compression::tokio::bufread::GzipEncoder;
+use async_compression::{tokio::bufread::GzipEncoder, Level};
 use axum::{
     body::Body,
     extract::{FromRequestParts, RawPathParams},
@@ -290,18 +290,10 @@ async fn update_container(
     Path(path): Path<IdPath>,
 ) -> AppResult<Response> {
     let id = docker::validate_identifier(&path.id, "Container")?;
-    audit(
-        &ctx,
-        &headers,
-        AuditAction::Update,
-        ResourceType::DockerContainer,
-        &label(&host, &id),
-        "Atualização de imagem e recriação solicitadas",
-    )
-    .await;
+    let audited = label(&host, &id);
     let maintenance = host.maintenance.clone();
     let target = id.clone();
-    let accepted = operations::start(
+    let accepted = operations::try_start(
         &ctx,
         Operation {
             host: host.key,
@@ -309,7 +301,17 @@ async fn update_container(
             target: id,
         },
         move |progress| async move { maintenance.update_container(&target, progress).await },
-    );
+    )?;
+    // Só depois do aceite: um `409` (já há operação) não é pedido feito.
+    audit(
+        &ctx,
+        &headers,
+        AuditAction::Update,
+        ResourceType::DockerContainer,
+        &audited,
+        "Atualização de imagem e recriação solicitadas",
+    )
+    .await;
     Ok((StatusCode::ACCEPTED, Json(accepted)).into_response())
 }
 
@@ -321,18 +323,10 @@ async fn pull_image(
     Json(input): Json<DockerPullInput>,
 ) -> AppResult<Response> {
     let image = docker::validate_identifier(&input.image, "Imagem")?;
-    audit(
-        &ctx,
-        &headers,
-        AuditAction::Create,
-        ResourceType::DockerImage,
-        &label(&host, &image),
-        "Pull de imagem solicitado",
-    )
-    .await;
+    let audited = label(&host, &image);
     let maintenance = host.maintenance.clone();
     let target = image.clone();
-    let accepted = operations::start(
+    let accepted = operations::try_start(
         &ctx,
         Operation {
             host: host.key,
@@ -340,7 +334,16 @@ async fn pull_image(
             target: image,
         },
         move |progress| async move { maintenance.pull_image(&target, progress).await },
-    );
+    )?;
+    audit(
+        &ctx,
+        &headers,
+        AuditAction::Create,
+        ResourceType::DockerImage,
+        &audited,
+        "Pull de imagem solicitado",
+    )
+    .await;
     Ok((StatusCode::ACCEPTED, Json(accepted)).into_response())
 }
 
@@ -374,17 +377,10 @@ async fn compose_action(
         service: service.clone(),
     };
     let target = service.map_or_else(|| project.clone(), |service| format!("{project}/{service}"));
-    audit(
-        &ctx,
-        &headers,
-        AuditAction::Update,
-        ResourceType::DockerContainer,
-        &label(&host, &target),
-        &format!("compose {} solicitado", request.action.label()),
-    )
-    .await;
+    let audited = label(&host, &target);
+    let summary = format!("compose {} solicitado", request.action.label());
     let maintenance = host.maintenance.clone();
-    let accepted = operations::start(
+    let accepted = operations::try_start(
         &ctx,
         Operation {
             host: host.key,
@@ -392,7 +388,16 @@ async fn compose_action(
             target,
         },
         move |progress| async move { maintenance.compose(&request, progress).await },
-    );
+    )?;
+    audit(
+        &ctx,
+        &headers,
+        AuditAction::Update,
+        ResourceType::DockerContainer,
+        &audited,
+        &summary,
+    )
+    .await;
     Ok((StatusCode::ACCEPTED, Json(accepted)).into_response())
 }
 
@@ -448,8 +453,11 @@ async fn export_volume(
     )
     .await;
     let file_name = archive.file_name;
-    let gzip = GzipEncoder::new(BufReader::new(archive.reader));
-    let body = Body::from_stream(tokio_util::io::ReaderStream::new(gzip));
+    let gzip = GzipEncoder::with_quality(
+        BufReader::with_capacity(256 * 1024, archive.reader),
+        Level::Fastest,
+    );
+    let body = Body::from_stream(tokio_util::io::ReaderStream::with_capacity(gzip, 64 * 1024));
     Ok((
         StatusCode::OK,
         [

@@ -10,7 +10,7 @@ use loco_rs::app::AppContext;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 
 use super::{
-    backups::{self, Trigger, BACKUP_SCOPE, STATUS_FAILED},
+    backups::{self, Trigger, STATUS_FAILED},
     jobs::{DatabaseJobKind, Job},
     notify::{self, FailureKind},
     service,
@@ -18,7 +18,7 @@ use super::{
 use netmonitor_core::{
     events::EventBus,
     models::database_connections,
-    shared::{backup_schedule::BackupPolicy, errors::AppResult, run_guard::RunGuard},
+    shared::{backup_schedule::BackupPolicy, errors::AppResult},
 };
 
 const TICK: Duration = Duration::from_secs(60);
@@ -45,6 +45,17 @@ pub fn spawn(ctx: &AppContext) {
     }
     let ctx = ctx.clone();
     tokio::spawn(async move {
+        match backups::recover_stuck_running(&ctx.db).await {
+            Ok(0) => {}
+            Ok(count) => tracing::warn!(
+                count,
+                "backups de banco presos em 'running' marcados como falhos no boot"
+            ),
+            Err(error) => tracing::warn!(
+                %error,
+                "falha ao reconciliar backups de banco presos em 'running'"
+            ),
+        }
         tokio::time::sleep(FIRST_TICK_DELAY).await;
         loop {
             if let Err(error) = run_due(&ctx, Utc::now()).await {
@@ -71,7 +82,7 @@ pub async fn run_due(ctx: &AppContext, now: DateTime<Utc>) -> AppResult<usize> {
     for row in rows.into_iter().filter(|row| policy(row).is_due(now)) {
         let id = row.id;
         let name = row.name.clone();
-        let Ok(_guard) = RunGuard::acquire(BACKUP_SCOPE, id, "ocupado") else {
+        let Ok(_guard) = backups::acquire_exclusive(DatabaseJobKind::Backup, id) else {
             continue;
         };
         let row_for_error = row.clone();

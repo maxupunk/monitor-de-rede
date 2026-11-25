@@ -6,6 +6,12 @@
 //! inteiro é conferido contra o digest antes de virar blob (RS-05). O
 //! deslocamento fica no banco, então o envio sobrevive a uma reinicialização.
 
+use std::{
+    collections::HashMap,
+    io::SeekFrom,
+    sync::{Arc, Mutex as StdMutex, OnceLock},
+};
+
 use axum::{
     body::Body,
     http::{header, HeaderMap, StatusCode},
@@ -15,7 +21,7 @@ use chrono::Utc;
 use futures::StreamExt;
 use loco_rs::app::AppContext;
 use sea_orm::{ActiveModelTrait, EntityTrait, Set};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 use uuid::Uuid;
 
 use netmonitor_core::models::registry_uploads;
@@ -28,6 +34,50 @@ use crate::{
     storage::{self, Staged},
     tokens::Action,
 };
+
+/// Serializa PATCH/PUT/DELETE concorrentes sobre o mesmo envio em andamento.
+fn upload_locks() -> &'static StdMutex<HashMap<Uuid, Arc<tokio::sync::Mutex<()>>>> {
+    static LOCKS: OnceLock<StdMutex<HashMap<Uuid, Arc<tokio::sync::Mutex<()>>>>> = OnceLock::new();
+    LOCKS.get_or_init(|| StdMutex::new(HashMap::new()))
+}
+
+/// A vez de um envio. Ao sair (por qualquer caminho, inclusive erro ou
+/// sessão inexistente), tira a entrada do mapa se ninguém mais a espera: o
+/// mapa só guarda envios com requisição em andamento.
+struct UploadTurn {
+    id: Uuid,
+    guard: Option<tokio::sync::OwnedMutexGuard<()>>,
+}
+
+impl Drop for UploadTurn {
+    fn drop(&mut self) {
+        let mut map = upload_locks()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        drop(self.guard.take());
+        if map
+            .get(&self.id)
+            .is_some_and(|lock| Arc::strong_count(lock) == 1)
+        {
+            map.remove(&self.id);
+        }
+    }
+}
+
+async fn upload_turn(id: Uuid) -> UploadTurn {
+    let lock = {
+        let mut map = upload_locks()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        map.entry(id)
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone()
+    };
+    UploadTurn {
+        id,
+        guard: Some(lock.lock_owned().await),
+    }
+}
 
 fn location(name: &str, id: &Uuid) -> String {
     format!("/v2/{name}/blobs/uploads/{}", id.simple())
@@ -70,66 +120,125 @@ fn created(name: &str, digest: &Digest) -> Response {
     response
 }
 
-/// Grava o corpo no fim do arquivo; devolve quantos bytes entraram.
-async fn append(path: &std::path::Path, body: Body, room: u64) -> OciResult<u64> {
+async fn update_hasher(mut hasher: Hasher, chunk: bytes::Bytes) -> OciResult<Hasher> {
+    if chunk.len() < 16 * 1024 {
+        hasher.update(&chunk);
+        return Ok(hasher);
+    }
+    tokio::task::spawn_blocking(move || {
+        hasher.update(&chunk);
+        hasher
+    })
+    .await
+    .map_err(OciError::internal)
+}
+
+/// Grava o corpo a partir de `expected_offset`; em falha no meio, trunca de
+/// volta para `expected_offset` para não corromper o envio. Com `hash = true`,
+/// calcula o SHA-256 em uma passada só (envio monolítico).
+async fn write_at(
+    path: &std::path::Path,
+    expected_offset: u64,
+    body: Body,
+    room: u64,
+    hash: bool,
+) -> OciResult<(u64, Option<Digest>)> {
     let mut file = tokio::fs::OpenOptions::new()
         .create(true)
-        .append(true)
+        .write(true)
+        .truncate(false)
         .open(path)
         .await
         .map_err(OciError::internal)?;
+    file.set_len(expected_offset)
+        .await
+        .map_err(OciError::internal)?;
+    file.seek(SeekFrom::Start(expected_offset))
+        .await
+        .map_err(OciError::internal)?;
     let mut written: u64 = 0;
+    let mut hasher = hash.then(Hasher::new);
     let mut stream = body.into_data_stream();
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|_| {
-            OciError::new(
-                StatusCode::BAD_REQUEST,
-                Code::BlobUploadInvalid,
-                "envio interrompido",
-            )
-        })?;
-        written += chunk.len() as u64;
+        let chunk = match chunk {
+            Ok(chunk) => chunk,
+            Err(_) => {
+                let _ = file.set_len(expected_offset).await;
+                return Err(OciError::new(
+                    StatusCode::BAD_REQUEST,
+                    Code::BlobUploadInvalid,
+                    "envio interrompido",
+                ));
+            }
+        };
+        written = written.saturating_add(chunk.len() as u64);
         if written > room {
+            let _ = file.set_len(expected_offset).await;
             return Err(OciError::new(
                 StatusCode::INSUFFICIENT_STORAGE,
                 Code::Denied,
                 "o registry está sem espaço na cota: libere versões antigas ou aumente a cota",
             ));
         }
-        file.write_all(&chunk).await.map_err(OciError::internal)?;
+        if let Err(error) = file.write_all(&chunk).await {
+            let _ = file.set_len(expected_offset).await;
+            return Err(OciError::internal(error));
+        }
+        if let Some(current) = hasher.take() {
+            hasher = Some(update_hasher(current, chunk).await?);
+        }
     }
-    file.flush().await.map_err(OciError::internal)?;
-    Ok(written)
+    if let Err(error) = file.flush().await {
+        let _ = file.set_len(expected_offset).await;
+        return Err(OciError::internal(error));
+    }
+    Ok((written, hasher.map(Hasher::finish)))
 }
 
-/// Confere o arquivo inteiro e o torna blob do repositório.
+async fn hash_file(path: std::path::PathBuf) -> OciResult<(Digest, u64)> {
+    tokio::task::spawn_blocking(move || -> std::io::Result<(Digest, u64)> {
+        use std::io::Read as _;
+        let mut file = std::fs::File::open(&path)?;
+        let mut hasher = Hasher::new();
+        let mut buffer = vec![0_u8; 256 * 1024];
+        let mut size: u64 = 0;
+        loop {
+            let count = file.read(&mut buffer)?;
+            if count == 0 {
+                break;
+            }
+            size += count as u64;
+            hasher.update(&buffer[..count]);
+        }
+        Ok((hasher.finish(), size))
+    })
+    .await
+    .map_err(OciError::internal)?
+    .map_err(OciError::internal)
+}
+
+/// Confere o arquivo inteiro (fora do executor assíncrono) e o torna blob do
+/// repositório. Quando `verified` vem (envio monolítico), pula a releitura.
 async fn commit(
     ctx: &AppContext,
     repository_id: i64,
     path: &std::path::Path,
     expected: &Digest,
+    verified: Option<(Digest, u64)>,
 ) -> OciResult<()> {
-    let mut file = tokio::fs::File::open(path)
-        .await
-        .map_err(OciError::internal)?;
-    let mut hasher = Hasher::new();
-    let mut buffer = vec![0_u8; 256 * 1024];
-    let mut size: u64 = 0;
-    loop {
-        let count = file.read(&mut buffer).await.map_err(OciError::internal)?;
-        if count == 0 {
-            break;
-        }
-        size += count as u64;
-        hasher.update(&buffer[..count]);
-    }
-    if &hasher.finish() != expected {
+    let (actual, size) = match verified {
+        Some(pair) => pair,
+        None => hash_file(path.to_path_buf()).await?,
+    };
+    if &actual != expected {
         return Err(OciError::new(
             StatusCode::BAD_REQUEST,
             Code::DigestInvalid,
             "o conteúdo não confere com o digest",
         ));
     }
+    // Do arquivo ao vínculo, a coleta não apaga este blob.
+    let _push = storage::push_gate().read().await;
     storage::store()
         .commit(path, expected)
         .await
@@ -166,6 +275,7 @@ pub(super) async fn start(
                     .await
                     .map_err(OciError::internal)?
                 {
+                    let _push = storage::push_gate().read().await;
                     catalog::link_blob(&ctx.db, repo.id, &digest, size)
                         .await
                         .map_err(OciError::internal)?;
@@ -181,8 +291,9 @@ pub(super) async fn start(
         let mut staged = Staged::new(storage::store().as_ref())
             .await
             .map_err(OciError::internal)?;
-        append(&staged.path, body, room(ctx).await?).await?;
-        commit(ctx, repo.id, &staged.path, &digest).await?;
+        let (size, actual) = write_at(&staged.path, 0, body, room(ctx).await?, true).await?;
+        let verified = actual.map(|actual| (actual, size));
+        commit(ctx, repo.id, &staged.path, &digest, verified).await?;
         staged.keep();
         return Ok(created(name, &digest));
     }
@@ -195,16 +306,19 @@ pub(super) async fn start(
         .await
         .map_err(OciError::internal)?;
     let now = Utc::now().into();
-    registry_uploads::ActiveModel {
+    if let Err(error) = (registry_uploads::ActiveModel {
         id: Set(id.simple().to_string()),
         repository_id: Set(repo.id),
         offset: Set(0),
         created_at: Set(now),
         updated_at: Set(now),
-    }
+    })
     .insert(&ctx.db)
     .await
-    .map_err(OciError::internal)?;
+    {
+        let _ = tokio::fs::remove_file(&staged.path).await;
+        return Err(OciError::internal(error));
+    }
     Ok(accepted(name, &id, 0))
 }
 
@@ -278,31 +392,67 @@ pub(super) async fn patch(
     id: &str,
     body: Body,
 ) -> OciResult<Response> {
+    let uuid = Uuid::parse_str(id).map_err(|_| {
+        OciError::new(
+            StatusCode::NOT_FOUND,
+            Code::BlobUploadUnknown,
+            "envio desconhecido",
+        )
+    })?;
+    let _turn = upload_turn(uuid).await;
     let (upload, uuid, staged) = session(ctx, name, id).await?;
     check_range(headers, upload.offset)?;
-    let room = room(ctx)
-        .await?
-        .saturating_sub(u64::try_from(upload.offset).unwrap_or(0));
-    let written = append(&staged.path, body, room).await?;
+    let expected_offset = u64::try_from(upload.offset).unwrap_or(0);
+    let room = room(ctx).await?.saturating_sub(expected_offset);
+    let (written, _) = write_at(&staged.path, expected_offset, body, room, false).await?;
     let offset = advance(ctx, upload, written).await?;
     Ok(accepted(name, &uuid, offset))
 }
 
 pub(super) async fn finish(
     ctx: &AppContext,
+    headers: &HeaderMap,
     name: &str,
     id: &str,
     query: &str,
     body: Body,
 ) -> OciResult<Response> {
-    let (upload, _uuid, mut staged) = session(ctx, name, id).await?;
+    let uuid = Uuid::parse_str(id).map_err(|_| {
+        OciError::new(
+            StatusCode::NOT_FOUND,
+            Code::BlobUploadUnknown,
+            "envio desconhecido",
+        )
+    })?;
+    let _turn = upload_turn(uuid).await;
+    let (upload, _, mut staged) = session(ctx, name, id).await?;
+    check_range(headers, upload.offset)?;
     let digest = parse_digest(&query_value(query, "digest").unwrap_or_default())?;
-    let room = room(ctx)
-        .await?
-        .saturating_sub(u64::try_from(upload.offset).unwrap_or(0));
-    append(&staged.path, body, room).await?;
+    let expected_offset = u64::try_from(upload.offset).unwrap_or(0);
+    let room = room(ctx).await?.saturating_sub(expected_offset);
+    write_at(&staged.path, expected_offset, body, room, false).await?;
     let repository_id = upload.repository_id;
-    commit(ctx, repository_id, &staged.path, &digest).await?;
+    if let Err(error) = commit(ctx, repository_id, &staged.path, &digest, None).await {
+        if tokio::fs::try_exists(&staged.path).await.unwrap_or(true) {
+            // Restaura o tamanho ao último offset confirmado para manter o
+            // envio íntegro.
+            if let Ok(file) = tokio::fs::OpenOptions::new()
+                .write(true)
+                .open(&staged.path)
+                .await
+            {
+                let _ = file.set_len(expected_offset).await;
+            }
+        } else {
+            // O arquivo já virou blob e o vínculo falhou: o envio não tem
+            // mais o que retomar (o offset apontaria para um arquivo que não
+            // existe). O cliente recomeça; o blob órfão sai na coleta.
+            let _ = registry_uploads::Entity::delete_by_id(upload.id)
+                .exec(&ctx.db)
+                .await;
+        }
+        return Err(error);
+    }
     staged.keep();
     registry_uploads::Entity::delete_by_id(upload.id)
         .exec(&ctx.db)
@@ -319,11 +469,54 @@ pub(super) async fn status(ctx: &AppContext, name: &str, id: &str) -> OciResult<
 }
 
 pub(super) async fn cancel(ctx: &AppContext, name: &str, id: &str) -> OciResult<Response> {
-    let (upload, _uuid, staged) = session(ctx, name, id).await?;
+    let uuid = Uuid::parse_str(id).map_err(|_| {
+        OciError::new(
+            StatusCode::NOT_FOUND,
+            Code::BlobUploadUnknown,
+            "envio desconhecido",
+        )
+    })?;
+    let _turn = upload_turn(uuid).await;
+    let (upload, _, staged) = session(ctx, name, id).await?;
     let _ = tokio::fs::remove_file(&staged.path).await;
     registry_uploads::Entity::delete_by_id(upload.id)
         .exec(&ctx.db)
         .await
         .map_err(OciError::internal)?;
     Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tracked(id: &Uuid) -> bool {
+        upload_locks()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains_key(id)
+    }
+
+    #[tokio::test]
+    async fn a_vez_do_envio_sai_do_mapa_quando_ninguem_espera() {
+        let id = Uuid::new_v4();
+        let first = upload_turn(id).await;
+        assert!(tracked(&id));
+        let waiter = tokio::spawn(async move {
+            let _turn = upload_turn(id).await;
+        });
+        // O segundo pedido já pegou o mutex e espera a vez.
+        while upload_locks()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&id)
+            .is_some_and(|lock| Arc::strong_count(lock) < 3)
+        {
+            tokio::task::yield_now().await;
+        }
+        drop(first);
+        assert!(tracked(&id), "quem espera continua no mesmo mutex");
+        waiter.await.unwrap();
+        assert!(!tracked(&id), "sem ninguém esperando, a entrada sai");
+    }
 }

@@ -11,7 +11,13 @@ use chrono::{DateTime, Utc};
 use loco_rs::app::AppContext;
 
 use super::{copies, notify, plan};
-use crate::services::{shared::errors::AppResult, storage};
+use crate::services::{
+    shared::{
+        errors::{AppError, AppResult},
+        run_guard::RunGuard,
+    },
+    storage,
+};
 
 #[cfg(doc)]
 use crate::services::shared::backup_schedule::BackupPolicy;
@@ -41,6 +47,43 @@ pub fn spawn(ctx: &AppContext) {
     });
 }
 
+/// Executa o plano contra um destino já carregado, publica `backup_plan:updated`
+/// nos dois desfechos e notifica em caso de falha.
+///
+/// Compartilhado entre o agendador automático (`scheduled`) e o "Fazer backup
+/// agora" (`manual`).
+///
+/// # Errors
+///
+/// Propaga a falha de [`copies::run`].
+pub async fn run_plan(
+    ctx: &AppContext,
+    current: &crate::models::system_backup_plan::Model,
+    destination: &storage::service::Destination,
+    trigger: &'static str,
+) -> AppResult<copies::RunOutcome> {
+    let result = copies::run(&ctx.db, current, destination, crate::app_version()).await;
+    // O resultado — inclusive a falha — já foi gravado no plano: as outras
+    // abas precisam ver o novo status nos dois casos.
+    plan::publish_updated(ctx).await;
+    if let Err(AppError::Conflict(ref busy)) = result {
+        // Outra cópia ou uma restauração segurava a vez: nada foi tentado nem
+        // gravado no plano, e notificar "backup falhou" a cada minuto de uma
+        // restauração longa seria alarme falso.
+        tracing::info!(trigger, busy = %busy, "backup do NetMonitor adiado: outra operação em andamento");
+    } else if let Err(ref error) = result {
+        tracing::warn!(%error, trigger, "backup do NetMonitor falhou");
+        notify::notify_system_backup_failed(
+            ctx,
+            Some(&destination.row.name),
+            trigger,
+            &error.to_string(),
+        )
+        .await;
+    }
+    result
+}
+
 /// Faz a cópia do sistema se o plano venceu. Devolve se rodou.
 ///
 /// A falha fica gravada no plano (ou só no log, quando nem o destino abre) e
@@ -57,31 +100,22 @@ pub async fn run_due(ctx: &AppContext, now: DateTime<Utc>) -> AppResult<bool> {
     let Some(destination_id) = current.storage_destination_id else {
         return Ok(false);
     };
-    let (destination_name, outcome) = match storage::service::load(&ctx.db, destination_id).await {
+    // Restauração ou outra cópia em curso: pula o ciclo sem registrar falha.
+    // O plano continua vencido e o próximo minuto tenta de novo.
+    if RunGuard::is_running(copies::RUN_SCOPE, plan::PLAN_ID) {
+        return Ok(false);
+    }
+    match storage::service::load(&ctx.db, destination_id).await {
         Ok(destination) => {
-            let name = destination.row.name.clone();
-            let result = copies::run(&ctx.db, &current, &destination, crate::app_version())
-                .await
-                .map(|_| ());
-            (Some(name), result)
+            let _ = run_plan(ctx, &current, &destination, "scheduled").await;
         }
         Err(error) => {
             let msg = error.to_string();
             let _ = copies::record_failure(&ctx.db, &current, now, &msg).await;
-            (None, Err(error))
+            tracing::warn!(%error, "backup automático do NetMonitor falhou");
+            notify::notify_system_backup_failed(ctx, None, "scheduled", &msg).await;
+            plan::publish_updated(ctx).await;
         }
-    };
-    if let Err(error) = outcome {
-        let err_text = error.to_string();
-        tracing::warn!(%error, "backup automático do NetMonitor falhou");
-        notify::notify_system_backup_failed(
-            ctx,
-            destination_name.as_deref(),
-            "scheduled",
-            &err_text,
-        )
-        .await;
     }
-    plan::publish_updated(ctx).await;
     Ok(true)
 }

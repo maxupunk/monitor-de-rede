@@ -11,14 +11,19 @@ use std::time::Duration;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use loco_rs::app::AppContext;
-use netmonitor_core::{ai::platform::PlatformSection, shared::errors::AppResult};
+use netmonitor_core::{
+    ai::platform::PlatformSection,
+    events::{DomainEvent, EventBus},
+    shared::errors::AppResult,
+};
 use netmonitor_network::plugins::wifi_source::Requester;
 use serde_json::{json, Value};
+use tokio::{sync::broadcast, time::Instant};
 
 use crate::{
     collector,
-    dtos::{WifiBand, WifiDeviceSnapshot, WifiHealth, WifiStation},
-    watchlist,
+    dtos::{WifiBand, WifiDeviceSnapshot, WifiHealth, WifiReadStatus, WifiStation},
+    rounds, watchlist,
 };
 
 /// Quanto a IA espera pela primeira leitura da frota.
@@ -130,20 +135,67 @@ pub fn report(snapshots: &[WifiDeviceSnapshot], watched: Value, limit: usize) ->
     })
 }
 
+/// Equipamento que está na primeira leitura: em `Reading` e sem leitura
+/// anterior, ou seja, sem estação nenhuma para mostrar ainda.
+fn first_read_pending(snapshot: &WifiDeviceSnapshot) -> bool {
+    snapshot.status == WifiReadStatus::Reading && snapshot.read_at.is_none()
+}
+
+fn settled(snapshots: &[WifiDeviceSnapshot]) -> bool {
+    !snapshots.is_empty() && !snapshots.iter().any(first_read_pending)
+}
+
+/// Espera a rodada em curso (de outro pedido) terminar a primeira leitura,
+/// acordando a cada `wifi:snapshot` do barramento — sem consultar nada em
+/// laço. Ao fim do prazo, devolve o que houver.
+async fn wait_settled(
+    ctx: &AppContext,
+    events: Option<broadcast::Receiver<DomainEvent>>,
+    deadline: Instant,
+) -> Vec<WifiDeviceSnapshot> {
+    if let Some(mut events) = events {
+        loop {
+            let current = collector::current_snapshots(ctx);
+            if settled(&current) {
+                return current;
+            }
+            match tokio::time::timeout_at(deadline, events.recv()).await {
+                Ok(Ok(_) | Err(broadcast::error::RecvError::Lagged(_))) => {}
+                Ok(Err(broadcast::error::RecvError::Closed)) | Err(_) => break,
+            }
+        }
+    }
+    collector::current_snapshots(ctx)
+}
+
 async fn snapshots(ctx: &AppContext) -> AppResult<Vec<WifiDeviceSnapshot>> {
+    // Assina antes de olhar o estado: o snapshot que termina a leitura não
+    // pode passar entre a conferência e a espera.
+    let events = EventBus::from_context(ctx).ok().map(|bus| bus.subscribe());
+    let deadline = Instant::now() + FIRST_READ_TIMEOUT;
     let current = collector::current_snapshots(ctx);
-    if !current.is_empty() {
+    if settled(&current) {
         return Ok(current);
     }
-    match tokio::time::timeout(
-        FIRST_READ_TIMEOUT,
-        collector::read_fleet(ctx, Requester::ai(None)),
-    )
-    .await
-    {
-        Ok(reading) => Ok(reading?.snapshots),
-        // A leitura segue em segundo plano e chega à tela pelo SSE.
-        Err(_) => Ok(collector::current_snapshots(ctx)),
+    if !current.is_empty() {
+        // Uma rodada já está lendo a frota pela primeira vez.
+        return Ok(wait_settled(ctx, events, deadline).await);
+    }
+    // Executa em tarefa destacada passando por `rounds::run` (respeita
+    // `RunGuard` e vigia): se o prazo de 25 s estourar, a leitura continua até
+    // o fim em segundo plano e nunca deixa snapshots presos em `reading`.
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let task_ctx = ctx.clone();
+    tokio::spawn(async move {
+        let result = rounds::run(&task_ctx, Requester::ai(None)).await;
+        let _ = tx.send(result);
+    });
+    match tokio::time::timeout_at(deadline, rx).await {
+        Ok(Ok(Ok(Some(outcome)))) => Ok(outcome.reading.snapshots),
+        // Outra rodada estava em andamento: espera ela, dentro do mesmo prazo.
+        Ok(Ok(Ok(None))) => Ok(wait_settled(ctx, events, deadline).await),
+        Ok(Err(_)) | Err(_) => Ok(collector::current_snapshots(ctx)),
+        Ok(Ok(Err(error))) => Err(error),
     }
 }
 
@@ -258,5 +310,17 @@ mod tests {
         assert_eq!(out["stations"][1]["mac"], "b");
         assert_eq!(out["omitted"], 1);
         assert_eq!(out["access_points"][1]["stations_attention"], 2);
+    }
+
+    #[test]
+    fn primeira_leitura_em_curso_nao_e_estado_pronto() {
+        let mut lendo = ap(1, "ap-sala", Vec::new());
+        lendo.status = WifiReadStatus::Reading;
+        assert!(!settled(&[]), "sem leitura nenhuma não há o que entregar");
+        assert!(!settled(&[ap(2, "ap-quarto", Vec::new()), lendo.clone()]));
+
+        // Relendo com a leitura anterior em mãos: as estações já servem.
+        lendo.read_at = Some("2026-11-25T10:00:00Z".into());
+        assert!(settled(&[lendo]));
     }
 }

@@ -100,21 +100,18 @@ pub async fn references(
     client: &Client,
     repository: &str,
 ) -> Result<DeployReferencesView, GitHubError> {
-    let repo: Repo = client.get(&format!("/repos/{repository}")).await?;
-    let mut branches: Vec<String> = client
-        .get::<Vec<Named>>(&format!("/repos/{repository}/branches?per_page={PER_PAGE}"))
-        .await?
-        .into_iter()
-        .map(|branch| branch.name)
-        .collect();
+    let repo_path = format!("/repos/{repository}");
+    let branches_path = format!("/repos/{repository}/branches?per_page={PER_PAGE}");
+    let tags_path = format!("/repos/{repository}/tags?per_page={MAX_TAGS}");
+    let (repo, raw_branches, raw_tags) = tokio::try_join!(
+        client.get::<Repo>(&repo_path),
+        client.get::<Vec<Named>>(&branches_path),
+        client.get::<Vec<Named>>(&tags_path),
+    )?;
+    let mut branches: Vec<String> = raw_branches.into_iter().map(|branch| branch.name).collect();
     branches.retain(|name| name != &repo.default_branch);
     branches.insert(0, repo.default_branch.clone());
-    let tags = client
-        .get::<Vec<Named>>(&format!("/repos/{repository}/tags?per_page={MAX_TAGS}"))
-        .await?
-        .into_iter()
-        .map(|tag| tag.name)
-        .collect();
+    let tags = raw_tags.into_iter().map(|tag| tag.name).collect();
     Ok(DeployReferencesView {
         default_branch: repo.default_branch,
         branches,

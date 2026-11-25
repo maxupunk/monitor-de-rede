@@ -146,8 +146,8 @@ impl ProbeAgent {
             self.flush_offline_buffer().await;
         }
         let tasks = self.fetch_tasks().await;
-        for task in tasks.monitors {
-            self.execute_and_report(ctx, &task).await;
+        if !tasks.monitors.is_empty() {
+            self.execute_and_report_batch(ctx, tasks.monitors).await;
         }
         for task in tasks.discovery {
             self.execute_discovery_and_report(&task).await;
@@ -196,35 +196,62 @@ impl ProbeAgent {
             .unwrap_or_default()
     }
 
-    async fn execute_and_report(&self, ctx: &AppContext, task: &ProbeTask) {
-        let result = match run_monitor(
-            ctx,
-            &task.task_type,
-            &task.payload,
-            RunOptions {
-                timeout_ms: Some(task.timeout_ms.max(1) as u64),
-            },
-        )
-        .await
-        {
-            Ok(result) => result,
-            // Falha de execução vira observação `down` com a explicação, e não
-            // silêncio: o operador precisa ver que o probe tentou.
-            Err(error) => failed_result(&error.to_string()),
-        };
+    async fn execute_and_report_batch(&self, ctx: &AppContext, tasks: Vec<ProbeTask>) {
+        use futures::stream::{self, StreamExt};
 
-        let payload = json!({
-            "results": [{ "monitorId": task.monitor_id, "taskId": task.id, "result": result }],
-        });
-        if self.post("/api/probes/results", &payload).await.is_none() {
-            self.buffer
-                .save_result_offline(BufferedResult {
-                    task_id: task.id.clone(),
+        // Posta em sublotes à medida que as checagens terminam: um monitor
+        // lento (timeout longo) não segura o resultado dos rápidos.
+        let finished = stream::iter(tasks)
+            .map(|task| async move {
+                let result = match run_monitor(
+                    ctx,
+                    &task.task_type,
+                    &task.payload,
+                    RunOptions {
+                        timeout_ms: Some(task.timeout_ms.max(1) as u64),
+                    },
+                )
+                .await
+                {
+                    Ok(result) => result,
+                    // Falha de execução vira observação `down` com a explicação, e não
+                    // silêncio: o operador precisa ver que o probe tentou.
+                    Err(error) => failed_result(&error.to_string()),
+                };
+                (task, result)
+            })
+            .buffer_unordered(8)
+            .ready_chunks(8);
+        let mut finished = std::pin::pin!(finished);
+        while let Some(outcomes) = finished.next().await {
+            self.report_outcomes(outcomes).await;
+        }
+    }
+
+    /// Envia um sublote de resultados; sem servidor, guarda no buffer offline.
+    async fn report_outcomes(&self, outcomes: Vec<(ProbeTask, CheckResult)>) {
+        let batch: Vec<_> = outcomes
+            .iter()
+            .map(|(task, result)| {
+                json!({ "monitorId": task.monitor_id, "taskId": task.id, "result": result })
+            })
+            .collect();
+        if self
+            .post("/api/probes/results", &json!({ "results": batch }))
+            .await
+            .is_none()
+        {
+            let now = Utc::now().to_rfc3339();
+            let offline_items = outcomes
+                .into_iter()
+                .map(|(task, result)| BufferedResult {
+                    task_id: task.id,
                     monitor_id: task.monitor_id,
                     result: serde_json::to_value(&result).unwrap_or_else(|_| json!({})),
-                    timestamp: Utc::now().to_rfc3339(),
+                    timestamp: now.clone(),
                 })
-                .await;
+                .collect();
+            self.buffer.save_results_offline(offline_items).await;
         }
     }
 
@@ -232,13 +259,14 @@ impl ProbeAgent {
         let cancel = tokio_util::sync::CancellationToken::new();
         let command = Command::Discovery { task: task.clone() };
         // A varredura é da Rede: quem a executa é o handler registrado.
+        let scan_cancel = cancel.clone();
         let scan = async {
             let Some(handler) = self.handlers.find(&command) else {
                 return Err("este probe não executa varreduras".to_owned());
             };
             let (chunks, _) = tokio::sync::mpsc::unbounded_channel();
             let value = handler
-                .execute(command.clone(), chunks, cancel)
+                .execute(command.clone(), chunks, scan_cancel)
                 .await
                 .map_err(|error| error.message)?;
             serde_json::from_value::<Vec<DiscoveredHost>>(value).map_err(|error| error.to_string())
@@ -248,10 +276,13 @@ impl ProbeAgent {
         let (hosts, error) = match outcome {
             Ok(Ok(hosts)) => (hosts, None),
             Ok(Err(error)) => (Vec::new(), Some(error)),
-            Err(_) => (
-                Vec::new(),
-                Some("tempo limite do discovery remoto excedido".into()),
-            ),
+            Err(_) => {
+                cancel.cancel();
+                (
+                    Vec::new(),
+                    Some("tempo limite do discovery remoto excedido".into()),
+                )
+            }
         };
         let body = json!({
             "discoveryResults": [{

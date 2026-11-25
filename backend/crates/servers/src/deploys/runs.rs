@@ -5,15 +5,20 @@
 //! despachante, a aprovação e o cancelamento podem disputar o mesmo deploy,
 //! e só um vence. Quem perde recebe `false` e não faz nada.
 
+use std::collections::{HashMap, VecDeque};
+
 use chrono::{DateTime, Utc};
 use sea_orm::{
-    sea_query::Expr, ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
-    QueryOrder, QuerySelect, Set,
+    sea_query::Expr, ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection,
+    EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set,
 };
 
 use netmonitor_core::{
     models::deploy_runs,
-    shared::errors::{AppError, AppResult},
+    shared::{
+        errors::{AppError, AppResult},
+        transaction::begin_write,
+    },
 };
 
 use super::{DeployStage, RunStatus, RunTrigger};
@@ -21,6 +26,41 @@ use super::{DeployStage, RunStatus, RunTrigger};
 /// Teto do log gravado: guarda o fim, que é onde está o erro.
 pub const MAX_LOG_BYTES: usize = 256 * 1024;
 const TRUNCATED_MARK: &str = "… (início do log omitido)\n";
+
+/// Consulta `deploy_runs` sem trafegar a coluna `log` (até 256 KiB por linha).
+fn select_without_log() -> sea_orm::Select<deploy_runs::Entity> {
+    use deploy_runs::Column as C;
+    deploy_runs::Entity::find()
+        .select_only()
+        .columns([
+            C::Id,
+            C::ApplicationId,
+            C::TargetId,
+            C::Trigger,
+            C::TriggeredBy,
+            C::Reference,
+            C::CommitSha,
+            C::CommitMessage,
+            C::ImageTag,
+            C::EnvVersionId,
+            C::Status,
+            C::Stage,
+            C::RollbackOfRunId,
+            C::AfterRunId,
+            C::BackupId,
+            C::ApprovedBy,
+            C::ApprovedAt,
+            C::ScheduledFor,
+            C::Error,
+            C::StartedAt,
+            C::FinishedAt,
+            C::DurationMs,
+            C::BuildId,
+            C::CreatedAt,
+            C::UpdatedAt,
+        ])
+        .column_as(Expr::cust("CAST(NULL AS TEXT)"), "log")
+}
 
 /// Um deploy a criar.
 #[derive(Debug, Clone)]
@@ -84,6 +124,44 @@ pub async fn find<C: ConnectionTrait>(db: &C, id: i64) -> AppResult<deploy_runs:
         .ok_or_else(|| AppError::not_found("Deploy não encontrado"))
 }
 
+/// O deploy sem a coluna `log` (para quem só olha o estado).
+///
+/// # Errors
+///
+/// `404`.
+pub async fn find_without_log<C: ConnectionTrait>(
+    db: &C,
+    id: i64,
+) -> AppResult<deploy_runs::Model> {
+    select_without_log()
+        .filter(deploy_runs::Column::Id.eq(id))
+        .one(db)
+        .await?
+        .ok_or_else(|| AppError::not_found("Deploy não encontrado"))
+}
+
+/// Os deploys destes ids, sem a coluna `log`, numa consulta por lote.
+///
+/// # Errors
+///
+/// Banco.
+pub async fn find_many_without_log<C: ConnectionTrait>(
+    db: &C,
+    ids: &[i64],
+) -> AppResult<HashMap<i64, deploy_runs::Model>> {
+    let mut found = HashMap::with_capacity(ids.len());
+    for chunk in ids.chunks(500) {
+        for run in select_without_log()
+            .filter(deploy_runs::Column::Id.is_in(chunk.iter().copied()))
+            .all(db)
+            .await?
+        {
+            found.insert(run.id, run);
+        }
+    }
+    Ok(found)
+}
+
 /// O estado gravado.
 #[must_use]
 pub fn status_of(run: &deploy_runs::Model) -> RunStatus {
@@ -100,7 +178,7 @@ pub async fn recent<C: ConnectionTrait>(
     target_id: Option<i64>,
     limit: u64,
 ) -> AppResult<Vec<deploy_runs::Model>> {
-    let mut query = deploy_runs::Entity::find()
+    let mut query = select_without_log()
         .order_by_desc(deploy_runs::Column::Id)
         .limit(limit);
     if let Some(target_id) = target_id {
@@ -118,8 +196,28 @@ pub async fn with_status<C: ConnectionTrait>(
     db: &C,
     statuses: &[RunStatus],
 ) -> AppResult<Vec<deploy_runs::Model>> {
-    Ok(deploy_runs::Entity::find()
+    Ok(select_without_log()
         .filter(deploy_runs::Column::Status.is_in(statuses.iter().map(|status| status.as_str())))
+        .order_by_asc(deploy_runs::Column::Id)
+        .all(db)
+        .await?)
+}
+
+/// Os deploys pendentes de um alvo específico.
+///
+/// # Errors
+///
+/// Banco.
+pub async fn pending_for_target<C: ConnectionTrait>(
+    db: &C,
+    target_id: i64,
+) -> AppResult<Vec<deploy_runs::Model>> {
+    Ok(select_without_log()
+        .filter(deploy_runs::Column::TargetId.eq(target_id))
+        .filter(
+            deploy_runs::Column::Status
+                .is_in(RunStatus::PENDING.iter().map(|status| status.as_str())),
+        )
         .order_by_asc(deploy_runs::Column::Id)
         .all(db)
         .await?)
@@ -134,12 +232,47 @@ pub async fn live<C: ConnectionTrait>(
     db: &C,
     target_id: i64,
 ) -> AppResult<Option<deploy_runs::Model>> {
-    Ok(deploy_runs::Entity::find()
+    Ok(select_without_log()
         .filter(deploy_runs::Column::TargetId.eq(target_id))
         .filter(deploy_runs::Column::Status.eq(RunStatus::Succeeded.as_str()))
         .order_by_desc(deploy_runs::Column::Id)
         .one(db)
         .await?)
+}
+
+/// A versão no ar de cada alvo em `target_ids`, em lote (2 consultas).
+///
+/// # Errors
+///
+/// Banco.
+pub async fn live_by_targets<C: ConnectionTrait>(
+    db: &C,
+    target_ids: &[i64],
+) -> AppResult<HashMap<i64, deploy_runs::Model>> {
+    if target_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let pairs: Vec<(i64, Option<i64>)> = deploy_runs::Entity::find()
+        .select_only()
+        .column(deploy_runs::Column::TargetId)
+        .column_as(deploy_runs::Column::Id.max(), "max_id")
+        .filter(deploy_runs::Column::TargetId.is_in(target_ids.iter().copied()))
+        .filter(deploy_runs::Column::Status.eq(RunStatus::Succeeded.as_str()))
+        .group_by(deploy_runs::Column::TargetId)
+        .into_tuple::<(i64, Option<i64>)>()
+        .all(db)
+        .await?;
+    let ids: Vec<i64> = pairs.into_iter().filter_map(|(_, id)| id).collect();
+    if ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    Ok(select_without_log()
+        .filter(deploy_runs::Column::Id.is_in(ids))
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|run| (run.target_id, run))
+        .collect())
 }
 
 /// O alvo tem um deploy rodando?
@@ -149,8 +282,11 @@ pub async fn live<C: ConnectionTrait>(
 /// Banco.
 pub async fn running_on<C: ConnectionTrait>(db: &C, target_id: i64) -> AppResult<bool> {
     Ok(deploy_runs::Entity::find()
+        .select_only()
+        .column(deploy_runs::Column::Id)
         .filter(deploy_runs::Column::TargetId.eq(target_id))
         .filter(deploy_runs::Column::Status.eq(RunStatus::Running.as_str()))
+        .into_tuple::<i64>()
         .one(db)
         .await?
         .is_some())
@@ -169,10 +305,34 @@ pub struct Change {
 
 /// Leva o deploy a `to` se ele ainda está num dos estados `from`.
 ///
+/// Quando `change.finished` está marcado, executa a atualização de estado e a
+/// gravação de `finished_at`/`duration_ms` na mesma transação de escrita.
+///
 /// # Errors
 ///
 /// Banco. `Ok(false)` quando outro caminho mudou o estado antes.
-pub async fn transition<C: ConnectionTrait>(
+pub async fn transition(
+    db: &DatabaseConnection,
+    id: i64,
+    from: &[RunStatus],
+    to: RunStatus,
+    change: Change,
+) -> AppResult<bool> {
+    if !change.finished {
+        return transition_in(db, id, from, to, change).await;
+    }
+    let txn = begin_write(db).await?;
+    let changed = transition_in(&txn, id, from, to, change).await?;
+    txn.commit().await?;
+    Ok(changed)
+}
+
+/// Variante de [`transition`] para uso dentro de uma transação já aberta.
+///
+/// # Errors
+///
+/// Banco. `Ok(false)` quando outro caminho mudou o estado antes.
+pub async fn transition_in<C: ConnectionTrait>(
     db: &C,
     id: i64,
     from: &[RunStatus],
@@ -219,15 +379,23 @@ pub async fn transition<C: ConnectionTrait>(
 }
 
 async fn finish_times<C: ConnectionTrait>(db: &C, id: i64) -> AppResult<()> {
-    let run = find(db, id).await?;
+    let Some(run) = select_without_log()
+        .filter(deploy_runs::Column::Id.eq(id))
+        .one(db)
+        .await?
+    else {
+        return Ok(());
+    };
     let now = Utc::now();
     let duration = run
         .started_at
         .map(|started| (now - started.with_timezone(&Utc)).num_milliseconds());
-    let mut active: deploy_runs::ActiveModel = run.into();
-    active.finished_at = Set(Some(now.into()));
-    active.duration_ms = Set(duration);
-    active.update(db).await?;
+    deploy_runs::Entity::update_many()
+        .col_expr(deploy_runs::Column::FinishedAt, Expr::value(Some(now)))
+        .col_expr(deploy_runs::Column::DurationMs, Expr::value(duration))
+        .filter(deploy_runs::Column::Id.eq(id))
+        .exec(db)
+        .await?;
     Ok(())
 }
 
@@ -280,7 +448,8 @@ pub async fn set_backup<C: ConnectionTrait>(db: &C, id: i64, backup_id: i64) -> 
 /// O log de um deploy em memória, com o teto de [`MAX_LOG_BYTES`].
 #[derive(Debug, Default, Clone)]
 pub struct LogBuffer {
-    text: String,
+    lines: VecDeque<String>,
+    bytes: usize,
     truncated: bool,
 }
 
@@ -289,34 +458,64 @@ impl LogBuffer {
     pub fn from_saved(saved: Option<&str>) -> Self {
         let mut buffer = Self::default();
         if let Some(saved) = saved {
-            buffer.text.push_str(saved);
+            let saved = match saved.strip_prefix(TRUNCATED_MARK) {
+                Some(rest) => {
+                    buffer.truncated = true;
+                    rest
+                }
+                None => saved,
+            };
+            for segment in saved.split_inclusive('\n') {
+                buffer.bytes += segment.len();
+                buffer.lines.push_back(segment.to_string());
+            }
+            buffer.trim();
         }
         buffer
     }
 
     pub fn push(&mut self, line: &str) {
-        self.text.push_str(line);
-        self.text.push('\n');
-        if self.text.len() > MAX_LOG_BYTES {
-            let mut cut = self.text.len() - MAX_LOG_BYTES;
-            while !self.text.is_char_boundary(cut) {
-                cut += 1;
-            }
-            let cut = self.text[cut..]
-                .find('\n')
-                .map_or(cut, |line| cut + line + 1);
-            self.text.drain(..cut);
+        let mut entry = String::with_capacity(line.len() + 1);
+        entry.push_str(line);
+        entry.push('\n');
+        self.bytes += entry.len();
+        self.lines.push_back(entry);
+        self.trim();
+    }
+
+    fn trim(&mut self) {
+        while self.bytes > MAX_LOG_BYTES {
             self.truncated = true;
+            if self.lines.len() > 1 {
+                if let Some(removed) = self.lines.pop_front() {
+                    self.bytes -= removed.len();
+                }
+            } else if let Some(only) = self.lines.front_mut() {
+                let mut cut = only.len() - MAX_LOG_BYTES;
+                while !only.is_char_boundary(cut) {
+                    cut += 1;
+                }
+                only.drain(..cut);
+                self.bytes = only.len();
+            }
         }
     }
 
     #[must_use]
     pub fn text(&self) -> String {
-        if self.truncated {
-            format!("{TRUNCATED_MARK}{}", self.text)
+        let extra = if self.truncated {
+            TRUNCATED_MARK.len()
         } else {
-            self.text.clone()
+            0
+        };
+        let mut out = String::with_capacity(self.bytes + extra);
+        if self.truncated {
+            out.push_str(TRUNCATED_MARK);
         }
+        for line in &self.lines {
+            out.push_str(line);
+        }
+        out
     }
 }
 

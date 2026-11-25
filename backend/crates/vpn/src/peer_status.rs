@@ -11,9 +11,12 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
-use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::{ActiveModelTrait, ConnectionTrait, Set, TransactionSession, TransactionTrait};
 
-use netmonitor_core::{models::vpn_peers, shared::errors::AppResult};
+use netmonitor_core::{
+    models::vpn_peers,
+    shared::{errors::AppResult, transaction::begin_write},
+};
 
 use crate::config_writer::{resolve_config_dir, VpnConfigSink};
 
@@ -44,19 +47,32 @@ pub fn parse_wg_dump(dump: &str) -> Vec<WgPeerStatus> {
         .map(str::trim)
         .filter(|line| !line.is_empty())
         .filter_map(|line| {
-            let columns: Vec<&str> = line.split('\t').collect();
-            if columns.len() < 8 {
-                return None;
-            }
-            let handshake_seconds: i64 = columns[4].parse().unwrap_or(0);
+            let mut cols = line.split('\t');
+            let public_key = cols.next()?;
+            let preshared_key = cols.next()?;
+            let endpoint = cols.next()?;
+            let allowed_ips_col = cols.next()?;
+            let handshake_col = cols.next()?;
+            let rx_col = cols.next()?;
+            let tx_col = cols.next()?;
+            let keepalive_col = cols.next()?;
+
+            let handshake_seconds: i64 = handshake_col.parse().ok()?;
+            let bytes_rx: i64 = rx_col.parse().ok().filter(|&v| v >= 0)?;
+            let bytes_tx: i64 = tx_col.parse().ok().filter(|&v| v >= 0)?;
+            let persistent_keepalive = if keepalive_col == OFF {
+                0
+            } else {
+                keepalive_col.parse().ok().filter(|&v| v >= 0)?
+            };
             Some(WgPeerStatus {
-                public_key: columns[0].to_string(),
-                preshared_key: optional(columns[1]),
-                endpoint: optional(columns[2]),
-                allowed_ips: if columns[3] == NONE {
+                public_key: public_key.to_string(),
+                preshared_key: optional(preshared_key),
+                endpoint: optional(endpoint),
+                allowed_ips: if allowed_ips_col == NONE {
                     Vec::new()
                 } else {
-                    columns[3]
+                    allowed_ips_col
                         .split(',')
                         .filter(|value| !value.is_empty())
                         .map(ToString::to_string)
@@ -65,13 +81,9 @@ pub fn parse_wg_dump(dump: &str) -> Vec<WgPeerStatus> {
                 latest_handshake_at: (handshake_seconds > 0)
                     .then(|| DateTime::from_timestamp(handshake_seconds, 0))
                     .flatten(),
-                bytes_rx: columns[5].parse().unwrap_or(0),
-                bytes_tx: columns[6].parse().unwrap_or(0),
-                persistent_keepalive: if columns[7] == OFF {
-                    0
-                } else {
-                    columns[7].parse().unwrap_or(0)
-                },
+                bytes_rx,
+                bytes_tx,
+                persistent_keepalive,
             })
         })
         .collect()
@@ -120,55 +132,79 @@ pub async fn read_status(sink: &dyn VpnConfigSink, interface_name: &str) -> Vec<
     parse_wg_dump(&dump)
 }
 
-/// Atualiza handshake, contadores de tráfego e sinal de vida dos peers.
-///
-/// Devolve quantas linhas mudaram.
+/// Atualiza handshake, contadores de tráfego e sinal de vida dos peers em uma
+/// única transação de escrita (quando há mudanças) e devolve todos os peers
+/// habilitados já atualizados.
 ///
 /// # Errors
 ///
 /// Propaga erro do banco.
-pub async fn sync_peers<C: ConnectionTrait>(
+pub async fn sync_peers_loaded<C: ConnectionTrait + TransactionTrait>(
     db: &C,
     sink: &dyn VpnConfigSink,
     interface_name: &str,
     vpn_server_id: i64,
-) -> AppResult<u64> {
+) -> AppResult<(u64, Vec<vpn_peers::Model>)> {
     let statuses = read_status(sink, interface_name).await;
-    if statuses.is_empty() {
-        return Ok(0);
+    let mut peers = vpn_peers::Entity::find_enabled_for_server(vpn_server_id)
+        .all(db)
+        .await?;
+    if statuses.is_empty() || peers.is_empty() {
+        return Ok((0, peers));
     }
     let by_public_key: HashMap<&str, &WgPeerStatus> = statuses
         .iter()
         .map(|status| (status.public_key.as_str(), status))
         .collect();
 
-    let peers = vpn_peers::Entity::find()
-        .filter(vpn_peers::Column::VpnServerId.eq(vpn_server_id))
-        .all(db)
-        .await?;
     let now = Utc::now();
+    let pending: Vec<(usize, PeerChanges)> = peers
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, peer)| {
+            let status = by_public_key.get(peer.public_key.as_str())?;
+            compute_changes(peer, status, now).map(|changes| (idx, changes))
+        })
+        .collect();
+
+    if pending.is_empty() {
+        return Ok((0, peers));
+    }
+
+    let txn = begin_write(db).await?;
     let mut updated = 0;
-
-    for peer in peers {
-        let Some(status) = by_public_key.get(peer.public_key.as_str()) else {
-            continue;
-        };
-        let Some(changes) = compute_changes(&peer, status, now) else {
-            continue;
-        };
-
-        let mut active: vpn_peers::ActiveModel = peer.into();
+    for (idx, changes) in pending {
+        let mut active: vpn_peers::ActiveModel = peers[idx].clone().into();
         active.bytes_rx = Set(changes.bytes_rx);
         active.bytes_tx = Set(changes.bytes_tx);
         active.last_handshake_at = Set(changes.last_handshake_at.map(Into::into));
         if let Some(last_seen_at) = changes.last_seen_at {
             active.last_seen_at = Set(Some(last_seen_at.into()));
         }
-        active.update(db).await?;
+        peers[idx] = active.update(&txn).await?;
         updated += 1;
     }
+    txn.commit().await?;
 
-    Ok(updated)
+    Ok((updated, peers))
+}
+
+/// Atualiza handshake, contadores de tráfego e sinal de vida dos peers
+/// habilitados — o mesmo caminho de [`sync_peers_loaded`], com a mesma
+/// transação de escrita — e devolve quantas linhas mudaram.
+///
+/// # Errors
+///
+/// Propaga erro do banco.
+pub async fn sync_peers<C: ConnectionTrait + TransactionTrait>(
+    db: &C,
+    sink: &dyn VpnConfigSink,
+    interface_name: &str,
+    vpn_server_id: i64,
+) -> AppResult<u64> {
+    Ok(sync_peers_loaded(db, sink, interface_name, vpn_server_id)
+        .await?
+        .0)
 }
 
 /// O que muda numa linha a partir de uma leitura do dump, ou `None` quando nada
@@ -258,6 +294,8 @@ PUB-B\tPSK-B\t(none)\t(none)\t0\t0\t0\toff";
         assert!(parse_wg_dump("").is_empty());
         assert!(parse_wg_dump("   \n\n").is_empty());
         assert!(parse_wg_dump("lixo sem tabs").is_empty());
+        // Linha com contadores numéricos corrompidos é descartada em vez de virar 0.
+        assert!(parse_wg_dump("PUB-X\t(none)\t(none)\t(none)\t0\tnan\t0\toff").is_empty());
     }
 
     fn peer(bytes_rx: i64, handshake_ago: Option<i64>) -> vpn_peers::Model {

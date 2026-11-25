@@ -46,15 +46,30 @@ impl FromStr for TunnelTarget {
         let raw = raw.trim();
         let invalid =
             || format!("destino de ponte inválido: '{raw}' (use IP:porta ou faixa/prefixo:porta)");
-        let (host, port) = raw.rsplit_once(':').ok_or_else(invalid)?;
-        let port: u16 = port.parse().map_err(|_| invalid())?;
-        let host = host.trim_start_matches('[').trim_end_matches(']');
-        let net = if host.contains('/') {
+        let (host, port_str, expect_v6) = if let Some(rest) = raw.strip_prefix('[') {
+            let (host, port_str) = rest.split_once("]:").ok_or_else(invalid)?;
+            (host, port_str, true)
+        } else {
+            if raw.contains('[') || raw.contains(']') {
+                return Err(invalid());
+            }
+            let (host, port_str) = raw.split_once(':').ok_or_else(invalid)?;
+            // IPv6 sem colchetes (`fd00::1:5432`) é ambíguo e recusado.
+            if port_str.contains(':') {
+                return Err(invalid());
+            }
+            (host, port_str, false)
+        };
+        let port: u16 = port_str.parse().map_err(|_| invalid())?;
+        if port == 0 {
+            return Err(invalid());
+        }
+        let net: ipnet::IpNet = if host.contains('/') {
             host.parse().map_err(|_| invalid())?
         } else {
             ipnet::IpNet::from(host.parse::<IpAddr>().map_err(|_| invalid())?)
         };
-        if port == 0 {
+        if matches!(net, ipnet::IpNet::V6(_)) != expect_v6 {
             return Err(invalid());
         }
         Ok(Self { net, port })
@@ -95,5 +110,18 @@ mod tests {
         let targets = parse_targets(raw).expect("destinos");
         assert_eq!(format_targets(&targets), raw);
         assert_eq!(parse_targets(&format_targets(&targets)).unwrap(), targets);
+    }
+
+    #[test]
+    fn ipv6_sem_colchetes_ou_colchetes_desbalanceados_sao_recusados() {
+        for bad in [
+            "fd00::1:5432",
+            "[[10.0.0.1]]:5432",
+            "[10.0.0.1]:5432",
+            "[fd00::5:5432",
+            "10.0.0.1:0",
+        ] {
+            assert!(parse_targets(bad).is_err(), "aceitou {bad}");
+        }
     }
 }

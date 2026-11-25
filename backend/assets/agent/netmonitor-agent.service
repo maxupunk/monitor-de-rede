@@ -18,6 +18,7 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
 PrivateTmp=true
+ReadWritePaths=-/srv/netmonitor/stacks
 StateDirectory=netmonitor-agent
 StateDirectoryMode=0700
 

@@ -18,8 +18,7 @@ use std::{
 
 use chrono::Utc;
 use loco_rs::app::AppContext;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
-use serde_json::json;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use tokio::sync::{mpsc, Semaphore};
 use tokio_util::sync::CancellationToken;
 
@@ -38,7 +37,7 @@ use crate::{
     deploys::{
         access,
         applications::{self, repository_url},
-        console::{human_bytes, Console, ConsoleSink},
+        console::{human_bytes, Console, ConsoleSink, PUBLISH_EVERY},
         images::{
             image_store, repository_for, tag_for, ImageOrigin, OriginKind, ScanStatus, StoredImage,
         },
@@ -116,29 +115,17 @@ impl ConsoleSink for BuildSink {
     }
 
     async fn save(&self, ctx: &AppContext, text: &str) {
-        if let Ok(Some(row)) = deploy_builds::Entity::find_by_id(self.id)
-            .one(&ctx.db)
-            .await
-        {
-            let mut active: deploy_builds::ActiveModel = row.into();
-            active.log = Set(Some(text.to_string()));
-            if let Err(error) = active.update(&ctx.db).await {
-                tracing::warn!(build = self.id, %error, "log da compilação não foi gravado");
-            }
+        if let Err(error) = super::save_log(&ctx.db, self.id, text).await {
+            tracing::warn!(build = self.id, %error, "log da compilação não foi gravado");
         }
     }
 
     async fn stage(&self, ctx: &AppContext, (stage, image): (BuildStage, Option<String>)) {
-        if let Ok(Some(row)) = deploy_builds::Entity::find_by_id(self.id)
-            .one(&ctx.db)
-            .await
-        {
-            let mut active: deploy_builds::ActiveModel = row.into();
-            active.stage = Set(serde_json::to_value(stage)
-                .ok()
-                .and_then(|value| value.as_str().map(ToString::to_string)));
-            active.current_image = Set(image);
-            let _ = active.update(&ctx.db).await;
+        let stage_name = serde_json::to_value(stage)
+            .ok()
+            .and_then(|value| value.as_str().map(ToString::to_string));
+        if let Err(error) = super::set_stage(&ctx.db, self.id, stage_name, image).await {
+            tracing::warn!(build = self.id, %error, "etapa da compilação não foi gravada");
         }
         publish(ctx, self.id).await;
     }
@@ -212,18 +199,6 @@ fn request_of(
     }
 }
 
-async fn mark(
-    ctx: &AppContext,
-    id: i64,
-    change: impl FnOnce(&mut deploy_builds::ActiveModel),
-) -> AppResult<()> {
-    let row = super::find(&ctx.db, id).await?;
-    let mut active: deploy_builds::ActiveModel = row.into();
-    change(&mut active);
-    active.update(&ctx.db).await?;
-    Ok(())
-}
-
 /// A compilação inteira; o fim (sucesso, falha) é gravado aqui.
 pub async fn execute(ctx: AppContext, id: i64) {
     let Ok(build) = super::find(&ctx.db, id).await else {
@@ -236,11 +211,19 @@ pub async fn execute(ctx: AppContext, id: i64) {
     let probe_id = match builder_of(&ctx, &application, reference.as_ref()).await {
         Ok(probe_id) => probe_id,
         Err(error) => {
-            finish(&ctx, id, BuildStatus::Failed, Some(error.to_string()), None).await;
+            finish(
+                &ctx,
+                id,
+                &[BuildStatus::Queued],
+                BuildStatus::Failed,
+                Some(error.to_string()),
+                None,
+            )
+            .await;
             return;
         }
     };
-    let _ = mark(&ctx, id, |active| active.probe_id = Set(Some(probe_id))).await;
+    let _ = super::set_probe(&ctx.db, id, probe_id).await;
     publish(&ctx, id).await;
 
     // Espera a vez do builder; quem ficou velho na fila sai substituído.
@@ -248,20 +231,19 @@ pub async fn execute(ctx: AppContext, id: i64) {
     let Ok(current) = super::find(&ctx.db, id).await else {
         return;
     };
-    if BuildStatus::parse(&current.status) != BuildStatus::Queued {
-        return;
-    }
     let token = CancellationToken::new();
     running()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .insert(id, token.clone());
     let started = Instant::now();
-    let _ = mark(&ctx, id, |active| {
-        active.status = Set(BuildStatus::Running.as_str().to_string());
-        active.started_at = Set(Some(Utc::now().into()));
-    })
-    .await;
+    if !matches!(super::start_running(&ctx.db, id).await, Ok(true)) {
+        running()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&id);
+        return;
+    }
     publish(&ctx, id).await;
 
     let mut console: BuildConsole = Console::new(&ctx, BuildSink { id }, None);
@@ -276,20 +258,27 @@ pub async fn execute(ctx: AppContext, id: i64) {
     let elapsed = i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX);
     match result {
         Ok(images) => {
+            if token.is_cancelled() {
+                console.flush().await;
+                return;
+            }
             console
                 .line(format!("✔ Compilação concluída em {}s", elapsed / 1000))
                 .await;
             console.flush().await;
-            finish(
+            if finish(
                 &ctx,
                 id,
+                &[BuildStatus::Running],
                 BuildStatus::Succeeded,
                 None,
                 Some((images.clone(), elapsed)),
             )
-            .await;
-            if let Err(error) = open_deploys(&ctx, &application, &current).await {
-                tracing::warn!(build = id, %error, "deploys da compilação não foram abertos");
+            .await
+            {
+                if let Err(error) = open_deploys(&ctx, &application, &current).await {
+                    tracing::warn!(build = id, %error, "deploys da compilação não foram abertos");
+                }
             }
         }
         Err(error) => {
@@ -298,15 +287,17 @@ pub async fn execute(ctx: AppContext, id: i64) {
                 console.line(format!("✖ {error}")).await;
             }
             console.flush().await;
-            if !cancelled {
-                finish(
+            if !cancelled
+                && finish(
                     &ctx,
                     id,
+                    &[BuildStatus::Running],
                     BuildStatus::Failed,
                     Some(error.to_string()),
                     Some((Vec::new(), elapsed)),
                 )
-                .await;
+                .await
+            {
                 if let Ok(build) = super::find(&ctx.db, id).await {
                     if let Ok(view) = super::view(&ctx.db, &build).await {
                         crate::deploys::notify::send_build_failed(&ctx, &view).await;
@@ -320,32 +311,23 @@ pub async fn execute(ctx: AppContext, id: i64) {
 async fn finish(
     ctx: &AppContext,
     id: i64,
+    from: &[BuildStatus],
     status: BuildStatus,
     error: Option<String>,
     result: Option<(Vec<StoredImage>, i64)>,
-) {
-    let saved = mark(ctx, id, |active| {
-        active.status = Set(status.as_str().to_string());
-        // Falhou: a etapa fica, para a tela mostrar onde parou.
-        if status == BuildStatus::Succeeded {
-            active.stage = Set(None);
+) -> bool {
+    let changed = match super::finish_status(&ctx.db, id, from, status, error, result).await {
+        Ok(changed) => changed,
+        Err(error) => {
+            tracing::warn!(build = id, %error, "o fim da compilação não foi gravado");
+            false
         }
-        active.current_image = Set(None);
-        active.error = Set(error);
-        active.finished_at = Set(Some(Utc::now().into()));
-        if let Some((images, elapsed)) = result {
-            if !images.is_empty() {
-                active.images = Set(json!(images));
-            }
-            active.duration_ms = Set(Some(elapsed));
-        }
-    })
-    .await;
-    if let Err(error) = saved {
-        tracing::warn!(build = id, %error, "o fim da compilação não foi gravado");
+    };
+    if changed {
+        publish(ctx, id).await;
+        super::super::events::publish_updated(ctx);
     }
-    publish(ctx, id).await;
-    super::super::events::publish_updated(ctx);
+    changed
 }
 
 async fn run(
@@ -385,15 +367,24 @@ async fn run(
     let ask = request.clone();
     let stop = cancel.clone();
     let task = tokio::spawn(async move { images.build_images(&ask, events, stop).await });
-    while let Some(chunk) = received.recv().await {
-        match chunk {
-            BuildChunk::Stage { stage, image } => {
-                if let Some(image) = &image {
-                    console.line(format!("── {image} ──")).await;
+    let mut flush_tick = tokio::time::interval(PUBLISH_EVERY);
+    flush_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    flush_tick.tick().await;
+    loop {
+        tokio::select! {
+            chunk = received.recv() => match chunk {
+                Some(BuildChunk::Stage { stage, image }) => {
+                    if let Some(image) = &image {
+                        console.line(format!("── {image} ──")).await;
+                    }
+                    console.stage((stage, image)).await;
                 }
-                console.stage((stage, image)).await;
+                Some(BuildChunk::Line { text }) => console.line(text).await,
+                None => break,
+            },
+            _ = flush_tick.tick() => {
+                console.flush_pending();
             }
-            BuildChunk::Line { text } => console.line(text).await,
         }
     }
     let outcome = task

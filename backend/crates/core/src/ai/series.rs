@@ -32,7 +32,7 @@ pub struct SeriesStats {
 /// dígitos no JSON que a IA lê.
 #[must_use]
 pub fn round2(value: f64) -> f64 {
-    (value * 100.0).round() / 100.0
+    crate::shared::units::round_two(value)
 }
 
 /// Estatísticas da série; `None` quando não há amostra.

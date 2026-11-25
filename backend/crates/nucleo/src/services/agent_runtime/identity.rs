@@ -22,12 +22,15 @@ fn host_root() -> String {
     std::env::var("HOST_ROOT").unwrap_or_else(|_| "/".into())
 }
 
-fn read_host_file(relative: &str) -> Option<String> {
-    std::fs::read_to_string(Path::new(&host_root()).join(relative)).ok()
+async fn read_host_file(relative: &str) -> Option<String> {
+    tokio::fs::read_to_string(Path::new(&host_root()).join(relative))
+        .await
+        .ok()
 }
 
-fn hostname() -> String {
+async fn hostname() -> String {
     read_host_file("etc/hostname")
+        .await
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .or_else(|| std::env::var("HOSTNAME").ok())
@@ -37,17 +40,22 @@ fn hostname() -> String {
 /// Monta o `Hello` com o estado atual do host.
 /// O Docker e o compose vêm do Docker do host (Servidores).
 pub async fn hello(policy: &Policy, host_docker: &dyn HostDocker) -> Hello {
-    let (docker, compose) = host_docker.capabilities().await;
+    let ((docker, compose), hostname, os_release, in_container) = tokio::join!(
+        host_docker.capabilities(),
+        hostname(),
+        read_host_file("etc/os-release"),
+        async { tokio::fs::try_exists("/.dockerenv").await.unwrap_or(false) },
+    );
     Hello {
         protocol: PROTOCOL_VERSION,
         agent_version: env!("CARGO_PKG_VERSION").to_string(),
-        hostname: hostname(),
-        os: read_host_file("etc/os-release")
+        hostname,
+        os: os_release
             .as_deref()
             .and_then(parse_os_release)
             .unwrap_or_else(|| std::env::consts::OS.to_string()),
         arch: std::env::consts::ARCH.to_string(),
-        in_container: Path::new("/.dockerenv").exists(),
+        in_container,
         policy: policy.permissions(),
         docker,
         compose,

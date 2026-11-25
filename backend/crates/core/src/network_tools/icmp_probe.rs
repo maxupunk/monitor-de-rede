@@ -80,6 +80,21 @@ pub fn calculate_jitter(latencies: &[f64]) -> Option<f64> {
     Some(round_two(diff_sum / (latencies.len() - 1) as f64))
 }
 
+/// Executa múltiplas sondas ICMP reutilizando o [`PingClient`](super::ping_client::PingClient)
+/// compartilhado do processo (evita abrir um novo socket DGRAM a cada chamada).
+pub async fn probe_icmp_with_client(
+    client: &super::ping_client::PingClient,
+    target: IpAddr,
+    options: &IcmpProbeOptions,
+    cancel: &CancellationToken,
+) -> IcmpProbeResult {
+    let Some(raw_client) = client.for_ip(target) else {
+        tracing::warn!(%target, "socket ICMP indisponível para a família de endereço");
+        return empty_failure_result();
+    };
+    run_ping_loop(&raw_client, target, options, cancel).await
+}
+
 /// Executa múltiplas sondas ICMP contra o alvo, retornando métricas consolidadas.
 pub async fn probe_icmp(
     target: IpAddr,
@@ -91,18 +106,31 @@ pub async fn probe_icmp(
         Ok(c) => c,
         Err(err) => {
             tracing::warn!(%err, %target, "falha ao criar socket ICMP DGRAM");
-            return IcmpProbeResult {
-                success: false,
-                rtts: Vec::new(),
-                avg_rtt_ms: None,
-                min_rtt_ms: None,
-                max_rtt_ms: None,
-                jitter_ms: None,
-                packet_loss_pct: 100.0,
-            };
+            return empty_failure_result();
         }
     };
 
+    run_ping_loop(&client, target, options, cancel).await
+}
+
+fn empty_failure_result() -> IcmpProbeResult {
+    IcmpProbeResult {
+        success: false,
+        rtts: Vec::new(),
+        avg_rtt_ms: None,
+        min_rtt_ms: None,
+        max_rtt_ms: None,
+        jitter_ms: None,
+        packet_loss_pct: 100.0,
+    }
+}
+
+async fn run_ping_loop(
+    client: &Client,
+    target: IpAddr,
+    options: &IcmpProbeOptions,
+    cancel: &CancellationToken,
+) -> IcmpProbeResult {
     let mut pinger = client.pinger(target, PingIdentifier(rand::random())).await;
     pinger.timeout(options.timeout);
     let payload = vec![0u8; options.payload_size];
@@ -112,7 +140,12 @@ pub async fn probe_icmp(
         if cancel.is_cancelled() {
             break;
         }
-        match pinger.ping(PingSequence(seq as u16), &payload).await {
+        let ping_res = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => break,
+            res = pinger.ping(PingSequence(seq as u16), &payload) => res,
+        };
+        match ping_res {
             Ok((_packet, rtt)) => {
                 let ms = duration_to_ms(rtt);
                 rtts.push(Some(ms));
@@ -123,7 +156,8 @@ pub async fn probe_icmp(
         }
     }
 
-    calculate_probe_result(rtts, options.count)
+    let attempted = rtts.len();
+    calculate_probe_result(rtts, attempted)
 }
 
 /// Executa uma sonda ICMP simples retornando apenas o RTT em milissegundos se bem-sucedido.
@@ -140,10 +174,8 @@ pub async fn probe_icmp_single(
 fn calculate_probe_result(rtts: Vec<Option<f64>>, total_sent: usize) -> IcmpProbeResult {
     let successful: Vec<f64> = rtts.iter().flatten().copied().collect();
     let received_count = successful.len();
-    let total = total_sent.max(1);
-    let packet_loss_pct = round_two(((total - received_count) as f64 / total as f64) * 100.0);
 
-    if successful.is_empty() {
+    if successful.is_empty() || total_sent == 0 {
         return IcmpProbeResult {
             success: false,
             rtts,
@@ -154,6 +186,10 @@ fn calculate_probe_result(rtts: Vec<Option<f64>>, total_sent: usize) -> IcmpProb
             packet_loss_pct: 100.0,
         };
     }
+
+    let total = total_sent.max(received_count);
+    let packet_loss_pct =
+        round_two((total.saturating_sub(received_count) as f64 / total as f64) * 100.0);
 
     let sum: f64 = successful.iter().sum();
     let avg = round_two(sum / received_count as f64);
@@ -233,5 +269,16 @@ mod tests {
         assert_eq!(calculate_jitter(&latencies), Some(2.33));
         assert_eq!(calculate_jitter(&[10.0]), None);
         assert_eq!(calculate_jitter(&[]), None);
+    }
+
+    #[test]
+    fn calcula_estatisticas_protege_contra_underflow_e_zero_enviados() {
+        let zero = calculate_probe_result(vec![], 0);
+        assert!(!zero.success);
+        assert_eq!(zero.packet_loss_pct, 100.0);
+
+        let mismatch = calculate_probe_result(vec![Some(5.0), Some(6.0)], 1);
+        assert!(mismatch.success);
+        assert_eq!(mismatch.packet_loss_pct, 0.0);
     }
 }

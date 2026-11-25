@@ -26,7 +26,7 @@ use std::{
 
 use axum::{
     extract::Request,
-    http::{header::HeaderValue, StatusCode},
+    http::{header::HeaderValue, Method, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
     Json,
@@ -44,7 +44,7 @@ pub const SLOW_REQUEST: Duration = Duration::from_secs(10);
 #[derive(Debug, Clone)]
 struct RequestInfo {
     incident: String,
-    method: String,
+    method: Method,
     path: String,
 }
 
@@ -60,7 +60,7 @@ pub fn current_incident() -> Option<String> {
 
 /// Código curto e legível: 8 caracteres hexadecimais em maiúsculas.
 fn new_code() -> String {
-    uuid::Uuid::new_v4().simple().to_string()[..8].to_ascii_uppercase()
+    format!("{:08X}", rand::random::<u32>())
 }
 
 /// A mensagem que a tela mostra para qualquer 500.
@@ -97,7 +97,7 @@ pub async fn track(request: Request, next: Next) -> Response {
     let started = Instant::now();
     let info = RequestInfo {
         incident: new_code(),
-        method: request.method().to_string(),
+        method: request.method().clone(),
         path: request.uri().path().to_string(),
     };
     let outcome = REQUEST

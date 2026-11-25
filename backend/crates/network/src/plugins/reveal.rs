@@ -111,7 +111,8 @@ pub async fn reveal(
     let resolved = credentials::resolve(&ctx.db, device.id, &package.manifest.transports).await?;
     let transport = transport_for(ctx, resolved.via_probe_id).await?;
     let extras = runs::load_extras(&ctx.db, &plugin, &package, device.id).await?;
-    let outcome = runtime::execute(
+    // A saída é o segredo pedido: volta sem máscara, só nesta resposta.
+    let outcome = runtime::execute_revealing(
         &package.script,
         &action.id,
         params_value,

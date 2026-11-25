@@ -1,16 +1,18 @@
 //! Casos de uso SNMP para controllers, scheduler e checker.
 
 use chrono::{DateTime, Utc};
-use futures::future;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
+use futures::{stream::FuturesUnordered, StreamExt};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, Set,
+};
 use std::collections::{BTreeMap, HashMap};
 
 use crate::snmp::{
     client::{SnmpConfig, SnmpError, SnmpVersion},
     collectors::{
         collect_cpu, collect_hardware, collect_interfaces_and_traffic, collect_lldp,
-        collect_memory, collect_system, status_label, InterfaceTraffic, LldpNeighbor, SnmpCpuInfo,
-        SnmpInterface, SnmpMemoryInfo, SnmpSystemInfo,
+        collect_memory, collect_system, interface_monitor_status, status_label, InterfaceTraffic,
+        LldpNeighbor, SnmpCpuInfo, SnmpInterface, SnmpMemoryInfo, SnmpSystemInfo,
     },
     interface_monitoring,
 };
@@ -278,47 +280,16 @@ pub async fn scan_device(
     let has_memory_support =
         scan.memory_info.used_percent.is_some() || scan.memory_info.total_kb.is_some();
 
-    if has_cpu_support {
-        scan.has_cpu_monitor = all_device_monitors
+    // A varredura é somente leitura: nunca apaga monitores nem métricas por
+    // uma falha transitória ou ausência pontual de CPU/memória.
+    scan.has_cpu_monitor = has_cpu_support
+        && all_device_monitors
             .iter()
             .any(|m| m.name == CPU_MONITOR_NAME && m.enabled);
-    } else {
-        scan.has_cpu_monitor = false;
-        if let Some(mon) = all_device_monitors
-            .iter()
-            .find(|m| m.name == CPU_MONITOR_NAME)
-        {
-            let _ = netmonitor_core::maintenance::resource_cleanup::ResourceCleanupService::delete_monitor(
-                &ctx.db, mon.id,
-            ).await;
-            let _ = metrics::Entity::delete_many()
-                .filter(metrics_entity::Column::DeviceId.eq(device.id))
-                .filter(metrics_entity::Column::Name.eq("cpu_usage"))
-                .exec(&ctx.db)
-                .await;
-        }
-    }
-
-    if has_memory_support {
-        scan.has_memory_monitor = all_device_monitors
+    scan.has_memory_monitor = has_memory_support
+        && all_device_monitors
             .iter()
             .any(|m| m.name == MEMORY_MONITOR_NAME && m.enabled);
-    } else {
-        scan.has_memory_monitor = false;
-        if let Some(mon) = all_device_monitors
-            .iter()
-            .find(|m| m.name == MEMORY_MONITOR_NAME)
-        {
-            let _ = netmonitor_core::maintenance::resource_cleanup::ResourceCleanupService::delete_monitor(
-                &ctx.db, mon.id,
-            ).await;
-            let _ = metrics::Entity::delete_many()
-                .filter(metrics_entity::Column::DeviceId.eq(device.id))
-                .filter(metrics_entity::Column::Name.eq("memory_usage"))
-                .exec(&ctx.db)
-                .await;
-        }
-    }
 
     let existing: Vec<_> = all_device_monitors
         .into_iter()
@@ -513,6 +484,11 @@ impl InterfaceMatcher {
     fn take(&mut self, posicao: usize) -> Option<device_interfaces::Model> {
         self.casados.remove(&posicao)
     }
+
+    /// IDs das linhas do banco que casaram com alguma interface da varredura.
+    fn matched_ids(&self) -> std::collections::HashSet<i64> {
+        self.casados.values().map(|row| row.id).collect()
+    }
 }
 
 pub async fn poll_device(
@@ -546,20 +522,27 @@ pub async fn poll_device(
         .iter()
         .map(|traffic| (traffic.if_index, traffic))
         .collect();
-    let mut interfaces = std::collections::BTreeMap::new();
-    let mut previous_octets = HashMap::new();
+    let mut synced_list = Vec::with_capacity(scan.interfaces.len());
+    let sync_txn = begin_write(&ctx.db).await?;
     for (posicao, interface) in scan.interfaces.iter().enumerate() {
         let existing = conhecidas.take(posicao);
         let saved = sync_interface(
-            &ctx.db,
+            &sync_txn,
             device.id,
             interface,
             existing.as_ref(),
             traffic_by_index.get(&interface.if_index).copied(),
         )
         .await?;
+        synced_list.push((interface.if_index, saved));
+    }
+    sync_txn.commit().await?;
+
+    let mut interfaces = std::collections::BTreeMap::new();
+    let mut previous_octets = HashMap::new();
+    for (if_index, saved) in synced_list {
         if let Some(reading) = saved.previous_octets {
-            previous_octets.insert(interface.if_index, reading);
+            previous_octets.insert(if_index, reading);
         }
         // Só interface administrativamente habilitada é avaliada: uma porta
         // que o operador desligou não pode gerar alerta de queda de link.
@@ -573,7 +556,7 @@ pub async fn poll_device(
             )
             .await?;
         }
-        interfaces.insert(interface.if_index, saved.interface);
+        interfaces.insert(if_index, saved.interface);
     }
     if let Some(ref link_name) = device.link_interface_name {
         if let Some(matching) = interfaces
@@ -1045,18 +1028,6 @@ fn failed_monitor_result(
     }
 }
 
-fn interface_monitor_status(admin: u64, oper: u64) -> MonitorStatus {
-    if admin == 2 {
-        MonitorStatus::Disabled
-    } else if oper == 1 {
-        MonitorStatus::Up
-    } else if oper == 2 {
-        MonitorStatus::Down
-    } else {
-        MonitorStatus::Warning
-    }
-}
-
 /// Recusa aplicar a configuração quando a varredura não é confiável.
 ///
 /// `apply_monitors` lê "interface ausente da varredura" como "interface
@@ -1138,6 +1109,7 @@ pub async fn apply_monitors(
         .collect();
 
     let mut conhecidas = InterfaceMatcher::resolve(db_interfaces.clone(), &scan.interfaces);
+    let matched_ids = conhecidas.matched_ids();
 
     // Numa transação porque a remoção de uma interface são três escritas que
     // só valem juntas — métricas, monitor e a própria linha. Sem ela, o pool de
@@ -1148,7 +1120,8 @@ pub async fn apply_monitors(
         let Some(snmp_idx) = db_iface.snmp_index else {
             continue;
         };
-        if discovered_indexes.contains(&snmp_idx)
+        if matched_ids.contains(&db_iface.id)
+            || discovered_indexes.contains(&snmp_idx)
             || discovered_names.contains(&db_iface.name.to_lowercase())
         {
             continue;
@@ -1234,7 +1207,7 @@ pub async fn apply_monitors(
                     .await?;
             }
         }
-    } else {
+    } else if !scan.collector_errors.contains_key("cpu") {
         // Equipamento não possui CPU (ex: MPPT, IoT): remove monitor órfão de CPU se existir
         if let Some(mon) = monitors::Entity::find()
             .filter(monitors_entity::Column::DeviceId.eq(Some(device.id)))
@@ -1277,7 +1250,7 @@ pub async fn apply_monitors(
                     .await?;
             }
         }
-    } else {
+    } else if !scan.collector_errors.contains_key("memory") {
         // Equipamento não possui Memória: remove monitor órfão de memória se existir
         if let Some(mon) = monitors::Entity::find()
             .filter(monitors_entity::Column::DeviceId.eq(Some(device.id)))
@@ -1673,8 +1646,8 @@ const fn counter_from_column(value: i64) -> u64 {
 ///
 /// Recebe a interface existente (quando já carregada em lote pelo chamador)
 /// para evitar um `SELECT` por interface durante o poll.
-pub async fn sync_interface(
-    db: &sea_orm::DatabaseConnection,
+pub async fn sync_interface<C: ConnectionTrait>(
+    db: &C,
     device_id: i64,
     source: &SnmpInterface,
     existing: Option<&device_interfaces::Model>,
@@ -1866,14 +1839,16 @@ impl PendingMetric {
     }
 }
 
-/// Grava um lote de métricas em uma única operação de inserção em massa.
+/// Grava um lote de métricas em chunks dentro de uma transação de escrita.
 ///
-/// SQLite e PostgreSQL suportam `INSERT` multi-row; o `sea_orm` emite a forma
-/// correta para cada dialeto. O retorno é a quantidade de itens enviados.
+/// SQLite e PostgreSQL suportam `INSERT` multi-row, mas têm teto de parâmetros
+/// por comando: dividir em lotes de 100 linhas evita estourar o limite em
+/// switches com dezenas de interfaces.
 async fn record_metrics_bulk(
     db: &sea_orm::DatabaseConnection,
     metrics: Vec<PendingMetric>,
 ) -> AppResult<usize> {
+    const CHUNK_SIZE: usize = 100;
     if metrics.is_empty() {
         return Ok(0);
     }
@@ -1882,9 +1857,13 @@ async fn record_metrics_bulk(
         .into_iter()
         .map(PendingMetric::into_active_model)
         .collect();
-    metrics::Entity::insert_many(active_models)
-        .exec_without_returning(db)
-        .await?;
+    let txn = begin_write(db).await?;
+    for chunk in active_models.chunks(CHUNK_SIZE) {
+        metrics::Entity::insert_many(chunk.to_vec())
+            .exec_without_returning(&txn)
+            .await?;
+    }
+    txn.commit().await?;
     Ok(count)
 }
 
@@ -1894,12 +1873,15 @@ pub async fn detect_connection(
     preferred: Option<SnmpConfig>,
 ) -> AppResult<SnmpDetectResult> {
     let started = std::time::Instant::now();
-    let mut candidates = Vec::new();
-    if let Some(mut config) = preferred {
+    let preferred = preferred.map(|mut config| {
         config.host = host.to_string();
         config.port = port;
-        candidates.push(config);
-    }
+        config
+    });
+    let tried_preferred = preferred
+        .as_ref()
+        .map(|config| (config.version, config.community.clone()));
+    let mut candidates = Vec::new();
     let timeout_ms = std::env::var("SNMP_DISCOVERY_TIMEOUT_MS")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
@@ -1916,9 +1898,14 @@ pub async fn detect_connection(
                     .map(move |community| (version, community))
             })
     {
-        if !candidates.iter().any(|config| {
-            config.version == version && config.community.as_str() == community.as_str()
-        }) {
+        let already_tried = tried_preferred
+            .as_ref()
+            .is_some_and(|(v, c)| *v == version && c.as_str() == community.as_str());
+        if !already_tried
+            && !candidates.iter().any(|config: &SnmpConfig| {
+                config.version == version && config.community.as_str() == community.as_str()
+            })
+        {
             let mut config = SnmpConfig::v2c(host, community, port);
             config.version = version;
             config.timeout_ms = timeout_ms;
@@ -1926,29 +1913,75 @@ pub async fn detect_connection(
         }
     }
     candidates.extend(discovery_v3_profiles(host, port, timeout_ms));
-    let candidate_count = candidates.len();
-    let attempts = candidates.into_iter().map(|config| async move {
-        let label = (
-            config.version,
-            (config.version != SnmpVersion::V3).then(|| config.community.clone()),
-        );
-        test_connection(config).await.map(|result| (label, result))
-    });
-    let outcomes = future::join_all(attempts).await;
-    // A ordem das tentativas é a de preferência, mas quem vence é quem
-    // respondeu: pegar o primeiro `Ok` devolvia "não detectado" quando a
-    // combinação preferida falava com o agente sem entregar OID nenhum, mesmo
-    // havendo outra combinação logo atrás que funcionava.
-    let mut answered = None;
-    let mut fallback = None;
-    for outcome in outcomes.into_iter().flatten() {
-        if outcome.1.success {
-            answered = Some(outcome);
-            break;
-        }
-        fallback.get_or_insert(outcome);
+    let candidate_count = candidates.len() + usize::from(preferred.is_some());
+    // O perfil já cadastrado corre junto com os demais (em série, o timeout
+    // dele somaria ao da varredura quando não responde) e vence se responder
+    // até `PREFERRED_GRACE` depois do primeiro sucesso de outro perfil.
+    const PREFERRED_GRACE: std::time::Duration = std::time::Duration::from_millis(500);
+    let mut pending = FuturesUnordered::new();
+    for (is_preferred, config) in preferred
+        .into_iter()
+        .map(|config| (true, config))
+        .chain(candidates.into_iter().map(|config| (false, config)))
+    {
+        pending.push(async move {
+            let label = (
+                config.version,
+                (config.version != SnmpVersion::V3).then(|| config.community.clone()),
+            );
+            (
+                is_preferred,
+                test_connection(config).await.map(|result| (label, result)),
+            )
+        });
     }
-    let detected = answered.or(fallback);
+    let mut preferred_pending = tried_preferred.is_some();
+    let mut preferred_fallback = None;
+    let mut fallback = None;
+    let mut answered = None;
+    let mut grace_until = None;
+    loop {
+        let next = match grace_until {
+            Some(deadline) => match tokio::time::timeout_at(deadline, pending.next()).await {
+                Ok(next) => next,
+                Err(_) => break,
+            },
+            None => pending.next().await,
+        };
+        let Some((is_preferred, outcome)) = next else {
+            break;
+        };
+        if is_preferred {
+            preferred_pending = false;
+        }
+        let Ok(outcome) = outcome else {
+            if grace_until.is_some() && !preferred_pending {
+                break;
+            }
+            continue;
+        };
+        if outcome.1.success {
+            if is_preferred {
+                answered = Some(outcome);
+                break;
+            }
+            answered.get_or_insert(outcome);
+            if !preferred_pending {
+                break;
+            }
+            grace_until.get_or_insert_with(|| tokio::time::Instant::now() + PREFERRED_GRACE);
+        } else if is_preferred {
+            preferred_fallback = Some(outcome);
+            if grace_until.is_some() {
+                break;
+            }
+        } else {
+            fallback.get_or_insert(outcome);
+        }
+    }
+    // Descarta as tentativas que ainda estavam pendentes.
+    drop(pending);
+    let detected = answered.or(preferred_fallback).or(fallback);
     tracing::info!(
         target = host,
         port,
@@ -1960,7 +1993,7 @@ pub async fn detect_connection(
     match detected {
         Some(((version, community), result)) => Ok(SnmpDetectResult {
             detected: result.success,
-            version: Some(version_label(version).into()),
+            version: Some(version_name(version).into()),
             community,
             result: Some(result),
         }),
@@ -2026,13 +2059,6 @@ fn discovery_v3_profiles(host: &str, port: u16, timeout_ms: u64) -> Vec<SnmpConf
             timeout_ms,
         })
         .collect()
-}
-const fn version_label(version: SnmpVersion) -> &'static str {
-    match version {
-        SnmpVersion::V1 => "v1",
-        SnmpVersion::V2c => "v2c",
-        SnmpVersion::V3 => "v3",
-    }
 }
 fn map_error(error: SnmpError) -> AppError {
     AppError::BusinessRule(error.to_string())
@@ -2541,5 +2567,44 @@ mod tests {
         );
         assert!(reboot);
         assert!(pendentes.is_empty());
+    }
+
+    #[tokio::test]
+    async fn record_metrics_bulk_divide_em_lotes_acima_de_150_metricas() {
+        use crate::migrations::{MigratorTrait, TestMigrator};
+        let mut options = sea_orm::ConnectOptions::new("sqlite::memory:".to_owned());
+        options.max_connections(1).min_connections(1);
+        let db = sea_orm::Database::connect(options).await.unwrap();
+        TestMigrator::up(&db, None).await.unwrap();
+
+        let device = devices::ActiveModel {
+            name: Set("Switch-48p".into()),
+            r#type: Set("switch".into()),
+            status: Set("online".into()),
+            ..Default::default()
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+
+        let now = Utc::now();
+        let batch: Vec<PendingMetric> = (0..180)
+            .map(|i| PendingMetric {
+                device_id: device.id,
+                interface_id: None,
+                name: format!("metric_{i}"),
+                value: f64::from(i),
+                unit: "bps".into(),
+                recorded_at: now,
+            })
+            .collect();
+        let inserted = record_metrics_bulk(&db, batch).await.unwrap();
+        assert_eq!(inserted, 180);
+        let stored = metrics::Entity::find()
+            .filter(metrics_entity::Column::DeviceId.eq(device.id))
+            .all(&db)
+            .await
+            .unwrap();
+        assert_eq!(stored.len(), 180);
     }
 }

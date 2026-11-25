@@ -32,16 +32,19 @@
 //! seu socket e continua lendo. A ponte termina quando os dois lados fecharam,
 //! quando o canal cai ou quando é cancelada.
 
-use std::io;
+use std::{
+    fmt, io,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
-    sync::mpsc,
+    sync::{mpsc, Notify},
 };
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::protocol::{TunnelFrame, TunnelPayload, WireFrame, TUNNEL_DATA_MAX};
+use crate::protocol::{TunnelFrame, TunnelPayload, WireFrame, TUNNEL_DATA_MAX, ZSTD_LEVEL};
 
 /// Custo que um lado manda sem esperar crédito.
 pub const WINDOW: u32 = 256 * 1024;
@@ -89,28 +92,45 @@ pub struct TunnelTotals {
     pub sent_on_wire: u64,
 }
 
-/// Decide, quadro a quadro, se a compressão compensa.
-#[derive(Debug, Default)]
+/// Decide, quadro a quadro, se a compressão compensa, reutilizando o contexto zstd.
 pub struct DataEncoder {
     misses: u32,
     skipped: u32,
+    compressor: Option<zstd::bulk::Compressor<'static>>,
+}
+
+impl Default for DataEncoder {
+    fn default() -> Self {
+        Self {
+            misses: 0,
+            skipped: 0,
+            compressor: zstd::bulk::Compressor::new(ZSTD_LEVEL).ok(),
+        }
+    }
+}
+
+impl fmt::Debug for DataEncoder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DataEncoder")
+            .field("misses", &self.misses)
+            .field("skipped", &self.skipped)
+            .finish()
+    }
 }
 
 impl DataEncoder {
     /// Quadro de dados pronto para o fio, comprimido quando vale a pena.
     pub fn encode(&mut self, id: Uuid, data: &[u8]) -> Vec<u8> {
         if data.len() >= COMPRESS_MIN_BYTES && self.should_try() {
-            if let Some(packed) = TunnelFrame::encode_compressed(id, data) {
-                self.misses = 0;
-                return packed;
+            if let Some(compressor) = self.compressor.as_mut() {
+                if let Some(packed) = TunnelFrame::encode_compressed_with(id, data, compressor) {
+                    self.misses = 0;
+                    return packed;
+                }
+                self.misses = self.misses.saturating_add(1);
             }
-            self.misses = self.misses.saturating_add(1);
         }
-        TunnelFrame {
-            id,
-            payload: TunnelPayload::Data(data.to_vec()),
-        }
-        .encode()
+        TunnelFrame::encode_raw(id, data)
     }
 
     fn should_try(&mut self) -> bool {
@@ -128,89 +148,280 @@ impl DataEncoder {
     }
 }
 
+/// Crédito compartilhado entre leitura local (que consome) e escrita local (que devolve via `Ack`).
+struct CreditWindow {
+    available: AtomicU64,
+    notify: Notify,
+}
+
+impl CreditWindow {
+    fn new() -> Self {
+        Self {
+            available: AtomicU64::new(u64::from(WINDOW)),
+            notify: Notify::new(),
+        }
+    }
+
+    fn load(&self) -> u64 {
+        self.available.load(Ordering::Acquire)
+    }
+
+    fn consume(&self, cost: u64) {
+        self.available.fetch_sub(cost, Ordering::AcqRel);
+    }
+
+    /// Devolve crédito limitado a [`WINDOW`], evitando estouro ou violação da janela.
+    fn release(&self, count: u32) {
+        let cap = u64::from(WINDOW);
+        let add = u64::from(count);
+        let _ = self
+            .available
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+                Some(current.checked_add(add).map_or(cap, |next| next.min(cap)))
+            });
+        self.notify.notify_one();
+    }
+}
+
 /// Bombeia bytes entre `stream` e a ponte `id` até as duas pontas fecharem.
+///
+/// Leitura e escrita correm em paralelo sobre o `stream` dividido: uma escrita
+/// local lenta não bloqueia a leitura nem o processamento de `Ack`/`Cancel`.
 ///
 /// # Errors
 ///
-/// Falha de leitura ou escrita no socket local.
+/// Falha de leitura/escrita no socket local ou encerramento abrupto do canal
+/// antes de `TunnelPayload::Eof`.
 pub async fn pump<S>(
     id: Uuid,
     stream: S,
-    mut inbound: mpsc::Receiver<TunnelPayload>,
+    inbound: mpsc::Receiver<TunnelPayload>,
     outbound: mpsc::Sender<WireFrame>,
     cancel: CancellationToken,
 ) -> io::Result<TunnelTotals>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    let (mut reader, mut writer) = tokio::io::split(stream);
-    let mut totals = TunnelTotals::default();
-    let mut encoder = DataEncoder::default();
-    // Crédito para mandar; o do outro lado começa igual, sem aviso.
-    let mut credit = u64::from(WINDOW);
-    // Recebido e já escrito, mas ainda não devolvido como crédito.
-    let mut unacked: u32 = 0;
-    let mut local_eof = false;
-    let mut remote_eof = false;
-    let mut buffer = vec![0_u8; TUNNEL_DATA_MAX];
-    let send = |bytes: Vec<u8>| {
-        let outbound = outbound.clone();
-        async move {
-            outbound
-                .send(WireFrame::Binary(bytes))
-                .await
-                .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "canal do agente caiu"))
-        }
-    };
-    let control = |payload: TunnelPayload| TunnelFrame { id, payload }.encode();
+    pump_inner(id, stream, inbound, outbound, cancel, Ok).await
+}
 
-    while !(local_eof && remote_eof) {
-        // Sem crédito para o piso, não lê: o socket local espera, e o banco
-        // (ou o `sqlx`) desacelera sozinho.
-        let room = if credit >= u64::from(MIN_FRAME_COST) {
-            usize::try_from(credit)
-                .unwrap_or(usize::MAX)
-                .min(TUNNEL_DATA_MAX)
-        } else {
-            0
-        };
-        tokio::select! {
-            () = cancel.cancelled() => break,
-            read = reader.read(&mut buffer[..room]), if !local_eof && room > 0 => {
-                let count = read?;
-                if count == 0 {
-                    local_eof = true;
-                    send(control(TunnelPayload::Eof)).await?;
-                } else {
-                    credit -= u64::from(frame_cost(count));
-                    totals.sent += count as u64;
-                    let frame = encoder.encode(id, &buffer[..count]);
-                    totals.sent_on_wire += frame.len() as u64;
-                    send(frame).await?;
+/// Como [`pump`], mas recebe quadros binários crus e descomprime com um
+/// `zstd::bulk::Decompressor` próprio desta ponte, fora do laço do WebSocket.
+///
+/// # Errors
+///
+/// Ver [`pump`], além de quadro binário malformado (`InvalidData`).
+pub async fn pump_raw<S>(
+    id: Uuid,
+    stream: S,
+    inbound: mpsc::Receiver<Vec<u8>>,
+    outbound: mpsc::Sender<WireFrame>,
+    cancel: CancellationToken,
+) -> io::Result<TunnelTotals>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let mut decompressor = zstd::bulk::Decompressor::new().map_err(io::Error::other)?;
+    pump_inner(
+        id,
+        stream,
+        inbound,
+        outbound,
+        cancel,
+        move |bytes: Vec<u8>| {
+            TunnelFrame::decode_with(&bytes, &mut decompressor)
+                .map(|frame| frame.payload)
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))
+        },
+    )
+    .await
+}
+
+async fn send_wire(
+    outbound: &mpsc::Sender<WireFrame>,
+    stop: &CancellationToken,
+    bytes: Vec<u8>,
+) -> io::Result<bool> {
+    tokio::select! {
+        biased;
+        () = stop.cancelled() => Ok(false),
+        res = outbound.send(WireFrame::Binary(bytes)) => {
+            res.map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "canal do agente caiu"))?;
+            Ok(true)
+        }
+    }
+}
+
+async fn pump_inner<S, M, F>(
+    id: Uuid,
+    stream: S,
+    mut inbound: mpsc::Receiver<M>,
+    outbound: mpsc::Sender<WireFrame>,
+    cancel: CancellationToken,
+    mut decode: F,
+) -> io::Result<TunnelTotals>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+    F: FnMut(M) -> io::Result<TunnelPayload>,
+{
+    let (mut reader, mut writer) = tokio::io::split(stream);
+    let credit = CreditWindow::new();
+    let stop = cancel.child_token();
+    let local_done = CancellationToken::new();
+
+    let read_half = async {
+        let mut encoder = DataEncoder::default();
+        let mut buffer = vec![0_u8; TUNNEL_DATA_MAX];
+        let mut sent: u64 = 0;
+        let mut sent_on_wire: u64 = 0;
+        let min_cost = u64::from(MIN_FRAME_COST);
+
+        loop {
+            if stop.is_cancelled() {
+                break;
+            }
+            // Inscrito antes de consultar o crédito: um Ack entre o load e o
+            // await não se perde.
+            let wakeup = credit.notify.notified();
+            tokio::pin!(wakeup);
+            wakeup.as_mut().enable();
+            let available = credit.load();
+            if available < min_cost {
+                tokio::select! {
+                    biased;
+                    () = stop.cancelled() => break,
+                    () = wakeup => continue,
                 }
             }
-            frame = inbound.recv() => match frame {
-                // O outro lado sumiu (sessão fechada ou ponte cancelada).
-                None => break,
-                Some(TunnelPayload::Data(bytes)) => {
-                    writer.write_all(&bytes).await?;
-                    totals.received += bytes.len() as u64;
+            let room = usize::try_from(available)
+                .unwrap_or(usize::MAX)
+                .min(TUNNEL_DATA_MAX);
+            let read = tokio::select! {
+                biased;
+                () = stop.cancelled() => break,
+                read = reader.read(&mut buffer[..room]) => read,
+            };
+            let count = match read {
+                Ok(count) => count,
+                Err(error) => {
+                    stop.cancel();
+                    return Err(error);
+                }
+            };
+            if count == 0 {
+                let eof = TunnelFrame {
+                    id,
+                    payload: TunnelPayload::Eof,
+                }
+                .encode();
+                if let Err(error) = send_wire(&outbound, &stop, eof).await {
+                    stop.cancel();
+                    return Err(error);
+                }
+                break;
+            }
+            credit.consume(u64::from(frame_cost(count)));
+            sent += count as u64;
+            let frame = encoder.encode(id, &buffer[..count]);
+            sent_on_wire += frame.len() as u64;
+            match send_wire(&outbound, &stop, frame).await {
+                Ok(true) => {}
+                Ok(false) => break,
+                Err(error) => {
+                    stop.cancel();
+                    return Err(error);
+                }
+            }
+        }
+        local_done.cancel();
+        Ok::<(u64, u64), io::Error>((sent, sent_on_wire))
+    };
+
+    let write_half = async {
+        let mut received: u64 = 0;
+        let mut unacked: u32 = 0;
+        let mut remote_eof = false;
+
+        loop {
+            if stop.is_cancelled() || (remote_eof && local_done.is_cancelled()) {
+                break;
+            }
+            let next = tokio::select! {
+                biased;
+                () = stop.cancelled() => break,
+                () = local_done.cancelled(), if remote_eof => break,
+                frame = inbound.recv() => frame,
+            };
+            let Some(raw) = next else {
+                if !remote_eof {
+                    stop.cancel();
+                    return Err(io::Error::new(
+                        io::ErrorKind::UnexpectedEof,
+                        "ponte encerrada antes do fim dos dados",
+                    ));
+                }
+                // Sem entrada não chega mais `Ack`: a metade de leitura
+                // ficaria presa esperando crédito para sempre.
+                stop.cancel();
+                break;
+            };
+            let payload = match decode(raw) {
+                Ok(payload) => payload,
+                Err(error) => {
+                    stop.cancel();
+                    return Err(error);
+                }
+            };
+            match payload {
+                TunnelPayload::Data(bytes) => {
+                    let write = tokio::select! {
+                        biased;
+                        () = stop.cancelled() => break,
+                        res = writer.write_all(&bytes) => res,
+                    };
+                    if let Err(error) = write {
+                        stop.cancel();
+                        return Err(error);
+                    }
+                    received += bytes.len() as u64;
                     unacked = unacked.saturating_add(frame_cost(bytes.len()));
                     if unacked >= WINDOW / 2 {
-                        send(control(TunnelPayload::Ack(unacked))).await?;
-                        unacked = 0;
+                        let ack = TunnelFrame {
+                            id,
+                            payload: TunnelPayload::Ack(unacked),
+                        }
+                        .encode();
+                        match send_wire(&outbound, &stop, ack).await {
+                            Ok(true) => unacked = 0,
+                            Ok(false) => break,
+                            Err(error) => {
+                                stop.cancel();
+                                return Err(error);
+                            }
+                        }
                     }
                 }
-                Some(TunnelPayload::Ack(count)) => credit += u64::from(count),
-                Some(TunnelPayload::Eof) => {
+                TunnelPayload::Ack(count) => credit.release(count),
+                TunnelPayload::Eof => {
                     let _ = writer.shutdown().await;
                     remote_eof = true;
                 }
-            },
+            }
         }
-    }
-    let _ = writer.shutdown().await;
-    Ok(totals)
+        if remote_eof || cancel.is_cancelled() {
+            let _ = writer.shutdown().await;
+        }
+        Ok::<u64, io::Error>(received)
+    };
+
+    let (read_res, write_res) = tokio::join!(read_half, write_half);
+    let received = write_res?;
+    let (sent, sent_on_wire) = read_res?;
+    Ok(TunnelTotals {
+        sent,
+        received,
+        sent_on_wire,
+    })
 }
 
 #[cfg(test)]
@@ -346,6 +557,32 @@ mod tests {
         assert_eq!(sent, WINDOW as usize);
     }
 
+    #[tokio::test]
+    async fn entrada_fechada_depois_do_eof_remoto_encerra_a_bomba() {
+        let id = Uuid::new_v4();
+        let (mut local, side) = duplex(TUNNEL_DATA_MAX * 8);
+        let (out, mut wire) = mpsc::channel(INBOUND_CAPACITY * 4);
+        let (to_pump, inbound) = mpsc::channel(INBOUND_CAPACITY);
+        let pumped = tokio::spawn(pump(id, side, inbound, out, CancellationToken::new()));
+        tokio::spawn(async move { while wire.recv().await.is_some() {} });
+
+        // Mais que a janela: sem `Ack`, a leitura esgota o crédito.
+        local
+            .write_all(&vec![1; TUNNEL_DATA_MAX * 8])
+            .await
+            .unwrap();
+        to_pump.send(TunnelPayload::Eof).await.unwrap();
+        drop(to_pump);
+
+        let totals = tokio::time::timeout(std::time::Duration::from_secs(2), pumped)
+            .await
+            .expect("a bomba não pode ficar presa esperando crédito")
+            .unwrap()
+            .unwrap();
+        assert!(totals.sent <= u64::from(WINDOW));
+        drop(local);
+    }
+
     /// Consultas curtas: a janela em bytes deixaria milhares de quadros a
     /// caminho; o piso de custo segura em `WINDOW / MIN_FRAME_COST`.
     #[tokio::test]
@@ -424,5 +661,82 @@ mod tests {
         let task = tokio::spawn(pump(Uuid::new_v4(), side, inbound, out, cancel.clone()));
         cancel.cancel();
         assert!(task.await.unwrap().is_ok());
+    }
+
+    #[tokio::test]
+    async fn encerramento_sem_eof_retorna_unexpected_eof() {
+        let (_local, side) = duplex(1024);
+        let (out, _wire) = mpsc::channel(4);
+        let (tx, inbound) = mpsc::channel(4);
+        tx.send(TunnelPayload::Data(b"parcial".to_vec()))
+            .await
+            .unwrap();
+        drop(tx);
+        let err = pump(Uuid::new_v4(), side, inbound, out, CancellationToken::new())
+            .await
+            .expect_err("sem Eof precisa falhar");
+        assert_eq!(err.kind(), io::ErrorKind::UnexpectedEof);
+    }
+
+    #[tokio::test]
+    async fn trafego_bidirecional_simultaneo_nao_entra_em_deadlock() {
+        // Duplex pequeno (2 KiB) com envio pesado simultâneo nos dois sentidos:
+        // um laço único travaria em write_all bloqueando read/Ack.
+        let (client, database, central, agent) = bridged(2048);
+        let payload_a = vec![0x41_u8; (WINDOW as usize) * 2];
+        let payload_b = vec![0x42_u8; (WINDOW as usize) * 2];
+        let expected_a = payload_a.clone();
+        let expected_b = payload_b.clone();
+
+        let (mut c_read, mut c_write) = tokio::io::split(client);
+        let (mut d_read, mut d_write) = tokio::io::split(database);
+
+        let result = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            let (wa, wb, ra, rb) = tokio::join!(
+                async move {
+                    c_write.write_all(&payload_a).await.unwrap();
+                    c_write.shutdown().await.unwrap();
+                },
+                async move {
+                    d_write.write_all(&payload_b).await.unwrap();
+                    d_write.shutdown().await.unwrap();
+                },
+                async move {
+                    let mut buf = Vec::new();
+                    d_read.read_to_end(&mut buf).await.unwrap();
+                    buf
+                },
+                async move {
+                    let mut buf = Vec::new();
+                    c_read.read_to_end(&mut buf).await.unwrap();
+                    buf
+                }
+            );
+            let _ = (wa, wb);
+            assert_eq!(ra, expected_a);
+            assert_eq!(rb, expected_b);
+            central.await.unwrap().unwrap();
+            agent.await.unwrap().unwrap();
+        })
+        .await;
+        assert!(result.is_ok(), "ponte bidirecional entrou em deadlock");
+    }
+
+    #[tokio::test]
+    async fn cancelar_interrompe_escrita_bloqueada_em_buffer_cheio() {
+        let (_local, side) = duplex(16);
+        let (out, _wire) = mpsc::channel(4);
+        let (tx, inbound) = mpsc::channel(4);
+        let cancel = CancellationToken::new();
+        let task = tokio::spawn(pump(Uuid::new_v4(), side, inbound, out, cancel.clone()));
+        // Enche o duplex de 16 bytes e deixa writer.write_all bloqueado.
+        tx.send(TunnelPayload::Data(vec![1_u8; 4096]))
+            .await
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        cancel.cancel();
+        let finished = tokio::time::timeout(std::time::Duration::from_secs(1), task).await;
+        assert!(finished.is_ok(), "cancel não interrompeu write_all");
+        assert!(finished.unwrap().unwrap().is_ok());
     }
 }

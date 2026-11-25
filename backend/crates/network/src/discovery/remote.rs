@@ -32,6 +32,16 @@ pub async fn get_pending_discovery_tasks<C: ConnectionTrait>(
     db: &C,
     probe_id: i64,
 ) -> AppResult<Vec<ProbeDiscoveryTask>> {
+    // Não despacha outra varredura enquanto este probe já tiver uma em curso
+    // — qualquer uma viva, não só a mais antiga (que pode estar abandonada).
+    let running = discovery_runs::Entity::find()
+        .filter(discovery_runs_entity::Column::ProbeId.eq(probe_id))
+        .filter(discovery_runs_entity::Column::Status.eq("running"))
+        .all(db)
+        .await?;
+    if super::queue::any_alive(&running) {
+        return Ok(Vec::new());
+    }
     let Some(run) = discovery_runs::Entity::find()
         .filter(discovery_runs_entity::Column::ProbeId.eq(probe_id))
         .filter(discovery_runs_entity::Column::Status.eq("pending"))

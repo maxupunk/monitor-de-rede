@@ -116,6 +116,12 @@ impl Default for DeciderRuntime {
 }
 
 impl DeciderRuntime {
+    /// Instala o runtime do Decisor no contexto na subida da aplicação,
+    /// garantindo instância única compartilhada entre todas as tarefas.
+    pub fn install(ctx: &AppContext) {
+        let _ = Self::from_context(ctx);
+    }
+
     /// O runtime do processo, criado na primeira consulta.
     #[must_use]
     pub fn from_context(ctx: &AppContext) -> Self {
@@ -210,7 +216,13 @@ impl DeciderRuntime {
                         "Decisor em pausa depois de falhas seguidas",
                     ));
                 }
-                self.inner.background.acquire().await.ok()
+                let permit = self.inner.background.acquire().await.ok();
+                if self.breaker_open() {
+                    return Err(AppError::service_unavailable(
+                        "Decisor em pausa depois de falhas seguidas",
+                    ));
+                }
+                permit
             }
         };
         match lane {

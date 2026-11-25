@@ -64,10 +64,7 @@ pub fn peek(code: &str) -> Option<i64> {
 /// devolve `None`.
 #[must_use]
 pub fn redeem(code: &str) -> Option<i64> {
-    let code = code.trim();
-    if !code.starts_with(PREFIX) {
-        return None;
-    }
+    let code = validate_code(code).ok()?;
     vault().consume(&sha256_hex(code))?.parse().ok()
 }
 

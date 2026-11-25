@@ -16,7 +16,6 @@ use netmonitor_core::{
         AuditAction, AuditActor, AuditChanges, AuditEntryInput, AuditService, ResourceType,
         AUTHENTICATED_USER_HEADER,
     },
-    events::EventBus,
     shared::errors::{AppError, AppResult},
 };
 
@@ -25,7 +24,7 @@ use crate::{
     central::Central,
     ip_allocator, peer_name,
     peer_service::{self, CreatePeerPayload, PeerAgent},
-    server_service,
+    server_service, traffic_recorder,
     views::{
         SerializedVpnArtifact, VpnAgentPolicyResponse, VpnFirewallHintsResponse,
         VpnKeyRotationResponse, VpnNextIpResponse, VpnPeerCreatedResponse, VpnPeerListItem,
@@ -231,7 +230,7 @@ async fn store(
         ));
     };
 
-    let (peer, artifact) = peer_service::create(
+    let created = peer_service::create_with_device(
         &ctx.db,
         &CreatePeerPayload {
             name: name.to_string(),
@@ -247,7 +246,9 @@ async fn store(
         },
     )
     .await?;
-    emit_vpn_peers_updated(&ctx).await;
+    let peer = created.peer;
+    let artifact = created.artifact;
+    traffic_recorder::notify_peers_changed(&ctx);
 
     let requester = requester_id(&headers);
     audit_entry(
@@ -256,37 +257,25 @@ async fn store(
         &requester,
         json!({ "profile": peer.device_profile }),
     );
-    let _ = AuditService::new(&ctx.db)
-        .log(
-            AuditActor::from_headers(&headers, &ctx.db)
-                .await
-                .unwrap_or_default(),
-            AuditEntryInput {
-                action: AuditAction::Create,
-                resource_type: ResourceType::VpnPeer,
-                resource_id: Some(peer.id),
-                resource_label: Some(format!("Peer VPN #{}", peer.id)),
-                description: Some(format!("Peer VPN #{} criado", peer.id)),
-                changes: None,
-            },
-        )
-        .await;
+    log_peer_audit(
+        &ctx,
+        &headers,
+        AuditAction::Create,
+        peer.id,
+        format!("Peer VPN #{} criado", peer.id),
+        None,
+    )
+    .await;
 
-    let device = match netmonitor_core::models::devices::Entity::find_by_id(peer.device_id)
-        .one(&ctx.db)
-        .await?
-    {
-        Some(device) => central
-            .present_device(&ctx.db, device)
-            .await?
-            .unwrap_or(serde_json::Value::Null),
-        None => serde_json::Value::Null,
+    let device = match created.device {
+        Some(device) => central.present_device(&ctx.db, device).await?,
+        None => None,
     };
     Ok((
         StatusCode::CREATED,
         Json(VpnPeerCreatedResponse {
             peer: VpnPeerResponse::from(&peer),
-            device: if device.is_null() { None } else { Some(device) },
+            device,
             artifact: serialize_artifact(peer.id, artifact),
         }),
     )
@@ -310,37 +299,27 @@ async fn update(
         .transpose()?
         .ok_or_else(|| AppError::business_rule("Informe o nome do dispositivo"))?;
 
-    let old = netmonitor_core::models::vpn_peers::Entity::find_by_id(id)
-        .one(&ctx.db)
-        .await?
-        .ok_or_else(|| AppError::not_found("Peer não encontrado"))?;
-    let old_response = VpnPeerResponse::from(&old);
-
-    let (peer, device) = peer_service::rename(&ctx.db, id, name).await?;
-    emit_vpn_peers_updated(&ctx).await;
-    let device = match device {
+    let renamed = peer_service::rename_with_previous(&ctx.db, id, name).await?;
+    let old_response = VpnPeerResponse::from(&renamed.previous);
+    let peer = renamed.peer;
+    traffic_recorder::notify_peers_changed(&ctx);
+    let device = match renamed.device {
         Some(device) => central.present_device(&ctx.db, device).await?,
         None => None,
     };
 
-    let _ = AuditService::new(&ctx.db)
-        .log(
-            AuditActor::from_headers(&headers, &ctx.db)
-                .await
-                .unwrap_or_default(),
-            AuditEntryInput {
-                action: AuditAction::Update,
-                resource_type: ResourceType::VpnPeer,
-                resource_id: Some(peer.id),
-                resource_label: Some(format!("Peer VPN #{}", peer.id)),
-                description: Some(format!("Peer VPN #{} renomeado", peer.id)),
-                changes: Some(AuditChanges {
-                    old: serde_json::to_value(old_response).ok(),
-                    new: serde_json::to_value(VpnPeerResponse::from(&peer)).ok(),
-                }),
-            },
-        )
-        .await;
+    log_peer_audit(
+        &ctx,
+        &headers,
+        AuditAction::Update,
+        peer.id,
+        format!("Peer VPN #{} renomeado", peer.id),
+        Some(AuditChanges {
+            old: serde_json::to_value(old_response).ok(),
+            new: serde_json::to_value(VpnPeerResponse::from(&peer)).ok(),
+        }),
+    )
+    .await;
 
     Ok(format::json(VpnPeerWithDevice {
         peer: VpnPeerResponse::from(&peer),
@@ -376,13 +355,7 @@ async fn qrcode(
     let requester = requester_id(&headers);
     enforce_rate_limit("qrcode", &requester)?;
 
-    let artifact = peer_service::build_artifact(&ctx.db, id).await?;
-    if !artifact.supports_qr_code {
-        return Err(AppError::business_rule(format!(
-            "O perfil {} não utiliza QR Code — copie o script gerado.",
-            artifact.label
-        )));
-    }
+    let artifact = peer_service::build_qr_artifact(&ctx.db, id).await?;
 
     let profile = artifact.profile.clone();
     let file_name = artifact.file_name.clone();
@@ -425,39 +398,30 @@ async fn rotate(
             .map_err(|_| AppError::validation("Corpo da solicitação inválido"))?
     };
 
-    let old = netmonitor_core::models::vpn_peers::Entity::find_by_id(id)
-        .one(&ctx.db)
-        .await?
-        .ok_or_else(|| AppError::not_found("Peer não encontrado"))?;
-    let old_response = VpnPeerResponse::from(&old);
-
-    let (peer, artifact) =
-        peer_service::rotate_keys(&ctx.db, id, input.agent_policy.as_ref()).await?;
-    emit_vpn_peers_updated(&ctx).await;
+    let rotated =
+        peer_service::rotate_keys_with_previous(&ctx.db, id, input.agent_policy.as_ref()).await?;
+    let old_response = VpnPeerResponse::from(&rotated.previous);
+    let peer = rotated.peer;
+    let artifact = rotated.artifact;
+    traffic_recorder::notify_peers_changed(&ctx);
     audit_entry(
         VpnAuditAction::KeyRotation,
         Some(peer.id),
         &requester,
         json!({ "profile": peer.device_profile }),
     );
-    let _ = AuditService::new(&ctx.db)
-        .log(
-            AuditActor::from_headers(&headers, &ctx.db)
-                .await
-                .unwrap_or_default(),
-            AuditEntryInput {
-                action: AuditAction::Update,
-                resource_type: ResourceType::VpnPeer,
-                resource_id: Some(peer.id),
-                resource_label: Some(format!("Peer VPN #{}", peer.id)),
-                description: Some(format!("Chaves do peer VPN #{} rotacionadas", peer.id)),
-                changes: Some(AuditChanges {
-                    old: serde_json::to_value(old_response).ok(),
-                    new: serde_json::to_value(VpnPeerResponse::from(&peer)).ok(),
-                }),
-            },
-        )
-        .await;
+    log_peer_audit(
+        &ctx,
+        &headers,
+        AuditAction::Update,
+        peer.id,
+        format!("Chaves do peer VPN #{} rotacionadas", peer.id),
+        Some(AuditChanges {
+            old: serde_json::to_value(old_response).ok(),
+            new: serde_json::to_value(VpnPeerResponse::from(&peer)).ok(),
+        }),
+    )
+    .await;
     Ok(format::json(VpnKeyRotationResponse {
         message: "Novo par de chaves gerado. A configuração anterior foi invalidada.".into(),
         peer: VpnPeerResponse::from(&peer),
@@ -503,53 +467,57 @@ async fn destroy(
     Path(id): Path<i64>,
     headers: HeaderMap,
 ) -> AppResult<Response> {
-    let old = netmonitor_core::models::vpn_peers::Entity::find_by_id(id)
-        .one(&ctx.db)
-        .await?
-        .ok_or_else(|| AppError::not_found("Peer não encontrado"))?;
+    let old = peer_service::revoke(&ctx.db, id).await?;
     let old_response = VpnPeerResponse::from(&old);
     let old_label = format!("Peer VPN #{}", old.id);
 
-    peer_service::revoke(&ctx.db, id).await?;
-    emit_vpn_peers_updated(&ctx).await;
+    traffic_recorder::notify_peers_changed(&ctx);
     audit_entry(
         VpnAuditAction::PeerRevoked,
         Some(id),
         &requester_id(&headers),
         json!({}),
     );
-    let _ = AuditService::new(&ctx.db)
-        .log(
-            AuditActor::from_headers(&headers, &ctx.db)
-                .await
-                .unwrap_or_default(),
-            AuditEntryInput {
-                action: AuditAction::Delete,
-                resource_type: ResourceType::VpnPeer,
-                resource_id: Some(id),
-                resource_label: Some(old_label.clone()),
-                description: Some(format!("Peer VPN '{}' revogado", old_label)),
-                changes: Some(AuditChanges {
-                    old: serde_json::to_value(old_response).ok(),
-                    new: None,
-                }),
-            },
-        )
-        .await;
+    log_peer_audit(
+        &ctx,
+        &headers,
+        AuditAction::Delete,
+        id,
+        format!("Peer VPN '{old_label}' revogado"),
+        Some(AuditChanges {
+            old: serde_json::to_value(old_response).ok(),
+            new: None,
+        }),
+    )
+    .await;
     Ok(format::json(VpnPeerRevokedResponse {
         message: "Peer revogado. O acesso foi cortado imediatamente.".into(),
     })?)
 }
 
-async fn emit_vpn_peers_updated(ctx: &AppContext) {
-    if let Ok(bus) = EventBus::from_context(ctx) {
-        if let Err(error) = bus
-            .publish(&ctx.db, "vpn:peers_updated", serde_json::json!({}))
-            .await
-        {
-            tracing::warn!(%error, "falha ao publicar vpn:peers_updated");
-        }
-    }
+async fn log_peer_audit(
+    ctx: &AppContext,
+    headers: &HeaderMap,
+    action: AuditAction,
+    peer_id: i64,
+    description: String,
+    changes: Option<AuditChanges>,
+) {
+    let _ = AuditService::new(&ctx.db)
+        .log(
+            AuditActor::from_headers(headers, &ctx.db)
+                .await
+                .unwrap_or_default(),
+            AuditEntryInput {
+                action,
+                resource_type: ResourceType::VpnPeer,
+                resource_id: Some(peer_id),
+                resource_label: Some(format!("Peer VPN #{peer_id}")),
+                description: Some(description),
+                changes,
+            },
+        )
+        .await;
 }
 
 pub fn routes() -> Routes {

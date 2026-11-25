@@ -216,20 +216,20 @@ struct TrainingSets {
     with_failures: JsonLines,
 }
 
-/// Grava as conversas do período direto no pacote (página a página) e
-/// separa os exemplos de treino.
+/// Grava as conversas do período direto no pacote (página a página por cursor)
+/// e separa os exemplos de treino.
 async fn write_conversations<C: ConnectionTrait>(
     db: &C,
     period: Period,
+    users: &HashMap<i64, String>,
     bundle: &mut Bundle,
     totals: &mut Totals,
 ) -> AppResult<TrainingSets> {
-    let users = repository::user_names(db).await?;
     let mut sets = TrainingSets::default();
     bundle.begin("conversas.jsonl")?;
-    let mut page = 0;
+    let mut after_id = 0_i64;
     loop {
-        let rows = repository::conversation_page(db, period.since, page).await?;
+        let rows = repository::conversation_page(db, period.since, after_id).await?;
         for row in &rows {
             let messages = messages_of(row);
             let signals = signals::analyze(messages);
@@ -237,7 +237,7 @@ async fn write_conversations<C: ConnectionTrait>(
             bundle.write_line(&ConversationRecord {
                 id: row.id,
                 title: &row.title,
-                user: Named::from(row.user_id, &users),
+                user: Named::from(row.user_id, users),
                 created_at: row.created_at.to_rfc3339(),
                 updated_at: row.updated_at.to_rfc3339(),
                 outcome: signals.outcome(),
@@ -251,39 +251,70 @@ async fn write_conversations<C: ConnectionTrait>(
                 }
             }
         }
+        if let Some(last) = rows.last() {
+            after_id = last.id;
+        }
         if (rows.len() as u64) < repository::PAGE_SIZE {
             break;
         }
-        page += 1;
     }
     totals.training_examples_without_failures = sets.without_failures.len();
     totals.training_examples_with_failures = sets.with_failures.len();
     Ok(sets)
 }
 
-async fn device_runs<C: ConnectionTrait>(db: &C, period: Period) -> AppResult<JsonLines> {
-    let runs: Vec<plugin_runs::Model> = repository::ai_runs(db, period.since).await?;
-    let device_ids: BTreeSet<i64> = runs.iter().map(|run| run.device_id).collect();
-    let devices = repository::device_names(db, device_ids.into_iter().collect()).await?;
-    let users = repository::user_names(db).await?;
-    let mut lines = JsonLines::default();
-    for run in &runs {
-        lines.push(&DeviceRunRecord {
-            id: run.id,
-            created_at: run.created_at.to_rfc3339(),
-            finished_at: run.finished_at.map(|at| at.to_rfc3339()),
-            device: Named::from(run.device_id, &devices),
-            user: run.user_id.map(|id| Named::from(id, &users)),
-            plugin_id: run.plugin_id,
-            action: &run.action,
-            status: &run.status,
-            params: run.params.as_ref(),
-            output: run.output.as_ref(),
-            transcript: &run.transcript,
-            error: run.error.as_deref(),
-        })?;
+/// Grava as execuções em equipamentos direto no pacote (página a página por cursor).
+async fn write_device_runs<C: ConnectionTrait>(
+    db: &C,
+    period: Period,
+    users: &HashMap<i64, String>,
+    bundle: &mut Bundle,
+) -> AppResult<usize> {
+    bundle.begin("execucoes-em-equipamentos.jsonl")?;
+    let mut devices: HashMap<i64, String> = HashMap::new();
+    let mut after_id = 0_i64;
+    let mut count = 0_usize;
+    loop {
+        let runs: Vec<plugin_runs::Model> =
+            repository::ai_runs_page(db, period.since, after_id).await?;
+        if runs.is_empty() {
+            break;
+        }
+        let missing_devices: Vec<i64> = runs
+            .iter()
+            .map(|run| run.device_id)
+            .filter(|id| !devices.contains_key(id))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        if !missing_devices.is_empty() {
+            devices.extend(repository::device_names(db, missing_devices).await?);
+        }
+        for run in &runs {
+            bundle.write_line(&DeviceRunRecord {
+                id: run.id,
+                created_at: run.created_at.to_rfc3339(),
+                finished_at: run.finished_at.map(|at| at.to_rfc3339()),
+                device: Named::from(run.device_id, &devices),
+                user: run.user_id.map(|id| Named::from(id, users)),
+                plugin_id: run.plugin_id,
+                action: &run.action,
+                status: &run.status,
+                params: run.params.as_ref(),
+                output: run.output.as_ref(),
+                transcript: &run.transcript,
+                error: run.error.as_deref(),
+            })?;
+            count += 1;
+        }
+        if let Some(last) = runs.last() {
+            after_id = last.id;
+        }
+        if (runs.len() as u64) < repository::PAGE_SIZE {
+            break;
+        }
     }
-    Ok(lines)
+    Ok(count)
 }
 
 /// Monta o pacote do período.
@@ -298,18 +329,17 @@ pub async fn export<C: ConnectionTrait>(
 ) -> AppResult<Export> {
     let mut bundle = Bundle::new();
     let mut totals = Totals::default();
+    let users = repository::user_names(db).await?;
     bundle.add("LEIAME.md", README.as_bytes())?;
 
-    let sets = write_conversations(db, period, &mut bundle, &mut totals).await?;
+    let sets = write_conversations(db, period, &users, &mut bundle, &mut totals).await?;
     bundle.add(
         "treino/sem-falhas.jsonl",
         &sets.without_failures.into_bytes(),
     )?;
     bundle.add("treino/com-falhas.jsonl", &sets.with_failures.into_bytes())?;
 
-    let runs = device_runs(db, period).await?;
-    totals.device_runs = runs.len();
-    bundle.add("execucoes-em-equipamentos.jsonl", &runs.into_bytes())?;
+    totals.device_runs = write_device_runs(db, period, &users, &mut bundle).await?;
 
     bundle.add_json(
         "manifesto.json",

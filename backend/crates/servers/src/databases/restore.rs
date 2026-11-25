@@ -44,7 +44,10 @@ impl LineReader {
     #[must_use]
     pub fn gzip(reader: ObjectReader, expected_checksum: Option<String>) -> Self {
         let decoder = GzipDecoder::new(BufReader::with_capacity(256 * 1024, reader));
-        Self::plain(Box::pin(BufReader::new(decoder)), expected_checksum)
+        Self::plain(
+            Box::pin(BufReader::with_capacity(256 * 1024, decoder)),
+            expected_checksum,
+        )
     }
 
     /// Lê SQL já descompactado.
@@ -62,12 +65,13 @@ impl LineReader {
         }
     }
 
-    /// A próxima linha, sem o `\n`; `None` no fim do arquivo.
+    /// A próxima linha por empréstimo do buffer interno (sem `\n`, preservando
+    /// `\r` interno de literais SQL); `None` no fim do arquivo.
     ///
     /// # Errors
     ///
     /// Falha de leitura, gzip corrompido ou texto que não é UTF-8.
-    pub async fn next_line(&mut self) -> Result<Option<String>, DatabaseError> {
+    pub async fn next_line_ref(&mut self) -> Result<Option<&str>, DatabaseError> {
         self.buffer.clear();
         let read = self
             .inner
@@ -80,7 +84,16 @@ impl LineReader {
         self.hasher.update(self.buffer.as_bytes());
         self.bytes += read as u64;
         let line = self.buffer.strip_suffix('\n').unwrap_or(&self.buffer);
-        Ok(Some(line.strip_suffix('\r').unwrap_or(line).to_string()))
+        Ok(Some(line))
+    }
+
+    /// A próxima linha, sem o `\n`; `None` no fim do arquivo.
+    ///
+    /// # Errors
+    ///
+    /// Falha de leitura, gzip corrompido ou texto que não é UTF-8.
+    pub async fn next_line(&mut self) -> Result<Option<String>, DatabaseError> {
+        Ok(self.next_line_ref().await?.map(str::to_string))
     }
 
     /// Bytes lidos até agora (descompactados).
@@ -115,6 +128,7 @@ pub trait RestoreSession: Send {
         &mut self,
         _statement: &str,
         _input: &mut LineReader,
+        _progress: &dyn Progress,
     ) -> Result<u64, DatabaseError> {
         Err(DatabaseError::Unsupported(
             "COPY FROM stdin só existe no PostgreSQL".to_string(),
@@ -141,9 +155,15 @@ pub async fn apply_script(
     let mut stats = RestoreStats::default();
     let mut lines = 0_u64;
 
-    while let Some(line) = input.next_line().await? {
-        lines += 1;
-        for statement in splitter.push_line(&line) {
+    loop {
+        let statements = match input.next_line_ref().await? {
+            Some(line) => {
+                lines += 1;
+                splitter.push_line(line)
+            }
+            None => break,
+        };
+        for statement in statements {
             run_one(session, family, &statement, input, progress, &mut stats).await?;
         }
         if lines.is_multiple_of(PROGRESS_EVERY_LINES) {
@@ -177,9 +197,11 @@ async fn run_one(
 
     if family == EngineFamily::Postgres && is_copy_from_stdin(statement) {
         progress.stage(&preview(statement));
-        let rows = session.copy_from(statement, input).await.map_err(fail)?;
+        let rows = session
+            .copy_from(statement, input, progress)
+            .await
+            .map_err(fail)?;
         stats.rows += rows;
-        progress.rows(rows);
     } else {
         if is_ddl(statement) {
             progress.stage(&preview(statement));
@@ -251,15 +273,17 @@ mod tests {
             &mut self,
             _statement: &str,
             input: &mut LineReader,
+            progress: &dyn Progress,
         ) -> Result<u64, DatabaseError> {
             let mut rows = 0;
             while let Some(line) = input.next_line().await? {
-                if line == "\\." {
+                if line.trim_end_matches('\r') == "\\." {
                     break;
                 }
                 self.copied.push(line);
                 rows += 1;
             }
+            progress.rows(rows);
             Ok(rows)
         }
     }
@@ -340,6 +364,24 @@ mod tests {
         .to_string();
         assert!(error.contains("comando 2"), "{error}");
         assert!(error.contains("INSERT INTO quebrado"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn preserva_crlf_dentro_de_string_mysql() {
+        let sql = "INSERT INTO t VALUES ('linha 1\r\nlinha 2');\n";
+        let mut session = Recorder::default();
+        apply_script(
+            &mut session,
+            EngineFamily::Mysql,
+            &mut reader(sql, None),
+            &NoProgress,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            session.executed,
+            vec!["INSERT INTO t VALUES ('linha 1\r\nlinha 2')"]
+        );
     }
 
     #[test]

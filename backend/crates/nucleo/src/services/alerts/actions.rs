@@ -5,11 +5,14 @@
 
 use chrono::Utc;
 use loco_rs::prelude::AppContext;
-use sea_orm::{ActiveModelTrait, Set};
+use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 use serde_json::{json, Value};
 
 use super::{contracts::AlertStatus, feed, silence};
-use crate::{models::alert_events, services::shared::errors::AppResult};
+use crate::{
+    models::alert_events,
+    services::shared::{errors::AppResult, transaction::begin_write},
+};
 
 fn action_payload(event: &alert_events::Model) -> Value {
     json!({
@@ -32,9 +35,21 @@ pub async fn acknowledge(
     ctx: &AppContext,
     event: alert_events::Model,
 ) -> AppResult<alert_events::Model> {
-    let event = silence::acknowledge_alert(&ctx.db, event).await?;
-    feed::publish(ctx, "alert:acknowledged", action_payload(&event)).await;
-    Ok(event)
+    let txn = begin_write(&ctx.db).await?;
+    let current = alert_events::Entity::find_by_id(event.id)
+        .one(&txn)
+        .await?
+        .unwrap_or(event);
+    // Resolvido entre a leitura do chamador e esta transação: reconhecer não
+    // reabre o episódio (e o índice de "um aberto por alvo" recusaria).
+    if current.status == AlertStatus::Resolved.as_str() {
+        txn.commit().await?;
+        return Ok(current);
+    }
+    let saved = silence::acknowledge_alert(&txn, current).await?;
+    txn.commit().await?;
+    feed::publish(ctx, "alert:acknowledged", action_payload(&saved)).await;
+    Ok(saved)
 }
 
 /// Silencia o alerta por `minutes` (padrão de 60 quando `<= 0`) e publica
@@ -53,12 +68,23 @@ pub async fn silence(
     } else {
         silence::DEFAULT_SILENCE_MINUTES
     };
-    let event = silence::silence_alert(&ctx.db, event, minutes).await?;
-    let mut payload = action_payload(&event);
-    payload["silencedUntil"] = json!(silence::silenced_until(&event).map(|at| at.to_rfc3339()));
+    let txn = begin_write(&ctx.db).await?;
+    let current = alert_events::Entity::find_by_id(event.id)
+        .one(&txn)
+        .await?
+        .unwrap_or(event);
+    // Silenciar um alerta já resolvido não o reabre.
+    if current.status == AlertStatus::Resolved.as_str() {
+        txn.commit().await?;
+        return Ok(current);
+    }
+    let saved = silence::silence_alert(&txn, current, minutes).await?;
+    txn.commit().await?;
+    let mut payload = action_payload(&saved);
+    payload["silencedUntil"] = json!(silence::silenced_until(&saved).map(|at| at.to_rfc3339()));
     payload["durationMinutes"] = json!(minutes);
     feed::publish(ctx, "alert:silenced", payload).await;
-    Ok(event)
+    Ok(saved)
 }
 
 /// Encerra o alerta à mão e publica `alert:resolved`.
@@ -72,20 +98,27 @@ pub async fn silence(
 ///
 /// Propaga erro do banco.
 pub async fn close(ctx: &AppContext, event: alert_events::Model) -> AppResult<alert_events::Model> {
-    if event.status == AlertStatus::Resolved.as_str() {
-        return Ok(event);
+    let txn = begin_write(&ctx.db).await?;
+    let current = alert_events::Entity::find_by_id(event.id)
+        .one(&txn)
+        .await?
+        .unwrap_or(event);
+    if current.status == AlertStatus::Resolved.as_str() {
+        txn.commit().await?;
+        return Ok(current);
     }
     let now = Utc::now();
     let data = silence::merge_data(
-        event.data.clone(),
+        current.data.clone(),
         "closedManuallyAt",
         json!(now.to_rfc3339()),
     );
-    let mut active: alert_events::ActiveModel = event.into();
+    let mut active: alert_events::ActiveModel = current.into();
     active.status = Set(AlertStatus::Resolved.as_str().into());
     active.resolved_at = Set(Some(now.into()));
     active.data = Set(Some(data));
-    let saved = active.update(&ctx.db).await?;
+    let saved = active.update(&txn).await?;
+    txn.commit().await?;
     feed::publish(ctx, "alert:resolved", feed::event_payload(&saved)).await;
     Ok(saved)
 }

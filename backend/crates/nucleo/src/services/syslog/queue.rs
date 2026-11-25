@@ -226,11 +226,21 @@ impl RateLimiter {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         if buckets.len() >= MAX_TRACKED_SOURCES && !buckets.contains_key(source) {
-            // Descarta o que já está cheio de fichas: são as fontes que não
-            // estão consumindo nada, logo as que menos perdem com o despejo.
-            buckets.retain(|_, bucket| bucket.tokens < capacidade);
+            // Descarta o que já voltou à capacidade cheia em `agora`: são as
+            // fontes ociosas, logo as que menos perdem com o despejo.
+            buckets.retain(|_, bucket| {
+                let decorrido = agora.saturating_duration_since(bucket.last).as_secs_f64();
+                let efetivo = (bucket.tokens + decorrido * self.per_second).min(capacidade);
+                efetivo < capacidade
+            });
             if buckets.len() >= MAX_TRACKED_SOURCES {
-                buckets.clear();
+                if let Some(mais_antiga) = buckets
+                    .iter()
+                    .min_by_key(|(_, bucket)| bucket.last)
+                    .map(|(k, _)| k.clone())
+                {
+                    buckets.remove(&mais_antiga);
+                }
             }
         }
 

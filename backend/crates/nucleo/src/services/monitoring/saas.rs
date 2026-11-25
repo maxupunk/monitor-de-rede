@@ -1,9 +1,9 @@
 //! Catálogo e provisionamento de serviços SaaS para monitoramento de latência e QoE (§2.2.2).
 
+use std::collections::HashMap;
+
 use loco_rs::app::AppContext;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, Set,
-};
+use sea_orm::{ActiveModelTrait, ConnectionTrait, EntityTrait, Set};
 use serde_json::json;
 
 use crate::{
@@ -11,7 +11,7 @@ use crate::{
         SaasPreset, SaasPresetsResponse, SaasProvisionRequest, SaasProvisionResponse,
         SaasThresholds,
     },
-    models::{monitor_results, monitors},
+    models::monitors,
     services::shared::errors::{AppError, AppResult},
 };
 
@@ -711,6 +711,21 @@ pub fn get_curated_saas_definitions() -> Vec<SaasPreset> {
     ]
 }
 
+fn find_matching_monitor<'a>(
+    existing_monitors: &'a [monitors::Model],
+    preset: &SaasPreset,
+) -> Option<&'a monitors::Model> {
+    existing_monitors.iter().find(|m| {
+        let config_saas_id = m.configuration.get("saasPresetId").and_then(|v| v.as_str());
+        let target = m.target();
+        config_saas_id == Some(&preset.id)
+            || (!target.is_empty()
+                && (target == preset.target
+                    || target == preset.target.trim_start_matches("https://")
+                    || target == preset.target.trim_start_matches("http://")))
+    })
+}
+
 /// Lista os presets SaaS enriquecendo com informações de monitores existentes no banco.
 pub async fn get_saas_catalog<C>(db: &C) -> AppResult<SaasPresetsResponse>
 where
@@ -720,33 +735,28 @@ where
     let existing_monitors = monitors::Entity::find().all(db).await?;
 
     let mut provisioned_count = 0;
+    let mut matched_monitor_ids = Vec::new();
 
     for preset in &mut definitions {
-        // Encontra monitor por `saasService` no configuration ou por alvo correspondente
-        let matching = existing_monitors.iter().find(|m| {
-            let config_saas_id = m.configuration.get("saasPresetId").and_then(|v| v.as_str());
-            let target = m.target();
-            config_saas_id == Some(&preset.id)
-                || (!target.is_empty()
-                    && (target == preset.target
-                        || target == preset.target.trim_start_matches("https://")
-                        || target == preset.target.trim_start_matches("http://")))
-        });
-
-        if let Some(m) = matching {
+        if let Some(m) = find_matching_monitor(&existing_monitors, preset) {
             preset.is_provisioned = true;
             preset.monitor_id = Some(m.id);
             preset.current_status = Some(m.status.clone());
             provisioned_count += 1;
+            matched_monitor_ids.push(m.id);
+        }
+    }
 
-            // Busca a última latência medida
-            let latest = monitor_results::Entity::find()
-                .filter(monitor_results::Column::MonitorId.eq(m.id))
-                .order_by_desc(monitor_results::Column::StartedAt)
-                .one(db)
-                .await?;
-            if let Some(res) = latest {
-                preset.current_latency_ms = res.latency_ms;
+    // Busca a última latência dos monitores SaaS em lote (evita N+1 por preset).
+    if !matched_monitor_ids.is_empty() {
+        let mut latest_latency: HashMap<i64, Option<f64>> =
+            HashMap::with_capacity(matched_monitor_ids.len());
+        for row in super::presenter::fetch_recent_result_rows(db, &matched_monitor_ids, 1).await? {
+            latest_latency.insert(row.monitor_id, row.latency_ms);
+        }
+        for preset in &mut definitions {
+            if let Some(monitor_id) = preset.monitor_id {
+                preset.current_latency_ms = latest_latency.get(&monitor_id).copied().flatten();
             }
         }
     }
@@ -771,6 +781,7 @@ pub async fn provision_saas_presets(
     }
 
     let definitions = get_curated_saas_definitions();
+    let mut existing = monitors::Entity::find().all(&ctx.db).await?;
     let mut created_monitor_ids = Vec::new();
     let mut existing_monitor_ids = Vec::new();
 
@@ -779,25 +790,18 @@ pub async fn provision_saas_presets(
             continue;
         };
 
-        // Verifica se já existe um monitor para este preset
-        let existing = monitors::Entity::find().all(&ctx.db).await?;
-        let matching = existing.iter().find(|m| {
-            let config_saas_id = m.configuration.get("saasPresetId").and_then(|v| v.as_str());
-            let target = m.target();
-            config_saas_id == Some(&preset.id)
-                || (!target.is_empty()
-                    && (target == preset.target
-                        || target == preset.target.trim_start_matches("https://")
-                        || target == preset.target.trim_start_matches("http://")))
-        });
-
-        if let Some(m) = matching {
-            existing_monitor_ids.push(m.id);
+        if let Some(m) = find_matching_monitor(&existing, preset).cloned() {
+            if !existing_monitor_ids.contains(&m.id) && !created_monitor_ids.contains(&m.id) {
+                existing_monitor_ids.push(m.id);
+            }
             // Se estiver desabilitado, reativa
             if !m.enabled {
-                let mut active: monitors::ActiveModel = m.clone().into();
+                let mut active: monitors::ActiveModel = m.into();
                 active.enabled = Set(true);
-                active.update(&ctx.db).await?;
+                let updated = active.update(&ctx.db).await?;
+                if let Some(slot) = existing.iter_mut().find(|item| item.id == updated.id) {
+                    *slot = updated;
+                }
             }
             continue;
         }
@@ -807,7 +811,10 @@ pub async fn provision_saas_presets(
             .interval_seconds
             .unwrap_or(preset.interval_seconds)
             .max(5);
-        let timeout = request.timeout_seconds.unwrap_or(preset.timeout_seconds);
+        let timeout = request
+            .timeout_seconds
+            .unwrap_or(preset.timeout_seconds)
+            .clamp(1, (interval - 1).max(1));
 
         let mut config_map = serde_json::Map::new();
         config_map.insert("isSaas".into(), json!(true));
@@ -879,6 +886,7 @@ pub async fn provision_saas_presets(
 
         let inserted = new_monitor.insert(&ctx.db).await?;
         created_monitor_ids.push(inserted.id);
+        existing.push(inserted);
     }
 
     let provisioned_count = created_monitor_ids.len() + existing_monitor_ids.len();

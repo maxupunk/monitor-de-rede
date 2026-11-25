@@ -40,11 +40,15 @@ impl TransportKind {
     ///
     /// Tipo fora de `ssh`, `http` e `telnet`.
     pub fn parse(value: &str) -> Result<Self, String> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "ssh" => Ok(Self::Ssh),
-            "http" => Ok(Self::Http),
-            "telnet" => Ok(Self::Telnet),
-            other => Err(format!("tipo de acesso desconhecido: {other}")),
+        let trimmed = value.trim();
+        if trimmed.eq_ignore_ascii_case("ssh") {
+            Ok(Self::Ssh)
+        } else if trimmed.eq_ignore_ascii_case("http") {
+            Ok(Self::Http)
+        } else if trimmed.eq_ignore_ascii_case("telnet") {
+            Ok(Self::Telnet)
+        } else {
+            Err(format!("tipo de acesso desconhecido: {trimmed}"))
         }
     }
 }
@@ -112,7 +116,7 @@ impl Endpoint {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HttpRequest {
     pub method: String,
@@ -125,6 +129,39 @@ pub struct HttpRequest {
     pub body: Option<String>,
     #[serde(default)]
     pub basic_auth: Option<Login>,
+}
+
+impl fmt::Debug for HttpRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let redacted_headers: Vec<(&str, &str)> = self
+            .headers
+            .iter()
+            .map(|(name, value)| {
+                let sensitive = name.eq_ignore_ascii_case("authorization")
+                    || name.eq_ignore_ascii_case("proxy-authorization")
+                    || name.eq_ignore_ascii_case("cookie")
+                    || name.eq_ignore_ascii_case("x-api-key");
+                (
+                    name.as_str(),
+                    if sensitive {
+                        "********"
+                    } else {
+                        value.as_str()
+                    },
+                )
+            })
+            .collect();
+        f.debug_struct("HttpRequest")
+            .field("method", &self.method)
+            .field("path", &self.path)
+            .field("headers", &redacted_headers)
+            .field(
+                "body",
+                &self.body.as_ref().map(|b| format!("<{} bytes>", b.len())),
+            )
+            .field("basic_auth", &self.basic_auth)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

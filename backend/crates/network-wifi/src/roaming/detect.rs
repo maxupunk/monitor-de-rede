@@ -40,18 +40,17 @@ impl Location {
         }
     }
 
-    /// Esta leitura do aparelho é mais confiável que `other`? A de atividade
-    /// mais recente, com folga; empatadas, a de sinal melhor.
+    /// Esta leitura do aparelho é mais confiável que `other`? Quando os dois
+    /// APs informam inatividade, vence o mais ativo (com folga); empatados ou
+    /// quando um dos plugins não informa `inactive_ms`, vence o sinal melhor.
     fn beats(&self, other: &Self) -> bool {
-        let (mine, theirs) = (
-            self.inactive_ms.unwrap_or(0),
-            other.inactive_ms.unwrap_or(0),
-        );
-        if mine.saturating_add(STALE_MARGIN_MS) < theirs {
-            return true;
-        }
-        if theirs.saturating_add(STALE_MARGIN_MS) < mine {
-            return false;
+        if let (Some(mine), Some(theirs)) = (self.inactive_ms, other.inactive_ms) {
+            if mine.saturating_add(STALE_MARGIN_MS) < theirs {
+                return true;
+            }
+            if theirs.saturating_add(STALE_MARGIN_MS) < mine {
+                return false;
+            }
         }
         self.signal_dbm > other.signal_dbm
     }
@@ -93,6 +92,10 @@ pub struct Roam {
     pub to: Location,
 }
 
+/// Teto defensivo de MACs lembrados em memória (redes de visitantes com MAC
+/// aleatório não podem fazer o mapa crescer sem limite).
+const MAX_KNOWN_MACS: usize = 10_000;
+
 /// Compara a rodada com o que se sabia e devolve as trocas; atualiza `known`.
 /// Aparelho que não aparece na rodada continua onde estava até passar
 /// [`ROAM_GAP`] sem ser visto.
@@ -121,6 +124,17 @@ pub fn detect(
         );
     }
     known.retain(|_, seen| now - seen.at <= ROAM_GAP);
+    if known.len() > MAX_KNOWN_MACS {
+        let mut by_age: Vec<(DateTime<Utc>, String)> = known
+            .iter()
+            .map(|(mac, seen)| (seen.at, mac.clone()))
+            .collect();
+        by_age.sort_unstable_by_key(|(at, _)| *at);
+        let overflow = known.len() - MAX_KNOWN_MACS;
+        for (_, mac) in by_age.into_iter().take(overflow) {
+            known.remove(&mac);
+        }
+    }
     roams
 }
 
@@ -277,5 +291,18 @@ pub(crate) mod tests {
         assert!(!is_ping_pong(3, 4));
         assert!(is_ping_pong(4, 4));
         assert!(is_ping_pong(9, 4));
+    }
+
+    #[test]
+    fn sem_inatividade_em_um_dos_aps_desempata_pelo_sinal() {
+        let mut sem_inatividade = estacao(CELULAR, -90, 0);
+        sem_inatividade.inactive_ms = None;
+        let com_inatividade = estacao(CELULAR, -55, 15_000);
+        let rodada = vec![ap(1, vec![sem_inatividade]), ap(2, vec![com_inatividade])];
+        assert_eq!(
+            locate(&rodada)[CELULAR].device_id,
+            2,
+            "plugin sem inactive_ms não deve vencer sinal muito melhor"
+        );
     }
 }

@@ -83,6 +83,22 @@ impl Batch {
     }
 }
 
+struct AbortOnDrop<T>(Option<tokio::task::JoinHandle<T>>);
+
+impl<T> AbortOnDrop<T> {
+    fn take(&mut self) -> Option<tokio::task::JoinHandle<T>> {
+        self.0.take()
+    }
+}
+
+impl<T> Drop for AbortOnDrop<T> {
+    fn drop(&mut self) {
+        if let Some(handle) = self.0.take() {
+            handle.abort();
+        }
+    }
+}
+
 /// `ping` ausente não interrompe a varredura: sem ICMP, a presença vem da
 /// tabela de vizinhos e da prova por TCP em todos os endereços — mais lenta,
 /// mas encontra o parque em vez de falhar inteira.
@@ -98,7 +114,10 @@ pub async fn scan(
     let client = http::client()?;
     reporter.phase(phase::SWEEP, 0, total);
 
-    let mut multicast = Some(tokio::spawn(multicast(client.clone(), target.cidr.clone())));
+    let mut multicast = AbortOnDrop(Some(tokio::spawn(multicast(
+        client.clone(),
+        target.cidr.clone(),
+    ))));
     let mut merged: Vec<DiscoveredHost> = Vec::new();
     let mut offset = 0_u32;
     while offset < range.usable_hosts {

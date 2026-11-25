@@ -17,9 +17,7 @@
 //! e chamada logo depois desta, no mesmo ciclo ([`prune_areas`]).
 
 use chrono::{Duration, Utc};
-use sea_orm::{
-    ColumnTrait, Condition, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
-};
+use sea_orm::{ColumnTrait, Condition, ConnectionTrait, EntityTrait, QueryFilter, QuerySelect};
 
 use netmonitor_core::routines::AreaRoutines;
 
@@ -56,7 +54,7 @@ pub const DEFAULT_RETENTION_PLUGIN_RUNS_DAYS: i64 = 90;
 /// Execuções de tarefas agendadas: uma tarefa de minuto em minuto grava
 /// ~43 mil por mês, então o prazo é o das métricas, não o dos incidentes.
 pub const DEFAULT_RETENTION_SCHEDULED_TASK_RUNS_DAYS: i64 = 30;
-const DELETE_BATCH_SIZE: u64 = 10_000;
+const DELETE_BATCH_SIZE: u64 = 2_000;
 /// Folga entre lotes. No SQLite há um escritor só: sem ela, a purga de uma
 /// tabela grande segura o lock em sequência e a coleta, o syslog e as telas
 /// esperam até estourar o `busy_timeout`.
@@ -164,102 +162,134 @@ pub fn retention_of(table: &str) -> Option<RetentionRule> {
 
 /// Apaga tudo que passou da janela de retenção.
 ///
+/// Falha em uma tabela é registrada no log e não impede a purga das demais.
+///
 /// # Errors
 ///
-/// Propaga erro do banco.
+/// Mantido por compatibilidade de assinatura; falhas por tabela são isoladas.
 pub async fn prune_all<C: ConnectionTrait>(db: &C) -> AppResult<PruneStats> {
     let now = Utc::now();
     let cutoff = |rule: RetentionRule| now - Duration::days(rule.days());
 
-    let outbox_deleted = delete_in_batches::<event_outbox::Entity, _>(
-        db,
-        event_outbox::Column::Id,
-        Condition::all().add(
-            event_outbox::Column::CreatedAt.lt(now - Duration::minutes(OUTBOX_RETENTION_MINUTES)),
+    let outbox_deleted = prune_table(
+        "event_outbox",
+        delete_in_batches::<event_outbox::Entity, _>(
+            db,
+            event_outbox::Column::Id,
+            Condition::all().add(
+                event_outbox::Column::CreatedAt
+                    .lt(now - Duration::minutes(OUTBOX_RETENTION_MINUTES)),
+            ),
         ),
     )
-    .await?;
+    .await;
 
-    let results_deleted = delete_in_batches::<monitor_results::Entity, _>(
-        db,
-        monitor_results::Column::Id,
-        Condition::all()
-            .add(monitor_results::Column::CreatedAt.lt(cutoff(MONITOR_RESULTS_RETENTION))),
+    let results_deleted = prune_table(
+        "monitor_results",
+        delete_in_batches::<monitor_results::Entity, _>(
+            db,
+            monitor_results::Column::Id,
+            Condition::all()
+                .add(monitor_results::Column::CreatedAt.lt(cutoff(MONITOR_RESULTS_RETENTION))),
+        ),
     )
-    .await?;
+    .await;
 
     let metrics_cutoff = cutoff(METRICS_RETENTION);
-    let metrics_deleted = delete_in_batches::<metrics::Entity, _>(
-        db,
-        metrics::Column::Id,
-        Condition::all().add(metrics::Column::CreatedAt.lt(metrics_cutoff)),
+    let metrics_deleted = prune_table(
+        "metrics",
+        delete_in_batches::<metrics::Entity, _>(
+            db,
+            metrics::Column::Id,
+            Condition::all().add(metrics::Column::CreatedAt.lt(metrics_cutoff)),
+        ),
     )
-    .await?;
+    .await;
     // Mesma janela das métricas SNMP: é a mesma natureza de dado.
-    let telemetry_deleted = telemetry::store::prune(db, metrics_cutoff).await?;
+    let telemetry_deleted =
+        prune_table("telemetry", telemetry::store::prune(db, metrics_cutoff)).await;
 
-    let discovery_deleted = delete_in_batches::<discovery_runs::Entity, _>(
-        db,
-        discovery_runs::Column::Id,
-        Condition::all().add(discovery_runs::Column::CreatedAt.lt(cutoff(DISCOVERY_RETENTION))),
+    let discovery_deleted = prune_table(
+        "discovery_runs",
+        delete_in_batches::<discovery_runs::Entity, _>(
+            db,
+            discovery_runs::Column::Id,
+            Condition::all().add(discovery_runs::Column::CreatedAt.lt(cutoff(DISCOVERY_RETENTION))),
+        ),
     )
-    .await?;
+    .await;
 
     // Só episódio **fechado** envelhece: um alerta ainda aberto é o que o
     // operador precisa ver na Central, por mais antigo que seja.
     let alert_events_cutoff = cutoff(ALERT_EVENTS_RETENTION);
-    let alert_events_deleted = delete_in_batches::<alert_events::Entity, _>(
-        db,
-        alert_events::Column::Id,
-        Condition::all()
-            .add(alert_events::Column::Status.eq(AlertStatus::Resolved))
-            .add(
-                // `resolved_at` pode faltar em linha antiga fechada antes de a
-                // coluna ser preenchida: a abertura serve de âncora.
-                Condition::any()
-                    .add(alert_events::Column::ResolvedAt.lt(alert_events_cutoff))
-                    .add(
-                        Condition::all()
-                            .add(alert_events::Column::ResolvedAt.is_null())
-                            .add(alert_events::Column::StartedAt.lt(alert_events_cutoff)),
-                    ),
-            ),
+    let alert_events_deleted = prune_table(
+        "alert_events",
+        delete_in_batches::<alert_events::Entity, _>(
+            db,
+            alert_events::Column::Id,
+            Condition::all()
+                .add(alert_events::Column::Status.eq(AlertStatus::Resolved))
+                .add(
+                    // `resolved_at` pode faltar em linha antiga fechada antes de a
+                    // coluna ser preenchida: a abertura serve de âncora.
+                    Condition::any()
+                        .add(alert_events::Column::ResolvedAt.lt(alert_events_cutoff))
+                        .add(
+                            Condition::all()
+                                .add(alert_events::Column::ResolvedAt.is_null())
+                                .add(alert_events::Column::StartedAt.lt(alert_events_cutoff)),
+                        ),
+                ),
+        ),
     )
-    .await?;
+    .await;
 
     // Idem para o diário: linha ainda pendente é notificação por entregar.
-    let notifications_deleted = delete_in_batches::<notification_outbox::Entity, _>(
-        db,
-        notification_outbox::Column::Id,
-        Condition::all()
-            .add(notification_outbox::Column::Status.ne("pending"))
-            .add(notification_outbox::Column::CreatedAt.lt(cutoff(NOTIFICATIONS_RETENTION))),
+    let notifications_deleted = prune_table(
+        "notification_outbox",
+        delete_in_batches::<notification_outbox::Entity, _>(
+            db,
+            notification_outbox::Column::Id,
+            Condition::all()
+                .add(notification_outbox::Column::Status.ne("pending"))
+                .add(notification_outbox::Column::CreatedAt.lt(cutoff(NOTIFICATIONS_RETENTION))),
+        ),
     )
-    .await?;
+    .await;
 
-    let audit_deleted = delete_in_batches::<audit_logs::Entity, _>(
-        db,
-        audit_logs::Column::Id,
-        Condition::all().add(audit_logs::Column::CreatedAt.lt(cutoff(AUDIT_RETENTION))),
+    let audit_deleted = prune_table(
+        "audit_logs",
+        delete_in_batches::<audit_logs::Entity, _>(
+            db,
+            audit_logs::Column::Id,
+            Condition::all().add(audit_logs::Column::CreatedAt.lt(cutoff(AUDIT_RETENTION))),
+        ),
     )
-    .await?;
-
-    // Execução em curso não tem `finished_at` e nunca envelhece.
-    let plugin_runs_deleted = delete_in_batches::<plugin_runs::Entity, _>(
-        db,
-        plugin_runs::Column::Id,
-        Condition::all().add(plugin_runs::Column::FinishedAt.lt(cutoff(PLUGIN_RUNS_RETENTION))),
-    )
-    .await?;
+    .await;
 
     // Execução em curso não tem `finished_at` e nunca envelhece.
-    let scheduled_task_runs_deleted = delete_in_batches::<scheduled_task_runs::Entity, _>(
-        db,
-        scheduled_task_runs::Column::Id,
-        Condition::all()
-            .add(scheduled_task_runs::Column::FinishedAt.lt(cutoff(SCHEDULED_TASK_RUNS_RETENTION))),
+    let plugin_runs_deleted = prune_table(
+        "plugin_runs",
+        delete_in_batches::<plugin_runs::Entity, _>(
+            db,
+            plugin_runs::Column::Id,
+            Condition::all().add(plugin_runs::Column::FinishedAt.lt(cutoff(PLUGIN_RUNS_RETENTION))),
+        ),
     )
-    .await?;
+    .await;
+
+    // Execução em curso não tem `finished_at` e nunca envelhece.
+    let scheduled_task_runs_deleted = prune_table(
+        "scheduled_task_runs",
+        delete_in_batches::<scheduled_task_runs::Entity, _>(
+            db,
+            scheduled_task_runs::Column::Id,
+            Condition::all().add(
+                scheduled_task_runs::Column::FinishedAt.lt(cutoff(SCHEDULED_TASK_RUNS_RETENTION)),
+            ),
+        ),
+    )
+    .await;
 
     Ok(PruneStats {
         outbox_deleted,
@@ -273,6 +303,19 @@ pub async fn prune_all<C: ConnectionTrait>(db: &C) -> AppResult<PruneStats> {
         plugin_runs_deleted,
         scheduled_task_runs_deleted,
     })
+}
+
+async fn prune_table<F>(table: &'static str, fut: F) -> u64
+where
+    F: std::future::Future<Output = AppResult<u64>>,
+{
+    match fut.await {
+        Ok(count) => count,
+        Err(error) => {
+            tracing::warn!(%error, table, "falha ao purgar tabela");
+            0
+        }
+    }
 }
 
 /// Roda a retenção que as áreas contribuíram. Falha de uma não impede as
@@ -308,7 +351,6 @@ where
             .select_only()
             .column(id)
             .filter(filter.clone())
-            .order_by_asc(id)
             .limit(DELETE_BATCH_SIZE)
             .into_tuple::<i64>()
             .all(db)

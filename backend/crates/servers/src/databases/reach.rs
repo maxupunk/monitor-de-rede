@@ -11,7 +11,7 @@
 //! operação — só para o que é idempotente: um dump refeito do zero sai igual;
 //! uma restauração pela metade, não.
 
-use std::{future::Future, time::Duration};
+use std::{future::Future, sync::Arc, time::Duration};
 
 use loco_rs::app::AppContext;
 use sea_orm::EntityTrait;
@@ -28,6 +28,10 @@ pub const ATTEMPTS: u32 = 3;
 
 /// Quanto esperar o agente reconectar antes de desistir de uma tentativa.
 const RECONNECT_WAIT: Duration = Duration::from_secs(60);
+
+/// Espera mínima entre tentativas quando a sessão WebSocket do agente ainda
+/// parece aberta (evita esgotar as tentativas em milissegundos num drop TCP).
+const SAME_SESSION_BACKOFF: Duration = Duration::from_secs(2);
 
 /// Um alvo pronto para conectar, com a ponte (se houver) viva junto.
 pub struct Reached {
@@ -63,7 +67,7 @@ impl Reached {
         F: FnMut() -> Fut,
         Fut: Future<Output = Result<T, DatabaseError>>,
     {
-        self.retrying_within(progress, RECONNECT_WAIT, operation)
+        self.retrying_within(progress, RECONNECT_WAIT, SAME_SESSION_BACKOFF, operation)
             .await
     }
 
@@ -71,6 +75,7 @@ impl Reached {
         &self,
         progress: &dyn Progress,
         wait: Duration,
+        same_session_backoff: Duration,
         mut operation: F,
     ) -> Result<Attempted<T>, DatabaseError>
     where
@@ -79,6 +84,10 @@ impl Reached {
     {
         let mut attempts = 1;
         loop {
+            let previous = self
+                .agent
+                .as_ref()
+                .and_then(|(hub, probe_id)| hub.get(*probe_id));
             let error = match operation().await {
                 Ok(value) => return Ok(Attempted { value, attempts }),
                 Err(error) => error,
@@ -94,8 +103,15 @@ impl Reached {
             progress.stage(&format!(
                 "O canal com o agente caiu — tentando de novo ({attempts}/{ATTEMPTS})"
             ));
-            if hub.wait_for(*probe_id, wait).await.is_none() {
+            let Some(current) = hub.wait_for(*probe_id, wait).await else {
                 return Err(error);
+            };
+            if previous
+                .as_ref()
+                .is_some_and(|prev| Arc::ptr_eq(prev, &current))
+                && !same_session_backoff.is_zero()
+            {
+                tokio::time::sleep(same_session_backoff.saturating_mul(attempts - 1)).await;
             }
         }
     }
@@ -210,7 +226,7 @@ mod tests {
         let reached = via_agent(&hub);
         let calls = AtomicU32::new(0);
         let result = reached
-            .retrying_within(&NoProgress, Duration::from_secs(5), || {
+            .retrying_within(&NoProgress, Duration::from_secs(5), Duration::ZERO, || {
                 let call = calls.fetch_add(1, Ordering::SeqCst);
                 let (hub, first) = (hub.clone(), first.clone());
                 async move {
@@ -234,7 +250,7 @@ mod tests {
         session(&hub);
         let calls = AtomicU32::new(0);
         let result = via_agent(&hub)
-            .retrying_within(&NoProgress, Duration::from_secs(5), || {
+            .retrying_within(&NoProgress, Duration::from_secs(5), Duration::ZERO, || {
                 calls.fetch_add(1, Ordering::SeqCst);
                 async { Err::<(), _>(dropped()) }
             })
@@ -249,10 +265,15 @@ mod tests {
         session(&hub).close();
         let calls = AtomicU32::new(0);
         let result = via_agent(&hub)
-            .retrying_within(&NoProgress, Duration::from_millis(50), || {
-                calls.fetch_add(1, Ordering::SeqCst);
-                async { Err::<(), _>(dropped()) }
-            })
+            .retrying_within(
+                &NoProgress,
+                Duration::from_millis(50),
+                Duration::ZERO,
+                || {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    async { Err::<(), _>(dropped()) }
+                },
+            )
             .await;
         assert!(result.is_err());
         assert_eq!(calls.load(Ordering::SeqCst), 1);
@@ -278,7 +299,7 @@ mod tests {
             let message = error.to_string();
             let mut error = Some(error);
             let result = reached
-                .retrying_within(&NoProgress, Duration::from_secs(5), || {
+                .retrying_within(&NoProgress, Duration::from_secs(5), Duration::ZERO, || {
                     calls.fetch_add(1, Ordering::SeqCst);
                     let error = error.take().unwrap_or_else(dropped);
                     async move { Err::<(), _>(error) }

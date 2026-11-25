@@ -26,18 +26,26 @@ fn fold(text: &str) -> String {
 /// O termo casa com o dispositivo pelo nome, IP ou fabricante (substring, sem caixa).
 #[must_use]
 pub fn device_matches(device: &devices::Model, term: &str) -> bool {
+    device_fields_match(
+        &device.name,
+        device.ip_address.as_deref(),
+        device.vendor.as_deref(),
+        term,
+    )
+}
+
+/// A mesma regra de [`device_matches`] sobre os campos soltos, para quem lê
+/// só as colunas (a busca do `@` do chat): termo vazio casa com tudo.
+#[must_use]
+pub fn device_fields_match(name: &str, ip: Option<&str>, vendor: Option<&str>, term: &str) -> bool {
     let term = fold(term);
     if term.is_empty() {
         return true;
     }
-    [
-        Some(device.name.as_str()),
-        device.ip_address.as_deref(),
-        device.vendor.as_deref(),
-    ]
-    .into_iter()
-    .flatten()
-    .any(|field| fold(field).contains(&term))
+    [Some(name), ip, vendor]
+        .into_iter()
+        .flatten()
+        .any(|field| fold(field).contains(&term))
 }
 
 /// Extrai o alvo (IP, hostname ou URL) da configuração JSON de um monitor.
@@ -176,6 +184,9 @@ pub fn pick_device<'a>(list: &'a [devices::Model], identifier: &str) -> Option<&
     }
 }
 
+/// Tamanho de lote seguro para cláusulas `IN (...)` no SQLite (limite 999 parâmetros).
+const DEVICE_NAMES_CHUNK_SIZE: usize = 400;
+
 /// Nomes de dispositivo por id, para trocar ids por nomes legíveis.
 ///
 /// # Errors
@@ -185,17 +196,25 @@ pub async fn device_names<C: ConnectionTrait>(
     db: &C,
     ids: impl IntoIterator<Item = i64>,
 ) -> AppResult<HashMap<i64, String>> {
-    let ids: HashSet<i64> = ids.into_iter().collect();
+    let ids: Vec<i64> = ids
+        .into_iter()
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
     if ids.is_empty() {
         return Ok(HashMap::new());
     }
-    Ok(devices::Entity::find()
-        .filter(devices::Column::Id.is_in(ids))
-        .all(db)
-        .await?
-        .into_iter()
-        .map(|device| (device.id, device.name))
-        .collect())
+    let mut names = HashMap::with_capacity(ids.len());
+    for chunk in ids.chunks(DEVICE_NAMES_CHUNK_SIZE) {
+        let rows = devices::Entity::find()
+            .filter(devices::Column::Id.is_in(chunk.iter().copied()))
+            .all(db)
+            .await?;
+        for device in rows {
+            names.insert(device.id, device.name);
+        }
+    }
+    Ok(names)
 }
 
 /// # Errors
@@ -296,14 +315,28 @@ pub async fn find_monitor<C: ConnectionTrait>(
             "Informe monitor_id ou device (nome/IP do dispositivo)".to_string()
         ));
     };
-    let Some(device) = find_device(db, identifier).await? else {
-        let wanted = fold(identifier.trim().trim_start_matches('@'));
-        if !wanted.is_empty() {
-            let all = monitors::Entity::find().all(db).await?;
-            if let Some(found) = all.into_iter().find(|m| fold(&m.name) == wanted) {
-                return Ok(Ok(found));
+    let devices_list = devices::Entity::find().all(db).await?;
+    let device = match pick_device(&devices_list, identifier).cloned() {
+        Some(device) => Some(device),
+        None => {
+            let all_monitors = monitors::Entity::find().all(db).await?;
+            if let Some(found_device) =
+                pick_device_by_monitor(&devices_list, &all_monitors, identifier).cloned()
+            {
+                Some(found_device)
+            } else {
+                let wanted = fold(identifier.trim().trim_start_matches('@'));
+                if !wanted.is_empty() {
+                    if let Some(found) = all_monitors.into_iter().find(|m| fold(&m.name) == wanted)
+                    {
+                        return Ok(Ok(found));
+                    }
+                }
+                None
             }
         }
+    };
+    let Some(device) = device else {
         return Ok(Err(format!(
             "Dispositivo '{identifier}' não encontrado ou ambíguo; use list_devices"
         )));
@@ -351,6 +384,25 @@ mod tests {
     use chrono::Utc;
 
     use super::*;
+
+    #[test]
+    fn campos_soltos_casam_pela_mesma_regra_do_dispositivo() {
+        assert!(device_fields_match("Borda", None, None, ""));
+        assert!(device_fields_match("Roteador Borda", None, None, " borda "));
+        assert!(device_fields_match("x", Some("10.0.0.1"), None, "10.0.0"));
+        assert!(device_fields_match("x", None, Some("MikroTik"), "mikrotik"));
+        assert!(!device_fields_match(
+            "x",
+            Some("10.0.0.1"),
+            Some("Ubnt"),
+            "cisco"
+        ));
+        let model = device(1, "Roteador Borda", "10.0.0.1");
+        assert_eq!(
+            device_matches(&model, "BORDA"),
+            device_fields_match("Roteador Borda", Some("10.0.0.1"), None, "BORDA")
+        );
+    }
 
     fn device(id: i64, name: &str, ip: &str) -> devices::Model {
         let now = Utc::now().into();

@@ -31,7 +31,7 @@ use netmonitor_core::{
         _entities::{alert_events as alert_events_entity, alert_rules, devices},
         alert_events,
     },
-    shared::errors::AppResult,
+    shared::{errors::AppResult, transaction::begin_write},
 };
 
 /// O campo da opinião no alerta é do núcleo (a apresentação do alerta o lê);
@@ -164,11 +164,9 @@ pub async fn assess(ctx: &AppContext, alert_id: i64) -> AppResult<Option<(Decide
         assessed_at: Utc::now().to_rfc3339(),
     };
 
-    // Relê antes de gravar: o motor pode ter mexido no `data` enquanto isso.
-    let Some(current) = alert_events::Entity::find_by_id(alert_id)
-        .one(&ctx.db)
-        .await?
-    else {
+    // Relê e grava numa transação de escrita: o motor pode ter mexido no `data`.
+    let tx = begin_write(&ctx.db).await?;
+    let Some(current) = alert_events::Entity::find_by_id(alert_id).one(&tx).await? else {
         return Ok(None);
     };
     let mut data = match current.data.clone() {
@@ -178,7 +176,8 @@ pub async fn assess(ctx: &AppContext, alert_id: i64) -> AppResult<Option<(Decide
     data[TRIAGE_FIELD] = json!(triage);
     let mut active: alert_events::ActiveModel = current.into();
     active.data = Set(Some(data));
-    let updated = active.update(&ctx.db).await?;
+    let updated = active.update(&tx).await?;
+    tx.commit().await?;
     feed::publish(
         ctx,
         TRIAGE_EVENT,

@@ -4,10 +4,13 @@
 //! O CGNAT é a única condição realmente impeditiva — e ele é detectável pela
 //! faixa 100.64.0.0/10 (RFC 6598).
 
-use std::net::Ipv4Addr;
+use std::{net::Ipv4Addr, time::Duration};
 
 use serde::Serialize;
 use ts_rs::TS;
+
+/// Teto para a resolução DNS do endpoint configurado.
+const DNS_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Faixa reservada ao CGNAT (RFC 6598).
 const CGNAT_RANGE: (Ipv4Addr, Ipv4Addr) = (
@@ -116,13 +119,26 @@ async fn resolve_host(host: &str) -> Option<Ipv4Addr> {
 /// quase todos os caminhos — inventar um `true` ali seria mentir para quem
 /// depende do diagnóstico.
 pub async fn run(endpoint_host: Option<&str>, port: i32) -> PreflightResult {
-    let public_ip = detect_public_ip().await;
-    let resolved_ip = match endpoint_host.filter(|host| !host.trim().is_empty()) {
-        Some(host) => resolve_host(host).await,
-        None => public_ip,
+    let host_to_resolve = endpoint_host.filter(|host| !host.trim().is_empty());
+    let (public_ip, resolved_host, locals) = tokio::join!(
+        detect_public_ip(),
+        async {
+            match host_to_resolve {
+                Some(host) => tokio::time::timeout(DNS_TIMEOUT, resolve_host(host))
+                    .await
+                    .ok()
+                    .flatten(),
+                None => None,
+            }
+        },
+        local_addresses(),
+    );
+    let resolved_ip = if host_to_resolve.is_some() {
+        resolved_host
+    } else {
+        public_ip
     };
     let candidate = resolved_ip.or(public_ip);
-    let locals = local_addresses();
 
     let base =
         |status, level, message: String, recommendation: String, is_cgnat, behind_nat, verified| {
@@ -209,13 +225,13 @@ pub async fn run(endpoint_host: Option<&str>, port: i32) -> PreflightResult {
 /// o que interessa é saber se o IP público **é** um endereço desta máquina, e
 /// um `UDP connect` para fora revela o endereço de saída sem enviar pacote
 /// algum. Cobre o caso real (servidor com IP público direto) sem dependência.
-fn local_addresses() -> Vec<Ipv4Addr> {
-    let Ok(socket) = std::net::UdpSocket::bind("0.0.0.0:0") else {
+async fn local_addresses() -> Vec<Ipv4Addr> {
+    let Ok(socket) = tokio::net::UdpSocket::bind("0.0.0.0:0").await else {
         return Vec::new();
     };
     // 203.0.113.1 é TEST-NET-3 (RFC 5737): nunca roteável, e `connect` em UDP
     // só escolhe a rota de saída — não há tráfego.
-    if socket.connect("203.0.113.1:9").is_err() {
+    if socket.connect("203.0.113.1:9").await.is_err() {
         return Vec::new();
     }
     match socket.local_addr() {

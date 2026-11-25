@@ -59,15 +59,42 @@ impl EphemeralDockerConfig {
         Ok(guard)
     }
 
+    /// Versão assíncrona de [`Self::create`] para uso no runtime Tokio sem
+    /// bloquear o worker com I/O de disco.
+    ///
+    /// # Errors
+    ///
+    /// `Validation` quando o diretório temporário não pode ser criado.
+    pub async fn create_async(auth: &RegistryAuth) -> Result<Self, DockerError> {
+        let auth = auth.clone();
+        tokio::task::spawn_blocking(move || Self::create(&auth))
+            .await
+            .map_err(|_| DockerError::Engine)?
+    }
+
+    /// Apaga o diretório de forma assíncrona antes do `Drop`.
+    pub async fn cleanup(mut self) {
+        let dir = std::mem::take(&mut self.dir);
+        if !dir.as_os_str().is_empty() {
+            let _ = tokio::fs::remove_dir_all(&dir).await;
+        }
+    }
+
     #[must_use]
     pub fn path(&self) -> &Path {
         &self.dir
     }
 }
 
+/// Apaga **na hora**, mesmo dentro do runtime: o diretório tem um arquivo de
+/// poucos bytes, e uma tarefa `spawn_blocking` pode nunca rodar se o runtime
+/// estiver encerrando — a senha do registry ficaria no disco.
 impl Drop for EphemeralDockerConfig {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
+        if self.dir.as_os_str().is_empty() {
+            return;
+        }
+        let _ = std::fs::remove_dir_all(std::mem::take(&mut self.dir));
     }
 }
 
@@ -103,5 +130,15 @@ mod tests {
             guard.path().to_path_buf()
         };
         assert!(!path.exists(), "credencial ficou no disco");
+    }
+
+    #[tokio::test]
+    async fn dentro_do_runtime_o_diretorio_some_na_hora_do_drop() {
+        let guard = EphemeralDockerConfig::create_async(&auth())
+            .await
+            .expect("criado");
+        let path = guard.path().to_path_buf();
+        drop(guard);
+        assert!(!path.exists(), "credencial ficou no disco após o Drop");
     }
 }

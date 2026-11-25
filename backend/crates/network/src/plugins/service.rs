@@ -15,7 +15,8 @@ use std::collections::{HashMap, HashSet};
 
 use loco_rs::app::AppContext;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, Set,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder,
+    QuerySelect, Set,
 };
 use serde_json::Value;
 
@@ -154,7 +155,7 @@ pub async fn ensure_builtins<C: ConnectionTrait>(db: &C) -> AppResult<()> {
         .filter(plugins::Column::Source.eq(source::BUILTIN))
         .all(db)
         .await?;
-    let packages = builtin::packages();
+    let packages = builtin::cached();
     // Embutido que saiu do binário (renomeado ou aposentado) sai do catálogo.
     // As execuções ficam (FK `SET NULL`); as instalações vão junto.
     let retired: Vec<i64> = existing
@@ -162,7 +163,7 @@ pub async fn ensure_builtins<C: ConnectionTrait>(db: &C) -> AppResult<()> {
         .filter(|model| {
             !packages
                 .iter()
-                .any(|package| package.manifest.slug == model.slug)
+                .any(|(package, _)| package.manifest.slug == model.slug)
         })
         .map(|model| model.id)
         .collect();
@@ -172,29 +173,28 @@ pub async fn ensure_builtins<C: ConnectionTrait>(db: &C) -> AppResult<()> {
             .exec(db)
             .await?;
     }
-    for package in packages {
-        let checksum = package.checksum();
+    for (package, checksum) in packages {
         let current = existing
             .iter()
             .find(|model| model.slug == package.manifest.slug);
         match current {
-            Some(model) if model.checksum == checksum => {}
+            Some(model) if model.checksum == *checksum => {}
             // Nova versão do embutido: o código muda, o estado (ligado ou
             // não) é do operador.
             Some(model) => {
-                let mut active = fill(model.clone().into(), &package)?;
-                active.review = Set(Some(static_review(&package)?));
+                let mut active = fill(model.clone().into(), package)?;
+                active.review = Set(Some(static_review(package)?));
                 active.update(db).await?;
             }
             // Nasce desligado; liga ao cadastrar um equipamento compatível
             // ([`activate_for_device`]) ou à mão.
             None => {
-                let mut active = fill(<plugins::ActiveModel as Default>::default(), &package)?;
+                let mut active = fill(<plugins::ActiveModel as Default>::default(), package)?;
                 active.scope = Set(scope::MODEL.to_owned());
                 active.source = Set(source::BUILTIN.to_owned());
                 active.status = Set(status::DISABLED.to_owned());
                 active.auto_enable = Set(true);
-                active.review = Set(Some(static_review(&package)?));
+                active.review = Set(Some(static_review(package)?));
                 active.last_test_ok = Set(Some(true));
                 active.last_test_at = Set(Some(chrono::Utc::now().into()));
                 active.insert(db).await?;
@@ -368,7 +368,7 @@ pub async fn import_with<C: ConnectionTrait>(
 async fn full_review(ctx: &AppContext, package: &PluginPackage) -> ReviewReport {
     let findings = review::static_scan::scan(package);
     let ai = ai_review::review(ctx, package, &findings).await;
-    review::build_report(package, ai)
+    review::build_report_with_findings(package, findings, ai)
 }
 
 /// Refaz a revisão completa (depois de configurar a IA, por exemplo).
@@ -562,6 +562,11 @@ pub async fn set_enabled<C: ConnectionTrait>(
     enabled: bool,
 ) -> AppResult<plugins::Model> {
     let model = find(db, id).await?;
+    if model.status == status::QUARANTINE {
+        return Err(AppError::business_rule(
+            "O plugin está em quarentena: aceite a revisão de segurança antes de alterar o estado.",
+        ));
+    }
     let next = match (enabled, model.source.as_str(), model.last_test_ok) {
         (false, ..) => status::DISABLED,
         (true, source::BUILTIN, _) => status::ACTIVE,
@@ -622,13 +627,20 @@ pub async fn duplicate<C: ConnectionTrait>(
     device_id: Option<i64>,
 ) -> AppResult<plugins::Model> {
     let model = find(db, id).await?;
+    if model.status == status::QUARANTINE {
+        return Err(AppError::business_rule(
+            "O plugin está em quarentena: aceite a revisão de segurança antes de duplicá-lo.",
+        ));
+    }
     let mut package = package_of(&model)?;
     let base = format!("{}-custom", model.slug.trim_end_matches("-custom"));
     let taken: HashSet<String> = plugins::Entity::find()
+        .select_only()
+        .column(plugins::Column::Slug)
+        .into_tuple::<String>()
         .all(db)
         .await?
         .into_iter()
-        .map(|plugin| plugin.slug)
         .collect();
     package.manifest.slug = (1..)
         .map(|n| {
@@ -1279,5 +1291,36 @@ mod tests {
         assert_eq!(copy.source, source::USER);
         assert!(copy.slug.ends_with("-custom"));
         assert_eq!(copy.status, status::DRAFT);
+    }
+
+    #[tokio::test]
+    async fn quarentena_bloqueia_set_enabled_e_duplicar() {
+        let db = db().await;
+        let perigoso = package(
+            "1.0.0",
+            "fn detect(device, params) { device.run(\"sysupgrade -n /tmp/fw\"); #{} }",
+        );
+        let imported = import_with(&db, &perigoso, None, ia_desligada(&perigoso))
+            .await
+            .unwrap();
+        assert_eq!(imported.status, status::QUARANTINE);
+
+        let err_disable = set_enabled(&db, imported.id, false).await.unwrap_err();
+        assert!(
+            err_disable.to_string().contains("quarentena"),
+            "{err_disable}"
+        );
+        let err_enable = set_enabled(&db, imported.id, true).await.unwrap_err();
+        assert!(
+            err_enable.to_string().contains("quarentena"),
+            "{err_enable}"
+        );
+        let err_dup = duplicate(&db, imported.id, None).await.unwrap_err();
+        assert!(err_dup.to_string().contains("quarentena"), "{err_dup}");
+
+        assert_eq!(
+            find(&db, imported.id).await.unwrap().status,
+            status::QUARANTINE
+        );
     }
 }

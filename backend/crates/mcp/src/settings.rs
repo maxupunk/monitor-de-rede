@@ -3,7 +3,7 @@
 //! * `mcp.enabled` — padrão `true`;
 //! * `mcp.allow_public_origin` — padrão `false` (apenas rede interna ou VPN).
 
-use sea_orm::{ConnectionTrait, DatabaseConnection};
+use sea_orm::{ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter};
 
 use netmonitor_core::{
     models::system_settings,
@@ -44,15 +44,19 @@ fn parse_bool(raw: Option<&str>, default: bool) -> bool {
 /// Propaga falha de leitura no banco.
 pub async fn load<C: ConnectionTrait>(db: &C) -> AppResult<McpSettings> {
     let defaults = McpSettings::default();
-    let enabled_row = system_settings::Model::get(db, KEY_ENABLED).await?;
-    let public_row = system_settings::Model::get(db, KEY_ALLOW_PUBLIC_ORIGIN).await?;
+    let rows = system_settings::Entity::find()
+        .filter(system_settings::Column::Key.is_in([KEY_ENABLED, KEY_ALLOW_PUBLIC_ORIGIN]))
+        .all(db)
+        .await?;
+    let enabled_row = rows.iter().find(|row| row.key == KEY_ENABLED);
+    let public_row = rows.iter().find(|row| row.key == KEY_ALLOW_PUBLIC_ORIGIN);
     Ok(McpSettings {
         enabled: parse_bool(
-            enabled_row.as_ref().and_then(|row| row.value.as_deref()),
+            enabled_row.and_then(|row| row.value.as_deref()),
             defaults.enabled,
         ),
         allow_public_origin: parse_bool(
-            public_row.as_ref().and_then(|row| row.value.as_deref()),
+            public_row.and_then(|row| row.value.as_deref()),
             defaults.allow_public_origin,
         ),
     })

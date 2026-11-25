@@ -1,4 +1,8 @@
-use std::{collections::BTreeMap, sync::Arc, time::Instant};
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, OnceLock},
+    time::Instant,
+};
 
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -46,6 +50,21 @@ const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 /// interrompe na hora).
 const SILENCE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
 
+/// Pool HTTP compartilhado entre chamadas de chat para reaproveitar conexões
+/// TLS/keep-alive com o provedor.
+fn shared_client() -> reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                .connect_timeout(CONNECT_TIMEOUT)
+                .read_timeout(SILENCE_TIMEOUT)
+                .build()
+                .unwrap_or_default()
+        })
+        .clone()
+}
+
 /// Erro de prazo explicado para quem usa, com o que fazer.
 fn silence_message(provider: &str) -> String {
     format!(
@@ -63,11 +82,7 @@ impl OpenAiCompatibleDriver {
         model: String,
         extra_headers: Vec<(String, String)>,
     ) -> Self {
-        let client = reqwest::Client::builder()
-            .connect_timeout(CONNECT_TIMEOUT)
-            .read_timeout(SILENCE_TIMEOUT)
-            .build()
-            .unwrap_or_default();
+        let client = shared_client();
 
         let trimmed_url = base_url.trim_end_matches('/').to_string();
 
@@ -240,17 +255,223 @@ fn with_cache_breakpoints(messages: &mut serde_json::Value) {
     }
 }
 
+/// Buffer de bytes O(N) para decodificar linhas SSE sem corromper caracteres
+/// UTF-8 divididos entre pacotes de rede nem copiar o restante a cada linha.
+#[derive(Default)]
+struct SseParser {
+    buffer: Vec<u8>,
+    offset: usize,
+    accumulated_tools: BTreeMap<usize, (String, String, String)>,
+    // O id do modelo se repete em todo pedaço; basta repassar uma vez.
+    model_reported: bool,
+    done: bool,
+}
+
+impl SseParser {
+    fn push(&mut self, chunk: &[u8]) -> Vec<AiChatChunk> {
+        let mut out = Vec::new();
+        if self.done {
+            return out;
+        }
+        self.buffer.extend_from_slice(chunk);
+
+        while !self.done {
+            let Some(rel) = self.buffer[self.offset..].iter().position(|&b| b == b'\n') else {
+                break;
+            };
+            let end = self.offset + rel;
+            let raw = self.buffer[self.offset..end]
+                .strip_suffix(b"\r")
+                .unwrap_or(&self.buffer[self.offset..end]);
+            let line = String::from_utf8_lossy(raw);
+            Self::parse_line(
+                &mut self.accumulated_tools,
+                &mut self.model_reported,
+                &mut self.done,
+                line.trim(),
+                &mut out,
+            );
+            self.offset = end + 1;
+        }
+
+        if self.offset == self.buffer.len() {
+            self.buffer.clear();
+            self.offset = 0;
+        } else if self.offset >= 4096 && self.offset * 2 >= self.buffer.len() {
+            self.buffer.drain(..self.offset);
+            self.offset = 0;
+        }
+
+        out
+    }
+
+    fn finish(&mut self) -> Vec<AiChatChunk> {
+        let mut out = Vec::new();
+        if !self.done && self.offset < self.buffer.len() {
+            let raw = self.buffer[self.offset..]
+                .strip_suffix(b"\r")
+                .unwrap_or(&self.buffer[self.offset..]);
+            let line = String::from_utf8_lossy(raw);
+            Self::parse_line(
+                &mut self.accumulated_tools,
+                &mut self.model_reported,
+                &mut self.done,
+                line.trim(),
+                &mut out,
+            );
+        }
+        self.buffer.clear();
+        self.offset = 0;
+
+        if !self.done && !self.accumulated_tools.is_empty() {
+            let calls = drain_calls(&mut self.accumulated_tools);
+            out.push(AiChatChunk {
+                text_delta: None,
+                tool_calls: calls,
+                finish_reason: Some("tool_calls".into()),
+                ..AiChatChunk::default()
+            });
+        }
+        out
+    }
+
+    fn parse_line(
+        accumulated_tools: &mut BTreeMap<usize, (String, String, String)>,
+        model_reported: &mut bool,
+        done: &mut bool,
+        line: &str,
+        out: &mut Vec<AiChatChunk>,
+    ) {
+        if line.is_empty() || line.starts_with(':') {
+            return;
+        }
+        let Some(data_str) = line.strip_prefix("data:").map(str::trim) else {
+            return;
+        };
+        if data_str == "[DONE]" {
+            *done = true;
+            if !accumulated_tools.is_empty() {
+                let calls = drain_calls(accumulated_tools);
+                out.push(AiChatChunk {
+                    text_delta: None,
+                    tool_calls: calls,
+                    finish_reason: Some("tool_calls".into()),
+                    ..AiChatChunk::default()
+                });
+            }
+            out.push(AiChatChunk {
+                text_delta: None,
+                tool_calls: Vec::new(),
+                finish_reason: Some("stop".into()),
+                ..AiChatChunk::default()
+            });
+            return;
+        }
+
+        let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data_str) else {
+            return;
+        };
+
+        if !*model_reported {
+            if let Some(model) = parsed
+                .get("model")
+                .and_then(|m| m.as_str())
+                .filter(|m| !m.is_empty())
+            {
+                *model_reported = true;
+                out.push(AiChatChunk {
+                    model: Some(model.to_string()),
+                    ..AiChatChunk::default()
+                });
+            }
+        }
+        if let Some(usage) = parsed.get("usage").and_then(AiUsage::from_openai) {
+            out.push(AiChatChunk {
+                usage: Some(usage),
+                ..AiChatChunk::default()
+            });
+        }
+        let Some(choice) = parsed
+            .get("choices")
+            .and_then(|c| c.as_array())
+            .and_then(|choices| choices.first())
+        else {
+            return;
+        };
+
+        let delta = choice.get("delta");
+        let finish_reason = choice
+            .get("finish_reason")
+            .and_then(|f| f.as_str())
+            .map(ToString::to_string);
+        let text_delta = delta
+            .and_then(|d| d.get("content"))
+            .and_then(|c| c.as_str())
+            .map(ToString::to_string);
+
+        if let Some(tool_calls_json) = delta
+            .and_then(|d| d.get("tool_calls"))
+            .and_then(|t| t.as_array())
+        {
+            for tc in tool_calls_json {
+                let index = tc.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as usize;
+                let id = tc.get("id").and_then(|s| s.as_str()).unwrap_or("");
+                let func = tc.get("function");
+                let name = func
+                    .and_then(|f| f.get("name"))
+                    .and_then(|n| n.as_str())
+                    .unwrap_or("");
+                let args = func
+                    .and_then(|f| f.get("arguments"))
+                    .and_then(|a| a.as_str())
+                    .unwrap_or("");
+
+                let entry = accumulated_tools
+                    .entry(index)
+                    .or_insert_with(|| (String::new(), String::new(), String::new()));
+                if !id.is_empty() {
+                    entry.0 = id.to_string();
+                }
+                if !name.is_empty() {
+                    entry.1.push_str(name);
+                }
+                if !args.is_empty() {
+                    entry.2.push_str(args);
+                }
+            }
+        }
+
+        let mut calls = Vec::new();
+        if finish_reason.as_deref() == Some("tool_calls") && !accumulated_tools.is_empty() {
+            calls.extend(drain_calls(accumulated_tools));
+        }
+
+        if text_delta.is_some() || !calls.is_empty() || finish_reason.is_some() {
+            out.push(AiChatChunk {
+                text_delta,
+                tool_calls: calls,
+                finish_reason,
+                ..AiChatChunk::default()
+            });
+        }
+    }
+}
+
 fn spawn_sse_reader(res: reqwest::Response, notice: Option<String>) -> AiChunkStream {
     let (sender, receiver) = mpsc::channel(64);
 
     tokio::spawn(async move {
         if let Some(notice_text) = notice {
-            let _ = sender
+            if sender
                 .send(Ok(AiChatChunk {
                     notice: Some(notice_text),
                     ..AiChatChunk::default()
                 }))
-                .await;
+                .await
+                .is_err()
+            {
+                return;
+            }
         }
 
         let byte_stream = res
@@ -258,11 +479,7 @@ fn spawn_sse_reader(res: reqwest::Response, notice: Option<String>) -> AiChunkSt
             .map(|item| item.map_err(std::io::Error::other));
         let reader = tokio_util::io::StreamReader::new(byte_stream);
         let mut framed = FramedRead::new(reader, BytesCodec::new());
-
-        let mut pending_buffer = String::new();
-        let mut accumulated_tools: BTreeMap<usize, (String, String, String)> = BTreeMap::new();
-        // O id do modelo se repete em todo pedaço; basta repassar uma vez.
-        let mut model_reported = false;
+        let mut parser = SseParser::default();
 
         while let Some(chunk_res) = framed.next().await {
             let bytes = match chunk_res {
@@ -286,153 +503,19 @@ fn spawn_sse_reader(res: reqwest::Response, notice: Option<String>) -> AiChunkSt
                 }
             };
 
-            let text = match String::from_utf8(bytes.to_vec()) {
-                Ok(s) => s,
-                Err(_) => continue,
-            };
-
-            pending_buffer.push_str(&text);
-
-            while let Some(pos) = pending_buffer.find('\n') {
-                let line = pending_buffer[..pos].trim().to_string();
-                pending_buffer = pending_buffer[pos + 1..].to_string();
-
-                if line.is_empty() || line.starts_with(':') {
-                    continue;
+            for item in parser.push(&bytes) {
+                if sender.send(Ok(item)).await.is_err() {
+                    return;
                 }
+            }
+            if parser.done {
+                return;
+            }
+        }
 
-                if let Some(data_str) = line.strip_prefix("data: ") {
-                    let data_str = data_str.trim();
-                    if data_str == "[DONE]" {
-                        if !accumulated_tools.is_empty() {
-                            let calls = drain_calls(&mut accumulated_tools);
-                            let _ = sender
-                                .send(Ok(AiChatChunk {
-                                    text_delta: None,
-                                    tool_calls: calls,
-                                    finish_reason: Some("tool_calls".into()),
-                                    ..AiChatChunk::default()
-                                }))
-                                .await;
-                        }
-                        let _ = sender
-                            .send(Ok(AiChatChunk {
-                                text_delta: None,
-                                tool_calls: Vec::new(),
-                                finish_reason: Some("stop".into()),
-                                ..AiChatChunk::default()
-                            }))
-                            .await;
-                        return;
-                    }
-
-                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data_str) {
-                        if !model_reported {
-                            if let Some(model) = parsed
-                                .get("model")
-                                .and_then(|m| m.as_str())
-                                .filter(|m| !m.is_empty())
-                            {
-                                model_reported = true;
-                                if sender
-                                    .send(Ok(AiChatChunk {
-                                        model: Some(model.to_string()),
-                                        ..AiChatChunk::default()
-                                    }))
-                                    .await
-                                    .is_err()
-                                {
-                                    return;
-                                }
-                            }
-                        }
-                        if let Some(usage) = parsed.get("usage").and_then(AiUsage::from_openai) {
-                            if sender
-                                .send(Ok(AiChatChunk {
-                                    usage: Some(usage),
-                                    ..AiChatChunk::default()
-                                }))
-                                .await
-                                .is_err()
-                            {
-                                return;
-                            }
-                        }
-                        if let Some(choices) = parsed.get("choices").and_then(|c| c.as_array()) {
-                            if let Some(choice) = choices.first() {
-                                let delta = choice.get("delta");
-                                let finish_reason = choice
-                                    .get("finish_reason")
-                                    .and_then(|f| f.as_str())
-                                    .map(ToString::to_string);
-
-                                let text_delta = delta
-                                    .and_then(|d| d.get("content"))
-                                    .and_then(|c| c.as_str())
-                                    .map(ToString::to_string);
-
-                                if let Some(tool_calls_json) = delta
-                                    .and_then(|d| d.get("tool_calls"))
-                                    .and_then(|t| t.as_array())
-                                {
-                                    for tc in tool_calls_json {
-                                        let index =
-                                            tc.get("index").and_then(|i| i.as_u64()).unwrap_or(0)
-                                                as usize;
-                                        let id =
-                                            tc.get("id").and_then(|s| s.as_str()).unwrap_or("");
-                                        let func = tc.get("function");
-                                        let name = func
-                                            .and_then(|f| f.get("name"))
-                                            .and_then(|n| n.as_str())
-                                            .unwrap_or("");
-                                        let args = func
-                                            .and_then(|f| f.get("arguments"))
-                                            .and_then(|a| a.as_str())
-                                            .unwrap_or("");
-
-                                        let entry =
-                                            accumulated_tools.entry(index).or_insert_with(|| {
-                                                (String::new(), String::new(), String::new())
-                                            });
-                                        if !id.is_empty() {
-                                            entry.0 = id.to_string();
-                                        }
-                                        if !name.is_empty() {
-                                            entry.1.push_str(name);
-                                        }
-                                        if !args.is_empty() {
-                                            entry.2.push_str(args);
-                                        }
-                                    }
-                                }
-
-                                let mut calls = Vec::new();
-                                if finish_reason.as_deref() == Some("tool_calls")
-                                    && !accumulated_tools.is_empty()
-                                {
-                                    calls.extend(drain_calls(&mut accumulated_tools));
-                                }
-
-                                if (text_delta.is_some()
-                                    || !calls.is_empty()
-                                    || finish_reason.is_some())
-                                    && sender
-                                        .send(Ok(AiChatChunk {
-                                            text_delta,
-                                            tool_calls: calls,
-                                            finish_reason,
-                                            ..AiChatChunk::default()
-                                        }))
-                                        .await
-                                        .is_err()
-                                {
-                                    return;
-                                }
-                            }
-                        }
-                    }
-                }
+        for item in parser.finish() {
+            if sender.send(Ok(item)).await.is_err() {
+                return;
             }
         }
     });
@@ -510,16 +593,17 @@ impl AiDriver for OpenAiCompatibleDriver {
                 || status == reqwest::StatusCode::NOT_FOUND)
             && self.model != "openrouter/free"
         {
+            let original_status = status;
             tracing::warn!(
                 model = %self.model,
-                status = %status,
+                status = %original_status,
                 "Modelo OpenRouter retornou erro; tentando fallback automático para 'openrouter/free'"
             );
             body["model"] = json!("openrouter/free");
             if let Ok(fallback_res) = self
                 .client
                 .post(&url)
-                .headers(headers)
+                .headers(headers.clone())
                 .json(&body)
                 .send()
                 .await
@@ -527,8 +611,13 @@ impl AiDriver for OpenAiCompatibleDriver {
                 if fallback_res.status().is_success() {
                     res = fallback_res;
                     status = res.status();
+                    let motivo = if original_status == reqwest::StatusCode::NOT_FOUND {
+                        "não estava disponível (404)"
+                    } else {
+                        "atingiu o limite de taxa (429)"
+                    };
                     fallback_notice = Some(format!(
-                        "O modelo '{}' atingiu o limite de taxa (429) no OpenRouter. A resposta foi gerada usando o balanceador dinâmico 'openrouter/free'.",
+                        "O modelo '{}' {motivo} no OpenRouter. A resposta foi gerada usando o balanceador dinâmico 'openrouter/free'.",
                         self.model
                     ));
                 }
@@ -550,7 +639,7 @@ impl AiDriver for OpenAiCompatibleDriver {
                 let retry = self
                     .client
                     .post(&url)
-                    .headers(self.build_headers()?)
+                    .headers(headers)
                     .json(&body)
                     .send()
                     .await
@@ -690,5 +779,27 @@ mod tests {
             mensagens[4]["content"], "{}",
             "resultado de ferramenta fica como texto"
         );
+    }
+
+    #[test]
+    fn sse_preserva_utf8_partido_aceita_data_sem_espaco_e_descarrega_no_eof() {
+        let mut parser = SseParser::default();
+        // Caractere 'é' (0xC3 0xA9) partido no meio de dois chunks TCP,
+        // linha `data:{...}` sem espaço após `:` e ferramenta sem `[DONE]` no fim.
+        let line1 = "data:{\"choices\":[{\"delta\":{\"content\":\"olá café\"}}]}\n".as_bytes();
+        let split_at = line1.iter().position(|&b| b == 0xC3).unwrap() + 1;
+
+        let mut chunks = parser.push(&line1[..split_at]);
+        assert!(chunks.is_empty(), "linha incompleta aguarda o restante");
+        chunks.extend(parser.push(&line1[split_at..]));
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].text_delta.as_deref(), Some("olá café"));
+
+        let tool_line = b"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"function\":{\"name\":\"ping\",\"arguments\":\"{}\"}}]}}]}";
+        assert!(parser.push(tool_line).is_empty());
+        let flushed = parser.finish();
+        assert_eq!(flushed.len(), 1);
+        assert_eq!(flushed[0].tool_calls.len(), 1);
+        assert_eq!(flushed[0].tool_calls[0].name, "ping");
     }
 }

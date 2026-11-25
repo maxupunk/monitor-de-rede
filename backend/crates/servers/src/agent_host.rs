@@ -41,21 +41,6 @@ fn docker<T: Serialize>(result: Result<T, DockerError>) -> Result<Value, RemoteE
     result.map_err(RemoteError::from).and_then(to_value)
 }
 
-/// Linhas de progresso de texto viram chunks de string.
-fn progress_to_chunks(
-    chunks: mpsc::UnboundedSender<Value>,
-) -> (Progress, tokio::task::JoinHandle<()>) {
-    let (progress, mut lines) = mpsc::unbounded_channel::<String>();
-    let forward = tokio::spawn(async move {
-        while let Some(line) = lines.recv().await {
-            if chunks.send(Value::String(line)).is_err() {
-                break;
-            }
-        }
-    });
-    (progress, forward)
-}
-
 /// Os comandos Docker no host do agente, com a Engine local (compose
 /// incluído).
 pub struct DockerCommands {
@@ -105,14 +90,11 @@ impl DockerCommands {
         T: Serialize,
         F: std::future::Future<Output = Result<T, DockerError>>,
     {
-        let (progress, forward) = progress_to_chunks(chunks);
-        let result = operation(progress).await;
-        let _ = forward.await;
-        docker(result)
+        Self::streamed_with(chunks, Value::String, operation).await
     }
 
-    /// Operação com andamento tipado (`StackChunk`, `BuildChunk`): cada
-    /// evento vai num chunk em JSON até o fim.
+    /// Operação com andamento tipado (`StackChunk`, `BuildChunk`, `LogChunk`):
+    /// cada evento vai num chunk em JSON até o fim.
     async fn streamed<C, T, F>(
         chunks: mpsc::UnboundedSender<Value>,
         operation: impl FnOnce(mpsc::UnboundedSender<C>) -> F,
@@ -122,12 +104,31 @@ impl DockerCommands {
         T: Serialize,
         F: std::future::Future<Output = Result<T, DockerError>>,
     {
+        Self::streamed_with(
+            chunks,
+            |chunk| serde_json::to_value(chunk).unwrap_or(Value::Null),
+            operation,
+        )
+        .await
+    }
+
+    async fn streamed_with<C, T, F>(
+        chunks: mpsc::UnboundedSender<Value>,
+        encode: impl Fn(C) -> Value + Send + 'static,
+        operation: impl FnOnce(mpsc::UnboundedSender<C>) -> F,
+    ) -> Result<Value, RemoteError>
+    where
+        C: Send + 'static,
+        T: Serialize,
+        F: std::future::Future<Output = Result<T, DockerError>>,
+    {
         let (events, mut received) = mpsc::unbounded_channel::<C>();
         let forward = tokio::spawn(async move {
             while let Some(chunk) = received.recv().await {
-                let Ok(value) = serde_json::to_value(chunk) else {
+                let value = encode(chunk);
+                if value.is_null() {
                     continue;
-                };
+                }
                 if chunks.send(value).is_err() {
                     break;
                 }
@@ -145,20 +146,13 @@ impl DockerCommands {
         chunks: mpsc::UnboundedSender<Value>,
         cancel: CancellationToken,
     ) -> Result<Value, RemoteError> {
-        let (logs, mut received) = mpsc::unbounded_channel::<LogChunk>();
-        let forward = tokio::spawn(async move {
-            while let Some(chunk) = received.recv().await {
-                let Ok(value) = serde_json::to_value(chunk) else {
-                    continue;
-                };
-                if chunks.send(value).is_err() {
-                    break;
-                }
-            }
-        });
-        let result = self.engine.follow_logs(id, tail, logs, cancel).await;
-        let _ = forward.await;
-        docker(result.map(|()| Value::Null))
+        Self::streamed::<LogChunk, _, _>(chunks, |logs| async move {
+            self.engine
+                .follow_logs(id, tail, logs, cancel)
+                .await
+                .map(|()| Value::Null)
+        })
+        .await
     }
 
     #[allow(clippy::too_many_lines)]
@@ -189,7 +183,10 @@ impl DockerCommands {
                     .await,
             ),
             DockerCall::FollowLogs { id, tail } => self.follow(&id, &tail, chunks, cancel).await,
-            DockerCall::ClearLogs { id } => docker(engine.clear_logs(&id).await),
+            DockerCall::ClearLogs { id } => {
+                self.guard(&id).await?;
+                docker(engine.clear_logs(&id).await)
+            }
             DockerCall::Metrics => to_value(engine.metrics().await),
             DockerCall::ListVolumes => docker(engine.list_volumes_raw().await),
             DockerCall::InspectVolume { name } => docker(engine.inspect_volume_raw(&name).await),

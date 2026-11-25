@@ -119,14 +119,14 @@ fn round(number: &serde_json::Number) -> Value {
 /// o que a IA mostra ao usuário.
 fn short_instant(text: &str) -> Option<String> {
     let bytes = text.as_bytes();
-    let looks_like = text.len() >= 20
+    let looks_like = bytes.len() >= 20
         && bytes.get(4) == Some(&b'-')
         && bytes.get(10) == Some(&b'T')
         && bytes.get(13) == Some(&b':')
         && bytes.get(16) == Some(&b':')
-        && text[..19]
-            .chars()
-            .all(|c| c.is_ascii_digit() || matches!(c, '-' | 'T' | ':'));
+        && bytes[..19]
+            .iter()
+            .all(|b| b.is_ascii_digit() || matches!(b, b'-' | b'T' | b':'));
     if !looks_like {
         return None;
     }
@@ -208,6 +208,11 @@ mod tests {
             json!("2026-09-30T08:52:33-03:00")
         );
         assert_eq!(lean(&json!("não é data")), json!("não é data"));
+        assert_eq!(
+            lean(&json!("1234-67890T12:45:7ç9")),
+            json!("1234-67890T12:45:7ç9"),
+            "multibyte UTF-8 cruzando o byte 19 não causa panic"
+        );
     }
 
     #[test]

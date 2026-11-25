@@ -89,3 +89,45 @@ async fn registrar_e_remover_subscricao_webpush() {
     })
     .await;
 }
+
+#[tokio::test]
+#[serial]
+async fn inscricao_sem_dono_pode_ser_removida_por_quem_tem_o_endpoint() {
+    use netmonitor_core::models::_entities::push_subscriptions;
+    use sea_orm::{ActiveModelTrait, EntityTrait, PaginatorTrait, Set};
+
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        autenticado(&mut request, &ctx).await;
+
+        let endpoint = "https://fcm.googleapis.com/fcm/send/orfa-sem-usuario";
+        let now: sea_orm::prelude::DateTimeWithTimeZone = chrono::Utc::now().into();
+        push_subscriptions::ActiveModel {
+            user_id: Set(None),
+            endpoint: Set(endpoint.to_string()),
+            p256dh: Set("p256dh".to_string()),
+            auth: Set("auth".to_string()),
+            created_at: Set(now),
+            updated_at: Set(now),
+            ..Default::default()
+        }
+        .insert(&ctx.db)
+        .await
+        .expect("inscrição órfã");
+
+        let del_res = request
+            .delete("/api/push/subscriptions")
+            .json(&serde_json::json!({ "endpoint": endpoint }))
+            .await;
+        assert_eq!(del_res.status_code(), 200, "{}", del_res.text());
+        let json: serde_json::Value = serde_json::from_str(&del_res.text()).unwrap();
+        assert_eq!(json["rowsAffected"], 1);
+        assert_eq!(
+            push_subscriptions::Entity::find()
+                .count(&ctx.db)
+                .await
+                .unwrap(),
+            0
+        );
+    })
+    .await;
+}

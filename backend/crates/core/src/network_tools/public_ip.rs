@@ -1,7 +1,7 @@
 //! O IP público visto pela internet — o pré-voo da VPN e o assistente
 //! inicial perguntam a mesma coisa.
 
-use std::{net::Ipv4Addr, time::Duration};
+use std::{net::Ipv4Addr, sync::OnceLock, time::Duration};
 
 /// Serviços públicos usados para descobrir o IP visto pela internet.
 const PUBLIC_IP_ENDPOINTS: [&str; 2] = [
@@ -10,6 +10,18 @@ const PUBLIC_IP_ENDPOINTS: [&str; 2] = [
 ];
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+
+fn http_client() -> Option<&'static reqwest::Client> {
+    static CLIENT: OnceLock<Option<reqwest::Client>> = OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                .timeout(REQUEST_TIMEOUT)
+                .build()
+                .ok()
+        })
+        .as_ref()
+}
 
 /// IP público visto pela internet.
 ///
@@ -20,10 +32,7 @@ pub async fn detect_public_ip() -> Option<Ipv4Addr> {
     struct IpPayload {
         ip: Option<String>,
     }
-    let client = reqwest::Client::builder()
-        .timeout(REQUEST_TIMEOUT)
-        .build()
-        .ok()?;
+    let client = http_client()?;
 
     for endpoint in PUBLIC_IP_ENDPOINTS {
         let Ok(response) = client.get(endpoint).send().await else {

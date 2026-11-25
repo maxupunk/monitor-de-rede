@@ -1,6 +1,9 @@
 //! A compilação no host do agente (o lado que executa).
 
-use std::time::{Duration, Instant};
+use std::{
+    path::PathBuf,
+    time::{Duration, Instant},
+};
 
 use async_trait::async_trait;
 use bollard::image::ImportImageOptions;
@@ -49,18 +52,44 @@ where
     F: FnOnce(Progress) -> Fut,
     Fut: std::future::Future<Output = T>,
 {
-    let (progress, mut lines) = tokio::sync::mpsc::unbounded_channel::<String>();
-    let events = events.clone();
-    let forward = tokio::spawn(async move {
-        while let Some(text) = lines.recv().await {
-            if events.send(BuildChunk::Line { text }).is_err() {
-                break;
+    cli::forward_lines(events, |text| BuildChunk::Line { text }, work).await
+}
+
+/// Remove artefatos criados durante um build se ele falhar ou for cancelado.
+struct ArtifactGuard(Vec<PathBuf>);
+
+impl ArtifactGuard {
+    fn new() -> Self {
+        Self(Vec::new())
+    }
+
+    fn track(&mut self, path: PathBuf) {
+        self.0.push(path);
+    }
+
+    fn disarm(mut self) {
+        self.0.clear();
+    }
+}
+
+impl Drop for ArtifactGuard {
+    fn drop(&mut self) {
+        if self.0.is_empty() {
+            return;
+        }
+        let paths = std::mem::take(&mut self.0);
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn_blocking(move || {
+                for path in paths {
+                    let _ = std::fs::remove_file(&path);
+                }
+            });
+        } else {
+            for path in paths {
+                let _ = std::fs::remove_file(&path);
             }
         }
-    });
-    let result = work(progress).await;
-    let _ = forward.await;
-    result
+    }
 }
 
 /// O tempo que resta à compilação.
@@ -169,14 +198,15 @@ async fn build(
     }
 
     let mut artifacts = Vec::with_capacity(request.images.len());
+    let mut created_files = ArtifactGuard::new();
     for image in &request.images {
         stage(events, BuildStage::Build, Some(&image.name));
         let artifact = Uuid::new_v4();
         let output = root.artifact_path(artifact);
+        created_files.track(output.clone());
         let args = buildx::image_args(request, image, &work.0, &output);
         let built = docker(events, &args, &envs, remaining(deadline)?).await?;
         if !built.success {
-            let _ = tokio::fs::remove_file(&output).await;
             return Err(DockerError::Validation(format!(
                 "A imagem {} não compilou: {}",
                 image.name,
@@ -195,6 +225,8 @@ async fn build(
             bytes,
         });
     }
+    created_files.disarm();
+    work.cleanup().await;
     Ok(ImageBuildOutcome { commit, artifacts })
 }
 
@@ -208,12 +240,28 @@ fn import(request: ImageImportRequest) -> Result<TunnelStream, DockerError> {
     tokio::spawn(async move {
         let (tar, mut tar_feed) = tokio::io::duplex(256 * 1024);
         // O corpo do load lê do `tar`; a ponte escreve no `reader`.
-        let copy = tokio::spawn(async move {
+        let mut copy = tokio::spawn(async move {
             let result = tokio::io::copy(&mut reader, &mut tar_feed).await;
             let _ = tar_feed.shutdown().await;
             result
         });
-        let body = tokio_util::io::ReaderStream::new(tar).filter_map(|chunk| async { chunk.ok() });
+        let read_error = std::sync::Arc::new(std::sync::Mutex::new(None::<String>));
+        let read_error_stream = read_error.clone();
+        let body =
+            tokio_util::io::ReaderStream::with_capacity(tar, 64 * 1024).filter_map(move |chunk| {
+                let read_error = read_error_stream.clone();
+                async move {
+                    match chunk {
+                        Ok(bytes) => Some(bytes),
+                        Err(error) => {
+                            if let Ok(mut slot) = read_error.lock() {
+                                *slot = Some(format!("Falha ao ler stream de importação: {error}"));
+                            }
+                            None
+                        }
+                    }
+                }
+            });
         let loading = async {
             let mut stream =
                 client.import_image_stream(ImportImageOptions { quiet: true }, body, None);
@@ -230,11 +278,29 @@ fn import(request: ImageImportRequest) -> Result<TunnelStream, DockerError> {
             }
             failure
         };
-        let failure = match tokio::time::timeout(IMPORT_TIMEOUT, loading).await {
+        let mut failure = match tokio::time::timeout(IMPORT_TIMEOUT, loading).await {
             Ok(failure) => failure,
             Err(_) => Some("O docker load passou do tempo limite".into()),
         };
-        let _ = copy.await;
+        if failure.is_some() {
+            copy.abort();
+        } else {
+            match tokio::time::timeout(Duration::from_secs(5), &mut copy).await {
+                Ok(Ok(Ok(_))) => {}
+                Ok(Ok(Err(error))) => {
+                    failure = Some(format!("Transferência da imagem interrompida: {error}"));
+                }
+                Ok(Err(_)) | Err(_) => {
+                    copy.abort();
+                    failure = Some("Transferência da imagem não encerrou a tempo".into());
+                }
+            }
+        }
+        if failure.is_none() {
+            if let Ok(mut slot) = read_error.lock() {
+                failure = slot.take();
+            }
+        }
         let mut loaded = Vec::new();
         let mut error = failure;
         if error.is_none() {
@@ -272,24 +338,26 @@ impl ImageHost for LocalEngine {
 
     async fn builder_readiness(&self) -> Result<BuilderReadiness, DockerError> {
         let version = |output: String| output.lines().next().map(str::trim).map(String::from);
-        let buildx_version =
-            match cli::capture("docker", &["buildx", "version"], None, CHECK_TIMEOUT).await {
-                Ok((true, output)) => version(output),
-                _ => None,
-            };
-        let git_version = match cli::capture("git", &["--version"], None, CHECK_TIMEOUT).await {
-            Ok((true, output)) => version(output),
-            _ => None,
-        };
-        let builder_ready =
-            buildx_version.is_some() && quiet(&["buildx", "inspect", BUILDER]).await;
         let root = BuildsRoot::from_env();
         let _ = tokio::fs::create_dir_all(root.path()).await;
         let path = root.path().display().to_string();
-        let free_bytes = cli::capture("df", &["-Pk", &path], None, CHECK_TIMEOUT)
-            .await
-            .ok()
-            .and_then(|(_, output)| parse_df(&output));
+        let df_args = ["-Pk", path.as_str()];
+        let (buildx_res, git_res, builder_inspected, df_res) = tokio::join!(
+            cli::capture("docker", &["buildx", "version"], None, CHECK_TIMEOUT),
+            cli::capture("git", &["--version"], None, CHECK_TIMEOUT),
+            quiet(&["buildx", "inspect", BUILDER]),
+            cli::capture("df", &df_args, None, CHECK_TIMEOUT),
+        );
+        let buildx_version = match buildx_res {
+            Ok((true, output)) => version(output),
+            _ => None,
+        };
+        let git_version = match git_res {
+            Ok((true, output)) => version(output),
+            _ => None,
+        };
+        let builder_ready = buildx_version.is_some() && builder_inspected;
+        let free_bytes = df_res.ok().and_then(|(_, output)| parse_df(&output));
         let cpus = host_cpus();
         let limits = BuilderLimits::from_env(cpus);
         Ok(BuilderReadiness {

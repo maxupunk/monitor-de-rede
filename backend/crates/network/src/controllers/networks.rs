@@ -1,8 +1,10 @@
 //! CRUD de redes e enfileiramento persistente de discovery.
 
+use std::collections::{HashMap, HashSet};
+
 use axum::{http::HeaderMap, http::StatusCode, response::IntoResponse};
 use loco_rs::prelude::*;
-use sea_orm::{ActiveModelTrait, EntityTrait, QueryOrder, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
 
 use netmonitor_core::{
     audit::{AuditAction, AuditActor, AuditChanges, AuditEntryInput, AuditService, ResourceType},
@@ -45,23 +47,10 @@ struct NetworkResponse {
     usable_hosts: u32,
 }
 
-async fn present(
-    db: &sea_orm::DatabaseConnection,
-    network: networks::Model,
-) -> AppResult<NetworkResponse> {
-    let site = match network.site_id {
-        Some(id) => sites::Entity::find_by_id(id)
-            .one(db)
-            .await?
-            .map(|site| SiteReference {
-                id: site.id,
-                name: site.name,
-            }),
-        None => None,
-    };
+fn present_with_site(network: networks::Model, site: Option<SiteReference>) -> NetworkResponse {
     let scannable = network.scannable();
     let usable_hosts = network.usable_hosts();
-    Ok(NetworkResponse {
+    NetworkResponse {
         id: network.id,
         site_id: network.site_id,
         probe_id: network.probe_id,
@@ -80,7 +69,24 @@ async fn present(
         site,
         scannable,
         usable_hosts,
-    })
+    }
+}
+
+async fn present(
+    db: &sea_orm::DatabaseConnection,
+    network: networks::Model,
+) -> AppResult<NetworkResponse> {
+    let site = match network.site_id {
+        Some(id) => sites::Entity::find_by_id(id)
+            .one(db)
+            .await?
+            .map(|site| SiteReference {
+                id: site.id,
+                name: site.name,
+            }),
+        None => None,
+    };
+    Ok(present_with_site(network, site))
 }
 
 fn validate(input: &NetworkInput) -> AppResult<()> {
@@ -103,10 +109,35 @@ async fn index(State(ctx): State<AppContext>) -> AppResult<Response> {
         .order_by_asc(networks::Column::Name)
         .all(&ctx.db)
         .await?;
-    let mut output = Vec::with_capacity(rows.len());
-    for row in rows {
-        output.push(present(&ctx.db, row).await?);
-    }
+    let site_ids: Vec<i64> = rows
+        .iter()
+        .filter_map(|row| row.site_id)
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    let sites_by_id: HashMap<i64, String> = if site_ids.is_empty() {
+        HashMap::new()
+    } else {
+        sites::Entity::find()
+            .filter(sites::Column::Id.is_in(site_ids))
+            .all(&ctx.db)
+            .await?
+            .into_iter()
+            .map(|site| (site.id, site.name))
+            .collect()
+    };
+    let output: Vec<NetworkResponse> = rows
+        .into_iter()
+        .map(|row| {
+            let site = row.site_id.and_then(|id| {
+                sites_by_id.get(&id).map(|name| SiteReference {
+                    id,
+                    name: name.clone(),
+                })
+            });
+            present_with_site(row, site)
+        })
+        .collect();
     Ok(format::json(output)?)
 }
 

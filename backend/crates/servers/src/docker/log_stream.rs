@@ -29,6 +29,9 @@ pub const EVENT: &str = "docker:log";
 const MAX_STREAMS: usize = 20;
 const MAX_DURATION: Duration = Duration::from_secs(10 * 60);
 const BATCH_INTERVAL: Duration = Duration::from_millis(500);
+/// Limite de chunks acumulados antes de descarregar imediatamente, evitando
+/// crescimento sem limite de memória em containers muito ruidosos.
+const BATCH_MAX_CHUNKS: usize = 256;
 
 #[derive(Clone, Default)]
 pub struct LogStreams {
@@ -130,6 +133,17 @@ fn has_listeners(ctx: &AppContext) -> bool {
     EventBus::from_context(ctx).is_ok_and(|bus| bus.has_subscribers())
 }
 
+/// Por que parar o acompanhamento agora, se for o caso.
+fn stop_reason(ctx: &AppContext, deadline: tokio::time::Instant) -> Option<String> {
+    if tokio::time::Instant::now() >= deadline {
+        return Some("Tempo máximo de acompanhamento atingido".to_string());
+    }
+    if !has_listeners(ctx) {
+        return Some("Nenhuma tela acompanhando".to_string());
+    }
+    None
+}
+
 /// Devolve o motivo do encerramento, que vai no último evento.
 async fn run(
     ctx: &AppContext,
@@ -151,13 +165,27 @@ async fn run(
                 .await
         })
     };
-    let deadline = tokio::time::Instant::now() + MAX_DURATION;
-    let mut ticker = tokio::time::interval(BATCH_INTERVAL);
+    let now = tokio::time::Instant::now();
+    let deadline = now + MAX_DURATION;
+    let mut ticker = tokio::time::interval_at(now + BATCH_INTERVAL, BATCH_INTERVAL);
     let mut batch: Vec<LogChunk> = Vec::new();
     let reason = loop {
         tokio::select! {
+            biased;
+            () = token.cancelled() => break "Acompanhamento encerrado".to_string(),
             chunk = received.recv() => match chunk {
-                Some(chunk) => batch.push(chunk),
+                Some(chunk) => {
+                    batch.push(chunk);
+                    if batch.len() >= BATCH_MAX_CHUNKS {
+                        let entries = engine::log_entries(&std::mem::take(&mut batch), true);
+                        publish(ctx, &event(stream_id, host, container_id, entries, None));
+                        // Com fluxo contínuo o `biased` nunca chega ao `tick`:
+                        // o lote cheio é a hora de conferir prazo e audiência.
+                        if let Some(reason) = stop_reason(ctx, deadline) {
+                            break reason;
+                        }
+                    }
+                }
                 None => break "O stream de logs terminou".to_string(),
             },
             _ = ticker.tick() => {
@@ -165,14 +193,8 @@ async fn run(
                     let entries = engine::log_entries(&std::mem::take(&mut batch), true);
                     publish(ctx, &event(stream_id, host, container_id, entries, None));
                 }
-                if token.is_cancelled() {
-                    break "Acompanhamento encerrado".to_string();
-                }
-                if tokio::time::Instant::now() >= deadline {
-                    break "Tempo máximo de acompanhamento atingido".to_string();
-                }
-                if !has_listeners(ctx) {
-                    break "Nenhuma tela acompanhando".to_string();
+                if let Some(reason) = stop_reason(ctx, deadline) {
+                    break reason;
                 }
             }
         }

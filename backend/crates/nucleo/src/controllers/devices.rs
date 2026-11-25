@@ -1,6 +1,6 @@
 //! Cadastro de dispositivos e recursos dependentes.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use axum::{
     extract::Query,
@@ -9,8 +9,8 @@ use axum::{
 };
 use loco_rs::prelude::*;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, ExprTrait, QueryFilter, QueryOrder, QuerySelect,
-    Set,
+    sea_query::Expr, ActiveModelTrait, ColumnTrait, EntityTrait, ExprTrait, QueryFilter,
+    QueryOrder, QuerySelect, Set,
 };
 
 use netmonitor_core::devices::snmp_cadence::{
@@ -106,8 +106,6 @@ pub(crate) async fn present_many(
     rows: Vec<devices::Model>,
     vpn: VpnLink,
 ) -> AppResult<Vec<DevicePresenterItem>> {
-    use std::collections::HashSet;
-
     let site_ids: HashSet<i64> = rows.iter().filter_map(|row| row.site_id).collect();
     let parent_ids: HashSet<i64> = rows.iter().filter_map(|row| row.parent_id).collect();
     let device_ids: Vec<i64> = rows.iter().map(|row| row.id).collect();
@@ -766,6 +764,7 @@ async fn destroy(
     let old_type = row.r#type.clone();
     system_device::ensure_deletable(&row)?;
     ResourceCleanupService::delete_device(&ctx.db, id).await?;
+    netmonitor_core::routines::cadence::forget_device(id);
     emit_topology_updated(&ctx).await;
 
     let _ = AuditService::new(&ctx.db)
@@ -860,11 +859,12 @@ async fn metrics(
     Path(id): Path<i64>,
     Query(query): Query<PaginationQuery>,
 ) -> AppResult<Response> {
-    let device = devices::Entity::find_by_id(id).one(&ctx.db).await?;
-    let link_interface_id = device.as_ref().and_then(|d| d.link_interface_id);
-    let link_interface_name = device
-        .as_ref()
-        .and_then(|d| d.link_interface_name.as_deref());
+    let device = devices::Entity::find_by_id(id)
+        .one(&ctx.db)
+        .await?
+        .ok_or_else(|| AppError::not_found("Dispositivo não encontrado"))?;
+    let link_interface_id = device.link_interface_id;
+    let link_interface_name = device.link_interface_name.as_deref();
 
     let interfaces = device_interfaces::Entity::find()
         .filter(device_interfaces::Column::DeviceId.eq(id))
@@ -929,6 +929,10 @@ async fn events(
     Path(id): Path<i64>,
     Query(query): Query<PaginationQuery>,
 ) -> AppResult<Response> {
+    devices::Entity::find_by_id(id)
+        .one(&ctx.db)
+        .await?
+        .ok_or_else(|| AppError::not_found("Dispositivo não encontrado"))?;
     let base = alert_events::Entity::find()
         .filter(alert_events::Column::DeviceId.eq(id))
         .order_by_desc(alert_events::Column::CreatedAt);
@@ -993,29 +997,52 @@ async fn batch_parent(
     headers: HeaderMap,
     Json(input): Json<BatchParentInput>,
 ) -> AppResult<Response> {
-    if input.device_ids.is_empty() {
+    let mut target_set = HashSet::new();
+    let target_ids: Vec<i64> = input
+        .device_ids
+        .into_iter()
+        .filter(|id| input.parent_id != Some(*id) && target_set.insert(*id))
+        .collect();
+    if target_ids.is_empty() {
         return Ok(format::json(serde_json::json!({ "updatedCount": 0 }))?);
     }
 
+    let txn = crate::services::shared::transaction::begin_write(&ctx.db).await?;
+
     if let Some(pid) = input.parent_id {
-        let exists = devices::Entity::find_by_id(pid).one(&ctx.db).await?;
-        if exists.is_none() {
-            return Err(AppError::not_found("Dispositivo pai não encontrado"));
+        let mut cursor = devices::Entity::find_by_id(pid)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| AppError::not_found("Dispositivo pai não encontrado"))?
+            .parent_id;
+        let mut visited = HashSet::from([pid]);
+        while let Some(ancestor_id) = cursor {
+            if target_set.contains(&ancestor_id) {
+                return Err(AppError::validation(
+                    "A atribuição criaria um ciclo na hierarquia de dispositivos",
+                ));
+            }
+            if !visited.insert(ancestor_id) {
+                break;
+            }
+            cursor = devices::Entity::find_by_id(ancestor_id)
+                .one(&txn)
+                .await?
+                .and_then(|ancestor| ancestor.parent_id);
         }
     }
 
-    let mut updated_count = 0;
-    for id in &input.device_ids {
-        if input.parent_id == Some(*id) {
-            continue;
-        }
-        let Some(dev) = devices::Entity::find_by_id(*id).one(&ctx.db).await? else {
-            continue;
-        };
-        let mut active: devices::ActiveModel = dev.into();
-        active.parent_id = Set(input.parent_id);
-        active.update(&ctx.db).await?;
-        updated_count += 1;
+    let updated_count = devices::Entity::update_many()
+        .col_expr(devices::Column::ParentId, Expr::value(input.parent_id))
+        .col_expr(devices::Column::UpdatedAt, Expr::value(chrono::Utc::now()))
+        .filter(devices::Column::Id.is_in(target_ids))
+        .exec(&txn)
+        .await?
+        .rows_affected;
+    txn.commit().await?;
+
+    if updated_count > 0 {
+        emit_topology_updated(&ctx).await;
     }
 
     let _ = AuditService::new(&ctx.db)

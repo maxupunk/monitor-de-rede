@@ -71,7 +71,7 @@ pub enum TestProtocol {
     Tcp,
 }
 
-/// O que medir e como. Valide com [`ThroughputSpec::validate`] antes de usar.
+/// O que medir e como. Valide antes de usar no motor (`network_tools::throughput`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]

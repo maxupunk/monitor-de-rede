@@ -30,9 +30,17 @@ pub struct SavedHint {
 ///
 /// IPs usam sua forma canônica; hostnames são minúsculos porque DNS não
 /// diferencia caixa. O mesmo critério é usado para eliminar duplicatas.
+///
+/// **A porta fica de fora.** O catálogo de endereços aceita `nome:porta`
+/// porque o domínio também serve de URL dos agentes — e essa porta é a da API,
+/// não a do syslog. Gravada no equipamento, ela viraria
+/// `remote=172.20.0.5:9000 remote-port=5514`, que o RouterOS recusa (e outros
+/// sistemas leem como nome). A porta do syslog vem sempre de
+/// `snippets::published_port`.
 #[must_use]
 pub fn normalize(raw: &str) -> Option<String> {
     let clean = hints::sanitiza_endereco(Some(raw))?;
+    let clean = hints::sem_porta(&clean);
     Some(
         clean
             .parse::<IpAddr>()
@@ -156,6 +164,20 @@ mod tests {
     fn normaliza_ips_e_hostnames_para_deduplicar() {
         assert_eq!(normalize(" 2001:0db8::1 ").as_deref(), Some("2001:db8::1"));
         assert!(same_address("NETMONITOR.EXEMPLO", "netmonitor.exemplo"));
+    }
+
+    #[test]
+    fn a_porta_da_api_nao_vai_para_o_destino_do_syslog() {
+        assert_eq!(normalize("172.20.0.5:9000").as_deref(), Some("172.20.0.5"));
+        assert_eq!(
+            normalize("[2001:db8::1]:9000").as_deref(),
+            Some("2001:db8::1")
+        );
+        assert_eq!(
+            normalize("Casa.DDNS.net:8080").as_deref(),
+            Some("casa.ddns.net")
+        );
+        assert_eq!(normalize("127.0.0.1:9000"), None);
     }
 
     #[tokio::test]

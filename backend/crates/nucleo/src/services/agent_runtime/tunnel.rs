@@ -13,7 +13,11 @@
 //! O volume só exige `volume_export` na política: o nome vai à Engine deste
 //! host, que valida a existência, e o tar sai só de ida.
 
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+    time::Duration,
+};
 
 use agent_protocol::docker::images::ImageImportRequest;
 use async_trait::async_trait;
@@ -93,12 +97,16 @@ impl LocalTunnelOpener {
         self
     }
 
-    /// O primeiro endereço de `host` que as regras deixam alcançar.
-    fn allowed(&self, candidates: &[SocketAddr]) -> Option<SocketAddr> {
-        candidates.iter().copied().find(|addr| {
-            is_reachable_target(addr.ip())
-                && self.targets.iter().any(|target| target.matches(*addr))
-        })
+    /// Todos os endereços de `host` que as regras deixam alcançar, preservando a ordem.
+    fn allowed(&self, candidates: &[SocketAddr]) -> Vec<SocketAddr> {
+        candidates
+            .iter()
+            .copied()
+            .filter(|addr| {
+                is_reachable_target(addr.ip())
+                    && self.targets.iter().any(|target| target.matches(*addr))
+            })
+            .collect()
     }
 }
 
@@ -114,7 +122,9 @@ impl TunnelOpener for LocalTunnelOpener {
                 "Nenhum banco liberado neste host: defina AGENT_DATABASE_TARGETS (ex.: 10.0.0.20:5432)",
             ));
         }
-        let resolved: Vec<SocketAddr> =
+        let resolved: Vec<SocketAddr> = if let Ok(ip) = host.trim().parse::<IpAddr>() {
+            vec![SocketAddr::new(ip, port)]
+        } else {
             tokio::time::timeout(CONNECT_TIMEOUT, tokio::net::lookup_host((host, port)))
                 .await
                 .map_err(|_| {
@@ -129,29 +139,42 @@ impl TunnelOpener for LocalTunnelOpener {
                         format!("Não foi possível resolver {host}: {error}"),
                     )
                 })?
-                .collect();
-        let addr = self.allowed(&resolved).ok_or_else(|| {
-            RemoteError::new(
+                .collect()
+        };
+        let allowed = self.allowed(&resolved);
+        if allowed.is_empty() {
+            return Err(RemoteError::new(
                 ErrorCode::Forbidden,
                 format!("{host}:{port} não está em AGENT_DATABASE_TARGETS deste host"),
+            ));
+        }
+        let mut last_error = None;
+        for addr in allowed {
+            match tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect(addr)).await {
+                Ok(Ok(stream)) => {
+                    let _ = stream.set_nodelay(true);
+                    return Ok(Box::new(stream));
+                }
+                Ok(Err(error)) => {
+                    last_error = Some(RemoteError::new(
+                        ErrorCode::Unavailable,
+                        format!("O agente não conectou em {addr}: {error}"),
+                    ));
+                }
+                Err(_) => {
+                    last_error = Some(RemoteError::new(
+                        ErrorCode::Timeout,
+                        format!("Tempo esgotado conectando em {addr}"),
+                    ));
+                }
+            }
+        }
+        Err(last_error.unwrap_or_else(|| {
+            RemoteError::new(
+                ErrorCode::Unavailable,
+                format!("O agente não conectou em {host}:{port}"),
             )
-        })?;
-        let stream = tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect(addr))
-            .await
-            .map_err(|_| {
-                RemoteError::new(
-                    ErrorCode::Timeout,
-                    format!("Tempo esgotado conectando em {addr}"),
-                )
-            })?
-            .map_err(|error| {
-                RemoteError::new(
-                    ErrorCode::Unavailable,
-                    format!("O agente não conectou em {addr}: {error}"),
-                )
-            })?;
-        let _ = stream.set_nodelay(true);
-        Ok(Box::new(stream))
+        }))
     }
 
     async fn open_volume(&self, name: &str) -> Result<TunnelStream, RemoteError> {
@@ -254,7 +277,7 @@ mod tests {
     #[test]
     fn ip_publico_nunca_passa_mesmo_listado() {
         let opener = opener(&[Permission::Database], "8.8.8.8:53");
-        assert_eq!(opener.allowed(&["8.8.8.8:53".parse().unwrap()]), None);
+        assert!(opener.allowed(&["8.8.8.8:53".parse().unwrap()]).is_empty());
     }
 
     #[tokio::test]

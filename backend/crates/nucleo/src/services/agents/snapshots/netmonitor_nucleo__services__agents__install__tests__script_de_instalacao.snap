@@ -32,8 +32,13 @@ mv /usr/local/bin/netmonitor-agent.new /usr/local/bin/netmonitor-agent
 
 install -d -m 0755 /etc/netmonitor-agent
 # Raiz das stacks do deploy contínuo (ADR 021): só vale com `deploy` no
-# AGENT_ALLOW, e pede o `git` instalado no host.
-install -d -m 0750 /srv/netmonitor/stacks
+# AGENT_ALLOW, e pede o `git` instalado no host. O grupo `docker` permite
+# escrita ao serviço com DynamicUser=yes + SupplementaryGroups=docker.
+if getent group docker >/dev/null 2>&1; then
+  install -d -m 0770 -g docker /srv/netmonitor/stacks
+else
+  install -d -m 0750 /srv/netmonitor/stacks
+fi
 umask 077
 {
   echo "AGENT_SERVER_URL=$AGENT_SERVER_URL"
@@ -68,6 +73,7 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
 PrivateTmp=true
+ReadWritePaths=-/srv/netmonitor/stacks
 StateDirectory=netmonitor-agent
 StateDirectoryMode=0700
 

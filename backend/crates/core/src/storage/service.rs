@@ -116,6 +116,7 @@ pub async fn create<C: ConnectionTrait>(
     let input = normalize(input)?;
     ensure_unique_name(db, &input.name, None).await?;
 
+    let name_for_conflict = input.name.clone();
     let row = storage_destinations::ActiveModel {
         name: Set(input.name),
         provider: Set(input.provider.as_str().to_string()),
@@ -123,7 +124,8 @@ pub async fn create<C: ConnectionTrait>(
         ..Default::default()
     }
     .insert(db)
-    .await?;
+    .await
+    .map_err(|err| map_unique_name_error(err, &name_for_conflict))?;
     Ok(row)
 }
 
@@ -142,11 +144,21 @@ pub async fn update<C: ConnectionTrait>(
     let input = normalize(input)?;
     ensure_unique_name(db, &input.name, Some(id)).await?;
 
+    let name_for_conflict = input.name.clone();
     let mut row: storage_destinations::ActiveModel = current.row.into();
     row.name = Set(input.name);
     row.provider = Set(input.provider.as_str().to_string());
     row.config_encrypted = Set(seal(&input.config)?);
-    Ok(row.update(db).await?)
+    row.update(db)
+        .await
+        .map_err(|err| map_unique_name_error(err, &name_for_conflict))
+}
+
+fn map_unique_name_error(err: sea_orm::DbErr, name: &str) -> AppError {
+    if crate::shared::db_errors::is_unique_violation(&err) {
+        return AppError::conflict(format!("Já existe um armazenamento chamado \"{name}\""));
+    }
+    AppError::from(err)
 }
 
 /// Remove o cadastro. Os arquivos que estão no destino ficam onde estão.

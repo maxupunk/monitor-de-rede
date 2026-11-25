@@ -20,13 +20,14 @@
 //! sobreviver a um reinício que reinicia a janela de qualquer forma.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{Mutex, PoisonError},
 };
 
 use chrono::{DateTime, Duration, Utc};
 use loco_rs::app::AppContext;
 use regex::Regex;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde_json::{Map, Value};
 
 use crate::{
@@ -35,7 +36,7 @@ use crate::{
         alerts::{
             contracts::{AlertEvaluationContext, AlertEvaluationScope},
             datasets::log_pattern::{self, LogPatternFacts},
-            manager, repository,
+            manager,
         },
         shared::errors::AppResult,
         syslog::parser::ParsedLog,
@@ -69,6 +70,9 @@ pub struct PatternRule {
     /// `None` aceita qualquer uma.
     pub min_severity: Option<i16>,
     pub window_seconds: i64,
+    /// Janela de recuperação da regra, para continuar emitindo `recovered: true`
+    /// até o motor de alertas fechar o episódio.
+    pub recovery_window_seconds: i64,
     /// Escopo da regra, para não contar log de dispositivo que ela não cobre.
     pub device_id: Option<i64>,
 }
@@ -78,12 +82,25 @@ impl PatternRule {
     /// malformada — regra corrompida no banco nunca derruba a ingestão.
     #[must_use]
     pub fn from_rule(rule: &alert_rules::Model) -> Option<Self> {
+        Self::from_rule_with_cache(rule, &mut HashMap::new())
+    }
+
+    fn from_rule_with_cache(
+        rule: &alert_rules::Model,
+        cache: &mut HashMap<String, Regex>,
+    ) -> Option<Self> {
         if rule.r#type != RULE_TYPE {
             return None;
         }
         let condition = rule.condition.as_object()?;
         let pattern = condition.get("pattern")?.as_str()?;
-        let regex = Regex::new(pattern).ok()?;
+        let regex = if let Some(compiled) = cache.get(pattern) {
+            compiled.clone()
+        } else {
+            let compiled = Regex::new(pattern).ok()?;
+            cache.insert(pattern.to_owned(), compiled.clone());
+            compiled
+        };
 
         Some(Self {
             rule_id: rule.id,
@@ -101,6 +118,7 @@ impl PatternRule {
                 .and_then(Value::as_i64)
                 .filter(|valor| *valor > 0)
                 .unwrap_or(DEFAULT_WINDOW_SECONDS),
+            recovery_window_seconds: i64::from(rule.recovery_window_seconds.max(0)),
             device_id: rule.device_id,
         })
     }
@@ -125,13 +143,28 @@ impl PatternRule {
     }
 }
 
-/// Um casamento observado.
-#[derive(Debug, Clone)]
+/// Um casamento observado — sem clonar a mensagem em cada hit (só a última
+/// mensagem da chave é usada na avaliação).
+#[derive(Debug, Clone, Copy)]
 struct Hit {
     at: DateTime<Utc>,
     severity: Option<i16>,
-    message: String,
 }
+
+/// Estado da janela por `(rule_id, device_id)`.
+#[derive(Debug, Default)]
+struct WindowBucket {
+    hits: Vec<Hit>,
+    last_message: String,
+    /// Instante em que a contagem chegou a zero; mantemos a chave viva durante
+    /// a `recovery_window_seconds` da regra para continuar emitindo ticks de
+    /// recuperação ao motor de alertas.
+    empty_since: Option<DateTime<Utc>>,
+}
+
+/// Folga adicional sobre `recovery_window_seconds` para garantir que o último
+/// tick de recuperação chegue mesmo com atraso do scheduler.
+const RECOVERY_GRACE_SECONDS: i64 = 120;
 
 /// Chave da janela: a regra e o dispositivo de onde o log veio.
 ///
@@ -145,7 +178,10 @@ type WindowKey = (i64, Option<i64>);
 pub struct PatternMatcher {
     /// As regras compiladas. Recarregadas pelo ciclo do scheduler.
     rules: Mutex<Vec<PatternRule>>,
-    hits: Mutex<HashMap<WindowKey, Vec<Hit>>>,
+    /// Cache de regexes compiladas por texto do padrão, evitando recompilação a
+    /// cada ciclo do scheduler.
+    regex_cache: Mutex<HashMap<String, Regex>>,
+    hits: Mutex<HashMap<WindowKey, WindowBucket>>,
 }
 
 impl PatternMatcher {
@@ -160,6 +196,21 @@ impl PatternMatcher {
     /// casamento na ingestão barato.
     pub fn set_rules(&self, rules: Vec<PatternRule>) {
         *self.rules.lock().unwrap_or_else(PoisonError::into_inner) = rules;
+    }
+
+    fn compile_rules(&self, rows: &[alert_rules::Model]) -> Vec<PatternRule> {
+        let mut cache = self
+            .regex_cache
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let active_patterns: HashSet<&str> = rows
+            .iter()
+            .filter_map(|rule| rule.condition.get("pattern")?.as_str())
+            .collect();
+        cache.retain(|pattern, _| active_patterns.contains(pattern.as_str()));
+        rows.iter()
+            .filter_map(|rule| PatternRule::from_rule_with_cache(rule, &mut cache))
+            .collect()
     }
 
     #[must_use]
@@ -191,14 +242,15 @@ impl PatternMatcher {
         }
         let mut hits = self.hits.lock().unwrap_or_else(PoisonError::into_inner);
         for rule_id in casadas {
-            let lista = hits.entry((rule_id, device_id)).or_default();
-            if lista.len() < MAX_HITS_PER_KEY {
-                lista.push(Hit {
+            let bucket = hits.entry((rule_id, device_id)).or_default();
+            bucket.empty_since = None;
+            if bucket.hits.len() < MAX_HITS_PER_KEY {
+                bucket.hits.push(Hit {
                     at: agora,
                     severity: parsed.severity,
-                    message: parsed.message.clone(),
                 });
             }
+            bucket.last_message.clone_from(&parsed.message);
         }
     }
 
@@ -206,30 +258,55 @@ impl PatternMatcher {
     fn drain_window(&self, rules: &[PatternRule], agora: DateTime<Utc>) -> Vec<Observation> {
         let mut hits = self.hits.lock().unwrap_or_else(PoisonError::into_inner);
         let mut observacoes = Vec::new();
+        let recovery_by_rule: HashMap<i64, i64> = rules
+            .iter()
+            .map(|rule| (rule.rule_id, rule.recovery_window_seconds))
+            .collect();
 
         for rule in rules {
             let corte = agora - Duration::seconds(rule.window_seconds);
-            for ((rule_id, device_id), lista) in hits.iter_mut() {
+            for ((rule_id, device_id), bucket) in hits.iter_mut() {
                 if *rule_id != rule.rule_id {
                     continue;
                 }
-                lista.retain(|hit| hit.at >= corte);
+                bucket.hits.retain(|hit| hit.at >= corte);
+                if bucket.hits.is_empty() {
+                    bucket.last_message.clear();
+                    bucket.empty_since.get_or_insert(agora);
+                } else {
+                    bucket.empty_since = None;
+                }
                 // Chave sem casamento na janela também vira observação: é ela
                 // que leva `recovered` ao motor e permite o alerta resolver.
                 observacoes.push(Observation {
                     rule_id: *rule_id,
                     device_id: *device_id,
-                    count: i64::try_from(lista.len()).unwrap_or(i64::MAX),
-                    severity: lista.iter().filter_map(|hit| hit.severity).min(),
-                    last_message: lista
-                        .last()
-                        .map_or_else(String::new, |hit| hit.message.clone()),
+                    count: i64::try_from(bucket.hits.len()).unwrap_or(i64::MAX),
+                    severity: bucket.hits.iter().filter_map(|hit| hit.severity).min(),
+                    last_message: bucket.last_message.clone(),
                 });
             }
         }
 
-        // Chave vazia de regra que já não existe não precisa ocupar memória.
-        hits.retain(|_, lista| !lista.is_empty());
+        // Mantém chaves vazias enquanto a janela de recuperação da regra ainda
+        // pode precisar de novos ticks `recovered: true`; remove chaves de
+        // regras excluídas ou cuja janela de recuperação já passou.
+        hits.retain(|(rule_id, _), bucket| {
+            let Some(&recovery_secs) = recovery_by_rule.get(rule_id) else {
+                return false;
+            };
+            if !bucket.hits.is_empty() {
+                return true;
+            }
+            let Some(empty_since) = bucket.empty_since else {
+                return false;
+            };
+            if recovery_secs == 0 {
+                return false;
+            }
+            agora.signed_duration_since(empty_since)
+                <= Duration::seconds(recovery_secs + RECOVERY_GRACE_SECONDS)
+        });
         observacoes
     }
 }
@@ -250,12 +327,12 @@ struct Observation {
 ///
 /// Propaga erro do banco ao ler as regras.
 pub async fn evaluate(ctx: &AppContext, matcher: &PatternMatcher) -> AppResult<usize> {
-    let compiladas: Vec<PatternRule> = repository::find_all(&ctx.db)
-        .await?
-        .iter()
-        .filter(|rule| rule.enabled)
-        .filter_map(PatternRule::from_rule)
-        .collect();
+    let rows = alert_rules::Entity::find()
+        .filter(alert_rules::Column::Type.eq(RULE_TYPE))
+        .filter(alert_rules::Column::Enabled.eq(true))
+        .all(&ctx.db)
+        .await?;
+    let compiladas = matcher.compile_rules(&rows);
     matcher.set_rules(compiladas.clone());
 
     if compiladas.is_empty() {
@@ -304,7 +381,7 @@ pub async fn evaluate(ctx: &AppContext, matcher: &PatternMatcher) -> AppResult<u
         );
         data.insert("logMatchCount".into(), Value::from(observacao.count));
 
-        manager::evaluate(
+        match manager::evaluate(
             ctx,
             &AlertEvaluationContext {
                 scope,
@@ -320,8 +397,18 @@ pub async fn evaluate(ctx: &AppContext, matcher: &PatternMatcher) -> AppResult<u
                 degraded: false,
             },
         )
-        .await?;
-        avaliadas += 1;
+        .await
+        {
+            Ok(_) => avaliadas += 1,
+            Err(error) => {
+                tracing::warn!(
+                    %error,
+                    rule_id = observacao.rule_id,
+                    device_id = ?observacao.device_id,
+                    "falha ao avaliar regra de padrão de log"
+                );
+            }
+        }
     }
 
     Ok(avaliadas)
@@ -516,7 +603,7 @@ mod tests {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .values()
-            .map(Vec::len)
+            .map(|bucket| bucket.hits.len())
             .sum::<usize>();
         assert_eq!(guardados, MAX_HITS_PER_KEY, "a contagem satura no teto");
     }

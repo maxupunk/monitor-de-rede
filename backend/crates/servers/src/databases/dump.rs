@@ -16,7 +16,7 @@
 
 use std::path::{Path, PathBuf};
 
-use async_compression::tokio::write::GzipEncoder;
+use async_compression::{tokio::write::GzipEncoder, Level};
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncWriteExt, BufWriter};
 
@@ -42,6 +42,29 @@ pub struct DumpFile {
     pub checksum: String,
 }
 
+/// Abre (truncando) um arquivo temporário legível só pelo processo: o dump
+/// leva os dados do banco, e a pasta temporária é compartilhada.
+///
+/// # Errors
+///
+/// Falha do sistema de arquivos.
+pub async fn create_private(path: &Path) -> std::io::Result<tokio::fs::File> {
+    let mut options = tokio::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    options.open(path).await
+}
+
+/// Apaga o arquivo temporário ao sair de escopo, inclusive em erro ou pânico.
+pub struct TempFile(pub PathBuf);
+
+impl Drop for TempFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
 /// Escritor do dump.
 pub struct DumpWriter {
     encoder: GzipEncoder<BufWriter<tokio::fs::File>>,
@@ -57,11 +80,12 @@ impl DumpWriter {
     ///
     /// Falha do sistema de arquivos.
     pub async fn create(path: &Path) -> Result<Self, DatabaseError> {
-        let file = tokio::fs::File::create(path)
-            .await
-            .map_err(DatabaseError::io)?;
+        let file = create_private(path).await.map_err(DatabaseError::io)?;
         Ok(Self {
-            encoder: GzipEncoder::new(BufWriter::with_capacity(256 * 1024, file)),
+            encoder: GzipEncoder::with_quality(
+                BufWriter::with_capacity(256 * 1024, file),
+                Level::Fastest,
+            ),
             hasher: Sha256::new(),
             bytes: 0,
             path: path.to_path_buf(),
@@ -190,5 +214,23 @@ mod tests {
             .unwrap();
         assert_eq!(sql, "CREATE TABLE t (a int);\n1\n2\n");
         assert_eq!(file.checksum, hex::encode(Sha256::digest(sql.as_bytes())));
+    }
+
+    #[tokio::test]
+    async fn o_temporario_e_privado_e_some_ao_sair_de_escopo() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("restore.sql.gz");
+        {
+            let _temp = TempFile(path.clone());
+            drop(create_private(&path).await.unwrap());
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+                assert_eq!(mode & 0o777, 0o600);
+            }
+            assert!(path.exists());
+        }
+        assert!(!path.exists());
     }
 }

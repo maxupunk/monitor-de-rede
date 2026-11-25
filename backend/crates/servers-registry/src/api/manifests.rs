@@ -11,6 +11,7 @@ use loco_rs::app::AppContext;
 use serde_json::{json, Value};
 
 use super::{blobs::parse_digest, existing, query_value, Code, OciError, OciResult};
+use netmonitor_core::shared::transaction::begin_write;
 use netmonitor_servers::deploys::images::OriginKind;
 
 use crate::{
@@ -113,8 +114,9 @@ pub(super) async fn put(
         .map_err(OciError::from_app)?;
     let bytes = read_body(body).await?;
     let digest = Digest::of(&bytes);
-    if let Ok(asked) = reference.parse::<Digest>() {
-        if asked != digest {
+    let reference_digest = reference.parse::<Digest>().ok();
+    if let Some(asked) = &reference_digest {
+        if asked != &digest {
             return Err(OciError::new(
                 StatusCode::BAD_REQUEST,
                 Code::DigestInvalid,
@@ -151,13 +153,17 @@ pub(super) async fn put(
             json!({ "source": OriginKind::ManualPush, "by": who, "at": chrono::Utc::now().to_rfc3339() }),
         ),
     };
-    let stored = catalog::put_manifest(&ctx.db, repo.id, &content, &parsed, &push)
+    let txn = begin_write(&ctx.db).await.map_err(OciError::internal)?;
+    let stored = catalog::put_manifest(&txn, repo.id, &content, &parsed, &push)
         .await
         .map_err(OciError::from_app)?;
-    if reference.parse::<Digest>().is_err() {
-        catalog::set_tag(&ctx.db, repo.id, reference, &digest)
+    if reference_digest.is_none() {
+        catalog::set_tag(&txn, repo.id, reference, &digest)
             .await
             .map_err(OciError::from_app)?;
+    }
+    txn.commit().await.map_err(OciError::internal)?;
+    if reference_digest.is_none() {
         // Imagem nova com tag: analisa em segundo plano.
         scan::schedule(ctx, repo.id, stored.digest.clone());
     }

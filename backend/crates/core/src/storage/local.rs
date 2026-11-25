@@ -53,24 +53,9 @@ impl LocalExplorer {
         Ok(Self { base })
     }
 
-    /// Resolve um caminho relativo dentro da base, recusando qualquer fuga.
-    ///
-    /// Duas barreiras, e as duas são necessárias:
-    ///
-    /// 1. **componente a componente** — um `..` ou um componente absoluto é
-    ///    recusado antes de tocar o disco. Sozinha, essa barreira já cobre o
-    ///    caminho que não existe (um `DELETE` de chave inventada);
-    /// 2. **canonicalização** — quando o alvo existe, o caminho real precisa
-    ///    continuar sob a base real. É o que pega o link simbólico que aponta
-    ///    para fora, que a primeira barreira não enxerga.
-    fn resolve(&self, relative: &str) -> Result<PathBuf, StorageError> {
-        // Um caminho que já começa na raiz é recusado, e **não** reinterpretado
-        // como relativo. As duas leituras são seguras — `<base>/etc/passwd`
-        // continua sob a base —, mas quem pede `/etc/passwd` está pedindo o
-        // arquivo do sistema; devolver outro conteúdo com status 200 esconderia
-        // a tentativa em vez de registrá-la. O `resolve()` do Node faz o
-        // mesmo: lá o componente absoluto vence a base e o guard reprova.
-        if relative.starts_with('/') || relative.starts_with('\\') {
+    /// Valida componentes léxicos de um caminho relativo sem tocar no disco.
+    fn resolve_lexical(&self, relative: &str) -> Result<PathBuf, StorageError> {
+        if relative.contains('\0') || relative.starts_with('/') || relative.starts_with('\\') {
             return Err(StorageError::PathTraversal);
         }
 
@@ -87,11 +72,54 @@ impl LocalExplorer {
             }
         }
 
-        // A canonicalização só é possível no que já existe. Um alvo inexistente
-        // já passou pela barreira de componentes, que é suficiente para ele.
-        if let (Ok(real), Ok(real_base)) = (resolved.canonicalize(), self.base.canonicalize()) {
-            if !real.starts_with(&real_base) {
-                return Err(StorageError::PathTraversal);
+        Ok(resolved)
+    }
+
+    /// Resolve um caminho relativo dentro da base (síncrono, usado no construtor),
+    /// verificando o ancestral existente mais profundo contra escapes por symlink.
+    fn resolve(&self, relative: &str) -> Result<PathBuf, StorageError> {
+        let resolved = self.resolve_lexical(relative)?;
+
+        if let Ok(real_base) = self.base.canonicalize() {
+            let mut probe = resolved.as_path();
+            while !probe.exists() {
+                let Some(parent) = probe.parent() else {
+                    break;
+                };
+                probe = parent;
+            }
+            if let Ok(real_ancestor) = probe.canonicalize() {
+                if !real_ancestor.starts_with(&real_base) {
+                    return Err(StorageError::PathTraversal);
+                }
+            }
+        }
+
+        Ok(resolved)
+    }
+
+    /// Versão assíncrona de [`Self::resolve`] para operações do `StorageExplorer`:
+    /// evita `canonicalize` síncrono na thread do Tokio e impede escape por symlink
+    /// mesmo quando o arquivo de destino ainda não existe (`put_file`).
+    async fn resolve_async(&self, relative: &str) -> Result<PathBuf, StorageError> {
+        let resolved = self.resolve_lexical(relative)?;
+
+        if let Ok(real_base) = tokio::fs::canonicalize(&self.base).await {
+            let mut probe = resolved.clone();
+            loop {
+                match tokio::fs::canonicalize(&probe).await {
+                    Ok(real_ancestor) => {
+                        if !real_ancestor.starts_with(&real_base) {
+                            return Err(StorageError::PathTraversal);
+                        }
+                        break;
+                    }
+                    Err(_) => {
+                        if !probe.pop() {
+                            break;
+                        }
+                    }
+                }
             }
         }
 
@@ -120,7 +148,7 @@ impl StorageExplorer for LocalExplorer {
         path: &str,
         options: &ListOptions,
     ) -> Result<ListPage, StorageError> {
-        let target = self.resolve(path)?;
+        let target = self.resolve_async(path).await?;
         let limit = options.effective_limit();
 
         let Ok(mut entries) = tokio::fs::read_dir(&target).await else {
@@ -140,13 +168,21 @@ impl StorageExplorer for LocalExplorer {
                 }
             }
 
+            let key = self.key_of(&entry.path());
+            if options
+                .cursor
+                .as_deref()
+                .is_some_and(|cursor| key.as_str() <= cursor)
+            {
+                continue;
+            }
+
             let Ok(metadata) = entry.metadata().await else {
                 // Arquivo removido entre o `read_dir` e o `stat`: pular é
                 // melhor que derrubar a listagem inteira.
                 continue;
             };
 
-            let key = self.key_of(&entry.path());
             let modified = metadata
                 .modified()
                 .ok()
@@ -155,25 +191,17 @@ impl StorageExplorer for LocalExplorer {
             objects.push(if metadata.is_dir() {
                 BucketObject::directory(key)
             } else {
-                let mut file = BucketObject::file(
+                BucketObject::file(
                     key,
                     i64::try_from(metadata.len()).unwrap_or(i64::MAX),
-                    modified.clone(),
-                );
-                file.last_modified = modified;
-                file
+                    modified,
+                )
             });
         }
 
         // Ordem estável: `read_dir` devolve na ordem do sistema de arquivos, e
-        // sem ordenar a mesma pasta pagina diferente a cada chamada. O corte
-        // por cursor vem depois, pela mesma razão: ele compara chaves, e só
-        // faz sentido sobre uma lista já ordenada.
+        // sem ordenar a mesma pasta pagina diferente a cada chamada.
         objects.sort_by(|a, b| a.key.cmp(&b.key));
-
-        if let Some(cursor) = options.cursor.as_deref() {
-            objects.retain(|object| object.key.as_str() > cursor);
-        }
 
         let is_truncated = objects.len() > limit;
         objects.truncate(limit);
@@ -190,7 +218,7 @@ impl StorageExplorer for LocalExplorer {
     }
 
     async fn object_metadata(&self, key: &str) -> Result<ObjectMetadata, StorageError> {
-        let path = self.resolve(key)?;
+        let path = self.resolve_async(key).await?;
 
         let metadata = tokio::fs::metadata(&path)
             .await
@@ -209,7 +237,7 @@ impl StorageExplorer for LocalExplorer {
     }
 
     async fn delete_object(&self, key: &str, is_directory: bool) -> Result<(), StorageError> {
-        let path = self.resolve(key)?;
+        let path = self.resolve_async(key).await?;
 
         // Segunda barreira, depois de resolver: uma chave que se reduz à
         // própria base apagaria a árvore inteira de backups.
@@ -260,7 +288,7 @@ impl StorageExplorer for LocalExplorer {
     }
 
     async fn put_file(&self, key: &str, source: &Path) -> Result<(), StorageError> {
-        let destination = self.resolve(key)?;
+        let destination = self.resolve_async(key).await?;
 
         if let Some(parent) = destination.parent() {
             tokio::fs::create_dir_all(parent)
@@ -268,18 +296,33 @@ impl StorageExplorer for LocalExplorer {
                 .map_err(StorageError::backend)?;
         }
 
-        // `copy`, e não `rename`: origem e destino podem estar em dispositivos
-        // diferentes (o `/tmp` e o volume de dados num container), e o
-        // `rename` falha com `EXDEV` nesse caso.
-        tokio::fs::copy(source, &destination)
-            .await
-            .map_err(StorageError::backend)?;
+        // Copia para arquivo temporário na mesma pasta e renomeia
+        // atomicamente: evita arquivo truncado/corrompido em queda ou ENOSPC
+        // e ainda funciona entre sistemas de arquivos diferentes (`EXDEV`).
+        let file_name = destination.file_name().map_or_else(
+            || "backup".to_string(),
+            |n| n.to_string_lossy().into_owned(),
+        );
+        let temp_path = destination.with_file_name(format!(
+            ".{file_name}.{}.tmp",
+            uuid::Uuid::new_v4().simple()
+        ));
+
+        if let Err(err) = tokio::fs::copy(source, &temp_path).await {
+            let _ = tokio::fs::remove_file(&temp_path).await;
+            return Err(StorageError::backend(err));
+        }
+
+        if let Err(err) = tokio::fs::rename(&temp_path, &destination).await {
+            let _ = tokio::fs::remove_file(&temp_path).await;
+            return Err(StorageError::backend(err));
+        }
 
         Ok(())
     }
 
     async fn read_object(&self, key: &str) -> Result<ObjectReader, StorageError> {
-        let path = self.resolve(key)?;
+        let path = self.resolve_async(key).await?;
 
         let file = tokio::fs::File::open(&path)
             .await

@@ -57,24 +57,27 @@ impl ClientOrigin {
 pub struct TrustedProxies(Vec<IpNet>);
 
 impl TrustedProxies {
-    /// Loopback e redes privadas (IPv4 e IPv6).
+    /// Loopback e redes privadas (IPv4 e IPv6), montadas uma vez por processo.
     #[must_use]
-    pub fn private_networks() -> Self {
-        Self(
-            [
-                "127.0.0.0/8",
-                "10.0.0.0/8",
-                "172.16.0.0/12",
-                "192.168.0.0/16",
-                "100.64.0.0/10",
-                "::1/128",
-                "fc00::/7",
-                "fe80::/10",
-            ]
-            .iter()
-            .filter_map(|net| net.parse().ok())
-            .collect(),
-        )
+    pub fn private_networks() -> &'static Self {
+        static PRIVATE: OnceLock<TrustedProxies> = OnceLock::new();
+        PRIVATE.get_or_init(|| {
+            Self(
+                [
+                    "127.0.0.0/8",
+                    "10.0.0.0/8",
+                    "172.16.0.0/12",
+                    "192.168.0.0/16",
+                    "100.64.0.0/10",
+                    "::1/128",
+                    "fc00::/7",
+                    "fe80::/10",
+                ]
+                .iter()
+                .filter_map(|net| net.parse().ok())
+                .collect(),
+            )
+        })
     }
 
     /// Lê `TRUSTED_PROXIES`.
@@ -84,7 +87,7 @@ impl TrustedProxies {
     /// Faixa inválida — é configuração de segurança: errada, não vira silêncio.
     pub fn parse(raw: Option<&str>) -> Result<Self, String> {
         let Some(raw) = raw.map(str::trim).filter(|raw| !raw.is_empty()) else {
-            return Ok(Self::private_networks());
+            return Ok(Self::private_networks().clone());
         };
         if raw.eq_ignore_ascii_case("none") {
             return Ok(Self(Vec::new()));
@@ -130,7 +133,10 @@ fn canonical(ip: IpAddr) -> IpAddr {
     }
 }
 
-/// Endereço de rede interna: loopback, privado, CGNAT/VPN ou link-local.
+/// Endereço de rede interna: loopback, privado, CGNAT/VPN e, em IPv6, ULA e
+/// link-local. O link-local IPv4 (169.254.0.0/16) fica de fora de propósito:
+/// é a regra de "token pessoal só de origem interna/VPN" do registry, e não a
+/// de alvo alcançável de `cidr::is_internal_address`.
 #[must_use]
 pub fn is_internal_ip(ip: IpAddr) -> bool {
     TrustedProxies::private_networks().contains(ip)
@@ -172,15 +178,15 @@ pub fn resolve(
         header(headers, "cf-connecting-ip")
             .and_then(parse_ip)
             .or_else(|| {
-                let chain: Vec<IpAddr> = header(headers, "x-forwarded-for")
-                    .map(|raw| raw.split(',').filter_map(parse_ip).collect())
-                    .unwrap_or_default();
-                chain
-                    .iter()
-                    .rev()
-                    .copied()
-                    .find(|ip| !trusted.contains(*ip))
-                    .or_else(|| chain.first().copied())
+                let raw = header(headers, "x-forwarded-for")?;
+                let mut leftmost = None;
+                for ip in raw.rsplit(',').filter_map(parse_ip) {
+                    if !trusted.contains(ip) {
+                        return Some(ip);
+                    }
+                    leftmost = Some(ip);
+                }
+                leftmost
             })
             .or_else(|| header(headers, "x-real-ip").and_then(parse_ip))
             .or(peer)
@@ -250,6 +256,18 @@ mod tests {
         map
     }
 
+    #[test]
+    fn link_local_ipv4_nao_e_origem_interna() {
+        // Token pessoal do registry só vale de origem interna/VPN: o
+        // link-local IPv4 não entra, ao contrário de `cidr::is_internal_address`.
+        assert!(!is_internal_ip("169.254.10.1".parse().unwrap()));
+        assert!(is_internal_ip("10.8.0.2".parse().unwrap()));
+        assert!(is_internal_ip("100.64.0.1".parse().unwrap()));
+        assert!(is_internal_ip("::ffff:192.168.1.1".parse().unwrap()));
+        assert!(is_internal_ip("fe80::1".parse().unwrap()));
+        assert!(!is_internal_ip("8.8.8.8".parse().unwrap()));
+    }
+
     fn ip(raw: &str) -> IpAddr {
         raw.parse().unwrap()
     }
@@ -260,7 +278,7 @@ mod tests {
         let origin = resolve(
             Some(ip("203.0.113.9")),
             &headers(&[("x-forwarded-for", "10.8.0.5")]),
-            &TrustedProxies::private_networks(),
+            TrustedProxies::private_networks(),
         );
         assert_eq!(origin.ip, Some(ip("203.0.113.9")));
         assert!(origin.public);
@@ -273,7 +291,7 @@ mod tests {
         let origin = resolve(
             Some(ip("172.18.0.4")),
             &headers(&[("x-forwarded-for", "10.8.0.5, 198.51.100.7")]),
-            &TrustedProxies::private_networks(),
+            TrustedProxies::private_networks(),
         );
         assert_eq!(origin.ip, Some(ip("198.51.100.7")));
         assert!(origin.public);
@@ -284,7 +302,7 @@ mod tests {
         let origin = resolve(
             Some(ip("172.18.0.4")),
             &headers(&[("cf-connecting-ip", "10.8.0.5"), ("cf-ray", "abc-GRU")]),
-            &TrustedProxies::private_networks(),
+            TrustedProxies::private_networks(),
         );
         assert!(origin.public);
         assert!(!origin.is_internal());
@@ -295,14 +313,14 @@ mod tests {
         let origin = resolve(
             Some(ip("10.8.0.5")),
             &HeaderMap::new(),
-            &TrustedProxies::private_networks(),
+            TrustedProxies::private_networks(),
         );
         assert_eq!(origin.ip, Some(ip("10.8.0.5")));
         assert!(origin.is_internal());
         let mapped = resolve(
             Some(ip("::ffff:192.168.1.20")),
             &HeaderMap::new(),
-            &TrustedProxies::private_networks(),
+            TrustedProxies::private_networks(),
         );
         assert_eq!(mapped.ip, Some(ip("192.168.1.20")));
         assert!(mapped.is_internal());

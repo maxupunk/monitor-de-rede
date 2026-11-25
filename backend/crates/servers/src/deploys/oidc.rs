@@ -116,10 +116,14 @@ pub async fn verify(token: &str, keys: &dyn KeySource, audience: &str) -> AppRes
             }
         })?
         .claims;
-    if let Some(jti) = &claims.jti {
-        if !replay_guard().first_use(jti, claims.exp) {
-            return Err(unauthorized("já usado"));
-        }
+    let jti = claims
+        .jti
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| unauthorized("sem identificador único (jti)"))?;
+    if !replay_guard().first_use(jti, claims.exp) {
+        return Err(unauthorized("já usado"));
     }
     Ok(claims)
 }
@@ -145,6 +149,24 @@ impl ReplayGuard {
         }
         seen.insert(jti.to_string(), exp);
         true
+    }
+
+    /// Devolve o `jti`: o pedido falhou do lado da central (5xx) e o
+    /// workflow pode repetir com o mesmo token.
+    pub fn release(&self, jti: &str) {
+        self.seen
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(jti);
+    }
+}
+
+/// O pedido deste token falhou por erro da central: libera o `jti` para a
+/// repetição do `curl` do workflow. Só depois de um erro de servidor — um
+/// aviso aceito ou recusado pela regra continua de uso único.
+pub fn release(claims: &GithubClaims) {
+    if let Some(jti) = claims.jti.as_deref().map(str::trim) {
+        replay_guard().release(jti);
     }
 }
 
@@ -318,6 +340,17 @@ mod tests {
         assert!(error.to_string().contains("audience"));
     }
 
+    #[test]
+    fn jti_liberado_depois_de_erro_da_central_vale_de_novo() {
+        let guard = ReplayGuard::default();
+        let exp = chrono::Utc::now().timestamp() + 300;
+        assert!(guard.first_use("jti-1", exp));
+        assert!(!guard.first_use("jti-1", exp), "reuso recusado");
+        guard.release("jti-1");
+        assert!(guard.first_use("jti-1", exp), "repetição depois de 5xx");
+        assert!(!guard.first_use("jti-1", exp));
+    }
+
     #[tokio::test]
     async fn emissor_e_validade_sao_conferidos() {
         let mut forged = claims("a/b", "refs/heads/main");
@@ -362,5 +395,20 @@ mod tests {
             .await
             .expect_err("hs256");
         assert!(error.to_string().contains("RS256"));
+    }
+
+    #[tokio::test]
+    async fn token_sem_jti_e_recusado() {
+        let mut without = claims("a/b", "refs/heads/main");
+        without.as_object_mut().expect("obj").remove("jti");
+        assert!(verify(&sign(&without), &FixtureKeys, DEFAULT_AUDIENCE)
+            .await
+            .is_err());
+
+        let mut blank = claims("a/b", "refs/heads/main");
+        blank["jti"] = json!("   ");
+        assert!(verify(&sign(&blank), &FixtureKeys, DEFAULT_AUDIENCE)
+            .await
+            .is_err());
     }
 }

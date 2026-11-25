@@ -153,7 +153,8 @@ pub async fn start_validation(
     Ok(runs::spawn(ctx.clone(), prepared))
 }
 
-/// O estado do modo automático para a tela.
+/// O estado do modo automático para a tela de `user_id` — o mesmo aceite
+/// que a IA considera para essa pessoa.
 ///
 /// # Errors
 ///
@@ -162,8 +163,9 @@ pub async fn auto_accept_state(
     ctx: &AppContext,
     conversation_key: &str,
     device_id: i64,
+    user_id: i64,
 ) -> AppResult<AutoAcceptState> {
-    let active = auto_accept::active(&ctx.db, conversation_key, device_id).await?;
+    let active = auto_accept::active(&ctx.db, conversation_key, device_id, Some(user_id)).await?;
     Ok(AutoAcceptState {
         active: active.is_some(),
         expires_at: active.map(|row| row.expires_at.to_rfc3339()),

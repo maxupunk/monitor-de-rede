@@ -188,6 +188,20 @@ impl Prepared {
     }
 }
 
+impl Drop for Prepared {
+    fn drop(&mut self) {
+        lock_cancellations().remove(&self.run.id);
+    }
+}
+
+struct CancellationGuard(i64);
+
+impl Drop for CancellationGuard {
+    fn drop(&mut self) {
+        lock_cancellations().remove(&self.0);
+    }
+}
+
 fn cancellations() -> &'static Mutex<HashMap<i64, CancellationToken>> {
     static TOKENS: OnceLock<Mutex<HashMap<i64, CancellationToken>>> = OnceLock::new();
     TOKENS.get_or_init(Mutex::default)
@@ -213,7 +227,7 @@ pub(super) async fn transport_for(
     via_probe_id: Option<i64>,
 ) -> AppResult<Arc<dyn DeviceTransport>> {
     match via_probe_id {
-        None => Ok(Arc::new(LocalTransport::new("central")?)),
+        None => Ok(LocalTransport::shared("central")?),
         Some(probe_id) => {
             let session = AgentHub::from_context(ctx)
                 .ok()
@@ -363,17 +377,24 @@ pub async fn load_library<C: ConnectionTrait>(
     db: &C,
     uses: &[String],
 ) -> AppResult<Vec<LibraryPlugin>> {
-    let mut library = Vec::new();
+    if uses.is_empty() {
+        return Ok(Vec::new());
+    }
+    let rows = plugins::Entity::find()
+        .filter(plugins::Column::Slug.is_in(uses.to_vec()))
+        .filter(plugins::Column::Status.eq(status::ACTIVE))
+        .filter(plugins::Column::DeviceId.is_null())
+        .order_by_desc(plugins::Column::Id)
+        .all(db)
+        .await?;
+    let mut latest_by_slug: HashMap<String, plugins::Model> = HashMap::new();
+    for model in rows {
+        latest_by_slug.entry(model.slug.clone()).or_insert(model);
+    }
+    let mut library = Vec::with_capacity(latest_by_slug.len());
     for slug in uses {
-        let found = plugins::Entity::find()
-            .filter(plugins::Column::Slug.eq(slug.clone()))
-            .filter(plugins::Column::Status.eq(status::ACTIVE))
-            .filter(plugins::Column::DeviceId.is_null())
-            .order_by_desc(plugins::Column::Id)
-            .one(db)
-            .await?;
-        if let Some(model) = found {
-            let package = service::package_of(&model)?;
+        if let Some(model) = latest_by_slug.get(slug) {
+            let package = service::package_of(model)?;
             library.push(LibraryPlugin {
                 slug: slug.clone(),
                 manifest: package.manifest,
@@ -847,15 +868,16 @@ impl AdHocRequest {
         match self {
             Self::Ssh { command } | Self::Telnet { command } => effect::classify_command(command),
             Self::Http { request } => {
-                if request.get("login").and_then(Value::as_bool) == Some(true) {
+                let method = request
+                    .get("method")
+                    .and_then(Value::as_str)
+                    .unwrap_or("GET");
+                if request.get("login").and_then(Value::as_bool) == Some(true)
+                    && method.eq_ignore_ascii_case("POST")
+                {
                     Effect::Read
                 } else {
-                    effect::classify_http(
-                        request
-                            .get("method")
-                            .and_then(Value::as_str)
-                            .unwrap_or("GET"),
-                    )
+                    effect::classify_http(method)
                 }
             }
         }
@@ -940,6 +962,7 @@ pub async fn run_ad_hoc(ctx: &AppContext, spec: AdHocSpec) -> AppResult<plugin_r
     });
     let cancel = CancellationToken::new();
     lock_cancellations().insert(run.id, cancel.clone());
+    let _cancel_guard = CancellationGuard(run.id);
     let outcome = runtime::execute(
         AD_HOC_SCRIPT,
         "access",
@@ -1023,12 +1046,26 @@ pub async fn recent<C: ConnectionTrait>(
         .limit(limit)
         .all(db)
         .await?;
-    let names: HashMap<i64, String> = plugins::Entity::find()
-        .all(db)
-        .await?
+    let plugin_ids: Vec<i64> = runs
+        .iter()
+        .filter_map(|run| run.plugin_id)
+        .collect::<std::collections::HashSet<_>>()
         .into_iter()
-        .map(|plugin| (plugin.id, plugin.name))
         .collect();
+    let names: HashMap<i64, String> = if plugin_ids.is_empty() {
+        HashMap::new()
+    } else {
+        plugins::Entity::find()
+            .select_only()
+            .column(plugins::Column::Id)
+            .column(plugins::Column::Name)
+            .filter(plugins::Column::Id.is_in(plugin_ids))
+            .into_tuple::<(i64, String)>()
+            .all(db)
+            .await?
+            .into_iter()
+            .collect()
+    };
     Ok(runs
         .iter()
         .map(|run| {

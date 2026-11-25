@@ -11,8 +11,10 @@ use futures::StreamExt;
 use crate::views::docker::DockerActionResponse;
 
 use super::{
-    call, client, engine, protection::is_current_container, source::LocalEngine, volume_export,
-    DockerError,
+    call, call_within, client, engine,
+    protection::{is_current_container, is_protected},
+    source::LocalEngine,
+    volume_export, DockerError, LIFECYCLE_TIMEOUT,
 };
 
 const LOG_MOUNT_POINT: &str = "/docker-log/container.log";
@@ -32,12 +34,16 @@ pub async fn clear(id: &str) -> Result<DockerActionResponse, DockerError> {
     volume_export::ensure_image(&client).await?;
 
     if target.running {
-        call(client.stop_container(id, None)).await?;
+        call_within(LIFECYCLE_TIMEOUT, client.stop_container(id, None)).await?;
     }
 
     let clear_result = truncate_with_helper(&client, &target.path).await;
     let restore_result = if target.running {
-        call(client.start_container::<String>(id, None)).await
+        call_within(
+            LIFECYCLE_TIMEOUT,
+            client.start_container::<String>(id, None),
+        )
+        .await
     } else {
         Ok(())
     };
@@ -95,9 +101,19 @@ fn log_target(
 
     let id = inspected.id.as_deref().ok_or(DockerError::Engine)?;
     if is_current_container(id) {
-        return Err(DockerError::Validation(
+        return Err(DockerError::Forbidden(
             "Os logs do container que executa o NetMonitor não podem ser apagados por esta interface"
                 .to_string(),
+        ));
+    }
+    if inspected
+        .config
+        .as_ref()
+        .and_then(|config| config.labels.as_ref())
+        .is_some_and(is_protected)
+    {
+        return Err(DockerError::Forbidden(
+            "Container protegido da instalação NetMonitor: a ação derrubaria a central".to_string(),
         ));
     }
     let path = inspected.log_path.as_deref().ok_or_else(|| {
@@ -209,5 +225,34 @@ mod tests {
         .is_ok());
         assert!(validate_log_path(&id, "/etc/passwd").is_err());
         assert!(validate_log_path(&id, &format!("/tmp/../{id}-json.log")).is_err());
+    }
+
+    #[test]
+    fn recusa_container_protegido_da_instalacao() {
+        use std::collections::HashMap;
+        let id = "b".repeat(64);
+        let inspected = bollard::models::ContainerInspectResponse {
+            id: Some(id.clone()),
+            log_path: Some(format!("/var/lib/docker/containers/{id}/{id}-json.log")),
+            host_config: Some(HostConfig {
+                log_config: Some(bollard::models::HostConfigLogConfig {
+                    typ: Some("json-file".to_string()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+            config: Some(bollard::models::ContainerConfig {
+                labels: Some(HashMap::from([(
+                    super::super::protection::PROTECTED_LABEL.to_string(),
+                    "true".to_string(),
+                )])),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert!(matches!(
+            log_target(&inspected),
+            Err(DockerError::Forbidden(_))
+        ));
     }
 }

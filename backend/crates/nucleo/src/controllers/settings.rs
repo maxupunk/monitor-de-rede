@@ -145,7 +145,7 @@ async fn clear_all_items(headers: HeaderMap, State(ctx): State<AppContext>) -> A
     require_admin(
         &ctx,
         &headers,
-        "Apenas administradores podem apagar o histórico do sistema.",
+        "Apenas administradores podem apagar todos os itens do sistema.",
     )
     .await?;
 

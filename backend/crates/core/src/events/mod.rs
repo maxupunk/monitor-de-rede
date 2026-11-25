@@ -8,6 +8,6 @@ pub mod presence;
 pub mod relay;
 
 pub use audience::EventAudience;
-pub use bus::{DomainEvent, EventBus};
+pub use bus::{DomainEvent, EncodedEvent, EventBus};
 pub use interest::Interests;
 pub use presence::Presence;

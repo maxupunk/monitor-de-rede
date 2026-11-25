@@ -33,3 +33,67 @@ pub mod protocol {
     //! O contrato de fio (`agent-protocol`), pelo caminho antigo.
     pub use agent_protocol::*;
 }
+
+/// Escreve uma mensagem no socket sem deixar a escrita presa: desiste quando
+/// `stop` é cancelado ou quando `limit` passa (buffer do TCP cheio de um par
+/// half-open, que nunca drena). Devolve `false` quando a conexão deve cair.
+pub(crate) async fn send_bounded<S, M>(
+    sink: &mut S,
+    message: M,
+    stop: &tokio_util::sync::CancellationToken,
+    limit: std::time::Duration,
+) -> bool
+where
+    S: futures::Sink<M> + Unpin,
+{
+    use futures::SinkExt;
+    tokio::select! {
+        biased;
+        () = stop.cancelled() => false,
+        sent = tokio::time::timeout(limit, sink.send(message)) => match sent {
+            Ok(Ok(())) => true,
+            Ok(Err(_)) => false,
+            Err(_) => {
+                tracing::warn!(
+                    segundos = limit.as_secs(),
+                    "escrita no socket do agente presa (half-open); encerrando"
+                );
+                false
+            }
+        },
+    }
+}
+
+/// Despachante de saída com prioridade para controle: envelopes JSON
+/// (`Response`, `Chunk`, `Event`, `Cancel`) sempre saem antes dos quadros
+/// binários das pontes (`tunnel_frames`). Cancela `on_closed` quando o canal
+/// de saída cai para acordar o laço principal da sessão.
+pub(crate) fn spawn_priority_writer(
+    mut to_send: tokio::sync::mpsc::Receiver<protocol::Envelope>,
+    mut tunnel_frames: tokio::sync::mpsc::Receiver<protocol::WireFrame>,
+    outgoing: tokio::sync::mpsc::Sender<protocol::WireFrame>,
+    on_closed: tokio_util::sync::CancellationToken,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        loop {
+            let frame = tokio::select! {
+                biased;
+                envelope = to_send.recv() => match envelope {
+                    Some(envelope) => match envelope.encode() {
+                        Ok(text) => protocol::WireFrame::Text(text),
+                        Err(error) => {
+                            tracing::warn!(%error, "quadro de agente descartado por erro de codificação");
+                            continue;
+                        }
+                    },
+                    None => break,
+                },
+                Some(frame) = tunnel_frames.recv() => frame,
+            };
+            if outgoing.send(frame).await.is_err() {
+                on_closed.cancel();
+                break;
+            }
+        }
+    })
+}

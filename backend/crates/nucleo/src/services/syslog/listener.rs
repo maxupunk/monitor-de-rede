@@ -99,11 +99,13 @@ pub async fn spawn_tcp(porta: u16, ingestor: Ingestor) -> AppResult<u16> {
     tokio::spawn(async move {
         let vagas = Arc::new(Semaphore::new(MAX_TCP_CONNECTIONS));
         loop {
+            // Reserva a vaga antes do `accept()` para não segurar sockets
+            // aceitos sem leitura quando o teto de conexões for atingido.
+            let Ok(vaga) = Arc::clone(&vagas).acquire_owned().await else {
+                return;
+            };
             match listener.accept().await {
                 Ok((stream, origem)) => {
-                    let Ok(vaga) = Arc::clone(&vagas).acquire_owned().await else {
-                        return;
-                    };
                     let ingestor = ingestor.clone();
                     tokio::spawn(async move {
                         atende(stream, origem.ip(), ingestor).await;
@@ -111,6 +113,7 @@ pub async fn spawn_tcp(porta: u16, ingestor: Ingestor) -> AppResult<u16> {
                     });
                 }
                 Err(error) => {
+                    drop(vaga);
                     tracing::warn!(%error, "falha ao aceitar conexão TCP de syslog");
                     tokio::time::sleep(Duration::from_millis(100)).await;
                 }
@@ -151,8 +154,18 @@ async fn atende(mut stream: tokio::net::TcpStream, origem: IpAddr, ingestor: Ing
 
         acumulado.extend_from_slice(&pedaco[..lido]);
 
+        // Avança um cursor de leitura em O(1) por moldura e compacta o buffer
+        // no máximo uma vez por `read()`, evitando `Vec::drain` O(N²) em
+        // rajadas de linhas pequenas.
+        let mut cursor = 0;
         loop {
-            match proxima_moldura(&mut acumulado, maximo) {
+            let (framing, consumido, oversized) =
+                proxima_moldura_slice(&acumulado[cursor..], maximo);
+            cursor += consumido;
+            if oversized {
+                ingestor.metrics().record_oversized();
+            }
+            match framing {
                 Framing::Message(linha) => {
                     if !linha.is_empty() {
                         ingestor.handle(&linha, origem).await;
@@ -169,6 +182,11 @@ async fn atende(mut stream: tokio::net::TcpStream, origem: IpAddr, ingestor: Ing
                 }
             }
         }
+        if cursor >= acumulado.len() {
+            acumulado.clear();
+        } else if cursor > 0 {
+            acumulado.drain(..cursor);
+        }
     }
 }
 
@@ -180,22 +198,21 @@ enum Framing {
     Invalid,
 }
 
-/// Extrai a próxima mensagem, consumindo-a do buffer.
+/// Extrai a próxima mensagem a partir de `slice`, devolvendo `(framing,
+/// bytes_consumidos, truncada_ou_acima_do_teto)`.
 ///
 /// Reconhece a moldura pelo primeiro byte útil: dígito seguido de espaço é
 /// contagem de octetos (RFC 6587 §3.4.1); qualquer outra coisa é delimitação
 /// por LF (§3.4.2).
-fn proxima_moldura(buffer: &mut Vec<u8>, maximo: usize) -> Framing {
+fn proxima_moldura_slice(slice: &[u8], maximo: usize) -> (Framing, usize, bool) {
     // Delimitadores acumulados entre mensagens.
-    let inicio = buffer
+    let inicio = slice
         .iter()
         .position(|byte| !matches!(byte, b'\n' | b'\r' | b'\0'))
-        .unwrap_or(buffer.len());
-    if inicio > 0 {
-        buffer.drain(..inicio);
-    }
-    if buffer.is_empty() {
-        return Framing::Incomplete;
+        .unwrap_or(slice.len());
+    let rest = &slice[inicio..];
+    if rest.is_empty() {
+        return (Framing::Incomplete, inicio, false);
     }
 
     // Contagem de octetos é **só dígitos** seguidos de um espaço. Exigir isso,
@@ -203,50 +220,57 @@ fn proxima_moldura(buffer: &mut Vec<u8>, maximo: usize) -> Framing {
     // de ser lido como um cabeçalho: ali os dígitos param no `-`, não no
     // espaço. Sem essa distinção, uma linha que começa com data derrubaria a
     // conexão inteira.
-    let digitos = buffer
+    let digitos = rest
         .iter()
         .take(11)
         .take_while(|byte| byte.is_ascii_digit())
         .count();
-    if digitos > 0 && digitos <= 10 && buffer.get(digitos) == Some(&b' ') {
-        let Ok(texto) = std::str::from_utf8(&buffer[..digitos]) else {
-            return Framing::Invalid;
+    if digitos > 0 && digitos <= 10 && rest.get(digitos) == Some(&b' ') {
+        let Ok(texto) = std::str::from_utf8(&rest[..digitos]) else {
+            return (Framing::Invalid, inicio, false);
         };
         let Ok(tamanho) = texto.parse::<usize>() else {
-            return Framing::Invalid;
+            return (Framing::Invalid, inicio, false);
         };
         // Anúncio acima do teto: não há como reencontrar o começo da próxima
         // mensagem confiando num número que já se mostrou absurdo.
         if tamanho > maximo {
-            return Framing::Invalid;
+            return (Framing::Invalid, inicio, true);
         }
         let total = digitos + 1 + tamanho;
-        if buffer.len() < total {
-            return Framing::Incomplete;
+        if rest.len() < total {
+            return (Framing::Incomplete, inicio, false);
         }
-        let linha = buffer[digitos + 1..total].to_vec();
-        buffer.drain(..total);
-        return Framing::Message(linha);
+        let linha = rest[digitos + 1..total].to_vec();
+        return (Framing::Message(linha), inicio + total, false);
     }
 
-    if let Some(quebra) = buffer.iter().position(|byte| *byte == b'\n') {
-        let mut linha = buffer[..quebra].to_vec();
-        if linha.last() == Some(&b'\r') {
-            linha.pop();
+    if let Some(quebra) = rest.iter().position(|byte| *byte == b'\n') {
+        let mut fim = quebra;
+        if fim > 0 && rest[fim - 1] == b'\r' {
+            fim -= 1;
         }
-        buffer.drain(..=quebra);
-        linha.truncate(maximo);
-        return Framing::Message(linha);
+        let oversized = fim > maximo;
+        let linha = rest[..fim.min(maximo)].to_vec();
+        return (Framing::Message(linha), inicio + quebra + 1, oversized);
     }
 
     // Remetente que nunca manda LF não pode fazer o buffer crescer sem fim.
-    if buffer.len() > maximo {
-        let linha = buffer[..maximo].to_vec();
-        buffer.drain(..maximo);
-        return Framing::Message(linha);
+    if rest.len() > maximo {
+        let linha = rest[..maximo].to_vec();
+        return (Framing::Message(linha), inicio + maximo, true);
     }
 
-    Framing::Incomplete
+    (Framing::Incomplete, inicio, false)
+}
+
+#[cfg(test)]
+fn proxima_moldura(buffer: &mut Vec<u8>, maximo: usize) -> Framing {
+    let (framing, consumido, _) = proxima_moldura_slice(buffer, maximo);
+    if consumido > 0 {
+        buffer.drain(..consumido);
+    }
+    framing
 }
 
 #[cfg(test)]

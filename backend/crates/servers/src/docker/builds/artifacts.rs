@@ -133,9 +133,29 @@ async fn sweep(dir: &Path, ttl: Duration) {
 /// Apaga o clone quando a compilação termina, dê certo ou não.
 pub struct WorkDir(pub PathBuf);
 
+impl WorkDir {
+    /// Remove o clone de forma assíncrona (preferível ao `Drop` síncrono).
+    pub async fn cleanup(mut self) {
+        let path = std::mem::take(&mut self.0);
+        if !path.as_os_str().is_empty() {
+            let _ = tokio::fs::remove_dir_all(&path).await;
+        }
+    }
+}
+
 impl Drop for WorkDir {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
+        if self.0.as_os_str().is_empty() {
+            return;
+        }
+        let path = std::mem::take(&mut self.0);
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn_blocking(move || {
+                let _ = std::fs::remove_dir_all(&path);
+            });
+        } else {
+            let _ = std::fs::remove_dir_all(&path);
+        }
     }
 }
 

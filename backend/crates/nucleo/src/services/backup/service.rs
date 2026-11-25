@@ -32,12 +32,13 @@
 //! O arquivo também carrega `probes.token_hash` e `devices.snmp_community`,
 //! então é material sensível — quem o guarda, guarda o acesso.
 
-use sea_orm::{DatabaseConnection, EntityTrait};
+use sea_orm::{ConnectionTrait, DatabaseConnection, EntityTrait};
 use serde::Serialize;
 
 use super::{
+    archive::begin_snapshot,
     catalog::{BackupScope, Store},
-    restore::Loader,
+    restore::{Loader, RestoreGuard},
 };
 use crate::{
     models::_entities::{
@@ -83,7 +84,7 @@ pub const BACKED_UP_TABLES: [&str; 12] = [
 /// id que passou a ser de outro equipamento — um gráfico de tráfego com os
 /// dados do vizinho. As FKs `CASCADE` resolveriam isso no PostgreSQL, mas o
 /// SQLite só as aplica com `foreign_keys=ON`; limpar à mão vale nos dois.
-pub(super) const DEPENDENT_HISTORY: [&str; 18] = [
+pub(super) const DEPENDENT_HISTORY: [&str; 19] = [
     // Teste de enlace: pernas, testes e agendamentos citam ids de
     // equipamentos e de enlaces que a restauração substitui.
     "link_test_legs",
@@ -103,6 +104,7 @@ pub(super) const DEPENDENT_HISTORY: [&str; 18] = [
     "device_credentials",
     "alert_events",
     "notification_outbox",
+    "monitor_results_hourly",
     "monitor_results",
     "metrics",
     "discovery_results",
@@ -126,7 +128,39 @@ pub struct BackupFile {
     /// Arquivo sem o campo é de antes do backup completo: configuração.
     #[serde(default)]
     pub scope: BackupScope,
+    #[serde(serialize_with = "tables_in_creation_order")]
     pub tables: serde_json::Map<String, serde_json::Value>,
+}
+
+/// Escreve `tables` na ordem de [`BACKED_UP_TABLES`] (pai antes de filho), e
+/// só depois o que não estiver nela.
+///
+/// O `serde_json::Map` sem `preserve_order` é um `BTreeMap`: serializado como
+/// está, sai em ordem **alfabética** — `alert_rules` antes de `devices`,
+/// `devices` antes de `sites` —, e a restauração em fluxo teria de segurar na
+/// memória quase todas as tabelas até a primeira da ordem chegar. Ligar o
+/// `preserve_order` no workspace trocaria o mapa de todo JSON do sistema por
+/// um `IndexMap`; ordenar só aqui custa um laço.
+fn tables_in_creation_order<S>(
+    tables: &serde_json::Map<String, serde_json::Value>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    use serde::ser::SerializeMap;
+    let mut map = serializer.serialize_map(Some(tables.len()))?;
+    for table in BACKED_UP_TABLES {
+        if let Some(rows) = tables.get(table) {
+            map.serialize_entry(table, rows)?;
+        }
+    }
+    for (table, rows) in tables {
+        if !BACKED_UP_TABLES.contains(&table.as_str()) {
+            map.serialize_entry(table, rows)?;
+        }
+    }
+    map.end()
 }
 
 /// Monta o arquivo de backup a partir do banco.
@@ -135,19 +169,21 @@ pub struct BackupFile {
 ///
 /// Propaga falha de leitura do banco ou de serialização.
 pub async fn export(db: &DatabaseConnection, app_version: String) -> AppResult<BackupFile> {
+    let txn = begin_snapshot(db).await?;
     let mut tables = serde_json::Map::new();
-    dump::<sites::Entity>(db, &mut tables, "sites").await?;
-    dump::<probes::Entity>(db, &mut tables, "probes").await?;
-    dump::<networks::Entity>(db, &mut tables, "networks").await?;
-    dump::<devices::Entity>(db, &mut tables, "devices").await?;
-    dump::<device_interfaces::Entity>(db, &mut tables, "device_interfaces").await?;
-    dump::<device_links::Entity>(db, &mut tables, "device_links").await?;
-    dump::<monitors::Entity>(db, &mut tables, "monitors").await?;
-    dump::<alert_rules::Entity>(db, &mut tables, "alert_rules").await?;
-    dump::<vpn_servers::Entity>(db, &mut tables, "vpn_servers").await?;
-    dump::<vpn_peers::Entity>(db, &mut tables, "vpn_peers").await?;
-    dump::<dns_servers::Entity>(db, &mut tables, "dns_servers").await?;
-    dump::<system_settings::Entity>(db, &mut tables, "system_settings").await?;
+    dump::<sites::Entity, _>(&txn, &mut tables, "sites").await?;
+    dump::<probes::Entity, _>(&txn, &mut tables, "probes").await?;
+    dump::<networks::Entity, _>(&txn, &mut tables, "networks").await?;
+    dump::<devices::Entity, _>(&txn, &mut tables, "devices").await?;
+    dump::<device_interfaces::Entity, _>(&txn, &mut tables, "device_interfaces").await?;
+    dump::<device_links::Entity, _>(&txn, &mut tables, "device_links").await?;
+    dump::<monitors::Entity, _>(&txn, &mut tables, "monitors").await?;
+    dump::<alert_rules::Entity, _>(&txn, &mut tables, "alert_rules").await?;
+    dump::<vpn_servers::Entity, _>(&txn, &mut tables, "vpn_servers").await?;
+    dump::<vpn_peers::Entity, _>(&txn, &mut tables, "vpn_peers").await?;
+    dump::<dns_servers::Entity, _>(&txn, &mut tables, "dns_servers").await?;
+    dump::<system_settings::Entity, _>(&txn, &mut tables, "system_settings").await?;
+    txn.rollback().await?;
 
     Ok(BackupFile {
         format_version: FORMAT_VERSION,
@@ -197,6 +233,7 @@ pub fn inspect(file: &BackupFile) -> AppResult<TableCounts> {
 /// casa com o esquema atual, ou em qualquer erro do banco. Em todos os casos o
 /// banco fica intocado.
 pub async fn restore(db: &DatabaseConnection, file: &BackupFile) -> AppResult<TableCounts> {
+    let guard = RestoreGuard::acquire()?;
     validate_version(file)?;
     // Falha cedo, fora da transação: um arquivo ilegível não merece o custo de
     // apagar tudo primeiro para só então descobrir que não dava.
@@ -211,7 +248,7 @@ pub async fn restore(db: &DatabaseConnection, file: &BackupFile) -> AppResult<Ta
         loader.rows(Store::Main, table, rows).await?;
         loader.table_end(Store::Main, table).await?;
     }
-    Ok(loader.finish(db, None, None).await?.counts)
+    Ok(loader.finish(db, None, None, guard).await?.counts)
 }
 
 fn validate_version(file: &BackupFile) -> AppResult<()> {
@@ -225,14 +262,15 @@ fn validate_version(file: &BackupFile) -> AppResult<()> {
     }
 }
 
-async fn dump<E>(
-    db: &DatabaseConnection,
+async fn dump<E, C>(
+    db: &C,
     out: &mut serde_json::Map<String, serde_json::Value>,
     table: &str,
 ) -> AppResult<()>
 where
     E: EntityTrait,
     E::Model: Serialize,
+    C: ConnectionTrait,
 {
     let rows = E::find().all(db).await?;
     let value = serde_json::to_value(rows)
@@ -285,6 +323,40 @@ mod tests {
                 "'{table}' seria apagada e reinserida ao mesmo tempo"
             );
         }
+    }
+
+    #[test]
+    fn o_arquivo_sai_com_as_tabelas_na_ordem_de_criacao() {
+        let mut tables = serde_json::Map::new();
+        // Inseridas fora de ordem; o mapa as guarda em ordem alfabética.
+        for table in BACKED_UP_TABLES.iter().rev() {
+            tables.insert((*table).to_owned(), serde_json::json!([]));
+        }
+        tables.insert("tabela_do_futuro".into(), serde_json::json!([]));
+        let arquivo = BackupFile {
+            format_version: FORMAT_VERSION,
+            app_version: "teste".into(),
+            generated_at: "2026-08-12T00:00:00Z".into(),
+            scope: BackupScope::Config,
+            tables,
+        };
+        let texto = serde_json::to_string(&arquivo).unwrap();
+        let posicoes: Vec<usize> = BACKED_UP_TABLES
+            .iter()
+            .chain(std::iter::once(&"tabela_do_futuro"))
+            .map(|table| {
+                texto
+                    .find(&format!("\"{table}\":"))
+                    .expect("tabela no arquivo")
+            })
+            .collect();
+        assert!(
+            posicoes.windows(2).all(|par| par[0] < par[1]),
+            "fora da ordem de criação: {texto}"
+        );
+        // E a volta lê o mesmo conteúdo.
+        let lido: BackupFile = serde_json::from_str(&texto).unwrap();
+        assert_eq!(lido.tables.len(), BACKED_UP_TABLES.len() + 1);
     }
 
     #[test]

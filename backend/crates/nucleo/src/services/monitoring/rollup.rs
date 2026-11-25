@@ -7,7 +7,7 @@
 use chrono::{DateTime, Duration, Utc};
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseBackend, DatabaseConnection, EntityTrait,
-    FromQueryResult, QueryFilter, QueryOrder, Set, Statement, Value,
+    FromQueryResult, QueryFilter, QueryOrder, QuerySelect, Set, Statement, Value,
 };
 
 use crate::services::shared::transaction::begin_write;
@@ -50,8 +50,8 @@ impl RollupStats {
 #[must_use]
 pub fn truncate_to_hour(dt: DateTime<Utc>) -> DateTime<Utc> {
     let ts = dt.timestamp();
-    let hour_start = ts - (ts % 3_600);
-    DateTime::from_timestamp(hour_start, 0).expect("timestamp de hora válido")
+    let hour_start = ts - ts.rem_euclid(3_600);
+    DateTime::from_timestamp(hour_start, 0).unwrap_or(dt)
 }
 
 /// Primeiro instante da janela que o rollup ainda não agregou.
@@ -180,8 +180,21 @@ pub async fn rollup_monitor_results(
         return Ok(RollupStats::default());
     }
 
-    let txn = begin_write(db).await?;
-    let aggregates = aggregate_range(&txn, start, end, None).await?;
+    // Marca d'água do bruto já visível: a agregação roda fora da transação,
+    // então uma linha que chegar depois dela não entrou na conta e não pode
+    // ser apagada pela purga abaixo.
+    let aggregated_max_id: Option<i64> = monitor_results::Entity::find()
+        .select_only()
+        .column_as(monitor_results::Column::Id.max(), "max_id")
+        .filter(monitor_results::Column::StartedAt.lt(end))
+        .into_tuple::<Option<i64>>()
+        .one(db)
+        .await?
+        .flatten();
+
+    // Calcula a agregação antes de abrir `begin_write` para não reter o lock
+    // de escrita (SQLite `BEGIN IMMEDIATE`) durante a varredura de leitura.
+    let aggregates = aggregate_range(db, start, end, None).await?;
     let rows_aggregated = aggregates.iter().try_fold(0_u64, |total, row| {
         u64::try_from(row.total_checks)
             .ok()
@@ -189,6 +202,8 @@ pub async fn rollup_monitor_results(
     });
     let rows_aggregated = rows_aggregated
         .ok_or_else(|| AppError::Internal(anyhow::anyhow!("contagem do rollup excede u64")))?;
+
+    let txn = begin_write(db).await?;
 
     monitor_results_hourly::Entity::delete_many()
         .filter(monitor_results_hourly::Column::Bucket.gte(start))
@@ -220,13 +235,13 @@ pub async fn rollup_monitor_results(
         .ok()
         .and_then(|value| value.trim().parse::<i64>().ok())
         .unwrap_or(DEFAULT_DELETE_BRUTO_AFTER_HOURS);
-    if delete_after > 0 {
-        let delete_cutoff = cutoff - Duration::hours(delete_after);
+    if let (true, Some(max_id)) = (delete_after > 0, aggregated_max_id) {
+        let delete_cutoff = (cutoff - Duration::hours(delete_after)).min(raw_purge_limit(end));
         stats.rows_deleted = monitor_results::Entity::delete_many()
             .filter(monitor_results::Column::StartedAt.lt(delete_cutoff))
-            // Durante a recuperação de backlog, horas posteriores a `end`
-            // ainda não foram agregadas e não podem ser descartadas.
-            .filter(monitor_results::Column::StartedAt.lt(end))
+            // Só o que a agregação acima viu: linha tardia fica para o
+            // próximo ciclo.
+            .filter(monitor_results::Column::Id.lte(max_id))
             .exec(&txn)
             .await?
             .rows_affected;
@@ -234,6 +249,16 @@ pub async fn rollup_monitor_results(
 
     txn.commit().await?;
     Ok(stats)
+}
+
+/// Até onde o bruto pode ser purgado depois de agregar até `end`.
+///
+/// Horas posteriores a `end` ainda não foram agregadas (recuperação de
+/// backlog), e as últimas `ROLLUP_LOOKBACK_HOURS` (+ a hora em curso) serão
+/// **recalculadas** no próximo ciclo a partir do bruto: apagá-lo agora
+/// faria o recálculo sobrescrever o bucket com menos checagens.
+fn raw_purge_limit(end: DateTime<Utc>) -> DateTime<Utc> {
+    end - Duration::hours(ROLLUP_LOOKBACK_HOURS + 1)
 }
 
 #[derive(Debug, FromQueryResult)]
@@ -351,5 +376,14 @@ mod tests {
     fn janela_de_backlog_tem_teto_explicito() {
         assert_eq!(MAX_ROLLUP_HOURS_PER_RUN, 168);
         assert_eq!(ROLLUP_LOOKBACK_HOURS, 2);
+    }
+
+    #[test]
+    fn a_purga_preserva_o_bruto_que_o_proximo_ciclo_recalcula() {
+        let end = truncate_to_hour(Utc::now());
+        // O próximo ciclo recalcula a partir de `último bucket - lookback`, e o
+        // último bucket é no mínimo `end - 1 h`.
+        let next_start = end - Duration::hours(1) - Duration::hours(ROLLUP_LOOKBACK_HOURS);
+        assert!(raw_purge_limit(end) <= next_start);
     }
 }

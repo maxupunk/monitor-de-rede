@@ -93,6 +93,7 @@ impl<R: AsyncRead + Unpin> Reader<R> {
         }
         self.close_entry().await?;
         let mut long_name: Option<String> = None;
+        let mut pax_size: Option<u64> = None;
         loop {
             let mut block = [0_u8; BLOCK];
             match self.inner.read_exact(&mut block).await {
@@ -123,25 +124,28 @@ impl<R: AsyncRead + Unpin> Reader<R> {
             if header.cksum().ok() != Some(computed) {
                 return Err(invalid("cabeçalho de tar com checksum errado"));
             }
-            let size = header
+            let header_size = header
                 .entry_size()
                 .map_err(|_| invalid("tamanho inválido"))?;
             let kind = header.entry_type();
             if kind.is_pax_local_extensions() {
-                let data = self.read_extended(size).await?;
-                long_name = pax_path(&data).or(long_name);
+                let data = self.read_extended(header_size).await?;
+                let (path, size) = pax_extensions(&data);
+                long_name = path.or(long_name);
+                pax_size = size.or(pax_size);
                 continue;
             }
             if kind.is_gnu_longname() {
-                let data = self.read_extended(size).await?;
+                let data = self.read_extended(header_size).await?;
                 let name = String::from_utf8_lossy(&data);
                 long_name = Some(name.trim_end_matches('\0').to_string());
                 continue;
             }
             if kind.is_pax_global_extensions() {
-                self.read_extended(size).await?;
+                self.read_extended(header_size).await?;
                 continue;
             }
+            let size = pax_size.take().unwrap_or(header_size);
             let path = long_name
                 .take()
                 .unwrap_or_else(|| String::from_utf8_lossy(&header.path_bytes()).into_owned());
@@ -196,13 +200,24 @@ impl<R: AsyncRead + Unpin> Reader<R> {
     }
 }
 
-fn pax_path(data: &[u8]) -> Option<String> {
+fn pax_extensions(data: &[u8]) -> (Option<String>, Option<u64>) {
     // Registros `<tamanho> chave=valor\n`.
     let text = String::from_utf8_lossy(data);
-    text.lines().find_map(|record| {
-        let (_, pair) = record.split_once(' ')?;
-        pair.strip_prefix("path=").map(ToString::to_string)
-    })
+    let mut path = None;
+    let mut size = None;
+    for record in text.lines() {
+        let Some((_, pair)) = record.split_once(' ') else {
+            continue;
+        };
+        if let Some(value) = pair.strip_prefix("path=") {
+            path = Some(value.to_string());
+        } else if let Some(value) = pair.strip_prefix("size=") {
+            if let Ok(parsed) = value.parse::<u64>() {
+                size = Some(parsed);
+            }
+        }
+    }
+    (path, size)
 }
 
 /// Escritor de tar sobre um fluxo.
@@ -325,5 +340,12 @@ mod tests {
         let second = reader.next().await.unwrap().unwrap();
         assert_eq!(second.path, "b");
         assert_eq!(reader.read_all(10).await.unwrap(), b"ok");
+    }
+
+    #[test]
+    fn pax_le_path_e_size() {
+        let (path, size) = pax_extensions(b"20 path=blobs/sha256/a\n18 size=9000000000\n");
+        assert_eq!(path.as_deref(), Some("blobs/sha256/a"));
+        assert_eq!(size, Some(9_000_000_000));
     }
 }

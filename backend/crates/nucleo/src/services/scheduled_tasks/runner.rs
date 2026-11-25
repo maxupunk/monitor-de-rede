@@ -17,18 +17,26 @@
 //! - A tarefa roda em nome de quem a salvou por último, com o papel que essa
 //!   pessoa tem **agora**: perdeu a escrita, a tarefa falha com o motivo.
 
-use std::{str::FromStr, time::Duration};
+use std::{
+    str::FromStr,
+    sync::{Arc, LazyLock},
+    time::Duration,
+};
 
 use chrono::{DateTime, Local, Utc};
 use loco_rs::prelude::AppContext;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::{
+    sea_query::Expr, ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter,
+    Set,
+};
 use serde_json::{json, Value};
-use tokio::task::JoinHandle;
+use tokio::{sync::Semaphore, task::JoinHandle};
 
 use super::{
     events,
     model::{ScheduledTaskRun, ScheduledTaskStatus, ScheduledTaskTrigger},
     schedule::Schedule,
+    service::Author,
     view,
 };
 use crate::{
@@ -38,6 +46,7 @@ use crate::{
         shared::{
             errors::{AppError, AppResult},
             run_guard::RunGuard,
+            transaction::begin_write,
         },
         users::Role,
     },
@@ -58,9 +67,14 @@ const FIRST_TICK_DELAY: Duration = Duration::from_secs(30);
 const GRACE_MINUTES: i64 = 5;
 /// Teto de uma execução.
 const RUN_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+/// Teto de tarefas agendadas executando em paralelo.
+const MAX_CONCURRENT_RUNS: usize = 8;
 /// Resultado maior que isso é cortado no histórico.
 const RESULT_MAX_BYTES: usize = 32 * 1024;
 const MESSAGE_MAX_CHARS: usize = 500;
+
+static RUN_SLOTS: LazyLock<Arc<Semaphore>> =
+    LazyLock::new(|| Arc::new(Semaphore::new(MAX_CONCURRENT_RUNS)));
 
 /// Sobe o laço. Fora do ambiente de teste — lá, quem testa chama
 /// [`run_due`] diretamente.
@@ -70,16 +84,98 @@ pub fn spawn(ctx: &AppContext) {
     }
     let ctx = ctx.clone();
     tokio::spawn(async move {
+        if let Err(error) = recover_stale_runs(&ctx.db, true).await {
+            tracing::warn!(%error, "falha ao reconciliar execuções órfãs de tarefas agendadas");
+        }
         tokio::time::sleep(FIRST_TICK_DELAY).await;
         let mut ticker = tokio::time::interval(TICK);
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             ticker.tick().await;
+            if let Err(error) = recover_stale_runs(&ctx.db, false).await {
+                tracing::warn!(%error, "falha ao reconciliar execuções travadas de tarefas agendadas");
+            }
             if let Err(error) = run_due(&ctx, Utc::now()).await {
                 tracing::warn!(%error, "ciclo das tarefas agendadas falhou");
             }
         }
     });
+}
+
+/// Encerra execuções que ficaram presas em `running` após queda do processo ou
+/// falha de gravação no `finish`.
+///
+/// No boot (`on_startup = true`), qualquer linha `running` sem `RunGuard` ativo
+/// neste processo é marcada como falha. No laço periódico, só linhas acima de
+/// `RUN_TIMEOUT + 1 min` são reconciliadas.
+///
+/// **Um processo só.** O agendador mora no processo do servidor (ADR 007) e a
+/// execução não guarda a instância dona — não há como distinguir, no boot, a
+/// linha de um processo que caiu da de um segundo servidor vivo. A regravação
+/// é condicional (`WHERE status = 'running'`) e na mesma transação de escrita:
+/// se o dono terminar antes, o `success` dele fica; se terminar depois, o
+/// `finish` regrava por cima do `failed` com o desfecho real.
+///
+/// # Errors
+///
+/// Propaga erro do banco.
+pub async fn recover_stale_runs(db: &DatabaseConnection, on_startup: bool) -> AppResult<u64> {
+    let running = ScheduledTaskStatus::Running.as_str();
+    let failed = ScheduledTaskStatus::Failed.as_str();
+    let now = Utc::now();
+    let reason = if on_startup {
+        "Execução interrompida: o servidor foi reiniciado antes do término"
+    } else {
+        "Execução interrompida: excedeu o tempo máximo sem finalizar"
+    };
+
+    let txn = begin_write(db).await?;
+    let mut query =
+        scheduled_task_runs::Entity::find().filter(scheduled_task_runs::Column::Status.eq(running));
+    if !on_startup {
+        let cutoff = now
+            - chrono::Duration::seconds(i64::try_from(RUN_TIMEOUT.as_secs()).unwrap_or(600) + 60);
+        query = query.filter(scheduled_task_runs::Column::StartedAt.lt(cutoff));
+    }
+    let stale = query.all(&txn).await?;
+    let mut recovered = 0;
+    for run in stale {
+        if RunGuard::is_running(SCOPE, run.task_id) {
+            continue;
+        }
+        let closed = scheduled_task_runs::Entity::update_many()
+            .col_expr(scheduled_task_runs::Column::Status, Expr::value(failed))
+            .col_expr(
+                scheduled_task_runs::Column::FinishedAt,
+                Expr::value(chrono::DateTime::<chrono::FixedOffset>::from(now)),
+            )
+            .col_expr(scheduled_task_runs::Column::Message, Expr::value(reason))
+            .filter(scheduled_task_runs::Column::Id.eq(run.id))
+            .filter(scheduled_task_runs::Column::Status.eq(running))
+            .exec(&txn)
+            .await?
+            .rows_affected;
+        if closed == 0 {
+            continue;
+        }
+        scheduled_tasks::Entity::update_many()
+            .col_expr(scheduled_tasks::Column::LastStatus, Expr::value(failed))
+            .col_expr(scheduled_tasks::Column::LastMessage, Expr::value(reason))
+            .filter(scheduled_tasks::Column::Id.eq(run.task_id))
+            .filter(scheduled_tasks::Column::LastStatus.eq(running))
+            .exec(&txn)
+            .await?;
+        recovered += 1;
+    }
+    txn.commit().await?;
+    if recovered > 0 {
+        tracing::warn!(
+            recovered,
+            on_startup,
+            "execuções órfãs de tarefas agendadas encerradas"
+        );
+    }
+    Ok(recovered)
 }
 
 /// O desfecho de uma execução.
@@ -137,7 +233,11 @@ fn stored_result(result: Option<Value>) -> Option<Value> {
     if text.len() <= RESULT_MAX_BYTES {
         return Some(result);
     }
-    let preview: String = text.chars().take(RESULT_MAX_BYTES).collect();
+    let mut end = RESULT_MAX_BYTES;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    let preview = &text[..end];
     Some(json!({ "truncated": true, "bytes": text.len(), "preview": preview }))
 }
 
@@ -181,10 +281,17 @@ async fn owner(ctx: &AppContext, task: &scheduled_tasks::Model) -> Result<AuditA
     })
 }
 
-async fn execute(ctx: &AppContext, task: &scheduled_tasks::Model) -> Outcome {
-    let actor = match owner(ctx, task).await {
-        Ok(actor) => actor,
-        Err(reason) => return Outcome::failed(reason),
+async fn execute(
+    ctx: &AppContext,
+    task: &scheduled_tasks::Model,
+    manual_actor: Option<AuditActor>,
+) -> Outcome {
+    let actor = match manual_actor {
+        Some(actor) => actor,
+        None => match owner(ctx, task).await {
+            Ok(actor) => actor,
+            Err(reason) => return Outcome::failed(reason),
+        },
     };
     let args = ToolArgs::from_value(task.arguments.clone()).with_actor(actor);
     let tools = UnattendedTools::new();
@@ -207,6 +314,7 @@ async fn finish(
     started: std::time::Instant,
 ) -> AppResult<ScheduledTaskRun> {
     let message = clip(&outcome.message);
+    let txn = begin_write(&ctx.db).await?;
     let mut active: scheduled_task_runs::ActiveModel = run.into();
     active.status = Set(outcome.status.as_str().to_string());
     active.finished_at = Set(Some(Utc::now().into()));
@@ -215,23 +323,54 @@ async fn finish(
     ));
     active.message = Set(Some(message.clone()));
     active.result = Set(stored_result(outcome.result));
-    let run = active.update(&ctx.db).await?;
+    let run = active.update(&txn).await?;
 
     // A tarefa pode ter sido excluída enquanto rodava.
     if let Some(current) = scheduled_tasks::Entity::find_by_id(task.id)
-        .one(&ctx.db)
+        .one(&txn)
         .await?
     {
         let mut active: scheduled_tasks::ActiveModel = current.into();
         active.last_status = Set(Some(outcome.status.as_str().to_string()));
         active.last_message = Set(Some(message));
-        active.update(&ctx.db).await?;
+        active.update(&txn).await?;
     }
+    txn.commit().await?;
     if outcome.status == ScheduledTaskStatus::Failed {
         tracing::warn!(task_id = task.id, tool = %task.tool, message = ?run.message, "tarefa agendada falhou");
     }
     events::publish(ctx, task.id, &task.name, Some(outcome.status)).await;
     Ok(view::run(run))
+}
+
+/// Execução manual disparada pelo usuário: exige papel de administrador para
+/// ferramentas `admin_only`, recusa se a área estiver desligada e propaga o
+/// ator de quem disparou para a auditoria da ferramenta.
+///
+/// # Errors
+///
+/// `Forbidden`, `BusinessRule` (área desligada), `Conflict` ou erro do banco.
+pub async fn start_manual(
+    ctx: &AppContext,
+    task: scheduled_tasks::Model,
+    author: &Author,
+) -> AppResult<(i64, JoinHandle<AppResult<ScheduledTaskRun>>)> {
+    super::service::check_tool_permission(&task.tool, author)?;
+    let enabled = netmonitor_core::areas::load(&ctx.db).await?;
+    if let Some(area) = super::areas::disabled_area(&enabled, &task.tool) {
+        return Err(AppError::business_rule(format!(
+            "Não é possível rodar agora: a área {} está desligada (Configurações › Áreas)",
+            area.title()
+        )));
+    }
+    start_inner(
+        ctx,
+        task,
+        ScheduledTaskTrigger::Manual,
+        Some(author.user_id),
+        Some(author.actor.clone()),
+    )
+    .await
 }
 
 /// Começa uma execução agora e devolve o id dela e o fim, que roda à parte.
@@ -245,12 +384,23 @@ pub async fn start(
     trigger: ScheduledTaskTrigger,
     requested_by: Option<i64>,
 ) -> AppResult<(i64, JoinHandle<AppResult<ScheduledTaskRun>>)> {
+    start_inner(ctx, task, trigger, requested_by, None).await
+}
+
+async fn start_inner(
+    ctx: &AppContext,
+    task: scheduled_tasks::Model,
+    trigger: ScheduledTaskTrigger,
+    requested_by: Option<i64>,
+    manual_actor: Option<AuditActor>,
+) -> AppResult<(i64, JoinHandle<AppResult<ScheduledTaskRun>>)> {
     let guard = RunGuard::acquire(
         SCOPE,
         task.id,
         "Esta tarefa já está rodando; espere terminar",
     )?;
     let now = Utc::now();
+    let txn = begin_write(&ctx.db).await?;
     let run = scheduled_task_runs::ActiveModel {
         task_id: Set(task.id),
         trigger: Set(trigger.as_str().to_string()),
@@ -259,22 +409,36 @@ pub async fn start(
         user_id: Set(requested_by.or(task.user_id)),
         ..Default::default()
     }
-    .insert(&ctx.db)
+    .insert(&txn)
     .await?;
     let mut active: scheduled_tasks::ActiveModel = task.clone().into();
     active.last_run_at = Set(Some(now.into()));
     active.last_status = Set(Some(ScheduledTaskStatus::Running.as_str().to_string()));
     active.last_message = Set(None);
-    active.update(&ctx.db).await?;
+    active.update(&txn).await?;
+    txn.commit().await?;
     events::publish(ctx, task.id, &task.name, Some(ScheduledTaskStatus::Running)).await;
 
     let run_id = run.id;
     let ctx = ctx.clone();
     let handle = tokio::spawn(async move {
         let _guard = guard;
+        let _permit = Arc::clone(&RUN_SLOTS)
+            .acquire_owned()
+            .await
+            .map_err(|_| AppError::Internal(anyhow::anyhow!("semáforo de tarefas fechado")))?;
         let started = std::time::Instant::now();
-        let outcome = execute(&ctx, &task).await;
-        finish(&ctx, &task, run, outcome, started).await
+        let outcome = execute(&ctx, &task, manual_actor).await;
+        let result = finish(&ctx, &task, run, outcome, started).await;
+        if let Err(ref error) = result {
+            tracing::error!(
+                %error,
+                task_id = task.id,
+                run_id,
+                "falha ao gravar o desfecho da tarefa agendada"
+            );
+        }
+        result
     });
     Ok((run_id, handle))
 }
@@ -287,6 +451,7 @@ async fn skip(
     overwrite_last: bool,
 ) -> AppResult<()> {
     let now = Utc::now();
+    let txn = begin_write(&ctx.db).await?;
     scheduled_task_runs::ActiveModel {
         task_id: Set(task.id),
         trigger: Set(ScheduledTaskTrigger::Schedule.as_str().to_string()),
@@ -298,14 +463,15 @@ async fn skip(
         user_id: Set(task.user_id),
         ..Default::default()
     }
-    .insert(&ctx.db)
+    .insert(&txn)
     .await?;
     if overwrite_last {
         let mut active: scheduled_tasks::ActiveModel = task.clone().into();
         active.last_status = Set(Some(ScheduledTaskStatus::Skipped.as_str().to_string()));
         active.last_message = Set(Some(reason));
-        active.update(&ctx.db).await?;
+        active.update(&txn).await?;
     }
+    txn.commit().await?;
     Ok(())
 }
 
@@ -324,6 +490,9 @@ pub async fn run_due(
         .filter(scheduled_tasks::Column::NextRunAt.lte(now))
         .all(&ctx.db)
         .await?;
+    if due.is_empty() {
+        return Ok(Vec::new());
+    }
     // Lido a cada ciclo, sem cache: o laço pode rodar em outro processo.
     let enabled = netmonitor_core::areas::load(&ctx.db).await?;
     let mut started = Vec::new();
@@ -332,9 +501,18 @@ pub async fn run_due(
             continue;
         };
         // A próxima vai para o banco antes de rodar.
-        let next = Schedule::parse(&task.cron)
-            .ok()
-            .and_then(|schedule| schedule.next_after(now));
+        let next = match Schedule::parse(&task.cron) {
+            Ok(schedule) => schedule.next_after(now),
+            Err(error) => {
+                tracing::warn!(
+                    %error,
+                    task_id = task.id,
+                    cron = %task.cron,
+                    "expressão cron inválida em tarefa agendada"
+                );
+                None
+            }
+        };
         let mut active: scheduled_tasks::ActiveModel = task.clone().into();
         active.next_run_at = Set(next.map(Into::into));
         let task = active.update(&ctx.db).await?;
@@ -415,6 +593,81 @@ mod tests {
 
         let pequeno = json!({ "ok": 1 });
         assert_eq!(stored_result(Some(pequeno.clone())), Some(pequeno));
+    }
+
+    async fn banco() -> DatabaseConnection {
+        use crate::test_schema::{MigratorTrait, TestMigrator as Migrator};
+        let db = sea_orm::Database::connect(
+            sea_orm::ConnectOptions::new("sqlite::memory:".to_owned())
+                .max_connections(1)
+                .min_connections(1)
+                .to_owned(),
+        )
+        .await
+        .expect("banco");
+        Migrator::up(&db, None).await.expect("migrations");
+        db
+    }
+
+    async fn execucao(
+        db: &DatabaseConnection,
+        task_id: i64,
+        status: ScheduledTaskStatus,
+    ) -> scheduled_task_runs::Model {
+        scheduled_task_runs::ActiveModel {
+            task_id: Set(task_id),
+            trigger: Set(ScheduledTaskTrigger::Schedule.as_str().to_string()),
+            status: Set(status.as_str().to_string()),
+            started_at: Set((Utc::now() - chrono::Duration::hours(2)).into()),
+            ..Default::default()
+        }
+        .insert(db)
+        .await
+        .expect("execução")
+    }
+
+    #[tokio::test]
+    async fn reconciliacao_so_fecha_o_que_ainda_esta_rodando() {
+        let db = banco().await;
+        let agora: sea_orm::prelude::DateTimeWithTimeZone = Utc::now().into();
+        let tarefa = scheduled_tasks::ActiveModel {
+            name: Set("Teste".into()),
+            tool: Set("list_alerts".into()),
+            arguments: Set(json!({})),
+            cron: Set("0 3 * * *".into()),
+            enabled: Set(true),
+            origin: Set("user".into()),
+            last_status: Set(Some(ScheduledTaskStatus::Running.as_str().to_string())),
+            created_at: Set(agora),
+            updated_at: Set(agora),
+            ..Default::default()
+        }
+        .insert(&db)
+        .await
+        .expect("tarefa");
+        let presa = execucao(&db, tarefa.id, ScheduledTaskStatus::Running).await;
+        let concluida = execucao(&db, tarefa.id, ScheduledTaskStatus::Success).await;
+
+        assert_eq!(recover_stale_runs(&db, false).await.unwrap(), 1);
+
+        let reler = |id| scheduled_task_runs::Entity::find_by_id(id).one(&db);
+        let presa = reler(presa.id).await.unwrap().unwrap();
+        assert_eq!(presa.status, ScheduledTaskStatus::Failed.as_str());
+        assert!(presa.finished_at.is_some());
+        let concluida = reler(concluida.id).await.unwrap().unwrap();
+        assert_eq!(concluida.status, ScheduledTaskStatus::Success.as_str());
+        let tarefa = scheduled_tasks::Entity::find_by_id(tarefa.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            tarefa.last_status.as_deref(),
+            Some(ScheduledTaskStatus::Failed.as_str())
+        );
+
+        // Segunda passada: nada mais a fechar.
+        assert_eq!(recover_stale_runs(&db, false).await.unwrap(), 0);
     }
 
     #[test]

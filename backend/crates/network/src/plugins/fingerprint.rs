@@ -9,7 +9,7 @@
 //! Parte sempre da central. Equipamento só alcançável por agente remoto
 //! aparece com as portas fechadas — o resultado diz de onde partiu.
 
-use std::{net::IpAddr, time::Duration};
+use std::{net::IpAddr, sync::OnceLock, time::Duration};
 
 use futures::future::join_all;
 use regex::Regex;
@@ -19,7 +19,7 @@ use tokio::{io::AsyncReadExt, net::TcpStream, time::timeout};
 
 use super::{
     compat::{self, DeviceFacts},
-    service,
+    runtime, service,
     transport::{
         local::LocalTransport, DeviceIoCall, DeviceIoReply, DeviceTransport, Endpoint, HttpRequest,
     },
@@ -87,7 +87,7 @@ async fn ssh_banner(ip: IpAddr) -> Option<String> {
 }
 
 async fn http_page(ip: IpAddr, port: u16, https: bool) -> Option<HttpFingerprint> {
-    let transport = LocalTransport::new("central").ok()?;
+    let transport = LocalTransport::shared("central").ok()?;
     let reply = transport
         .execute(&DeviceIoCall::HttpRequest {
             endpoint: Endpoint {
@@ -129,7 +129,9 @@ async fn http_page(ip: IpAddr, port: u16, https: bool) -> Option<HttpFingerprint
 /// O `<title>` da página, sem espaços sobrando.
 #[must_use]
 pub fn page_title(body: &str) -> Option<String> {
-    let re = Regex::new(r"(?is)<title[^>]*>\s*(.*?)\s*</title>").ok()?;
+    static TITLE_RE: OnceLock<Regex> = OnceLock::new();
+    let re = TITLE_RE
+        .get_or_init(|| Regex::new(r"(?is)<title[^>]*>\s*(.*?)\s*</title>").expect("regex válida"));
     re.captures(body)
         .and_then(|captures| captures.get(1))
         .map(|m| m.as_str().split_whitespace().collect::<Vec<_>>().join(" "))
@@ -196,9 +198,26 @@ pub async fn fingerprint<C: ConnectionTrait>(
         })
         .unwrap_or_default();
     let mut suggested = Vec::new();
-    for item in service::for_device(db, device).await? {
-        let model = service::find(db, item.plugin.id).await?;
-        let package = service::package_of(&model)?;
+    let candidate_items = service::for_device(db, device).await?;
+    let candidate_ids: Vec<i64> = candidate_items.iter().map(|item| item.plugin.id).collect();
+    let models_by_id: std::collections::HashMap<i64, netmonitor_core::models::plugins::Model> =
+        if candidate_ids.is_empty() {
+            std::collections::HashMap::new()
+        } else {
+            use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+            netmonitor_core::models::plugins::Entity::find()
+                .filter(netmonitor_core::models::plugins::Column::Id.is_in(candidate_ids))
+                .all(db)
+                .await?
+                .into_iter()
+                .map(|m| (m.id, m))
+                .collect()
+        };
+    for item in candidate_items {
+        let Some(model) = models_by_id.get(&item.plugin.id) else {
+            continue;
+        };
+        let package = service::package_of(model)?;
         let verdict = compat::evaluate(&package.manifest, &package.compatibility, &facts);
         let http_match = package
             .manifest
@@ -207,14 +226,15 @@ pub async fn fingerprint<C: ConnectionTrait>(
             .as_deref()
             .is_some_and(|pattern| {
                 !page_text.trim().is_empty()
-                    && Regex::new(&format!("(?i){pattern}")).is_ok_and(|re| re.is_match(&page_text))
+                    && runtime::cached_regex(&format!("(?i){pattern}"))
+                        .is_ok_and(|re| re.is_match(&page_text))
             });
         if verdict.level > compat::Compat::Incompatible || http_match {
             suggested.push(SuggestedPlugin {
                 id: model.id,
-                slug: model.slug,
-                name: model.name,
-                status: model.status,
+                slug: model.slug.clone(),
+                name: model.name.clone(),
+                status: model.status.clone(),
                 compat: verdict.level,
                 http_fingerprint_match: http_match,
             });

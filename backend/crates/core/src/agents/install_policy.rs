@@ -86,7 +86,7 @@ impl InstallPolicy {
             .configuration
             .as_ref()
             .and_then(|value| value.get(CONFIG_KEY))
-            .and_then(|value| serde_json::from_value::<InstallPolicyView>(value.clone()).ok())
+            .and_then(|value| <InstallPolicyView as serde::Deserialize>::deserialize(value).ok())
             .and_then(|view| Self::from_view(&view).ok())
             .unwrap_or_else(Self::suggested)
     }
@@ -110,12 +110,14 @@ impl InstallPolicy {
     /// Valor de `AGENT_ALLOW`.
     #[must_use]
     pub fn allow_env(&self) -> String {
-        self.policy
-            .permissions()
-            .iter()
-            .map(|permission| permission.as_str())
-            .collect::<Vec<_>>()
-            .join(",")
+        let mut out = String::new();
+        for (idx, permission) in self.policy.permissions().into_iter().enumerate() {
+            if idx > 0 {
+                out.push(',');
+            }
+            out.push_str(permission.as_str());
+        }
+        out
     }
 
     /// Valor de `AGENT_DATABASE_TARGETS`; vazio quando a ponte não está

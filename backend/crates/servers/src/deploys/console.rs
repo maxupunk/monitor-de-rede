@@ -12,7 +12,7 @@ use loco_rs::app::AppContext;
 
 use super::runs::LogBuffer;
 
-const PUBLISH_EVERY: Duration = Duration::from_millis(300);
+pub const PUBLISH_EVERY: Duration = Duration::from_millis(300);
 const SAVE_EVERY: Duration = Duration::from_secs(2);
 
 /// Para onde vai o console de uma execução.
@@ -35,6 +35,7 @@ pub struct Console<S: ConsoleSink> {
     sink: S,
     buffer: LogBuffer,
     unsent: Vec<String>,
+    dirty: bool,
     last_publish: Instant,
     last_save: Instant,
     /// Etapa travada (o rollback não deixa a etapa voltar).
@@ -48,6 +49,7 @@ impl<S: ConsoleSink> Console<S> {
             sink,
             buffer: LogBuffer::from_saved(saved),
             unsent: Vec::new(),
+            dirty: false,
             last_publish: Instant::now(),
             last_save: Instant::now(),
             pinned: false,
@@ -58,6 +60,7 @@ impl<S: ConsoleSink> Console<S> {
         let text = text.into();
         self.buffer.push(&text);
         self.unsent.push(text);
+        self.dirty = true;
         if self.last_publish.elapsed() >= PUBLISH_EVERY {
             self.publish();
         }
@@ -66,14 +69,31 @@ impl<S: ConsoleSink> Console<S> {
         }
     }
 
+    /// Publica linhas pendentes sem esperar outra linha chegar (usado no
+    /// intervalo do `select!` durante passos silenciosos como `docker pull`).
+    pub fn flush_pending(&mut self) {
+        if !self.unsent.is_empty() {
+            self.publish();
+        }
+    }
+
     fn publish(&mut self) {
+        if self.unsent.is_empty() {
+            self.last_publish = Instant::now();
+            return;
+        }
         self.sink
             .publish(&self.ctx, std::mem::take(&mut self.unsent));
         self.last_publish = Instant::now();
     }
 
     async fn save(&mut self) {
+        if !self.dirty {
+            self.last_save = Instant::now();
+            return;
+        }
         self.sink.save(&self.ctx, &self.buffer.text()).await;
+        self.dirty = false;
         self.last_save = Instant::now();
     }
 

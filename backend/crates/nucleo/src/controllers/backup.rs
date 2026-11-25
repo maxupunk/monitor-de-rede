@@ -32,9 +32,8 @@ use crate::{
             archive,
             catalog::BackupScope,
             copies::{self, RUN_SCOPE},
-            notify,
             plan::{self, PLAN_ID},
-            restore as file_restore, service,
+            restore as file_restore, schedule, service,
         },
         shared::{
             errors::{AppError, AppResult},
@@ -79,7 +78,7 @@ async fn export(State(ctx): State<AppContext>) -> AppResult<Response> {
 /// só se sabe no fim); a tela mostra quanto já chegou.
 async fn export_full(State(ctx): State<AppContext>, headers: HeaderMap) -> AppResult<Response> {
     let logs = LogsDb::from_context(&ctx).ok().map(|logs| logs.0);
-    let stream = archive::export_full(ctx.db.clone(), logs, crate::app_version());
+    let stream = archive::export_full(ctx.db.clone(), logs, crate::app_version())?;
     audit::record(
         &ctx.db,
         &headers,
@@ -138,7 +137,7 @@ async fn restore(
     let what = match restored.scope {
         BackupScope::Config => "Configuração do NetMonitor restaurada a partir de um arquivo enviado",
         BackupScope::Full => {
-            "Bancos do NetMonitor (completo, com usuários e histórico) restaurados a partir de um              arquivo enviado"
+            "Bancos do NetMonitor (completo, com usuários e histórico) restaurados a partir de um arquivo enviado"
         }
     };
     audit::record(
@@ -202,20 +201,7 @@ async fn run_now(State(ctx): State<AppContext>, headers: HeaderMap) -> AppResult
         AppError::validation("Escolha para onde vão as cópias do NetMonitor antes de fazer backup")
     })?;
     let destination = storage::service::load(&ctx.db, destination_id).await?;
-    let result = copies::run(&ctx.db, &current, &destination, crate::app_version()).await;
-    // O resultado — inclusive a falha — já foi gravado no plano: as outras
-    // abas precisam ver o novo status nos dois casos.
-    plan::publish_updated(&ctx).await;
-    if let Err(ref error) = result {
-        notify::notify_system_backup_failed(
-            &ctx,
-            Some(&destination.row.name),
-            "manual",
-            &error.to_string(),
-        )
-        .await;
-    }
-    let outcome = result?;
+    let outcome = schedule::run_plan(&ctx, &current, &destination, "manual").await?;
     audit::record(
         &ctx.db,
         &headers,

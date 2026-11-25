@@ -5,14 +5,109 @@ use std::sync::Arc;
 
 use crate::{
     context_window::sources::{ModelsDevLookup, OllamaLookup, OpenRouterLookup, MODELS_DEV_URL},
+    dtos::TestConnectionInput,
     ollama,
-    settings::{AiSettings, DEFAULT_OLLAMA_BASE_URL, DEFAULT_OLLAMA_MODEL},
+    settings::{self, AiSettings, DEFAULT_OLLAMA_BASE_URL, DEFAULT_OLLAMA_MODEL},
 };
 use netmonitor_core::shared::errors::{AppError, AppResult};
 use openai_compatible::OpenAiCompatibleDriver;
 use traits::AiDriver;
 
 const OPENROUTER_BASE_URL: &str = "https://openrouter.ai/api/v1";
+
+/// Monta o driver para `POST /api/ai/test-connection` sem vazar chaves salvas
+/// para URLs diferentes da configurada.
+///
+/// # Errors
+///
+/// Driver desconhecido ou chave de API ausente.
+pub async fn from_test_input(
+    existing: &AiSettings,
+    input: TestConnectionInput,
+) -> AppResult<Option<Box<dyn AiDriver>>> {
+    match input.driver.as_str() {
+        "opencode" => {
+            let base_url = input
+                .base_url
+                .filter(|u| !u.trim().is_empty())
+                .or_else(|| existing.opencode_base_url.clone())
+                .unwrap_or_else(|| settings::OPENCODE_DEFAULT_BASE_URL.to_string());
+            let mut api_key = input.api_key;
+            if api_key.as_deref() == Some(settings::MASKED_KEY) {
+                if settings::opencode_url_matches(
+                    Some(&base_url),
+                    existing.opencode_base_url.as_deref(),
+                ) {
+                    api_key.clone_from(&existing.opencode_api_key);
+                } else {
+                    api_key = None;
+                }
+            }
+            let key = api_key
+                .filter(|k| !k.trim().is_empty())
+                .ok_or_else(|| AppError::validation("Informe a API Key do OpenCode Go / Zen"))?;
+            let model = if input.model.trim().is_empty() {
+                settings::DEFAULT_OPENCODE_MODEL.to_string()
+            } else {
+                input.model
+            };
+            Ok(Some(Box::new(OpenAiCompatibleDriver::new(
+                "opencode",
+                "OpenCode Go / Zen",
+                base_url,
+                Some(key),
+                model,
+                vec![],
+            ))))
+        }
+        "openrouter" => {
+            let mut api_key = input.api_key;
+            if api_key.as_deref() == Some(settings::MASKED_KEY) {
+                api_key.clone_from(&existing.openrouter_api_key);
+            }
+            let key = api_key
+                .filter(|k| !k.trim().is_empty())
+                .ok_or_else(|| AppError::validation("Informe a API Key do OpenRouter"))?;
+            let model = if input.model.trim().is_empty()
+                || input.model == "meta-llama/llama-3.3-70b-instruct:free"
+            {
+                settings::DEFAULT_OPENROUTER_MODEL.to_string()
+            } else {
+                input.model
+            };
+            Ok(Some(Box::new(OpenAiCompatibleDriver::new(
+                "openrouter",
+                "OpenRouter",
+                OPENROUTER_BASE_URL.to_string(),
+                Some(key),
+                model,
+                vec![
+                    (
+                        "HTTP-Referer".to_string(),
+                        "https://netmonitor.app".to_string(),
+                    ),
+                    ("X-Title".to_string(), "NetMonitor AI Assistant".to_string()),
+                ],
+            ))))
+        }
+        "ollama" => {
+            let configured = input
+                .base_url
+                .filter(|u| !u.trim().is_empty())
+                .unwrap_or_else(|| DEFAULT_OLLAMA_BASE_URL.to_string());
+            let base_url = ollama::locate_openai_base(&configured).await;
+            Ok(Some(Box::new(OpenAiCompatibleDriver::new(
+                "ollama",
+                "Ollama Local",
+                base_url,
+                None,
+                input.model,
+                vec![],
+            ))))
+        }
+        _ => Ok(None),
+    }
+}
 
 /// O driver do provedor configurado, falando com o Ollama onde ele de fato
 /// está quando a URL da tela aponta para esta máquina

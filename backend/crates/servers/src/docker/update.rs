@@ -30,7 +30,12 @@ use serde_json::{Map, Value};
 
 use crate::views::docker::DockerActionResponse;
 
-use super::{call, client, maintenance::Progress, protection::is_current_container, DockerError};
+use super::{
+    call, call_within, client,
+    maintenance::Progress,
+    protection::{is_current_container, is_protected_inspect},
+    DockerError, LIFECYCLE_TIMEOUT,
+};
 
 const PULL_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const PULL_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
@@ -329,8 +334,13 @@ pub async fn update_container(
         .unwrap_or(id)
         .to_string();
     if is_current_container(&full_id) {
-        return Err(DockerError::Validation(
+        return Err(DockerError::Forbidden(
             "O container que executa o NetMonitor não pode se recriar".into(),
+        ));
+    }
+    if is_protected_inspect(&inspect) {
+        return Err(DockerError::Forbidden(
+            "Container protegido da instalação NetMonitor: a ação derrubaria a central".into(),
         ));
     }
     let plan = recreate_plan(&inspect)?;
@@ -359,8 +369,11 @@ pub async fn update_container(
     .await?;
     if plan.running {
         let _ = progress.send("Parando o container atual…".into());
-        if let Err(error) =
-            call(client.stop_container(&full_id, None::<StopContainerOptions>)).await
+        if let Err(error) = call_within(
+            LIFECYCLE_TIMEOUT,
+            client.stop_container(&full_id, None::<StopContainerOptions>),
+        )
+        .await
         {
             rollback(&client, &full_id, &plan, None, progress).await;
             return Err(error);
@@ -371,14 +384,20 @@ pub async fn update_container(
         Ok(new_id) => {
             let _ = progress.send("Removendo o container anterior…".into());
             // Sem `v: true`: volumes nomeados e anônimos agora pertencem ao novo.
-            let _ = call(client.remove_container(
-                &full_id,
-                Some(RemoveContainerOptions {
-                    force: true,
-                    ..Default::default()
-                }),
-            ))
-            .await;
+            if let Err(error) = call_within(
+                LIFECYCLE_TIMEOUT,
+                client.remove_container(
+                    &full_id,
+                    Some(RemoveContainerOptions {
+                        force: true,
+                        ..Default::default()
+                    }),
+                ),
+            )
+            .await
+            {
+                tracing::warn!(%error, container = %full_id, "falha ao remover container antigo após atualização");
+            }
             Ok(DockerActionResponse {
                 success: true,
                 message: format!(
@@ -429,9 +448,12 @@ async fn create_and_start(
     }
     if plan.running {
         let _ = progress.send("Iniciando o novo container…".into());
-        call(client.start_container::<String>(&new_id, None))
-            .await
-            .map_err(|error| (error, Some(new_id.clone())))?;
+        call_within(
+            LIFECYCLE_TIMEOUT,
+            client.start_container::<String>(&new_id, None),
+        )
+        .await
+        .map_err(|error| (error, Some(new_id.clone())))?;
         wait_healthy(client, &new_id, progress)
             .await
             .map_err(|error| (error, Some(new_id.clone())))?;
@@ -487,24 +509,40 @@ async fn rollback(
 ) {
     let _ = progress.send("Falha na atualização; restaurando o container original…".into());
     if let Some(created) = created {
-        let _ = call(client.remove_container(
-            created,
-            Some(RemoveContainerOptions {
-                force: true,
-                ..Default::default()
-            }),
-        ))
-        .await;
+        if let Err(error) = call_within(
+            LIFECYCLE_TIMEOUT,
+            client.remove_container(
+                created,
+                Some(RemoveContainerOptions {
+                    force: true,
+                    ..Default::default()
+                }),
+            ),
+        )
+        .await
+        {
+            tracing::error!(%error, container = created, "rollback: falha ao remover container novo");
+        }
     }
-    let _ = call(client.rename_container(
+    if let Err(error) = call(client.rename_container(
         original_id,
         RenameContainerOptions {
             name: plan.name.clone(),
         },
     ))
-    .await;
+    .await
+    {
+        tracing::error!(%error, container = original_id, target_name = %plan.name, "rollback: falha ao restaurar nome original");
+    }
     if plan.running {
-        let _ = call(client.start_container::<String>(original_id, None)).await;
+        if let Err(error) = call_within(
+            LIFECYCLE_TIMEOUT,
+            client.start_container::<String>(original_id, None),
+        )
+        .await
+        {
+            tracing::error!(%error, container = original_id, "rollback: falha ao reiniciar container original");
+        }
     }
 }
 

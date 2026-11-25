@@ -110,7 +110,14 @@ pub async fn sync(
         "git checkout",
     )
     .await?;
-    let (ok, head) = cli::capture("git", &["rev-parse", "HEAD"], Some(dir), LOCAL_TIMEOUT).await?;
+    let (ok, head) = cli::capture_with_envs(
+        "git",
+        &["rev-parse", "HEAD"],
+        &envs,
+        Some(dir),
+        LOCAL_TIMEOUT,
+    )
+    .await?;
     if ok && !head.is_empty() {
         Ok(head)
     } else {

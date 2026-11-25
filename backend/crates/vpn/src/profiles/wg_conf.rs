@@ -62,10 +62,7 @@ impl VpnProfileGenerator for WgConfProfileGenerator {
             format!("MTU = {}", context.mtu),
         ];
         if let Some(dns) = context.dns_servers.as_deref().filter(|v| !v.is_empty()) {
-            let safe_dns: String = dns
-                .chars()
-                .filter(|c| !c.is_control() && *c != '\r' && *c != '\n' && *c != '\t')
-                .collect();
+            let safe_dns = escape_wg_value(dns);
             if !safe_dns.is_empty() {
                 lines.push(format!("DNS = {safe_dns}"));
             }

@@ -94,16 +94,21 @@ pub async fn execute_traceroute(
         let mut rtts: Vec<Option<f64>> = Vec::with_capacity(usize::from(options.probes_per_hop));
         let mut resolved_ip: Option<IpAddr> = None;
         let mut reached_target = false;
+        let mut pinger = client.pinger(target, PingIdentifier(rand::random())).await;
+        pinger.timeout(probe_timeout);
 
         for seq in 0..options.probes_per_hop {
             if cancel.is_cancelled() {
                 break;
             }
 
-            let mut pinger = client.pinger(target, PingIdentifier(rand::random())).await;
-            pinger.timeout(probe_timeout);
+            let ping_res = tokio::select! {
+                biased;
+                _ = cancel.cancelled() => break,
+                res = pinger.ping(PingSequence(seq.into()), &payload) => res,
+            };
 
-            match pinger.ping(PingSequence(seq.into()), &payload).await {
+            match ping_res {
                 Ok((packet, rtt)) => {
                     rtts.push(Some(duration_to_ms(rtt)));
 
@@ -133,6 +138,10 @@ pub async fn execute_traceroute(
             }
         }
 
+        if cancel.is_cancelled() {
+            break;
+        }
+
         // Calcula média de RTT das sondas bem-sucedidas
         let successful_rtts: Vec<f64> = rtts.iter().flatten().copied().collect();
         let avg_rtt = if successful_rtts.is_empty() {
@@ -152,7 +161,11 @@ pub async fn execute_traceroute(
 
         // Resolução reversa de DNS assíncrona com timeout estrito
         let hostname = if let Some(ip) = resolved_ip {
-            resolve_reverse_dns(ip).await
+            tokio::select! {
+                biased;
+                _ = cancel.cancelled() => break,
+                res = resolve_reverse_dns(ip) => res,
+            }
         } else {
             None
         };
@@ -167,7 +180,9 @@ pub async fn execute_traceroute(
         };
 
         hops.push(hop.clone());
-        let _ = sender.send(TracerouteEvent::Hop(hop)).await;
+        if sender.send(TracerouteEvent::Hop(hop)).await.is_err() {
+            break;
+        }
 
         if reached_target || cancel.is_cancelled() {
             break;

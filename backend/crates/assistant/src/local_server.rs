@@ -19,6 +19,7 @@
 //! máquina é escolha do operador e nunca é trocado.
 
 use std::{
+    collections::BTreeMap,
     sync::{OnceLock, RwLock},
     time::{Duration, Instant},
 };
@@ -34,8 +35,19 @@ const PROBE_TIMEOUT: Duration = Duration::from_millis(1_500);
 /// Quanto tempo um endereço achado vale sem nova procura.
 const REMEMBER: Duration = Duration::from_secs(5 * 60);
 
-/// O último achado: a URL da tela, onde o servidor respondeu e quando.
-type Found = Option<(String, String, Instant)>;
+/// Quanto tempo lembrar que nenhum endereço local respondeu, para evitar
+/// sondar todos os candidatos em sequência a cada requisição. Curto: o
+/// servidor que acabou de subir tem de ser achado logo.
+const REMEMBER_MISS: Duration = Duration::from_secs(5);
+
+/// O último resultado da procura de uma URL da tela: achado ou ausência recente.
+enum Cached {
+    Found { url: String, at: Instant },
+    NotFound { tried: Vec<String>, at: Instant },
+}
+
+/// Um resultado por URL da tela: a falha de uma não apaga o achado de outra.
+type Found = BTreeMap<String, Cached>;
 
 fn http() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
@@ -67,7 +79,7 @@ impl LocalServer {
             service,
             port,
             env,
-            found: RwLock::new(None),
+            found: RwLock::new(BTreeMap::new()),
         }
     }
 
@@ -121,12 +133,29 @@ impl LocalServer {
         })
     }
 
-    fn remembered(&self, configured: &str) -> Option<String> {
+    fn remembered(&self, configured: &str) -> Option<Result<String, Vec<String>>> {
         let guard = self.found.read().ok()?;
-        guard
-            .as_ref()
-            .filter(|(asked, _, at)| asked == configured && at.elapsed() < REMEMBER)
-            .map(|(_, url, _)| url.clone())
+        match guard.get(configured)? {
+            Cached::Found { url, at } if at.elapsed() < REMEMBER => Some(Ok(url.clone())),
+            Cached::NotFound { tried, at } if at.elapsed() < REMEMBER_MISS => {
+                Some(Err(tried.clone()))
+            }
+            _ => None,
+        }
+    }
+
+    fn remember(&self, configured: &str, cached: Cached) {
+        if let Ok(mut guard) = self.found.write() {
+            guard.insert(configured.to_owned(), cached);
+        }
+    }
+
+    /// Esquece o que a procura achou: as configurações de IA mudaram, e a
+    /// próxima requisição procura de novo.
+    pub fn forget(&self) {
+        if let Ok(mut guard) = self.found.write() {
+            guard.clear();
+        }
     }
 
     /// O primeiro endereço que responde, em paralelo. Nenhum respondendo, a
@@ -138,8 +167,8 @@ impl LocalServer {
     ///
     /// Os endereços tentados, quando nenhum respondeu.
     pub async fn locate(&self, configured: &str) -> Result<String, Vec<String>> {
-        if let Some(url) = self.remembered(configured) {
-            return Ok(url);
+        if let Some(cached) = self.remembered(configured) {
+            return cached;
         }
         let list = self.candidates(configured, std::env::var(self.env).ok().as_deref());
         // A da tela sozinha primeiro: respondendo, não espera a resolução de
@@ -154,13 +183,24 @@ impl LocalServer {
                 .zip(replies)
                 .find_map(|(url, ok)| ok.then(|| url.clone()))
             else {
+                self.remember(
+                    configured,
+                    Cached::NotFound {
+                        tried: list.clone(),
+                        at: Instant::now(),
+                    },
+                );
                 return Err(list);
             };
             url
         };
-        if let Ok(mut guard) = self.found.write() {
-            *guard = Some((configured.to_owned(), url.clone(), Instant::now()));
-        }
+        self.remember(
+            configured,
+            Cached::Found {
+                url: url.clone(),
+                at: Instant::now(),
+            },
+        );
         if url != configured.trim_end_matches('/') {
             tracing::info!(%url, configured, server = self.label, "servidor de modelos encontrado fora da URL da tela");
         }
@@ -184,6 +224,33 @@ mod tests {
     use super::*;
 
     static OLLAYA: LocalServer = LocalServer::new("Ollaya", "ollaya", 11435, "OLLAYA_URL");
+
+    #[test]
+    fn a_falha_de_uma_url_nao_apaga_o_achado_de_outra() {
+        let server = LocalServer::new("Teste", "teste", 1, "TESTE_URL");
+        server.remember(
+            "http://teste:1",
+            Cached::Found {
+                url: "http://127.0.0.1:1".into(),
+                at: Instant::now(),
+            },
+        );
+        server.remember(
+            "http://outra:1",
+            Cached::NotFound {
+                tried: vec!["http://outra:1".into()],
+                at: Instant::now(),
+            },
+        );
+        assert_eq!(
+            server.remembered("http://teste:1"),
+            Some(Ok("http://127.0.0.1:1".to_owned()))
+        );
+        assert!(matches!(server.remembered("http://outra:1"), Some(Err(_))));
+        server.forget();
+        assert_eq!(server.remembered("http://teste:1"), None);
+        assert_eq!(server.remembered("http://outra:1"), None);
+    }
 
     #[test]
     fn a_variavel_vem_antes_e_nada_se_repete() {

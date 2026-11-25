@@ -2,19 +2,23 @@
 
 use chrono::Utc;
 use loco_rs::app::AppContext;
-use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect, Set,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
 use crate::vendors;
 use netmonitor_core::{
     events::EventBus,
-    models::_entities::{alert_events, device_interfaces, devices},
+    models::_entities::{
+        alert_events, device_interfaces, devices, discovery_results, discovery_runs,
+    },
     network_tools::{
         nat::can_inspect_l2,
         neighbor_cache::{self, NeighborEntry},
     },
-    shared::errors::AppResult,
+    shared::{errors::AppResult, transaction::begin_write},
 };
 
 /// Tipo de anomalia identificada na camada de rede.
@@ -54,14 +58,11 @@ pub async fn analyze_network_conflicts(db: &DatabaseConnection) -> AppResult<Vec
 
     let mut neighbors = neighbor_cache::read_system_neighbors().await;
 
-    // Complementa com resultados observados na descoberta recente
-    if let Ok(recent) = netmonitor_core::models::_entities::discovery_results::Entity::find()
-        .filter(
-            netmonitor_core::models::_entities::discovery_results::Column::MacAddress.is_not_null(),
-        )
-        .all(db)
-        .await
-    {
+    // Complementa só com a última varredura concluída de cada rede: leases
+    // DHCP históricos não viram falso conflito, e uma rede varrida menos de
+    // uma vez por dia não alterna o alerta entre resolvido e recriado (o que
+    // um corte absoluto de 24h fazia).
+    if let Ok(recent) = latest_run_results_with_mac(db).await {
         for disc in recent {
             if let Some(mac) = disc
                 .mac_address
@@ -80,6 +81,31 @@ pub async fn analyze_network_conflicts(db: &DatabaseConnection) -> AppResult<Vec
 
     let deduped = neighbor_cache::dedup_neighbors(neighbors);
     evaluate_conflicts_pure(db, &deduped).await
+}
+
+/// Os resultados com MAC da última run concluída de cada rede.
+async fn latest_run_results_with_mac(
+    db: &DatabaseConnection,
+) -> AppResult<Vec<discovery_results::Model>> {
+    let latest_runs: Vec<i64> = discovery_runs::Entity::find()
+        .select_only()
+        .column_as(discovery_runs::Column::Id.max(), "id")
+        .filter(discovery_runs::Column::Status.eq("completed"))
+        .group_by(discovery_runs::Column::NetworkId)
+        .into_tuple::<Option<i64>>()
+        .all(db)
+        .await?
+        .into_iter()
+        .flatten()
+        .collect();
+    if latest_runs.is_empty() {
+        return Ok(Vec::new());
+    }
+    Ok(discovery_results::Entity::find()
+        .filter(discovery_results::Column::MacAddress.is_not_null())
+        .filter(discovery_results::Column::DiscoveryRunId.is_in(latest_runs))
+        .all(db)
+        .await?)
 }
 
 /// Avalia conflitos contra uma lista de vizinhos (função isolada e testável).
@@ -232,25 +258,31 @@ pub async fn alert_on_conflicts(ctx: &AppContext, conflicts: &[NetworkConflict])
     let current_ids: std::collections::HashSet<&str> =
         conflicts.iter().map(|c| c.id.as_str()).collect();
 
-    // 1. Auto-resolve alertas de conflitos anteriores que deixaram de existir
-    if let Ok(active_events) = alert_events::Entity::find()
+    // 1. Auto-resolve alertas anteriores e registra novos conflitos numa
+    // única transação de escrita.
+    let txn = begin_write(&ctx.db).await?;
+    let active_events = alert_events::Entity::find()
         .filter(alert_events::Column::ScopeKey.is_not_null())
         .filter(alert_events::Column::Status.eq("active"))
-        .all(&ctx.db)
-        .await
-    {
-        for evt in active_events {
-            if let Some(ref scope) = evt.scope_key {
-                if (scope.starts_with("ip_collision_")
-                    || scope.starts_with("mac_duplicate_")
-                    || scope.starts_with("mismatch_"))
-                    && !current_ids.contains(scope.as_str())
-                {
+        .all(&txn)
+        .await?;
+    let mut existing_scopes: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for evt in active_events {
+        if let Some(ref scope) = evt.scope_key {
+            if scope.starts_with("ip_collision_")
+                || scope.starts_with("mac_duplicate_")
+                || scope.starts_with("mismatch_")
+            {
+                if current_ids.contains(scope.as_str()) {
+                    existing_scopes.insert(scope.clone());
+                } else {
                     let mut act: alert_events::ActiveModel = evt.into();
                     act.status = Set("resolved".into());
                     act.resolved_at = Set(Some(now.into()));
                     act.updated_at = Set(now.into());
-                    let _ = act.update(&ctx.db).await;
+                    // Um erro aborta a transação no PostgreSQL: o COMMIT
+                    // viraria rollback silencioso.
+                    act.update(&txn).await?;
                 }
             }
         }
@@ -258,15 +290,8 @@ pub async fn alert_on_conflicts(ctx: &AppContext, conflicts: &[NetworkConflict])
 
     // 2. Registra novos alertas para os conflitos atuais
     for conflict in conflicts {
-        // Evita flood de eventos idênticos gravando apenas se não houver alerta recente para o mesmo ID
-        let existing = alert_events::Entity::find()
-            .filter(alert_events::Column::ScopeKey.eq(&conflict.id))
-            .filter(alert_events::Column::Status.eq("active"))
-            .one(&ctx.db)
-            .await?;
-
-        if existing.is_none() {
-            let _ = alert_events::ActiveModel {
+        if !existing_scopes.contains(&conflict.id) {
+            alert_events::ActiveModel {
                 device_id: Set(conflict.affected_device_id),
                 scope_key: Set(Some(conflict.id.clone())),
                 status: Set("active".into()),
@@ -278,10 +303,11 @@ pub async fn alert_on_conflicts(ctx: &AppContext, conflicts: &[NetworkConflict])
                 updated_at: Set(now.into()),
                 ..Default::default()
             }
-            .insert(&ctx.db)
-            .await;
+            .insert(&txn)
+            .await?;
         }
     }
+    txn.commit().await?;
 
     // 3. Notifica a aplicação em tempo real via SSE
     if let Ok(events) = EventBus::from_context(ctx) {
@@ -303,6 +329,85 @@ pub async fn alert_on_conflicts(ctx: &AppContext, conflicts: &[NetworkConflict])
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::migrations::{MigratorTrait, TestMigrator};
+    use netmonitor_core::models::_entities::networks;
+
+    async fn db() -> DatabaseConnection {
+        let mut options = sea_orm::ConnectOptions::new("sqlite::memory:".to_owned());
+        options.max_connections(1).min_connections(1);
+        let db = sea_orm::Database::connect(options).await.unwrap();
+        TestMigrator::up(&db, None).await.unwrap();
+        db
+    }
+
+    async fn network(db: &DatabaseConnection, cidr: &str) -> i64 {
+        let now = Utc::now().fixed_offset();
+        networks::ActiveModel {
+            name: Set(cidr.into()),
+            cidr: Set(cidr.into()),
+            scan_enabled: Set(true),
+            scan_interval: Set(7 * 24 * 3600),
+            active: Set(true),
+            created_at: Set(now),
+            updated_at: Set(now),
+            ..Default::default()
+        }
+        .insert(db)
+        .await
+        .unwrap()
+        .id
+    }
+
+    async fn run_with(db: &DatabaseConnection, network_id: i64, status: &str, mac: &str) {
+        // Varredura antiga: o corte absoluto de 24h a descartaria.
+        let seen = (Utc::now() - chrono::Duration::days(6)).fixed_offset();
+        let run = discovery_runs::ActiveModel {
+            network_id: Set(network_id),
+            status: Set(status.into()),
+            started_at: Set(seen),
+            created_at: Set(seen),
+            updated_at: Set(seen),
+            ..Default::default()
+        }
+        .insert(db)
+        .await
+        .unwrap();
+        discovery_results::ActiveModel {
+            discovery_run_id: Set(run.id),
+            ip_address: Set("192.168.0.10".into()),
+            mac_address: Set(Some(mac.into())),
+            confidence: Set(50),
+            first_seen_at: Set(seen),
+            last_seen_at: Set(seen),
+            created_at: Set(seen),
+            updated_at: Set(seen),
+            ..Default::default()
+        }
+        .insert(db)
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn conflitos_usam_a_ultima_run_concluida_de_cada_rede() {
+        let db = db().await;
+        let semanal = network(&db, "192.168.0.0/24").await;
+        let outra = network(&db, "10.0.0.0/24").await;
+        run_with(&db, semanal, "completed", "aa:aa:aa:aa:aa:01").await;
+        run_with(&db, semanal, "completed", "aa:aa:aa:aa:aa:02").await;
+        run_with(&db, semanal, "failed", "aa:aa:aa:aa:aa:03").await;
+        run_with(&db, outra, "completed", "aa:aa:aa:aa:aa:04").await;
+
+        let mut macs: Vec<String> = latest_run_results_with_mac(&db)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter_map(|result| result.mac_address)
+            .collect();
+        macs.sort();
+        assert_eq!(macs, ["aa:aa:aa:aa:aa:02", "aa:aa:aa:aa:aa:04"]);
+    }
 
     #[test]
     fn serializacao_de_conflict_type() {

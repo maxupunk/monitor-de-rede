@@ -23,7 +23,10 @@ use crate::{
 use netmonitor_core::notifications::{NotificationMessage, Severity};
 use netmonitor_core::{
     models::system_settings,
-    shared::errors::{AppError, AppResult},
+    shared::{
+        errors::{AppError, AppResult},
+        transaction::begin_write,
+    },
 };
 
 /// Último resumo gerado (automático ou pedido na tela).
@@ -108,7 +111,9 @@ pub async fn generate(
     };
     let text = serde_json::to_string(&digest)
         .map_err(|error| AppError::Internal(anyhow::Error::new(error)))?;
-    system_settings::Model::set(&ctx.db, LATEST_KEY, Some(text)).await?;
+    let tx = begin_write(&ctx.db).await?;
+    system_settings::Model::set(&tx, LATEST_KEY, Some(text)).await?;
+    tx.commit().await?;
     Ok(digest)
 }
 
@@ -150,16 +155,21 @@ pub async fn run_if_due(
     {
         return Ok(false);
     }
+    let hours = period_hours(schedule);
+    // Verifica o período silencioso antes de gravar `LAST_SENT_KEY`: um erro
+    // transitório de leitura aqui não queima a janela do dia.
+    let quiet = settings.proactive.skip_quiet_digest && quiet_period(&ctx.db, hours).await?;
     // Marca antes de gerar: se o provedor falhar, a próxima tentativa fica
     // para o próximo período em vez de insistir a cada 5 minutos.
+    let tx = begin_write(&ctx.db).await?;
     system_settings::Model::set(
-        &ctx.db,
+        &tx,
         LAST_SENT_KEY,
         Some(now.with_timezone(&Utc).to_rfc3339()),
     )
     .await?;
-    let hours = period_hours(schedule);
-    if settings.proactive.skip_quiet_digest && quiet_period(&ctx.db, hours).await? {
+    tx.commit().await?;
+    if quiet {
         tracing::info!(hours, "resumo periódico pulado: nenhum alerta no período");
         return Ok(false);
     }

@@ -7,7 +7,8 @@
 //! serviço de agentes.
 
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, Set,
+    TransactionSession, TransactionTrait,
 };
 use serde_json::json;
 
@@ -21,6 +22,7 @@ use crate::{
     shared::{
         crypto::{random_token, sha256_hex},
         errors::{AppError, AppResult},
+        transaction::begin_write,
     },
 };
 
@@ -48,8 +50,8 @@ pub fn validate_name(name: &str) -> AppResult<String> {
 /// # Errors
 ///
 /// `validation` quando não existe; erro do banco.
-pub async fn ensure_device(
-    db: &DatabaseConnection,
+pub async fn ensure_device<C: ConnectionTrait>(
+    db: &C,
     device_id: Option<i64>,
 ) -> AppResult<Option<devices::Model>> {
     let Some(device_id) = device_id else {
@@ -70,31 +72,46 @@ pub async fn ensure_device(
 /// # Errors
 ///
 /// Validação do nome ou do dispositivo; erro do banco.
-pub async fn create(
-    db: &DatabaseConnection,
+pub async fn create<C: ConnectionTrait>(
+    db: &C,
     name: &str,
     site_id: Option<i64>,
     device_id: Option<i64>,
     enforce_tunnel_ip: Option<bool>,
 ) -> AppResult<(probes::Model, String)> {
+    let saved = insert_agent(db, name, site_id, device_id, enforce_tunnel_ip, None).await?;
+    let code = enrollment::issue(saved.id);
+    Ok((saved, code))
+}
+
+async fn insert_agent<C: ConnectionTrait>(
+    db: &C,
+    name: &str,
+    site_id: Option<i64>,
+    device_id: Option<i64>,
+    enforce_tunnel_ip: Option<bool>,
+    policy: Option<&InstallPolicy>,
+) -> AppResult<probes::Model> {
     let name = validate_name(name)?;
     ensure_device(db, device_id).await?;
-    let saved = probes::ActiveModel {
+    let mut configuration = json!({
+        "role": ROLE_AGENT,
+        "enforceTunnelIp": enforce_tunnel_ip.unwrap_or(true),
+    });
+    if let Some(policy) = policy {
+        policy.store(&mut configuration);
+    }
+    Ok(probes::ActiveModel {
         site_id: Set(site_id),
         name: Set(name),
         token_hash: Set(sha256_hex(&random_token())),
         status: Set(STATUS_PENDING.into()),
         device_id: Set(device_id),
-        configuration: Set(Some(json!({
-            "role": ROLE_AGENT,
-            "enforceTunnelIp": enforce_tunnel_ip.unwrap_or(true),
-        }))),
+        configuration: Set(Some(configuration)),
         ..Default::default()
     }
     .insert(db)
-    .await?;
-    let code = enrollment::issue(saved.id);
-    Ok((saved, code))
+    .await?)
 }
 
 /// Agente criado junto com o peer da VPN: já nasce vinculado ao
@@ -104,22 +121,29 @@ pub async fn create(
 /// # Errors
 ///
 /// Validação do nome ou erro do banco.
-pub async fn create_for_device(
-    db: &DatabaseConnection,
+pub async fn create_for_device<C: ConnectionTrait + TransactionTrait>(
+    db: &C,
     name: &str,
     site_id: Option<i64>,
     device_id: i64,
     policy: &InstallPolicy,
 ) -> AppResult<probes::Model> {
-    if let Some(existing) = for_device(db, device_id).await? {
+    let txn = begin_write(db).await?;
+    if let Some(existing) = for_device(&txn, device_id).await? {
+        txn.commit().await?;
         return Ok(existing);
     }
-    let (probe, _code) = create(db, name, site_id, Some(device_id), Some(true)).await?;
-    let mut configuration = probe.configuration.clone().unwrap_or_else(|| json!({}));
-    policy.store(&mut configuration);
-    let mut active: probes::ActiveModel = probe.into();
-    active.configuration = Set(Some(configuration));
-    Ok(active.update(db).await?)
+    let saved = insert_agent(
+        &txn,
+        name,
+        site_id,
+        Some(device_id),
+        Some(true),
+        Some(policy),
+    )
+    .await?;
+    txn.commit().await?;
+    Ok(saved)
 }
 
 /// Agente já cadastrado que pode passar a falar pelo túnel de um peer novo:
@@ -130,7 +154,7 @@ pub async fn create_for_device(
 ///
 /// `not_found` para um id que não é de agente; `business_rule` para o agente
 /// local, um revogado ou um que já tem dispositivo.
-pub async fn attachable(db: &DatabaseConnection, agent_id: i64) -> AppResult<probes::Model> {
+pub async fn attachable<C: ConnectionTrait>(db: &C, agent_id: i64) -> AppResult<probes::Model> {
     let agent = probes::Entity::find_by_id(agent_id)
         .one(db)
         .await?
@@ -160,13 +184,13 @@ pub async fn attachable(db: &DatabaseConnection, agent_id: i64) -> AppResult<pro
 /// # Errors
 ///
 /// Propaga erro do banco.
-pub async fn attach_to_device(
-    db: &DatabaseConnection,
-    agent: probes::Model,
+pub async fn attach_to_device<C: ConnectionTrait>(
+    db: &C,
+    mut agent: probes::Model,
     device_id: i64,
     policy: &InstallPolicy,
 ) -> AppResult<probes::Model> {
-    let mut configuration = agent.configuration.clone().unwrap_or_else(|| json!({}));
+    let mut configuration = agent.configuration.take().unwrap_or_else(|| json!({}));
     configuration["enforceTunnelIp"] = serde_json::Value::Bool(true);
     policy.store(&mut configuration);
     let mut active: probes::ActiveModel = agent.into();
@@ -181,19 +205,19 @@ pub async fn attach_to_device(
 /// # Errors
 ///
 /// Propaga erro do banco.
-pub async fn save_policy(
-    db: &DatabaseConnection,
+pub async fn save_policy<C: ConnectionTrait>(
+    db: &C,
     probe_id: i64,
     policy: &InstallPolicy,
 ) -> AppResult<Option<probes::Model>> {
-    let Some(agent) = probes::Entity::find_by_id(probe_id)
+    let Some(mut agent) = probes::Entity::find_by_id(probe_id)
         .one(db)
         .await?
         .filter(is_agent)
     else {
         return Ok(None);
     };
-    let mut configuration = agent.configuration.clone().unwrap_or_else(|| json!({}));
+    let mut configuration = agent.configuration.take().unwrap_or_else(|| json!({}));
     policy.store(&mut configuration);
     let mut active: probes::ActiveModel = agent.into();
     active.configuration = Set(Some(configuration));
@@ -205,8 +229,8 @@ pub async fn save_policy(
 /// # Errors
 ///
 /// Propaga erro do banco.
-pub async fn for_device(
-    db: &DatabaseConnection,
+pub async fn for_device<C: ConnectionTrait>(
+    db: &C,
     device_id: i64,
 ) -> AppResult<Option<probes::Model>> {
     Ok(probes::Entity::find()
@@ -233,7 +257,12 @@ pub fn tunnel_server_url(server_vpn_address: &str) -> String {
         .ok()
         .and_then(|port| port.trim().parse::<u16>().ok())
         .unwrap_or(3333);
-    format!("http://{server_vpn_address}:{port}")
+    let host = server_vpn_address.trim();
+    if host.contains(':') && !host.starts_with('[') {
+        format!("http://[{host}]:{port}")
+    } else {
+        format!("http://{host}:{port}")
+    }
 }
 
 #[cfg(test)]

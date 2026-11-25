@@ -54,9 +54,14 @@ impl Ipv4Cidr {
     }
 
     /// Primeiro endereço utilizável da faixa (por convenção, o servidor/gateway).
+    /// Nas faixas `/31` e `/32` (RFC 3021), o próprio endereço de rede é utilizável.
     #[must_use]
     pub fn first_usable_address(&self) -> Ipv4Addr {
-        Ipv4Addr::from(u32::from(self.network_address).saturating_add(1))
+        if self.prefix_length >= 31 {
+            self.network_address
+        } else {
+            Ipv4Addr::from(u32::from(self.network_address).saturating_add(1))
+        }
     }
 
     /// Verifica se um IP pertence a esta faixa.
@@ -66,10 +71,19 @@ impl Ipv4Cidr {
         target >= u32::from(self.network_address) && target <= u32::from(self.broadcast_address)
     }
 
-    /// Itera os endereços utilizáveis da faixa (exclui rede e broadcast).
+    /// Itera os endereços utilizáveis da faixa (exclui rede e broadcast, exceto `/31` e `/32`).
     pub fn usable_addresses(&self) -> impl Iterator<Item = Ipv4Addr> {
-        let start = u32::from(self.network_address).saturating_add(1);
-        let end = u32::from(self.broadcast_address).saturating_sub(1);
+        let (start, end) = if self.prefix_length >= 31 {
+            (
+                u32::from(self.network_address),
+                u32::from(self.broadcast_address),
+            )
+        } else {
+            (
+                u32::from(self.network_address).saturating_add(1),
+                u32::from(self.broadcast_address).saturating_sub(1),
+            )
+        };
         (start..=end).map(Ipv4Addr::from)
     }
 }
@@ -88,8 +102,13 @@ impl Ipv6Cidr {
     pub fn new(address: Ipv6Addr, prefix_length: u8) -> Self {
         let prefix_length = prefix_length.min(128);
         let host_bits = 128 - u32::from(prefix_length);
-        let size = 1_u128 << host_bits;
-        let mask = if prefix_length == 128 {
+        let usable_hosts = 1_u128
+            .checked_shl(host_bits)
+            .and_then(|size| u32::try_from(size).ok())
+            .unwrap_or(u32::MAX);
+        let mask = if prefix_length == 0 {
+            0
+        } else if prefix_length == 128 {
             u128::MAX
         } else {
             u128::MAX << host_bits
@@ -99,7 +118,7 @@ impl Ipv6Cidr {
         Self {
             network_address: Ipv6Addr::from(network),
             prefix_length,
-            usable_hosts: u32::try_from(size).unwrap_or(u32::MAX),
+            usable_hosts,
         }
     }
 
@@ -265,6 +284,9 @@ pub fn is_internal_address(ip: IpAddr) -> bool {
                 || (a == 100 && (64..=127).contains(&b))
         }
         IpAddr::V6(v6) => {
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return is_internal_address(IpAddr::V4(v4));
+            }
             let first = v6.segments()[0];
             v6.is_loopback() || (first & 0xfe00) == 0xfc00 || (first & 0xffc0) == 0xfe80
         }
@@ -394,5 +416,38 @@ mod tests {
             .filter(|candidate| is_scan_host(*candidate, "192.168.7.0/29"))
             .collect();
         assert_eq!(accepted, hosts);
+    }
+
+    #[test]
+    fn ipv6_cidr_prefixo_zero_nao_faz_panico() {
+        let range = Ipv6Cidr::new(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1), 0);
+        assert_eq!(range.network_address, Ipv6Addr::UNSPECIFIED);
+        assert_eq!(range.prefix_length, 0);
+        assert_eq!(range.usable_hosts, u32::MAX);
+    }
+
+    #[test]
+    fn ipv4_cidr_31_e_32_retornam_enderecos_validos() {
+        let host = Ipv4Cidr::new(Ipv4Addr::new(10, 8, 0, 5), 32);
+        assert_eq!(host.first_usable_address(), Ipv4Addr::new(10, 8, 0, 5));
+        assert_eq!(
+            host.usable_addresses().collect::<Vec<_>>(),
+            vec![Ipv4Addr::new(10, 8, 0, 5)]
+        );
+
+        let ptp = Ipv4Cidr::new(Ipv4Addr::new(10, 8, 0, 4), 31);
+        assert_eq!(ptp.first_usable_address(), Ipv4Addr::new(10, 8, 0, 4));
+        assert_eq!(
+            ptp.usable_addresses().collect::<Vec<_>>(),
+            vec![Ipv4Addr::new(10, 8, 0, 4), Ipv4Addr::new(10, 8, 0, 5)]
+        );
+    }
+
+    #[test]
+    fn is_internal_address_reconhece_ipv4_mapeado_em_ipv6() {
+        assert!(is_internal_address(ip("::ffff:10.0.0.1")));
+        assert!(is_internal_address(ip("::ffff:127.0.0.1")));
+        assert!(is_internal_address(ip("::ffff:100.64.0.1")));
+        assert!(!is_internal_address(ip("::ffff:8.8.8.8")));
     }
 }

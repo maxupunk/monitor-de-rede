@@ -77,16 +77,30 @@ pub(super) async fn run(
     let (reader, writer) = stream.into_split();
     let sent = ByteCounter::default();
     let received = ByteCounter::default();
-    let stop = CancellationToken::new();
+    let stop = cancel.child_token();
     let peer_gone = CancellationToken::new();
 
-    let read_task = tokio::spawn(read_loop(
+    struct AbortOnDrop<T>(Option<tokio::task::JoinHandle<T>>);
+    impl<T> AbortOnDrop<T> {
+        async fn join(mut self) -> Result<T, tokio::task::JoinError> {
+            self.0.take().expect("task presente").await
+        }
+    }
+    impl<T> Drop for AbortOnDrop<T> {
+        fn drop(&mut self) {
+            if let Some(handle) = self.0.take() {
+                handle.abort();
+            }
+        }
+    }
+
+    let read_task = AbortOnDrop(Some(tokio::spawn(read_loop(
         reader,
         received.clone(),
         stop.clone(),
         peer_gone.clone(),
-    ));
-    let write_task = tokio::spawn(write_loop(
+    ))));
+    let write_task = AbortOnDrop(Some(tokio::spawn(write_loop(
         writer,
         WriteSide {
             send: plan.send,
@@ -96,7 +110,7 @@ pub(super) async fn run(
         (sent.clone(), received.clone()),
         stop.clone(),
         peer_gone.clone(),
-    ));
+    ))));
 
     let mut flows = Vec::with_capacity(2);
     if plan.send {
@@ -115,8 +129,8 @@ pub(super) async fn run(
     let elapsed = started.elapsed();
     stop.cancel();
     let samples = sampler.finish().await;
-    let scanner = read_task.await.unwrap_or_default();
-    let _ = write_task.await;
+    let scanner = read_task.join().await.unwrap_or_default();
+    let _ = write_task.join().await;
     if was_cancelled {
         return Err(cancelled());
     }
@@ -181,6 +195,8 @@ async fn write_loop(
     let mut seq: u32 = 0;
     let mut reported = 0u64;
     loop {
+        // O cliente manda status periódico mesmo no teste só de envio: é o
+        // que o servidor btest do RouterOS espera para manter a sessão.
         if Instant::now() >= next_status {
             seq = seq.wrapping_add(1);
             let total = received.get();

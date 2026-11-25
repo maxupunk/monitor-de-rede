@@ -5,7 +5,14 @@
 //! controller extrai, valida, delega a `services::agents` e serializa; a
 //! ponte WebSocket ↔ canais é a única coisa de transporte que mora aqui.
 
-use std::net::{IpAddr, SocketAddr};
+use std::{
+    net::{IpAddr, SocketAddr},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
 use axum::{
     body::Body,
@@ -18,8 +25,9 @@ use axum::{
 };
 use futures::{SinkExt, StreamExt};
 use loco_rs::prelude::*;
-use netmonitor_core::agents::install_policy::InstallPolicy;
+use netmonitor_core::{agents::install_policy::InstallPolicy, shared::client_addr::TrustedProxies};
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 
 use crate::{
     dtos::agents::{
@@ -32,7 +40,10 @@ use crate::{
             hub::AgentHub,
             install, install_address,
             protocol::{WireFrame, MAX_FRAME_BYTES},
-            service::{publish_status, to_view, AgentService, ENROLLMENT_TTL_SECONDS},
+            send_bounded,
+            service::{
+                disconnect_session, publish_status, to_view, AgentService, ENROLLMENT_TTL_SECONDS,
+            },
         },
         audit::{AuditAction, AuditActor, AuditEntryInput, AuditService, ResourceType},
         shared::errors::{AppError, AppResult},
@@ -41,6 +52,11 @@ use crate::{
 };
 
 const TOKEN_HEADER: &str = "x-probe-token";
+const WS_PING_INTERVAL: Duration = Duration::from_secs(25);
+const WS_IDLE_TIMEOUT_SECS: u64 = 60;
+const WS_CLOSE_TIMEOUT: Duration = Duration::from_secs(2);
+/// Escrita no socket presa além disto (buffer cheio, agente sumido) é half-open.
+const WS_SEND_TIMEOUT: Duration = Duration::from_secs(WS_IDLE_TIMEOUT_SECS);
 
 /// IP de origem da conexão, quando o servidor o conhece.
 struct PeerAddr(Option<IpAddr>);
@@ -59,15 +75,31 @@ impl<S: Send + Sync> FromRequestParts<S> for PeerAddr {
 }
 
 /// `scheme://host` de quem chamou — último recurso para a URL da central.
-fn request_origin(headers: &HeaderMap) -> String {
-    let host = headers
-        .get("x-forwarded-host")
-        .or_else(|| headers.get(header::HOST))
+/// Cabeçalhos `X-Forwarded-*` só valem quando o peer é um proxy confiável
+/// (`TRUSTED_PROXIES`), e ambos passam por validação estrita.
+fn request_origin(headers: &HeaderMap, peer: Option<IpAddr>) -> String {
+    let trusted = peer.is_none_or(|ip| TrustedProxies::from_env().contains(ip));
+    let forwarded_host = trusted
+        .then(|| headers.get("x-forwarded-host"))
+        .flatten()
         .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| install_address::is_safe(value));
+    let host = forwarded_host
+        .or_else(|| {
+            headers
+                .get(header::HOST)
+                .and_then(|value| value.to_str().ok())
+                .map(str::trim)
+                .filter(|value| install_address::is_safe(value))
+        })
         .unwrap_or("localhost");
-    let scheme = headers
-        .get("x-forwarded-proto")
+    let scheme = trusted
+        .then(|| headers.get("x-forwarded-proto"))
+        .flatten()
         .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| matches!(*value, "http" | "https"))
         .unwrap_or("http");
     format!("{scheme}://{host}")
 }
@@ -89,7 +121,7 @@ async fn audit(
     let actor = AuditActor::from_headers(headers, &ctx.db)
         .await
         .unwrap_or_default();
-    let _ = AuditService::new(&ctx.db)
+    if let Err(error) = AuditService::new(&ctx.db)
         .log(
             actor,
             AuditEntryInput {
@@ -101,26 +133,17 @@ async fn audit(
                 changes: None,
             },
         )
-        .await;
+        .await
+    {
+        tracing::warn!(%error, probe_id = probe.id, "falha ao registrar auditoria do agente");
+    }
 }
 
 // --- Administração (JWT) ----------------------------------------------------
 
 async fn index(State(ctx): State<AppContext>) -> AppResult<Response> {
-    let service = AgentService::new(&ctx.db);
-    let agents = service.list().await?;
-    let devices = service.devices_of(&agents).await?;
     let hub = AgentHub::from_context(&ctx).ok();
-    let views: Vec<AgentView> = agents
-        .iter()
-        .map(|agent| {
-            let device = devices
-                .iter()
-                .find(|device| Some(device.id) == agent.device_id);
-            let connected = hub.as_ref().is_some_and(|hub| hub.get(agent.id).is_some());
-            to_view(agent, device, connected)
-        })
-        .collect();
+    let views = AgentService::new(&ctx.db).list_views(hub.as_ref()).await?;
     Ok(format::json(views)?)
 }
 
@@ -132,6 +155,7 @@ async fn show(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<R
 async fn store(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
+    PeerAddr(peer): PeerAddr,
     Json(input): Json<AgentCreateInput>,
 ) -> AppResult<Response> {
     let service = AgentService::new(&ctx.db);
@@ -142,7 +166,7 @@ async fn store(
         &ctx,
         code,
         devices.first(),
-        &request_origin(&headers),
+        &request_origin(&headers, peer),
         &policy,
     )
     .await?;
@@ -180,6 +204,7 @@ async fn update(
         "Agente remoto alterado",
     )
     .await;
+    publish_status(&ctx, &probe).await;
     Ok(format::json(view_of(&ctx, &probe).await?)?)
 }
 
@@ -187,6 +212,7 @@ async fn update(
 async fn enrollment(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
+    PeerAddr(peer): PeerAddr,
     Path(id): Path<i64>,
 ) -> AppResult<Response> {
     let service = AgentService::new(&ctx.db);
@@ -198,7 +224,7 @@ async fn enrollment(
         &ctx,
         code,
         devices.first(),
-        &request_origin(&headers),
+        &request_origin(&headers, peer),
         &policy,
     )
     .await?;
@@ -220,13 +246,16 @@ async fn enrollment(
 async fn install_commands(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
+    PeerAddr(peer): PeerAddr,
     Json(input): Json<AgentInstallCommandsInput>,
 ) -> AppResult<Response> {
     let policy = InstallPolicy::chosen_or_suggested(input.policy.as_ref())?;
     if input.policy.is_some() {
-        if let Some(probe_id) = netmonitor_core::agents::enrollment::peek(&input.code) {
-            let _ = netmonitor_core::agents::registration::save_policy(&ctx.db, probe_id, &policy)
-                .await;
+        if let Err(error) = AgentService::new(&ctx.db)
+            .save_policy_for_code(&input.code, &policy)
+            .await
+        {
+            tracing::warn!(%error, "falha ao salvar política de instalação do agente");
         }
     }
     Ok(format::json(
@@ -235,7 +264,7 @@ async fn install_commands(
             &input.code,
             input.address_id.as_deref(),
             None,
-            &request_origin(&headers),
+            &request_origin(&headers, peer),
             &policy,
         )
         .await?,
@@ -270,11 +299,7 @@ async fn revoke(
     Path(id): Path<i64>,
 ) -> AppResult<Response> {
     let probe = AgentService::new(&ctx.db).revoke(id).await?;
-    if let Ok(hub) = AgentHub::from_context(&ctx) {
-        if let Some(session) = hub.get(probe.id) {
-            hub.unregister(&session);
-        }
-    }
+    disconnect_session(&ctx, probe.id);
     audit(
         &ctx,
         &headers,
@@ -293,11 +318,7 @@ async fn destroy(
     Path(id): Path<i64>,
 ) -> AppResult<Response> {
     let probe = AgentService::new(&ctx.db).delete(id).await?;
-    if let Ok(hub) = AgentHub::from_context(&ctx) {
-        if let Some(session) = hub.get(probe.id) {
-            hub.unregister(&session);
-        }
-    }
+    disconnect_session(&ctx, probe.id);
     audit(
         &ctx,
         &headers,
@@ -317,6 +338,8 @@ async fn enroll(
     Json(input): Json<AgentEnrollInput>,
 ) -> AppResult<Response> {
     let (probe, token) = AgentService::new(&ctx.db).enroll(&input).await?;
+    // Reinstalação: encerra eventual conexão anterior que usava o token antigo.
+    disconnect_session(&ctx, probe.id);
     Ok(format::json(AgentEnrollResponse {
         probe_id: probe.id,
         name: probe.name,
@@ -342,42 +365,102 @@ async fn connect(
         .on_upgrade(move |socket| bridge(ctx, probe, socket)))
 }
 
-/// Liga o socket aos canais de quadros do serviço.
+/// Liga o socket aos canais de quadros do serviço, com detecção ativa de
+/// conexões half-open (Ping periódico + timeout de inatividade).
 async fn bridge(ctx: AppContext, probe: probes::Model, socket: WebSocket) {
     let (mut sink, mut stream) = socket.split();
     let (incoming_tx, incoming_rx) = mpsc::channel::<WireFrame>(64);
     let (outgoing_tx, mut outgoing_rx) = mpsc::channel::<WireFrame>(64);
-    let reader = tokio::spawn(async move {
-        while let Some(Ok(message)) = stream.next().await {
-            let frame = match message {
-                Message::Text(text) => WireFrame::Text(text.to_string()),
-                Message::Binary(bytes) => WireFrame::Binary(bytes.to_vec()),
-                Message::Close(_) => break,
-                _ => continue,
-            };
-            if incoming_tx.send(frame).await.is_err() {
-                break;
-            }
-        }
-    });
-    let writer = tokio::spawn(async move {
-        while let Some(frame) = outgoing_rx.recv().await {
-            let message = match frame {
-                WireFrame::Text(text) => Message::Text(text.into()),
-                WireFrame::Binary(bytes) => Message::Binary(bytes.into()),
-            };
-            if sink.send(message).await.is_err() {
-                break;
-            }
-        }
-        let _ = sink.close().await;
-    });
+    let stop = CancellationToken::new();
+    let started_at = tokio::time::Instant::now();
+    let last_rx = Arc::new(AtomicU64::new(0));
     let probe_id = probe.id;
+
+    let reader = {
+        let stop = stop.clone();
+        let last_rx = last_rx.clone();
+        tokio::spawn(async move {
+            loop {
+                let next = tokio::select! {
+                    biased;
+                    () = stop.cancelled() => break,
+                    next = stream.next() => next,
+                };
+                let Some(Ok(message)) = next else {
+                    break;
+                };
+                last_rx.store(started_at.elapsed().as_secs(), Ordering::Relaxed);
+                let frame = match message {
+                    Message::Text(text) => WireFrame::Text(text.to_string()),
+                    Message::Binary(bytes) => WireFrame::Binary(Vec::from(bytes)),
+                    Message::Close(_) => break,
+                    Message::Ping(_) | Message::Pong(_) => continue,
+                };
+                if incoming_tx.send(frame).await.is_err() {
+                    break;
+                }
+            }
+            stop.cancel();
+        })
+    };
+    let writer = {
+        let stop = stop.clone();
+        let last_rx = last_rx.clone();
+        tokio::spawn(async move {
+            let mut ping = tokio::time::interval(WS_PING_INTERVAL);
+            ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            ping.tick().await;
+            loop {
+                tokio::select! {
+                    biased;
+                    () = stop.cancelled() => break,
+                    frame = outgoing_rx.recv() => {
+                        let message = match frame {
+                            Some(WireFrame::Text(text)) => Message::Text(text.into()),
+                            Some(WireFrame::Binary(bytes)) => Message::Binary(bytes.into()),
+                            None => break,
+                        };
+                        if !send_bounded(&mut sink, message, &stop, WS_SEND_TIMEOUT).await {
+                            break;
+                        }
+                    }
+                    _ = ping.tick() => {
+                        let idle = started_at
+                            .elapsed()
+                            .as_secs()
+                            .saturating_sub(last_rx.load(Ordering::Relaxed));
+                        if idle >= WS_IDLE_TIMEOUT_SECS {
+                            tracing::warn!(
+                                probe_id,
+                                segundos = idle,
+                                "conexão de agente sem atividade (half-open); encerrando"
+                            );
+                            break;
+                        }
+                        if !send_bounded(&mut sink, Message::Ping(Vec::new().into()), &stop, WS_SEND_TIMEOUT).await {
+                            break;
+                        }
+                    }
+                }
+            }
+            stop.cancel();
+            let _ = tokio::time::timeout(WS_CLOSE_TIMEOUT, sink.close()).await;
+        })
+    };
     if let Err(error) = connection::serve(ctx, probe, incoming_rx, outgoing_tx).await {
         tracing::warn!(%error, probe_id, "conexão de agente recusada no handshake");
     }
+    stop.cancel();
     reader.abort();
-    let _ = writer.await;
+    if tokio::time::timeout(WS_CLOSE_TIMEOUT + Duration::from_secs(1), writer)
+        .await
+        .is_err()
+    {
+        tracing::debug!(
+            probe_id,
+            "encerramento do WebSocket do agente excedeu o prazo"
+        );
+    }
 }
 
 /// `GET /api/agents/install.sh` — script de instalação systemd (sem segredo).
@@ -395,15 +478,25 @@ async fn download(Path(arch): Path<String>) -> AppResult<Response> {
     let file = tokio::fs::File::open(&path).await.map_err(|_| {
         AppError::not_found("Binário do agente não publicado nesta central (AGENT_DIST_DIR)")
     })?;
+    let content_length = file.metadata().await.ok().map(|meta| meta.len());
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::CONTENT_TYPE,
+        header::HeaderValue::from_static("application/octet-stream"),
+    );
+    if let Ok(disposition) = header::HeaderValue::from_str(&format!(
+        r#"attachment; filename="netmonitor-agent-{arch}""#
+    )) {
+        headers.insert(header::CONTENT_DISPOSITION, disposition);
+    }
+    if let Some(len) = content_length {
+        if let Ok(value) = header::HeaderValue::from_str(&len.to_string()) {
+            headers.insert(header::CONTENT_LENGTH, value);
+        }
+    }
     Ok((
         StatusCode::OK,
-        [
-            (header::CONTENT_TYPE, "application/octet-stream".to_string()),
-            (
-                header::CONTENT_DISPOSITION,
-                format!(r#"attachment; filename="netmonitor-agent-{arch}""#),
-            ),
-        ],
+        headers,
         Body::from_stream(tokio_util::io::ReaderStream::new(file)),
     )
         .into_response())

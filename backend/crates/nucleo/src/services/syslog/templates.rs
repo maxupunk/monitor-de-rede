@@ -96,16 +96,16 @@ pub async fn list(
     db: &DatabaseConnection,
     category: Option<&str>,
 ) -> AppResult<Vec<LogTemplateInfo>> {
-    let rows = log_templates::Entity::find()
+    let mut query = log_templates::Entity::find();
+    if let Some(wanted) = category.map(str::trim).filter(|value| !value.is_empty()) {
+        query = query.filter(super::repository::effective_category_condition(wanted));
+    }
+    let rows = query
         .order_by_desc(log_templates::Column::FirstSeenAt)
         .limit(LIST_LIMIT)
         .all(db)
         .await?;
-    Ok(rows
-        .iter()
-        .filter(|row| category.is_none_or(|wanted| row.effective_category() == Some(wanted)))
-        .map(info)
-        .collect())
+    Ok(rows.iter().map(info).collect())
 }
 
 /// O operador confirma ou corrige a categoria de um padrão.

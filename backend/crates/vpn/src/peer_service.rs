@@ -4,13 +4,15 @@
 //! dos artefatos por perfil. A chave privada do cliente fica **apenas** em
 //! memória, entregue uma única vez.
 
-use std::net::Ipv4Addr;
+use std::{collections::HashMap, net::Ipv4Addr};
 
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set,
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, DbErr, EntityTrait, QueryFilter, QueryOrder,
+    Set,
 };
 
 use netmonitor_core::agents::install_policy::{InstallPolicy, InstallPolicyView};
+use netmonitor_core::shared::db_errors::is_unique_violation;
 use netmonitor_core::shared::transaction::begin_write;
 use netmonitor_core::{
     agents::{
@@ -196,10 +198,22 @@ fn generate_artifact(
 ///
 /// Propaga erro do banco.
 pub async fn list(db: &DatabaseConnection) -> AppResult<Vec<PeerListItem>> {
+    list_with_sync(db, true).await
+}
+
+/// Lista os peers, permitindo pular a releitura do `.status` quando o chamador
+/// acabou de sincronizar no mesmo fluxo.
+///
+/// # Errors
+///
+/// Propaga erro do banco.
+pub async fn list_with_sync(db: &DatabaseConnection, sync: bool) -> AppResult<Vec<PeerListItem>> {
     // Sem isto a lista mostra o que o scheduler gravou no ciclo anterior: o
     // operador que acabou de conectar o túnel precisaria recarregar a tela até
     // o background alcançá-lo.
-    server_service::sync_telemetry(db).await;
+    if sync {
+        server_service::sync_telemetry(db).await;
+    }
 
     let peers = vpn_peers::Entity::find()
         .order_by_asc(vpn_peers::Column::Id)
@@ -210,28 +224,29 @@ pub async fn list(db: &DatabaseConnection) -> AppResult<Vec<PeerListItem>> {
     }
 
     let device_ids: Vec<i64> = peers.iter().map(|peer| peer.device_id).collect();
-    let devices_by_id = devices::Entity::find()
+    let mut devices_by_id: HashMap<i64, devices::Model> = devices::Entity::find()
         .filter(devices::Column::Id.is_in(device_ids.clone()))
         .all(db)
-        .await?;
-    let ping_monitors = monitors::Entity::find()
+        .await?
+        .into_iter()
+        .map(|device| (device.id, device))
+        .collect();
+    let ping_monitors: HashMap<i64, monitors::Model> = monitors::Entity::find()
         .filter(monitors::Column::DeviceId.is_in(device_ids))
         .filter(monitors::Column::Type.eq("ping"))
         .all(db)
-        .await?;
+        .await?
+        .into_iter()
+        .filter_map(|monitor| monitor.device_id.map(|id| (id, monitor)))
+        .collect();
 
     // Uma leitura só da topologia para a lista inteira.
     let probe_external = super::probe_is_external();
     Ok(peers
         .into_iter()
         .map(|peer| {
-            let device = devices_by_id
-                .iter()
-                .find(|device| device.id == peer.device_id)
-                .cloned();
-            let monitor = ping_monitors
-                .iter()
-                .find(|monitor| monitor.device_id == Some(peer.device_id));
+            let device = devices_by_id.remove(&peer.device_id);
+            let monitor = ping_monitors.get(&peer.device_id);
             let hints = compute_peer_hints(&peer, monitor, probe_external);
             PeerListItem {
                 peer,
@@ -242,7 +257,30 @@ pub async fn list(db: &DatabaseConnection) -> AppResult<Vec<PeerListItem>> {
         .collect())
 }
 
-/// Cria dispositivo, peer e monitores em uma única transação e só então
+/// Resultado da criação de um peer: peer gravado, dispositivo provisionado e
+/// artefato com a chave privada (uso único).
+pub struct CreatedPeer {
+    pub peer: vpn_peers::Model,
+    pub device: Option<devices::Model>,
+    pub artifact: GeneratedArtifact,
+}
+
+/// Resultado de uma operação que altera o peer e precisa devolver o estado
+/// anterior para auditoria sem nova consulta no controller.
+pub struct RotatedPeer {
+    pub previous: vpn_peers::Model,
+    pub peer: vpn_peers::Model,
+    pub artifact: GeneratedArtifact,
+}
+
+/// Resultado do `rename` com o estado anterior para auditoria.
+pub struct RenamedPeer {
+    pub previous: vpn_peers::Model,
+    pub peer: vpn_peers::Model,
+    pub device: Option<devices::Model>,
+}
+
+/// Cria dispositivo, peer, monitores e agente em uma única transação e só então
 /// reescreve o `wg0.conf`.
 ///
 /// # Errors
@@ -252,6 +290,20 @@ pub async fn create(
     db: &DatabaseConnection,
     payload: &CreatePeerPayload,
 ) -> AppResult<(vpn_peers::Model, GeneratedArtifact)> {
+    let created = create_with_device(db, payload).await?;
+    Ok((created.peer, created.artifact))
+}
+
+/// Como [`create`], devolvendo também o dispositivo já carregado (evita uma
+/// segunda consulta no controller).
+///
+/// # Errors
+///
+/// Propaga validação de perfil/IP e erro do banco.
+pub async fn create_with_device(
+    db: &DatabaseConnection,
+    payload: &CreatePeerPayload,
+) -> AppResult<CreatedPeer> {
     if !registry::has(&payload.profile) {
         return Err(AppError::business_rule(format!(
             "Perfil de equipamento não suportado: {}",
@@ -272,17 +324,16 @@ pub async fn create(
     // Antes de criar qualquer coisa: um agente que não pode ser movido não
     // deixa um peer órfão para trás.
     let agent_policy = InstallPolicy::chosen_or_suggested(payload.agent_policy.as_ref())?;
-    let existing_agent = match payload.agent {
-        PeerAgent::Existing(agent_id) => Some(registration::attachable(db, agent_id).await?),
-        PeerAgent::None | PeerAgent::New => None,
-    };
+    if let PeerAgent::Existing(agent_id) = payload.agent {
+        registration::attachable(db, agent_id).await?;
+    }
 
     let requested_ip = match payload.ip_address.as_deref().filter(|v| !v.is_empty()) {
         Some(raw) => {
             let ip: Ipv4Addr = raw
                 .parse()
                 .map_err(|_| AppError::business_rule(format!("Endereço IPv4 inválido: {raw}")))?;
-            ip_allocator::assert_available(db, server.network_id, &network.cidr, ip).await?;
+            ip_allocator::validate_manual_ip(&network.cidr, ip)?;
             Some(ip)
         }
         None => None,
@@ -291,14 +342,19 @@ pub async fn create(
     let key_pair = generate_key_pair();
     let preshared_key = generate_preshared_key();
 
-    let provision = |ip_address: Ipv4Addr| {
+    let provision = |ip_address: Ipv4Addr, check_manual: bool| {
         let payload = payload.clone();
         let server = server.clone();
         let network = network.clone();
         let key_pair = key_pair.clone();
         let preshared_key = preshared_key.clone();
+        let agent_policy = agent_policy.clone();
         async move {
             let txn = begin_write(db).await?;
+            if check_manual {
+                ip_allocator::assert_available(&txn, server.network_id, &network.cidr, ip_address)
+                    .await?;
+            }
             let device = devices::ActiveModel {
                 site_id: Set(payload.site_id.or(network.site_id)),
                 network_id: Set(Some(server.network_id)),
@@ -361,38 +417,62 @@ pub async fn create(
             )
             .await?;
 
+            match payload.agent {
+                PeerAgent::Existing(agent_id) => {
+                    let agent = registration::attachable(&txn, agent_id).await?;
+                    registration::attach_to_device(&txn, agent, device.id, &agent_policy).await?;
+                }
+                PeerAgent::New => {
+                    registration::create_for_device(
+                        &txn,
+                        &payload.name,
+                        payload.site_id,
+                        device.id,
+                        &agent_policy,
+                    )
+                    .await?;
+                }
+                PeerAgent::None => {}
+            }
+
             txn.commit().await?;
             Ok(peer)
         }
     };
 
     let peer = match requested_ip {
-        Some(ip) => provision(ip).await?,
+        Some(ip) => match provision(ip, true).await {
+            Ok(peer) => peer,
+            Err(AppError::Internal(error))
+                if error
+                    .downcast_ref::<DbErr>()
+                    .is_some_and(is_unique_violation) =>
+            {
+                return Err(AppError::conflict(format!(
+                    "O endereço {ip} já está em uso nesta rede"
+                )));
+            }
+            Err(other) => return Err(other),
+        },
         None => {
-            ip_allocator::allocate(db, server.network_id, &network.cidr, &[], provision).await?
+            ip_allocator::allocate(db, server.network_id, &network.cidr, &[], |ip| {
+                provision(ip, false)
+            })
+            .await?
         }
     };
 
     server_service::apply_configuration(db, &server, &network).await?;
 
-    if let Some(agent) = existing_agent {
-        registration::attach_to_device(db, agent, peer.device_id, &agent_policy).await?;
-    } else if payload.agent == PeerAgent::New {
-        registration::create_for_device(
-            db,
-            &payload.name,
-            payload.site_id,
-            peer.device_id,
-            &agent_policy,
-        )
-        .await?;
-    }
-
     client_key_store().put(secret_key(peer.id), key_pair.private_key.clone());
     let bundle = load_peer(db, peer.id).await?;
     let artifact = generate_artifact(&bundle, Some(&key_pair.private_key))?;
 
-    Ok((bundle.peer, artifact))
+    Ok(CreatedPeer {
+        peer: bundle.peer,
+        device: bundle.device,
+        artifact,
+    })
 }
 
 /// Renomeia o dispositivo do peer.
@@ -409,18 +489,41 @@ pub async fn rename(
     peer_id: i64,
     name: &str,
 ) -> AppResult<(vpn_peers::Model, Option<devices::Model>)> {
+    let renamed = rename_with_previous(db, peer_id, name).await?;
+    Ok((renamed.peer, renamed.device))
+}
+
+/// Como [`rename`], devolvendo o estado anterior do peer para auditoria.
+///
+/// # Errors
+///
+/// Propaga validação de nome e erro do banco.
+pub async fn rename_with_previous(
+    db: &DatabaseConnection,
+    peer_id: i64,
+    name: &str,
+) -> AppResult<RenamedPeer> {
     let new_name = name.trim();
     if new_name.is_empty() {
         return Err(AppError::business_rule("Informe o nome do dispositivo"));
     }
 
     let bundle = load_peer(db, peer_id).await?;
+    let previous = bundle.peer.clone();
     let Some(device) = bundle.device.clone() else {
-        return Ok((bundle.peer, None));
+        return Ok(RenamedPeer {
+            previous,
+            peer: bundle.peer,
+            device: None,
+        });
     };
     let previous_name = device.name.clone();
     if previous_name == new_name {
-        return Ok((bundle.peer, Some(device)));
+        return Ok(RenamedPeer {
+            previous,
+            peer: bundle.peer,
+            device: Some(device),
+        });
     }
 
     let txn = begin_write(db).await?;
@@ -450,7 +553,11 @@ pub async fn rename(
     // O `wg0.conf` traz o nome como comentário de cada peer.
     server_service::apply_configuration(db, &bundle.server, &bundle.network).await?;
 
-    Ok((bundle.peer, Some(device)))
+    Ok(RenamedPeer {
+        previous,
+        peer: bundle.peer,
+        device: Some(device),
+    })
 }
 
 /// Gera novo par de chaves e PSK, invalidando imediatamente os anteriores.
@@ -466,17 +573,40 @@ pub async fn rotate_keys(
     peer_id: i64,
     agent_policy: Option<&InstallPolicyView>,
 ) -> AppResult<(vpn_peers::Model, GeneratedArtifact)> {
+    let rotated = rotate_keys_with_previous(db, peer_id, agent_policy).await?;
+    Ok((rotated.peer, rotated.artifact))
+}
+
+/// Como [`rotate_keys`], devolvendo o estado anterior do peer para auditoria.
+///
+/// # Errors
+///
+/// Propaga erro de cifra, validação de política e de banco.
+pub async fn rotate_keys_with_previous(
+    db: &DatabaseConnection,
+    peer_id: i64,
+    agent_policy: Option<&InstallPolicyView>,
+) -> AppResult<RotatedPeer> {
     let bundle = load_peer(db, peer_id).await?;
-    if let (Some(view), Some(agent)) = (agent_policy, bundle.agent.as_ref()) {
-        let policy = InstallPolicy::from_view(view)?;
-        registration::save_policy(db, agent.id, &policy).await?;
-    }
+    let previous = bundle.peer.clone();
+    let policy = match (agent_policy, bundle.agent.as_ref()) {
+        (Some(view), Some(_)) => Some(InstallPolicy::from_view(view)?),
+        _ => None,
+    };
     let key_pair = generate_key_pair();
 
-    let mut active: vpn_peers::ActiveModel = bundle.peer.clone().into();
-    active.public_key = Set(key_pair.public_key.clone());
-    active.set_preshared_key(Some(&generate_preshared_key()))?;
-    let peer = active.update(db).await?;
+    let peer = {
+        let txn = begin_write(db).await?;
+        if let (Some(policy), Some(agent)) = (policy.as_ref(), bundle.agent.as_ref()) {
+            registration::save_policy(&txn, agent.id, policy).await?;
+        }
+        let mut active: vpn_peers::ActiveModel = bundle.peer.clone().into();
+        active.public_key = Set(key_pair.public_key.clone());
+        active.set_preshared_key(Some(&generate_preshared_key()))?;
+        let peer = active.update(&txn).await?;
+        txn.commit().await?;
+        peer
+    };
 
     server_service::apply_configuration(db, &bundle.server, &bundle.network).await?;
 
@@ -484,7 +614,11 @@ pub async fn rotate_keys(
     let bundle = load_peer(db, peer.id).await?;
     let artifact = generate_artifact(&bundle, Some(&key_pair.private_key))?;
 
-    Ok((bundle.peer, artifact))
+    Ok(RotatedPeer {
+        previous,
+        peer: bundle.peer,
+        artifact,
+    })
 }
 
 /// Atualiza a política de `AGENT_ALLOW` gravada no agente do peer e reestampa
@@ -565,6 +699,29 @@ pub async fn build_artifact(db: &DatabaseConnection, peer_id: i64) -> AppResult<
     generate_artifact(&bundle, private_key.as_deref())
 }
 
+/// Artefato exclusivo para QR Code: valida o suporte do perfil **antes** de
+/// consumir a chave privada do cofre, para que uma chamada acidental a
+/// `/qrcode` num perfil Linux/MikroTik nunca queime a chave de uso único.
+///
+/// # Errors
+///
+/// `BusinessRule` (400) para perfis sem QR Code; erro do banco.
+pub async fn build_qr_artifact(
+    db: &DatabaseConnection,
+    peer_id: i64,
+) -> AppResult<GeneratedArtifact> {
+    let bundle = load_peer(db, peer_id).await?;
+    let generator = registry::resolve(&bundle.peer.device_profile)?;
+    if !generator.supports_qr_code() {
+        return Err(AppError::business_rule(format!(
+            "O perfil {} não utiliza QR Code — copie o script gerado.",
+            generator.label()
+        )));
+    }
+    let private_key = client_key_store().consume(&secret_key(peer_id));
+    Ok(generator.generate(&build_context(&bundle, private_key.as_deref())?))
+}
+
 /// Regras de firewall do perfil — usadas no diagnóstico "não responde ao ping".
 ///
 /// # Errors
@@ -585,23 +742,26 @@ pub async fn firewall_hints(
 }
 
 /// Revoga o peer, remove o dispositivo (liberando o IP) e reescreve o
-/// `wg0.conf`.
+/// `wg0.conf`. Devolve o peer revogado para auditoria.
 ///
 /// # Errors
 ///
 /// Propaga erro do banco.
-pub async fn revoke(db: &DatabaseConnection, peer_id: i64) -> AppResult<()> {
+pub async fn revoke(db: &DatabaseConnection, peer_id: i64) -> AppResult<vpn_peers::Model> {
     let bundle = load_peer(db, peer_id).await?;
     let device_id = bundle.peer.device_id;
 
-    vpn_peers::Entity::delete_by_id(peer_id).exec(db).await?;
-    // Apagar o dispositivo é o que libera o IP (matriz de paridade #41): o
-    // alocador olha `devices.ip_address`, não a tabela de peers.
+    // Remove o dispositivo antes do peer: se a limpeza do dispositivo falhar,
+    // o peer continua visível para nova tentativa em vez de deixar o IP preso
+    // para sempre em `devices` (matriz de paridade #41). Com FK `ON DELETE
+    // CASCADE`, o peer cai junto; o `delete_by_id` abaixo cobre SQLite sem
+    // `foreign_keys=ON`.
     ResourceCleanupService::delete_device(db, device_id).await?;
+    vpn_peers::Entity::delete_by_id(peer_id).exec(db).await?;
 
     client_key_store().consume(&secret_key(peer_id));
     server_service::apply_configuration(db, &bundle.server, &bundle.network).await?;
-    Ok(())
+    Ok(bundle.peer)
 }
 
 #[cfg(test)]

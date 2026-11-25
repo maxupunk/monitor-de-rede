@@ -17,7 +17,10 @@
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
-use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter,
+    Set, TransactionTrait,
+};
 use serde_json::json;
 
 use crate::{
@@ -27,6 +30,7 @@ use crate::{
             crypto::{random_token, sha256_hex},
             errors::{AppError, AppResult},
             secret_file,
+            transaction::begin_write,
         },
         telemetry,
     },
@@ -81,28 +85,27 @@ pub fn ensure_managed_by_user(probe: &probes::Model, action: &str) -> AppResult<
 /// # Errors
 ///
 /// Erro do banco ou falha ao gravar o arquivo do token.
-pub async fn ensure<C: ConnectionTrait>(db: &C, token_path: &Path) -> AppResult<probes::Model> {
-    let existing = find(db).await?;
-    let saved_token = secret_file::read(token_path);
+pub async fn ensure(db: &DatabaseConnection, token_path: &Path) -> AppResult<probes::Model> {
+    let saved_token = read_token(token_path).await;
+    let txn = begin_write(db).await?;
+    let existing = find(&txn).await?;
     let token_valid = |probe: &probes::Model| {
         saved_token
             .as_deref()
             .is_some_and(|token| sha256_hex(token) == probe.token_hash)
     };
 
-    let probe = match existing {
-        Some(probe) if token_valid(&probe) => probe,
+    let (probe, new_token) = match existing {
+        Some(probe) if token_valid(&probe) => (probe, None),
         Some(probe) => {
             let token = random_token();
-            write_token(token_path, &token)?;
             let mut active: probes::ActiveModel = probe.into();
             active.token_hash = Set(sha256_hex(&token));
-            active.update(db).await?
+            (active.update(&txn).await?, Some(token))
         }
         None => {
             let token = random_token();
-            write_token(token_path, &token)?;
-            probes::ActiveModel {
+            let inserted = probes::ActiveModel {
                 name: Set(LOCAL_AGENT_NAME.to_string()),
                 token_hash: Set(sha256_hex(&token)),
                 status: Set("pending".into()),
@@ -114,27 +117,46 @@ pub async fn ensure<C: ConnectionTrait>(db: &C, token_path: &Path) -> AppResult<
                 }))),
                 ..Default::default()
             }
-            .insert(db)
-            .await?
+            .insert(&txn)
+            .await?;
+            (inserted, Some(token))
         }
     };
 
-    adopt_central_resources(db, &probe).await?;
+    adopt_central_resources(&txn, &probe).await?;
+    txn.commit().await?;
+    // Grava o arquivo só depois do commit no banco: uma falha no banco nunca
+    // sobrescreve o arquivo com um token que não bate com `token_hash`.
+    if let Some(token) = new_token {
+        write_token(token_path, token).await?;
+    }
     Ok(probe)
 }
 
-fn write_token(path: &Path, token: &str) -> AppResult<()> {
-    secret_file::write(path, token).map_err(|error| {
-        AppError::Internal(anyhow::anyhow!(
-            "não foi possível gravar o token do agente local em {}: {error}",
-            path.display()
-        ))
-    })
+async fn read_token(path: &Path) -> Option<String> {
+    let path = path.to_path_buf();
+    tokio::task::spawn_blocking(move || secret_file::read(&path))
+        .await
+        .ok()
+        .flatten()
+}
+
+async fn write_token(path: &Path, token: String) -> AppResult<()> {
+    let path = path.to_path_buf();
+    let display = path.display().to_string();
+    tokio::task::spawn_blocking(move || secret_file::write(&path, &token))
+        .await
+        .map_err(|error| AppError::Internal(anyhow::Error::new(error)))?
+        .map_err(|error| {
+            AppError::Internal(anyhow::anyhow!(
+                "não foi possível gravar o token do agente local em {display}: {error}"
+            ))
+        })
 }
 
 /// O Docker da central agora é o do agente local: os monitores de container
 /// sem probe passam a ser dele, e o histórico antigo segue para a chave dele.
-async fn adopt_central_resources<C: ConnectionTrait>(
+async fn adopt_central_resources<C: ConnectionTrait + TransactionTrait>(
     db: &C,
     probe: &probes::Model,
 ) -> AppResult<()> {

@@ -44,7 +44,7 @@ pub fn ports(ctx: &AppContext) -> (u16, u16) {
 
 /// Só caracteres de host/URL: o valor entra num comando de shell que o
 /// operador cola no servidor, e um endereço personalizado é texto livre.
-fn is_safe(value: &str) -> bool {
+pub(crate) fn is_safe(value: &str) -> bool {
     !value.is_empty()
         && value
             .chars()
@@ -101,6 +101,25 @@ pub fn server_url_for(address: &ServerAddress, ports: (u16, u16)) -> Option<Stri
     server_url(address.kind, value, ports)
 }
 
+async fn suggested_for_device<'a>(
+    ctx: &AppContext,
+    addresses: &'a [ServerAddress],
+    device: Option<&devices::Model>,
+) -> AppResult<Option<&'a ServerAddress>> {
+    let Some(dev) = device else {
+        return Ok(None);
+    };
+    if let Some((id, _)) = server_addresses::suggest_for(&ctx.db, dev, addresses).await? {
+        if let Some(found) = addresses
+            .iter()
+            .find(|addr| addr.value.is_some() && addr.id == id)
+        {
+            return Ok(Some(found));
+        }
+    }
+    Ok(None)
+}
+
 /// Endereço padrão: quando o dispositivo já é da VPN, a central exige que a
 /// conexão venha pelo túnel (`check_tunnel_origin`), então o endereço na VPN
 /// vem primeiro. Fora disso, vale o marcado pelo operador ou o domínio — o
@@ -111,15 +130,10 @@ async fn default_address<'a>(
     addresses: &'a [ServerAddress],
     device: Option<&devices::Model>,
 ) -> AppResult<Option<&'a ServerAddress>> {
-    let usable = || addresses.iter().filter(|address| address.value.is_some());
     let is_vpn_device = device.is_some_and(|dev| dev.access_mode.as_deref() == Some("vpn"));
     if is_vpn_device {
-        if let Some(dev) = device {
-            if let Some((id, _)) = server_addresses::suggest_for(&ctx.db, dev, addresses).await? {
-                if let Some(found) = usable().find(|addr| addr.id == id) {
-                    return Ok(Some(found));
-                }
-            }
+        if let Some(found) = suggested_for_device(ctx, addresses, device).await? {
+            return Ok(Some(found));
         }
     }
     let preferred = server_addresses::stored(&ctx.db).await?.preferred_id;
@@ -127,15 +141,11 @@ async fn default_address<'a>(
         return Ok(Some(chosen));
     }
     if !is_vpn_device {
-        if let Some(dev) = device {
-            if let Some((id, _)) = server_addresses::suggest_for(&ctx.db, dev, addresses).await? {
-                if let Some(found) = usable().find(|addr| addr.id == id) {
-                    return Ok(Some(found));
-                }
-            }
+        if let Some(found) = suggested_for_device(ctx, addresses, device).await? {
+            return Ok(Some(found));
         }
     }
-    Ok(usable().next())
+    Ok(addresses.iter().find(|address| address.value.is_some()))
 }
 
 /// Comandos de instalação para o endereço escolhido (ou o padrão).
@@ -159,6 +169,11 @@ pub async fn commands(
     if let Ok(forced) = std::env::var("AGENT_SERVER_URL") {
         let forced = forced.trim().trim_end_matches('/').to_string();
         if !forced.is_empty() {
+            if !is_safe(&forced) {
+                return Err(AppError::validation(
+                    "AGENT_SERVER_URL contém caracteres inválidos para URL do agente",
+                ));
+            }
             return Ok(render(None, forced));
         }
     }
@@ -175,10 +190,13 @@ pub async fn commands(
     let Some(chosen) = chosen else {
         // Nenhum endereço cadastrado: a origem de quem abriu a tela é o
         // melhor palpite que resta, e a tela avisa que é um palpite.
-        return Ok(render(
-            None,
-            request_origin.trim_end_matches('/').to_string(),
-        ));
+        let origin = request_origin.trim().trim_end_matches('/');
+        if !is_safe(origin) {
+            return Err(AppError::validation(
+                "A origem da requisição não é uma URL válida para o agente",
+            ));
+        }
+        return Ok(render(None, origin.to_string()));
     };
     let url = server_url_for(chosen, ports(ctx)).ok_or_else(|| {
         AppError::validation("O endereço escolhido não é um host ou URL válido para o agente")

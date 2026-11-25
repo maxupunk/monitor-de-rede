@@ -175,6 +175,18 @@ pub struct LogPage {
     pub next_cursor: Option<Cursor>,
 }
 
+/// Condição SQL da categoria efetiva de um padrão: a correção do operador
+/// (`user_category`) vence o palpite (`category`).
+pub(super) fn effective_category_condition(category: &str) -> Condition {
+    Condition::any()
+        .add(log_templates::Column::UserCategory.eq(category))
+        .add(
+            Condition::all()
+                .add(log_templates::Column::UserCategory.is_null())
+                .add(log_templates::Column::Category.eq(category)),
+        )
+}
+
 /// Janela, dispositivo, severidade máxima e facility — o que toda consulta
 /// da tabela filtra antes de qualquer busca por texto.
 fn window_condition(query: &LogQuery) -> Condition {
@@ -186,7 +198,13 @@ fn window_condition(query: &LogQuery) -> Condition {
         condicao = condicao.add(device_logs::Column::DeviceId.eq(device_id));
     }
     if let Some(severity) = query.severity {
-        condicao = condicao.add(device_logs::Column::Severity.lte(severity));
+        // Mesma semântica do live tail (`controllers::logs::passa_no_filtro`):
+        // linha sem severidade (`NULL`) não é escondida pelo filtro.
+        condicao = condicao.add(
+            Condition::any()
+                .add(device_logs::Column::Severity.lte(severity))
+                .add(device_logs::Column::Severity.is_null()),
+        );
     }
     if let Some(facility) = query.facility {
         condicao = condicao.add(device_logs::Column::Facility.eq(facility));
@@ -198,15 +216,7 @@ fn window_condition(query: &LogQuery) -> Condition {
         let padroes = Query::select()
             .column(log_templates::Column::TemplateHash)
             .from(log_templates::Entity)
-            .cond_where(
-                Condition::any()
-                    .add(log_templates::Column::UserCategory.eq(category.as_str()))
-                    .add(
-                        Condition::all()
-                            .add(log_templates::Column::UserCategory.is_null())
-                            .add(log_templates::Column::Category.eq(category.as_str())),
-                    ),
-            )
+            .cond_where(effective_category_condition(category.as_str()))
             .to_owned();
         condicao = condicao.add(device_logs::Column::TemplateHash.in_subquery(padroes));
     }
@@ -317,9 +327,12 @@ pub async fn hourly_counts(
     if let Some(termo) = &query.q {
         condicao = condicao.add(search::select(db).await.condition(db, termo).await);
     }
-    // O mesmo truncamento por hora do rollup dos monitores, nos dois dialetos.
+    // O mesmo truncamento por hora em UTC nos dois dialetos, independente do
+    // fuso da sessão no PostgreSQL.
     let bucket = match db.get_database_backend() {
-        DatabaseBackend::Postgres => "date_trunc('hour', received_at)",
+        DatabaseBackend::Postgres => {
+            "date_trunc('hour', received_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'"
+        }
         _ => "strftime('%Y-%m-%dT%H:00:00+00:00', received_at)",
     };
     // `SUM` no PostgreSQL pode vir `numeric`; o CAST dá o mesmo tipo nos dois.

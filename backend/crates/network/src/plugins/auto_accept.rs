@@ -42,7 +42,8 @@ fn validate_key(conversation_key: &str) -> AppResult<&str> {
     Ok(key)
 }
 
-/// O aceite em vigor, se houver.
+/// O aceite em vigor, se houver — com `user_id`, só o que essa pessoa deu
+/// (o mesmo critério que a IA usa para dispensar a confirmação).
 ///
 /// # Errors
 ///
@@ -51,19 +52,40 @@ pub async fn active<C: ConnectionTrait>(
     db: &C,
     conversation_key: &str,
     device_id: i64,
+    user_id: Option<i64>,
 ) -> AppResult<Option<plugin_auto_accept::Model>> {
     let Ok(key) = validate_key(conversation_key) else {
         return Ok(None);
     };
-    Ok(plugin_auto_accept::Entity::find()
+    let mut query = plugin_auto_accept::Entity::find()
         .filter(plugin_auto_accept::Column::ConversationKey.eq(key))
-        .filter(plugin_auto_accept::Column::DeviceId.eq(device_id))
+        .filter(plugin_auto_accept::Column::DeviceId.eq(device_id));
+    if let Some(user_id) = user_id {
+        query = query.filter(plugin_auto_accept::Column::UserId.eq(user_id));
+    }
+    Ok(query
         .filter(plugin_auto_accept::Column::TermsVersion.eq(TERMS_VERSION))
         .filter(plugin_auto_accept::Column::RevokedAt.is_null())
         .filter(plugin_auto_accept::Column::ExpiresAt.gt(Utc::now()))
         .order_by_desc(plugin_auto_accept::Column::Id)
         .one(db)
         .await?)
+}
+
+/// Verifica se existe aceite em vigor concedido explicitamente por `user_id`.
+///
+/// # Errors
+///
+/// Erro do banco.
+pub async fn active_for_user<C: ConnectionTrait>(
+    db: &C,
+    conversation_key: &str,
+    device_id: i64,
+    user_id: i64,
+) -> AppResult<bool> {
+    Ok(active(db, conversation_key, device_id, Some(user_id))
+        .await?
+        .is_some())
 }
 
 /// Liga o modo automático para a conversa × dispositivo.
@@ -91,7 +113,7 @@ pub async fn accept<C: ConnectionTrait>(
     {
         return Err(AppError::not_found("Dispositivo não encontrado."));
     }
-    revoke(db, key, device_id).await?;
+    revoke(db, key, device_id, user_id).await?;
     Ok(plugin_auto_accept::ActiveModel {
         conversation_key: Set(key.to_owned()),
         device_id: Set(device_id),
@@ -105,7 +127,8 @@ pub async fn accept<C: ConnectionTrait>(
     .await?)
 }
 
-/// Desliga. Idempotente.
+/// Desliga. Idempotente. Com `user_id`, só o aceite dessa pessoa; `None`
+/// (administrador) desliga o de todos.
 ///
 /// # Errors
 ///
@@ -114,11 +137,16 @@ pub async fn revoke<C: ConnectionTrait>(
     db: &C,
     conversation_key: &str,
     device_id: i64,
+    user_id: Option<i64>,
 ) -> AppResult<()> {
     let Ok(key) = validate_key(conversation_key) else {
         return Ok(());
     };
-    plugin_auto_accept::Entity::update_many()
+    let mut update = plugin_auto_accept::Entity::update_many();
+    if let Some(user_id) = user_id {
+        update = update.filter(plugin_auto_accept::Column::UserId.eq(user_id));
+    }
+    update
         .col_expr(
             plugin_auto_accept::Column::RevokedAt,
             sea_orm::sea_query::Expr::value(chrono::DateTime::<chrono::FixedOffset>::from(
@@ -161,23 +189,85 @@ mod tests {
         accept(&db, "conversa-1", device.id, None, true)
             .await
             .unwrap();
-        assert!(active(&db, "conversa-1", device.id)
+        assert!(active(&db, "conversa-1", device.id, None)
             .await
             .unwrap()
             .is_some());
-        assert!(active(&db, "conversa-2", device.id)
+        assert!(active(&db, "conversa-2", device.id, None)
             .await
             .unwrap()
             .is_none());
-        assert!(active(&db, "conversa-1", device.id + 1)
+        assert!(active(&db, "conversa-1", device.id + 1, None)
             .await
             .unwrap()
             .is_none());
 
-        revoke(&db, "conversa-1", device.id).await.unwrap();
-        assert!(active(&db, "conversa-1", device.id)
+        revoke(&db, "conversa-1", device.id, None).await.unwrap();
+        assert!(active(&db, "conversa-1", device.id, None)
             .await
             .unwrap()
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn aceite_por_usuario_vale_apenas_para_quem_aceitou() {
+        let mut options = sea_orm::ConnectOptions::new("sqlite::memory:".to_owned());
+        options.max_connections(1).min_connections(1);
+        let db = Database::connect(options).await.unwrap();
+        Migrator::up(&db, None).await.unwrap();
+        let user = netmonitor_core::models::_entities::users::ActiveModel {
+            pid: Set(uuid::Uuid::new_v4()),
+            email: Set("admin@teste.local".into()),
+            password: Set("hash".into()),
+            api_key: Set("key-1".into()),
+            name: Set("Admin".into()),
+            active: Set(true),
+            role: Set("admin".into()),
+            ..Default::default()
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+        let device = devices::ActiveModel {
+            name: Set("Roteador".into()),
+            r#type: Set("router".into()),
+            status: Set("online".into()),
+            ..Default::default()
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+
+        accept(&db, "conversa-u", device.id, Some(user.id), true)
+            .await
+            .unwrap();
+        assert!(active_for_user(&db, "conversa-u", device.id, user.id)
+            .await
+            .unwrap());
+        assert!(!active_for_user(&db, "conversa-u", device.id, user.id + 1)
+            .await
+            .unwrap());
+        assert!(!active_for_user(&db, "outra", device.id, user.id)
+            .await
+            .unwrap());
+
+        // A tela vê o mesmo que a IA: o aceite de outra pessoa não aparece.
+        assert!(active(&db, "conversa-u", device.id, Some(user.id + 1))
+            .await
+            .unwrap()
+            .is_none());
+        // Outra pessoa não desliga o aceite alheio; quem aceitou, sim.
+        revoke(&db, "conversa-u", device.id, Some(user.id + 1))
+            .await
+            .unwrap();
+        assert!(active_for_user(&db, "conversa-u", device.id, user.id)
+            .await
+            .unwrap());
+        revoke(&db, "conversa-u", device.id, Some(user.id))
+            .await
+            .unwrap();
+        assert!(!active_for_user(&db, "conversa-u", device.id, user.id)
+            .await
+            .unwrap());
     }
 }

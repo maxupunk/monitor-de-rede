@@ -19,6 +19,7 @@
 use async_trait::async_trait;
 use loco_rs::{
     app::{AppContext, Initializer},
+    environment::Environment,
     Result,
 };
 
@@ -36,6 +37,9 @@ impl Initializer for SetupInitializer {
     }
 
     async fn before_run(&self, ctx: &AppContext) -> Result<()> {
+        if ctx.environment == Environment::Test {
+            return Ok(());
+        }
         let service = SetupService::new(&ctx.db);
 
         // Banco indisponível não pode derrubar o boot por causa de um aviso.

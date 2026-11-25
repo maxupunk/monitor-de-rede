@@ -19,11 +19,14 @@ use netmonitor_network::topology::path::PathEdge;
 /// a central, com os motores nativos.
 #[must_use]
 pub fn is_transparent(device: &devices::Model) -> bool {
-    device.system_key.as_deref() != Some(NETMONITOR_KEY)
-        && device
-            .ip_address
-            .as_deref()
-            .is_none_or(|ip| ip.trim().is_empty())
+    is_transparent_by(device.ip_address.as_deref(), device.system_key.as_deref())
+}
+
+/// A mesma regra de [`is_transparent`] a partir só das duas colunas que ela
+/// lê — para quem carrega a projeção, e não o `devices::Model` inteiro.
+#[must_use]
+pub fn is_transparent_by(ip_address: Option<&str>, system_key: Option<&str>) -> bool {
+    system_key != Some(NETMONITOR_KEY) && ip_address.is_none_or(|ip| ip.trim().is_empty())
 }
 
 /// O erro de quando um transparente é pedido como ponta.

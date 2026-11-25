@@ -28,7 +28,7 @@ pub mod untrusted;
 
 use std::{
     collections::HashSet,
-    sync::{Mutex, OnceLock},
+    sync::{Mutex, OnceLock, PoisonError},
     time::{Duration, Instant},
 };
 
@@ -182,9 +182,11 @@ impl WebSearchService {
                 .iter()
                 .all(|failure| matches!(failure, ProviderError::Unreachable(_)));
         if offline {
-            if let Ok(mut until) = self.offline_until.lock() {
-                *until = Some(Instant::now() + self.offline_backoff);
-            }
+            *self
+                .offline_until
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) =
+                Some(Instant::now() + self.offline_backoff);
             return AppError::service_unavailable(offline_message(
                 failures.first().map(ProviderError::message),
                 self.offline_backoff,
@@ -198,7 +200,10 @@ impl WebSearchService {
     }
 
     fn offline_remaining(&self) -> Option<Duration> {
-        let until = (*self.offline_until.lock().ok()?)?;
+        let until = (*self
+            .offline_until
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner))?;
         until.checked_duration_since(Instant::now())
     }
 }

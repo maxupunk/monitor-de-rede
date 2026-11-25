@@ -20,6 +20,17 @@ pub const LOG_CATEGORIES: &[(&str, &str)] = &[
     ("informational", "Routine informational message with nothing to act on (successful login, periodic status)."),
 ];
 
+/// A resposta à categoria de um padrão. Separa "o modelo respondeu sem
+/// confiança" (vale esperar antes de perguntar de novo) de "não deu para
+/// perguntar" (frente desligada, modelo fora do ar, disjuntor aberto), que
+/// tenta de novo na próxima passada.
+#[derive(Debug, Clone, PartialEq)]
+pub enum LogVerdict {
+    Suggested(super::suggestion::DeciderSuggestion),
+    Unsure,
+    Unavailable,
+}
+
 /// Um padrão como o Decisor o lê.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

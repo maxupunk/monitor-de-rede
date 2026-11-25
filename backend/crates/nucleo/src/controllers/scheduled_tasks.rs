@@ -20,7 +20,7 @@ use crate::{
         scheduled_tasks::{
             model::{
                 ScheduledTaskInput, ScheduledTaskOrigin, ScheduledTaskPreviewInput,
-                ScheduledTaskStarted, ScheduledTaskTrigger,
+                ScheduledTaskStarted,
             },
             runner, service, Author,
         },
@@ -118,13 +118,7 @@ async fn run(
 ) -> AppResult<Response> {
     let author = author(&ctx, &headers).await?;
     let task = service::find(&ctx.db, id).await?;
-    let (run_id, _) = runner::start(
-        &ctx,
-        task,
-        ScheduledTaskTrigger::Manual,
-        Some(author.user_id),
-    )
-    .await?;
+    let (run_id, _) = runner::start_manual(&ctx, task, &author).await?;
     Ok((StatusCode::ACCEPTED, Json(ScheduledTaskStarted { run_id })).into_response())
 }
 

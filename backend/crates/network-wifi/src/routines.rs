@@ -38,21 +38,18 @@ impl Routine for WifiWatch {
     }
 
     async fn run(&self, ctx: &AppContext, cycle: Cycle) -> AppResult<()> {
+        if live::is_watched(ctx) {
+            return Ok(());
+        }
         let interval = settings::load(&ctx.db).await?.background_interval_s;
         if !is_due("wifi_watch", i64::from(interval), cycle.now) {
             return Ok(());
         }
-        if live::is_watched(ctx) {
+        if !areas::is_enabled(&ctx.db, Area::Network).await? {
             return Ok(());
         }
         let ctx = ctx.clone();
         tokio::spawn(async move {
-            if !areas::is_enabled(&ctx.db, Area::Network)
-                .await
-                .unwrap_or(true)
-            {
-                return;
-            }
             if let Err(error) = rounds::run(&ctx, Requester::watch()).await {
                 tracing::warn!(%error, "falha na leitura do Wi-Fi em segundo plano");
             }

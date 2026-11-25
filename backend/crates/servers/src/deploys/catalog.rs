@@ -7,18 +7,20 @@ use std::collections::HashMap;
 
 use chrono::{Duration, Utc};
 use loco_rs::app::AppContext;
-use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
 
 use agent_protocol::policy::Permission;
 use netmonitor_core::{
     agents::{hub::AgentHub, identity},
-    models::{database_connections, deploy_applications, deploy_runs, deploy_targets},
+    models::{
+        database_connections, deploy_applications, deploy_env_versions, deploy_runs, deploy_targets,
+    },
     shared::errors::AppResult,
 };
 
 use super::{
-    applications, builds, connections as github_connections, credentials, env_versions, events,
-    guide, oidc,
+    applications, builds, connections as github_connections, credentials, env_versions, guide,
+    oidc,
     runs::{self, status_of},
     workflow::HOOK_PATH,
     RunStatus,
@@ -76,21 +78,22 @@ impl Lookup {
     }
 }
 
-async fn target_view(
-    ctx: &AppContext,
+fn target_view(
     target: &deploy_targets::Model,
     agents: &[DeployAgentView],
     connections: &HashMap<i64, String>,
+    live_by_target: &HashMap<i64, deploy_runs::Model>,
+    env_by_target: &HashMap<i64, deploy_env_versions::Model>,
     active: &[deploy_runs::Model],
     lookup: &Lookup,
-) -> AppResult<DeployTargetView> {
-    let live = runs::live(&ctx.db, target.id).await?;
+) -> DeployTargetView {
+    let live = live_by_target.get(&target.id);
     let pending = active
         .iter()
         .filter(|run| run.target_id == target.id)
         .max_by_key(|run| run.id);
-    let env = env_versions::current(&ctx.db, target.id).await?;
-    Ok(DeployTargetView::new(
+    let env = env_by_target.get(&target.id);
+    DeployTargetView::new(
         target,
         TargetParts {
             agent: target
@@ -99,26 +102,41 @@ async fn target_view(
             backup_connection_name: target
                 .backup_connection_id
                 .and_then(|id| connections.get(&id).cloned()),
-            live: live.as_ref().map(|run| lookup.run(run)),
+            live: live.map(|run| lookup.run(run)),
             pending: pending.map(|run| lookup.run(run)),
-            env: env
-                .as_ref()
-                .map(|version| DeployEnvVersionView::new(version, true)),
+            env: env.map(|version| DeployEnvVersionView::new(version, true)),
         },
-    ))
+    )
 }
 
-async fn count_since(
-    ctx: &AppContext,
-    status: RunStatus,
-    since: chrono::DateTime<Utc>,
-) -> AppResult<u32> {
-    let count = deploy_runs::Entity::find()
-        .filter(deploy_runs::Column::Status.eq(status.as_str()))
+async fn counts_24h(ctx: &AppContext, since: chrono::DateTime<Utc>) -> AppResult<(u32, u32)> {
+    let rows: Vec<(String, i64)> = deploy_runs::Entity::find()
+        .select_only()
+        .column(deploy_runs::Column::Status)
+        .column_as(deploy_runs::Column::Id.count(), "total")
         .filter(deploy_runs::Column::CreatedAt.gte(since))
-        .count(&ctx.db)
+        .filter(deploy_runs::Column::Status.is_in([
+            RunStatus::Succeeded.as_str(),
+            RunStatus::Failed.as_str(),
+            RunStatus::RolledBack.as_str(),
+        ]))
+        .group_by(deploy_runs::Column::Status)
+        .into_tuple::<(String, i64)>()
+        .all(&ctx.db)
         .await?;
-    Ok(u32::try_from(count).unwrap_or(u32::MAX))
+    let mut succeeded = 0u32;
+    let mut failed = 0u32;
+    for (status, total) in rows {
+        let count = u32::try_from(total).unwrap_or(u32::MAX);
+        match RunStatus::parse(&status) {
+            Ok(RunStatus::Succeeded) => succeeded = succeeded.saturating_add(count),
+            Ok(RunStatus::Failed | RunStatus::RolledBack) => {
+                failed = failed.saturating_add(count);
+            }
+            _ => {}
+        }
+    }
+    Ok((succeeded, failed))
 }
 
 /// A visão geral da página.
@@ -159,6 +177,9 @@ pub async fn overview(ctx: &AppContext) -> AppResult<DeployOverview> {
     let mut active_statuses = RunStatus::PENDING.to_vec();
     active_statuses.push(RunStatus::Running);
     let active = runs::with_status(&ctx.db, &active_statuses).await?;
+    let target_ids: Vec<i64> = target_rows.iter().map(|target| target.id).collect();
+    let live_by_target = runs::live_by_targets(&ctx.db, &target_ids).await?;
+    let env_by_target = env_versions::current_by_targets(&ctx.db, &target_ids).await?;
 
     let mut views = Vec::with_capacity(application_rows.len());
     for application in &application_rows {
@@ -167,7 +188,15 @@ pub async fn overview(ctx: &AppContext) -> AppResult<DeployOverview> {
             .iter()
             .filter(|target| target.application_id == application.id)
         {
-            targets.push(target_view(ctx, target, &agents, &connections, &active, &lookup).await?);
+            targets.push(target_view(
+                target,
+                &agents,
+                &connections,
+                &live_by_target,
+                &env_by_target,
+                &active,
+                &lookup,
+            ));
         }
         views.push(DeployApplicationView::new(
             application,
@@ -182,12 +211,12 @@ pub async fn overview(ctx: &AppContext) -> AppResult<DeployOverview> {
     }
 
     let since = Utc::now() - Duration::hours(24);
+    let (succeeded_24h, failed_24h) = counts_24h(ctx, since).await?;
     let counts = DeployCounts {
         applications: u32::try_from(application_rows.len()).unwrap_or(u32::MAX),
         targets: u32::try_from(target_rows.len()).unwrap_or(u32::MAX),
-        succeeded_24h: count_since(ctx, RunStatus::Succeeded, since).await?,
-        failed_24h: count_since(ctx, RunStatus::Failed, since).await?
-            + count_since(ctx, RunStatus::RolledBack, since).await?,
+        succeeded_24h,
+        failed_24h,
         awaiting_approval: u32::try_from(
             active
                 .iter()
@@ -245,12 +274,15 @@ pub async fn history(
     target_id: i64,
     limit: u64,
 ) -> AppResult<Vec<DeployRunView>> {
-    applications::find_target(&ctx.db, target_id).await?;
-    let mut out = Vec::new();
-    for run in runs::recent(&ctx.db, Some(target_id), limit).await? {
-        out.push(events::view(&ctx.db, &run).await?);
-    }
-    Ok(out)
+    let target = applications::find_target(&ctx.db, target_id).await?;
+    let application = applications::find(&ctx.db, target.application_id)
+        .await
+        .ok();
+    Ok(runs::recent(&ctx.db, Some(target_id), limit)
+        .await?
+        .iter()
+        .map(|run| DeployRunView::new(run, application.as_ref(), Some(&target)))
+        .collect())
 }
 
 /// Catálogo de aplicações de deploy fornecido pela área Servidores ao servidor

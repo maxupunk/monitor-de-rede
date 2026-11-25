@@ -1,9 +1,15 @@
 //! Medições DNS. Falha de rede vira amostra `success: false`, nunca erro que
 //! derrube um checker ou interrompa o benchmark inteiro.
 
-use std::time::{Duration, Instant};
+use std::{
+    sync::OnceLock,
+    time::{Duration, Instant},
+};
 
-use hickory_proto::{op::Message, rr::RecordType};
+use hickory_proto::{
+    op::{Message, ResponseCode},
+    rr::RecordType,
+};
 use serde::Serialize;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -11,9 +17,19 @@ use tokio::{
 };
 
 use crate::services::{
-    network_tools::dns::wire,
+    network_tools::{dns::wire, icmp_probe::duration_to_ms},
     shared::errors::{AppError, AppResult},
 };
+
+static DOH_HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+fn doh_http_client() -> AppResult<&'static reqwest::Client> {
+    if let Some(client) = DOH_HTTP_CLIENT.get() {
+        return Ok(client);
+    }
+    let built = reqwest::Client::builder().build().map_err(internal)?;
+    Ok(DOH_HTTP_CLIENT.get_or_init(|| built))
+}
 
 pub const DEFAULT_DNS_PORT: u16 = 53;
 pub const DEFAULT_DNS_TIMEOUT_MS: u64 = 3_000;
@@ -139,11 +155,10 @@ pub fn parse_server_address(raw: &str) -> AppResult<(String, u16)> {
     }
     // Um único ':' é host:port; mais de um é IPv6 sem colchetes.
     if raw.matches(':').count() == 1 {
-        let (host, port) = raw
-            .rsplit_once(':')
-            .expect("contagem de dois pontos já verificada");
-        if let Ok(port) = parse_port(port) {
-            return Ok((host.to_string(), port));
+        if let Some((host, port)) = raw.rsplit_once(':') {
+            if let Ok(port) = parse_port(port) {
+                return Ok((host.to_string(), port));
+            }
         }
     }
     Ok((raw.to_string(), DEFAULT_DNS_PORT))
@@ -171,18 +186,25 @@ pub async fn measure_dns_lookup(options: DnsLookupOptions) -> DnsLookupSample {
     }
     .await;
     match result {
-        Ok((elapsed, message)) => DnsLookupSample {
-            hostname: options.hostname,
-            record_type: record_name,
-            protocol: options.protocol.as_str().into(),
-            server,
-            success: true,
-            lookup_time_ms: Some(round_ms(elapsed)),
-            answers: wire::answers(&message),
-            truncated: message.truncated(),
-            message: wire::response_message(&message),
-            error: None,
-        },
+        Ok((elapsed, message)) => {
+            let failed_rcode = matches!(
+                message.response_code(),
+                ResponseCode::ServFail | ResponseCode::Refused | ResponseCode::FormErr
+            );
+            let response_msg = wire::response_message(&message);
+            DnsLookupSample {
+                hostname: options.hostname,
+                record_type: record_name,
+                protocol: options.protocol.as_str().into(),
+                server,
+                success: !failed_rcode,
+                lookup_time_ms: Some(duration_to_ms(elapsed)),
+                answers: wire::answers(&message),
+                truncated: message.truncated(),
+                message: response_msg.clone(),
+                error: failed_rcode.then_some(response_msg),
+            }
+        }
         Err(error) => DnsLookupSample {
             hostname: options.hostname,
             record_type: record_name,
@@ -212,21 +234,28 @@ fn effective_server(options: &DnsLookupOptions) -> String {
 
 async fn udp(server: &str, query: &[u8], timeout: Duration) -> AppResult<(Duration, Message)> {
     let (host, port) = parse_server_address(server)?;
-    let socket = UdpSocket::bind("0.0.0.0:0").await.map_err(internal)?;
-    socket
-        .connect((host.as_str(), port))
-        .await
-        .map_err(internal)?;
-    let started = Instant::now();
     tokio::time::timeout(timeout, async {
+        let target = tokio::net::lookup_host((host.as_str(), port))
+            .await
+            .map_err(internal)?
+            .next()
+            .ok_or_else(|| AppError::BusinessRule("Servidor DNS sem endereço resolvível".into()))?;
+        let bind_addr = if target.is_ipv6() {
+            "[::]:0"
+        } else {
+            "0.0.0.0:0"
+        };
+        let socket = UdpSocket::bind(bind_addr).await.map_err(internal)?;
+        socket.connect(target).await.map_err(internal)?;
+        let started = Instant::now();
         socket.send(query).await.map_err(internal)?;
         let mut buffer = [0_u8; 4_096];
         let read = socket.recv(&mut buffer).await.map_err(internal)?;
-        wire::decode_message(&buffer[..read])
+        let message = wire::decode_message(&buffer[..read])?;
+        Ok((started.elapsed(), message))
     })
     .await
     .map_err(|_| AppError::BusinessRule("Tempo esgotado na consulta DNS".into()))?
-    .map(|message| (started.elapsed(), message))
 }
 async fn tcp(server: &str, query: &[u8], timeout: Duration) -> AppResult<(Duration, Message)> {
     let (host, port) = parse_server_address(server)?;
@@ -259,13 +288,11 @@ async fn doh(url: &str, query: &[u8], timeout: Duration) -> AppResult<(Duration,
             "O endpoint DoH precisa começar com https://",
         ));
     }
-    let client = reqwest::Client::builder()
-        .timeout(timeout)
-        .build()
-        .map_err(internal)?;
+    let client = doh_http_client()?;
     let started = Instant::now();
     let response = client
         .post(url)
+        .timeout(timeout)
         .header("content-type", "application/dns-message")
         .header("accept", "application/dns-message")
         .body(query.to_vec())
@@ -294,9 +321,6 @@ async fn system_lookup(hostname: &str, timeout: Duration) -> AppResult<(Duration
 }
 fn internal(error: impl std::fmt::Display) -> AppError {
     AppError::Internal(anyhow::anyhow!(error.to_string()))
-}
-fn round_ms(duration: Duration) -> f64 {
-    (duration.as_secs_f64() * 1_000_000.0).round() / 1_000.0
 }
 
 pub async fn benchmark_dns_servers(options: DnsBenchmarkOptions) -> Vec<DnsServerRanking> {

@@ -6,7 +6,7 @@
 
 use sea_orm::{
     prelude::DateTimeWithTimeZone, ConnectionTrait, DatabaseBackend, DatabaseConnection,
-    EntityTrait, QueryOrder, QuerySelect, Statement,
+    EntityTrait, QueryOrder, QuerySelect, Statement, TransactionSession, TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -94,11 +94,16 @@ pub async fn database_info<C: ConnectionTrait>(
         DbType::Postgres => postgres_size_bytes(db).await?,
     };
 
-    if db_type == DbType::Sqlite {
-        if let Some(logs) = logs_db {
-            if let Ok(logs_size) = sqlite_size_bytes(logs).await {
-                size_bytes = size_bytes.saturating_add(logs_size);
+    if let Some(logs) = logs_db {
+        let logs_size = match db_type {
+            DbType::Sqlite => sqlite_size_bytes(logs).await.ok(),
+            DbType::Postgres if crate::services::syslog::db::is_separate(database_url) => {
+                postgres_size_bytes(logs).await.ok()
             }
+            DbType::Postgres => None,
+        };
+        if let Some(logs_size) = logs_size {
+            size_bytes = size_bytes.saturating_add(logs_size);
         }
     }
 
@@ -112,38 +117,71 @@ pub async fn database_info<C: ConnectionTrait>(
     })
 }
 
+/// Verifica se uma tabela opcional de área existe no banco antes de apagá-la
+/// dentro de uma transação (evita abortar a transação no PostgreSQL ou falhar
+/// em bancos mínimos de teste que rodam apenas as migrations do núcleo).
+async fn table_exists<C: ConnectionTrait>(db: &C, table_name: &str) -> AppResult<bool> {
+    let backend = db.get_database_backend();
+    let sql = match backend {
+        DatabaseBackend::Sqlite => "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        DatabaseBackend::Postgres => {
+            "SELECT 1 FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = $1"
+        }
+        _ => return Ok(true),
+    };
+    let row = db
+        .query_one_raw(Statement::from_sql_and_values(
+            backend,
+            sql,
+            [table_name.into()],
+        ))
+        .await?;
+    Ok(row.is_some())
+}
+
 /// Apaga todo o histórico técnico (métricas, resultados de monitoramento,
 /// execuções de discovery, alertas resolvidos/antigos, outbox e logs de dispositivos),
 /// mantendo intactos dispositivos, interfaces, links, monitores, regras de alerta e configurações.
 ///
 /// Em SQLite, executa `incremental_vacuum`, `VACUUM` e `wal_checkpoint(TRUNCATE)`
 /// para devolver fisicamente o espaço em disco ao sistema de arquivos.
-pub async fn clear_history<C: ConnectionTrait>(
+pub async fn clear_history<C: ConnectionTrait + TransactionTrait>(
     db: &C,
     logs_db: Option<&DatabaseConnection>,
 ) -> AppResult<ClearHistoryStats> {
-    let metrics_deleted = metrics::Entity::delete_many().exec(db).await?.rows_affected;
+    let txn = begin_write(db).await?;
+    let metrics_deleted = metrics::Entity::delete_many()
+        .exec(&txn)
+        .await?
+        .rows_affected;
 
     let results_deleted = monitor_results::Entity::delete_many()
-        .exec(db)
+        .exec(&txn)
         .await?
         .rows_affected;
 
     let hourly_deleted = monitor_results_hourly::Entity::delete_many()
-        .exec(db)
+        .exec(&txn)
         .await?
         .rows_affected;
 
-    let _ = discovery_results::Entity::delete_many().exec(db).await;
-    let _ = discovery_runs::Entity::delete_many().exec(db).await;
+    if table_exists(&txn, "discovery_results").await? {
+        discovery_results::Entity::delete_many().exec(&txn).await?;
+    }
+    if table_exists(&txn, "discovery_runs").await? {
+        discovery_runs::Entity::delete_many().exec(&txn).await?;
+    }
 
     let alerts_deleted = alert_events::Entity::delete_many()
-        .exec(db)
+        .exec(&txn)
         .await?
         .rows_affected;
 
-    let _ = event_outbox::Entity::delete_many().exec(db).await;
-    let _ = notification_outbox::Entity::delete_many().exec(db).await;
+    event_outbox::Entity::delete_many().exec(&txn).await?;
+    notification_outbox::Entity::delete_many()
+        .exec(&txn)
+        .await?;
+    txn.commit().await?;
 
     let logs_deleted = if let Some(logs) = logs_db {
         device_logs::Entity::delete_many()
@@ -293,6 +331,9 @@ pub async fn clear_all_items(
         .await?
         .rows_affected;
 
+    realign_sequences_after_clear(&txn).await?;
+    txn.commit().await?;
+
     let logs_deleted = if let Some(logs) = logs_db {
         device_logs::Entity::delete_many()
             .exec(logs)
@@ -302,9 +343,6 @@ pub async fn clear_all_items(
         0
     };
     total_deleted += logs_deleted;
-
-    realign_sequences_after_clear(&txn).await?;
-    txn.commit().await?;
     // Os ids recomeçam: a linha de base guardada do monitor 1 de antes não
     // pode valer para o monitor 1 que vier depois.
     crate::services::alerts::baseline::clear_cache();
@@ -353,7 +391,22 @@ async fn realign_sequences_after_clear(txn: &sea_orm::DatabaseTransaction) -> Ap
     if txn.get_database_backend() != DatabaseBackend::Postgres {
         return Ok(());
     }
-    const RESET_TABLES: [&str; 11] = [
+    const RESET_TABLES: [&str; 26] = [
+        "link_test_legs",
+        "link_tests",
+        "link_test_schedules",
+        "scheduled_task_runs",
+        "scheduled_tasks",
+        "probe_tasks",
+        "event_outbox",
+        "notification_outbox",
+        "alert_events",
+        "discovery_results",
+        "discovery_runs",
+        "metrics",
+        "monitor_results_hourly",
+        "monitor_results",
+        "maintenance_windows",
         "sites",
         "probes",
         "networks",

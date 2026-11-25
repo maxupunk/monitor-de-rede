@@ -6,7 +6,7 @@
 //! o Ollama é procurado onde o compose o deixa ([`OLLAMA`], ver
 //! [`super::local_server`]).
 
-use std::time::Duration;
+use std::{sync::OnceLock, time::Duration};
 
 use serde::Deserialize;
 use tokio_stream::wrappers::ReceiverStream;
@@ -439,11 +439,16 @@ pub fn same_model(a: &str, b: &str) -> bool {
     normalize(a) == normalize(b)
 }
 
-fn tags_client() -> AppResult<reqwest::Client> {
-    reqwest::Client::builder()
-        .timeout(Duration::from_secs(5))
-        .build()
-        .map_err(|e| AppError::service_unavailable(format!("Erro no cliente HTTP: {e}")))
+fn tags_client() -> reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(5))
+                .build()
+                .unwrap_or_default()
+        })
+        .clone()
 }
 
 /// Os modelos instalados no Ollama (`/api/tags`), sem a janela de contexto.
@@ -494,7 +499,7 @@ pub async fn installed_models(
     configured_model: &str,
 ) -> AppResult<Vec<OllamaModelItem>> {
     let root_url = locate_root(base_url).await;
-    fetch_installed(&tags_client()?, &root_url, configured_model)
+    fetch_installed(&tags_client(), &root_url, configured_model)
         .await
         .map_err(AppError::service_unavailable)
 }
@@ -507,7 +512,7 @@ pub async fn installed_models(
 /// `404` quando o Ollama não tem o modelo; `503` quando não responde ou recusa.
 pub async fn delete_model(base_url: &str, model: &str) -> AppResult<()> {
     let root_url = locate_root(base_url).await;
-    let res = tags_client()?
+    let res = tags_client()
         .delete(format!("{root_url}/api/delete"))
         .json(&serde_json::json!({ "model": model, "name": model }))
         .send()
@@ -538,7 +543,7 @@ pub async fn list_models(
     configured_model: &str,
 ) -> AppResult<OllamaModelsResponse> {
     let root_url = locate_root(base_url).await;
-    let client = tags_client()?;
+    let client = tags_client();
 
     let (installed_items, is_online, error_message) =
         match fetch_installed(&client, &root_url, configured_model).await {

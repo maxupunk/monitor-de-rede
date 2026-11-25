@@ -4,8 +4,11 @@ use std::{net::IpAddr, time::Duration};
 
 use chrono::Utc;
 use loco_rs::app::AppContext;
+use netmonitor_core::network_tools::icmp_probe::{
+    duration_to_ms, probe_icmp_with_client, IcmpProbeOptions,
+};
 use serde::Deserialize;
-use surge_ping::{PingIdentifier, PingSequence};
+use tokio_util::sync::CancellationToken;
 
 use crate::services::{
     monitoring::contracts::{CheckMetric, CheckResult, Checker, MonitorStatus},
@@ -143,21 +146,25 @@ impl Checker for PingChecker {
             Err(error) => return check_result_from_lookup_error(started_at, &host, error),
         };
         let count = config.packet_count.clamp(1, 20);
-        let Some(client) = self.client.for_ip(ip) else {
+        if self.client.for_ip(ip).is_none() {
             return failed_result(started_at, &host, "socket ICMPv6 indisponível".into());
-        };
-        let mut pinger = client.pinger(ip, PingIdentifier(rand::random())).await;
+        }
         let per_packet_timeout_ms =
             (config.timeout_ms / u64::from(count)).clamp(200, config.timeout_ms.max(200));
-        pinger.timeout(Duration::from_millis(per_packet_timeout_ms));
-        let payload = vec![0_u8; config.packet_size.clamp(1, 65_507)];
-        let mut latencies = Vec::with_capacity(usize::from(count));
-
-        for sequence in 0..count {
-            if let Ok((_, rtt)) = pinger.ping(PingSequence(sequence), &payload).await {
-                latencies.push(rtt);
-            }
-        }
+        let options = IcmpProbeOptions {
+            count: usize::from(count),
+            timeout: Duration::from_millis(per_packet_timeout_ms),
+            payload_size: config.packet_size.clamp(1, 65_507),
+        };
+        let cancel = CancellationToken::new();
+        let probe = probe_icmp_with_client(&self.client, ip, &options, &cancel).await;
+        let latencies: Vec<Duration> = probe
+            .rtts
+            .into_iter()
+            .flatten()
+            .filter(|ms| ms.is_finite() && *ms >= 0.0)
+            .map(|ms| Duration::from_secs_f64(ms / 1_000.0))
+            .collect();
 
         let mut result = summarize(started_at, Utc::now(), &host, count, &latencies);
         if let Some(data) = result.data.as_object_mut() {
@@ -187,7 +194,7 @@ pub fn summarize(
     let latency_ms = if latencies.is_empty() {
         0.0
     } else {
-        latencies.iter().map(Duration::as_secs_f64).sum::<f64>() * 1_000.0 / received as f64
+        latencies.iter().copied().map(duration_to_ms).sum::<f64>() / received as f64
     };
     let status = if latencies.is_empty() {
         MonitorStatus::Down

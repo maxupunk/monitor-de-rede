@@ -18,18 +18,18 @@
 //! processo à parte (`SCHEDULER_ENABLED=false` no servidor + um container só
 //! com a tarefa).
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use chrono::Utc;
 use futures::{stream, StreamExt};
 use loco_rs::prelude::*;
 use netmonitor_core::{
+    models::monitors,
     monitoring::MonitorGroups,
     routines::{AreaRoutines, Cycle},
+    shared::transaction::begin_write,
 };
-use sea_orm::{ActiveModelTrait, Set};
-
-use netmonitor_core::models::monitors;
+use sea_orm::{sea_query::Expr, ColumnTrait, EntityTrait, QueryFilter};
 
 use netmonitor_nucleo::{
     services::monitoring::{
@@ -81,7 +81,36 @@ pub fn resolve_interval_seconds(explicit: Option<&str>) -> u64 {
         .unwrap_or(DEFAULT_CYCLE_SECONDS)
 }
 
-/// Repete [`run_cycle`] para sempre. Nunca retorna.
+/// Aguarda `Ctrl+C` (ou `SIGTERM` em sistemas Unix) para encerrar o laço
+/// graciosamente entre ciclos sem deixar atualizações pela metade.
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        let mut sigterm =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).ok();
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            () = async {
+                if let Some(ref mut signal) = sigterm {
+                    signal.recv().await;
+                } else {
+                    std::future::pending::<()>().await;
+                }
+            } => {}
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
+}
+
+/// Repete [`run_cycle`] até `shutdown` completar.
+///
+/// Quem decide quando parar é o hospedeiro: o processo dedicado passa
+/// [`shutdown_signal`]; o servidor passa um futuro que nunca completa, e o laço
+/// termina com o processo — depois de o Loco drenar as conexões SSE, e não no
+/// primeiro `SIGTERM`, enquanto elas ainda recebem os eventos do ciclo.
 ///
 /// O ciclo roda **dentro** deste processo, e não como subprocesso por tique
 /// (ADR 007): assim o socket ICMP, o pool de conexões e as cadências internas
@@ -89,7 +118,11 @@ pub fn resolve_interval_seconds(explicit: Option<&str>) -> u64 {
 ///
 /// Erro de um ciclo é registrado e o laço continua. Um ciclo que falha não pode
 /// derrubar o agendamento inteiro — a checagem seguinte pode muito bem passar.
-pub async fn run_forever(ctx: &AppContext, interval_seconds: u64) {
+pub async fn run_forever(
+    ctx: &AppContext,
+    interval_seconds: u64,
+    shutdown: impl std::future::Future<Output = ()>,
+) {
     tracing::info!(interval_seconds, "scheduler inicializado");
 
     let mut ticker = tokio::time::interval(std::time::Duration::from_secs(interval_seconds));
@@ -98,8 +131,17 @@ pub async fn run_forever(ctx: &AppContext, interval_seconds: u64) {
     // exatamente a hora de não piorar.
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
+    tokio::pin!(shutdown);
+
     loop {
-        ticker.tick().await;
+        tokio::select! {
+            biased;
+            () = &mut shutdown => {
+                tracing::info!("scheduler encerrando graciosamente");
+                return;
+            }
+            _ = ticker.tick() => {}
+        }
         match run_cycle_inner(ctx, true).await {
             Ok(0) => {}
             Ok(count) => tracing::debug!(monitores = count, "ciclo concluído"),
@@ -122,7 +164,7 @@ impl Task for SchedulerLoop {
 
     async fn run(&self, ctx: &AppContext, vars: &task::Vars) -> Result<()> {
         let seconds = resolve_interval_seconds(vars.cli_arg("interval_seconds").ok());
-        run_forever(ctx, seconds).await;
+        run_forever(ctx, seconds, shutdown_signal()).await;
         Ok(())
     }
 }
@@ -151,14 +193,31 @@ async fn run_cycle_inner(ctx: &AppContext, detach_discovery: bool) -> AppResult<
         .iter()
         .filter_map(|monitor| groups.group_of(monitor))
         .collect();
-    for monitor in &due {
-        // Persistir primeiro evita que dois processos do scheduler executem a
-        // mesma linha quando o ciclo seguinte começar antes de a rede responder.
-        let mut active: monitors::ActiveModel = monitor.clone().into();
-        active.next_run_at = Set(Some(
-            (now + chrono::Duration::seconds(i64::from(monitor.interval_seconds.max(1)))).into(),
-        ));
-        active.update(&ctx.db).await?;
+    // Persistir `next_run_at` em lote (agrupado por intervalo, numa única
+    // transação de escrita) evita que dois schedulers executem o mesmo monitor
+    // e elimina N `UPDATE`s individuais por ciclo.
+    if !due.is_empty() {
+        let mut by_interval: BTreeMap<i32, Vec<i64>> = BTreeMap::new();
+        for monitor in &due {
+            by_interval
+                .entry(monitor.interval_seconds.max(1))
+                .or_default()
+                .push(monitor.id);
+        }
+        let tx = begin_write(&ctx.db).await?;
+        for (interval_seconds, ids) in by_interval {
+            let next_run: sea_orm::prelude::DateTimeWithTimeZone =
+                (now + chrono::Duration::seconds(i64::from(interval_seconds))).into();
+            // Lotes de até 400 ids para respeitar o limite de 999 parâmetros do SQLite.
+            for chunk in ids.chunks(400) {
+                monitors::Entity::update_many()
+                    .col_expr(monitors::Column::NextRunAt, Expr::value(Some(next_run)))
+                    .filter(monitors::Column::Id.is_in(chunk.iter().copied()))
+                    .exec(&tx)
+                    .await?;
+            }
+        }
+        tx.commit().await?;
     }
     stream::iter(
         due.iter()
@@ -231,7 +290,9 @@ async fn run_group(
         return Ok(());
     };
     for (monitor_id, result) in group.run(ctx, key, now).await? {
-        process_result(ctx, monitor_id, &result, None).await?;
+        if let Err(error) = process_result(ctx, monitor_id, &result, None).await {
+            tracing::warn!(%error, monitor_id, grupo = key, "falha ao processar resultado do grupo");
+        }
     }
     Ok(())
 }

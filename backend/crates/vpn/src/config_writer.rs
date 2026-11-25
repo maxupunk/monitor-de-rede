@@ -5,7 +5,12 @@
 //! É essa fronteira que permite o processo da API rodar sem `NET_ADMIN` e sem
 //! acesso ao socket do Docker.
 
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    time::{Duration, SystemTime},
+};
+
+use tokio::io::AsyncWriteExt;
 
 use netmonitor_core::shared::errors::{AppError, AppResult};
 
@@ -27,6 +32,31 @@ pub fn resolve_config_dir() -> PathBuf {
     } else {
         PathBuf::from("/config")
     }
+}
+
+/// Idade a partir da qual um temporário de escrita é tido como órfão. Uma
+/// escrita leva milissegundos; o que passa disso sobrou de um processo que
+/// morreu entre o `create_new` e o `rename`.
+const STALE_TEMPORARY_AGE: Duration = Duration::from_secs(60);
+
+/// O nome é um temporário de escrita de `file_name`
+/// (`.{file_name}.{pid}.{nonce}.tmp`)?
+fn is_temporary_of(name: &str, file_name: &str) -> bool {
+    name.strip_prefix('.')
+        .and_then(|rest| rest.strip_prefix(file_name))
+        .and_then(|rest| rest.strip_prefix('.'))
+        .and_then(|rest| rest.strip_suffix(".tmp"))
+        .is_some_and(|middle| {
+            let mut parts = middle.split('.');
+            matches!(
+                (parts.next(), parts.next(), parts.next()),
+                (Some(pid), Some(nonce), None)
+                    if !pid.is_empty()
+                        && pid.bytes().all(|byte| byte.is_ascii_digit())
+                        && !nonce.is_empty()
+                        && nonce.bytes().all(|byte| byte.is_ascii_hexdigit())
+            )
+        })
 }
 
 /// Porta de saída — permite trocar disco por outro destino em testes.
@@ -62,6 +92,32 @@ impl FileConfigSink {
     fn resolve(&self, file_name: &str) -> PathBuf {
         self.base_dir.join(file_name)
     }
+
+    /// Apaga os temporários órfãos de `file_name`: eles carregam a chave
+    /// privada do servidor e não podem ficar esquecidos no volume. Só os que
+    /// casam com o padrão e já passaram de [`STALE_TEMPORARY_AGE`] — o de uma
+    /// escrita concorrente em curso fica. Falha aqui não impede a escrita.
+    async fn remove_stale_temporaries(&self, file_name: &str) {
+        let Ok(mut entries) = tokio::fs::read_dir(&self.base_dir).await else {
+            return;
+        };
+        let now = SystemTime::now();
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            if !is_temporary_of(&entry.file_name().to_string_lossy(), file_name) {
+                continue;
+            }
+            let stale = entry
+                .metadata()
+                .await
+                .and_then(|metadata| metadata.modified())
+                .ok()
+                .and_then(|modified| now.duration_since(modified).ok())
+                .is_some_and(|age| age >= STALE_TEMPORARY_AGE);
+            if stale {
+                let _ = tokio::fs::remove_file(entry.path()).await;
+            }
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -70,19 +126,28 @@ impl VpnConfigSink for FileConfigSink {
         tokio::fs::create_dir_all(&self.base_dir)
             .await
             .map_err(|error| AppError::Internal(error.into()))?;
+        self.remove_stale_temporaries(file_name).await;
 
         // Escrita atômica (matriz de paridade #35): o watcher do container
         // acorda com o `rename`, e nunca com um arquivo pela metade — carregar
         // meio `wg0.conf` derrubaria os peers que ainda não foram escritos.
+        // O nome temporário único impede que escritas concorrentes corrompam o
+        // mesmo `.tmp`, e no Unix o arquivo nasce já em `0600` antes de
+        // receber a chave privada do servidor.
         let target = self.resolve(file_name);
-        let temporary = target.with_extension("conf.tmp");
-        tokio::fs::write(&temporary, contents)
-            .await
-            .map_err(|error| AppError::Internal(error.into()))?;
-        set_owner_only_permissions(&temporary).await;
-        tokio::fs::rename(&temporary, &target)
-            .await
-            .map_err(|error| AppError::Internal(error.into()))?;
+        let nonce: u64 = rand::random();
+        let temporary = self.base_dir.join(format!(
+            ".{file_name}.{}.{nonce:016x}.tmp",
+            std::process::id()
+        ));
+        if let Err(error) = write_temp_file(&temporary, contents).await {
+            let _ = tokio::fs::remove_file(&temporary).await;
+            return Err(error);
+        }
+        if let Err(error) = tokio::fs::rename(&temporary, &target).await {
+            let _ = tokio::fs::remove_file(&temporary).await;
+            return Err(AppError::Internal(error.into()));
+        }
         Ok(())
     }
 
@@ -93,22 +158,27 @@ impl VpnConfigSink for FileConfigSink {
     }
 }
 
-/// `0600` no arquivo temporário: ele carrega a chave privada do servidor, e o
-/// volume é compartilhado com outro container.
-#[cfg(unix)]
-async fn set_owner_only_permissions(path: &Path) {
-    use std::os::unix::fs::PermissionsExt;
-    if let Err(error) =
-        tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).await
+/// Grava o conteúdo em um arquivo temporário recém-criado (`0600` no Unix) e
+/// força `sync_all` antes do `rename` atômico.
+async fn write_temp_file(path: &Path, contents: &str) -> AppResult<()> {
+    let mut options = tokio::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
     {
-        tracing::warn!(%error, "não foi possível restringir a permissão do wg0.conf");
+        options.mode(0o600);
     }
+    let mut file = options
+        .open(path)
+        .await
+        .map_err(|error| AppError::Internal(error.into()))?;
+    file.write_all(contents.as_bytes())
+        .await
+        .map_err(|error| AppError::Internal(error.into()))?;
+    file.sync_all()
+        .await
+        .map_err(|error| AppError::Internal(error.into()))?;
+    Ok(())
 }
-
-/// No Windows não há bit de permissão equivalente; o diretório local de
-/// desenvolvimento já é do usuário.
-#[cfg(not(unix))]
-async fn set_owner_only_permissions(_path: &Path) {}
 
 /// Escreve `<interface>.conf` e devolve o conteúdo aplicado.
 ///
@@ -171,6 +241,71 @@ mod tests {
 
         // Regravar por cima funciona (o `rename` substitui).
         write_server_config(&sink, &servidor(), &[]).await.unwrap();
+
+        // Escritas concorrentes usam arquivos temporários distintos e nunca
+        // corrompem nem deixam `.tmp` órfãos.
+        let cfg = servidor();
+        let (a, b, c) = tokio::join!(
+            write_server_config(&sink, &cfg, &[]),
+            write_server_config(&sink, &cfg, &[]),
+            write_server_config(&sink, &cfg, &[]),
+        );
+        a.unwrap();
+        b.unwrap();
+        c.unwrap();
+        let mut entries = tokio::fs::read_dir(&dir).await.unwrap();
+        let mut names = Vec::new();
+        while let Some(entry) = entries.next_entry().await.unwrap() {
+            names.push(entry.file_name().to_string_lossy().into_owned());
+        }
+        assert_eq!(names, vec!["wg0.conf".to_string()]);
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[test]
+    fn reconhece_so_os_temporarios_do_proprio_arquivo() {
+        assert!(is_temporary_of(
+            ".wg0.conf.42.00ff00ff00ff00ff.tmp",
+            "wg0.conf"
+        ));
+        assert!(!is_temporary_of("wg0.conf", "wg0.conf"));
+        assert!(!is_temporary_of(".wg0.conf.tmp", "wg0.conf"));
+        assert!(!is_temporary_of(".wg1.conf.42.00ff.tmp", "wg0.conf"));
+        assert!(!is_temporary_of(".wg0.conf.x.00ff.tmp", "wg0.conf"));
+        assert!(!is_temporary_of(".wg0.conf.42.00ff.extra.tmp", "wg0.conf"));
+        assert!(!is_temporary_of(".wg0.conf.42.zz.tmp", "wg0.conf"));
+    }
+
+    #[tokio::test]
+    async fn apaga_o_temporario_orfao_e_poupa_o_recente() {
+        let dir = std::env::temp_dir().join(format!("wg-conf-orfao-{}", std::process::id()));
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+        std::fs::create_dir_all(&dir).unwrap();
+        let orphan = dir.join(".wg0.conf.7.0000000000000001.tmp");
+        let recent = dir.join(".wg0.conf.8.0000000000000002.tmp");
+        let other = dir.join(".wg1.conf.7.0000000000000003.tmp");
+        for path in [&orphan, &recent, &other] {
+            std::fs::write(path, "PrivateKey = PRIV").unwrap();
+        }
+        let old = SystemTime::now() - Duration::from_secs(600);
+        for path in [&orphan, &other] {
+            std::fs::File::options()
+                .write(true)
+                .open(path)
+                .unwrap()
+                .set_modified(old)
+                .unwrap();
+        }
+
+        let sink = FileConfigSink::new(&dir);
+        write_server_config(&sink, &servidor(), &[]).await.unwrap();
+
+        assert!(!orphan.exists(), "o órfão com a chave privada sai");
+        assert!(recent.exists(), "uma escrita concorrente em curso fica");
+        assert!(
+            other.exists(),
+            "temporário de outra interface não é deste write"
+        );
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 

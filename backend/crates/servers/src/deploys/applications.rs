@@ -46,20 +46,12 @@ pub fn repository_url(repository: &str) -> String {
 ///
 /// `Validation` fora do formato.
 pub fn validate_repository(repository: &str) -> AppResult<()> {
-    let part = |value: &str| {
-        !value.is_empty()
-            && value.len() <= 100
-            && value != "."
-            && value != ".."
-            && value
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
-    };
-    match repository.split_once('/') {
-        Some((owner, name)) if part(owner) && part(name) => Ok(()),
-        _ => Err(AppError::validation(
+    if super::github::split_repository(repository).is_some() {
+        Ok(())
+    } else {
+        Err(AppError::validation(
             "Repositório: informe dono/repo, como aparece no endereço do GitHub",
-        )),
+        ))
     }
 }
 
@@ -170,12 +162,14 @@ fn checked(input: &ApplicationInput) -> AppResult<ApplicationInput> {
     if input.builder == Builder::Netmonitor {
         if input.images.is_empty() {
             return Err(AppError::validation(
-                "Para o NetMonitor compilar, informe ao menos uma imagem com Dockerfile                  (um serviço com build: no compose)",
+                "Para o NetMonitor compilar, informe ao menos uma imagem com Dockerfile \
+                 (um serviço com build: no compose)",
             ));
         }
         if let Some(image) = input.images.iter().find(|image| image.reference.is_none()) {
             return Err(AppError::validation(format!(
-                "A imagem {} precisa do nome do image: do compose (ex.: ghcr.io/acme/{}) para                  o host reconhecê-la",
+                "A imagem {} precisa do nome do image: do compose (ex.: ghcr.io/acme/{}) para \
+                 o host reconhecê-la",
                 image.name, image.name
             )));
         }
@@ -292,13 +286,26 @@ pub async fn update<C: ConnectionTrait>(
     Ok(active.update(db).await?)
 }
 
-/// A conexão e o token escolhidos existem.
+/// A conexão, o token e o agente de build escolhidos existem e estão ativos.
 async fn ensure_sources<C: ConnectionTrait>(db: &C, input: &ApplicationInput) -> AppResult<()> {
     if let Some(id) = input.credential_id {
         credentials::find(db, id).await?;
     }
     if let Some(id) = input.github_connection_id {
         connections::find(db, id).await?;
+    }
+    if let Some(probe_id) = input.build_probe_id {
+        let agent = probes::Entity::find_by_id(probe_id)
+            .one(db)
+            .await?
+            .filter(identity::is_agent)
+            .ok_or_else(|| AppError::validation("Escolha um agente cadastrado para compilar"))?;
+        if agent.status == probes::STATUS_REVOKED {
+            return Err(AppError::validation(format!(
+                "O agente \"{}\" foi revogado",
+                agent.name
+            )));
+        }
     }
     Ok(())
 }

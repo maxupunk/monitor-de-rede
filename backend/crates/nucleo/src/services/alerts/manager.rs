@@ -7,7 +7,10 @@
 
 use chrono::Utc;
 use loco_rs::app::AppContext;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseTransaction, EntityTrait, QueryFilter,
+    Set,
+};
 use serde_json::{json, Map, Value};
 
 use crate::{
@@ -29,7 +32,7 @@ use crate::{
             policy::{NotificationKind, NotificationPolicy},
             Severity,
         },
-        shared::errors::AppResult,
+        shared::{errors::AppResult, transaction::begin_write},
     },
 };
 
@@ -94,7 +97,20 @@ pub async fn evaluate_monitor_result(
         }
         None => None,
     };
+    evaluate_monitor_result_with_device(ctx, monitor, device.as_ref(), result).await
+}
 
+/// Variante de [`evaluate_monitor_result`] que reutiliza o dispositivo já carregado pelo chamador.
+///
+/// # Errors
+///
+/// Propaga erro do banco.
+pub async fn evaluate_monitor_result_with_device(
+    ctx: &AppContext,
+    monitor: &monitors::Model,
+    device: Option<&crate::models::devices::Model>,
+    result: &CheckResult,
+) -> AppResult<adaptive_latency::Assessment> {
     let baseline = baseline::for_monitor(&ctx.db, monitor.id).await?;
     let mut dataset = monitor_result::build(&monitor.r#type, result, &baseline);
     let current_latency_ms = dataset
@@ -134,14 +150,12 @@ pub async fn evaluate_monitor_result(
         ctx,
         &AlertEvaluationContext {
             scope: AlertEvaluationScope {
-                site_id: device.as_ref().and_then(|device| device.site_id),
+                site_id: device.and_then(|device| device.site_id),
                 device_id: monitor.device_id,
                 monitor_id: Some(monitor.id),
             },
             scope_key: AlertScopeKey::monitor(monitor.id),
-            target_label: device
-                .as_ref()
-                .map_or_else(|| monitor.name.clone(), |device| device.name.clone()),
+            target_label: device.map_or_else(|| monitor.name.clone(), |device| device.name.clone()),
             dataset,
             message: result.message.clone().filter(|text| !text.is_empty()),
             data,
@@ -203,14 +217,9 @@ async fn trigger_alert(
     condition: &AlertRuleCondition,
     context: &AlertEvaluationContext,
 ) -> AppResult<()> {
-    let already_open = alert_events::Entity::find()
-        .filter(alert_events_entity::Column::AlertRuleId.eq(rule.id))
-        .filter(alert_events_entity::Column::ScopeKey.eq(context.scope_key.as_str()))
-        .filter(alert_events_entity::Column::Status.is_in(AlertStatus::OPEN))
-        .one(&ctx.db)
-        .await?;
-    if let Some(open) = already_open {
-        return update_open_event(ctx, &open, rule, condition, context).await;
+    let txn = begin_write(&ctx.db).await?;
+    if let Some(open) = find_open_event(&txn, rule.id, &context.scope_key).await? {
+        return continue_open_event(ctx, txn, &open, rule, condition, context).await;
     }
 
     let message = context
@@ -246,8 +255,29 @@ async fn trigger_alert(
         data: Set(Some(Value::Object(data))),
         ..Default::default()
     }
-    .insert(&ctx.db)
-    .await?;
+    .insert(&txn)
+    .await;
+    let event = match event {
+        Ok(event) => event,
+        // O índice único parcial `alert_events_open_rule_scope_unique` barrou
+        // um segundo aberto: outra transação abriu o mesmo alerta entre a
+        // leitura e o insert (PostgreSQL). É continuação, não alerta novo.
+        Err(error) if netmonitor_core::shared::db_errors::is_unique_violation(&error) => {
+            txn.rollback().await?;
+            let txn = begin_write(&ctx.db).await?;
+            return match find_open_event(&txn, rule.id, &context.scope_key).await? {
+                Some(open) => continue_open_event(ctx, txn, &open, rule, condition, context).await,
+                None => {
+                    // Já foi resolvido de novo nesse meio-tempo: nada a fazer
+                    // agora; o próximo resultado reavalia.
+                    txn.commit().await?;
+                    Ok(())
+                }
+            };
+        }
+        Err(error) => return Err(error.into()),
+    };
+    txn.commit().await?;
 
     let severity = Severity::parse(&rule.severity);
     let detail = problem_kind::detail(kind, &context.dataset);
@@ -290,8 +320,61 @@ async fn trigger_alert(
     Ok(())
 }
 
-/// Atualiza o evento já aberto de (regra, alvo): recaída dentro da janela ou
-/// simples continuação do problema.
+/// O alerta aberto da regra para o alvo, lido dentro da transação.
+async fn find_open_event<C: ConnectionTrait>(
+    db: &C,
+    rule_id: i64,
+    scope_key: &str,
+) -> AppResult<Option<alert_events::Model>> {
+    Ok(alert_events::Entity::find()
+        .filter(alert_events_entity::Column::AlertRuleId.eq(rule_id))
+        .filter(alert_events_entity::Column::ScopeKey.eq(scope_key))
+        .filter(alert_events_entity::Column::Status.is_in(AlertStatus::OPEN))
+        .one(db)
+        .await?)
+}
+
+/// Nova ocorrência de um alerta já aberto: a máquina de estados decide, a
+/// transação fecha e só então o feed e a notificação de flapping saem.
+async fn continue_open_event(
+    ctx: &AppContext,
+    txn: DatabaseTransaction,
+    open: &alert_events::Model,
+    rule: &alert_rules::Model,
+    condition: &AlertRuleCondition,
+    context: &AlertEvaluationContext,
+) -> AppResult<()> {
+    let side_effect = update_open_event_in_txn(&txn, open, rule, condition, context).await?;
+    txn.commit().await?;
+    if let Some(effect) = side_effect {
+        match effect {
+            OpenEventEffect::Updated(saved) => {
+                feed::publish(ctx, "alert:updated", feed::event_payload(&saved)).await;
+            }
+            OpenEventEffect::StartedFlapping {
+                saved,
+                transitions,
+                policy,
+            } => {
+                feed::publish(ctx, "alert:updated", feed::event_payload(&saved)).await;
+                notify_flapping(ctx, &saved, transitions, rule, policy, context).await;
+            }
+        }
+    }
+    Ok(())
+}
+
+enum OpenEventEffect {
+    Updated(alert_events::Model),
+    StartedFlapping {
+        saved: alert_events::Model,
+        transitions: u32,
+        policy: EpisodePolicy,
+    },
+}
+
+/// Atualiza o evento já aberto de (regra, alvo) dentro da transação `begin_write`:
+/// recaída dentro da janela ou simples continuação do problema.
 ///
 /// Em ambos os casos `lastProblemAt` avança para `now` — a janela de
 /// resolução conta do **último** problema. Nunca há notificação aqui: recaída
@@ -300,13 +383,13 @@ async fn trigger_alert(
 /// alvo é cronicamente instável e a partir daí volta ao silêncio. O
 /// `problemKind` é reavaliado a cada passagem: a recaída pode ter causa
 /// diferente da queda original.
-async fn update_open_event(
-    ctx: &AppContext,
+async fn update_open_event_in_txn<C: sea_orm::ConnectionTrait>(
+    txn: &C,
     open: &alert_events::Model,
     rule: &alert_rules::Model,
     condition: &AlertRuleCondition,
     context: &AlertEvaluationContext,
-) -> AppResult<()> {
+) -> AppResult<Option<OpenEventEffect>> {
     let now = Utc::now();
     let policy = EpisodePolicy::from(rule);
     let status = open.status.parse().unwrap_or(AlertStatus::Active);
@@ -335,8 +418,8 @@ async fn update_open_event(
     match transition {
         Transition::Relapse { recurrence, status } => {
             episode::mark_relapse(&mut data, recurrence, now, policy);
-            let saved = episode::persist(ctx, open, status, data).await?;
-            feed::publish(ctx, "alert:updated", feed::event_payload(&saved)).await;
+            let saved = episode::persist_on(txn, open, status, data).await?;
+            Ok(Some(OpenEventEffect::Updated(saved)))
         }
         Transition::StartFlapping {
             recurrence,
@@ -347,9 +430,12 @@ async fn update_open_event(
                 state_machine::FLAPPING_SINCE.into(),
                 json!(now.to_rfc3339()),
             );
-            let saved = episode::persist(ctx, open, AlertStatus::Flapping, data).await?;
-            feed::publish(ctx, "alert:updated", feed::event_payload(&saved)).await;
-            notify_flapping(ctx, &saved, transitions, rule, policy, context).await;
+            let saved = episode::persist_on(txn, open, AlertStatus::Flapping, data).await?;
+            Ok(Some(OpenEventEffect::StartedFlapping {
+                saved,
+                transitions,
+                policy,
+            }))
         }
         Transition::ProblemOngoing => {
             data.insert(
@@ -358,12 +444,12 @@ async fn update_open_event(
             );
             let mut active: alert_events::ActiveModel = open.clone().into();
             active.data = Set(Some(Value::Object(data)));
-            active.update(&ctx.db).await?;
+            active.update(txn).await?;
+            Ok(None)
         }
         // Com a condição batendo a máquina só devolve os três ramos acima.
-        _ => {}
+        _ => Ok(None),
     }
-    Ok(())
 }
 
 /// O aviso único de "alvo oscilando".
@@ -398,5 +484,96 @@ async fn notify_flapping(
     };
     if let Err(error) = outbox::enqueue(ctx, request).await {
         tracing::warn!(%error, alert_event_id = event.id, "falha ao enfileirar aviso de oscilação");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_schema::{MigratorTrait, TestMigrator as Migrator};
+
+    async fn banco() -> sea_orm::DatabaseConnection {
+        let db = sea_orm::Database::connect(
+            sea_orm::ConnectOptions::new("sqlite::memory:".to_owned())
+                .max_connections(1)
+                .min_connections(1)
+                .to_owned(),
+        )
+        .await
+        .expect("banco");
+        Migrator::up(&db, None).await.expect("migrations");
+        db
+    }
+
+    async fn regra(db: &sea_orm::DatabaseConnection) -> i64 {
+        let now = Utc::now();
+        alert_rules::ActiveModel {
+            name: Set("Queda".into()),
+            r#type: Set("monitor".into()),
+            condition: Set(json!({})),
+            severity: Set("critical".into()),
+            duration_seconds: Set(0),
+            recovery_window_seconds: Set(0),
+            flap_threshold: Set(0),
+            flap_window_seconds: Set(0),
+            notification_cooldown_seconds: Set(0),
+            inhibit_when_parent_down: Set(false),
+            enabled: Set(true),
+            created_at: Set(now.into()),
+            updated_at: Set(now.into()),
+            ..Default::default()
+        }
+        .insert(db)
+        .await
+        .expect("regra")
+        .id
+    }
+
+    async fn evento(
+        db: &sea_orm::DatabaseConnection,
+        rule_id: i64,
+        status: AlertStatus,
+    ) -> Result<alert_events::Model, sea_orm::DbErr> {
+        let now = Utc::now();
+        alert_events::ActiveModel {
+            alert_rule_id: Set(Some(rule_id)),
+            scope_key: Set(Some("monitor:1".into())),
+            status: Set(status.as_str().into()),
+            severity: Set("critical".into()),
+            started_at: Set(now.into()),
+            created_at: Set(now.into()),
+            updated_at: Set(now.into()),
+            ..Default::default()
+        }
+        .insert(db)
+        .await
+    }
+
+    #[tokio::test]
+    async fn o_banco_recusa_um_segundo_alerta_aberto_para_a_mesma_regra_e_alvo() {
+        let db = banco().await;
+        let rule_id = regra(&db).await;
+        evento(&db, rule_id, AlertStatus::Active)
+            .await
+            .expect("primeiro");
+
+        let segundo = evento(&db, rule_id, AlertStatus::Recovering)
+            .await
+            .expect_err("dois abertos");
+        assert!(netmonitor_core::shared::db_errors::is_unique_violation(
+            &segundo
+        ));
+
+        // O histórico fechado não colide com nada.
+        evento(&db, rule_id, AlertStatus::Resolved)
+            .await
+            .expect("resolvido");
+        evento(&db, rule_id, AlertStatus::Resolved)
+            .await
+            .expect("resolvido");
+        let aberto = find_open_event(&db, rule_id, "monitor:1")
+            .await
+            .expect("busca");
+        assert!(aberto.is_some());
     }
 }

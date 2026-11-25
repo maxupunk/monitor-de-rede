@@ -138,6 +138,99 @@ fn excerpt(line: &str) -> String {
     }
 }
 
+/// Avança até fechar `{` aberto na posição inicial, ignorando strings e comentários.
+fn find_matching_brace(code: &str) -> usize {
+    let bytes = code.as_bytes();
+    let mut i = 0;
+    let mut depth = 1_i32;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'/' if i + 1 < bytes.len() && bytes[i + 1] == b'/' => {
+                i += 2;
+                while i < bytes.len() && bytes[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            b'/' if i + 1 < bytes.len() && bytes[i + 1] == b'*' => {
+                i += 2;
+                while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+                    i += 1;
+                }
+                i = (i + 2).min(bytes.len());
+            }
+            quote @ (b'"' | b'\'' | b'`') => {
+                i += 1;
+                while i < bytes.len() {
+                    if bytes[i] == b'\\' && i + 1 < bytes.len() {
+                        i += 2;
+                        continue;
+                    }
+                    if bytes[i] == quote {
+                        i += 1;
+                        break;
+                    }
+                    i += 1;
+                }
+            }
+            b'{' => {
+                depth += 1;
+                i += 1;
+            }
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return i;
+                }
+                i += 1;
+            }
+            _ => i += 1,
+        }
+    }
+    bytes.len()
+}
+
+/// Remove comentários (`// ...` e `/* ... */`) preservando literais de string.
+fn strip_comments(code: &str) -> String {
+    let bytes = code.as_bytes();
+    let mut out = String::with_capacity(code.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+            i += 2;
+            while i < bytes.len() && bytes[i] != b'\n' {
+                i += 1;
+            }
+        } else if bytes[i] == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'*' {
+            i += 2;
+            while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+                i += 1;
+            }
+            i = (i + 2).min(bytes.len());
+        } else if matches!(bytes[i], b'"' | b'\'' | b'`') {
+            let quote = bytes[i];
+            let start = i;
+            i += 1;
+            while i < bytes.len() {
+                if bytes[i] == b'\\' && i + 1 < bytes.len() {
+                    i += 2;
+                    continue;
+                }
+                if bytes[i] == quote {
+                    i += 1;
+                    break;
+                }
+                i += 1;
+            }
+            out.push_str(&code[start..i]);
+        } else {
+            let ch = code[i..].chars().next().expect("caractere UTF-8 válido");
+            out.push(ch);
+            i += ch.len_utf8();
+        }
+    }
+    out
+}
+
 /// O corpo de cada `fn nome(...) { ... }` com a linha em que começa.
 fn function_bodies(script: &str) -> Vec<(String, u32, String)> {
     static HEADER: OnceLock<Regex> = OnceLock::new();
@@ -151,21 +244,7 @@ fn function_bodies(script: &str) -> Vec<(String, u32, String)> {
             continue;
         };
         let start = whole.end();
-        let mut depth = 1_i32;
-        let mut end = script.len();
-        for (offset, ch) in script[start..].char_indices() {
-            match ch {
-                '{' => depth += 1,
-                '}' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        end = start + offset;
-                        break;
-                    }
-                }
-                _ => {}
-            }
-        }
+        let end = start + find_matching_brace(&script[start..]);
         let line = u32::try_from(script[..whole.start()].lines().count() + 1).unwrap_or(0);
         bodies.push((
             name.as_str().to_owned(),
@@ -193,12 +272,45 @@ fn shell_commands(code: &str) -> Vec<String> {
 
 /// Requisição HTTP que altera (POST/PUT/PATCH/DELETE) sem ser login.
 fn writes_over_http(code: &str) -> bool {
-    static WRITE: OnceLock<Regex> = OnceLock::new();
-    let write = WRITE.get_or_init(|| {
-        Regex::new(r#"(?i)\.(post_form|post_json)\s*\(|method\s*:\s*"(post|put|patch|delete)""#)
+    static ALWAYS_WRITE: OnceLock<Regex> = OnceLock::new();
+    static HTTP_MAP: OnceLock<Regex> = OnceLock::new();
+    static POST_METHOD: OnceLock<Regex> = OnceLock::new();
+    static LOGIN_TRUE: OnceLock<Regex> = OnceLock::new();
+    let always_write = ALWAYS_WRITE.get_or_init(|| {
+        Regex::new(r#"(?i)\.(post_form|post_json)\s*\(|method\s*:\s*"(put|patch|delete)""#)
             .expect("regex de escrita HTTP válida")
     });
-    write.is_match(code) && !code.contains("login: true")
+    let http_map = HTTP_MAP
+        .get_or_init(|| Regex::new(r#"\.http\s*\(\s*#\{"#).expect("regex de chamada http válida"));
+    let post_method = POST_METHOD
+        .get_or_init(|| Regex::new(r#"(?i)\bmethod\s*:\s*"post""#).expect("regex de POST válida"));
+    let login_true = LOGIN_TRUE
+        .get_or_init(|| Regex::new(r#"(?i)\blogin\s*:\s*true\b"#).expect("regex de login válida"));
+
+    let clean = strip_comments(code);
+    if always_write.is_match(&clean) {
+        return true;
+    }
+    // O que sobra fora dos mapas inline já conferidos.
+    let mut outside = String::with_capacity(clean.len());
+    let mut cursor = 0;
+    for found in http_map.find_iter(&clean) {
+        let start = found.end();
+        if start < cursor {
+            continue;
+        }
+        let end = start + find_matching_brace(&clean[start..]);
+        let map_body = &clean[start..end];
+        if post_method.is_match(map_body) && !login_true.is_match(map_body) {
+            return true;
+        }
+        outside.push_str(&clean[cursor..start]);
+        cursor = end;
+    }
+    outside.push_str(&clean[cursor..]);
+    // POST montado fora de `device.http(#{...})` inline (ex.: em variável
+    // local): um login inline ao lado não o cobre.
+    post_method.is_match(&outside) && !login_true.is_match(&outside)
 }
 
 /// Todos os achados do pacote, do mais grave para o menos.
@@ -399,5 +511,75 @@ mod tests {
     fn script_limpo_nao_tem_achados() {
         let script = "fn detect(device, params) { device.run(\"cat /etc/openwrt_release\") }\nfn acao(device, params) { 1 }";
         assert!(scan(&package(script, "read", None)).is_empty());
+    }
+
+    #[test]
+    fn chave_em_string_e_login_true_em_outra_chamada_nao_enganam_scanner() {
+        let com_chave_em_string = r#"
+fn detect(device, params) { 1 }
+fn acao(device, params) {
+    let x = "}";
+    device.run("uci commit network");
+}
+"#;
+        assert!(
+            rules(&scan(&package(com_chave_em_string, "read", None)))
+                .contains(&"read-action-writes"),
+            "chave dentro de string não pode encerrar o corpo da função antes do comando de escrita"
+        );
+
+        let login_e_post_malicioso = r#"
+fn detect(device, params) { 1 }
+fn acao(device, params) {
+    device.http(#{ method: "POST", path: "/login", login: true });
+    device.http(#{ method: "POST", path: "/reset" });
+}
+"#;
+        assert!(
+            rules(&scan(&package(login_e_post_malicioso, "read", None)))
+                .contains(&"read-action-writes"),
+            "login: true numa chamada não pode esconder um segundo POST de escrita"
+        );
+
+        let delete_com_login = r#"
+fn detect(device, params) { 1 }
+fn acao(device, params) {
+    device.http(#{ method: "DELETE", path: "/users/1", login: true });
+}
+"#;
+        assert!(
+            rules(&scan(&package(delete_com_login, "read", None))).contains(&"read-action-writes"),
+            "DELETE nunca é login"
+        );
+
+        let login_inline_e_post_em_variavel = r#"
+fn detect(device, params) { 1 }
+fn acao(device, params) {
+    device.http(#{ method: "POST", path: "/login", login: true });
+    let req = #{ method: "POST", path: "/reset" };
+    device.http(req);
+}
+"#;
+        assert!(
+            rules(&scan(&package(
+                login_inline_e_post_em_variavel,
+                "read",
+                None
+            )))
+            .contains(&"read-action-writes"),
+            "login inline não cobre um POST de escrita montado em variável"
+        );
+
+        let so_login_inline = r#"
+fn detect(device, params) { 1 }
+fn acao(device, params) {
+    device.http(#{ method: "POST", path: "/login", login: true });
+    device.http(#{ method: "GET", path: "/status" });
+}
+"#;
+        assert!(
+            !rules(&scan(&package(so_login_inline, "read", None))).contains(&"read-action-writes"),
+            "login sozinho é leitura"
+        );
     }
 }

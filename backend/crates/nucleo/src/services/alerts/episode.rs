@@ -13,7 +13,7 @@
 
 use chrono::{DateTime, Utc};
 use loco_rs::app::AppContext;
-use sea_orm::{ActiveModelTrait, Set};
+use sea_orm::{ActiveModelTrait, ConnectionTrait, Set};
 use serde_json::{json, Map, Value};
 
 use crate::{
@@ -58,10 +58,24 @@ pub async fn persist(
     status: AlertStatus,
     data: Map<String, Value>,
 ) -> AppResult<alert_events::Model> {
+    persist_on(&ctx.db, event, status, data).await
+}
+
+/// Versão genérica de [`persist`] para gravação dentro de uma transação `begin_write`.
+///
+/// # Errors
+///
+/// Propaga erro do banco.
+pub async fn persist_on<C: ConnectionTrait>(
+    db: &C,
+    event: &alert_events::Model,
+    status: AlertStatus,
+    data: Map<String, Value>,
+) -> AppResult<alert_events::Model> {
     let mut active: alert_events::ActiveModel = event.clone().into();
     active.status = Set(status.as_str().into());
     active.data = Set(Some(Value::Object(data)));
-    Ok(active.update(&ctx.db).await?)
+    Ok(active.update(db).await?)
 }
 
 /// Rótulo do episódio para as notificações: o título gravado no disparo, que

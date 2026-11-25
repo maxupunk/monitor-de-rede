@@ -311,10 +311,48 @@ impl AiSettings {
     }
 
     /// Mescla os valores mascarados enviados pelo frontend com os valores reais persistidos.
-    pub fn merge_unmasked(&mut self, existing: &AiSettings) {
-        restore_secret(&mut self.opencode_api_key, &existing.opencode_api_key);
+    ///
+    /// Só restaura `opencode_api_key` quando o `opencode_base_url` coincide com o
+    /// endereço já gravado (ou o padrão), impedindo exfiltração da chave ao trocar o host.
+    ///
+    /// # Errors
+    ///
+    /// Validação quando a URL do OpenCode mudou e a chave veio mascarada: a
+    /// chave salva não vai para o novo host, e apagá-la em silêncio deixaria o
+    /// provedor sem chave sem o operador saber — ele redigita.
+    pub fn merge_unmasked(&mut self, existing: &AiSettings) -> AppResult<()> {
+        if opencode_url_matches(
+            self.opencode_base_url.as_deref(),
+            existing.opencode_base_url.as_deref(),
+        ) {
+            restore_secret(&mut self.opencode_api_key, &existing.opencode_api_key);
+        } else if self.opencode_api_key.as_deref() == Some(MASKED_KEY) {
+            return Err(AppError::validation(RETYPE_KEY_OPENCODE));
+        }
         restore_secret(&mut self.openrouter_api_key, &existing.openrouter_api_key);
+        Ok(())
     }
+}
+
+/// A URL do OpenCode mudou com a chave mascarada.
+const RETYPE_KEY_OPENCODE: &str = "A URL do OpenCode mudou: digite a API Key de novo.     A chave salva não é enviada a outro endereço.";
+
+/// O provedor ou a URL do Decisor mudou com a chave mascarada.
+const RETYPE_KEY_DECIDER: &str = "O provedor ou a URL do Decisor mudou: digite a API Key     de novo. A chave salva não é enviada a outro destino.";
+
+/// Normaliza uma URL para comparação de destino de segredo (trim + sem `/` final).
+fn normalize_secret_url<'a>(raw: Option<&'a str>, default: &'a str) -> &'a str {
+    raw.map(|u| u.trim().trim_end_matches('/'))
+        .filter(|u| !u.is_empty())
+        .unwrap_or(default)
+}
+
+/// A URL pedida para o OpenCode aponta para o mesmo destino cuja chave está salva?
+#[must_use]
+pub fn opencode_url_matches(requested: Option<&str>, stored: Option<&str>) -> bool {
+    let default = OPENCODE_DEFAULT_BASE_URL.trim_end_matches('/');
+    normalize_secret_url(requested, default)
+        .eq_ignore_ascii_case(normalize_secret_url(stored, default))
 }
 
 impl netmonitor_core::ai::tools::ToolSettings for AiSettings {
@@ -367,8 +405,9 @@ pub async fn load<C: ConnectionTrait>(db: &C) -> AppResult<AiSettings> {
 
 /// Salva as configurações de IA, mesclando chaves mascaradas com as existentes.
 pub async fn save(db: &DatabaseConnection, mut new_settings: AiSettings) -> AppResult<AiSettings> {
-    let existing = load(db).await?;
-    new_settings.merge_unmasked(&existing);
+    let tx = netmonitor_core::shared::transaction::begin_write(db).await?;
+    let existing = load(&tx).await?;
+    new_settings.merge_unmasked(&existing)?;
     new_settings.proactive = new_settings.proactive.normalized();
     // O Decisor tem card e endpoint próprios (`save_decider`): o formulário do
     // provedor não o altera, nem com uma cópia desatualizada.
@@ -464,8 +503,17 @@ pub async fn save(db: &DatabaseConnection, mut new_settings: AiSettings) -> AppR
         }
     }
 
-    persist(db, &new_settings).await?;
+    persist(&tx, &new_settings).await?;
+    tx.commit().await?;
+    forget_located_servers();
     Ok(new_settings)
+}
+
+/// A procura dos servidores locais recomeça com a configuração nova: o
+/// Ollama/Ollaya que acabou de subir, ou a URL trocada, não espera o cache.
+fn forget_located_servers() {
+    ollama::OLLAMA.forget();
+    crate::decider::locate::OLLAYA.forget();
 }
 
 /// Grava só a parte do Decisor, sem passar pelas validações do provedor: um
@@ -475,9 +523,12 @@ pub async fn save_decider(
     db: &DatabaseConnection,
     decider: AiDeciderSettings,
 ) -> AppResult<AiDeciderSettings> {
-    let mut settings = load(db).await?;
-    settings.decider = with_stored_key(decider, &settings.decider).normalized();
-    persist(db, &settings).await?;
+    let tx = netmonitor_core::shared::transaction::begin_write(db).await?;
+    let mut settings = load(&tx).await?;
+    settings.decider = with_stored_key(decider, &settings.decider)?.normalized();
+    persist(&tx, &settings).await?;
+    tx.commit().await?;
+    forget_located_servers();
     Ok(masked_decider(settings.decider))
 }
 
@@ -494,21 +545,32 @@ pub async fn resolve_decider<C: ConnectionTrait>(
     db: &C,
     form: AiDeciderSettings,
 ) -> AppResult<AiDeciderSettings> {
-    Ok(with_stored_key(form, &load(db).await?.decider).normalized())
+    Ok(with_stored_key(form, &load(db).await?.decider)?.normalized())
 }
 
-/// A máscara vira a chave gravada — só se o provedor é o mesmo: trocar de
-/// provedor sem digitar chave nova nunca manda a chave de um para o outro.
-fn with_stored_key(mut form: AiDeciderSettings, stored: &AiDeciderSettings) -> AiDeciderSettings {
-    if form.provider == stored.provider {
+/// A máscara vira a chave gravada — só se o provedor e a URL base forem os
+/// mesmos: trocar de provedor ou apontar para outro host nunca envia a chave
+/// salva para um destino diferente. Se o novo destino pede chave, o operador
+/// a redigita (erro de validação) em vez de ela sumir em silêncio.
+fn with_stored_key(
+    mut form: AiDeciderSettings,
+    stored: &AiDeciderSettings,
+) -> AppResult<AiDeciderSettings> {
+    let preset_url = form.preset().default_base_url.trim_end_matches('/');
+    let same_url = normalize_secret_url(Some(&form.base_url), preset_url)
+        .eq_ignore_ascii_case(normalize_secret_url(Some(&stored.base_url), preset_url));
+    if form.provider == stored.provider && same_url {
         restore_secret(&mut form.api_key, &stored.api_key);
     } else if form.api_key.as_deref() == Some(MASKED_KEY) {
+        if form.preset().requires_key {
+            return Err(AppError::validation(RETYPE_KEY_DECIDER));
+        }
         form.api_key = None;
     }
-    form
+    Ok(form)
 }
 
-async fn persist(db: &DatabaseConnection, settings: &AiSettings) -> AppResult<()> {
+async fn persist<C: ConnectionTrait>(db: &C, settings: &AiSettings) -> AppResult<()> {
     let texto = serde_json::to_string(settings)
         .map_err(|error| AppError::Internal(anyhow::Error::new(error)))?;
     system_settings::Model::set(db, STORAGE_KEY, Some(texto)).await?;
@@ -604,19 +666,66 @@ mod tests {
             api_key: Some("ts-secreta".into()),
             ..AiDeciderSettings::default()
         };
-        let mesma = with_stored_key(masked_decider(stored.clone()), &stored);
+        let mesma = with_stored_key(masked_decider(stored.clone()), &stored).unwrap();
         assert_eq!(mesma.api_key.as_deref(), Some("ts-secreta"));
 
         let trocou = AiDeciderSettings {
             provider: DeciderProvider::Openai,
             ..masked_decider(stored.clone())
         };
+        assert!(
+            with_stored_key(trocou, &stored).is_err(),
+            "a chave da TypeSafe não vai para a OpenAI: o operador redigita"
+        );
+        let sem_chave = AiDeciderSettings {
+            provider: DeciderProvider::Ollaya,
+            ..masked_decider(stored.clone())
+        };
         assert_eq!(
-            with_stored_key(trocou, &stored).api_key,
+            with_stored_key(sem_chave, &stored).unwrap().api_key,
             None,
-            "a chave da TypeSafe não vai para a OpenAI"
+            "provedor que dispensa chave só descarta a máscara"
+        );
+        let outra_url = AiDeciderSettings {
+            base_url: "https://evil.example/v1".into(),
+            ..masked_decider(stored.clone())
+        };
+        assert!(
+            with_stored_key(outra_url, &stored).is_err(),
+            "a chave salva não vai para outro host mesmo mantendo o provedor"
         );
         assert_eq!(masked_decider(stored).api_key.as_deref(), Some(MASKED_KEY));
+    }
+
+    #[test]
+    fn chave_do_opencode_nao_e_desmascarada_para_outra_url() {
+        let existing = AiSettings {
+            opencode_base_url: Some("https://opencode.ai/zen/v1".into()),
+            opencode_api_key: Some("segredo-opencode".into()),
+            ..AiSettings::default()
+        };
+
+        let mut mesma_url = existing.masked_view();
+        mesma_url.opencode_base_url = Some("https://opencode.ai/zen/v1/".into());
+        mesma_url.merge_unmasked(&existing).unwrap();
+        assert_eq!(
+            mesma_url.opencode_api_key.as_deref(),
+            Some("segredo-opencode")
+        );
+
+        let mut url_diferente = existing.masked_view();
+        url_diferente.opencode_base_url = Some("https://atacante.example/v1".into());
+        assert!(
+            url_diferente.merge_unmasked(&existing).is_err(),
+            "a chave não some em silêncio: o operador redigita"
+        );
+
+        // Chave nova digitada junto com a URL nova: vale a digitada.
+        let mut redigitada = existing.masked_view();
+        redigitada.opencode_base_url = Some("https://outro.example/v1".into());
+        redigitada.opencode_api_key = Some("nova".into());
+        redigitada.merge_unmasked(&existing).unwrap();
+        assert_eq!(redigitada.opencode_api_key.as_deref(), Some("nova"));
     }
 
     #[test]

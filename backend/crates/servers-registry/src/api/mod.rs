@@ -108,16 +108,53 @@ fn action_of(method: &Method) -> Action {
     }
 }
 
+fn safe_host(raw: &str) -> Option<&str> {
+    let host = raw.split(',').next()?.trim();
+    (!host.is_empty()
+        && host.len() <= 255
+        && host
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b':' | b'[' | b']')))
+    .then_some(host)
+}
+
+fn safe_scheme(raw: &str) -> Option<&str> {
+    let scheme = raw.split(',').next()?.trim();
+    match scheme {
+        "http" | "https" => Some(scheme),
+        _ => None,
+    }
+}
+
 /// `realm` do desafio: o endereço por onde o cliente chegou.
+/// Cabeçalhos `X-Forwarded-*` só valem quando a origem já foi validada como
+/// interna (ou atrás de proxy confiável) e passam por validação estrita.
 fn realm(headers: &HeaderMap) -> String {
-    let host = headers
-        .get("x-forwarded-host")
-        .or_else(|| headers.get(header::HOST))
-        .and_then(|value| value.to_str().ok())
+    let trust_forwarded = client_addr::origin(headers).is_internal();
+    let forwarded_host = trust_forwarded
+        .then(|| {
+            headers
+                .get("x-forwarded-host")
+                .and_then(|value| value.to_str().ok())
+                .and_then(safe_host)
+        })
+        .flatten();
+    let host = forwarded_host
+        .or_else(|| {
+            headers
+                .get(header::HOST)
+                .and_then(|value| value.to_str().ok())
+                .and_then(safe_host)
+        })
         .unwrap_or("localhost");
-    let scheme = headers
-        .get("x-forwarded-proto")
-        .and_then(|value| value.to_str().ok())
+    let scheme = trust_forwarded
+        .then(|| {
+            headers
+                .get("x-forwarded-proto")
+                .and_then(|value| value.to_str().ok())
+                .and_then(safe_scheme)
+        })
+        .flatten()
         .unwrap_or("http");
     format!("{scheme}://{host}/v2/token")
 }
@@ -142,7 +179,7 @@ fn challenge(headers: &HeaderMap, scope: Option<String>) -> OciError {
 
 /// Quem chama pode `action` em `name`? Pela borda pública, não (RS-04).
 pub(crate) fn authorize(headers: &HeaderMap, name: &str, action: Action) -> OciResult<String> {
-    if client_addr::origin(headers).public {
+    if !client_addr::origin(headers).is_internal() {
         return Err(OciError::new(
             StatusCode::FORBIDDEN,
             Code::Denied,
@@ -178,7 +215,7 @@ pub(crate) fn authorize(headers: &HeaderMap, name: &str, action: Action) -> OciR
 }
 
 async fn base(headers: HeaderMap) -> Response {
-    if client_addr::origin(&headers).public {
+    if !client_addr::origin(&headers).is_internal() {
         return OciError::new(
             StatusCode::FORBIDDEN,
             Code::Denied,
@@ -208,12 +245,12 @@ async fn token(
     let principal = match auth::login(&ctx.db, &headers).await {
         Ok(principal) => principal,
         Err(refusal) => {
-            let status = if refusal == Refusal::PublicOrigin {
-                StatusCode::FORBIDDEN
+            let (status, code) = if refusal == Refusal::PublicOrigin {
+                (StatusCode::FORBIDDEN, Code::Denied)
             } else {
-                StatusCode::UNAUTHORIZED
+                (StatusCode::UNAUTHORIZED, Code::Unauthorized)
             };
-            return OciError::new(status, Code::Unauthorized, refusal.message()).into_response();
+            return OciError::new(status, code, refusal.message()).into_response();
         }
     };
     let requested: Vec<Access> = uri
@@ -296,7 +333,7 @@ async fn dispatch(
             uploads::patch(&ctx, &headers, name, id, body).await
         }
         (Route::Upload { name, id }, &Method::PUT) => {
-            uploads::finish(&ctx, name, id, &query, body).await
+            uploads::finish(&ctx, &headers, name, id, &query, body).await
         }
         (Route::Upload { name, id }, &Method::GET) => uploads::status(&ctx, name, id).await,
         (Route::Upload { name, id }, &Method::DELETE) => uploads::cancel(&ctx, name, id).await,

@@ -43,17 +43,24 @@ use netmonitor_core::{
 
 use super::{service as db_service, DatabaseEngine};
 use crate::docker::{
-    engine::{inspect_container, list_containers, list_containers_with_networks},
+    engine::{container_detail, list_containers_with_networks},
     hosts::{self, HostKey},
 };
 use crate::views::docker::DockerHostView;
+use serde_json::Value;
 
 /// Teto de uma tentativa direta: um endereço que não responde em 3 s não
 /// serve para backup de qualquer jeito.
 const DIRECT_TIMEOUT: Duration = Duration::from_secs(3);
 
-/// Teto de uma tentativa pela ponte (o agente ainda resolve e conecta).
+/// Teto de uma tentativa pela ponte. Fica abaixo do `OPEN_TIMEOUT` (20 s) da
+/// ponte: largar a abertura no meio derruba o `OpenTunnel`, cujo `Drop` já
+/// manda `Cancel` ao agente — o túnel fecha limpo sem esperar o teto dela.
 const BRIDGE_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// Teto da descoberta inteira pela ponte: os endereços são tentados em série,
+/// e N candidatos mudos não podem prender a tela por N × [`BRIDGE_TIMEOUT`].
+const BRIDGE_BUDGET: Duration = Duration::from_secs(40);
 
 /// Por onde um endereço chega ao contêiner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
@@ -555,6 +562,7 @@ async fn attempt(
     hub: Option<&AgentHub>,
     via_probe_id: Option<i64>,
     address: CandidateAddress,
+    bridge_timeout: Duration,
 ) -> AddressAttempt {
     let outcome: Result<(), String> = match via_probe_id {
         None => {
@@ -568,7 +576,7 @@ async fn attempt(
         Some(probe_id) => match hub {
             None => Err("O agente não está conectado".to_string()),
             Some(hub) => tokio::time::timeout(
-                BRIDGE_TIMEOUT,
+                bridge_timeout,
                 LocalBridge::start(hub.clone(), probe_id, address.host.clone(), address.port),
             )
             .await
@@ -599,13 +607,23 @@ async fn attempt_all(
             addresses
                 .iter()
                 .cloned()
-                .map(|address| attempt(hub, None, address)),
+                .map(|address| attempt(hub, None, address, BRIDGE_TIMEOUT)),
         )
         .await;
     }
+    let deadline = tokio::time::Instant::now() + BRIDGE_BUDGET;
     let mut attempts = Vec::new();
     for address in addresses {
-        let tried = attempt(hub, via_probe_id, address.clone()).await;
+        let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if left.is_zero() {
+            attempts.push(AddressAttempt {
+                reachable: false,
+                message: Some("Não testado: o tempo da descoberta pelo agente acabou".to_string()),
+                address: address.clone(),
+            });
+            continue;
+        }
+        let tried = attempt(hub, via_probe_id, address.clone(), left.min(BRIDGE_TIMEOUT)).await;
         let reached = tried.reachable;
         attempts.push(tried);
         if reached {
@@ -613,6 +631,56 @@ async fn attempt_all(
         }
     }
     attempts
+}
+
+/// Extrai portas expostas e publicadas do JSON cru de `inspect`
+/// (`NetworkSettings.Ports`), evitando um `list_containers` extra no host.
+fn ports_from_inspect(raw: &Value) -> Vec<DockerContainerPort> {
+    let mut out = Vec::new();
+    let Some(ports) = raw
+        .get("NetworkSettings")
+        .or_else(|| raw.get("networkSettings"))
+        .and_then(|ns| ns.get("Ports").or_else(|| ns.get("ports")))
+        .and_then(Value::as_object)
+    else {
+        return out;
+    };
+    for (spec, bindings) in ports {
+        let (port_str, protocol) = spec.split_once('/').unwrap_or((spec.as_str(), "tcp"));
+        let Ok(private_port) = port_str.parse::<u16>() else {
+            continue;
+        };
+        let protocol = protocol.to_string();
+        if let Some(items) = bindings.as_array().filter(|items| !items.is_empty()) {
+            for binding in items {
+                let ip = binding
+                    .get("HostIp")
+                    .or_else(|| binding.get("hostIp"))
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string);
+                let public_port = binding
+                    .get("HostPort")
+                    .or_else(|| binding.get("hostPort"))
+                    .and_then(Value::as_str)
+                    .and_then(|s| s.parse::<u16>().ok());
+                out.push(DockerContainerPort {
+                    ip,
+                    private_port,
+                    public_port,
+                    protocol: protocol.clone(),
+                });
+            }
+        } else {
+            out.push(DockerContainerPort {
+                ip: None,
+                private_port,
+                public_port: None,
+                protocol,
+            });
+        }
+    }
+    out
 }
 
 /// Lê o contêiner de novo e testa os endereços dele pela rota que a conexão
@@ -636,21 +704,43 @@ pub async fn resolve(
             AppError::service_unavailable("O agente deste host não está conectado à central")
         })?;
     let docker = hosts::resolve(ctx, key)?;
-    // O resumo (portas publicadas) e o detalhe (redes, variáveis) vêm de duas
-    // chamadas à Engine pelo agente: juntas, custam o tempo de uma.
-    let (summaries, detail) = tokio::join!(
-        list_containers(docker.engine.as_ref()),
-        inspect_container(docker.engine.as_ref(), container_id)
-    );
-    let summary = summaries
-        .map_err(|error| AppError::business_rule(error.to_string()))?
-        .into_iter()
-        .find(|summary| summary.id == container_id)
-        .ok_or_else(|| AppError::not_found("O contêiner não existe mais neste host"))?;
-    let detail = detail.map_err(|error| AppError::business_rule(error.to_string()))?;
-    let ports: Vec<u16> = summary.ports.iter().map(|p| p.private_port).collect();
-    let engine = detect_engine(&summary.image, &ports)
+    // Uma única chamada `inspect` traz portas, redes, labels e variáveis.
+    let raw = docker
+        .engine
+        .inspect_container_raw(container_id)
+        .await
+        .map_err(|error| match error {
+            crate::docker::DockerError::NotFound => {
+                AppError::not_found("O contêiner não existe mais neste host")
+            }
+            other => AppError::business_rule(other.to_string()),
+        })?;
+    let detail = container_detail(&raw);
+    let container_ports = ports_from_inspect(&raw);
+    let private_ports: Vec<u16> = container_ports.iter().map(|p| p.private_port).collect();
+    let engine = detect_engine(&detail.image, &private_ports)
         .ok_or_else(|| AppError::validation("Este contêiner não parece ser um banco de dados"))?;
+    let summary = DockerContainerSummary {
+        id: detail.id.clone(),
+        names: vec![format!("/{}", detail.name)],
+        image: detail.image.clone(),
+        image_id: detail.image_id.clone(),
+        state: detail.state.status.clone(),
+        status: detail.state.status.clone(),
+        project_name: [
+            "com.docker.compose.project",
+            "io.podman.compose.project",
+            "project.name",
+        ]
+        .iter()
+        .find_map(|k| detail.config.labels.get(*k))
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty()),
+        protected: crate::docker::protection::is_protected(&detail.config.labels),
+        labels: detail.config.labels.clone(),
+        ports: container_ports,
+        created: 0,
+    };
     let container = summarize(&host, &summary, engine);
     let addresses = candidate_addresses(&detail, &summary.ports, container.port, container.local);
     let (username, database) = credentials_hint(engine, &detail.config.environment);
@@ -1019,6 +1109,15 @@ mod tests {
             .all(|a| !a.reachable && a.message.as_deref() == Some("O agente não está conectado")));
     }
 
+    #[test]
+    fn a_tentativa_pela_ponte_desiste_antes_da_ponte_e_o_total_tem_teto() {
+        // Abaixo do `OPEN_TIMEOUT` (20 s) da ponte, e o total cabe em poucas
+        // tentativas — N candidatos mudos não somam N × 20 s.
+        assert!(BRIDGE_TIMEOUT < Duration::from_secs(20));
+        assert!(BRIDGE_BUDGET >= BRIDGE_TIMEOUT);
+        assert!(BRIDGE_BUDGET <= BRIDGE_TIMEOUT * 3);
+    }
+
     #[tokio::test]
     async fn tentativa_direta_numa_porta_aberta_alcanca() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -1031,10 +1130,10 @@ mod tests {
             port,
             network: None,
         };
-        let reached = attempt(None, None, address.clone()).await;
+        let reached = attempt(None, None, address.clone(), BRIDGE_TIMEOUT).await;
         assert!(reached.reachable, "{:?}", reached.message);
         drop(listener);
-        let refused = attempt(None, None, address).await;
+        let refused = attempt(None, None, address, BRIDGE_TIMEOUT).await;
         assert!(!refused.reachable);
     }
 
@@ -1117,5 +1216,28 @@ mod tests {
             conn(14, "Outra Filial", "172.20.0.5", 5432, Some(9)),
         ];
         assert!(find_matching_connection(&item, &candidates, &other_host).is_none());
+    }
+
+    #[test]
+    fn extrai_portas_do_inspect_sem_precisar_listar_containers() {
+        let raw = serde_json::json!({
+            "NetworkSettings": {
+                "Ports": {
+                    "5432/tcp": [
+                        { "HostIp": "0.0.0.0", "HostPort": "15432" },
+                        { "HostIp": "::", "HostPort": "15432" }
+                    ],
+                    "8080/tcp": null
+                }
+            }
+        });
+        let ports = ports_from_inspect(&raw);
+        assert_eq!(ports.len(), 3);
+        assert!(ports.iter().any(|p| p.private_port == 5432
+            && p.public_port == Some(15432)
+            && p.ip.as_deref() == Some("0.0.0.0")));
+        assert!(ports
+            .iter()
+            .any(|p| p.private_port == 8080 && p.public_port.is_none()));
     }
 }

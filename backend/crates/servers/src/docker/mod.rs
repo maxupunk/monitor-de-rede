@@ -26,11 +26,20 @@ pub mod stacks;
 pub mod update;
 pub mod volume_export;
 
+#[cfg(not(test))]
+use std::sync::Mutex;
 use std::{future::Future, time::Duration};
 
 use bollard::Docker;
 
 use netmonitor_core::shared::errors::{AppError, AppResult};
+
+/// Um cliente por processo: o `bollard` mantém um pool de conexões preso ao
+/// runtime que as abriu. Em teste cada `#[tokio::test]` tem o seu runtime, e
+/// um cliente cacheado de um teste encerrado falharia no seguinte — lá não se
+/// cacheia.
+#[cfg(not(test))]
+static CACHED_CLIENT: Mutex<Option<Docker>> = Mutex::new(None);
 
 const OPERATION_TIMEOUT: Duration = Duration::from_secs(12);
 
@@ -61,7 +70,32 @@ pub fn client() -> Result<Docker, DockerError> {
     if !enabled() {
         return Err(DockerError::Disabled);
     }
-    Docker::connect_with_local_defaults().map_err(|_| DockerError::Unavailable)
+    cached_or_connect()
+}
+
+#[cfg(not(test))]
+fn cached_or_connect() -> Result<Docker, DockerError> {
+    let mut guard = CACHED_CLIENT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(docker) = guard.as_ref() {
+        return Ok(docker.clone());
+    }
+    let docker = connect()?;
+    *guard = Some(docker.clone());
+    Ok(docker)
+}
+
+#[cfg(test)]
+fn cached_or_connect() -> Result<Docker, DockerError> {
+    connect()
+}
+
+fn connect() -> Result<Docker, DockerError> {
+    Docker::connect_with_local_defaults().map_err(|error| {
+        tracing::debug!(%error, "falha ao conectar ao socket da Docker Engine");
+        DockerError::Unavailable
+    })
 }
 
 pub(crate) async fn call<T>(
@@ -83,13 +117,19 @@ pub(crate) async fn call_within<T>(
 }
 
 fn map_engine_error(error: &bollard::errors::Error) -> DockerError {
-    if let bollard::errors::Error::DockerResponseServerError { status_code, .. } = error {
+    if let bollard::errors::Error::DockerResponseServerError {
+        status_code,
+        message,
+    } = error
+    {
+        tracing::debug!(status_code, %message, "Docker Engine retornou erro HTTP");
         return match *status_code {
             404 => DockerError::NotFound,
             409 => DockerError::Conflict,
             _ => DockerError::Engine,
         };
     }
+    tracing::debug!(%error, "falha de transporte com a Docker Engine");
     // Falhas de transporte (socket/pipe inexistente, conexão recusada ou
     // encerrada) significam Engine indisponível. Erros HTTP da Engine foram
     // tratados acima e continuam distinguindo conflito, ausência e 5xx.

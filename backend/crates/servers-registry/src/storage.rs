@@ -109,7 +109,17 @@ impl BlobStore for LocalDisk {
             .await?
             .sync_all()
             .await?;
-        tokio::fs::rename(staged, &target).await
+        match tokio::fs::rename(staged, &target).await {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                if tokio::fs::try_exists(&target).await.unwrap_or(false) {
+                    let _ = tokio::fs::remove_file(staged).await;
+                    Ok(())
+                } else {
+                    Err(error)
+                }
+            }
+        }
     }
 
     async fn delete(&self, digest: &Digest) -> io::Result<()> {
@@ -134,6 +144,21 @@ pub fn store() -> Arc<dyn BlobStore> {
             Arc::new(LocalDisk::new(dir))
         })
         .clone()
+}
+
+/// O portão entre quem grava blobs e a coleta.
+///
+/// Um envio segura a leitura desde que olha se o arquivo do blob já existe
+/// (ou o grava) até o vínculo dele estar no banco; a coleta só apaga um blob
+/// com a escrita, pedida sem esperar ([`tokio::sync::RwLock::try_write`]). Sem
+/// isso, um envio que achou o arquivo pronto podia vinculá-lo logo depois da
+/// coleta tirar a linha e antes dela apagar o arquivo: blob no catálogo sem
+/// bytes no disco. Envios não esperam uns pelos outros nem pela coleta, que
+/// só adia para a próxima passada.
+#[must_use]
+pub fn push_gate() -> &'static tokio::sync::RwLock<()> {
+    static GATE: OnceLock<tokio::sync::RwLock<()>> = OnceLock::new();
+    GATE.get_or_init(|| tokio::sync::RwLock::new(()))
 }
 
 /// Um arquivo na área de montagem, apagado se ninguém o consumir.
@@ -181,7 +206,17 @@ impl Staged {
 impl Drop for Staged {
     fn drop(&mut self) {
         if !self.keep {
-            let _ = std::fs::remove_file(&self.path);
+            let path = std::mem::take(&mut self.path);
+            if path.as_os_str().is_empty() {
+                return;
+            }
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.spawn_blocking(move || {
+                    let _ = std::fs::remove_file(path);
+                });
+            } else {
+                let _ = std::fs::remove_file(path);
+            }
         }
     }
 }

@@ -11,30 +11,22 @@ use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, Que
 
 use netmonitor_core::{
     models::{_entities::devices as devices_entity, devices},
-    shared::errors::{AppError, AppResult},
+    shared::{
+        db_errors::is_unique_violation,
+        errors::{AppError, AppResult},
+    },
 };
 
-use crate::cidr::{first_usable_address, is_ip_in_cidr, iterate_usable_addresses};
+use crate::cidr::{first_usable_address, is_ip_in_cidr, iterate_usable_addresses, parse_cidr};
 
 /// Nº máximo de tentativas antes de desistir por concorrência.
 pub const MAX_ATTEMPTS: u32 = 10;
 
-/// Identifica violação de unicidade em PostgreSQL (23505) e SQLite
-/// (`SQLITE_CONSTRAINT_UNIQUE`), sem acoplar o serviço ao driver.
-///
-/// O `sea-orm` não expõe o código do erro de forma portátil, então a checagem
-/// é pelo texto, com a limitação documentada abaixo.
-#[must_use]
-pub fn is_unique_violation(error: &DbErr) -> bool {
-    let message = error.to_string().to_lowercase();
-    message.contains("23505")
-        || message.contains("sqlite_constraint_unique")
-        || message.contains("unique constraint")
-        || message.contains("duplicate key")
-}
-
 /// IPs já ocupados por dispositivos da rede.
-async fn used_addresses<C: ConnectionTrait>(db: &C, network_id: i64) -> AppResult<HashSet<String>> {
+async fn used_addresses<C: ConnectionTrait>(
+    db: &C,
+    network_id: i64,
+) -> AppResult<HashSet<Ipv4Addr>> {
     #[derive(sea_orm::FromQueryResult)]
     struct Row {
         ip_address: Option<String>,
@@ -48,6 +40,7 @@ async fn used_addresses<C: ConnectionTrait>(db: &C, network_id: i64) -> AppResul
         .await?
         .into_iter()
         .filter_map(|row| row.ip_address)
+        .filter_map(|raw| raw.trim().parse::<Ipv4Addr>().ok())
         .collect())
 }
 
@@ -64,15 +57,17 @@ pub async fn find_next_free<C: ConnectionTrait>(
     reserved: &[Ipv4Addr],
 ) -> AppResult<Ipv4Addr> {
     let used = used_addresses(db, network_id).await?;
+    let reserved_set: HashSet<Ipv4Addr> = reserved.iter().copied().collect();
     let server_address = first_usable_address(cidr)?;
 
     for candidate in iterate_usable_addresses(cidr)? {
-        if candidate == server_address || reserved.contains(&candidate) {
+        if candidate == server_address
+            || reserved_set.contains(&candidate)
+            || used.contains(&candidate)
+        {
             continue;
         }
-        if !used.contains(&candidate.to_string()) {
-            return Ok(candidate);
-        }
+        return Ok(candidate);
     }
 
     Err(AppError::business_rule(format!(
@@ -126,20 +121,26 @@ where
     )))
 }
 
-/// Valida um IP informado manualmente: precisa pertencer ao CIDR e estar livre.
+/// Valida se um IP informado manualmente é utilizável dentro do CIDR (sem
+/// tocar no banco): pertence à faixa, não é rede, broadcast nem o IP do
+/// servidor.
 ///
 /// # Errors
 ///
 /// Devolve 400 com a mensagem que o wizard exibe.
-pub async fn assert_available<C: ConnectionTrait>(
-    db: &C,
-    network_id: i64,
-    cidr: &str,
-    ip_address: Ipv4Addr,
-) -> AppResult<()> {
+pub fn validate_manual_ip(cidr: &str, ip_address: Ipv4Addr) -> AppResult<()> {
+    let range = parse_cidr(cidr)?;
     if !is_ip_in_cidr(ip_address, cidr)? {
         return Err(AppError::business_rule(format!(
             "O endereço {ip_address} não pertence à faixa {cidr}"
+        )));
+    }
+    if range.usable_hosts == 0
+        || ip_address == range.network_address
+        || ip_address == range.broadcast_address
+    {
+        return Err(AppError::business_rule(format!(
+            "O endereço {ip_address} é reservado (rede ou broadcast) na faixa {cidr}"
         )));
     }
     if ip_address == first_usable_address(cidr)? {
@@ -147,11 +148,33 @@ pub async fn assert_available<C: ConnectionTrait>(
             "O endereço {ip_address} é reservado para o servidor VPN"
         )));
     }
-    if used_addresses(db, network_id)
+    Ok(())
+}
+
+/// Valida um IP informado manualmente: precisa pertencer ao CIDR, ser um host
+/// utilizável e estar livre.
+///
+/// # Errors
+///
+/// Devolve 400/409 com a mensagem que o wizard exibe.
+pub async fn assert_available<C: ConnectionTrait>(
+    db: &C,
+    network_id: i64,
+    cidr: &str,
+    ip_address: Ipv4Addr,
+) -> AppResult<()> {
+    validate_manual_ip(cidr, ip_address)?;
+    let taken = devices::Entity::find()
+        .select_only()
+        .column(devices_entity::Column::Id)
+        .filter(devices_entity::Column::NetworkId.eq(network_id))
+        .filter(devices_entity::Column::IpAddress.eq(ip_address.to_string()))
+        .into_tuple::<i64>()
+        .one(db)
         .await?
-        .contains(&ip_address.to_string())
-    {
-        return Err(AppError::business_rule(format!(
+        .is_some();
+    if taken {
+        return Err(AppError::conflict(format!(
             "O endereço {ip_address} já está em uso nesta rede"
         )));
     }
@@ -163,21 +186,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn reconhece_colisao_de_unicidade_nos_dois_bancos() {
-        assert!(is_unique_violation(&DbErr::Custom(
-            "error returned from database: (code: 2067) UNIQUE constraint failed: devices.ip_address"
-                .into()
-        )));
-        assert!(is_unique_violation(&DbErr::Custom(
-            "duplicate key value violates unique constraint (23505)".into()
-        )));
-    }
-
-    #[test]
-    fn erro_comum_de_banco_nao_e_confundido_com_colisao() {
-        assert!(!is_unique_violation(&DbErr::Custom(
-            "connection closed".into()
-        )));
-        assert!(!is_unique_violation(&DbErr::RecordNotFound("sumiu".into())));
+    fn ip_manual_rejeita_rede_broadcast_e_servidor() {
+        let ip = |s: &str| s.parse::<Ipv4Addr>().unwrap();
+        assert!(validate_manual_ip("10.8.0.0/24", ip("10.8.0.0")).is_err());
+        assert!(validate_manual_ip("10.8.0.0/24", ip("10.8.0.255")).is_err());
+        assert!(validate_manual_ip("10.8.0.0/24", ip("10.8.0.1")).is_err());
+        assert!(validate_manual_ip("10.8.0.0/24", ip("192.168.1.5")).is_err());
+        assert!(validate_manual_ip("10.8.0.0/24", ip("10.8.0.2")).is_ok());
+        assert!(validate_manual_ip("10.8.0.0/24", ip("10.8.0.254")).is_ok());
     }
 }

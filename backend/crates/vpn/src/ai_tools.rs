@@ -32,7 +32,7 @@ impl PlatformSection for VpnStatus {
         let Some(server) = state.server.as_ref() else {
             return Ok(json!({ "configured": false }));
         };
-        let mut peers = peer_service::list(&ctx.db).await?;
+        let mut peers = peer_service::list_with_sync(&ctx.db, false).await?;
         // Quem precisa de atenção primeiro.
         peers.sort_by_key(|item| {
             matches!(

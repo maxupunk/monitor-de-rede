@@ -77,7 +77,7 @@ impl Hooks for App {
     /// suposição que deixou o `scheduler` e o `probe` sem cliente ICMP e sem
     /// barramento de eventos, com todo monitor de ping caindo em `unknown`.
     async fn after_context(ctx: AppContext) -> Result<AppContext> {
-        require_jwt_secret_in_production();
+        require_jwt_secret_in_production(&ctx.environment);
         // Todo pânico do processo vai ao log com o local e, dentro de uma
         // requisição, com o código do incidente que a tela mostra.
         netmonitor_nucleo::services::shared::incident::install_panic_hook();
@@ -349,9 +349,8 @@ impl Hooks for App {
 /// Deixar um default no `production.yaml` ou no `docker-compose.yml` é o mesmo
 /// que publicar a chave no repositório: qualquer um que leia o código consegue
 /// forjar tokens de admin. Por isso a produção exige a variável explicitamente.
-fn require_jwt_secret_in_production() {
-    let is_production = std::env::var("LOCO_ENV").map(|env| env == "production") == Ok(true);
-    if !is_production {
+fn require_jwt_secret_in_production(environment: &Environment) {
+    if *environment != Environment::Production {
         return;
     }
 

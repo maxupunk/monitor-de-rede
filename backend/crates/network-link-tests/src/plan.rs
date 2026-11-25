@@ -9,15 +9,15 @@
 
 use std::collections::{BTreeSet, HashMap};
 
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, EntityTrait, FromQueryResult, QueryFilter, QuerySelect};
 
 use super::{
     endpoint::{self, Endpoint, Role},
     env::LinkTestEnv,
     guard,
     model::{
-        LinkTestDirection, LinkTestEndpointKind, LinkTestFix, LinkTestKind, LinkTestLegKind,
-        LinkTestPlan, LinkTestPlanLeg, LinkTestRequest, LinkTestRole, LinkTestSide, LinkTestSpec,
+        LinkTestEndpointKind, LinkTestFix, LinkTestKind, LinkTestLegKind, LinkTestPlan,
+        LinkTestPlanLeg, LinkTestRequest, LinkTestRole, LinkTestSide, LinkTestSpec,
     },
     negotiate::{negotiate, Capabilities, Negotiation, Party},
     readiness::{self, CheckOutcome, CheckTarget},
@@ -191,6 +191,9 @@ struct RawLeg {
 
 /// Os equipamentos sem IP dentre `ids`, com o nome.
 async fn transparent_names(env: &LinkTestEnv, ids: &[i64]) -> AppResult<HashMap<i64, String>> {
+    if ids.is_empty() {
+        return Ok(HashMap::new());
+    }
     Ok(devices::Entity::find()
         .filter(devices::Column::Id.is_in(ids.iter().copied()))
         .all(&env.db)
@@ -279,14 +282,34 @@ async fn draft_segment(env: &LinkTestEnv, request: &LinkTestRequest) -> AppResul
         endpoints.device(source).await?,
         endpoints.device(target).await?,
     );
-    let devices = devices::Entity::find().all(&env.db).await?;
+    #[derive(FromQueryResult)]
+    struct DeviceSummary {
+        id: i64,
+        name: String,
+        ip_address: Option<String>,
+        system_key: Option<String>,
+    }
+    let devices = devices::Entity::find()
+        .select_only()
+        .column(devices::Column::Id)
+        .column(devices::Column::Name)
+        .column(devices::Column::IpAddress)
+        .column(devices::Column::SystemKey)
+        .into_model::<DeviceSummary>()
+        .all(&env.db)
+        .await?;
     let names: HashMap<i64, String> = devices
         .iter()
         .map(|device| (device.id, device.name.clone()))
         .collect();
     let hidden: HashMap<i64, String> = devices
         .into_iter()
-        .filter(transparent::is_transparent)
+        .filter(|device| {
+            transparent::is_transparent_by(
+                device.ip_address.as_deref(),
+                device.system_key.as_deref(),
+            )
+        })
         .map(|device| (device.id, device.name))
         .collect();
     let edges = load_path_edges(&env.db).await?;
@@ -383,13 +406,17 @@ async fn full_route(env: &LinkTestEnv, path: &TopologyPath) -> AppResult<Route> 
         [_, middle @ .., _] => middle.to_vec(),
         _ => Vec::new(),
     };
-    let names: HashMap<i64, String> = devices::Entity::find()
-        .filter(devices::Column::Id.is_in(middle.iter().copied()))
-        .all(&env.db)
-        .await?
-        .into_iter()
-        .map(|device| (device.id, device.name))
-        .collect();
+    let names: HashMap<i64, String> = if middle.is_empty() {
+        HashMap::new()
+    } else {
+        devices::Entity::find()
+            .filter(devices::Column::Id.is_in(middle.iter().copied()))
+            .all(&env.db)
+            .await?
+            .into_iter()
+            .map(|device| (device.id, device.name))
+            .collect()
+    };
     Ok(Route {
         edge_ids: path.edge_ids.clone(),
         via_names: middle
@@ -555,12 +582,8 @@ fn estimated_seconds(leg: &PlannedLeg, spec: &LinkTestSpec) -> u32 {
         0
     };
     let per_flow = u32::from(n.duration_s) + MEASURE_OVERHEAD_S;
-    let measure =
-        if n.engine == ThroughputEngine::Btest && spec.direction == LinkTestDirection::Both {
-            per_flow
-        } else {
-            per_flow * u32::try_from(spec.direction.flows().len()).unwrap_or(2)
-        };
+    // O runner mede um sentido por vez em todos os motores (inclusive btest).
+    let measure = per_flow * u32::try_from(spec.direction.flows().len()).unwrap_or(2);
     LEG_OVERHEAD_S + prepare_s + serve_stop + measure
 }
 
@@ -1107,7 +1130,7 @@ mod tests {
             estimated_seconds(&iperf, &spec),
             LEG_OVERHEAD_S + PREPARE_S + SERVE_STOP_S + 2 * (5 + MEASURE_OVERHEAD_S)
         );
-        // btest contra a central: sem serve no equipamento, sentidos juntos.
+        // btest contra a central: sem serve no equipamento, dois sentidos em série.
         let btest = leg(
             central_endpoint(None),
             device_endpoint(3, Capabilities::default(), false),
@@ -1115,7 +1138,7 @@ mod tests {
         );
         assert_eq!(
             estimated_seconds(&btest, &spec),
-            LEG_OVERHEAD_S + 5 + MEASURE_OVERHEAD_S
+            LEG_OVERHEAD_S + 2 * (5 + MEASURE_OVERHEAD_S)
         );
         let mut parado = btest;
         parado.view.runnable = false;

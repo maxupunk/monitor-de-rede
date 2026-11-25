@@ -7,16 +7,14 @@ use loco_rs::prelude::*;
 use serde::Deserialize;
 use serde_json::json;
 
-use netmonitor_core::{
-    events::EventBus,
-    shared::{body::optional_body, errors::AppResult},
-};
+use netmonitor_core::shared::{body::optional_body, errors::AppResult};
 
 use crate::{
     central::Central,
     preflight,
     profiles::{registry, PERSISTENT_KEEPALIVE_SECONDS},
     server_service::{self, default_listen_port, VpnServerPayload},
+    traffic_recorder,
     views::{VpnServerResponse, VpnServerStateResponse},
 };
 
@@ -81,7 +79,7 @@ async fn update(
 ) -> AppResult<Response> {
     let central = Central::from_context(&ctx)?;
     let (server, network) = server_service::create_or_update(&ctx.db, &input.into()).await?;
-    emit_vpn_peers_updated(&ctx).await;
+    traffic_recorder::notify_peers_changed(&ctx);
 
     // O `public_endpoint` é a origem do endereço "Internet" da lista de
     // endereços deste servidor. Se havia ali uma correção manual e ela acabou
@@ -136,17 +134,6 @@ async fn detect_endpoint() -> AppResult<Response> {
         "publicEndpoint": public_ip.to_string(),
         "message": format!("Endereço público detectado: {public_ip}"),
     }))?)
-}
-
-async fn emit_vpn_peers_updated(ctx: &AppContext) {
-    if let Ok(bus) = EventBus::from_context(ctx) {
-        if let Err(error) = bus
-            .publish(&ctx.db, "vpn:peers_updated", serde_json::json!({}))
-            .await
-        {
-            tracing::warn!(%error, "falha ao publicar vpn:peers_updated");
-        }
-    }
 }
 
 pub fn routes() -> Routes {

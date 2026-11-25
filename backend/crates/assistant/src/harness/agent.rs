@@ -66,6 +66,12 @@ fn tool_error(central: Option<&Central>, err: &AppError) -> serde_json::Value {
 /// Rodadas de raciocínio (chamada ao provedor + ferramentas) por pergunta.
 pub const MAX_ITERATIONS: usize = 6;
 
+/// Se ainda cabe uma rodada. A conferência da resposta final ganha uma rodada
+/// além do teto só quando foi pedida na última rodada, e uma vez só.
+fn has_round_left(round: usize, retry_on_last: bool, retry_used: bool) -> bool {
+    round < MAX_ITERATIONS || (retry_on_last && !retry_used)
+}
+
 /// Mensagens anteriores enviadas ao provedor. O histórico inteiro seria
 /// reenviado a cada pergunta; as últimas trocas bastam para manter o assunto.
 pub const MAX_HISTORY_MESSAGES: usize = 16;
@@ -476,9 +482,12 @@ struct ToolSession {
 }
 
 impl ToolSession {
-    /// O modo automático está ligado para esta conversa e o equipamento da
-    /// chamada. Sem conversa ou sem equipamento identificável, não está.
+    /// O modo automático está ligado para este usuário, conversa e equipamento
+    /// da chamada. Sem usuário, conversa ou equipamento identificável, não está.
     async fn auto_approves(&self, ctx: &AppContext, arguments: &serde_json::Value) -> bool {
+        let Some(user_id) = self.actor.user_id else {
+            return false;
+        };
         let Some(key) = self.conversation_key.as_deref() else {
             return false;
         };
@@ -488,7 +497,9 @@ impl ToolSession {
         let Some(central) = self.central.as_ref() else {
             return false;
         };
-        central.device_auto_accepted(&ctx.db, key, device_id).await
+        central
+            .device_auto_accepted(&ctx.db, user_id, key, device_id)
+            .await
     }
 
     /// A chamada voltou ao usuário: fica registrada para aparecer em
@@ -878,7 +889,9 @@ pub async fn run_agent_loop(
             .unwrap_or_default();
         let mut policy = request.policy.with_areas(areas);
         // Papel por área (ADR 019): a IA do chat só alcança o que o usuário
-        // alcança. Rotina sem usuário (o proativo) segue só as áreas ligadas.
+        // alcança. A borda HTTP (`controllers/ai.rs`) exige usuário autenticado
+        // antes de chegar aqui; rotinas internas (proativo) definem
+        // `ToolPolicy::passive()` explicitamente.
         if let Some(user_id) = request.actor.user_id {
             policy = policy.with_access(&AreaAccess::load(&ctx.db, Some(user_id)).await);
         }
@@ -1141,18 +1154,37 @@ pub async fn run_agent_loop(
         }
         // A conferência da resposta final ganha uma rodada só por pergunta.
         let mut answer_retried = false;
+        // Só a conferência pedida na última rodada estende o laço: a que
+        // ocorreu antes já cabe nas rodadas restantes.
+        let mut retry_on_last = false;
+        let mut retry_used = false;
         let mut seen_call_ids = HashSet::new();
         let mut seen_results = SeenResults::default();
-        for _ in 0..MAX_ITERATIONS {
+        let mut cached_loaded = loaded.clone();
+        let mut tools = if small_talk {
+            Vec::new()
+        } else {
+            registry.definitions_for(&loaded)
+        };
+        let mut tools_tokens = estimate_tokens(&serde_json::to_string(&tools).unwrap_or_default());
+        let mut round = 0usize;
+        while has_round_left(round, retry_on_last, retry_used) {
+            if round >= MAX_ITERATIONS {
+                retry_used = true;
+            }
+            round += 1;
             // Antes da poda: o resultado podado continua valendo na conferência.
             seen_results.record(&conversation);
-            // Recalculado a cada rodada: um `load_tools` vale já na seguinte.
-            let tools = if small_talk {
-                Vec::new()
-            } else {
-                registry.definitions_for(&loaded)
-            };
-            let tools_tokens = estimate_tokens(&serde_json::to_string(&tools).unwrap_or_default());
+            // Recalculado só quando `loaded` muda (`load_tools` ou chamada direta).
+            if loaded != cached_loaded {
+                tools = if small_talk {
+                    Vec::new()
+                } else {
+                    registry.definitions_for(&loaded)
+                };
+                tools_tokens = estimate_tokens(&serde_json::to_string(&tools).unwrap_or_default());
+                cached_loaded = loaded.clone();
+            }
             let repeated = supersede_repeated_results(&mut conversation);
             if repeated > 0 {
                 tracing::debug!(
@@ -1223,6 +1255,7 @@ pub async fn run_agent_loop(
                     return sink.finish(&mut metrics, driver.as_ref()).await;
                 }
                 answer_retried = true;
+                retry_on_last = round >= MAX_ITERATIONS;
                 let notice = HarnessEvent::answer_check(check.retry_notice());
                 if !sink.send(notice).await || !sink.send(HarnessEvent::Retract).await {
                     return;
@@ -1296,9 +1329,9 @@ pub async fn run_agent_loop(
                 return sink.finish(&mut metrics, driver.as_ref()).await;
             }
         }
-        // As rodadas acabaram sem resposta (ainda havia ferramenta, ou a
-        // conferência caiu na última): uma chamada sem ferramentas fecha com o
-        // que as consultas trouxeram — a tela nunca fica sem texto.
+        // As rodadas acabaram sem resposta (ainda havia ferramenta): uma chamada
+        // sem ferramentas fecha com o que as consultas trouxeram — a tela nunca
+        // fica sem texto.
         conversation.push(AiMessage {
             role: "user".to_string(),
             content: Some(ROUND_LIMIT_NOTE.to_string()),
@@ -1321,7 +1354,30 @@ pub async fn run_agent_loop(
                 sink.fail(NO_ANSWER.to_string(), &mut metrics, driver.as_ref())
                     .await;
             }
-            RoundRead::Done { .. } => sink.finish(&mut metrics, driver.as_ref()).await,
+            RoundRead::Done { text, .. } => {
+                if answer_retried {
+                    let check = AnswerCheck::run(
+                        &ctx.db,
+                        &text,
+                        &conversation,
+                        question_at,
+                        &seen_results,
+                        |name| registry.kind_of(name).is_some(),
+                    )
+                    .await;
+                    if !check.needs_redaction() {
+                        let _ = sink.send(HarnessEvent::answer_check(ANSWER_CHECKED)).await;
+                    } else {
+                        let notice = HarnessEvent::answer_check(check.final_notice());
+                        if !sink.send(notice).await || !sink.send(HarnessEvent::Retract).await {
+                            return;
+                        }
+                        let shown = check.redact(&text);
+                        let _ = sink.send(HarnessEvent::TextDelta { content: shown }).await;
+                    }
+                }
+                sink.finish(&mut metrics, driver.as_ref()).await;
+            }
             RoundRead::Failed(message) => sink.fail(message, &mut metrics, driver.as_ref()).await,
             RoundRead::Disconnected => {}
         }
@@ -1443,16 +1499,22 @@ pub struct AgentAnswer {
     pub usage: AiUsage,
 }
 
-/// Consome o stream e junta o texto.
+/// Consome o stream e junta o texto, respeitando `Retract` quando a conferência
+/// descarta a última rodada e emite a versão corrigida.
 ///
 /// # Errors
 ///
 /// O erro do provedor, quando a sessão falha, ou resposta vazia.
 pub async fn collect_answer(mut stream: HarnessEventStream) -> AppResult<AgentAnswer> {
     let mut answer = AgentAnswer::default();
+    let mut round_start = 0usize;
     while let Some(event) = stream.next().await {
         match event {
             HarnessEvent::TextDelta { content } => answer.text.push_str(&content),
+            HarnessEvent::ToolResult { .. } | HarnessEvent::ConfirmationRequired { .. } => {
+                round_start = answer.text.len();
+            }
+            HarnessEvent::Retract => answer.text.truncate(round_start),
             HarnessEvent::Usage {
                 prompt_tokens,
                 completion_tokens,
@@ -1485,6 +1547,41 @@ pub async fn collect_answer(mut stream: HarnessEventStream) -> AppResult<AgentAn
 mod tests {
     use super::*;
     use crate::dtos::{AiChartAxis, AiChartSeries, AiChartUnit};
+
+    #[test]
+    fn rodada_extra_so_quando_a_conferencia_foi_na_ultima_rodada() {
+        assert!(has_round_left(MAX_ITERATIONS - 1, false, false));
+        // Conferência numa rodada do meio: o teto continua valendo.
+        assert!(!has_round_left(MAX_ITERATIONS, false, false));
+        // Conferência pedida na última rodada: ganha uma, uma vez só.
+        assert!(has_round_left(MAX_ITERATIONS, true, false));
+        assert!(!has_round_left(MAX_ITERATIONS + 1, true, true));
+    }
+
+    #[tokio::test]
+    async fn collect_answer_descarta_texto_retratado_apos_ultima_ferramenta() {
+        let events: HarnessEventStream = Box::pin(futures::stream::iter(vec![
+            HarnessEvent::TextDelta {
+                content: "Consultando...".into(),
+            },
+            HarnessEvent::ToolResult {
+                id: "t1".into(),
+                name: "get_alerts".into(),
+                result: json!({}),
+                chart: None,
+            },
+            HarnessEvent::TextDelta {
+                content: "O `agente-falso-01` caiu.".into(),
+            },
+            HarnessEvent::Retract,
+            HarnessEvent::TextDelta {
+                content: " Nenhum alerta aberto.".into(),
+            },
+            HarnessEvent::Done,
+        ]));
+        let answer = collect_answer(events).await.unwrap();
+        assert_eq!(answer.text, "Consultando... Nenhum alerta aberto.");
+    }
 
     fn msg(role: &str, content: &str) -> ChatMessageInput {
         ChatMessageInput {

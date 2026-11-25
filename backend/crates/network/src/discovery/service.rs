@@ -35,7 +35,10 @@ use netmonitor_core::{
     },
     monitoring::CheckDeps,
     network_tools::ping_client::PingClient,
-    shared::errors::{AppError, AppResult},
+    shared::{
+        errors::{AppError, AppResult},
+        transaction::begin_write,
+    },
 };
 
 /// Evento de snapshot da sessão no barramento global.
@@ -134,6 +137,33 @@ impl ScanSessionService {
         };
         self.publish(&state);
         token
+    }
+
+    /// Reserva atomicamente a sessão ao vivo se nenhuma varredura estiver ativa.
+    pub async fn try_reserve(&self, network_id: i64) -> Option<CancellationToken> {
+        let mut state = self.state.write().await;
+        if state.is_active() {
+            return None;
+        }
+        let token = CancellationToken::new();
+        *self.cancel.write().await = Some(token.clone());
+        *state = ScanSessionState {
+            run_id: None,
+            network_id: Some(network_id),
+            status: "running".into(),
+            phase: phase::SWEEP.into(),
+            started_at: Some(Utc::now().to_rfc3339()),
+            logs: vec!["Varredura iniciada.".into()],
+            ..Default::default()
+        };
+        self.publish(&state);
+        Some(token)
+    }
+
+    pub async fn bind_run(&self, run_id: i64) {
+        let mut state = self.state.write().await;
+        state.run_id = Some(run_id);
+        self.publish(&state);
     }
     pub async fn cancel(&self) {
         if let Some(token) = self.cancel.write().await.take() {
@@ -284,15 +314,15 @@ pub async fn start_scan(ctx: &AppContext, network_id: i64) -> AppResult<ScanStar
         ))
     })?;
     let session = ScanSessionService::from_context(ctx)?;
-    // A sessão ao vivo é uma só: uma segunda varredura sobrescreveria a tela
-    // da primeira, que seguiria rodando sem dono.
-    if session.state().await.is_active() {
+    // Reserva atomicamente a sessão ao vivo sob o write-lock para evitar corrida
+    // TOCTOU entre dois cliques simultâneos em "Escanear".
+    let Some(cancel) = session.try_reserve(network.id).await else {
         return Err(AppError::business_rule(
             "Já existe uma varredura em andamento — aguarde ou cancele para iniciar outra.",
         ));
-    }
+    };
     let remote = network.probe_id.is_some();
-    let run = discovery_runs::ActiveModel {
+    let run = match (discovery_runs::ActiveModel {
         network_id: Set(network.id),
         probe_id: Set(network.probe_id),
         status: Set(if remote { "pending" } else { "running" }.into()),
@@ -305,8 +335,15 @@ pub async fn start_scan(ctx: &AppContext, network_id: i64) -> AppResult<ScanStar
         ..Default::default()
     }
     .insert(&ctx.db)
-    .await?;
-    let cancel = session.start(run.id, network.id).await;
+    .await)
+    {
+        Ok(run) => run,
+        Err(error) => {
+            session.finish(Some(error.to_string())).await;
+            return Err(error.into());
+        }
+    };
+    session.bind_run(run.id).await;
     if remote {
         session.wait_for_probe().await;
     } else {
@@ -361,7 +398,7 @@ pub async fn execute_run(
         Err(_) if cancel.is_cancelled() => ("cancelled", None),
         Err(error) => ("failed", Some(error.to_string())),
     };
-    discovery_runs::ActiveModel {
+    let update_result = discovery_runs::ActiveModel {
         id: Set(run_id),
         status: Set(status.into()),
         finished_at: Set(Some(Utc::now().into())),
@@ -369,8 +406,15 @@ pub async fn execute_run(
         ..Default::default()
     }
     .update(&ctx.db)
-    .await?;
-    session.finish(error.clone()).await;
+    .await;
+    // Sempre encerra a sessão em memória mesmo se a atualização no banco falhar,
+    // evitando que a tela fique presa em "running" para sempre.
+    let finish_error = match &update_result {
+        Ok(_) => error.clone(),
+        Err(db_err) => error.clone().or_else(|| Some(db_err.to_string())),
+    };
+    session.finish(finish_error).await;
+    update_result?;
 
     let (event, message) = match (&outcome, status) {
         (Ok(hosts), _) => (
@@ -472,11 +516,10 @@ pub async fn run_discovery(
     persist_results(&ctx.db, run_id, &merged).await?;
     super::decider_identity::spawn(ctx, run_id, merged.clone());
 
-    // Auditoria de conflitos/clones de IP e MAC após a varredura
+    // Auditoria de conflitos/clones de IP e MAC após a varredura (chama mesmo
+    // quando vazio para auto-resolver alertas de conflitos que sumiram).
     if let Ok(conflicts) = super::conflicts::analyze_network_conflicts(&ctx.db).await {
-        if !conflicts.is_empty() {
-            let _ = super::conflicts::alert_on_conflicts(ctx, &conflicts).await;
-        }
+        let _ = super::conflicts::alert_on_conflicts(ctx, &conflicts).await;
     }
 
     Ok(merged)
@@ -606,11 +649,12 @@ async fn persist_results(
     run_id: i64,
     hosts: &[DiscoveredHost],
 ) -> AppResult<()> {
+    let txn = begin_write(db).await?;
     // discovery_results é o cache da última execução desta run; reexecuções não
     // acumulam entradas antigas que já não existem na rede.
     discovery_results::Entity::delete_many()
         .filter(ResultColumn::DiscoveryRunId.eq(run_id))
-        .exec(db)
+        .exec(&txn)
         .await?;
     let now = Utc::now();
     let rows: Vec<_> = hosts
@@ -635,9 +679,10 @@ async fn persist_results(
     // Em lotes: o SQLite limita as variáveis por comando.
     for chunk in rows.chunks(50) {
         discovery_results::Entity::insert_many(chunk.to_vec())
-            .exec(db)
+            .exec(&txn)
             .await?;
     }
+    txn.commit().await?;
     Ok(())
 }
 

@@ -43,8 +43,8 @@ impl HttpChannelSpec for TelegramChannel {
         let text = format!(
             "🚨 *[{}] {}*\n\n{}",
             message.severity.as_str().to_uppercase(),
-            message.title,
-            message.body
+            escape_markdown(&message.title),
+            escape_markdown(&message.body)
         );
         ChannelRequest {
             url: format!("https://api.telegram.org/bot{}/sendMessage", self.bot_token),
@@ -56,6 +56,19 @@ impl HttpChannelSpec for TelegramChannel {
             headers: Vec::new(),
         }
     }
+}
+
+/// Escapa caracteres especiais do modo `Markdown` legado do Telegram para que
+/// nomes de host/interface (ex.: `eth0_wan`) não gerem HTTP 400 `can't parse entities`.
+fn escape_markdown(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for ch in text.chars() {
+        if matches!(ch, '_' | '*' | '`' | '[') {
+            escaped.push('\\');
+        }
+        escaped.push(ch);
+    }
+    escaped
 }
 
 #[cfg(test)]

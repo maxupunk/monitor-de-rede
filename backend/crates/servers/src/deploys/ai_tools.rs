@@ -9,6 +9,7 @@
 //! `allowed_application_ids` e `can_approve_deploys`.
 
 use async_trait::async_trait;
+use futures::future::try_join_all;
 use loco_rs::prelude::AppContext;
 use sea_orm::EntityTrait;
 use serde_json::{json, Value};
@@ -27,8 +28,8 @@ use netmonitor_core::{
 };
 
 use super::{
-    applications, builds, catalog, events, orchestrator, readiness, runs, short_digest, short_sha,
-    RunStatus,
+    applications, builds, catalog, events, guide, orchestrator, readiness, runs, short_digest,
+    short_sha, RunStatus,
 };
 use crate::dtos::deploys::{DeployInput, DeployWhen};
 
@@ -83,8 +84,32 @@ impl AiToolHandler for DeployGuide {
         json!({ "type": "object", "properties": {} })
     }
 
-    async fn execute(&self, ctx: &AppContext, _args: &ToolArgs) -> AppResult<ToolOutput> {
-        let guide = catalog::overview(ctx).await?.guide;
+    async fn execute(&self, ctx: &AppContext, args: &ToolArgs) -> AppResult<ToolOutput> {
+        let mut overview = catalog::overview(ctx).await?;
+        let guide = match args
+            .mcp()
+            .and_then(|mcp| mcp.allowed_application_ids.as_deref())
+        {
+            Some(allowed) => {
+                overview
+                    .applications
+                    .retain(|app| mcp_allows_app(args, app.id));
+                overview
+                    .recent_runs
+                    .retain(|run| mcp_allows_app(args, run.application_id));
+                let agents = catalog::agents(ctx).await?;
+                let latest_build = builds::recent_for_applications(&ctx.db, allowed, 1)
+                    .await?
+                    .into_iter()
+                    .next()
+                    .map(|build| guide::BuildFact {
+                        status: builds::BuildStatus::parse(&build.status),
+                        short_sha: short_sha(&build.commit_sha).to_string(),
+                    });
+                guide::steps(&guide::facts_of(&overview, &agents, latest_build))
+            }
+            None => overview.guide,
+        };
         let current = guide
             .steps
             .iter()
@@ -330,15 +355,16 @@ impl AiToolHandler for DeployReadiness {
             )));
         };
         let targets = applications::targets_of(&ctx.db, application.id).await?;
-        let mut results = Vec::with_capacity(targets.len());
-        let mut all_ready = !targets.is_empty();
-        for target in &targets {
-            let report = inspect_target_readiness(ctx, &application, target).await?;
-            if !report["ready"].as_bool().unwrap_or(false) {
-                all_ready = false;
-            }
-            results.push(report);
-        }
+        let results = try_join_all(
+            targets
+                .iter()
+                .map(|target| inspect_target_readiness(ctx, &application, target)),
+        )
+        .await?;
+        let all_ready = !results.is_empty()
+            && results
+                .iter()
+                .all(|report| report["ready"].as_bool().unwrap_or(false));
         Ok(ToolOutput::data(json!({
             "applicationId": application.id,
             "application": application.name,
@@ -494,31 +520,34 @@ impl AiToolHandler for BuildStatus {
             (None, Some(allowed)) => builds::recent_for_applications(&ctx.db, allowed, 15).await?,
             (None, None) => builds::recent(&ctx.db, None, 15).await?,
         };
-        let mut items = Vec::with_capacity(rows.len());
-        for row in &rows {
-            let view = builds::view(&ctx.db, row).await?;
-            items.push(json!({
-                "buildId": view.id,
-                "application": view.application,
-                "applicationId": view.application_id,
-                "branch": builds::branch_of(row),
-                "commit": view.short_sha,
-                "message": view.commit_message.as_deref().and_then(|message| message.lines().next()),
-                "trigger": view.trigger,
-                "by": view.triggered_by,
-                "agent": view.agent,
-                "status": view.status,
-                "stage": view.stage,
-                "noCache": view.no_cache,
-                "images": view.images.iter().map(|image| json!({
-                    "name": image.name,
-                    "digest": short_digest(&image.digest),
-                })).collect::<Vec<_>>(),
-                "error": view.error,
-                "durationMs": view.duration_ms,
-                "at": view.finished_at.as_ref().unwrap_or(&view.created_at),
-            }));
-        }
+        let views = builds::views(&ctx.db, &rows).await?;
+        let items: Vec<Value> = rows
+            .iter()
+            .zip(views.iter())
+            .map(|(row, view)| {
+                json!({
+                    "buildId": view.id,
+                    "application": view.application,
+                    "applicationId": view.application_id,
+                    "branch": builds::branch_of(row),
+                    "commit": view.short_sha,
+                    "message": view.commit_message.as_deref().and_then(|message| message.lines().next()),
+                    "trigger": view.trigger,
+                    "by": view.triggered_by,
+                    "agent": view.agent,
+                    "status": view.status,
+                    "stage": view.stage,
+                    "noCache": view.no_cache,
+                    "images": view.images.iter().map(|image| json!({
+                        "name": image.name,
+                        "digest": short_digest(&image.digest),
+                    })).collect::<Vec<_>>(),
+                    "error": view.error,
+                    "durationMs": view.duration_ms,
+                    "at": view.finished_at.as_ref().unwrap_or(&view.created_at),
+                })
+            })
+            .collect();
         Ok(ToolOutput::data(json!({ "builds": items })))
     }
 }
@@ -1550,5 +1579,27 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, AppError::Forbidden(_)));
+    }
+
+    #[tokio::test]
+    async fn deploy_guide_respeita_escopo_mcp() {
+        let ctx = test_ctx().await;
+        let agent = insert_agent(&ctx, "srv-guide").await;
+        let app1 = insert_app(&ctx, "Permitida", "permitida").await;
+        let app2 = insert_app(&ctx, "Secreta", "secreta").await;
+        let t2 = insert_target(&ctx, app2.id, agent.id, "ProdSecreta", "secreta", false).await;
+        insert_run(&ctx, app2.id, t2.id, RunStatus::Failed, None).await;
+
+        let out = DeployGuide
+            .execute(
+                &ctx,
+                &ToolArgs::from_value(json!({})).with_mcp(mcp_ctx(Some(vec![app1.id]), false)),
+            )
+            .await
+            .expect("guia escopado");
+        let serialized = out.data.to_string();
+        assert!(serialized.contains("Permitida"));
+        assert!(!serialized.contains("Secreta"));
+        assert!(!serialized.contains("ProdSecreta"));
     }
 }

@@ -63,6 +63,22 @@ pub async fn list<C: ConnectionTrait>(db: &C) -> AppResult<Vec<probes::Model>> {
         .collect())
 }
 
+/// Os agentes ativos (não revogados), pelo nome.
+///
+/// # Errors
+///
+/// Propaga erro do banco.
+pub async fn list_active<C: ConnectionTrait>(db: &C) -> AppResult<Vec<probes::Model>> {
+    Ok(probes::Entity::find()
+        .filter(probes::Column::Status.ne(probes::STATUS_REVOKED))
+        .order_by_asc(probes::Column::Name)
+        .all(db)
+        .await?
+        .into_iter()
+        .filter(is_agent)
+        .collect())
+}
+
 /// O que a última conexão do agente anunciou (`probes.configuration.host`).
 #[must_use]
 pub fn host_info(probe: &probes::Model) -> AgentHostInfo {
@@ -70,7 +86,6 @@ pub fn host_info(probe: &probes::Model) -> AgentHostInfo {
         .configuration
         .as_ref()
         .and_then(|value| value.get("host"))
-        .cloned()
-        .and_then(|value| serde_json::from_value::<AgentHostInfo>(value).ok())
+        .and_then(|value| serde::Deserialize::deserialize(value).ok())
         .unwrap_or_default()
 }

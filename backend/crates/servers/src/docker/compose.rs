@@ -6,7 +6,7 @@
 //! agente — o remoto ou o local, ao lado da central (ADR 014): o processo da
 //! API nunca executa o CLI `docker` (ADR 010, AGENTS §7).
 
-use std::{collections::BTreeMap, process::Stdio, time::Duration};
+use std::{collections::BTreeMap, time::Duration};
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -215,18 +215,16 @@ pub async fn execute(
 
 /// Se o CLI com o plugin compose existe neste host.
 pub async fn availability() -> Result<String, String> {
-    let output = tokio::time::timeout(
+    let (ok, version) = super::cli::capture(
+        "docker",
+        &["compose", "version", "--short"],
+        None,
         VERSION_TIMEOUT,
-        tokio::process::Command::new("docker")
-            .args(["compose", "version", "--short"])
-            .stdin(Stdio::null())
-            .output(),
     )
     .await
-    .map_err(|_| "o CLI docker não respondeu".to_string())?
-    .map_err(|_| "CLI docker não instalado".to_string())?;
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    .map_err(|_| "CLI docker indisponível ou não respondeu".to_string())?;
+    if ok {
+        Ok(version)
     } else {
         Err("plugin docker compose indisponível".to_string())
     }

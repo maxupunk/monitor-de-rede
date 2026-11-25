@@ -227,6 +227,24 @@ impl VulnerabilityPolicy {
             Self::BlockCritical => (verdict.critical, "crítica"),
             Self::BlockHigh => (verdict.critical + verdict.high, "alta ou crítica"),
         };
+        match verdict.status {
+            ScanStatus::Missing => {
+                return Some(
+                    "A imagem não foi encontrada no registry para verificação de vulnerabilidades"
+                        .to_string(),
+                );
+            }
+            ScanStatus::Failed => {
+                return Some(
+                    "A análise de vulnerabilidades falhou (base OSV indisponível): a política do \
+                     alvo bloqueia deploy sem verificação. Sem acesso à internet, aponte \
+                     REGISTRY_OSV_URL para um espelho interno da base e atualize em Registry › \
+                     Vulnerabilidades"
+                        .to_string(),
+                );
+            }
+            _ => {}
+        }
         (count > 0).then(|| {
             let sample = verdict
                 .top
@@ -378,5 +396,33 @@ mod tests {
             VulnerabilityPolicy::BlockHigh
         );
         assert_eq!(VulnerabilityPolicy::parse("??"), VulnerabilityPolicy::Warn);
+    }
+
+    #[test]
+    fn politica_bloqueia_quando_analise_falhou_ou_imagem_ausente() {
+        for status in [ScanStatus::Failed, ScanStatus::Missing] {
+            let verdict = ScanVerdict {
+                status,
+                ..ScanVerdict::default()
+            };
+            assert!(VulnerabilityPolicy::Warn.blocks(&verdict).is_none());
+            assert!(VulnerabilityPolicy::BlockCritical
+                .blocks(&verdict)
+                .is_some());
+            assert!(VulnerabilityPolicy::BlockHigh.blocks(&verdict).is_some());
+        }
+        let failed = ScanVerdict {
+            status: ScanStatus::Failed,
+            ..ScanVerdict::default()
+        };
+        assert!(VulnerabilityPolicy::BlockHigh
+            .blocks(&failed)
+            .unwrap()
+            .contains("REGISTRY_OSV_URL"));
+        let no_sbom = ScanVerdict {
+            status: ScanStatus::NoSbom,
+            ..ScanVerdict::default()
+        };
+        assert!(VulnerabilityPolicy::BlockHigh.blocks(&no_sbom).is_none());
     }
 }

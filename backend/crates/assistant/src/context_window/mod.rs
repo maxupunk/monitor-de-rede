@@ -10,7 +10,7 @@ pub mod sources;
 
 use std::{
     collections::HashMap,
-    sync::{Mutex, OnceLock},
+    sync::{Mutex, OnceLock, PoisonError},
     time::{Duration, Instant},
 };
 
@@ -21,6 +21,8 @@ use super::drivers::traits::AiDriver;
 
 /// Por quanto tempo um "o provedor não conhece este modelo" vale.
 const MISS_TTL: Duration = Duration::from_secs(10 * 60);
+/// Teto de entradas em memória no cache de janelas (catálogos grandes + misses).
+const MAX_CACHE_ENTRIES: usize = 2048;
 
 /// Janela resolvida para um modelo.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,7 +67,7 @@ fn candidates(model: &str) -> Vec<&str> {
 pub async fn lookup(source: &dyn WindowLookup, model: &str) -> Option<LearnedWindow> {
     let now = Instant::now();
     {
-        let guard = cache().lock().ok()?;
+        let guard = cache().lock().unwrap_or_else(PoisonError::into_inner);
         for candidate in candidates(model) {
             if let Some(entry) = guard.get(&cache_key(source, candidate)) {
                 if entry.expires > now {
@@ -85,27 +87,39 @@ pub async fn lookup(source: &dyn WindowLookup, model: &str) -> Option<LearnedWin
         .into_iter()
         .find_map(|candidate| learned.get(candidate).copied());
 
-    if let Ok(mut guard) = cache().lock() {
-        let expires = Instant::now() + source.ttl();
-        for (id, window) in &learned {
-            if window.confident {
-                guard.insert(
-                    cache_key(source, id),
-                    Entry {
-                        window: Some(*window),
-                        expires,
-                    },
-                );
-            }
-        }
-        if found.is_none() {
+    let mut guard = cache().lock().unwrap_or_else(PoisonError::into_inner);
+    let now = Instant::now();
+    let expires = now + source.ttl();
+    for (id, window) in &learned {
+        if window.confident {
             guard.insert(
-                cache_key(source, model.trim()),
+                cache_key(source, id),
                 Entry {
-                    window: None,
-                    expires: Instant::now() + MISS_TTL,
+                    window: Some(*window),
+                    expires,
                 },
             );
+        }
+    }
+    if found.is_none() {
+        guard.insert(
+            cache_key(source, model.trim()),
+            Entry {
+                window: None,
+                expires: now + MISS_TTL,
+            },
+        );
+    }
+    if guard.len() > MAX_CACHE_ENTRIES {
+        guard.retain(|_, entry| entry.expires > now);
+        if guard.len() > MAX_CACHE_ENTRIES {
+            let mut by_expiry: Vec<(String, Instant)> =
+                guard.iter().map(|(k, v)| (k.clone(), v.expires)).collect();
+            by_expiry.sort_by_key(|(_, exp)| *exp);
+            let excess = guard.len() - MAX_CACHE_ENTRIES;
+            for (k, _) in by_expiry.into_iter().take(excess) {
+                guard.remove(&k);
+            }
         }
     }
     found

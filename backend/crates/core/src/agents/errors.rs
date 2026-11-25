@@ -32,13 +32,16 @@ impl From<AppError> for RemoteError {
 impl From<RemoteError> for AppError {
     fn from(error: RemoteError) -> Self {
         match error.code {
-            ErrorCode::Timeout | ErrorCode::Disconnected | ErrorCode::Unavailable => {
-                Self::service_unavailable(error.message)
-            }
+            ErrorCode::Timeout
+            | ErrorCode::Disconnected
+            | ErrorCode::Unavailable
+            | ErrorCode::Disabled => Self::service_unavailable(error.message),
             ErrorCode::Forbidden => Self::forbidden(error.message),
             ErrorCode::NotFound => Self::not_found(error.message),
+            ErrorCode::Conflict => Self::conflict(error.message),
             ErrorCode::Validation => Self::validation(error.message),
-            _ => DockerError::from(error).into(),
+            ErrorCode::Engine | ErrorCode::Unsupported => Self::business_rule(error.message),
+            ErrorCode::Internal => Self::Internal(anyhow::anyhow!(error.message)),
         }
     }
 }
@@ -79,5 +82,21 @@ mod tests {
         let internal = RemoteError::from(AppError::Internal(anyhow::anyhow!("segredo")));
         assert_eq!(internal.code, ErrorCode::Internal);
         assert!(!internal.message.contains("segredo"));
+    }
+
+    #[test]
+    fn erro_remoto_preserva_mensagem_na_volta_para_app_error() {
+        let business = AppError::from(RemoteError::new(ErrorCode::Engine, "EC-SRP5"));
+        assert!(matches!(business, AppError::BusinessRule(ref msg) if msg == "EC-SRP5"));
+
+        let conflict = AppError::from(RemoteError::new(ErrorCode::Conflict, "ocupado"));
+        assert!(matches!(conflict, AppError::Conflict(ref msg) if msg == "ocupado"));
+
+        let disabled = AppError::from(RemoteError::new(ErrorCode::Disabled, "desabilitado"));
+        assert!(matches!(disabled, AppError::ServiceUnavailable(ref msg) if msg == "desabilitado"));
+
+        let internal = AppError::from(RemoteError::new(ErrorCode::Internal, "falha interna"));
+        assert!(matches!(internal, AppError::Internal(_)));
+        assert!(internal.to_string().contains("falha interna"));
     }
 }

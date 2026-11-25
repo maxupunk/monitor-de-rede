@@ -3,7 +3,7 @@
 //! configuração da VPN usam os mesmos.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     sync::{Mutex, OnceLock},
     time::{Duration, Instant},
 };
@@ -37,12 +37,22 @@ pub struct RateLimitDecision {
 pub struct SlidingWindowRateLimiter {
     limit: usize,
     window: Duration,
-    hits: Mutex<HashMap<String, Vec<Instant>>>,
+    hits: Mutex<HashMap<String, VecDeque<Instant>>>,
 }
 
 impl Default for SlidingWindowRateLimiter {
     fn default() -> Self {
         Self::new(RATE_LIMIT, RATE_WINDOW)
+    }
+}
+
+fn prune_front(timestamps: &mut VecDeque<Instant>, now: Instant, window: Duration) {
+    while let Some(&oldest) = timestamps.front() {
+        if now.duration_since(oldest) >= window {
+            timestamps.pop_front();
+        } else {
+            break;
+        }
     }
 }
 
@@ -69,6 +79,14 @@ impl SlidingWindowRateLimiter {
     }
 
     pub fn consume(&self, key: &str) -> RateLimitDecision {
+        if self.limit == 0 {
+            return RateLimitDecision {
+                allowed: false,
+                remaining: 0,
+                retry_after_seconds: self.window.as_secs().max(1),
+            };
+        }
+
         let now = Instant::now();
         let Ok(mut hits) = self.hits.lock() else {
             tracing::error!("RateLimiter: Mutex envenenado ao registrar consumo");
@@ -80,24 +98,41 @@ impl SlidingWindowRateLimiter {
             };
         };
 
-        // Expurgo preventivo se atingir o teto de chaves rastreadas
-        if hits.len() >= MAX_TRACKED_ENTRIES && !hits.contains_key(key) {
-            hits.retain(|_, timestamps| {
-                timestamps.retain(|hit| now.duration_since(*hit) < self.window);
-                !timestamps.is_empty()
-            });
+        let entry = if hits.contains_key(key) {
+            hits.get_mut(key)
+        } else {
+            // Expurgo preventivo se atingir o teto de chaves rastreadas
             if hits.len() >= MAX_TRACKED_ENTRIES {
-                if let Some(first_key) = hits.keys().next().cloned() {
-                    hits.remove(&first_key);
+                hits.retain(|_, timestamps| {
+                    prune_front(timestamps, now, self.window);
+                    !timestamps.is_empty()
+                });
+                if hits.len() >= MAX_TRACKED_ENTRIES {
+                    // Remove a chave com atividade mais antiga, preservando bloqueios ativos.
+                    if let Some(oldest_key) = hits
+                        .iter()
+                        .min_by_key(|(_, timestamps)| timestamps.back().copied())
+                        .map(|(k, _)| k.clone())
+                    {
+                        hits.remove(&oldest_key);
+                    }
                 }
             }
-        }
+            Some(hits.entry(key.to_string()).or_default())
+        };
 
-        let entry = hits.entry(key.to_string()).or_default();
-        entry.retain(|hit| now.duration_since(*hit) < self.window);
+        let Some(entry) = entry else {
+            return RateLimitDecision {
+                allowed: true,
+                remaining: self.limit,
+                retry_after_seconds: 0,
+            };
+        };
+
+        prune_front(entry, now, self.window);
 
         if entry.len() >= self.limit {
-            let oldest = entry[0];
+            let oldest = entry.front().copied().unwrap_or(now);
             let retry_after = self.window.saturating_sub(now.duration_since(oldest));
             return RateLimitDecision {
                 allowed: false,
@@ -106,7 +141,7 @@ impl SlidingWindowRateLimiter {
             };
         }
 
-        entry.push(now);
+        entry.push_back(now);
         RateLimitDecision {
             allowed: true,
             remaining: self.limit - entry.len(),
@@ -119,15 +154,21 @@ impl SlidingWindowRateLimiter {
     /// conta as falhas deixaria o palpite certo passar depois do limite.
     #[must_use]
     pub fn blocked_for(&self, key: &str) -> Option<u64> {
+        if self.limit == 0 {
+            return Some(self.window.as_secs().max(1));
+        }
         let now = Instant::now();
         let hits = self.hits.lock().ok()?;
-        let recent: Vec<&Instant> = hits
+        let (count, oldest) = hits
             .get(key)?
             .iter()
-            .filter(|hit| now.duration_since(**hit) < self.window)
-            .collect();
-        (recent.len() >= self.limit).then(|| {
-            let oldest = recent.first().map_or(now, |hit| **hit);
+            .copied()
+            .filter(|hit| now.duration_since(*hit) < self.window)
+            .fold((0usize, None), |(count, oldest), hit| {
+                (count + 1, oldest.or(Some(hit)))
+            });
+        (count >= self.limit).then(|| {
+            let oldest = oldest.unwrap_or(now);
             self.window
                 .saturating_sub(now.duration_since(oldest))
                 .as_secs()
@@ -219,5 +260,15 @@ mod tests {
         assert!(limiter.consume("user:1").allowed);
         // Com janela zerada, a batida anterior já saiu do intervalo.
         assert!(limiter.consume("user:1").allowed);
+    }
+
+    #[test]
+    fn limite_zero_bloqueia_sem_panico() {
+        let limiter = SlidingWindowRateLimiter::new(0, Duration::from_secs(60));
+        let decision = limiter.consume("user:zero");
+        assert!(!decision.allowed);
+        assert_eq!(decision.remaining, 0);
+        assert_eq!(decision.retry_after_seconds, 60);
+        assert_eq!(limiter.blocked_for("user:zero"), Some(60));
     }
 }

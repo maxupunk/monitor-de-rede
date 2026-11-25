@@ -6,173 +6,149 @@
 
 use std::{
     collections::HashSet,
+    hash::Hash,
     net::IpAddr,
-    sync::{Mutex, OnceLock},
+    sync::{Mutex, OnceLock, PoisonError},
 };
 
-fn in_flight_monitors() -> &'static Mutex<HashSet<i64>> {
-    static SET: OnceLock<Mutex<HashSet<i64>>> = OnceLock::new();
-    SET.get_or_init(|| Mutex::new(HashSet::new()))
+struct InFlightSet<K: Eq + Hash + Copy + 'static> {
+    entries: Mutex<HashSet<K>>,
 }
 
-fn in_flight_snmp_devices() -> &'static Mutex<HashSet<i64>> {
-    static SET: OnceLock<Mutex<HashSet<i64>>> = OnceLock::new();
-    SET.get_or_init(|| Mutex::new(HashSet::new()))
+impl<K: Eq + Hash + Copy + 'static> InFlightSet<K> {
+    fn new() -> Self {
+        Self {
+            entries: Mutex::new(HashSet::new()),
+        }
+    }
+
+    fn try_acquire(&'static self, key: K) -> Option<InFlightGuard<K>> {
+        let mut set = self.entries.lock().unwrap_or_else(PoisonError::into_inner);
+        set.insert(key).then(|| InFlightGuard { set: self, key })
+    }
+
+    fn release(&self, key: K) {
+        self.entries
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&key);
+    }
 }
 
-fn in_flight_port_scans() -> &'static Mutex<HashSet<IpAddr>> {
-    static SET: OnceLock<Mutex<HashSet<IpAddr>>> = OnceLock::new();
-    SET.get_or_init(|| Mutex::new(HashSet::new()))
+#[derive(Debug)]
+struct InFlightGuard<K: Eq + Hash + Copy + 'static> {
+    set: &'static InFlightSet<K>,
+    key: K,
 }
 
-fn in_flight_traceroutes() -> &'static Mutex<HashSet<IpAddr>> {
-    static SET: OnceLock<Mutex<HashSet<IpAddr>>> = OnceLock::new();
-    SET.get_or_init(|| Mutex::new(HashSet::new()))
+impl<K: Eq + Hash + Copy + 'static> Drop for InFlightGuard<K> {
+    fn drop(&mut self) {
+        self.set.release(self.key);
+    }
 }
 
-fn in_flight_quick_pings() -> &'static Mutex<HashSet<IpAddr>> {
-    static SET: OnceLock<Mutex<HashSet<IpAddr>>> = OnceLock::new();
-    SET.get_or_init(|| Mutex::new(HashSet::new()))
+impl<K: Eq + Hash + Copy + 'static> std::fmt::Debug for InFlightSet<K> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InFlightSet").finish_non_exhaustive()
+    }
 }
 
-fn in_flight_speedtest() -> &'static Mutex<bool> {
-    static FLAG: OnceLock<Mutex<bool>> = OnceLock::new();
-    FLAG.get_or_init(|| Mutex::new(false))
+fn in_flight_monitors() -> &'static InFlightSet<i64> {
+    static SET: OnceLock<InFlightSet<i64>> = OnceLock::new();
+    SET.get_or_init(InFlightSet::new)
+}
+
+fn in_flight_snmp_devices() -> &'static InFlightSet<i64> {
+    static SET: OnceLock<InFlightSet<i64>> = OnceLock::new();
+    SET.get_or_init(InFlightSet::new)
+}
+
+fn in_flight_port_scans() -> &'static InFlightSet<IpAddr> {
+    static SET: OnceLock<InFlightSet<IpAddr>> = OnceLock::new();
+    SET.get_or_init(InFlightSet::new)
+}
+
+fn in_flight_traceroutes() -> &'static InFlightSet<IpAddr> {
+    static SET: OnceLock<InFlightSet<IpAddr>> = OnceLock::new();
+    SET.get_or_init(InFlightSet::new)
+}
+
+fn in_flight_quick_pings() -> &'static InFlightSet<IpAddr> {
+    static SET: OnceLock<InFlightSet<IpAddr>> = OnceLock::new();
+    SET.get_or_init(InFlightSet::new)
+}
+
+fn in_flight_speedtest() -> &'static InFlightSet<()> {
+    static SET: OnceLock<InFlightSet<()>> = OnceLock::new();
+    SET.get_or_init(InFlightSet::new)
 }
 
 /// Guarda RAII que sinaliza a execução em curso de um monitor.
 /// Libera o identificador automaticamente ao ser descartado.
 #[derive(Debug)]
-pub struct MonitorExecutionGuard(i64);
-
-impl Drop for MonitorExecutionGuard {
-    fn drop(&mut self) {
-        if let Ok(mut set) = in_flight_monitors().lock() {
-            set.remove(&self.0);
-        }
-    }
-}
+pub struct MonitorExecutionGuard(#[allow(dead_code)] InFlightGuard<i64>);
 
 /// Tenta adquirir a trava de execução para o monitor informado.
 /// Retorna `None` se já houver uma execução em andamento.
 pub fn try_acquire_monitor(monitor_id: i64) -> Option<MonitorExecutionGuard> {
-    let mut set = in_flight_monitors().lock().ok()?;
-    if set.insert(monitor_id) {
-        Some(MonitorExecutionGuard(monitor_id))
-    } else {
-        None
-    }
+    in_flight_monitors()
+        .try_acquire(monitor_id)
+        .map(MonitorExecutionGuard)
 }
 
 /// Guarda RAII que sinaliza a consulta SNMP em curso para um dispositivo.
 #[derive(Debug)]
-pub struct DeviceSnmpExecutionGuard(i64);
-
-impl Drop for DeviceSnmpExecutionGuard {
-    fn drop(&mut self) {
-        if let Ok(mut set) = in_flight_snmp_devices().lock() {
-            set.remove(&self.0);
-        }
-    }
-}
+pub struct DeviceSnmpExecutionGuard(#[allow(dead_code)] InFlightGuard<i64>);
 
 /// Tenta adquirir a trava de consulta SNMP para o dispositivo informado.
 pub fn try_acquire_snmp_device(device_id: i64) -> Option<DeviceSnmpExecutionGuard> {
-    let mut set = in_flight_snmp_devices().lock().ok()?;
-    if set.insert(device_id) {
-        Some(DeviceSnmpExecutionGuard(device_id))
-    } else {
-        None
-    }
+    in_flight_snmp_devices()
+        .try_acquire(device_id)
+        .map(DeviceSnmpExecutionGuard)
 }
 
 /// Guarda RAII que sinaliza a varredura de portas em curso para um IP.
 #[derive(Debug)]
-pub struct PortScanExecutionGuard(IpAddr);
-
-impl Drop for PortScanExecutionGuard {
-    fn drop(&mut self) {
-        if let Ok(mut set) = in_flight_port_scans().lock() {
-            set.remove(&self.0);
-        }
-    }
-}
+pub struct PortScanExecutionGuard(#[allow(dead_code)] InFlightGuard<IpAddr>);
 
 /// Tenta adquirir a trava de varredura de portas para o IP informado.
 pub fn try_acquire_port_scan(ip: IpAddr) -> Option<PortScanExecutionGuard> {
-    let mut set = in_flight_port_scans().lock().ok()?;
-    if set.insert(ip) {
-        Some(PortScanExecutionGuard(ip))
-    } else {
-        None
-    }
+    in_flight_port_scans()
+        .try_acquire(ip)
+        .map(PortScanExecutionGuard)
 }
 
 /// Guarda RAII que sinaliza o traceroute em curso para um IP.
 #[derive(Debug)]
-pub struct TracerouteExecutionGuard(IpAddr);
-
-impl Drop for TracerouteExecutionGuard {
-    fn drop(&mut self) {
-        if let Ok(mut set) = in_flight_traceroutes().lock() {
-            set.remove(&self.0);
-        }
-    }
-}
+pub struct TracerouteExecutionGuard(#[allow(dead_code)] InFlightGuard<IpAddr>);
 
 /// Tenta adquirir a trava de traceroute para o IP informado.
 pub fn try_acquire_traceroute(ip: IpAddr) -> Option<TracerouteExecutionGuard> {
-    let mut set = in_flight_traceroutes().lock().ok()?;
-    if set.insert(ip) {
-        Some(TracerouteExecutionGuard(ip))
-    } else {
-        None
-    }
+    in_flight_traceroutes()
+        .try_acquire(ip)
+        .map(TracerouteExecutionGuard)
 }
 
 /// Guarda RAII que sinaliza o diagnóstico rápido por ping em curso para um IP.
 #[derive(Debug)]
-pub struct QuickPingExecutionGuard(IpAddr);
-
-impl Drop for QuickPingExecutionGuard {
-    fn drop(&mut self) {
-        if let Ok(mut set) = in_flight_quick_pings().lock() {
-            set.remove(&self.0);
-        }
-    }
-}
+pub struct QuickPingExecutionGuard(#[allow(dead_code)] InFlightGuard<IpAddr>);
 
 /// Tenta adquirir a trava do diagnóstico rápido para o IP informado.
 pub fn try_acquire_quick_ping(ip: IpAddr) -> Option<QuickPingExecutionGuard> {
-    let mut set = in_flight_quick_pings().lock().ok()?;
-    if set.insert(ip) {
-        Some(QuickPingExecutionGuard(ip))
-    } else {
-        None
-    }
+    in_flight_quick_pings()
+        .try_acquire(ip)
+        .map(QuickPingExecutionGuard)
 }
 
 /// Guarda RAII que sinaliza o teste de velocidade em curso no servidor.
 #[derive(Debug)]
-pub struct SpeedTestExecutionGuard;
-
-impl Drop for SpeedTestExecutionGuard {
-    fn drop(&mut self) {
-        if let Ok(mut flag) = in_flight_speedtest().lock() {
-            *flag = false;
-        }
-    }
-}
+pub struct SpeedTestExecutionGuard(#[allow(dead_code)] InFlightGuard<()>);
 
 /// Tenta adquirir a trava do teste de velocidade.
 pub fn try_acquire_speedtest() -> Option<SpeedTestExecutionGuard> {
-    let mut flag = in_flight_speedtest().lock().ok()?;
-    if !*flag {
-        *flag = true;
-        Some(SpeedTestExecutionGuard)
-    } else {
-        None
-    }
+    in_flight_speedtest()
+        .try_acquire(())
+        .map(SpeedTestExecutionGuard)
 }
 
 /// Converte o `timeout_seconds` salvo no monitor para um valor efetivo,
@@ -196,21 +172,14 @@ pub fn calculate_smart_timeout_seconds(kind: &str, interval_seconds: i32) -> i32
 
     let max_allowed = (interval - 1).max(1);
 
-    match kind.to_lowercase().as_str() {
-        "ping" | "tcp" | "dns" | "snmp" => {
-            // Fração segura de 1/3 do intervalo, limitada entre 2s e 5s
-            let calculated = interval / 3;
-            calculated.clamp(2, 5).min(max_allowed)
-        }
-        "http" | "https" => {
-            // Requisições HTTP aceitam até metade do intervalo, limitado entre 3s e 10s
-            let calculated = interval / 2;
-            calculated.clamp(3, 10).min(max_allowed)
-        }
-        _ => {
-            let calculated = interval / 3;
-            calculated.clamp(2, 5).min(max_allowed)
-        }
+    if kind.eq_ignore_ascii_case("http") || kind.eq_ignore_ascii_case("https") {
+        // Requisições HTTP aceitam até metade do intervalo, limitado entre 3s e 10s
+        let calculated = interval / 2;
+        calculated.clamp(3, 10).min(max_allowed)
+    } else {
+        // Ping, TCP, DNS, SNMP e demais: fração segura de 1/3 do intervalo, entre 2s e 5s
+        let calculated = interval / 3;
+        calculated.clamp(2, 5).min(max_allowed)
     }
 }
 

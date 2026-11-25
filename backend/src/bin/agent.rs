@@ -48,5 +48,41 @@ async fn main() {
         docker: registries::agent_host_docker(),
         deps,
     };
-    client::run_forever(config, host).await;
+    let shutdown = tokio_util::sync::CancellationToken::new();
+    let signal_token = shutdown.clone();
+    tokio::spawn(async move {
+        wait_for_shutdown_signal().await;
+        tracing::info!("sinal de encerramento recebido; finalizando o agente");
+        signal_token.cancel();
+    });
+
+    client::run_until_shutdown(config, host, shutdown).await;
+}
+
+async fn wait_for_shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        let mut term = match signal(SignalKind::terminate()) {
+            Ok(sig) => Some(sig),
+            Err(error) => {
+                tracing::warn!(%error, "não foi possível registrar SIGTERM");
+                None
+            }
+        };
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = async {
+                if let Some(sig) = term.as_mut() {
+                    sig.recv().await;
+                } else {
+                    std::future::pending::<()>().await;
+                }
+            } => {}
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
 }

@@ -38,7 +38,9 @@ use crate::{
 
 const DEFAULT_LAN_DOWNLOAD_BYTES: usize = 25_000_000; // 25 MB
 const MAX_LAN_DOWNLOAD_BYTES: usize = 100_000_000; // 100 MB
+const MAX_LAN_UPLOAD_BYTES: usize = 50 * 1024 * 1024; // 50 MB
 const LAN_CHUNK_SIZE: usize = 65_536; // 64 KB
+static LAN_DOWNLOAD_CHUNK: [u8; LAN_CHUNK_SIZE] = [0x55u8; LAN_CHUNK_SIZE];
 
 #[derive(Debug, Deserialize)]
 pub struct LanDownloadQuery {
@@ -86,7 +88,9 @@ async fn traceroute(Json(input): Json<TracerouteInput>) -> AppResult<Response> {
         }
     });
 
-    let output = ReceiverStream::new(receiver).map(|event| {
+    let cancel_guard = cancel.drop_guard();
+    let output = ReceiverStream::new(receiver).map(move |event| {
+        let _keep_alive = &cancel_guard;
         let line = match event {
             TracerouteEvent::Hop(h) => serde_json::json!({
                 "type": "hop",
@@ -144,7 +148,9 @@ async fn speedtest(body: Bytes) -> AppResult<Response> {
         }
     });
 
-    let output = ReceiverStream::new(receiver).map(|event| {
+    let cancel_guard = cancel.drop_guard();
+    let output = ReceiverStream::new(receiver).map(move |event| {
+        let _keep_alive = &cancel_guard;
         let line = match event {
             SpeedTestEvent::Progress(p) => serde_json::json!({
                 "type": "progress",
@@ -200,8 +206,10 @@ async fn lan_download(Query(query): Query<LanDownloadQuery>) -> AppResult<Respon
         } else {
             let to_send = (total - sent).min(LAN_CHUNK_SIZE);
             sent += to_send;
-            let chunk = vec![0x55u8; to_send];
-            Some((Ok::<Bytes, Infallible>(Bytes::from(chunk)), (sent, total)))
+            Some((
+                Ok::<Bytes, Infallible>(Bytes::from_static(&LAN_DOWNLOAD_CHUNK[..to_send])),
+                (sent, total),
+            ))
         }
     })
     .fuse();
@@ -222,7 +230,17 @@ async fn lan_upload(body: Body) -> AppResult<Response> {
 
     while let Some(chunk_res) = stream.next().await {
         let chunk = chunk_res.map_err(|err| AppError::Internal(err.into()))?;
-        received_bytes += chunk.len();
+        received_bytes = received_bytes.saturating_add(chunk.len());
+        if received_bytes > MAX_LAN_UPLOAD_BYTES {
+            return Response::builder()
+                .status(StatusCode::PAYLOAD_TOO_LARGE)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "error": "Limite máximo de upload (50 MB) excedido" })
+                        .to_string(),
+                ))
+                .map_err(|err| AppError::Internal(err.into()));
+        }
     }
 
     let elapsed_sec = start.elapsed().as_secs_f64().max(0.001);
@@ -292,7 +310,9 @@ async fn run_playbook(
         }
     }
 
-    let output = ReceiverStream::new(receiver).map(|event| {
+    let cancel_guard = cancel.drop_guard();
+    let output = ReceiverStream::new(receiver).map(move |event| {
+        let _keep_alive = &cancel_guard;
         let line = match event {
             PlaybookEvent::Step(s) => serde_json::json!({
                 "type": "step",
@@ -335,7 +355,7 @@ pub fn routes() -> Routes {
         .add("/diagnostics/speedtest/lan/download", get(lan_download))
         .add(
             "/diagnostics/speedtest/lan/upload",
-            post(lan_upload).layer(axum::extract::DefaultBodyLimit::max(50 * 1024 * 1024)),
+            post(lan_upload).layer(axum::extract::DefaultBodyLimit::max(MAX_LAN_UPLOAD_BYTES)),
         )
         .add("/diagnostics/playbook/run", post(run_playbook))
         .add("/diagnostics/quick-ping", post(quick_ping))
