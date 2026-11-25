@@ -61,6 +61,7 @@ pub mod registry_uploads;
 pub mod scheduled_task_runs;
 pub mod scheduled_tasks;
 pub mod sites;
+pub mod snmp_profiles;
 pub mod storage_destinations;
 pub mod system_backup_plan;
 pub mod system_settings;

@@ -4,7 +4,7 @@
 //!   o agendador e quem roda a descoberta chamam antes de consultar.
 //! * [`refresh`] baixa os três CSVs, troca a tabela numa transação só (ou fica
 //!   tudo como estava) e reinstala a memória.
-//! * [`spawn_auto_update`] mantém o registro em dia: baixa quando está vazio
+//! * [`auto_update`] mantém o registro em dia: baixa quando está vazio
 //!   ou com mais de [`MAX_AGE_DAYS`]. `OUI_AUTO_UPDATE=false` desliga — uma
 //!   instalação sem internet segue com a tabela embutida.
 
@@ -258,29 +258,29 @@ pub async fn refresh(db: &DatabaseConnection, sources: &[String]) -> AppResult<R
     })
 }
 
-/// Carrega o registro e o mantém em dia em segundo plano (processo da API).
-pub fn spawn_auto_update(ctx: &AppContext) {
-    let db = ctx.db.clone();
-    tokio::spawn(async move {
-        ensure_loaded(&db).await;
-        tokio::time::sleep(AUTO_UPDATE_DELAY).await;
-        loop {
-            if auto_update_enabled() {
-                match status(&db).await {
-                    Ok(current) if current.stale => {
-                        if let Err(error) = refresh(&db, &configured_sources()).await {
-                            tracing::warn!(%error, "atualização automática do registro de fabricantes falhou");
-                        }
-                    }
-                    Ok(_) => {}
-                    Err(error) => {
-                        tracing::debug!(%error, "situação do registro de fabricantes indisponível")
+/// Mantém o registro em dia, para sempre. Rotina do processo líder (ADR
+/// 024): a carga em memória ([`ensure_loaded`]) é de cada processo, mas baixar
+/// e regravar o registro é de um só.
+pub async fn auto_update(ctx: AppContext) {
+    let db = ctx.db;
+    ensure_loaded(&db).await;
+    tokio::time::sleep(AUTO_UPDATE_DELAY).await;
+    loop {
+        if auto_update_enabled() {
+            match status(&db).await {
+                Ok(current) if current.stale => {
+                    if let Err(error) = refresh(&db, &configured_sources()).await {
+                        tracing::warn!(%error, "atualização automática do registro de fabricantes falhou");
                     }
                 }
+                Ok(_) => {}
+                Err(error) => {
+                    tracing::debug!(%error, "situação do registro de fabricantes indisponível")
+                }
             }
-            tokio::time::sleep(AUTO_UPDATE_CHECK).await;
         }
-    });
+        tokio::time::sleep(AUTO_UPDATE_CHECK).await;
+    }
 }
 
 #[cfg(test)]

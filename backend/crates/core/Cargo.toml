@@ -44,6 +44,10 @@ socket2 = { workspace = true }
 reqwest = { workspace = true }
 # Severidade canônica do syslog nos adapters de plataforma.
 syslog_loose = { workspace = true }
+# `LISTEN`/`NOTIFY` e a trava consultiva entre os processos da central
+# (ADR 024). Não é crate nova: é o `sqlx` sobre o qual o Sea-ORM roda, e o
+# pool vem dele (`get_postgres_connection_pool`).
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "postgres"] }
 
 # `statvfs` do armazenamento no coletor de saúde (só Unix; no Windows a
 # métrica é declarada indisponível).

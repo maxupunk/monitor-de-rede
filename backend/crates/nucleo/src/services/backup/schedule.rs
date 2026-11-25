@@ -29,22 +29,17 @@ const TICK: Duration = Duration::from_secs(60);
 /// restart em sequência não deve disparar uma rajada de backups.
 const FIRST_TICK_DELAY: Duration = Duration::from_secs(120);
 
-/// Sobe o ciclo. Fora do ambiente de teste — lá, quem testa chama
+/// O ciclo, para sempre. Rotina do processo líder (ADR 024): quem o sobe é o
+/// ponto de montagem, fora do ambiente de teste — lá, quem testa chama
 /// [`run_due`] diretamente.
-pub fn spawn(ctx: &AppContext) {
-    if ctx.environment == loco_rs::environment::Environment::Test {
-        return;
-    }
-    let ctx = ctx.clone();
-    tokio::spawn(async move {
-        tokio::time::sleep(FIRST_TICK_DELAY).await;
-        loop {
-            if let Err(error) = run_due(&ctx, Utc::now()).await {
-                tracing::warn!(%error, "ciclo de backup automático falhou");
-            }
-            tokio::time::sleep(TICK).await;
+pub async fn run(ctx: AppContext) {
+    tokio::time::sleep(FIRST_TICK_DELAY).await;
+    loop {
+        if let Err(error) = run_due(&ctx, Utc::now()).await {
+            tracing::warn!(%error, "ciclo de backup automático falhou");
         }
-    });
+        tokio::time::sleep(TICK).await;
+    }
 }
 
 /// Executa o plano contra um destino já carregado, publica `backup_plan:updated`

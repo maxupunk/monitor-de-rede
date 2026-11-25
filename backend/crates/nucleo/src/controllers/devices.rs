@@ -16,6 +16,7 @@ use sea_orm::{
 use netmonitor_core::devices::snmp_cadence::{
     sync_monitor_intervals, DEFAULT_SNMP_POLL_INTERVAL_SECONDS,
 };
+use netmonitor_core::devices::snmp_credentials;
 
 use crate::{
     dtos::{
@@ -45,7 +46,6 @@ use crate::{
             presenter::{present_monitors, RECENT_RESULTS_LIMIT},
             reachability,
         },
-        preferences,
         shared::{
             cidr::Ipv4Cidr,
             errors::{AppError, AppResult},
@@ -214,8 +214,7 @@ fn corpo(
         description: device.description.clone(),
         is_monitored: device.is_monitored,
         snmp_enabled: device.snmp_enabled,
-        snmp_community: device.snmp_community.clone(),
-        snmp_version: device.snmp_version.clone(),
+        snmp_profile_id: device.snmp_profile_id,
         snmp_poll_interval_seconds: device.snmp_poll_interval_seconds,
         status: device.status.clone(),
         access_mode: device.access_mode.clone(),
@@ -407,22 +406,15 @@ async fn store(
     let (name, kind) = require_name_type(&input)?;
     let name = name.to_string();
     let kind = kind.to_string();
-    // A comunidade padrão é gravada **no dispositivo**, e não aplicada só na
-    // hora de coletar. Duas razões: ela fica visível no cadastro em vez de
-    // depender de um valor global invisível, e mudar a preferência depois não
-    // repassa em silêncio a comunidade de equipamentos que já estavam
-    // funcionando — o que quebraria a coleta deles sem aviso.
+    // A credencial padrão é gravada **no dispositivo**, e não aplicada só na
+    // hora de coletar — ver `snmp_credentials::profile_for_device`.
     let snmp_enabled = input.snmp_enabled.unwrap_or(false);
-    let snmp_community = match input
-        .snmp_community
-        .as_deref()
-        .map(str::trim)
-        .filter(|valor| !valor.is_empty())
-    {
-        Some(valor) => Some(valor.to_owned()),
-        None if snmp_enabled => Some(preferences::load(&ctx.db).await?.default_snmp_community),
-        None => None,
-    };
+    let snmp_profile_id = snmp_credentials::profile_for_device(
+        &ctx.db,
+        input.snmp_profile_id.flatten(),
+        snmp_enabled,
+    )
+    .await?;
     let (network_id, site_id) = infer_network_and_site(
         &ctx.db,
         input.ip_address.as_deref(),
@@ -443,8 +435,7 @@ async fn store(
         description: Set(input.description),
         is_monitored: Set(input.is_monitored.unwrap_or(false)),
         snmp_enabled: Set(snmp_enabled),
-        snmp_community: Set(snmp_community),
-        snmp_version: Set(input.snmp_version),
+        snmp_profile_id: Set(snmp_profile_id),
         snmp_poll_interval_seconds: Set(std::cmp::max(
             input
                 .snmp_poll_interval_seconds
@@ -647,6 +638,12 @@ async fn update(
         current.operating_system.clone(),
     )?;
     let snmp_enabled = input.snmp_enabled.unwrap_or(current.snmp_enabled);
+    let snmp_profile_id = snmp_credentials::profile_for_device(
+        &ctx.db,
+        input.snmp_profile_id.unwrap_or(current.snmp_profile_id),
+        snmp_enabled,
+    )
+    .await?;
     let link_interface_name = if !snmp_enabled {
         None
     } else if let Some(ref name) = input.link_interface_name {
@@ -680,8 +677,7 @@ async fn update(
         description: Set(input.description.or(current.description)),
         is_monitored: Set(input.is_monitored.unwrap_or(current.is_monitored)),
         snmp_enabled: Set(snmp_enabled),
-        snmp_community: Set(input.snmp_community.or(current.snmp_community)),
-        snmp_version: Set(input.snmp_version.or(current.snmp_version)),
+        snmp_profile_id: Set(snmp_profile_id),
         snmp_poll_interval_seconds: Set(snmp_poll_interval_seconds),
         access_mode: Set(access_mode),
         operating_system: Set(operating_system),

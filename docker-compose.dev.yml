@@ -1,0 +1,41 @@
+# Banco de desenvolvimento: só o PostgreSQL, para o `cargo loco start` rodado
+# na máquina. Produção e desenvolvimento usam PostgreSQL; o SQLite é só o banco
+# da suíte de testes (ADR 020).
+#
+#   docker compose -f docker-compose.dev.yml up -d
+#
+# O `backend/config/development.yaml` já aponta para cá (porta 15432 do
+# 127.0.0.1, banco `netmonitor_dev` e os logs em `netmonitor_logs`). A senha é
+# fixa e de desenvolvimento: a porta só escuta no loopback.
+#
+# Recriar o banco do zero (o esquema muda editando a migration, AGENTS §3):
+#
+#   docker compose -f docker-compose.dev.yml down -v
+#   docker compose -f docker-compose.dev.yml up -d
+name: netmonitor-dev
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: netmonitor
+      POSTGRES_PASSWORD: netmonitor
+      POSTGRES_DB: netmonitor_dev
+      TZ: ${TZ:-America/Fortaleza}
+    ports:
+      - "127.0.0.1:${POSTGRES_DEV_PORT:-15432}:5432"
+    volumes:
+      # Mesma pasta-mãe do compose principal (a imagem 18 guarda os dados em
+      # /var/lib/postgresql/18/docker) e o mesmo script que cria o
+      # `netmonitor_logs`.
+      - netmonitor-dev-postgres:/var/lib/postgresql
+      - ./docker/postgres/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U netmonitor -d netmonitor_dev"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  netmonitor-dev-postgres:

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/utils/form_validators.dart';
+import 'package:netmonitor_app/features/core/presentation/widgets/snmp_credential_dropdown.dart';
 import 'package:netmonitor_app/features/vpn/models/vpn_models.dart';
 import 'package:netmonitor_app/features/vpn/providers/vpn_provider.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
@@ -48,11 +49,11 @@ class _VpnPeerWizardBodyState extends ConsumerState<_VpnPeerWizardBody> {
   String? _selectedProfile;
   late TextEditingController _nameCtrl;
   late TextEditingController _ipCtrl;
-  late TextEditingController _snmpCommunityCtrl;
   late TextEditingController _descriptionCtrl;
   late TextEditingController _dbTargetsCtrl;
   int? _siteId;
   bool _snmpEnabled = false;
+  int? _snmpProfileId;
   bool _installAgent = false;
   List<String> _agentAllow = <String>['metrics', 'docker_read'];
   bool _loadingIp = false;
@@ -65,7 +66,6 @@ class _VpnPeerWizardBodyState extends ConsumerState<_VpnPeerWizardBody> {
     super.initState();
     _nameCtrl = TextEditingController(text: widget.preset?.name ?? '');
     _ipCtrl = TextEditingController();
-    _snmpCommunityCtrl = TextEditingController(text: 'public');
     _descriptionCtrl = TextEditingController();
     _dbTargetsCtrl = TextEditingController();
 
@@ -84,7 +84,6 @@ class _VpnPeerWizardBodyState extends ConsumerState<_VpnPeerWizardBody> {
   void dispose() {
     _nameCtrl.dispose();
     _ipCtrl.dispose();
-    _snmpCommunityCtrl.dispose();
     _descriptionCtrl.dispose();
     _dbTargetsCtrl.dispose();
     super.dispose();
@@ -141,9 +140,7 @@ class _VpnPeerWizardBodyState extends ConsumerState<_VpnPeerWizardBody> {
                   : _ipCtrl.text.trim(),
               siteId: _siteId,
               snmpEnabled: _snmpEnabled,
-              snmpCommunity: _snmpEnabled
-                  ? _snmpCommunityCtrl.text.trim()
-                  : null,
+              snmpProfileId: _snmpEnabled ? _snmpProfileId : null,
               description: _descriptionCtrl.text.trim().isEmpty
                   ? null
                   : _descriptionCtrl.text.trim(),
@@ -338,12 +335,12 @@ class _VpnPeerWizardBodyState extends ConsumerState<_VpnPeerWizardBody> {
           ),
           if (_snmpEnabled) ...<Widget>[
             const SizedBox(height: 8),
-            TextFormField(
-              controller: _snmpCommunityCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Comunidade SNMP',
-                hintText: 'public',
-              ),
+            SnmpCredentialDropdown(
+              value: _snmpProfileId,
+              onChanged: (id) => setState(() => _snmpProfileId = id),
+              helperText:
+                  'O script grava a comunidade (v1/v2c) no equipamento; '
+                  'usuário v3 é configurado à mão.',
             ),
           ],
           if (activeProfile == 'linux') ...<Widget>[

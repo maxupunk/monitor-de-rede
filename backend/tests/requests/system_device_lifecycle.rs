@@ -111,8 +111,8 @@ async fn restaurar_um_arquivo_anterior_a_feature_recria_o_dispositivo() {
                     "id": 1, "site_id": null, "network_id": null, "parent_id": null,
                     "ip_address": "10.0.0.1", "name": "rt-antigo", "type": "router",
                     "vendor": null, "model": null, "serial_number": null, "description": null,
-                    "is_monitored": false, "snmp_enabled": false, "snmp_community": null,
-                    "snmp_version": null, "snmp_poll_interval_seconds": 60,
+                    "is_monitored": false, "snmp_enabled": false, "snmp_profile_id": null,
+                    "snmp_poll_interval_seconds": 60,
                     "access_mode": null, "operating_system": null, "system_key": null,
                     "status": "unknown", "last_seen_at": null,
                     "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z"

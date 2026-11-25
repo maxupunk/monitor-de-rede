@@ -23,6 +23,7 @@ import 'package:netmonitor_app/features/network/widgets/diagnostics_dialogs.dart
 import 'package:netmonitor_app/features/network/widgets/dns_widgets.dart';
 import 'package:netmonitor_app/features/network/widgets/network_dashboard_widgets.dart';
 import 'package:netmonitor_app/features/network/widgets/network_settings_cards.dart';
+import 'package:netmonitor_app/features/network/widgets/snmp_credentials_card.dart';
 
 NavItemSpec? _appsGroupBuilder(NavContext ctx) {
   if (ctx.apps.isEmpty) return null;
@@ -342,6 +343,12 @@ final AreaContribution networkArea = AreaContribution(
       order: 20,
       area: ProductArea.core,
       builder: (_) => const DnsServersCard(),
+    ),
+    SettingsCardContribution(
+      tab: 'rede',
+      order: 5,
+      area: ProductArea.network,
+      builder: (_) => const SnmpCredentialsCard(),
     ),
     SettingsCardContribution(
       tab: 'rede',

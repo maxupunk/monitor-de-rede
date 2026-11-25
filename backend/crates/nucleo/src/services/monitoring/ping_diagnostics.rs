@@ -54,12 +54,20 @@ const fn default_tcp_timeout_ms() -> u64 {
 }
 
 /// Acrescenta política e portas candidatas sem alterar a configuração salva.
+///
+/// Monitor SNMP de dispositivo recebe aqui a credencial do perfil do
+/// dispositivo (`snmp_credentials::execution_configuration`): a gravada não
+/// tem segredo. Os três caminhos de execução (agendador, "Testar agora" e a
+/// reconferência do alerta) passam por esta função.
 pub async fn prepare_configuration(
     ctx: &AppContext,
     monitor: &monitors::Model,
 ) -> AppResult<Value> {
     if !monitor.r#type.eq_ignore_ascii_case("ping") {
-        return Ok(monitor.configuration.clone());
+        return netmonitor_core::devices::snmp_credentials::execution_configuration(
+            &ctx.db, monitor,
+        )
+        .await;
     }
 
     let tcp_ports = tcp_monitor_ports(ctx, monitor).await?;

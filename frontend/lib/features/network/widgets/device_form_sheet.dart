@@ -6,6 +6,7 @@ import 'package:netmonitor_app/core/utils/device_presentation.dart';
 import 'package:netmonitor_app/core/utils/error_utils.dart';
 import 'package:netmonitor_app/core/utils/form_validators.dart';
 import 'package:netmonitor_app/features/core/models/log_models.dart';
+import 'package:netmonitor_app/features/core/presentation/widgets/snmp_credential_dropdown.dart';
 import 'package:netmonitor_app/features/core/providers/logs_provider.dart';
 import 'package:netmonitor_app/features/core/providers/settings_provider.dart';
 import 'package:netmonitor_app/features/network/models/device_models.dart';
@@ -66,7 +67,6 @@ class _DeviceFormBodyState extends ConsumerState<_DeviceFormBody> {
   late final TextEditingController _modelCtrl;
   late final TextEditingController _locationCtrl;
   late final TextEditingController _descCtrl;
-  late final TextEditingController _communityCtrl;
   late final TextEditingController _pollIntervalCtrl;
   late final TextEditingController _linkIfaceCtrl;
   final TextEditingController _sshAdminUserCtrl = TextEditingController();
@@ -98,7 +98,7 @@ class _DeviceFormBodyState extends ConsumerState<_DeviceFormBody> {
   bool _oneTimeUserEdited = false;
   String _oneTimeProtocol = 'ssh';
   String? _selectedSyslogAddress;
-  String _snmpVersion = 'v2c';
+  int? _snmpProfileId;
 
   bool _saving = false;
   bool _identifying = false;
@@ -191,7 +191,7 @@ class _DeviceFormBodyState extends ConsumerState<_DeviceFormBody> {
     );
     _locationCtrl = TextEditingController(text: d?.location ?? '');
     _descCtrl = TextEditingController(text: d?.description ?? '');
-    _communityCtrl = TextEditingController(text: d?.snmpCommunity ?? 'public');
+
     _pollIntervalCtrl = TextEditingController(
       text: (d?.snmpPollIntervalSeconds ?? 60).toString(),
     );
@@ -207,8 +207,9 @@ class _DeviceFormBodyState extends ConsumerState<_DeviceFormBody> {
         _operatingSystem != null && _operatingSystem!.trim().isNotEmpty;
     _accessMode = d?.accessMode;
     _isMonitored = d?.isMonitored ?? true;
-    _snmpEnabled = d?.snmpEnabled ?? false;
-    _snmpVersion = d?.snmpVersion ?? 'v2c';
+    // Da descoberta vem a credencial que respondeu (`snmp.profileId`).
+    _snmpEnabled = d?.snmpEnabled ?? (p['snmpEnabled'] as bool?) ?? false;
+    _snmpProfileId = d?.snmpProfileId ?? (p['snmpProfileId'] as int?);
     _syncDefaultDeviceUsernames();
 
     Future<void>.microtask(() {
@@ -235,7 +236,6 @@ class _DeviceFormBodyState extends ConsumerState<_DeviceFormBody> {
     _modelCtrl.dispose();
     _locationCtrl.dispose();
     _descCtrl.dispose();
-    _communityCtrl.dispose();
     _pollIntervalCtrl.dispose();
     _linkIfaceCtrl.dispose();
     _sshAdminUserCtrl.dispose();
@@ -265,8 +265,7 @@ class _DeviceFormBodyState extends ConsumerState<_DeviceFormBody> {
       _ipCtrl.text.trim().toLowerCase(),
       _vendorCtrl.text.trim().toLowerCase(),
       _modelCtrl.text.trim().toLowerCase(),
-      _snmpEnabled ? _snmpVersion : '',
-      _snmpEnabled ? _communityCtrl.text.trim() : '',
+      _snmpEnabled ? '${_snmpProfileId ?? 'padrao'}' : '',
     ].join('|');
   }
 
@@ -319,8 +318,7 @@ class _DeviceFormBodyState extends ConsumerState<_DeviceFormBody> {
           .identify(
             name: _nameCtrl.text.trim().isEmpty ? null : _nameCtrl.text.trim(),
             ipAddress: _ipCtrl.text.trim().isEmpty ? null : _ipCtrl.text.trim(),
-            snmpVersion: _snmpEnabled ? _snmpVersion : null,
-            snmpCommunity: _snmpEnabled ? _communityCtrl.text.trim() : null,
+            snmpProfileId: _snmpEnabled ? _snmpProfileId : null,
             vendor: _vendorCtrl.text.trim().isEmpty
                 ? null
                 : _vendorCtrl.text.trim(),
@@ -677,10 +675,7 @@ class _DeviceFormBodyState extends ConsumerState<_DeviceFormBody> {
           .read(snmpProfilesProvider.notifier)
           .testSnmp(
             host: host,
-            version: _snmpVersion,
-            community: _communityCtrl.text.trim().isEmpty
-                ? 'public'
-                : _communityCtrl.text.trim(),
+            profileId: _snmpProfileId,
             autoDetect: autoDetect,
           );
       if (!mounted) return;
@@ -688,8 +683,7 @@ class _DeviceFormBodyState extends ConsumerState<_DeviceFormBody> {
         _snmpResult = res;
         if (res.responded) {
           _snmpEnabled = true;
-          if (res.version != null) _snmpVersion = res.version!;
-          if (res.community != null) _communityCtrl.text = res.community!;
+          if (res.profileId != null) _snmpProfileId = res.profileId;
           if (_nameCtrl.text.trim().isEmpty && res.sysName != null) {
             _nameCtrl.text = res.sysName!;
           }
@@ -725,13 +719,7 @@ class _DeviceFormBodyState extends ConsumerState<_DeviceFormBody> {
     try {
       final list = await ref
           .read(snmpProfilesProvider.notifier)
-          .queryInterfaces(
-            host: host,
-            version: _snmpVersion,
-            community: _communityCtrl.text.trim().isEmpty
-                ? 'public'
-                : _communityCtrl.text.trim(),
-          );
+          .queryInterfaces(host: host, profileId: _snmpProfileId);
       if (mounted) {
         setState(() {
           _discoveredIfaces = list;
@@ -785,10 +773,8 @@ class _DeviceFormBodyState extends ConsumerState<_DeviceFormBody> {
       'isMonitored': _isMonitored,
       'snmpEnabled': _snmpEnabled,
       if (_snmpEnabled) ...<String, dynamic>{
-        'snmpVersion': _snmpVersion,
-        'snmpCommunity': _communityCtrl.text.trim().isEmpty
-            ? 'public'
-            : _communityCtrl.text.trim(),
+        // `null` é a credencial padrão: o backend a grava no cadastro.
+        'snmpProfileId': _snmpProfileId,
         'snmpPollIntervalSeconds':
             int.tryParse(_pollIntervalCtrl.text.trim()) ?? 60,
         'linkInterfaceName': _linkIfaceCtrl.text.trim(),
@@ -1181,24 +1167,11 @@ class _DeviceFormBodyState extends ConsumerState<_DeviceFormBody> {
                     spacing: 12,
                     runSpacing: 12,
                     children: <Widget>[
-                      AppDropdownFormField<String>(
-                        initialValue: _snmpVersion,
-                        decoration: const InputDecoration(
-                          labelText: 'Versão SNMP',
-                        ),
-                        items: const <DropdownMenuItem<String>>[
-                          DropdownMenuItem(value: 'v1', child: Text('SNMP v1')),
-                          DropdownMenuItem(
-                            value: 'v2c',
-                            child: Text('SNMP v2c'),
-                          ),
-                          DropdownMenuItem(value: 'v3', child: Text('SNMP v3')),
-                        ],
-                        onChanged: (v) {
-                          if (v != null) {
-                            setState(() => _snmpVersion = v);
-                            _scheduleAutoIdentify();
-                          }
+                      SnmpCredentialDropdown(
+                        value: _snmpProfileId,
+                        onChanged: (id) {
+                          setState(() => _snmpProfileId = id);
+                          _scheduleAutoIdentify();
                         },
                       ),
                       TextFormField(
@@ -1209,14 +1182,6 @@ class _DeviceFormBodyState extends ConsumerState<_DeviceFormBody> {
                         ),
                       ),
                     ],
-                  ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: _communityCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Community SNMP',
-                    ),
-                    onChanged: (_) => _scheduleAutoIdentify(),
                   ),
                   const SizedBox(height: 12),
                   SymmetricalActionBar(

@@ -171,11 +171,11 @@ pub trait DeviceShell: Send {
 pub trait DeviceAccess: Send + Sync {
     /// A identidade SNMP — `sysDescr`, `sysObjectId` e o chassi —, com teto
     /// curto. Falha vira `None`: é palpite.
+    /// A credencial vem de [`super::snmp_credentials`].
     async fn snmp_identity(
         &self,
         host: IpAddr,
-        community: &str,
-        version: Option<&str>,
+        credentials: &super::snmp_credentials::SnmpCredentials,
     ) -> Option<SnmpSystemInfo>;
 
     /// Há quem leia o Wi-Fi do equipamento (um plugin ativo com o bloco

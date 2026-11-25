@@ -14,11 +14,11 @@ use netmonitor_core::{
 /// O nome do `vpn-probe` é do núcleo (o registro no boot também o usa).
 pub use netmonitor_core::vpn_probe::vpn_probe_name;
 
+/// O monitor SNMP criado aqui não leva credencial: ela vem do perfil do
+/// dispositivo na hora de rodar (`snmp_credentials::execution_configuration`).
 #[derive(Debug, Clone, Default)]
 pub struct MonitorProvisioningOptions {
     pub snmp_enabled: bool,
-    pub snmp_community: Option<String>,
-    pub snmp_version: Option<String>,
     pub interval_seconds: Option<i32>,
 }
 
@@ -91,8 +91,6 @@ pub async fn provision<C: ConnectionTrait>(
                 name: Set(format!("SNMP {}", device.name)),
                 configuration: Set(serde_json::json!({
                     "host": host,
-                    "version": options.snmp_version.as_deref().unwrap_or("v2c"),
-                    "community": options.snmp_community.as_deref().unwrap_or("public"),
                     "port": 161,
                 })),
                 interval_seconds: Set(device.snmp_poll_interval_seconds),

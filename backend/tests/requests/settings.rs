@@ -34,7 +34,10 @@ async fn sem_nada_gravado_a_api_devolve_os_padroes_antigos() {
         let corpo: serde_json::Value = serde_json::from_str(&resposta.text()).unwrap();
 
         assert_eq!(corpo["defaultPingIntervalSeconds"], 60);
-        assert_eq!(corpo["defaultSnmpCommunity"], "public");
+        assert!(
+            corpo.get("defaultSnmpCommunity").is_none(),
+            "a credencial SNMP padrão é um perfil, não preferência"
+        );
         assert_eq!(corpo["autoDiscoveryEnabled"], true);
     })
     .await;
@@ -52,7 +55,6 @@ async fn o_intervalo_padrao_governa_o_monitor_novo_sem_intervalo_proprio() {
             &request,
             serde_json::json!({
                 "defaultPingIntervalSeconds": 300,
-                "defaultSnmpCommunity": "public",
                 "autoDiscoveryEnabled": true
             }),
         )
@@ -88,57 +90,6 @@ async fn o_intervalo_padrao_governa_o_monitor_novo_sem_intervalo_proprio() {
 
 #[tokio::test]
 #[serial]
-async fn a_comunidade_padrao_e_gravada_no_dispositivo_com_snmp_ligado() {
-    // Gravada no cadastro, e não aplicada só na coleta: assim ela fica visível,
-    // e trocar a preferência depois não repassa em silêncio a comunidade de
-    // equipamentos que já estavam funcionando.
-    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
-        autenticado(&mut request, &ctx).await;
-
-        grava(
-            &request,
-            serde_json::json!({
-                "defaultPingIntervalSeconds": 60,
-                "defaultSnmpCommunity": "comunidade-da-casa",
-                "autoDiscoveryEnabled": true
-            }),
-        )
-        .await;
-
-        let com_snmp = request
-            .post("/api/devices")
-            .json(&serde_json::json!({
-                "name": "switch", "type": "switch", "snmpEnabled": true
-            }))
-            .await;
-        assert_eq!(com_snmp.status_code(), 201, "{}", com_snmp.text());
-        let corpo: serde_json::Value = serde_json::from_str(&com_snmp.text()).unwrap();
-        assert_eq!(corpo["snmpCommunity"], "comunidade-da-casa");
-
-        // Sem SNMP, nada é inventado: a coluna continua nula.
-        let sem_snmp = request
-            .post("/api/devices")
-            .json(&serde_json::json!({ "name": "host", "type": "server" }))
-            .await;
-        let corpo: serde_json::Value = serde_json::from_str(&sem_snmp.text()).unwrap();
-        assert!(corpo["snmpCommunity"].is_null());
-
-        // E a comunidade informada vence a preferência.
-        let propria = request
-            .post("/api/devices")
-            .json(&serde_json::json!({
-                "name": "outro", "type": "switch", "snmpEnabled": true,
-                "snmpCommunity": "propria"
-            }))
-            .await;
-        let corpo: serde_json::Value = serde_json::from_str(&propria.text()).unwrap();
-        assert_eq!(corpo["snmpCommunity"], "propria");
-    })
-    .await;
-}
-
-#[tokio::test]
-#[serial]
 async fn a_trava_de_descoberta_impede_o_enfileiramento_sem_apagar_a_rede() {
     use netmonitor_network::discovery::queue::schedule_due_networks;
 
@@ -163,7 +114,6 @@ async fn a_trava_de_descoberta_impede_o_enfileiramento_sem_apagar_a_rede() {
             &request,
             serde_json::json!({
                 "defaultPingIntervalSeconds": 60,
-                "defaultSnmpCommunity": "public",
                 "autoDiscoveryEnabled": false
             }),
         )
@@ -178,7 +128,6 @@ async fn a_trava_de_descoberta_impede_o_enfileiramento_sem_apagar_a_rede() {
             &request,
             serde_json::json!({
                 "defaultPingIntervalSeconds": 60,
-                "defaultSnmpCommunity": "public",
                 "autoDiscoveryEnabled": true
             }),
         )
@@ -199,7 +148,6 @@ async fn valores_invalidos_sao_recusados_com_mensagem_em_portugues() {
             .put("/api/settings")
             .json(&serde_json::json!({
                 "defaultPingIntervalSeconds": 1,
-                "defaultSnmpCommunity": "public",
                 "autoDiscoveryEnabled": true
             }))
             .await;
@@ -209,16 +157,6 @@ async fn valores_invalidos_sao_recusados_com_mensagem_em_portugues() {
             "{}",
             curto.text()
         );
-
-        let vazia = request
-            .put("/api/settings")
-            .json(&serde_json::json!({
-                "defaultPingIntervalSeconds": 60,
-                "defaultSnmpCommunity": "   ",
-                "autoDiscoveryEnabled": true
-            }))
-            .await;
-        assert_eq!(vazia.status_code(), 422, "{}", vazia.text());
     })
     .await;
 }

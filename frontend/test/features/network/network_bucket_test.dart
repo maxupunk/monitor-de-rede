@@ -40,7 +40,7 @@ void main() {
     );
 
     test(
-      'registers all 5 network dashboard widgets, 3 navActions, and 3 settings cards',
+      'registers all 5 network dashboard widgets, 3 navActions, and 4 settings cards',
       () {
         expect(
           networkArea.widgets.keys,
@@ -60,7 +60,7 @@ void main() {
             NavAction.speedTest,
           ]),
         );
-        expect(networkArea.settingsCards.length, 3);
+        expect(networkArea.settingsCards.length, 4);
         expect(networkArea.settingsCards.first.tab, 'conectividade');
         expect(networkArea.settingsCards.first.area, ProductArea.core);
       },

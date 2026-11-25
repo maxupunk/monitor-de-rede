@@ -26,7 +26,7 @@ class PreferencesCard extends ConsumerStatefulWidget {
 
 class _PreferencesCardState extends ConsumerState<PreferencesCard> {
   final TextEditingController _pingCtrl = TextEditingController(text: '60');
-  final TextEditingController _snmpCtrl = TextEditingController(text: 'public');
+
   bool _autoDiscovery = true;
   bool _hydrated = false;
 
@@ -41,14 +41,13 @@ class _PreferencesCardState extends ConsumerState<PreferencesCard> {
   @override
   void dispose() {
     _pingCtrl.dispose();
-    _snmpCtrl.dispose();
     super.dispose();
   }
 
   void _syncFromState(SystemPreferences prefs) {
     if (_hydrated) return;
     _pingCtrl.text = '${prefs.defaultPingIntervalSeconds}';
-    _snmpCtrl.text = prefs.defaultSnmpCommunity;
+
     _autoDiscovery = prefs.autoDiscoveryEnabled;
     _hydrated = true;
   }
@@ -121,14 +120,6 @@ class _PreferencesCardState extends ConsumerState<PreferencesCard> {
               helperText: 'Mínimo 10s, máximo 86400s.',
             ),
           ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _snmpCtrl,
-            enabled: auth.canWrite,
-            decoration: const InputDecoration(
-              labelText: 'Comunidade SNMP padrão',
-            ),
-          ),
           const SizedBox(height: 8),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
@@ -151,10 +142,7 @@ class _PreferencesCardState extends ConsumerState<PreferencesCard> {
                           .savePreferences(
                             SystemPreferences(
                               defaultPingIntervalSeconds: interval,
-                              defaultSnmpCommunity:
-                                  _snmpCtrl.text.trim().isEmpty
-                                  ? 'public'
-                                  : _snmpCtrl.text.trim(),
+
                               autoDiscoveryEnabled: _autoDiscovery,
                             ),
                           );

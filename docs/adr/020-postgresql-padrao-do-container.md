@@ -1,4 +1,4 @@
-# ADR 020 — PostgreSQL 18 como banco padrão do container (SQLite continua alternativa)
+# ADR 020 — PostgreSQL 18 como banco do NetMonitor (SQLite só nos testes)
 
 - **Status:** aceito — 2026-11-08, decidido com o responsável pelo produto.
 - **Data:** 2026-11-08
@@ -63,10 +63,17 @@ out`, que chega à tela como 500. É o teto que motivou esta decisão.
    host, mas **só no loopback** e na porta `POSTGRES_HOST_PORT` (padrão 15432,
    e não a 5432, que um Postgres do host costuma ocupar).
 6. `DB_MAX_CONNECTIONS` do container sobe de 5 para 10.
-7. **O SQLite continua suportado e testado**: o `production.yaml` mantém o
-   SQLite como padrão para quem roda a imagem sem compose, o desenvolvimento
-   local continua nele e a regra do AGENTS.md ("toda consulta vale nos dois
-   dialetos") não muda.
+7. ~~O SQLite continua suportado como alternativa de container único e de
+   desenvolvimento.~~ **Revisto em 2026-11-25:** produção e desenvolvimento
+   rodam **só em PostgreSQL**; o SQLite fica apenas como banco da suíte de
+   testes. O boot recusa uma URL SQLite fora do ambiente de teste
+   (`app::database_allowed`), o `development.yaml` aponta para o banco do
+   `docker-compose.dev.yml` (127.0.0.1:15432, `netmonitor_dev` e
+   `netmonitor_logs`) e o `production.yaml` não tem mais padrão SQLite. Dois
+   bancos em uso confundiam configuração e testes, e a coordenação entre
+   processos (LISTEN/NOTIFY e líder por *advisory lock*) só existe no
+   PostgreSQL. A regra do AGENTS.md ("toda consulta vale nos dois dialetos")
+   continua, porque a suíte roda em SQLite e o CI roda também em PostgreSQL.
 
 ## Consequências
 

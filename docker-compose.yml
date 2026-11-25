@@ -154,8 +154,7 @@ services:
       # montada aqui, e não lida do `.env`: a `DATABASE_URL` de lá descreve o
       # banco visto **da máquina**, e ela não vale aqui dentro. Para um Postgres
       # externo, edite esta linha (e a `SYSLOG_DB_URL`) e remova o serviço.
-      # Container único sem Postgres? `sqlite:///data/netmonitor.sqlite?mode=rwc`
-      # continua suportado.
+      # Fora dos testes o NetMonitor roda só em PostgreSQL: o boot recusa SQLite.
       DATABASE_URL: postgres://netmonitor@postgres:5432/netmonitor
       # Pool de conexões, em milissegundos. Repassados aqui porque o
       # `config/*.yaml` vai assado dentro da imagem: sem estas linhas, ajustar
@@ -165,7 +164,6 @@ services:
       DB_MIN_CONNECTIONS: ${DB_MIN_CONNECTIONS:-1}
       # O PostgreSQL atende escritas concorrentes: com 10 conexões o
       # scheduler, os polls SNMP, o syslog e as requisições não disputam a vez.
-      # Em SQLite, volte para 5 (um escritor só; mais conexões só gastam cache).
       DB_MAX_CONNECTIONS: ${DB_MAX_CONNECTIONS:-10}
       # Token exigido no cadastro do primeiro usuário. Deixe vazio e o servidor
       # sorteia um no primeiro boot, imprimindo-o no log (`docker compose logs
@@ -200,7 +198,7 @@ services:
       # `docker/postgres/initdb/`): a ingestão e a retenção dos logs não
       # incham o banco principal nem o backup dele. Sem interpolação do `.env`,
       # pelo mesmo motivo da `DATABASE_URL`. Vazia, a variável põe os logs no
-      # banco principal (Postgres) ou em /data/logs.sqlite (SQLite).
+      # banco principal.
       SYSLOG_ENABLED: ${SYSLOG_ENABLED:-true}
       SYSLOG_DB_URL: postgres://netmonitor@postgres:5432/netmonitor_logs
       # Porta real dos listeners sem privilégio dentro do container. O override
@@ -243,9 +241,8 @@ services:
       postgres:
         condition: service_healthy
     volumes:
-      # Configuração do túnel em /data/wg, a pasta dos armazenamentos locais e,
-      # no arranjo SQLite, o próprio banco. O banco PostgreSQL mora no volume
-      # do serviço `postgres`.
+      # Configuração do túnel em /data/wg e a pasta dos armazenamentos locais.
+      # O banco PostgreSQL mora no volume do serviço `postgres`.
       - netmonitor-data:/data
       - netmonitor-secrets:/secrets:ro
       # Só o token do agente local: a API escreve, o agente lê.

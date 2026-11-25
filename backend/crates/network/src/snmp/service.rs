@@ -7,6 +7,8 @@ use sea_orm::{
 };
 use std::collections::{BTreeMap, HashMap};
 
+use netmonitor_core::devices::snmp_credentials::{self, SnmpCredentials, FALLBACK_COMMUNITY};
+
 use crate::snmp::{
     client::{SnmpConfig, SnmpError, SnmpVersion},
     collectors::{
@@ -65,13 +67,64 @@ pub struct SnmpScanResult {
     pub has_cpu_monitor: bool,
     pub has_memory_monitor: bool,
 }
+/// Resultado da detecção. Diz **qual credencial** respondeu (o perfil, quando
+/// veio de um) — nunca o segredo dela.
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SnmpDetectResult {
     pub detected: bool,
     pub version: Option<String>,
-    pub community: Option<String>,
+    /// O perfil (`snmp_profiles`) que respondeu; `None` quando foi a
+    /// credencial avulsa do formulário ou o `public` de fábrica.
+    pub profile_id: Option<i64>,
     pub result: Option<SnmpTestResult>,
+    /// A credencial que respondeu, para quem continua a consulta (a
+    /// descoberta lê a tabela ARP com ela). Não vai para a resposta HTTP.
+    #[serde(skip)]
+    pub credentials: Option<SnmpCredentials>,
+}
+
+/// Uma credencial a tentar na detecção, com o perfil de onde veio.
+#[derive(Debug, Clone)]
+pub struct DetectCandidate {
+    pub profile_id: Option<i64>,
+    pub credentials: SnmpCredentials,
+}
+
+impl DetectCandidate {
+    /// As credenciais que a descoberta tenta: os perfis cadastrados (o padrão
+    /// primeiro). Sem perfil nenhum, o `public` de fábrica em v2c e v1 — o
+    /// comportamento de antes dos perfis, explícito.
+    #[must_use]
+    pub fn from_profiles(profiles: Vec<(i64, SnmpCredentials)>) -> Vec<Self> {
+        if profiles.is_empty() {
+            return [SnmpVersion::V2c, SnmpVersion::V1]
+                .into_iter()
+                .map(|version| Self {
+                    profile_id: None,
+                    credentials: SnmpCredentials::community(version, FALLBACK_COMMUNITY),
+                })
+                .collect();
+        }
+        profiles
+            .into_iter()
+            .map(|(id, credentials)| Self {
+                profile_id: Some(id),
+                credentials,
+            })
+            .collect()
+    }
+
+    /// Os perfis do banco como candidatos ([`Self::from_profiles`]).
+    ///
+    /// # Errors
+    ///
+    /// Erro do banco.
+    pub async fn load<C: ConnectionTrait>(db: &C) -> AppResult<Vec<Self>> {
+        Ok(Self::from_profiles(
+            snmp_credentials::all_for_discovery(db).await?,
+        ))
+    }
 }
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -116,40 +169,33 @@ pub struct SnmpApplyOptions {
     pub clear_removed_history: Option<bool>,
 }
 
-/// Monta a configuração de coleta a partir do cadastro canônico do dispositivo.
-/// Os monitores SNMP vinculados a ele não devem manter credenciais ou alvos
-/// divergentes, pois todos participam da mesma coleta.
-pub fn device_config(device: &devices::Model) -> AppResult<SnmpConfig> {
-    device_config_with(device, netmonitor_core::preferences::DEFAULT_SNMP_COMMUNITY)
-}
-
-/// Idem, com a comunidade a usar quando o dispositivo não tem uma própria.
-///
-/// Existe para o chamador que tem banco à mão poder aplicar a preferência
-/// global (`Comunidade SNMP padrão`). Quem não tem cai no padrão de fábrica,
-/// que é o mesmo valor que estava fixo aqui antes.
-pub fn device_config_with(
-    device: &devices::Model,
-    comunidade_padrao: &str,
-) -> AppResult<SnmpConfig> {
-    let host = device
+/// O endereço SNMP do dispositivo: o IP cadastrado ou, sem ele, o nome.
+fn device_host(device: &devices::Model) -> String {
+    device
         .ip_address
         .clone()
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| device.name.clone());
-    let mut config = SnmpConfig::v2c(
-        host,
-        device
-            .snmp_community
-            .as_deref()
-            .map(str::trim)
-            .filter(|valor| !valor.is_empty())
-            .unwrap_or(comunidade_padrao),
+        .unwrap_or_else(|| device.name.clone())
+}
+
+/// Monta a configuração de coleta a partir do cadastro canônico do
+/// dispositivo, com a credencial do perfil dele (ou a padrão) resolvida por
+/// `snmp_credentials::for_device`. Coleta, monitores e "Testar agora" passam
+/// todos por aqui: nenhum fala com o equipamento com outra credencial.
+///
+/// # Errors
+///
+/// Perfil ilegível (a `ENCRYPTION_KEY` mudou) ou erro do banco.
+pub async fn device_config<C: ConnectionTrait>(
+    db: &C,
+    device: &devices::Model,
+) -> AppResult<SnmpConfig> {
+    let credentials = snmp_credentials::for_device(db, device).await?;
+    Ok(SnmpConfig::from_credentials(
+        device_host(device),
         161,
-    );
-    config.version = SnmpVersion::parse(device.snmp_version.as_deref().unwrap_or("v2c"))
-        .ok_or_else(|| AppError::validation("Versão SNMP inválida"))?;
-    Ok(config)
+        &credentials,
+    ))
 }
 
 /// A cadência SNMP é do dispositivo (inventário, núcleo): o caminho da área
@@ -661,22 +707,14 @@ pub async fn poll_device(
     })
 }
 
-/// Coleta o dispositivo com a configuração efetiva — a comunidade própria ou,
-/// sem ela, a padrão das preferências.
-///
-/// A preferência entra aqui, e não no `device_config` sem banco: é a coleta
-/// que precisa dela, e é onde o dispositivo sem comunidade própria aparece.
-/// Todo caminho periódico passa por esta função, para que nenhum colete com
-/// uma comunidade diferente do outro.
+/// Coleta o dispositivo com a credencial efetiva ([`device_config`]). Todo
+/// caminho periódico passa por esta função, para que nenhum colete com uma
+/// credencial diferente do outro.
 pub async fn collect_device(
     ctx: &loco_rs::app::AppContext,
     device: &devices::Model,
 ) -> AppResult<SnmpPollResult> {
-    let comunidade = netmonitor_core::preferences::load(&ctx.db)
-        .await
-        .map(|preferencias| preferencias.default_snmp_community)
-        .unwrap_or_else(|_| netmonitor_core::preferences::DEFAULT_SNMP_COMMUNITY.to_owned());
-    let config = device_config_with(device, &comunidade)?;
+    let config = device_config(&ctx.db, device).await?;
     poll_device(ctx, device, config).await
 }
 
@@ -1091,9 +1129,13 @@ pub async fn apply_monitors(
         .await?;
     ensure_scan_can_remove(&scan, db_interfaces.len())?;
 
+    // Ligar o SNMP grava a credencial no cadastro, como o formulário faz.
+    let snmp_profile_id =
+        snmp_credentials::profile_for_device(&ctx.db, device.snmp_profile_id, true).await?;
     devices::ActiveModel {
         id: Set(device.id),
         snmp_enabled: Set(true),
+        snmp_profile_id: Set(snmp_profile_id),
         is_monitored: Set(true),
         ..Default::default()
     }
@@ -1292,8 +1334,6 @@ pub async fn apply_monitors(
                     enabled: is_monitored,
                     configuration: serde_json::json!({
                         "host": config.host.clone(),
-                        "version": version_name(config.version),
-                        "community": config.community.clone(),
                         "port": config.port,
                         "metric": "sensor",
                         "sensorKey": sensor.key.clone(),
@@ -1358,8 +1398,6 @@ async fn set_monitoring(
             enabled,
             configuration: serde_json::json!({
                 "host": config.host.clone(),
-                "version": version_name(config.version),
-                "community": config.community.clone(),
                 "port": config.port,
                 "ifIndex": interface.snmp_index,
                 "ifName": interface.name,
@@ -1488,11 +1526,12 @@ pub async fn list_interfaces(
         .collect())
 }
 
+/// A configuração gravada num monitor SNMP de dispositivo: alvo e métrica,
+/// **sem credencial** — ela vem do perfil do dispositivo na hora de rodar
+/// (`snmp_credentials::execution_configuration`).
 fn monitor_configuration(config: &SnmpConfig, metric: &str) -> serde_json::Value {
     serde_json::json!({
         "host": config.host,
-        "version": version_name(config.version),
-        "community": config.community,
         "port": config.port,
         "metric": metric,
     })
@@ -1585,14 +1624,6 @@ async fn sync_monitor(db: &sea_orm::DatabaseConnection, spec: MonitorSpec<'_>) -
         .await?;
     }
     Ok(())
-}
-
-fn version_name(version: SnmpVersion) -> &'static str {
-    match version {
-        SnmpVersion::V1 => "v1",
-        SnmpVersion::V2c => "v2c",
-        SnmpVersion::V3 => "v3",
-    }
 }
 
 /// Uma interface persistida junto do estado que ela tinha antes da coleta.
@@ -1867,75 +1898,58 @@ async fn record_metrics_bulk(
     Ok(count)
 }
 
+/// Descobre com que credencial o agente em `host:port` responde.
+///
+/// `preferred` é a credencial já escolhida (a do formulário ou do perfil do
+/// dispositivo); `candidates`, as demais a tentar — os perfis cadastrados
+/// ([`DetectCandidate::load`]). Repetidas não são tentadas duas vezes.
 pub async fn detect_connection(
     host: &str,
     port: u16,
-    preferred: Option<SnmpConfig>,
+    preferred: Option<DetectCandidate>,
+    candidates: &[DetectCandidate],
 ) -> AppResult<SnmpDetectResult> {
     let started = std::time::Instant::now();
-    let preferred = preferred.map(|mut config| {
-        config.host = host.to_string();
-        config.port = port;
-        config
-    });
-    let tried_preferred = preferred
-        .as_ref()
-        .map(|config| (config.version, config.community.clone()));
-    let mut candidates = Vec::new();
     let timeout_ms = std::env::var("SNMP_DISCOVERY_TIMEOUT_MS")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or(800)
         .clamp(100, 5_000);
-    let communities =
-        discovery_communities(std::env::var("SNMP_DISCOVERY_COMMUNITIES").ok().as_deref());
-    for (version, community) in
-        [SnmpVersion::V2c, SnmpVersion::V1]
-            .into_iter()
-            .flat_map(|version| {
-                communities
-                    .iter()
-                    .map(move |community| (version, community))
-            })
-    {
-        let already_tried = tried_preferred
-            .as_ref()
-            .is_some_and(|(v, c)| *v == version && c.as_str() == community.as_str());
-        if !already_tried
-            && !candidates.iter().any(|config: &SnmpConfig| {
-                config.version == version && config.community.as_str() == community.as_str()
-            })
-        {
-            let mut config = SnmpConfig::v2c(host, community, port);
-            config.version = version;
-            config.timeout_ms = timeout_ms;
-            candidates.push(config);
+    let attempt = |candidate: &DetectCandidate| {
+        let mut config = SnmpConfig::from_credentials(host, port, &candidate.credentials);
+        config.timeout_ms = timeout_ms;
+        (candidate.profile_id, candidate.credentials.clone(), config)
+    };
+    let preferred = preferred.as_ref().map(attempt);
+    let mut seen: Vec<&SnmpCredentials> = preferred.iter().map(|(_, c, _)| c).collect();
+    let mut others = Vec::new();
+    for candidate in candidates {
+        if !seen.contains(&&candidate.credentials) {
+            seen.push(&candidate.credentials);
+            others.push(attempt(candidate));
         }
     }
-    candidates.extend(discovery_v3_profiles(host, port, timeout_ms));
-    let candidate_count = candidates.len() + usize::from(preferred.is_some());
+    let tried_preferred = preferred.is_some();
+    let candidate_count = others.len() + usize::from(tried_preferred);
     // O perfil já cadastrado corre junto com os demais (em série, o timeout
     // dele somaria ao da varredura quando não responde) e vence se responder
     // até `PREFERRED_GRACE` depois do primeiro sucesso de outro perfil.
     const PREFERRED_GRACE: std::time::Duration = std::time::Duration::from_millis(500);
     let mut pending = FuturesUnordered::new();
-    for (is_preferred, config) in preferred
+    for (is_preferred, (profile_id, credentials, config)) in preferred
         .into_iter()
-        .map(|config| (true, config))
-        .chain(candidates.into_iter().map(|config| (false, config)))
+        .map(|attempt| (true, attempt))
+        .chain(others.into_iter().map(|attempt| (false, attempt)))
     {
         pending.push(async move {
-            let label = (
-                config.version,
-                (config.version != SnmpVersion::V3).then(|| config.community.clone()),
-            );
+            let label = (profile_id, credentials);
             (
                 is_preferred,
                 test_connection(config).await.map(|result| (label, result)),
             )
         });
     }
-    let mut preferred_pending = tried_preferred.is_some();
+    let mut preferred_pending = tried_preferred;
     let mut preferred_fallback = None;
     let mut fallback = None;
     let mut answered = None;
@@ -1991,74 +2005,21 @@ pub async fn detect_connection(
         "detecção SNMP concluída"
     );
     match detected {
-        Some(((version, community), result)) => Ok(SnmpDetectResult {
+        Some(((profile_id, credentials), result)) => Ok(SnmpDetectResult {
             detected: result.success,
-            version: Some(version_name(version).into()),
-            community,
+            version: Some(credentials.version.as_str().into()),
+            profile_id,
             result: Some(result),
+            credentials: Some(credentials),
         }),
         None => Ok(SnmpDetectResult {
             detected: false,
             version: None,
-            community: None,
+            profile_id: None,
             result: None,
+            credentials: None,
         }),
     }
-}
-
-fn discovery_communities(value: Option<&str>) -> Vec<String> {
-    let mut communities = value
-        .unwrap_or("public")
-        .split(',')
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToString::to_string)
-        .collect::<Vec<_>>();
-    communities.sort();
-    communities.dedup();
-    communities
-}
-
-#[derive(Debug, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct DiscoveryV3Profile {
-    username: String,
-    auth_protocol: Option<String>,
-    auth_key: Option<String>,
-    priv_protocol: Option<String>,
-    priv_key: Option<String>,
-}
-
-fn discovery_v3_profiles(host: &str, port: u16, timeout_ms: u64) -> Vec<SnmpConfig> {
-    let Some(raw) = std::env::var("SNMP_DISCOVERY_V3_PROFILES")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-    else {
-        return Vec::new();
-    };
-    let profiles = match serde_json::from_str::<Vec<DiscoveryV3Profile>>(&raw) {
-        Ok(profiles) => profiles,
-        Err(error) => {
-            tracing::warn!(%error, "SNMP_DISCOVERY_V3_PROFILES inválido; perfis ignorados");
-            return Vec::new();
-        }
-    };
-    profiles
-        .into_iter()
-        .filter(|profile| !profile.username.trim().is_empty())
-        .map(|profile| SnmpConfig {
-            host: host.to_string(),
-            version: SnmpVersion::V3,
-            community: String::new(),
-            username: Some(profile.username),
-            auth_protocol: profile.auth_protocol,
-            auth_key: profile.auth_key,
-            priv_protocol: profile.priv_protocol,
-            priv_key: profile.priv_key,
-            port,
-            timeout_ms,
-        })
-        .collect()
 }
 fn map_error(error: SnmpError) -> AppError {
     AppError::BusinessRule(error.to_string())

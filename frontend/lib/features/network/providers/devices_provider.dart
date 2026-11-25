@@ -660,8 +660,7 @@ class OperatingSystemsNotifier extends Notifier<List<OperatingSystemOption>> {
   Future<IdentifyResultModel?> identify({
     String? name,
     required String? ipAddress,
-    String? snmpVersion,
-    String? snmpCommunity,
+    int? snmpProfileId,
     String? vendor,
     String? model,
   }) async {
@@ -672,8 +671,7 @@ class OperatingSystemsNotifier extends Notifier<List<OperatingSystemOption>> {
           data: <String, dynamic>{
             'name': ?name,
             'ipAddress': ipAddress,
-            'snmpVersion': snmpVersion,
-            'snmpCommunity': snmpCommunity,
+            'snmpProfileId': ?snmpProfileId,
             'vendor': vendor,
             'model': model,
           },
@@ -727,11 +725,13 @@ class SnmpProfilesNotifier extends Notifier<List<SnmpProfileModel>> {
     }
   }
 
+  /// Testa um alvo com a credencial `profileId` (ou a padrão, sem ela). Com
+  /// `autoDetect`, o backend tenta também as demais credenciais e devolve a
+  /// que respondeu em [SnmpTestResult.profileId].
   Future<SnmpTestResult> testSnmp({
     required String host,
     int port = 161,
-    String version = 'v2c',
-    String community = 'public',
+    int? profileId,
     bool autoDetect = false,
   }) async {
     final raw = await ref
@@ -742,8 +742,7 @@ class SnmpProfilesNotifier extends Notifier<List<SnmpProfileModel>> {
           data: <String, dynamic>{
             'host': host,
             'port': port,
-            'version': version,
-            'community': community,
+            'profileId': ?profileId,
             'autoDetect': autoDetect,
           },
         );
@@ -753,8 +752,7 @@ class SnmpProfilesNotifier extends Notifier<List<SnmpProfileModel>> {
   Future<List<DeviceInterfaceModel>> queryInterfaces({
     required String host,
     int port = 161,
-    String version = 'v2c',
-    String community = 'public',
+    int? profileId,
   }) async {
     final raw = await ref
         .read(apiClientProvider)
@@ -764,8 +762,7 @@ class SnmpProfilesNotifier extends Notifier<List<SnmpProfileModel>> {
           data: <String, dynamic>{
             'host': host,
             'port': port,
-            'version': version,
-            'community': community,
+            'profileId': ?profileId,
           },
         );
     return asJsonMapList(

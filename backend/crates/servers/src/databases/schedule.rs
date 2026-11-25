@@ -38,32 +38,29 @@ pub fn policy(row: &database_connections::Model) -> BackupPolicy {
     }
 }
 
-/// Sobe o ciclo. Fora do ambiente de teste.
-pub fn spawn(ctx: &AppContext) {
-    if ctx.environment == loco_rs::environment::Environment::Test {
-        return;
+/// O ciclo, para sempre. Rotina do processo líder (ADR 024), subida pelo
+/// ponto de montagem fora do ambiente de teste: a reconciliação do começo roda
+/// a cada vez que este processo assume — é ele quem herda o que o líder
+/// anterior deixou em `running`.
+pub async fn run(ctx: AppContext) {
+    match backups::recover_stuck_running(&ctx.db).await {
+        Ok(0) => {}
+        Ok(count) => tracing::warn!(
+            count,
+            "backups de banco presos em 'running' marcados como falhos no boot"
+        ),
+        Err(error) => tracing::warn!(
+            %error,
+            "falha ao reconciliar backups de banco presos em 'running'"
+        ),
     }
-    let ctx = ctx.clone();
-    tokio::spawn(async move {
-        match backups::recover_stuck_running(&ctx.db).await {
-            Ok(0) => {}
-            Ok(count) => tracing::warn!(
-                count,
-                "backups de banco presos em 'running' marcados como falhos no boot"
-            ),
-            Err(error) => tracing::warn!(
-                %error,
-                "falha ao reconciliar backups de banco presos em 'running'"
-            ),
+    tokio::time::sleep(FIRST_TICK_DELAY).await;
+    loop {
+        if let Err(error) = run_due(&ctx, Utc::now()).await {
+            tracing::warn!(%error, "ciclo de backup de bancos falhou");
         }
-        tokio::time::sleep(FIRST_TICK_DELAY).await;
-        loop {
-            if let Err(error) = run_due(&ctx, Utc::now()).await {
-                tracing::warn!(%error, "ciclo de backup de bancos falhou");
-            }
-            tokio::time::sleep(TICK).await;
-        }
-    });
+        tokio::time::sleep(TICK).await;
+    }
 }
 
 /// Faz o backup de cada conexão vencida, uma de cada vez.

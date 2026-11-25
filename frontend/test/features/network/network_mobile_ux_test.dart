@@ -36,6 +36,8 @@ import 'package:netmonitor_app/features/network/widgets/network_settings_cards.d
 import 'package:netmonitor_app/features/network/widgets/wifi_qr_sheet.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
+import 'package:netmonitor_app/features/core/models/snmp_credential_models.dart';
+import 'package:netmonitor_app/features/core/providers/snmp_credentials_provider.dart';
 
 class _StubAuthNotifier extends AuthNotifier {
   @override
@@ -457,8 +459,7 @@ class _StubOperatingSystemsNotifier extends OperatingSystemsNotifier {
   Future<IdentifyResultModel?> identify({
     String? name,
     required String? ipAddress,
-    String? snmpVersion,
-    String? snmpCommunity,
+    int? snmpProfileId,
     String? vendor,
     String? model,
   }) async => null;
@@ -588,6 +589,7 @@ List<Override> _baseOverrides() => <Override>[
   wifiSettingsProvider.overrideWith(_StubWifiSettingsNotifier.new),
   coreSettingsProvider.overrideWith(_StubCoreSettingsNotifier.new),
   operatingSystemsProvider.overrideWith(_StubOperatingSystemsNotifier.new),
+  snmpCredentialsProvider.overrideWith(_StubSnmpCredentialsNotifier.new),
   snmpProfilesProvider.overrideWith(_StubSnmpProfilesNotifier.new),
   logsProvider.overrideWith(_StubLogsNotifier.new),
 ];
@@ -609,6 +611,27 @@ Widget _wrapMobile(
       ),
     ),
   );
+}
+
+/// Credenciais SNMP já carregadas, sem HTTP.
+class _StubSnmpCredentialsNotifier extends SnmpCredentialsNotifier {
+  @override
+  SnmpCredentialsState build() => SnmpCredentialsState(
+    loaded: true,
+    items: <SnmpCredentialModel>[
+      SnmpCredentialModel.fromJson(const <String, dynamic>{
+        'id': 7,
+        'name': 'Casa',
+        'version': 'v2c',
+        'securityLevel': 'community',
+        'community': '********',
+        'isDefault': true,
+      }),
+    ],
+  );
+
+  @override
+  Future<void> fetchAll({bool force = false}) async {}
 }
 
 void main() {

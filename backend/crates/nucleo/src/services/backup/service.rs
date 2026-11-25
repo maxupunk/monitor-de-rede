@@ -29,8 +29,9 @@
 //! `vpn_peers.preshared_key_encrypted` viajam como estão no banco: cifrados
 //! com a `ENCRYPTION_KEY` da instalação. Um backup restaurado em outra
 //! instalação só devolve VPN funcional se a mesma `ENCRYPTION_KEY` estiver lá.
-//! O arquivo também carrega `probes.token_hash` e `devices.snmp_community`,
-//! então é material sensível — quem o guarda, guarda o acesso.
+//! `snmp_profiles` (as credenciais SNMP) viaja do mesmo jeito, cifrada. O
+//! arquivo também carrega `probes.token_hash`, então é material sensível —
+//! quem o guarda, guarda o acesso.
 
 use sea_orm::{ConnectionTrait, DatabaseConnection, EntityTrait};
 use serde::Serialize;
@@ -43,7 +44,7 @@ use super::{
 use crate::{
     models::_entities::{
         alert_rules, device_interfaces, device_links, devices, dns_servers, monitors, networks,
-        probes, sites, system_settings, vpn_peers, vpn_servers,
+        probes, sites, snmp_profiles, system_settings, vpn_peers, vpn_servers,
     },
     services::shared::errors::{AppError, AppResult},
 };
@@ -62,10 +63,11 @@ pub const FORMAT_VERSION: u32 = 1;
 /// A ordem é a mesma de [`crate::models::tables::CREATION_ORDER`] e é o que permite inserir
 /// sem violar FK. Um teste garante que nenhuma tabela aqui esteja fora daquela
 /// lista nem fora de ordem.
-pub const BACKED_UP_TABLES: [&str; 12] = [
+pub const BACKED_UP_TABLES: [&str; 13] = [
     "sites",
     "probes",
     "networks",
+    "snmp_profiles",
     "devices",
     "device_interfaces",
     "device_links",
@@ -174,6 +176,7 @@ pub async fn export(db: &DatabaseConnection, app_version: String) -> AppResult<B
     dump::<sites::Entity, _>(&txn, &mut tables, "sites").await?;
     dump::<probes::Entity, _>(&txn, &mut tables, "probes").await?;
     dump::<networks::Entity, _>(&txn, &mut tables, "networks").await?;
+    dump::<snmp_profiles::Entity, _>(&txn, &mut tables, "snmp_profiles").await?;
     dump::<devices::Entity, _>(&txn, &mut tables, "devices").await?;
     dump::<device_interfaces::Entity, _>(&txn, &mut tables, "device_interfaces").await?;
     dump::<device_links::Entity, _>(&txn, &mut tables, "device_links").await?;

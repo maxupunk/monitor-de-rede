@@ -193,9 +193,9 @@ RUN for mode in nft legacy; do \
         done; \
     done
 
-# Configuração do túnel e, no arranjo sem compose, o banco SQLite (o compose usa
-# o PostgreSQL do serviço `postgres`, ADR 020), no mesmo volume. O entrypoint
-# acerta o dono antes de largar o privilégio: volume nomeado nasce do root.
+# Configuração do túnel e os armazenamentos locais (o banco é o PostgreSQL do
+# serviço `postgres`, ADR 020). O entrypoint acerta o dono antes de largar o
+# privilégio: volume nomeado nasce do root.
 RUN mkdir -p /data/wg && chown -R app:app /data
 ENV LOCO_ENV=production \
     WEB_ROOT=/app/web \

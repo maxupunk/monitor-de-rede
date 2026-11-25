@@ -121,6 +121,8 @@ pub enum ResourceType {
     /// Registry de imagens (ADR 022): versões, tokens de acesso, exceções de
     /// vulnerabilidade e configurações.
     Registry,
+    /// Credencial SNMP reutilizável (`snmp_profiles`).
+    SnmpCredential,
     /// Token pessoal do servidor MCP (ADR 024).
     McpToken,
     /// Execução de ferramenta via servidor MCP (ADR 024).
@@ -155,6 +157,7 @@ impl ResourceType {
             ResourceType::ScheduledTask => "scheduled_task",
             ResourceType::Deploy => "deploy",
             ResourceType::Registry => "registry",
+            ResourceType::SnmpCredential => "snmp_credential",
             ResourceType::McpToken => "mcp_token",
             ResourceType::McpTool => "mcp_tool",
         }
@@ -196,6 +199,7 @@ impl std::str::FromStr for ResourceType {
             "scheduled_task" | "scheduledtask" => Ok(ResourceType::ScheduledTask),
             "deploy" => Ok(ResourceType::Deploy),
             "registry" => Ok(ResourceType::Registry),
+            "snmp_credential" | "snmpcredential" => Ok(ResourceType::SnmpCredential),
             "mcp_token" | "mcptoken" => Ok(ResourceType::McpToken),
             "mcp_tool" | "mcptool" => Ok(ResourceType::McpTool),
             _ => Err(AppError::validation(format!(

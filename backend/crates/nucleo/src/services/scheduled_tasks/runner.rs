@@ -76,30 +76,27 @@ const MESSAGE_MAX_CHARS: usize = 500;
 static RUN_SLOTS: LazyLock<Arc<Semaphore>> =
     LazyLock::new(|| Arc::new(Semaphore::new(MAX_CONCURRENT_RUNS)));
 
-/// Sobe o laço. Fora do ambiente de teste — lá, quem testa chama
-/// [`run_due`] diretamente.
-pub fn spawn(ctx: &AppContext) {
-    if ctx.environment == loco_rs::environment::Environment::Test {
-        return;
+/// O laço, para sempre. Rotina do processo líder (ADR 024), subida pelo
+/// ponto de montagem fora do ambiente de teste — lá, quem testa chama
+/// [`run_due`] diretamente. Só o líder dispara as execuções do cron, então
+/// nenhuma tarefa roda duas vezes no mesmo horário; a reconciliação do começo
+/// roda a cada vez que este processo assume.
+pub async fn run(ctx: AppContext) {
+    if let Err(error) = recover_stale_runs(&ctx.db, true).await {
+        tracing::warn!(%error, "falha ao reconciliar execuções órfãs de tarefas agendadas");
     }
-    let ctx = ctx.clone();
-    tokio::spawn(async move {
-        if let Err(error) = recover_stale_runs(&ctx.db, true).await {
-            tracing::warn!(%error, "falha ao reconciliar execuções órfãs de tarefas agendadas");
+    tokio::time::sleep(FIRST_TICK_DELAY).await;
+    let mut ticker = tokio::time::interval(TICK);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        ticker.tick().await;
+        if let Err(error) = recover_stale_runs(&ctx.db, false).await {
+            tracing::warn!(%error, "falha ao reconciliar execuções travadas de tarefas agendadas");
         }
-        tokio::time::sleep(FIRST_TICK_DELAY).await;
-        let mut ticker = tokio::time::interval(TICK);
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        loop {
-            ticker.tick().await;
-            if let Err(error) = recover_stale_runs(&ctx.db, false).await {
-                tracing::warn!(%error, "falha ao reconciliar execuções travadas de tarefas agendadas");
-            }
-            if let Err(error) = run_due(&ctx, Utc::now()).await {
-                tracing::warn!(%error, "ciclo das tarefas agendadas falhou");
-            }
+        if let Err(error) = run_due(&ctx, Utc::now()).await {
+            tracing::warn!(%error, "ciclo das tarefas agendadas falhou");
         }
-    });
+    }
 }
 
 /// Encerra execuções que ficaram presas em `running` após queda do processo ou

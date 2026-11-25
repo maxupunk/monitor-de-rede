@@ -35,11 +35,10 @@ workers:
 
 database:
   # O `docker-compose.yml` define a `DATABASE_URL` para o PostgreSQL do
-  # serviço `postgres` (ADR 020). Este padrão SQLite só vale para a imagem
-  # rodada sozinha, sem compose: o WAL é ligado no boot
-  # (`app::enable_sqlite_wal`), sem o qual uma escrita bloquearia toda leitura
-  # do processo. O código atende aos dois dialetos e os testes rodam nos dois.
-  uri: {{ get_env(name="DATABASE_URL", default="sqlite:///data/netmonitor.sqlite?mode=rwc") }}
+  # serviço `postgres` (ADR 020). Produção roda só em PostgreSQL: o boot recusa
+  # uma URL SQLite (`app::database_allowed`). A imagem rodada sem compose
+  # precisa de uma `DATABASE_URL` para um PostgreSQL externo.
+  uri: {{ get_env(name="DATABASE_URL", default="postgres://netmonitor@127.0.0.1:5432/netmonitor") }}
   enable_logging: false
   # ⚠️ Em **milissegundos** — o Loco os passa a `Duration::from_millis`, e o
   # nome não denuncia isso. Os 500 do scaffold faziam a `idle_timeout` derrubar
@@ -51,17 +50,13 @@ database:
   connect_timeout: {{ get_env(name="DB_CONNECT_TIMEOUT", default="5000") }}
   idle_timeout: {{ get_env(name="DB_IDLE_TIMEOUT", default="300000") }}
   min_connections: {{ get_env(name="DB_MIN_CONNECTIONS", default="1") }}
-  # Com o WAL ligado no boot, o SQLite atende vários leitores em paralelo com o
-  # escritor — e dois escritores se serializam sozinhos pelo `busy_timeout` de
-  # 5 s do sqlx. Um pool de **uma** conexão jogava isso fora: toda requisição
-  # disputava a mesma conexão com o scheduler, os polls SNMP e a ingestão de
-  # syslog, e quem esperasse mais que o `connect_timeout` recebia
-  # "Connection pool timed out" — que vira **500** no cliente. Era a origem dos
-  # 500 intermitentes em `GET /api/auth/setup` em produção.
-  #
-  # Cinco é o teto de leitores simultâneos, não um alvo: o pool só cresce sob
-  # disputa e `min_connections` mantém uma.
-  max_connections: {{ get_env(name="DB_MAX_CONNECTIONS", default="5") }}
+  # Um pool de **uma** conexão fazia toda requisição disputar a mesma conexão
+  # com o scheduler, os polls SNMP e a ingestão de syslog, e quem esperasse
+  # mais que o `connect_timeout` recebia "Connection pool timed out" — que vira
+  # **500** no cliente (os 500 intermitentes em `GET /api/auth/setup`). O
+  # PostgreSQL atende escritas em paralelo; o pool só cresce sob disputa e
+  # `min_connections` mantém uma. O compose define o valor da instalação.
+  max_connections: {{ get_env(name="DB_MAX_CONNECTIONS", default="10") }}
   # O container `migration` não existe mais: o próprio `start` converge o
   # esquema antes de abrir a porta. `create_app` migra; `run_task` não — então
   # um probe remoto, que roda tarefa, continua sem tocar no banco de ninguém.

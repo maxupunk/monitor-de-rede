@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/utils/error_utils.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
+import 'package:netmonitor_app/features/core/presentation/widgets/snmp_credential_dropdown.dart';
 import 'package:netmonitor_app/features/network/models/device_models.dart';
 import 'package:netmonitor_app/features/network/models/diagnostics_models.dart';
 import 'package:netmonitor_app/features/network/providers/devices_provider.dart';
@@ -15,32 +16,25 @@ import 'package:netmonitor_app/theme/app_theme.dart';
 Future<void> showSnmpTestDialog(
   BuildContext context, {
   String? initialHost,
-  String initialVersion = 'v2c',
-  String initialCommunity = 'public',
+  int? initialProfileId,
 }) {
   return showAdaptiveFormSheet<void>(
     context: context,
     title: 'Teste SNMP',
-    subtitle: 'Valide conectividade, versão, community e walk de interfaces',
+    subtitle: 'Valide conectividade, credencial e walk de interfaces',
     maxWidth: 600,
     builder: (_) => _SnmpTestBody(
       initialHost: initialHost,
-      initialVersion: initialVersion,
-      initialCommunity: initialCommunity,
+      initialProfileId: initialProfileId,
     ),
   );
 }
 
 class _SnmpTestBody extends ConsumerStatefulWidget {
-  const _SnmpTestBody({
-    this.initialHost,
-    required this.initialVersion,
-    required this.initialCommunity,
-  });
+  const _SnmpTestBody({this.initialHost, this.initialProfileId});
 
   final String? initialHost;
-  final String initialVersion;
-  final String initialCommunity;
+  final int? initialProfileId;
 
   @override
   ConsumerState<_SnmpTestBody> createState() => _SnmpTestBodyState();
@@ -48,9 +42,8 @@ class _SnmpTestBody extends ConsumerStatefulWidget {
 
 class _SnmpTestBodyState extends ConsumerState<_SnmpTestBody> {
   late final TextEditingController _hostCtrl;
-  late final TextEditingController _communityCtrl;
   final TextEditingController _portCtrl = TextEditingController(text: '161');
-  late String _version;
+  int? _profileId;
   bool _testing = false;
   SnmpTestResult? _result;
   List<DeviceInterfaceModel> _interfaces = const <DeviceInterfaceModel>[];
@@ -60,14 +53,12 @@ class _SnmpTestBodyState extends ConsumerState<_SnmpTestBody> {
   void initState() {
     super.initState();
     _hostCtrl = TextEditingController(text: widget.initialHost ?? '');
-    _communityCtrl = TextEditingController(text: widget.initialCommunity);
-    _version = widget.initialVersion;
+    _profileId = widget.initialProfileId;
   }
 
   @override
   void dispose() {
     _hostCtrl.dispose();
-    _communityCtrl.dispose();
     _portCtrl.dispose();
     super.dispose();
   }
@@ -85,20 +76,21 @@ class _SnmpTestBodyState extends ConsumerState<_SnmpTestBody> {
           .testSnmp(
             host: _hostCtrl.text.trim(),
             port: int.tryParse(_portCtrl.text.trim()) ?? 161,
-            version: _version,
-            community: _communityCtrl.text.trim(),
+            profileId: _profileId,
             autoDetect: autoDetect,
           );
       if (!mounted) return;
-      setState(() => _result = res);
+      setState(() {
+        _result = res;
+        if (res.profileId != null) _profileId = res.profileId;
+      });
       if (res.responded) {
         final ifaces = await ref
             .read(snmpProfilesProvider.notifier)
             .queryInterfaces(
               host: _hostCtrl.text.trim(),
               port: int.tryParse(_portCtrl.text.trim()) ?? 161,
-              version: res.version ?? _version,
-              community: res.community ?? _communityCtrl.text.trim(),
+              profileId: res.profileId ?? _profileId,
             );
         if (mounted) setState(() => _interfaces = ifaces);
       }
@@ -129,33 +121,9 @@ class _SnmpTestBodyState extends ConsumerState<_SnmpTestBody> {
           ],
         ),
         const SizedBox(height: 10),
-        ResponsiveFieldRow(
-          breakpoint: 480,
-          children: <Widget>[
-            AppDropdownFormField<String>(
-              initialValue: _version,
-              decoration: const InputDecoration(labelText: 'Versão'),
-              items: const <DropdownMenuItem<String>>[
-                DropdownMenuItem(
-                  value: 'v1',
-                  child: Text('v1', overflow: TextOverflow.ellipsis),
-                ),
-                DropdownMenuItem(
-                  value: 'v2c',
-                  child: Text('v2c', overflow: TextOverflow.ellipsis),
-                ),
-                DropdownMenuItem(
-                  value: 'v3',
-                  child: Text('v3', overflow: TextOverflow.ellipsis),
-                ),
-              ],
-              onChanged: (v) => setState(() => _version = v ?? 'v2c'),
-            ),
-            TextField(
-              controller: _communityCtrl,
-              decoration: const InputDecoration(labelText: 'Community'),
-            ),
-          ],
+        SnmpCredentialDropdown(
+          value: _profileId,
+          onChanged: (id) => setState(() => _profileId = id),
         ),
         const SizedBox(height: 12),
         Wrap(

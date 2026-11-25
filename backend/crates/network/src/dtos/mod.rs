@@ -5,4 +5,5 @@ pub mod networks;
 pub mod plugins;
 pub mod port_scan;
 pub mod snmp;
+pub mod snmp_credentials;
 pub mod topology;

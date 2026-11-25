@@ -110,8 +110,9 @@ pub struct DevicePresenterItem {
     pub description: Option<String>,
     pub is_monitored: bool,
     pub snmp_enabled: bool,
-    pub snmp_community: Option<String>,
-    pub snmp_version: Option<String>,
+    /// A credencial SNMP do equipamento (nunca o segredo dela).
+    #[ts(type = "number | null")]
+    pub snmp_profile_id: Option<i64>,
     pub snmp_poll_interval_seconds: i32,
     pub status: String,
     pub access_mode: Option<String>,

@@ -10,7 +10,7 @@ decisão cria.
 | [002](002-rustscan-embedding.md) | Port scanner: algoritmo do RustScan, não a crate (licença GPL + API sem streaming) | SPIKE-02 | aceito |
 | [003](003-icmp-dgram.md) | ICMP por `SOCK_DGRAM`, sem `CAP_NET_RAW` | SPIKE-03 | aceito |
 | [004](004-dns-wire.md) | DNS: `hickory-proto` no formato wire, sem cliente pronto | SPIKE-04 | aceito |
-| [007](007-scheduler-processo-unico.md) | Scheduler: laço em processo único; deps de processo em `after_context` | — | aceito |
+| [007](007-scheduler-processo-unico.md) | Scheduler: laço em processo único; deps de processo em `after_context` | — | aceito (emendado pelo 025) |
 | [008](008-syslog-parser.md) | Syslog: `syslog_loose` com resgate do `<pri>` e severidade por tópico | SPIKE-06 | aceito |
 | [009](009-device-adapters.md) | Plataformas: registro único com `DeviceAdapter` e adapters especializados | — | aceito |
 | [010](010-docker-engine-api.md) | Docker: API nativa pelo socket, com mutações administrativas e auditadas | — | aceito (socket movido pelo 014) |
@@ -28,3 +28,4 @@ decisão cria.
 | [022](022-registry-proprio.md) | Registry próprio: OCI em Rust na central, entrada e entrega pelo canal do agente (envio por OIDC no modo Actions), varredura com OSV local | SPIKE-REG-01..05 | aceito e implementado (fases 0–5) |
 | [023](023-compilacao-no-servidor.md) | Compilação no servidor (estilo Dokploy/Coolify): push pelo GitHub App, agente compila em BuildKit dedicado, imagem no registry da central, deploy pela fila do 021 | SPIKE-BLD-01..04 | aceito e implementado |
 | [024](024-servidor-mcp-seguro.md) | Servidor MCP seguro: Streamable HTTP nativo em crate dedicado (`crates/mcp`), PAT escopado por projeto, origem interna por padrão e aprovação humana preservada, sem depender da IA local | — | aceito e implementado |
+| [025](025-varios-processos-lider-e-notify.md) | Vários processos da central: rotinas de fundo só no líder (`pg_try_advisory_lock` em sessão dedicada) e eventos/snapshots entre processos por `LISTEN`/`NOTIFY` | — | aceito e implementado |

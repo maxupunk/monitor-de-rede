@@ -10,6 +10,7 @@ use loco_rs::{
 };
 
 use netmonitor_assistant::proactive;
+use netmonitor_core::cluster::leadership::{spawn_while_leader, LeaderRole};
 
 pub struct AiInitializer;
 
@@ -20,8 +21,10 @@ impl Initializer for AiInitializer {
     }
 
     async fn before_run(&self, ctx: &AppContext) -> Result<()> {
+        // Rotina do líder (ADR 024): o mesmo `alert:triggered` chega a todos
+        // os processos da central, e só um pode resumi-lo.
         if ctx.environment != Environment::Test {
-            proactive::spawn(ctx);
+            spawn_while_leader(ctx, LeaderRole::Background, "ia_proativa", proactive::run);
         }
         Ok(())
     }

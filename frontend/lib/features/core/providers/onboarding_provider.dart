@@ -7,6 +7,7 @@ import 'package:netmonitor_app/core/utils/json_parsers.dart';
 import 'package:netmonitor_app/features/core/models/settings_models.dart';
 import 'package:netmonitor_app/features/core/providers/monitors_provider.dart';
 import 'package:netmonitor_app/features/core/providers/settings_provider.dart';
+import 'package:netmonitor_app/features/core/providers/snmp_credentials_provider.dart';
 
 @immutable
 class OnboardingState {
@@ -78,6 +79,7 @@ class OnboardingNotifier extends Notifier<OnboardingState> {
   /// Retorna o token do primeiro agente remoto criado (se solicitado).
   Future<String?> commitInitialSetup({
     required SystemPreferences preferences,
+    String? defaultSnmpCommunity,
     String? lanAddressOverride,
     required bool enableNetwork,
     String? siteName,
@@ -94,6 +96,14 @@ class OnboardingNotifier extends Notifier<OnboardingState> {
     final settingsNotifier = ref.read(coreSettingsProvider.notifier);
 
     await settingsNotifier.savePreferences(preferences);
+
+    // A comunidade SNMP padrão vira a credencial padrão (`snmp_profiles`).
+    final community = (defaultSnmpCommunity ?? '').trim();
+    if (enableNetwork && community.isNotEmpty) {
+      await ref
+          .read(snmpCredentialsProvider.notifier)
+          .saveDefaultCommunity(community);
+    }
 
     final lan = (lanAddressOverride ?? '').trim();
     if (lan.isNotEmpty) {

@@ -196,8 +196,9 @@ async fn wants_summary(ctx: &AppContext, severity: &str) -> Option<u32> {
 }
 
 /// Escuta `alert:triggered` e dispara os resumos. As configurações são lidas
-/// a cada alerta, então ligar ou desligar vale sem reiniciar.
-pub fn spawn_listener(ctx: AppContext, drivers: Arc<dyn DriverFactory>) {
+/// a cada alerta, então ligar ou desligar vale sem reiniciar. Termina se o
+/// barramento fechar.
+pub async fn listen(ctx: AppContext, drivers: Arc<dyn DriverFactory>) {
     let Ok(bus) = EventBus::from_context(&ctx) else {
         tracing::warn!("barramento de eventos indisponível; resumos de incidente desligados");
         return;
@@ -207,71 +208,69 @@ pub fn spawn_listener(ctx: AppContext, drivers: Arc<dyn DriverFactory>) {
     let concurrency = Arc::new(Semaphore::new(MAX_CONCURRENT_SUMMARIES));
     let in_flight = Arc::new(StdMutex::new(HashSet::<i64>::new()));
 
-    tokio::spawn(async move {
-        loop {
-            let event = match receiver.recv().await {
-                Ok(event) => event,
-                Err(RecvError::Lagged(skipped)) => {
-                    tracing::warn!(skipped, "resumos de incidente: eventos perdidos");
-                    continue;
-                }
-                Err(RecvError::Closed) => return,
-            };
-            if event.event_type != "alert:triggered" {
+    loop {
+        let event = match receiver.recv().await {
+            Ok(event) => event,
+            Err(RecvError::Lagged(skipped)) => {
+                tracing::warn!(skipped, "resumos de incidente: eventos perdidos");
                 continue;
             }
-            let Some(alert_id) = event.payload.get("id").and_then(Value::as_i64) else {
-                continue;
-            };
-            let severity = event
-                .payload
-                .get("severity")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string();
+            Err(RecvError::Closed) => return,
+        };
+        if event.event_type != "alert:triggered" {
+            continue;
+        }
+        let Some(alert_id) = event.payload.get("id").and_then(Value::as_i64) else {
+            continue;
+        };
+        let severity = event
+            .payload
+            .get("severity")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
 
-            // Consulta de config, triagem e teto ficam na task para o laço do
-            // barramento nunca bloquear e não perder eventos (`Lagged`).
-            let ctx = ctx.clone();
-            let drivers = Arc::clone(&drivers);
-            let limiter = Arc::clone(&limiter);
-            let concurrency = Arc::clone(&concurrency);
-            let in_flight = Arc::clone(&in_flight);
-            tokio::spawn(async move {
-                let Some(_in_flight) = InFlightGuard::acquire(&in_flight, alert_id) else {
-                    return;
-                };
-                let Some(max_per_hour) = wants_summary(&ctx, &severity).await else {
-                    return;
-                };
-                let Ok(_permit) = concurrency.acquire_owned().await else {
-                    return;
-                };
-                match triage::assess(&ctx, alert_id).await {
-                    Ok(Some((opinion, _))) if opinion.suppressed => {
-                        tracing::info!(
-                            alert_id,
-                            actionable = opinion.actionable,
-                            "resumo de incidente pulado pela triagem do Decisor"
-                        );
-                        return;
-                    }
-                    Ok(_) => {}
-                    Err(error) => tracing::debug!(%error, alert_id, "triagem do Decisor falhou"),
-                }
-                if !limiter.lock().await.try_acquire(Utc::now(), max_per_hour) {
+        // Consulta de config, triagem e teto ficam na task para o laço do
+        // barramento nunca bloquear e não perder eventos (`Lagged`).
+        let ctx = ctx.clone();
+        let drivers = Arc::clone(&drivers);
+        let limiter = Arc::clone(&limiter);
+        let concurrency = Arc::clone(&concurrency);
+        let in_flight = Arc::clone(&in_flight);
+        tokio::spawn(async move {
+            let Some(_in_flight) = InFlightGuard::acquire(&in_flight, alert_id) else {
+                return;
+            };
+            let Some(max_per_hour) = wants_summary(&ctx, &severity).await else {
+                return;
+            };
+            let Ok(_permit) = concurrency.acquire_owned().await else {
+                return;
+            };
+            match triage::assess(&ctx, alert_id).await {
+                Ok(Some((opinion, _))) if opinion.suppressed => {
                     tracing::info!(
                         alert_id,
-                        "resumo de incidente adiado: teto por hora atingido"
+                        actionable = opinion.actionable,
+                        "resumo de incidente pulado pela triagem do Decisor"
                     );
                     return;
                 }
-                if let Err(error) = summarize_alert(&ctx, drivers.as_ref(), alert_id).await {
-                    tracing::warn!(%error, alert_id, "falha ao gerar resumo de incidente");
-                }
-            });
-        }
-    });
+                Ok(_) => {}
+                Err(error) => tracing::debug!(%error, alert_id, "triagem do Decisor falhou"),
+            }
+            if !limiter.lock().await.try_acquire(Utc::now(), max_per_hour) {
+                tracing::info!(
+                    alert_id,
+                    "resumo de incidente adiado: teto por hora atingido"
+                );
+                return;
+            }
+            if let Err(error) = summarize_alert(&ctx, drivers.as_ref(), alert_id).await {
+                tracing::warn!(%error, alert_id, "falha ao gerar resumo de incidente");
+            }
+        });
+    }
 }
 
 #[cfg(test)]

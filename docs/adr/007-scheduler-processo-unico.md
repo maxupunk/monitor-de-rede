@@ -1,6 +1,9 @@
 # ADR 007 — Scheduler: laço em processo único, no lugar do scheduler nativo do Loco
 
-- **Status:** aceito — 2026-08-12.
+- **Status:** aceito — 2026-08-12. **Emendado pelo
+  [ADR 025](025-varios-processos-lider-e-notify.md)** (2026-11-25): o relay por
+  cursor descrito abaixo foi substituído por `LISTEN`/`NOTIFY`, e o ciclo (como
+  as demais rotinas de fundo) só roda no processo que é o líder da função.
 - **Data:** 2026-08-12
 
 ## Contexto

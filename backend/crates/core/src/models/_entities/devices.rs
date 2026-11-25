@@ -23,8 +23,9 @@ pub struct Model {
     pub description: Option<String>,
     pub is_monitored: bool,
     pub snmp_enabled: bool,
-    pub snmp_community: Option<String>,
-    pub snmp_version: Option<String>,
+    /// A credencial SNMP (`snmp_profiles`). `None` é "a padrão" — ver
+    /// `devices::snmp_credentials::for_device`.
+    pub snmp_profile_id: Option<i64>,
     pub snmp_poll_interval_seconds: i32,
     /// Por onde o operador alcança o equipamento: `local`, `vpn` ou `remote`.
     /// `None` significa "automático" — ver `services::devices::access`.
@@ -96,6 +97,14 @@ pub enum Relation {
         on_delete = "Cascade"
     )]
     Sites,
+    #[sea_orm(
+        belongs_to = "super::snmp_profiles::Entity",
+        from = "Column::SnmpProfileId",
+        to = "super::snmp_profiles::Column::Id",
+        on_update = "Cascade",
+        on_delete = "Restrict"
+    )]
+    SnmpProfiles,
     #[sea_orm(has_one = "super::vpn_peers::Entity")]
     VpnPeers,
 }
@@ -145,6 +154,12 @@ impl Related<super::networks::Entity> for Entity {
 impl Related<super::sites::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Sites.def()
+    }
+}
+
+impl Related<super::snmp_profiles::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::SnmpProfiles.def()
     }
 }
 

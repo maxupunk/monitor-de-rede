@@ -5,22 +5,26 @@ use std::net::IpAddr;
 use crate::{
     discovery::{fingerprints, merger::DiscoveredHost},
     snmp::{
-        client::{SnmpClient, SnmpConfig, SnmpVersion},
+        client::{SnmpClient, SnmpConfig},
         collectors,
-        service::detect_connection,
+        service::{detect_connection, DetectCandidate},
     },
 };
 use futures::{stream, StreamExt};
 use netmonitor_core::devices::systems;
 use tokio_util::sync::CancellationToken;
 
-/// Agentes consultados ao mesmo tempo. Cada consulta testa as comunidades e
-/// versões configuradas em paralelo, então o custo real é este número vezes
-/// as combinações.
+/// Agentes consultados ao mesmo tempo. Cada consulta testa as credenciais
+/// cadastradas em paralelo, então o custo real é este número vezes elas.
 const CONCURRENCY: usize = 48;
 
-/// Consulta SNMP nos hosts vivos e devolve só os que responderam.
-pub async fn enrich(ips: &[IpAddr], cancel: &CancellationToken) -> Vec<DiscoveredHost> {
+/// Consulta SNMP nos hosts vivos com as credenciais `candidates` (as
+/// cadastradas, [`DetectCandidate::load`]) e devolve só os que responderam.
+pub async fn enrich(
+    ips: &[IpAddr],
+    candidates: &[DetectCandidate],
+    cancel: &CancellationToken,
+) -> Vec<DiscoveredHost> {
     let cancel = cancel.clone();
     stream::iter(ips.to_vec())
         .map(move |ip| {
@@ -29,7 +33,7 @@ pub async fn enrich(ips: &[IpAddr], cancel: &CancellationToken) -> Vec<Discovere
                 if cancel.is_cancelled() {
                     return Vec::new();
                 }
-                query(ip).await
+                query(ip, candidates).await
             }
         })
         .buffer_unordered(CONCURRENCY)
@@ -40,14 +44,17 @@ pub async fn enrich(ips: &[IpAddr], cancel: &CancellationToken) -> Vec<Discovere
         .collect()
 }
 
-async fn query(ip: IpAddr) -> Vec<DiscoveredHost> {
+async fn query(ip: IpAddr, candidates: &[DetectCandidate]) -> Vec<DiscoveredHost> {
     let ip_address = ip.to_string();
-    let Ok(result) = detect_connection(&ip_address, 161, None).await else {
+    let Ok(result) = detect_connection(&ip_address, 161, None, candidates).await else {
         return Vec::new();
     };
     if !result.detected {
         return Vec::new();
     }
+    let Some(credentials) = result.credentials.clone() else {
+        return Vec::new();
+    };
     let mut host = DiscoveredHost {
         ip_address: ip_address.clone(),
         confidence: 95,
@@ -86,21 +93,17 @@ async fn query(ip: IpAddr) -> Vec<DiscoveredHost> {
             "hardwareModel": system.hardware_model,
         });
     }
+    // `profileId`: a credencial que respondeu — o cadastro do dispositivo a
+    // partir desta descoberta já nasce apontando para ela.
     host.data["snmp"] = serde_json::json!({
         "detected": true,
         "protocol": "udp",
         "port": 161,
         "version": result.version,
+        "profileId": result.profile_id,
     });
 
-    let version = result
-        .version
-        .as_deref()
-        .and_then(SnmpVersion::parse)
-        .unwrap_or(SnmpVersion::V2c);
-    let community = result.community.unwrap_or_else(|| "public".to_string());
-    let mut config = SnmpConfig::v2c(&ip_address, community, 161);
-    config.version = version;
+    let mut config = SnmpConfig::from_credentials(&ip_address, 161, &credentials);
     config.timeout_ms = 1_000;
     let client = SnmpClient::new(config);
 

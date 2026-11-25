@@ -41,6 +41,8 @@ pub struct SnmpCheckerConfig {
     pub priv_protocol: Option<String>,
     #[serde(default)]
     pub priv_key: Option<String>,
+    #[serde(default)]
+    pub context_name: Option<String>,
     #[serde(default = "default_port")]
     pub port: u16,
     #[serde(default = "default_timeout")]
@@ -146,6 +148,7 @@ async fn execute_query(config: &SnmpCheckerConfig) -> Result<SnmpObservation, Sn
         auth_key: config.auth_key.clone(),
         priv_protocol: config.priv_protocol.clone(),
         priv_key: config.priv_key.clone(),
+        context_name: config.context_name.clone(),
         port: config.port,
         timeout_ms: config.timeout_ms,
     });
@@ -426,7 +429,7 @@ fn value(
 }
 
 /// Tipo do monitor SNMP (`monitors.type`).
-pub const SNMP_MONITOR: &str = "snmp";
+pub const SNMP_MONITOR: &str = netmonitor_core::devices::snmp_credentials::SNMP_MONITOR_KIND;
 
 /// O monitor `snmp` no registro do núcleo (ADR 017, `MonitorChecker`): roda
 /// na central e no agente (monitor com `probe_id`), como antes.

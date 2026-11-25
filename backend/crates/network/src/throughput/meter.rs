@@ -209,7 +209,9 @@ mod tests {
         assert_eq!(c.get(), 15);
     }
 
-    #[tokio::test]
+    /// Relógio pausado: sob a suíte cheia, o tique real atrasava o bastante
+    /// para cair fora das faixas e o teste falhava sem defeito nenhum.
+    #[tokio::test(start_paused = true)]
     async fn amostrador_emite_um_por_segundo_por_fluxo() {
         let tx = ByteCounter::default();
         let rx = ByteCounter::default();

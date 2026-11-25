@@ -1,5 +1,8 @@
 //! §6 #07 — `devices`. Núcleo do inventário.
 //!
+//! `snmp_profile_id` aponta a credencial SNMP do equipamento
+//! (`snmp_profiles`); `NULL` é "a credencial padrão".
+//!
 //! As colunas depois de `created_at`/`updated_at` vieram com as funções que as
 //! usam; ficam no fim para o esquema não mudar de forma:
 //!
@@ -58,8 +61,7 @@ impl MigrationTrait for Migration {
             .col(text_null("description"))
             .col(boolean("is_monitored").default(false).take())
             .col(boolean("snmp_enabled").default(false).take())
-            .col(string_null("snmp_community"))
-            .col(string_null("snmp_version"))
+            .col(big_integer_null("snmp_profile_id"))
             .col(string("status").default("unknown").take())
             .col(timestamp_with_time_zone_null("last_seen_at"))
             .foreign_key(&mut fk(
@@ -73,6 +75,15 @@ impl MigrationTrait for Migration {
                 "network_id",
                 "networks",
                 ForeignKeyAction::SetNull,
+            ))
+            // `RESTRICT`: apagar a credencial em uso deixaria o equipamento
+            // sem como responder, em silêncio. O serviço confere antes e
+            // devolve 409 dizendo quem usa; a FK é a rede de proteção.
+            .foreign_key(&mut fk(
+                "devices",
+                "snmp_profile_id",
+                "snmp_profiles",
+                ForeignKeyAction::Restrict,
             ))
             // Auto-referência: a hierarquia pai/filho da topologia. `SET NULL`
             // porque apagar o pai não pode apagar a subárvore inteira.
@@ -120,6 +131,12 @@ impl MigrationTrait for Migration {
             .await?;
         m.create_index(index("devices_site_id_index", "devices", &["site_id"]))
             .await?;
+        m.create_index(index(
+            "devices_snmp_profile_id_index",
+            "devices",
+            &["snmp_profile_id"],
+        ))
+        .await?;
         m.create_index(unique(
             "devices_system_key_unique",
             "devices",

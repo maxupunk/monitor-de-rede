@@ -119,6 +119,7 @@ static FULL: &[TableIo] = &[
     table_io!(Store::Main, _entities::sites, "sites"),
     table_io!(Store::Main, _entities::probes, "probes"),
     table_io!(Store::Main, _entities::networks, "networks"),
+    table_io!(Store::Main, _entities::snmp_profiles, "snmp_profiles"),
     table_io!(Store::Main, _entities::devices, "devices"),
     table_io!(
         Store::Main,

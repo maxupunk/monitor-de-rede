@@ -13,6 +13,7 @@
 //! ciclo. Aqui, não há modo que escape.
 
 use loco_rs::app::AppContext;
+use netmonitor_core::cluster::{leadership::Leadership, Coordination};
 
 use netmonitor_nucleo::{
     services::agents::hub::AgentHub,
@@ -32,8 +33,13 @@ use netmonitor_servers::docker::log_stream::LogStreams;
 /// inclusive `db migrate` e `doctor`. Ver a nota sobre o ICMP abaixo.
 pub fn install(ctx: &AppContext) {
     // Puramente em memória, não falham.
-    let bus = EventBus::create();
+    // O dialeto do banco decide, uma vez, como os processos da central se
+    // coordenam (ADR 024): no PostgreSQL o barramento já nasce avisando e
+    // escutando os outros processos, e a liderança das rotinas é disputada.
+    let coordination = Coordination::for_database(&ctx.db);
+    let bus: EventBus = coordination.start_event_bus();
     ctx.shared_store.insert(bus.clone());
+    Leadership::install(ctx, coordination);
     ctx.shared_store.insert(ScanSessionService::create(bus));
     // Registro das conexões de agentes e dos logs em follow. Só o processo da
     // API os povoa, mas existir vazio em todo processo evita um "não

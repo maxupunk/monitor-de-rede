@@ -282,6 +282,14 @@ class StreamedDiscoveryHost {
     return mac;
   }
 
+  /// O agente SNMP respondeu na descoberta.
+  bool get snmpDetected => asJsonMap(data['snmp'])['detected'] == true;
+
+  /// A credencial SNMP que respondeu na descoberta (`data.snmp.profileId`);
+  /// `null` quando foi o `public` de fábrica ou não houve SNMP.
+  int? get snmpProfileId =>
+      parseIntOrNull(asJsonMap(data['snmp'])['profileId']);
+
   /// Extrai o nome do sistema operacional reportado em [data], se disponível.
   String? get detectedOsLabel {
     for (final key in const <String>['operatingSystem', 'osName', 'os']) {

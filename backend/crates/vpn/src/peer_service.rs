@@ -12,6 +12,7 @@ use sea_orm::{
 };
 
 use netmonitor_core::agents::install_policy::{InstallPolicy, InstallPolicyView};
+use netmonitor_core::devices::snmp_credentials;
 use netmonitor_core::shared::db_errors::is_unique_violation;
 use netmonitor_core::shared::transaction::begin_write;
 use netmonitor_core::{
@@ -49,8 +50,8 @@ pub struct CreatePeerPayload {
     pub ip_address: Option<String>,
     pub site_id: Option<i64>,
     pub snmp_enabled: bool,
-    pub snmp_community: Option<String>,
-    pub snmp_version: Option<String>,
+    /// A credencial SNMP do dispositivo; `None` é a padrão.
+    pub snmp_profile_id: Option<i64>,
     pub description: Option<String>,
     /// O agente NetMonitor que o script instala (perfis com script Linux,
     /// ADR 011).
@@ -96,6 +97,10 @@ struct PeerBundle {
     network: networks::Model,
     /// Agente remoto vinculado ao dispositivo deste peer, se houver.
     agent: Option<probes::Model>,
+    /// A comunidade que o script grava no equipamento — da credencial SNMP do
+    /// dispositivo. `None` sem SNMP ou com credencial v3 (o script só sabe
+    /// configurar comunidade; o usuário v3 é configurado à mão).
+    snmp_community: Option<String>,
 }
 
 async fn load_peer(db: &DatabaseConnection, peer_id: i64) -> AppResult<PeerBundle> {
@@ -110,12 +115,20 @@ async fn load_peer(db: &DatabaseConnection, peer_id: i64) -> AppResult<PeerBundl
     let network = server_service::network_of(db, &server).await?;
     let device = devices::Entity::find_by_id(peer.device_id).one(db).await?;
     let agent = registration::for_device(db, peer.device_id).await?;
+    let snmp_community = match device.as_ref().filter(|device| device.snmp_enabled) {
+        Some(device) => snmp_credentials::for_device(db, device)
+            .await?
+            .community_text()
+            .map(str::to_owned),
+        None => None,
+    };
     Ok(PeerBundle {
         peer,
         device,
         server,
         network,
         agent,
+        snmp_community,
     })
 }
 
@@ -178,8 +191,8 @@ fn build_context_with_agent(
         endpoint_port: bundle.server.listen_port,
         mtu: bundle.server.mtu,
         dns_servers: bundle.server.dns_servers.clone(),
-        snmp_enabled: device.is_some_and(|device| device.snmp_enabled),
-        snmp_community: device.and_then(|device| device.snmp_community.clone()),
+        snmp_enabled: bundle.snmp_community.is_some(),
+        snmp_community: bundle.snmp_community.clone(),
         agent,
     })
 }
@@ -377,15 +390,12 @@ pub async fn create_with_device(
                 // mora no catálogo, e não numa segunda tabela aqui.
                 operating_system: Set(Some(device_adapter.platform().id.to_owned())),
                 snmp_enabled: Set(payload.snmp_enabled),
-                snmp_community: Set(payload.snmp_enabled.then(|| {
-                    payload
-                        .snmp_community
-                        .clone()
-                        .unwrap_or_else(|| "public".into())
-                })),
-                snmp_version: Set(payload
-                    .snmp_enabled
-                    .then(|| payload.snmp_version.clone().unwrap_or_else(|| "v2c".into()))),
+                snmp_profile_id: Set(snmp_credentials::profile_for_device(
+                    &txn,
+                    payload.snmp_profile_id,
+                    payload.snmp_enabled,
+                )
+                .await?),
                 ..Default::default()
             }
             .insert(&txn)
@@ -410,8 +420,6 @@ pub async fn create_with_device(
                 &device,
                 &MonitorProvisioningOptions {
                     snmp_enabled: payload.snmp_enabled,
-                    snmp_community: device.snmp_community.clone(),
-                    snmp_version: device.snmp_version.clone(),
                     interval_seconds: None,
                 },
             )
@@ -772,6 +780,10 @@ mod tests {
     fn bundle(endpoint: Option<&str>, device: Option<devices::Model>) -> PeerBundle {
         let now = Utc::now();
         PeerBundle {
+            snmp_community: device
+                .as_ref()
+                .filter(|device| device.snmp_enabled)
+                .map(|_| "netmon".to_string()),
             peer: vpn_peers::Model {
                 id: 1,
                 vpn_server_id: 1,
@@ -843,8 +855,7 @@ mod tests {
             description: None,
             is_monitored: true,
             snmp_enabled: snmp,
-            snmp_community: snmp.then(|| "netmon".to_string()),
-            snmp_version: snmp.then(|| "v2c".to_string()),
+            snmp_profile_id: None,
             snmp_poll_interval_seconds: 60,
             access_mode: Some("vpn".into()),
             operating_system: Some("routeros".into()),

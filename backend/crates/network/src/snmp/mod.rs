@@ -3,6 +3,7 @@
 pub mod checker;
 pub mod client;
 pub mod collectors;
+pub mod credentials;
 pub mod decider_interfaces;
 pub mod interface_monitoring;
 pub mod profiles;

@@ -355,6 +355,25 @@ pub fn opencode_url_matches(requested: Option<&str>, stored: Option<&str>) -> bo
         .eq_ignore_ascii_case(normalize_secret_url(stored, default))
 }
 
+/// A listagem de modelos pede algo além do que está salvo — outra URL ou uma
+/// chave em claro? Listar pelo salvo é leitura, de qualquer papel; apontar o
+/// servidor para outro endereço (ou com outra chave) é configurar a IA, e isso
+/// é do administrador.
+#[must_use]
+pub fn listing_overrides_saved(
+    requested_url: Option<&str>,
+    saved_url: Option<&str>,
+    default_url: &str,
+    requested_key: Option<&str>,
+) -> bool {
+    let default = default_url.trim_end_matches('/');
+    let other_url = requested_url.is_some_and(|url| !url.trim().is_empty())
+        && !normalize_secret_url(requested_url, default)
+            .eq_ignore_ascii_case(normalize_secret_url(saved_url, default));
+    let typed_key = requested_key.is_some_and(|key| !key.trim().is_empty() && key != MASKED_KEY);
+    other_url || typed_key
+}
+
 impl netmonitor_core::ai::tools::ToolSettings for AiSettings {
     fn allow_active_tools(&self) -> bool {
         self.allow_active_tools
@@ -580,6 +599,39 @@ async fn persist<C: ConnectionTrait>(db: &C, settings: &AiSettings) -> AppResult
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn listar_pelo_salvo_nao_e_configurar_e_outra_url_ou_chave_e() {
+        let salvo = Some("http://ollama:11434");
+        let padrao = DEFAULT_OLLAMA_BASE_URL;
+        assert!(!listing_overrides_saved(None, salvo, padrao, None));
+        assert!(!listing_overrides_saved(
+            Some("  "),
+            salvo,
+            padrao,
+            Some("")
+        ));
+        assert!(!listing_overrides_saved(
+            Some("HTTP://ollama:11434/"),
+            salvo,
+            padrao,
+            Some(MASKED_KEY)
+        ));
+        assert!(listing_overrides_saved(
+            Some("http://169.254.169.254"),
+            salvo,
+            padrao,
+            None
+        ));
+        assert!(listing_overrides_saved(
+            None,
+            salvo,
+            padrao,
+            Some("sk-nova")
+        ));
+        // Sem URL salva, a padrão é o salvo.
+        assert!(!listing_overrides_saved(Some(padrao), None, padrao, None));
+    }
 
     #[test]
     fn test_deserialize_ai_settings_with_object_models() {

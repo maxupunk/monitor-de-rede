@@ -20,6 +20,7 @@ pub mod alerts;
 pub mod areas;
 pub mod audit;
 pub mod classifier;
+pub mod cluster;
 pub mod dashboard;
 pub mod devices;
 pub mod events;

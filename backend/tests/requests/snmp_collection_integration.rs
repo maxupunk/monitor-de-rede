@@ -1,7 +1,7 @@
 //! Linhas da matriz de paridade (§16) que só se provam contra o banco.
 //!
 //! O que vive aqui não cabe em unitário: são comportamentos de acoplamento —
-//! relay entre processos, transição de status de dispositivo, janela por
+//! transição de status de dispositivo, janela por
 //! monitor na apresentação e o ciclo do scheduler.
 
 use backend::app::App;
@@ -15,10 +15,7 @@ use netmonitor_network::discovery::queue;
 use chrono::Utc;
 use loco_rs::testing::prelude::*;
 use netmonitor_nucleo::{
-    services::events::{
-        relay::{relay_pending, RELAY_BATCH_SIZE},
-        EventBus,
-    },
+    services::events::EventBus,
     services::monitoring::{
         device_status::{self, DeviceStatus},
         metrics_repository,
@@ -164,87 +161,6 @@ async fn prova_de_vida_avanca_sem_publicar_transicao() {
     assert!(
         recarregado.last_seen_at.is_some(),
         "last_seen_at não foi gravado"
-    );
-}
-
-/// Matriz #30 e #32 — o relay só lê o banco com assinante SSE conectado, e o
-/// que veio de outro processo chega ao barramento local.
-#[tokio::test]
-#[serial]
-async fn o_relay_so_trabalha_com_assinante_e_entrega_evento_de_outro_processo() {
-    let boot = boot_test::<App>().await.expect("subir app de teste");
-    let ctx = &boot.app_context;
-    let bus = EventBus::from_context(ctx).expect("barramento inicializado");
-
-    // Um processo diferente gravou backlog maior que uma passada.
-    let backlog = (0..=RELAY_BATCH_SIZE)
-        .map(
-            |monitor_id| netmonitor_core::models::event_outbox::ActiveModel {
-                r#type: Set("monitor:result".into()),
-                origin: Set("outro-processo".into()),
-                payload: Set(serde_json::json!({
-                    "type": "monitor:result",
-                    "data": { "monitorId": monitor_id },
-                    "timestamp": Utc::now().to_rfc3339(),
-                })),
-                ..Default::default()
-            },
-        )
-        .collect::<Vec<_>>();
-    netmonitor_core::models::event_outbox::Entity::insert_many(backlog)
-        .exec(&ctx.db)
-        .await
-        .expect("gravar no outbox");
-
-    // Sem ninguém escutando, o relay não consulta o banco (matriz #32).
-    assert_eq!(
-        relay_pending(ctx).await.expect("relay sem assinante"),
-        0,
-        "relay trabalhou sem assinante SSE"
-    );
-
-    // Com assinante, o evento atravessa (matriz #30).
-    let mut inscrito = bus.subscribe();
-    assert_eq!(
-        relay_pending(ctx).await.expect("relay com assinante"),
-        RELAY_BATCH_SIZE
-    );
-    let evento = inscrito.try_recv().expect("evento replicado");
-    assert_eq!(evento.event_type, "monitor:result");
-    assert_eq!(evento.payload["monitorId"], 0);
-
-    // A linha excedente fica para a próxima passagem, mantendo memória e
-    // pressão sobre o canal limitadas.
-    assert_eq!(relay_pending(ctx).await.expect("segunda passada"), 1);
-
-    // Terceira passada não reentrega: o `last_relayed_id` avançou.
-    assert_eq!(relay_pending(ctx).await.expect("terceira passada"), 0);
-}
-
-/// Matriz #31 — o relay ignora o que a própria instância publicou, senão o
-/// assinante local receberia o mesmo evento duas vezes.
-#[tokio::test]
-#[serial]
-async fn o_relay_ignora_evento_da_propria_origem() {
-    let boot = boot_test::<App>().await.expect("subir app de teste");
-    let ctx = &boot.app_context;
-    let bus = EventBus::from_context(ctx).expect("barramento inicializado");
-    let mut inscrito = bus.subscribe();
-
-    // `publish` grava no outbox **e** entrega localmente.
-    bus.publish(&ctx.db, "device:status", serde_json::json!({ "id": 1 }))
-        .await
-        .expect("publicar");
-    assert_eq!(
-        inscrito.try_recv().expect("entrega local").event_type,
-        "device:status"
-    );
-
-    // O relay vê a linha, reconhece a própria origem e não republica.
-    assert_eq!(relay_pending(ctx).await.expect("relay"), 0);
-    assert!(
-        inscrito.try_recv().is_err(),
-        "evento da própria origem foi entregue em dobro"
     );
 }
 

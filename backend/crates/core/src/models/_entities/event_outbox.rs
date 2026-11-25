@@ -12,6 +12,7 @@ pub struct Model {
     pub origin: String,
     #[sea_orm(column_type = "JsonBinary")]
     pub payload: Json,
+    pub snapshot_key: Option<String>,
     pub created_at: DateTimeWithTimeZone,
 }
 

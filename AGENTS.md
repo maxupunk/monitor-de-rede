@@ -38,12 +38,15 @@
    - Respeitar as guardas automáticas de arquitetura e convenção em `frontend/test/conventions/solid_dry_conventions_test.dart`.
 
 3. **Independência de Ambiente (Docker / Local)**:
-   - O backend Rust roda em **PostgreSQL 18** (o banco do `docker compose`,
+   - O backend Rust roda **só em PostgreSQL 18** em produção e em
+     desenvolvimento (o banco do `docker compose`,
      [ADR 020](docs/adr/020-postgresql-padrao-do-container.md), com os logs de
-     syslog no banco `netmonitor_logs` do mesmo servidor) e em **SQLite**
-     (desenvolvimento, testes e a imagem rodada sem compose). Toda consulta
-     precisa valer nos dois dialetos: quebrar o Postgres quebra a instalação
-     padrão, e quebrar o SQLite quebra a suíte e o container único.
+     syslog no banco `netmonitor_logs` do mesmo servidor; em dev, o
+     `docker-compose.dev.yml`). O **SQLite é só o banco da suíte de testes** —
+     o boot recusa uma URL SQLite fora do ambiente de teste. Toda consulta
+     continua precisando valer nos dois dialetos: quebrar o Postgres quebra a
+     instalação, e quebrar o SQLite quebra a suíte. Não reintroduza SQLite em
+     configuração de dev ou de produção.
    - **O sistema ainda não foi para produção.** Mudança de esquema **edita a
      migration existente** e recria o banco de desenvolvimento: não crie
      migration nova para alterar tabela, nem migration de compatibilidade,
@@ -64,7 +67,7 @@
 
 4. **Práticas de Teste (Rust)**:
    - **Isolamento de Banco**: testes de requisição usam
-     `request_with_config::<App, _, _>`; o `Hooks::truncate` limpa as 68 tabelas
+     `request_with_config::<App, _, _>`; o `Hooks::truncate` limpa as 69 tabelas
      entre eles.
    - **`#[serial]`** em tudo que toca estado global de processo: `ScanSessionService`,
      o cofre de chaves da VPN, o rate limiter e qualquer teste que mexa em

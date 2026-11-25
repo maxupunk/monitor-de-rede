@@ -78,6 +78,7 @@ impl Hooks for App {
     /// barramento de eventos, com todo monitor de ping caindo em `unknown`.
     async fn after_context(ctx: AppContext) -> Result<AppContext> {
         require_jwt_secret_in_production(&ctx.environment);
+        require_postgres_outside_tests(&ctx.environment, &ctx.config.database.uri);
         // Todo pânico do processo vai ao log com o local e, dentro de uma
         // requisição, com o código do incidente que a tela mostra.
         netmonitor_nucleo::services::shared::incident::install_panic_hook();
@@ -364,7 +365,29 @@ fn require_jwt_secret_in_production(environment: &Environment) {
     );
 }
 
-/// Liga o WAL quando o banco é SQLite.
+/// Produção e desenvolvimento rodam em PostgreSQL; o SQLite é só o banco da
+/// suíte de testes (ADR 020). Um banco só fora dos testes evita duas
+/// configurações e dois comportamentos de concorrência para a mesma
+/// instalação — e a coordenação entre processos (LISTEN/NOTIFY, líder por
+/// *advisory lock*) só existe no PostgreSQL.
+///
+/// Falha alto no boot, como a `JWT_SECRET`: subir em SQLite fora dos testes
+/// seria trocar de banco sem ninguém perceber.
+fn require_postgres_outside_tests(environment: &Environment, database_url: &str) {
+    assert!(
+        database_allowed(environment, database_url),
+        "DATABASE_URL aponta para SQLite no ambiente {environment}: fora dos testes o NetMonitor \
+         roda só em PostgreSQL. Em desenvolvimento, suba o banco com \
+         `docker compose -f docker-compose.dev.yml up -d`"
+    );
+}
+
+fn database_allowed(environment: &Environment, database_url: &str) -> bool {
+    *environment == Environment::Test || !database_url.trim_start().starts_with("sqlite:")
+}
+
+/// Liga o WAL quando o banco é SQLite — hoje, só o banco da suíte de testes,
+/// que roda o servidor e o scheduler no mesmo arquivo.
 ///
 /// No modo padrão (`delete`) um `INSERT` bloqueia toda leitura, e o servidor
 /// virou um processo só: o ciclo do scheduler grava resultados enquanto a tela
@@ -387,5 +410,25 @@ async fn enable_sqlite_wal(ctx: &AppContext) {
     match ctx.db.query_one_raw(pragma).await {
         Ok(_) => tracing::debug!("SQLite em WAL"),
         Err(error) => tracing::warn!(%error, "não foi possível ligar o WAL do SQLite"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sqlite_so_nos_testes() {
+        let sqlite = "sqlite://netmonitor_test.sqlite?mode=rwc";
+        let postgres = "postgres://netmonitor@127.0.0.1:15432/netmonitor_dev";
+        assert!(database_allowed(&Environment::Test, sqlite));
+        assert!(database_allowed(&Environment::Test, postgres));
+        assert!(!database_allowed(&Environment::Development, sqlite));
+        assert!(!database_allowed(&Environment::Production, sqlite));
+        assert!(!database_allowed(
+            &Environment::Any("staging".into()),
+            sqlite
+        ));
+        assert!(database_allowed(&Environment::Production, postgres));
     }
 }

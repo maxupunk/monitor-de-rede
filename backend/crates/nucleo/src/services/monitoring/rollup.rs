@@ -7,10 +7,10 @@
 use chrono::{DateTime, Duration, Utc};
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseBackend, DatabaseConnection, EntityTrait,
-    FromQueryResult, QueryFilter, QueryOrder, QuerySelect, Set, Statement, Value,
+    FromQueryResult, QueryFilter, QueryOrder, Set, Statement, Value,
 };
 
-use crate::services::shared::transaction::begin_write;
+use crate::services::shared::transaction::begin_snapshot_write;
 use crate::{
     models::{monitor_results, monitor_results_hourly},
     services::shared::errors::{AppError, AppResult},
@@ -151,6 +151,16 @@ pub async fn hourly_buckets<C: ConnectionTrait>(
 /// O intervalo é limitado, a agregação é feita por SQL e a substituição dos
 /// buckets ocorre na mesma transação. O bucket mais recente é recalculado para
 /// incorporar resultados que chegaram com atraso.
+///
+/// **Ler, agregar e purgar veem o mesmo instante do banco**
+/// ([`begin_snapshot_write`]). Antes, a agregação rodava fora da transação e a
+/// purga apagava até o maior `id` visível; no PostgreSQL um `id` menor,
+/// reservado antes e confirmado depois dessa leitura, não entrava na conta e
+/// mesmo assim era apagado. Agora a linha que chega depois do começo da
+/// transação fica invisível para os dois passos: não é contada nem apagada, e
+/// o próximo ciclo a agrega (o recálculo de [`ROLLUP_LOOKBACK_HOURS`]). Só o
+/// líder da função `Scheduler` roda o rollup (ADR 024), então não há dois
+/// rollups concorrentes regravando os mesmos buckets.
 pub async fn rollup_monitor_results(
     db: &DatabaseConnection,
     until: DateTime<Utc>,
@@ -180,21 +190,13 @@ pub async fn rollup_monitor_results(
         return Ok(RollupStats::default());
     }
 
-    // Marca d'água do bruto já visível: a agregação roda fora da transação,
-    // então uma linha que chegar depois dela não entrou na conta e não pode
-    // ser apagada pela purga abaixo.
-    let aggregated_max_id: Option<i64> = monitor_results::Entity::find()
-        .select_only()
-        .column_as(monitor_results::Column::Id.max(), "max_id")
-        .filter(monitor_results::Column::StartedAt.lt(end))
-        .into_tuple::<Option<i64>>()
-        .one(db)
-        .await?
-        .flatten();
+    let txn = begin_snapshot_write(db).await?;
 
-    // Calcula a agregação antes de abrir `begin_write` para não reter o lock
-    // de escrita (SQLite `BEGIN IMMEDIATE`) durante a varredura de leitura.
-    let aggregates = aggregate_range(db, start, end, None).await?;
+    // A agregação e a purga abaixo leem o mesmo instante: o que esta leitura
+    // não vê, a purga também não alcança. A janela é limitada a
+    // `MAX_ROLLUP_HOURS_PER_RUN`, então o lock de escrita do SQLite fica
+    // retido por uma varredura de tamanho conhecido.
+    let aggregates = aggregate_range(&txn, start, end, None).await?;
     let rows_aggregated = aggregates.iter().try_fold(0_u64, |total, row| {
         u64::try_from(row.total_checks)
             .ok()
@@ -202,8 +204,6 @@ pub async fn rollup_monitor_results(
     });
     let rows_aggregated = rows_aggregated
         .ok_or_else(|| AppError::Internal(anyhow::anyhow!("contagem do rollup excede u64")))?;
-
-    let txn = begin_write(db).await?;
 
     monitor_results_hourly::Entity::delete_many()
         .filter(monitor_results_hourly::Column::Bucket.gte(start))
@@ -235,13 +235,12 @@ pub async fn rollup_monitor_results(
         .ok()
         .and_then(|value| value.trim().parse::<i64>().ok())
         .unwrap_or(DEFAULT_DELETE_BRUTO_AFTER_HOURS);
-    if let (true, Some(max_id)) = (delete_after > 0, aggregated_max_id) {
+    if delete_after > 0 {
         let delete_cutoff = (cutoff - Duration::hours(delete_after)).min(raw_purge_limit(end));
+        // Só o que a agregação acima viu: a linha tardia é invisível a esta
+        // transação e fica para o próximo ciclo.
         stats.rows_deleted = monitor_results::Entity::delete_many()
             .filter(monitor_results::Column::StartedAt.lt(delete_cutoff))
-            // Só o que a agregação acima viu: linha tardia fica para o
-            // próximo ciclo.
-            .filter(monitor_results::Column::Id.lte(max_id))
             .exec(&txn)
             .await?
             .rows_affected;

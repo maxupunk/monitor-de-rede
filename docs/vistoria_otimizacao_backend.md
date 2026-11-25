@@ -875,10 +875,14 @@ A revisão do diff acima (9 frentes, uma por área) achou bugs de fluxo, condiç
 ### 6.8 Assistente, MCP e raiz
 - `retry_on_last` no harness; download de modelo local com nome fixo `sha256-{hex}.partial` e trava; cache do servidor local por URL, esquecido ao salvar; `merge_unmasked`/`with_stored_key` devolvem erro de validação; `run_forever` recebe o futuro de encerramento.
 
-### 6.9 Pendências conhecidas (não corrigidas)
-- **SNMPv3:** `devices` não guarda credencial v3 (só `snmp_community`/`snmp_version`), então coleta e monitores v3 não autenticam; os campos v3 de `SnmpCheckerConfig` só servem a monitor criado pela API com credencial em claro. Pede colunas cifradas, resolução na checagem e tela.
-- **Relay do SSE no PostgreSQL** (`core/src/events/relay.rs`, já existia antes do diff): um evento cujo id foi reservado antes e confirmado depois que o cursor passou pode ser pulado. Pede rastreio de lacunas de id.
-- **Snapshot entre processos:** o relay republica `*:snapshot` como evento comum; com o HTTP em processo separado, a aba que conecta depois carrega pelo GET até a próxima mudança (VPN e Wi-Fi).
-- **Tarefas agendadas:** a execução não registra a instância dona; a reconciliação assume processo único (ADR 007).
-- **Rollup e push gate:** janela residual no PostgreSQL (transação de id menor que confirma depois da agregação); a trava de envio vale dentro de um processo.
-- **GET de modelos da IA:** aceitam `base_url`/`api_key` na query para todo papel (já era assim antes do diff).
+### 6.9 Pendências conhecidas
+- ~~**SNMPv3**~~ — **resolvido**: credenciais SNMP viraram perfis cifrados (`snmp_profiles`), o dispositivo aponta para um (`snmp_profile_id`) e coleta, monitores (credencial injetada na hora de rodar), descoberta e identificação resolvem pelo mesmo `devices::snmp_credentials`; tela em Configurações › Rede.
+- ~~**Relay do SSE no PostgreSQL**~~ — **resolvido** ([ADR 025](adr/025-varios-processos-lider-e-notify.md)): o cursor saiu; a linha do outbox e o `pg_notify` saem no mesmo commit, e a escuta relê a lacuna depois de uma queda.
+- ~~**Snapshot entre processos**~~ — **resolvido** (ADR 025): o snapshot viaja como snapshot (tipo + chave) e entra no cache do outro processo; quem começa a escutar pede `resync`.
+- ~~**Tarefas agendadas**~~ — **resolvido** (ADR 025): o laço e a reconciliação de boot só rodam no processo líder. Resta o caso estreito da execução manual num processo não líder durante a troca de líder (registrado no ADR).
+- ~~**Rollup e push gate**~~ — **resolvido** (ADR 025): agregação e purga numa transação `REPEATABLE READ` (`begin_snapshot_write`); o ciclo, com o despacho de notificações, só roda no líder.
+- ~~**GET de modelos da IA**~~ — **resolvido**: qualquer papel lista pelo que está salvo; outra URL ou chave em claro na query é configurar a IA e exige administrador (`settings::listing_overrides_saved`, 403 para os demais).
+- **Banco único** (decisão de 2026-11-25, ADR 020 revisto): produção e desenvolvimento só em PostgreSQL (`docker-compose.dev.yml` para o dev); o boot recusa SQLite fora dos testes (`app::database_allowed`). O SQLite fica só como banco da suíte.
+- **Transporte SNMP por thread** (`snmp/client.rs`): o `UdpTransport` num `static` morria com o primeiro runtime tokio que o criou; agora há um por thread do runtime.
+- **Testes instáveis sob carga** corrigidos: o amostrador de vazão roda com o relógio do tokio pausado, e a corrida do `BEGIN` deferido usa uma barreira para garantir que as duas transações leiam antes de gravar.
+- **Em aberto (registrado):** o script da VPN não provisiona usuário SNMPv3 no equipamento (só comunidade v1/v2c); a lista de perfis SNMP não tem evento SSE próprio (recarrega após cada mudança feita na tela); no SQLite dos testes, `created_at` com `CURRENT_TIMESTAMP` tem formato textual diferente do que o sea-orm grava, o que pode antecipar a poda do outbox no mesmo dia (só na suíte).

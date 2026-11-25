@@ -198,7 +198,7 @@ async fn identificar_devolve_o_palpite_quando_a_evidencia_e_fraca() {
         let response = request
             .post("/api/devices/identify")
             .add_header(h, v)
-            .json(&json!({ "ipAddress": "127.0.0.1", "snmpCommunity": "nao-existe" }))
+            .json(&json!({ "ipAddress": "127.0.0.1" }))
             .await;
         assert_eq!(response.status_code(), 200, "{}", response.text());
         let body: Value = serde_json::from_str(&response.text()).unwrap();
@@ -245,7 +245,7 @@ async fn sem_o_assistente_a_identificacao_segue_pela_heuristica() {
         let response = request
             .post("/api/devices/identify")
             .add_header(h, v)
-            .json(&json!({ "ipAddress": "127.0.0.1", "snmpCommunity": "nao-existe" }))
+            .json(&json!({ "ipAddress": "127.0.0.1" }))
             .await;
         assert_eq!(response.status_code(), 200, "{}", response.text());
         let body: Value = serde_json::from_str(&response.text()).unwrap();

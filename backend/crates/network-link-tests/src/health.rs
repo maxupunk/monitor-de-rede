@@ -25,7 +25,7 @@ use std::{
 use async_trait::async_trait;
 use sea_orm::DatabaseConnection;
 use serde::{Deserialize, Serialize};
-use tokio::{sync::OnceCell, task::JoinHandle};
+use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use ts_rs::TS;
 
@@ -39,12 +39,11 @@ use netmonitor_core::{
         },
         series,
     },
-    preferences,
 };
 use netmonitor_network::snmp::{
     client::{SnmpClient, SnmpValue},
     collectors,
-    service::device_config_with,
+    service::device_config,
 };
 
 /// Intervalo entre duas leituras de uma ponta.
@@ -331,28 +330,12 @@ impl HealthReader for LocalHealth {
 /// O padrão: SNMP no equipamento que o tem ligado, `/proc` na central.
 pub struct DefaultHealthReaders {
     db: DatabaseConnection,
-    default_snmp_community: OnceCell<String>,
 }
 
 impl DefaultHealthReaders {
     #[must_use]
     pub fn new(db: DatabaseConnection) -> Self {
-        Self {
-            db,
-            default_snmp_community: OnceCell::new(),
-        }
-    }
-
-    async fn snmp_community(&self) -> &str {
-        self.default_snmp_community
-            .get_or_init(|| async {
-                preferences::load(&self.db).await.map_or_else(
-                    |_| preferences::DEFAULT_SNMP_COMMUNITY.to_owned(),
-                    |prefs| prefs.default_snmp_community,
-                )
-            })
-            .await
-            .as_str()
+        Self { db }
     }
 }
 
@@ -371,8 +354,7 @@ impl HealthReaders for DefaultHealthReaders {
                 if !device.snmp_enabled || !has_ip {
                     return None;
                 }
-                let community = self.snmp_community().await;
-                let mut config = device_config_with(device, community).ok()?;
+                let mut config = device_config(&self.db, device).await.ok()?;
                 config.timeout_ms = u64::try_from(READ_TIMEOUT.as_millis()).unwrap_or(900);
                 Some(Box::new(SnmpHealth::new(SnmpClient::new(config))))
             }

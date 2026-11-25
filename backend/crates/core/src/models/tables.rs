@@ -16,12 +16,14 @@ use std::collections::HashSet;
 use loco_rs::Result;
 use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 
-/// As 68 tabelas do esquema, na ordem de criação da §6 (pais antes de filhos).
-pub const CREATION_ORDER: [&str; 68] = [
+/// As 69 tabelas do esquema, na ordem de criação da §6 (pais antes de filhos).
+pub const CREATION_ORDER: [&str; 69] = [
     "users",
     "sites",
     "probes",
     "networks",
+    // Credenciais SNMP: antes de `devices`, que aponta para elas.
+    "snmp_profiles",
     "devices",
     "device_interfaces",
     "device_links",
@@ -126,11 +128,12 @@ pub const LOG_TABLES: [&str; 2] = ["device_logs", "log_templates"];
 /// Nome legível de cada tabela, para as telas que falam de banco (o espaço
 /// ocupado, o conteúdo de um backup). Um teste garante que nenhuma tabela do
 /// esquema fique sem nome.
-const LABELS: [(&str, &str); 71] = [
+const LABELS: [(&str, &str); 72] = [
     ("users", "Usuários"),
     ("sites", "Sites"),
     ("probes", "Agentes e sondas"),
     ("networks", "Redes IP"),
+    ("snmp_profiles", "Credenciais SNMP"),
     ("devices", "Dispositivos"),
     ("device_interfaces", "Interfaces dos dispositivos"),
     ("device_links", "Enlaces de topologia"),
@@ -317,9 +320,9 @@ mod tests {
 
     #[test]
     fn cobre_todas_as_tabelas_sem_repetir() {
-        assert_eq!(CREATION_ORDER.len(), 68);
+        assert_eq!(CREATION_ORDER.len(), 69);
         let unicas: HashSet<&&str> = CREATION_ORDER.iter().collect();
-        assert_eq!(unicas.len(), 68, "há nome de tabela repetido");
+        assert_eq!(unicas.len(), 69, "há nome de tabela repetido");
     }
 
     #[test]

@@ -29,6 +29,7 @@ use super::{
     progress::{phase, ScanReporter, Stage},
     scanners::{arp, http, icmp, mdns, names, ports, snmp, ssdp},
 };
+use crate::snmp::service::DetectCandidate;
 use netmonitor_core::{
     network_tools::ping_client::PingClient,
     shared::{
@@ -42,6 +43,10 @@ use netmonitor_core::{
 pub struct ScanTarget {
     pub cidr: String,
     pub gateway: Option<IpAddr>,
+    /// As credenciais SNMP a tentar em cada host. Vazio é o `public` de
+    /// fábrica ([`DetectCandidate::from_profiles`]) — o caso do agente
+    /// remoto, que não recebe os segredos da central.
+    pub snmp_candidates: Vec<DetectCandidate>,
 }
 
 impl ScanTarget {
@@ -50,7 +55,14 @@ impl ScanTarget {
         Self {
             cidr: cidr.into(),
             gateway: None,
+            snmp_candidates: Vec::new(),
         }
+    }
+
+    #[must_use]
+    pub fn with_snmp_candidates(mut self, candidates: Vec<DetectCandidate>) -> Self {
+        self.snmp_candidates = candidates;
+        self
     }
 
     #[must_use]
@@ -155,7 +167,7 @@ pub async fn scan(
         let identified = identify(
             &living,
             &client,
-            target.gateway,
+            target,
             &cancel,
             &reporter.stage(
                 phase::IDENTIFY,
@@ -187,7 +199,7 @@ pub async fn scan(
             let identified = identify(
                 &hosts,
                 &client,
-                target.gateway,
+                target,
                 &cancel,
                 &reporter.stage(
                     phase::IDENTIFY,
@@ -384,10 +396,16 @@ fn identification_summary<'a>(
 async fn identify(
     hosts: &[&DiscoveredHost],
     client: &Client,
-    gateway: Option<IpAddr>,
+    target: &ScanTarget,
     cancel: &CancellationToken,
     stage: &Stage,
 ) -> Vec<DiscoveredHost> {
+    let gateway = target.gateway;
+    let snmp_candidates = if target.snmp_candidates.is_empty() {
+        DetectCandidate::from_profiles(Vec::new())
+    } else {
+        target.snmp_candidates.clone()
+    };
     stage.begin();
     let ips: Vec<IpAddr> = hosts
         .iter()
@@ -399,7 +417,7 @@ async fn identify(
     }
     let (port_hosts, snmp_hosts, name_hosts) = tokio::join!(
         ports::scan(&ips, cancel, stage),
-        snmp::enrich(&ips, cancel),
+        snmp::enrich(&ips, &snmp_candidates, cancel),
         names::resolve(&ips, gateway),
     );
 

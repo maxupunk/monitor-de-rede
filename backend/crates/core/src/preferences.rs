@@ -15,8 +15,10 @@
 //! | preferência | onde ela muda o comportamento |
 //! |---|---|
 //! | `default_ping_interval_seconds` | intervalo de um monitor novo que não declara o seu |
-//! | `default_snmp_community` | comunidade de um dispositivo com SNMP ligado e sem comunidade própria |
 //! | `auto_discovery_enabled` | trava global da varredura periódica de redes |
+//!
+//! A credencial SNMP padrão não é preferência: é o perfil marcado como padrão
+//! em `snmp_profiles` (ver `devices::snmp_credentials`).
 //!
 //! # Onde mora
 //!
@@ -48,7 +50,6 @@ pub const STORAGE_KEY: &str = "preferences";
 /// existir — trocar um deles aqui muda o comportamento de quem nunca abriu a
 /// tela de Configurações.
 pub const DEFAULT_PING_INTERVAL_SECONDS: i32 = 60;
-pub const DEFAULT_SNMP_COMMUNITY: &str = "public";
 pub const DEFAULT_AUTO_DISCOVERY: bool = true;
 
 /// Piso e teto do intervalo de coleta.
@@ -71,9 +72,6 @@ pub struct Preferences {
     #[serde(default = "ping_padrao")]
     #[ts(type = "number")]
     pub default_ping_interval_seconds: i32,
-    /// Comunidade aplicada a um dispositivo com SNMP ligado e sem comunidade.
-    #[serde(default = "comunidade_padrao")]
-    pub default_snmp_community: String,
     /// Trava global da varredura periódica. Desligada, as redes mantêm o
     /// `scan_enabled` individual — o que este campo faz é impedir o agendador
     /// de disparar qualquer uma delas, sem apagar a configuração de nenhuma.
@@ -84,9 +82,6 @@ pub struct Preferences {
 fn ping_padrao() -> i32 {
     DEFAULT_PING_INTERVAL_SECONDS
 }
-fn comunidade_padrao() -> String {
-    DEFAULT_SNMP_COMMUNITY.to_owned()
-}
 const fn descoberta_padrao() -> bool {
     DEFAULT_AUTO_DISCOVERY
 }
@@ -95,7 +90,6 @@ impl Default for Preferences {
     fn default() -> Self {
         Self {
             default_ping_interval_seconds: DEFAULT_PING_INTERVAL_SECONDS,
-            default_snmp_community: DEFAULT_SNMP_COMMUNITY.to_owned(),
             auto_discovery_enabled: DEFAULT_AUTO_DISCOVERY,
         }
     }
@@ -123,25 +117,14 @@ pub async fn load<C: ConnectionTrait>(db: &C) -> AppResult<Preferences> {
 ///
 /// # Errors
 ///
-/// Valor fora da faixa, comunidade vazia, ou erro do banco.
-pub async fn save(
-    db: &DatabaseConnection,
-    mut preferencias: Preferences,
-) -> AppResult<Preferences> {
+/// Valor fora da faixa ou erro do banco.
+pub async fn save(db: &DatabaseConnection, preferencias: Preferences) -> AppResult<Preferences> {
     let intervalo = preferencias.default_ping_interval_seconds;
     if !(MIN_PING_INTERVAL_SECONDS..=MAX_PING_INTERVAL_SECONDS).contains(&intervalo) {
         return Err(AppError::validation(format!(
             "O intervalo padrão de ping precisa ficar entre {MIN_PING_INTERVAL_SECONDS} e \
              {MAX_PING_INTERVAL_SECONDS} segundos."
         )));
-    }
-
-    preferencias.default_snmp_community = preferencias.default_snmp_community.trim().to_owned();
-    if preferencias.default_snmp_community.is_empty() {
-        return Err(AppError::validation(
-            "A comunidade SNMP padrão não pode ficar em branco — um dispositivo sem comunidade \
-             própria não teria como responder.",
-        ));
     }
 
     let texto = serde_json::to_string(&preferencias)
@@ -176,7 +159,6 @@ mod tests {
         let preferencias = load(&db).await.expect("carregar");
         assert_eq!(preferencias, Preferences::default());
         assert_eq!(preferencias.default_ping_interval_seconds, 60);
-        assert_eq!(preferencias.default_snmp_community, "public");
         assert!(preferencias.auto_discovery_enabled);
     }
 
@@ -187,7 +169,6 @@ mod tests {
             &db,
             Preferences {
                 default_ping_interval_seconds: 120,
-                default_snmp_community: "  privada  ".to_owned(),
                 auto_discovery_enabled: false,
             },
         )
@@ -196,7 +177,6 @@ mod tests {
 
         let preferencias = load(&db).await.expect("carregar");
         assert_eq!(preferencias.default_ping_interval_seconds, 120);
-        assert_eq!(preferencias.default_snmp_community, "privada", "aparado");
         assert!(!preferencias.auto_discovery_enabled);
     }
 
@@ -233,22 +213,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn comunidade_em_branco_e_recusada() {
-        let db = banco().await;
-        for vazia in ["", "   "] {
-            assert!(save(
-                &db,
-                Preferences {
-                    default_snmp_community: vazia.to_owned(),
-                    ..Preferences::default()
-                },
-            )
-            .await
-            .is_err());
-        }
-    }
-
-    #[tokio::test]
     async fn json_corrompido_cai_no_padrao_em_vez_de_parar_o_agendador() {
         // `load` roda no ciclo do agendador: um valor ilegível não pode derrubar
         // a coleta do parque inteiro.
@@ -274,7 +238,6 @@ mod tests {
 
         let preferencias = load(&db).await.expect("carregar");
         assert_eq!(preferencias.default_ping_interval_seconds, 300);
-        assert_eq!(preferencias.default_snmp_community, "public");
         assert!(preferencias.auto_discovery_enabled);
     }
 }

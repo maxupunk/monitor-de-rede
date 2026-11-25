@@ -24,6 +24,7 @@ mod m20220101_000001_users;
 mod m20260810_000002_sites;
 mod m20260810_000003_probes;
 mod m20260810_000004_networks;
+mod m20260810_000006_snmp_profiles;
 mod m20260810_000007_devices;
 mod m20260810_000008_device_interfaces;
 mod m20260810_000009_device_links;
@@ -54,6 +55,7 @@ pub fn migrations() -> Vec<Box<dyn MigrationTrait>> {
         Box::new(m20260810_000002_sites::Migration),
         Box::new(m20260810_000003_probes::Migration),
         Box::new(m20260810_000004_networks::Migration),
+        Box::new(m20260810_000006_snmp_profiles::Migration),
         Box::new(m20260810_000007_devices::Migration),
         Box::new(m20260810_000008_device_interfaces::Migration),
         Box::new(m20260810_000009_device_links::Migration),

@@ -1,7 +1,9 @@
 //! `/api/ai/ollama/models` — listar e apagar os modelos baixados no Ollama.
 //!
 //! O que se afirma aqui, contra um Ollama falso em `127.0.0.1`: a lista marca
-//! o modelo do chat como em uso e traz o digest; só o administrador apaga; o
+//! o modelo do chat como em uso e traz o digest; qualquer papel lista pelo que
+//! está salvo, mas outra URL ou chave na query é do administrador; só o
+//! administrador apaga; o
 //! modelo do chat é recusado sem chamar o Ollama; o modelo apagado sai pelo
 //! `DELETE /api/delete` com o nome exato, devolve o espaço liberado e fica na
 //! auditoria; um nome que divide o arquivo com outro não devolve disco —
@@ -83,6 +85,32 @@ async fn configura(ctx: &loco_rs::app::AppContext, base: &str) {
     )
     .await
     .expect("configurações da IA");
+}
+
+#[tokio::test]
+#[serial]
+async fn quem_so_ve_lista_pelo_salvo_mas_nao_aponta_outra_url() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let (base, _) = ollama_falso().await;
+        configura(&ctx, &base).await;
+        session_with_role(&mut request, &ctx, Role::Viewer).await;
+
+        let res = request.get("/api/ai/ollama/models").await;
+        assert_eq!(res.status_code(), 200, "{}", res.text());
+
+        let res = request
+            .get("/api/ai/ollama/models")
+            .add_query_param("base_url", "http://127.0.0.1:9/v1")
+            .await;
+        assert_eq!(res.status_code(), 403, "{}", res.text());
+
+        let res = request
+            .get("/api/ai/openrouter/models")
+            .add_query_param("api_key", "sk-digitada")
+            .await;
+        assert_eq!(res.status_code(), 403, "{}", res.text());
+    })
+    .await;
 }
 
 #[tokio::test]

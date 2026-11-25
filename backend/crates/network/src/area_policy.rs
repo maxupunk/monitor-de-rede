@@ -77,6 +77,7 @@ impl AreaPolicy for NetworkPolicy {
             "wifi_watched_clients",
             "wifi_roaming_events",
             "networks",
+            "snmp_profiles",
         ]
     }
 

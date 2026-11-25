@@ -1,11 +1,13 @@
-//! Publicacao local e relay persistente de eventos de dominio.
+//! Publicacao local de eventos de dominio e a entrega aos outros processos da
+//! central (ADR 024).
 
 pub mod audience;
 pub mod bus;
 mod counter;
+pub mod fanout;
 pub mod interest;
+pub mod notice;
 pub mod presence;
-pub mod relay;
 
 pub use audience::EventAudience;
 pub use bus::{DomainEvent, EncodedEvent, EventBus};

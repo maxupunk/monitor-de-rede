@@ -206,18 +206,16 @@ pub async fn quiet_period<C: ConnectionTrait>(db: &C, hours: i64) -> AppResult<b
     Ok(still_open == 0)
 }
 
-/// Confere o agendamento a cada 5 minutos.
-pub fn spawn_scheduler(ctx: AppContext, drivers: Arc<dyn DriverFactory>) {
-    tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(CHECK_INTERVAL);
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        loop {
-            ticker.tick().await;
-            if let Err(error) = run_if_due(&ctx, drivers.as_ref(), Local::now()).await {
-                tracing::warn!(%error, "falha ao gerar o resumo periódico da IA");
-            }
+/// Confere o agendamento a cada 5 minutos, para sempre.
+pub async fn schedule_loop(ctx: AppContext, drivers: Arc<dyn DriverFactory>) {
+    let mut ticker = tokio::time::interval(CHECK_INTERVAL);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        ticker.tick().await;
+        if let Err(error) = run_if_due(&ctx, drivers.as_ref(), Local::now()).await {
+            tracing::warn!(%error, "falha ao gerar o resumo periódico da IA");
         }
-    });
+    }
 }
 
 #[cfg(test)]

@@ -291,11 +291,9 @@ class _OnboardingWizardBodyState extends ConsumerState<_OnboardingWizardBody> {
                     10,
                     86400,
                   ),
-              defaultSnmpCommunity: _snmpCommCtrl.text.trim().isEmpty
-                  ? 'public'
-                  : _snmpCommCtrl.text.trim(),
               autoDiscoveryEnabled: _autoDiscovery,
             ),
+            defaultSnmpCommunity: _snmpCommCtrl.text,
             lanAddressOverride: _lanAddrCtrl.text,
             enableNetwork: _enableNetwork,
             siteName: _siteNameCtrl.text,
@@ -699,8 +697,13 @@ class _OnboardingWizardBodyState extends ConsumerState<_OnboardingWizardBody> {
           const SizedBox(height: 12),
           TextField(
             controller: _snmpCommCtrl,
+            obscureText: true,
             decoration: const InputDecoration(
-              labelText: 'Comunidade SNMP padrão',
+              labelText: 'Comunidade SNMP padrão (v2c)',
+              helperText:
+                  'Vira a credencial SNMP padrão. Usuários v3 e outras '
+                  'comunidades: Configurações › Rede.',
+              helperMaxLines: 2,
             ),
           ),
           SwitchListTile(
@@ -838,7 +841,7 @@ class _OnboardingWizardBodyState extends ConsumerState<_OnboardingWizardBody> {
               '${_enableVpn ? ', VPN' : ''}',
             ),
             Text(
-              'Ping padrão: ${_pingIntervalCtrl.text}s · SNMP: ${_snmpCommCtrl.text}',
+              'Ping padrão: ${_pingIntervalCtrl.text}s · SNMP: credencial padrão v2c',
             ),
             if (_enableNetwork)
               Text(

@@ -1,6 +1,7 @@
 //! `POST /api/devices/identify`: descobre o sistema **agora**, e diz como.
 //!
-//! Consulta o SNMP (quando há comunidade) e lê a identificação do servidor SSH,
+//! Consulta o SNMP (com a credencial escolhida ou a padrão) e lê a
+//! identificação do servidor SSH,
 //! as duas em paralelo. Devolve a evidência crua junto da conclusão: o campo que
 //! só afirma "Linux" não tem como ser conferido, e foi exatamente assim que um
 //! OpenWrt ficou identificado errado sem ninguém perceber.
@@ -20,6 +21,7 @@ use netmonitor_core::classifier::{
     },
     ClassifierFeature, Lane,
 };
+use netmonitor_core::devices::snmp_credentials;
 
 use super::{access::AccessContext, systems};
 use crate::{
@@ -36,8 +38,8 @@ use crate::{
 pub struct IdentifyInput {
     pub name: Option<String>,
     pub ip_address: Option<String>,
-    pub snmp_version: Option<String>,
-    pub snmp_community: Option<String>,
+    /// A credencial SNMP do formulário; sem ela, a padrão.
+    pub snmp_profile_id: Option<i64>,
     pub vendor: Option<String>,
     pub model: Option<String>,
     /// Porta do SSH para ler a identificação do servidor (padrão: 22).
@@ -56,25 +58,16 @@ pub async fn identify(
         .filter(|valor| !valor.is_empty())
         .and_then(|texto| texto.parse::<std::net::IpAddr>().ok());
 
-    let comunidade = input
-        .snmp_community
-        .as_deref()
-        .map(str::trim)
-        .filter(|valor| !valor.is_empty())
-        .unwrap_or(crate::services::preferences::DEFAULT_SNMP_COMMUNITY);
+    let credencial = match input.snmp_profile_id {
+        Some(id) => snmp_credentials::for_profile(&ctx.db, id).await?,
+        None => snmp_credentials::default_credentials(&ctx.db).await?.1,
+    };
 
     let (snmp, ssh) = match host {
         Some(endereco) => {
             let access = netmonitor_core::devices::access::from_context(ctx);
-            let consulta_snmp = async {
-                hints::identidade_snmp(
-                    access.as_deref(),
-                    endereco,
-                    comunidade,
-                    input.snmp_version.as_deref(),
-                )
-                .await
-            };
+            let consulta_snmp =
+                async { hints::identidade_snmp(access.as_deref(), endereco, &credencial).await };
             tokio::join!(
                 consulta_snmp,
                 hints::sonda_ssh_em(endereco, input.ssh_port.unwrap_or(22))
@@ -343,8 +336,7 @@ pub async fn observe(
 
     let input = IdentifyInput {
         ip_address: device.ip_address.clone(),
-        snmp_version: device.snmp_version.clone(),
-        snmp_community: device.snmp_community.clone(),
+        snmp_profile_id: device.snmp_profile_id,
         ssh_port,
         // Sem nome/fabricante/modelo: o texto do cadastro é o que se quer
         // conferir, não evidência.

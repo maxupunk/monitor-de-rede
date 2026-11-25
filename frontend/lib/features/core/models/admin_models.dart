@@ -145,6 +145,7 @@ const List<(String, String)> kAuditResourceOptions = <(String, String)>[
   ('monitor', 'Monitor'),
   ('site', 'Site'),
   ('network', 'Rede'),
+  ('snmp_credential', 'Credencial SNMP'),
   ('user', 'Usuário'),
   ('probe', 'Probe'),
   ('vpn_peer', 'Peer VPN'),

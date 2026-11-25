@@ -486,6 +486,11 @@ class DiscoveryNotifier extends Notifier<DiscoveryState> {
         'networkId': networkId,
         'siteId': siteId,
         'isMonitored': true,
+        // A credencial que respondeu na descoberta já fica no cadastro.
+        if (host.snmpDetected) ...<String, dynamic>{
+          'snmpEnabled': true,
+          'snmpProfileId': ?host.snmpProfileId,
+        },
       });
       if (res != null) created++;
     }

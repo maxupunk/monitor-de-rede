@@ -24,7 +24,7 @@ que atende o Docker do host.
 | **Ferramentas de rede** | Scanner de portas, consultas e benchmark DNS e diagnóstico complementar quando ICMP é filtrado. |
 | **Docker** | Visão geral da Engine, containers e métricas, logs, volumes e exportação, redes, imagens e operações administrativas auditadas. |
 | **Operação e segurança** | Usuários com perfis `admin`, `operator` e `viewer`, auditoria, backup e restauração das configurações, primeiro acesso protegido e segredos cifrados em repouso. |
-| **Plataforma** | SPA instalável como PWA, eventos via SSE, PostgreSQL 18 no compose, SQLite como alternativa de container único e automonitoramento do próprio servidor. |
+| **Plataforma** | SPA instalável como PWA, eventos via SSE, PostgreSQL 18 no compose, SQLite só na suíte de testes e automonitoramento do próprio servidor. |
 
 Para detalhes de componentes, fluxos e decisões técnicas, consulte
 [`docs/arquitetura.md`](docs/arquitetura.md). O estado das entregas e dos itens
@@ -336,8 +336,10 @@ separados). No compose ela aponta para o serviço `postgres` (PostgreSQL 18,
 [ADR 020](docs/adr/020-postgresql-padrao-do-container.md)), e os logs de syslog
 vão para o banco `netmonitor_logs` do mesmo servidor. A senha do banco é
 sorteada no primeiro boot (ou vem da `POSTGRES_PASSWORD` do `.env`) e chega à
-API pelo `PGPASSFILE`, fora da URL. O SQLite continua
-suportado (`sqlite:///data/netmonitor.sqlite?mode=rwc`) para quem roda a imagem
-sem compose. Ao subir via `docker run` sem compose com a VPN habilitada,
+API pelo `PGPASSFILE`, fora da URL. Fora dos testes o NetMonitor roda **só em
+PostgreSQL** — o boot recusa uma URL SQLite; quem roda a imagem sem compose
+aponta a `DATABASE_URL` para um PostgreSQL externo. Em desenvolvimento,
+`docker compose -f docker-compose.dev.yml up -d` sobe o banco que o
+`development.yaml` espera (127.0.0.1:15432). Ao subir via `docker run` sem compose com a VPN habilitada,
 inclua `--cap-add=NET_ADMIN` e, em hosts sem módulo `wireguard` no kernel,
-`--device-cgroup-rule='c 10:200 rwm'` para o túnel em userspace. O código atende aos dois dialetos.
+`--device-cgroup-rule='c 10:200 rwm'` para o túnel em userspace. O código continua valendo nos dois dialetos porque a suíte de testes roda em SQLite.

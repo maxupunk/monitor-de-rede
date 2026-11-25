@@ -14,6 +14,8 @@ import 'package:netmonitor_app/features/network/widgets/device_access_host.dart'
 import 'package:netmonitor_app/features/network/widgets/device_form_sheet.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
+import 'package:netmonitor_app/features/core/models/snmp_credential_models.dart';
+import 'package:netmonitor_app/features/core/providers/snmp_credentials_provider.dart';
 
 class _StubSitesNotifier extends SitesNotifier {
   @override
@@ -193,8 +195,7 @@ class _StubOperatingSystemsNotifier extends OperatingSystemsNotifier {
   Future<IdentifyResultModel?> identify({
     String? name,
     required String? ipAddress,
-    String? snmpVersion,
-    String? snmpCommunity,
+    int? snmpProfileId,
     String? vendor,
     String? model,
   }) async {
@@ -267,8 +268,7 @@ class _StubSnmpProfilesNotifier extends SnmpProfilesNotifier {
 
   int testCalls = 0;
   int queryCalls = 0;
-  String? lastQueryVersion;
-  String? lastQueryCommunity;
+  int? lastQueryProfileId;
 
   @override
   List<SnmpProfileModel> build() => const <SnmpProfileModel>[];
@@ -280,8 +280,7 @@ class _StubSnmpProfilesNotifier extends SnmpProfilesNotifier {
   Future<SnmpTestResult> testSnmp({
     required String host,
     int port = 161,
-    String version = 'v2c',
-    String community = 'public',
+    int? profileId,
     bool autoDetect = false,
   }) async {
     testCalls++;
@@ -292,12 +291,10 @@ class _StubSnmpProfilesNotifier extends SnmpProfilesNotifier {
   Future<List<DeviceInterfaceModel>> queryInterfaces({
     required String host,
     int port = 161,
-    String version = 'v2c',
-    String community = 'public',
+    int? profileId,
   }) async {
     queryCalls++;
-    lastQueryVersion = version;
-    lastQueryCommunity = community;
+    lastQueryProfileId = profileId;
     return queriedInterfaces;
   }
 }
@@ -326,6 +323,27 @@ const SetupGuide _sampleSyslogGuide = SetupGuide(
     ),
   ],
 );
+
+/// Credenciais SNMP já carregadas, sem HTTP.
+class _StubSnmpCredentialsNotifier extends SnmpCredentialsNotifier {
+  @override
+  SnmpCredentialsState build() => SnmpCredentialsState(
+    loaded: true,
+    items: <SnmpCredentialModel>[
+      SnmpCredentialModel.fromJson(const <String, dynamic>{
+        'id': 7,
+        'name': 'Casa',
+        'version': 'v2c',
+        'securityLevel': 'community',
+        'community': '********',
+        'isDefault': true,
+      }),
+    ],
+  );
+
+  @override
+  Future<void> fetchAll({bool force = false}) async {}
+}
 
 void main() {
   group('DeviceInterfaceModel SNMP parsing & sorting', () {
@@ -692,7 +710,7 @@ void main() {
           testResult: const SnmpTestResult(
             responded: true,
             version: 'v2c',
-            community: 'public',
+            profileId: 7,
             sysName: 'MikroTik-Core',
             sysDescr: 'RouterOS RB5009',
           ),
@@ -753,6 +771,9 @@ void main() {
               ),
               operatingSystemsProvider.overrideWith(() => osStub),
               logsProvider.overrideWith(() => logsStub),
+              snmpCredentialsProvider.overrideWith(
+                _StubSnmpCredentialsNotifier.new,
+              ),
               snmpProfilesProvider.overrideWith(() => snmpStub),
             ],
             child: MaterialApp(
@@ -796,8 +817,9 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(tester.takeException(), isNull);
-        expect(find.text('Versão SNMP'), findsOneWidget);
-        expect(find.text('Community SNMP'), findsOneWidget);
+        expect(find.text('Credencial SNMP'), findsOneWidget);
+        expect(find.text('Padrão do sistema (Casa)'), findsOneWidget);
+        expect(find.text('Community SNMP'), findsNothing);
         expect(find.text('Intervalo (s)'), findsOneWidget);
         expect(find.text('Testar SNMP'), findsOneWidget);
         expect(find.text('Listar interfaces'), findsOneWidget);
@@ -816,8 +838,8 @@ void main() {
         expect(tester.takeException(), isNull);
         expect(snmpStub.testCalls, 1);
         expect(snmpStub.queryCalls, 1);
-        expect(snmpStub.lastQueryVersion, 'v2c');
-        expect(snmpStub.lastQueryCommunity, 'public');
+        // A credencial que respondeu é a usada para listar as interfaces.
+        expect(snmpStub.lastQueryProfileId, 7);
         expect(osStub.identifyCalls, greaterThanOrEqualTo(2));
 
         // Campo de uplink agora é select com UP/DOWN e velocidades canônicas
@@ -901,6 +923,9 @@ void main() {
               devicesProvider.overrideWith(_StubDevicesNotifier.new),
               operatingSystemsProvider.overrideWith(() => osStub),
               logsProvider.overrideWith(() => logsStub),
+              snmpCredentialsProvider.overrideWith(
+                _StubSnmpCredentialsNotifier.new,
+              ),
               snmpProfilesProvider.overrideWith(() => snmpStub),
             ],
             child: MaterialApp(
@@ -997,6 +1022,9 @@ void main() {
               deviceAccessProvider.overrideWith(() => accessStub),
               operatingSystemsProvider.overrideWith(() => osStub),
               logsProvider.overrideWith(() => logsStub),
+              snmpCredentialsProvider.overrideWith(
+                _StubSnmpCredentialsNotifier.new,
+              ),
               snmpProfilesProvider.overrideWith(
                 () => _StubSnmpProfilesNotifier(
                   testResult: const SnmpTestResult(responded: false),
@@ -1128,6 +1156,9 @@ void main() {
               deviceAccessProvider.overrideWith(() => accessStub),
               operatingSystemsProvider.overrideWith(() => osStub),
               logsProvider.overrideWith(() => logsStub),
+              snmpCredentialsProvider.overrideWith(
+                _StubSnmpCredentialsNotifier.new,
+              ),
               snmpProfilesProvider.overrideWith(
                 () => _StubSnmpProfilesNotifier(
                   testResult: const SnmpTestResult(responded: false),
@@ -1266,6 +1297,9 @@ void main() {
                 _StubOperatingSystemsNotifier.new,
               ),
               logsProvider.overrideWith(() => logsStub),
+              snmpCredentialsProvider.overrideWith(
+                _StubSnmpCredentialsNotifier.new,
+              ),
               snmpProfilesProvider.overrideWith(
                 () => _StubSnmpProfilesNotifier(
                   testResult: const SnmpTestResult(responded: false),
@@ -1374,6 +1408,9 @@ void main() {
                 _StubOperatingSystemsNotifier.new,
               ),
               logsProvider.overrideWith(() => logsStub),
+              snmpCredentialsProvider.overrideWith(
+                _StubSnmpCredentialsNotifier.new,
+              ),
               snmpProfilesProvider.overrideWith(
                 () => _StubSnmpProfilesNotifier(
                   testResult: const SnmpTestResult(responded: false),

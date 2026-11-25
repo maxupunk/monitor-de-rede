@@ -44,6 +44,23 @@ use netmonitor_core::{
 const ADMIN_CONFIG_FORBIDDEN: &str =
     "Apenas administradores podem gerenciar configurações, provedores e modelos de IA.";
 
+/// Guarda das listagens de modelos: listar pelo que está salvo vale para
+/// qualquer usuário autenticado; mandar outra URL ou outra chave na query é
+/// configurar a IA, e isso é do administrador
+/// ([`settings::listing_overrides_saved`]).
+async fn require_model_listing(
+    ctx: &AppContext,
+    headers: &HeaderMap,
+    overrides_saved: bool,
+) -> AppResult<()> {
+    if overrides_saved {
+        require_admin(ctx, headers, ADMIN_CONFIG_FORBIDDEN).await?;
+    } else {
+        require_authenticated_actor(ctx, headers).await?;
+    }
+    Ok(())
+}
+
 /// Extrai o ator autenticado dos cabeçalhos HTTP e recusa requisições sem
 /// usuário resolvido (fail-closed antes de aplicar `AreaAccess`).
 async fn require_authenticated_actor(
@@ -233,8 +250,14 @@ async fn list_ollama_models(
     headers: HeaderMap,
     Query(query): Query<OllamaModelsQuery>,
 ) -> AppResult<Response> {
-    require_admin(&ctx, &headers, ADMIN_CONFIG_FORBIDDEN).await?;
     let settings = settings::load(&ctx.db).await?;
+    let overrides = settings::listing_overrides_saved(
+        query.base_url.as_deref(),
+        settings.ollama_base_url.as_deref(),
+        settings::DEFAULT_OLLAMA_BASE_URL,
+        None,
+    );
+    require_model_listing(&ctx, &headers, overrides).await?;
     let base_url = model_cleanup::resolve_base_url(&settings, query.base_url);
     let models = ollama::list_models(&base_url, model_cleanup::configured_model(&settings)).await?;
     Ok(format::json(models)?)
@@ -426,8 +449,14 @@ async fn list_opencode_models(
     headers: HeaderMap,
     Query(query): Query<OpenCodeModelsQuery>,
 ) -> AppResult<Response> {
-    require_admin(&ctx, &headers, ADMIN_CONFIG_FORBIDDEN).await?;
     let settings = settings::load(&ctx.db).await?;
+    let overrides = settings::listing_overrides_saved(
+        query.base_url.as_deref(),
+        settings.opencode_base_url.as_deref(),
+        settings::OPENCODE_DEFAULT_BASE_URL,
+        query.api_key.as_deref(),
+    );
+    require_model_listing(&ctx, &headers, overrides).await?;
     let base_url = query
         .base_url
         .filter(|u| !u.trim().is_empty())
@@ -458,8 +487,9 @@ async fn list_openrouter_models(
     headers: HeaderMap,
     Query(query): Query<OpenRouterModelsQuery>,
 ) -> AppResult<Response> {
-    require_admin(&ctx, &headers, ADMIN_CONFIG_FORBIDDEN).await?;
     let settings = settings::load(&ctx.db).await?;
+    let overrides = settings::listing_overrides_saved(None, None, "", query.api_key.as_deref());
+    require_model_listing(&ctx, &headers, overrides).await?;
     let mut api_key = query.api_key;
     if api_key.as_deref() == Some(settings::MASKED_KEY) || api_key.is_none() {
         api_key = settings.openrouter_api_key;

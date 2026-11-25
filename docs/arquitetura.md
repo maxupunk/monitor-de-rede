@@ -32,7 +32,7 @@ produto** que usa (Rede, Servidores, VPN; o Núcleo sempre) — ver
 | :--- | :--- |
 | API, scheduler, probe | Rust — [Loco.rs](https://loco.rs/) sobre `axum` e `tokio` |
 | ORM e migrations | SeaORM + `sea-orm-migration` |
-| Banco | PostgreSQL 18 no compose (serviço `postgres`, [ADR 020](adr/020-postgresql-padrao-do-container.md)); SQLite em WAL no desenvolvimento, nos testes e na imagem sem compose |
+| Banco | PostgreSQL 18 no compose (serviço `postgres`, [ADR 020](adr/020-postgresql-padrao-do-container.md)); PostgreSQL também no desenvolvimento (`docker-compose.dev.yml`); SQLite só na suíte de testes — o boot o recusa fora dela |
 | Autenticação | JWT (`loco_rs::auth`), HS512 |
 | Tempo real | SSE |
 | Frontend | Vue 3 + TypeScript + Vite + Vuetify + Pinia + PWA, servido pela própria API |
@@ -56,7 +56,7 @@ Não há Redis, nem fila externa, nem broker. Ver [§12](#12-o-que-não-existe).
 │   :3333 ──▶ SPA (/app/web)  ─┐                                               │
 │             API (/api/*)    ─┤  backend-cli start   (usuário `app`)     │
 │             SSE             ─┤    └─ ciclo de monitores a cada 5 s           │
-│                              │    └─ relay do event_outbox                   │
+│                              │    └─ escuta LISTEN/NOTIFY (ADR 025)          │
 │                              └────────────┬──────────────┐                   │
 │                                           │ wg0.conf     │ TCP 5432          │
 │                                           ▼              ▼                   │
@@ -256,8 +256,10 @@ run_cycle (a cada 5 s, no mesmo processo)
    └─ data_pruner (a cada 1h): aplica as janelas de retenção
 ```
 
-O ciclo **não** drena o `event_outbox` — quem faz isso é o servidor. Ver
-[§9](#9-tempo-real).
+O ciclo **não** lê o `event_outbox`: os eventos que ele publica chegam aos
+outros processos pelo `NOTIFY` do próprio commit. Com várias instâncias, só o
+processo líder da função `Scheduler` roda o ciclo ([ADR
+025](adr/025-varios-processos-lider-e-notify.md)). Ver [§9](#9-tempo-real).
 
 Rodar o ciclo em laço dentro de um processo, em vez de um subprocesso por tique,
 é o que faz as cadências internas valerem: telemetria de VPN a cada 10 s,
@@ -385,9 +387,27 @@ definidos; qualquer coisa fora do catálogo é rejeitada.
   `OUI_SOURCES`) com a base embutida como reserva offline; a consulta é em
   memória, pelo bloco mais específico. A tabela fica fora do backup: é dado
   público, baixado de novo.
-- Credenciais automáticas de discovery vêm apenas de
-  `SNMP_DISCOVERY_COMMUNITIES` e `SNMP_DISCOVERY_V3_PROFILES`; nunca são
-  persistidas dentro do resultado descoberto.
+- **Credenciais SNMP são perfis** (`snmp_profiles`, "Credenciais SNMP" em
+  Configurações › Rede, `/api/snmp/credentials`): comunidade (v1/v2c) ou
+  usuário USM v3 (autenticação MD5/SHA-1/SHA-2, privacidade DES/3DES/AES,
+  `contextName` opcional), com comunidade e senhas cifradas com a
+  `ENCRYPTION_KEY` e devolvidas à tela só como máscara. O dispositivo aponta
+  para um perfil (`devices.snmp_profile_id`, FK `RESTRICT`: credencial em uso
+  não se apaga — a API responde 409 dizendo quem usa).
+- **Um caminho de resolução** (`netmonitor_core::devices::snmp_credentials`):
+  perfil do dispositivo → perfil padrão (`is_default`) → `public`/v2c de
+  fábrica. A coleta (`snmp::service::device_config`), o "Testar agora", a
+  identificação do equipamento, o leitor de saúde do teste de enlace e o
+  script da VPN passam por ele; o cliente converte a credencial em
+  `SnmpConfig::from_credentials`. Monitor SNMP de dispositivo grava só alvo e
+  métrica: a credencial entra na hora de rodar
+  (`snmp_credentials::execution_configuration`, chamado por
+  `ping_diagnostics::prepare_configuration` nos três caminhos de execução).
+- A descoberta tenta os perfis cadastrados (o padrão primeiro; sem nenhum,
+  `public` em v2c e v1) e grava em `data.snmp.profileId` qual respondeu —
+  adotar o host já cria o dispositivo apontando para ele. O segredo nunca
+  entra no resultado descoberto, e o agente remoto (que não recebe segredos da
+  central) varre só com o `public` de fábrica.
 
 ## 7. Esquema de dados
 
@@ -537,9 +557,9 @@ dentro de JSON. Tudo roda em uma transação; no PostgreSQL as sequências são
 realinhadas no fim, senão o próximo cadastro feito pela tela colidiria com um id
 restaurado.
 
-O arquivo carrega `probes.token_hash`, `devices.snmp_community` e as chaves da
-VPN cifradas com a `ENCRYPTION_KEY` da instalação — restaurar em outra
-instalação só devolve VPN funcional com a mesma chave.
+O arquivo carrega `probes.token_hash`, as credenciais SNMP (`snmp_profiles`) e
+as chaves da VPN cifradas com a `ENCRYPTION_KEY` da instalação — restaurar em
+outra instalação só devolve VPN e SNMP funcionais com a mesma chave.
 
 
 ### Convenções de contrato
@@ -588,22 +608,32 @@ Na apresentação, `memory_used_bytes` e `memory_total_bytes` são os valores
 principais; `memory_usage` fica restrito ao contexto secundário, às cores e aos
 limiares percentuais de alerta.
 
-Telemetria Docker é efêmera e vai direto ao barramento em memória: persistir
-amostras de três em três segundos no `event_outbox` faria o banco crescer sem
-valor histórico. Os eventos de domínio duráveis descritos abaixo continuam
-passando pelo outbox para atravessar processos.
+Telemetria Docker é efêmera e não grava no `event_outbox`: persistir amostras
+de três em três segundos faria o banco crescer sem valor histórico. Os eventos
+de domínio duráveis descritos abaixo continuam gravando a linha.
 
-**Os eventos de domínio duráveis passam por `event_outbox` antes do barramento.** Quem gera o evento
-é o scheduler, num processo; quem tem a conexão SSE aberta é o `server`, em
-outro. Publicar direto na memória do processo que gerou faria o evento morrer ali
-— o relay (`services/events/relay.rs`) é a ponte, e a tabela é o que garante que
-nada se perde entre um ciclo e outro.
+**Entre processos, os eventos vão por `LISTEN`/`NOTIFY`** ([ADR
+025](adr/025-varios-processos-lider-e-notify.md)). O barramento (`EventBus`) é
+um `broadcast` em memória; o que atravessa para os outros processos da central
+é do `EventFanout` escolhido no boot pelo dialeto do banco
+(`netmonitor_core::cluster::Coordination`):
 
-**O relay roda no `server`**, num laço subido pelo `MonitoringInitializer`. Tem
-de ser ali: o barramento é in-process, e só o servidor tem assinantes SSE. O
-relay começa com `if !bus.has_subscribers() { return }` — chamado de qualquer
-outro processo, ele sai no primeiro `if` e o evento nunca chega à tela. Foi
-exatamente esse o bug corrigido pela [ADR 007](adr/007-scheduler-processo-unico.md).
+- **Evento de domínio** (`publish`): a linha do `event_outbox` e o
+  `pg_notify('netmonitor_events', …)` saem na mesma transação — o aviso só é
+  entregue no commit, e não há cursor a pular `id`.
+- **Snapshot** (`publish_snapshot`), **esquecimento** (`forget_snapshots`) e
+  **efêmero** (`publish_ephemeral`): só o aviso. O snapshot chega aos outros
+  processos **como snapshot** (tipo + chave) e entra no cache deles: a aba que
+  conecta em qualquer processo recebe o estado atual logo depois de
+  `stream:connected`.
+- O que não cabe nos 8000 bytes do `NOTIFY` ganha linha no outbox (com
+  `snapshot_key`, se for snapshot) e o aviso leva só o `id`.
+- Cada processo PostgreSQL escuta o canal (`events::fanout::postgres`). Ao
+  começar a escutar, e depois de uma queda da conexão de escuta, ele relê do
+  outbox o que outros processos gravaram na lacuna e manda `resync` — os
+  outros reanunciam os snapshots que produziram.
+- No SQLite (testes) há um processo só: a linha é gravada e não há a quem
+  avisar.
 
 ## 10. Módulo VPN
 
@@ -740,9 +770,10 @@ SNMP consulta o último contador de cada `(interface, série)` por lookup indexa
 sem materializar o passado. Séries para gráficos percorrem cursores e mantêm
 somente acumuladores fixos; o histórico DNS entrega no máximo 720 pontos por
 série. O rollup de `monitor_results` agrega no banco em janelas de até sete dias
-por ciclo e o relay SSE lê no máximo 500 linhas do outbox por passagem. O
-compose usa PostgreSQL com `DB_MAX_CONNECTIONS=10`; o padrão do YAML (5) é o
-dimensionamento do SQLite, que tem um escritor só.
+por ciclo e a escuta relê no máximo 1000 linhas do outbox depois de uma
+queda. O
+compose e o padrão do YAML usam `DB_MAX_CONNECTIONS=10`: o PostgreSQL atende
+escritas em paralelo.
 
 ## 11-B. Agentes remotos
 

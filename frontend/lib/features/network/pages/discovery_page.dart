@@ -137,6 +137,8 @@ class _DiscoveryPageState extends ConsumerState<DiscoveryPage>
         'type': host.deviceType ?? 'other',
         'networkId': netId,
         'siteId': net?.siteId,
+        if (host.snmpDetected) 'snmpEnabled': true,
+        'snmpProfileId': ?host.snmpProfileId,
       },
     );
     if (saved != null && mounted) {

@@ -46,8 +46,10 @@ pub struct DeviceInput {
     pub description: Option<String>,
     pub is_monitored: Option<bool>,
     pub snmp_enabled: Option<bool>,
-    pub snmp_community: Option<String>,
-    pub snmp_version: Option<String>,
+    /// A credencial SNMP (`/api/snmp/credentials`). Ausente mantém a atual;
+    /// `null` volta para a padrão.
+    #[serde(default, deserialize_with = "presente")]
+    pub snmp_profile_id: Option<Option<i64>>,
     pub snmp_poll_interval_seconds: Option<i32>,
     /// `auto`, `local`, `vpn` ou `remote`.
     ///

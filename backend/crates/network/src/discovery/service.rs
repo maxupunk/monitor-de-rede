@@ -23,6 +23,7 @@ use crate::{
         pipeline::{self, ScanTarget},
         progress::{phase, ScanEvent, ScanReporter},
     },
+    snmp::service::DetectCandidate,
     vendors,
 };
 use netmonitor_core::{
@@ -505,7 +506,12 @@ pub async fn run_discovery(
     let ping = PingClient::from_context(ctx)
         .map_err(|error| reporter.log(format!("{error} A varredura segue sem ping.")))
         .ok();
-    let outcome = pipeline::scan(ping.as_ref(), target, cancel, &reporter).await;
+    // As credenciais SNMP cadastradas: a descoberta tenta todas e grava qual
+    // respondeu (`snmp.profileId`).
+    let target = target
+        .clone()
+        .with_snmp_candidates(DetectCandidate::load(&ctx.db).await?);
+    let outcome = pipeline::scan(ping.as_ref(), &target, cancel, &reporter).await;
     // Derrubar o repórter fecha o canal e encerra o pump: só depois disso o
     // estado publicado é o final, e não uma atualização atrasada de fase.
     drop(reporter);

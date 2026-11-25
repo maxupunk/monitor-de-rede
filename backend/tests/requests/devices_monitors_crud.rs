@@ -852,7 +852,6 @@ async fn cadastro_e_edicao_de_dispositivo_preserva_link_interface() {
                 "type": "router",
                 "ipAddress": "192.168.10.1",
                 "snmpEnabled": true,
-                "snmpCommunity": "public",
                 "linkInterfaceId": 10,
                 "linkInterfaceName": "ether1",
             }))

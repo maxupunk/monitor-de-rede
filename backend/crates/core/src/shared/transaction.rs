@@ -12,7 +12,10 @@
 //! espera o `busy_timeout` na fila, como no PostgreSQL, em vez de falhar. No
 //! PostgreSQL a opção é ignorada pela `sea-orm`.
 
-use sea_orm::{DbErr, SqliteTransactionMode, TransactionOptions, TransactionTrait};
+use sea_orm::{
+    ConnectionTrait, DatabaseBackend, DbErr, IsolationLevel, SqliteTransactionMode,
+    TransactionOptions, TransactionTrait,
+};
 
 /// Abre uma transação que vai escrever. Use no lugar de `begin()` sempre que
 /// a transação ler e depois gravar.
@@ -29,9 +32,40 @@ pub async fn begin_write<T: TransactionTrait>(db: &T) -> Result<T::Transaction, 
     .await
 }
 
+/// Abre uma transação de escrita em que **todas** as leituras veem o mesmo
+/// instante do banco — para quem lê um conjunto, decide com base nele e depois
+/// apaga exatamente esse conjunto (o rollup agrega o bruto e purga o que
+/// agregou).
+///
+/// No PostgreSQL é `REPEATABLE READ`: uma linha confirmada depois do começo da
+/// transação — inclusive uma de `id` menor, reservado antes e confirmado
+/// depois — não aparece na leitura **nem** é alcançada pelo `DELETE`. No
+/// SQLite é o [`begin_write`]: o `BEGIN IMMEDIATE` já impede qualquer outra
+/// escrita até o commit, o que dá a mesma garantia (o SQLite não aceita nível
+/// de isolamento, e a `sea-orm` só registraria um aviso).
+///
+/// # Errors
+///
+/// Falha ao abrir a transação.
+pub async fn begin_snapshot_write<T>(db: &T) -> Result<T::Transaction, DbErr>
+where
+    T: TransactionTrait + ConnectionTrait,
+{
+    let isolation_level = (db.get_database_backend() == DatabaseBackend::Postgres)
+        .then_some(IsolationLevel::RepeatableRead);
+    db.begin_with_options(TransactionOptions {
+        isolation_level,
+        sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+        ..TransactionOptions::default()
+    })
+    .await
+}
+
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use std::{sync::Arc, time::Duration};
+
+    use tokio::sync::Barrier;
 
     use sea_orm::{ConnectOptions, ConnectionTrait, Database, DatabaseConnection};
 
@@ -58,7 +92,17 @@ mod tests {
     }
 
     /// O que o `process_result` faz: lê, espera um instante e grava.
-    async fn read_then_write(db: DatabaseConnection, monitor: i64, immediate: bool) -> bool {
+    ///
+    /// `both_read`, no caso deferido, segura a escrita até as duas transações
+    /// terem lido: sem ela, sob a suíte cheia uma podia terminar inteira antes
+    /// da outra começar, e a corrida não se reproduzia. No caso `IMMEDIATE` não
+    /// cabe barreira — a segunda espera a primeira já no `BEGIN`.
+    async fn read_then_write(
+        db: DatabaseConnection,
+        monitor: i64,
+        immediate: bool,
+        both_read: Option<Arc<Barrier>>,
+    ) -> bool {
         let txn = if immediate {
             begin_write(&db).await
         } else {
@@ -74,6 +118,9 @@ mod tests {
         {
             return false;
         }
+        if let Some(barrier) = both_read {
+            barrier.wait().await;
+        }
         tokio::time::sleep(Duration::from_millis(50)).await;
         let wrote = txn
             .execute_unprepared(&format!("INSERT INTO results (monitor) VALUES ({monitor})"))
@@ -86,9 +133,10 @@ mod tests {
     async fn begin_deferido_perde_escrita_concorrente_e_immediate_nao() {
         let (db, path) = wal_database("race").await;
 
+        let both_read = Arc::new(Barrier::new(2));
         let deferred = tokio::join!(
-            read_then_write(db.clone(), 1, false),
-            read_then_write(db.clone(), 2, false),
+            read_then_write(db.clone(), 1, false, Some(Arc::clone(&both_read))),
+            read_then_write(db.clone(), 2, false, Some(both_read)),
         );
         assert!(
             !(deferred.0 && deferred.1),
@@ -96,8 +144,8 @@ mod tests {
         );
 
         let immediate = tokio::join!(
-            read_then_write(db.clone(), 3, true),
-            read_then_write(db.clone(), 4, true),
+            read_then_write(db.clone(), 3, true, None),
+            read_then_write(db.clone(), 4, true, None),
         );
         assert!(immediate.0 && immediate.1, "com IMMEDIATE as duas gravam");
 

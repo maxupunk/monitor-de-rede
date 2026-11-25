@@ -2,14 +2,14 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use loco_rs::app::AppContext;
-use sea_orm::{ActiveModelTrait, ConnectionTrait, EntityTrait, QueryOrder, QuerySelect, Set};
-use tokio::sync::{broadcast, Mutex, MutexGuard};
+use tokio::sync::broadcast;
 use uuid::Uuid;
 
-use crate::{
-    models::{_entities::event_outbox as event_outbox_entity, event_outbox},
-    shared::errors::{AppError, AppResult},
+use super::{
+    fanout::{EventFanout, Standalone},
+    notice::Notice,
 };
+use crate::shared::errors::{AppError, AppResult};
 
 /// Evento de domínio no formato exato que o `EventSource` do frontend lê.
 ///
@@ -17,7 +17,7 @@ use crate::{
 /// `raw.type`, `raw.data` e `raw.timestamp` — um `payload`/`occurredAt`
 /// idiomático em Rust chegaria como `undefined` e todo `case` do despachante
 /// receberia `{}`, sem erro visível em lugar nenhum.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DomainEvent {
     #[serde(rename = "type")]
@@ -46,29 +46,49 @@ impl EncodedEvent {
     }
 }
 
-/// Último estado de cada recurso em tempo real, por `(tipo, chave)`.
-type SnapshotMap = std::collections::BTreeMap<(String, String), Arc<EncodedEvent>>;
+/// Um snapshot guardado: o evento e de que processo ele veio (`None` = deste).
+#[derive(Clone)]
+struct StoredSnapshot {
+    encoded: Arc<EncodedEvent>,
+    origin: Option<String>,
+}
 
+/// Último estado de cada recurso em tempo real, por `(tipo, chave)`.
+type SnapshotMap = std::collections::BTreeMap<(String, String), StoredSnapshot>;
+
+/// O barramento de eventos do processo.
+///
+/// A entrega local é um `broadcast` em memória. O que atravessa para os outros
+/// processos da central — e como — é do [`EventFanout`] escolhido no boot
+/// (ADR 024): no PostgreSQL, `NOTIFY` no commit; no SQLite (um processo só),
+/// nada.
 #[derive(Clone)]
 pub struct EventBus {
     sender: broadcast::Sender<DomainEvent>,
     encoded_sender: broadcast::Sender<Arc<EncodedEvent>>,
     origin: String,
-    last_relayed_id: Arc<Mutex<i64>>,
     snapshots: Arc<std::sync::Mutex<SnapshotMap>>,
+    fanout: Arc<dyn EventFanout>,
 }
 
 impl EventBus {
+    /// Barramento de um processo só (SQLite, testes).
     #[must_use]
     pub fn create() -> Self {
+        Self::with_fanout(Arc::new(Standalone))
+    }
+
+    /// Barramento que entrega aos outros processos pelo `fanout` dado.
+    #[must_use]
+    pub fn with_fanout(fanout: Arc<dyn EventFanout>) -> Self {
         let (sender, _) = broadcast::channel(1024);
         let (encoded_sender, _) = broadcast::channel(1024);
         Self {
             sender,
             encoded_sender,
             origin: Uuid::new_v4().to_string(),
-            last_relayed_id: Arc::new(Mutex::new(0)),
             snapshots: Arc::default(),
+            fanout,
         }
     }
 
@@ -100,30 +120,6 @@ impl EventBus {
         &self.origin
     }
 
-    /// Posiciona o cursor do relay no último `id` já gravado em `event_outbox`.
-    /// Chamado no boot do servidor para não retransmitir eventos históricos de
-    /// execuções anteriores como se fossem ao vivo.
-    ///
-    /// # Errors
-    ///
-    /// Propaga erro do banco.
-    pub async fn seed_from_outbox<C: ConnectionTrait>(&self, db: &C) -> AppResult<i64> {
-        let latest = event_outbox::Entity::find()
-            .select_only()
-            .column(event_outbox_entity::Column::Id)
-            .order_by_desc(event_outbox_entity::Column::Id)
-            .limit(1)
-            .into_tuple::<i64>()
-            .one(db)
-            .await?
-            .unwrap_or(0);
-        let mut cursor = self.last_relayed_id.lock().await;
-        if latest > *cursor {
-            *cursor = latest;
-        }
-        Ok(*cursor)
-    }
-
     pub async fn publish(
         &self,
         db: &sea_orm::DatabaseConnection,
@@ -135,24 +131,20 @@ impl EventBus {
             payload,
             occurred_at: Utc::now().to_rfc3339(),
         };
-        event_outbox::ActiveModel {
-            r#type: Set(event.event_type.clone()),
-            origin: Set(self.origin.clone()),
-            payload: Set(serde_json::to_value(&event)
-                .map_err(|error| AppError::Internal(anyhow::Error::new(error)))?),
-            ..Default::default()
-        }
-        .insert(db)
-        .await?;
+        // A linha do outbox e o aviso aos outros processos saem no mesmo
+        // commit (ADR 024): nenhum dos dois existe sem o outro.
+        self.fanout.persist(db, &self.origin, &event).await?;
         self.publish_local(event.clone());
         Ok(event)
     }
 
-    /// Publica telemetria efêmera diretamente no processo HTTP.
+    /// Publica telemetria efêmera: sem linha no `event_outbox`.
     ///
-    /// Amostras frequentes não pertencem ao `event_outbox`: persistir cada
-    /// leitura faria o banco crescer apenas para alimentar clientes que podem
-    /// nem estar conectados. Eventos de domínio continuam usando `publish`.
+    /// Amostras frequentes não pertencem ao outbox: persistir cada leitura
+    /// faria o banco crescer apenas para alimentar clientes que podem nem
+    /// estar conectados. Os outros processos da central recebem o aviso, se
+    /// ele chegar; quem estava sem escuta naquela hora não o recebe depois.
+    /// Eventos de domínio continuam usando `publish`.
     pub fn publish_ephemeral(
         &self,
         event_type: impl Into<String>,
@@ -164,6 +156,11 @@ impl EventBus {
             occurred_at: Utc::now().to_rfc3339(),
         };
         self.publish_local(event.clone());
+        self.fanout.announce(Notice::Event {
+            origin: self.origin.clone(),
+            id: None,
+            event: Some(event.clone()),
+        });
         event
     }
 
@@ -171,46 +168,111 @@ impl EventBus {
     /// recente. Quem assinar depois recebe esse estado logo após
     /// `stream:connected` (ver [`Self::current_snapshots`]) — sem esperar o
     /// próximo ciclo e sem hidratação por HTTP (AGENTS §9).
+    ///
+    /// O snapshot viaja **como snapshot** para os outros processos da central:
+    /// lá ele também entra no cache, e a aba que conectar depois nesses
+    /// processos recebe o estado atual.
     pub fn publish_snapshot(
         &self,
         event_type: impl Into<String>,
         key: impl Into<String>,
         payload: serde_json::Value,
     ) -> DomainEvent {
+        let key = key.into();
         let event = DomainEvent {
             event_type: event_type.into(),
             payload,
             occurred_at: Utc::now().to_rfc3339(),
         };
-        let encoded = EncodedEvent::new(event);
-        // Grava o snapshot **antes** de difundir: garante que o cache nunca
-        // fique atrás do que foi entregue ao vivo em chamadas concorrentes.
-        self.lock_snapshots().insert(
-            (encoded.event.event_type.clone(), key.into()),
-            Arc::clone(&encoded),
-        );
-        self.broadcast_encoded(&encoded);
-        encoded.event.clone()
+        self.store_snapshot(key.clone(), event.clone(), None);
+        self.fanout.announce(Notice::Snapshot {
+            origin: self.origin.clone(),
+            key,
+            id: None,
+            event: Some(event.clone()),
+        });
+        event
     }
 
-    /// Esquece os snapshots de uma chave (host desconectado, por exemplo).
+    /// Esquece os snapshots de uma chave (host desconectado, por exemplo), aqui
+    /// e nos outros processos.
     pub fn forget_snapshots(&self, key: &str) {
         self.lock_snapshots()
             .retain(|(_, stored_key), _| stored_key != key);
+        self.fanout.announce(Notice::Forget {
+            origin: self.origin.clone(),
+            key: key.to_string(),
+        });
+    }
+
+    /// Snapshot que chegou de outro processo: entra no cache e vai às abas
+    /// deste, sem voltar a ser anunciado.
+    pub fn apply_remote_snapshot(&self, origin: &str, key: String, event: DomainEvent) {
+        self.store_snapshot(key, event, Some(origin.to_string()));
+    }
+
+    /// Outro processo esqueceu uma chave: saem daqui só os snapshots que
+    /// vieram **dele**. Um snapshot desta chave produzido aqui depois (o agente
+    /// que caiu lá e reconectou aqui) não pode sumir por um aviso atrasado.
+    pub fn apply_remote_forget(&self, origin: &str, key: &str) {
+        self.lock_snapshots().retain(|(_, stored_key), stored| {
+            stored_key != key || stored.origin.as_deref() != Some(origin)
+        });
+    }
+
+    /// Reanuncia os snapshots produzidos **neste** processo — a resposta ao
+    /// `Resync` de um processo que acabou de (re)começar a escutar.
+    pub fn reannounce_local_snapshots(&self) {
+        let local: Vec<(String, DomainEvent)> = self
+            .lock_snapshots()
+            .iter()
+            .filter(|(_, stored)| stored.origin.is_none())
+            .map(|((_, key), stored)| (key.clone(), stored.encoded.event.clone()))
+            .collect();
+        for (key, event) in local {
+            self.fanout.announce(Notice::Snapshot {
+                origin: self.origin.clone(),
+                key,
+                id: None,
+                event: Some(event),
+            });
+        }
+    }
+
+    /// Anuncia um aviso aos outros processos (o `Resync` do ouvinte).
+    pub fn announce(&self, notice: Notice) {
+        self.fanout.announce(notice);
     }
 
     #[must_use]
     pub fn current_snapshots(&self) -> Vec<DomainEvent> {
         self.lock_snapshots()
             .values()
-            .map(|encoded| encoded.event.clone())
+            .map(|stored| stored.encoded.event.clone())
             .collect()
     }
 
     /// Snapshots atuais já serializados em `Arc<EncodedEvent>`.
     #[must_use]
     pub fn current_encoded_snapshots(&self) -> Vec<Arc<EncodedEvent>> {
-        self.lock_snapshots().values().cloned().collect()
+        self.lock_snapshots()
+            .values()
+            .map(|stored| Arc::clone(&stored.encoded))
+            .collect()
+    }
+
+    fn store_snapshot(&self, key: String, event: DomainEvent, origin: Option<String>) {
+        let encoded = EncodedEvent::new(event);
+        // Grava o snapshot **antes** de difundir: garante que o cache nunca
+        // fique atrás do que foi entregue ao vivo em chamadas concorrentes.
+        self.lock_snapshots().insert(
+            (encoded.event.event_type.clone(), key),
+            StoredSnapshot {
+                encoded: Arc::clone(&encoded),
+                origin,
+            },
+        );
+        self.broadcast_encoded(&encoded);
     }
 
     fn lock_snapshots(&self) -> std::sync::MutexGuard<'_, SnapshotMap> {
@@ -242,10 +304,6 @@ impl EventBus {
         } else {
             let _ = self.sender.send(event);
         }
-    }
-
-    pub(crate) async fn lock_last_relayed_id(&self) -> MutexGuard<'_, i64> {
-        self.last_relayed_id.lock().await
     }
 }
 

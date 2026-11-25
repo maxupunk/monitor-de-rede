@@ -297,7 +297,7 @@ class SnmpTestResult {
   const SnmpTestResult({
     required this.responded,
     this.version,
-    this.community,
+    this.profileId,
     this.sysName,
     this.sysDescr,
     this.sysUpTime,
@@ -306,7 +306,9 @@ class SnmpTestResult {
 
   final bool responded;
   final String? version;
-  final String? community;
+
+  /// A credencial SNMP que respondeu na detecção automática (nunca o segredo).
+  final int? profileId;
   final String? sysName;
   final String? sysDescr;
   final int? sysUpTime;
@@ -320,7 +322,7 @@ class SnmpTestResult {
     return SnmpTestResult(
       responded: responded,
       version: json['version'] as String?,
-      community: json['community'] as String?,
+      profileId: parseIntOrNull(json['profileId']),
       sysName: system['sysName'] as String?,
       sysDescr: system['sysDescr'] as String?,
       sysUpTime: parseIntOrNull(system['sysUpTime']),

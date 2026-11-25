@@ -46,8 +46,9 @@ struct CreatePeerInput {
     ip_address: Option<String>,
     site_id: Option<i64>,
     snmp_enabled: Option<bool>,
-    snmp_community: Option<String>,
-    snmp_version: Option<String>,
+    /// A credencial SNMP do equipamento (`/api/snmp/credentials`); sem ela,
+    /// a padrão.
+    snmp_profile_id: Option<i64>,
     description: Option<String>,
     install_agent: Option<bool>,
     /// Servidor remoto já cadastrado que passa a usar este túnel.
@@ -238,8 +239,7 @@ async fn store(
             ip_address: input.ip_address,
             site_id: input.site_id,
             snmp_enabled: input.snmp_enabled.unwrap_or(false),
-            snmp_community: input.snmp_community,
-            snmp_version: input.snmp_version,
+            snmp_profile_id: input.snmp_profile_id,
             description: input.description,
             agent: PeerAgent::from_input(input.install_agent.unwrap_or(false), input.agent_id),
             agent_policy: input.agent_policy,

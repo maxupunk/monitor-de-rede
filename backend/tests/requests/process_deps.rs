@@ -13,10 +13,9 @@ use loco_rs::{
     app::Hooks, boot::create_context, environment::Environment, testing::prelude::*, Result,
 };
 use netmonitor_nucleo::{
-    services::events::{relay::relay_pending, EventBus},
-    services::monitoring::checkers::ping::PingClientCell,
+    services::events::EventBus, services::monitoring::checkers::ping::PingClientCell,
 };
-use sea_orm::{ActiveModelTrait, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, Set};
 use serial_test::serial;
 
 /// Monta o contexto **do mesmo jeito que `run_task` monta**.
@@ -58,14 +57,22 @@ async fn contexto_de_tarefa_tem_as_dependencias_de_processo() {
         ctx.shared_store.contains::<PingClientCell>(),
         "célula do cliente ICMP ausente num contexto de tarefa"
     );
+    // O `task scheduler_loop`/`scheduler_run` disputa a liderança do ciclo
+    // (ADR 024): sem ela no contexto de tarefa, o ciclo dedicado rodaria ao
+    // lado do servidor.
+    assert!(
+        ctx.shared_store
+            .contains::<netmonitor_core::cluster::leadership::Leadership>(),
+        "liderança ausente num contexto de tarefa"
+    );
 }
 
-/// O ciclo do scheduler **não** pode drenar o `event_outbox`.
+/// O ciclo do scheduler **não** entrega o que está no `event_outbox`.
 ///
-/// O barramento é in-process: quem tem conexão SSE aberta é o servidor. Quando
-/// o relay era chamado de dentro do `run_cycle`, o evento gerado pelo ciclo
-/// ficava parado na tabela e nunca chegava à tela. Este teste falha se o relay
-/// voltar para o ciclo.
+/// O evento de outro processo chega pelo aviso do commit dele (ADR 024), não
+/// por quem lê a tabela. Quando o relay era chamado de dentro do `run_cycle`,
+/// o evento gerado pelo ciclo ficava parado na tabela e nunca chegava à tela.
+/// Este teste falha se alguém voltar a varrer o outbox no ciclo.
 #[tokio::test]
 #[serial]
 async fn o_ciclo_do_scheduler_nao_consome_o_outbox() {
@@ -80,6 +87,9 @@ async fn o_ciclo_do_scheduler_nao_consome_o_outbox() {
                 "data": { "monitorId": 7 },
                 "timestamp": Utc::now().to_rfc3339(),
             })),
+            // Instante explícito: a purga do ciclo compara `created_at` no
+            // formato do `sea-orm`, e a linha recém-gravada não pode vencer.
+            created_at: Set(Utc::now().into()),
             ..Default::default()
         }
         .insert(&ctx.db)
@@ -104,13 +114,16 @@ async fn o_ciclo_do_scheduler_nao_consome_o_outbox() {
             );
         }
 
-        // E a prova de que o evento continua disponível para quem deve
-        // entregá-lo: o servidor.
-        assert_eq!(
-            relay_pending(&ctx).await.expect("relay do servidor"),
-            1,
-            "o evento sumiu do outbox sem ter sido entregue por ninguém"
-        );
+        // E a linha continua no outbox: o ciclo não a consome nem a apaga.
+        let linhas = netmonitor_core::models::event_outbox::Entity::find()
+            .filter(
+                netmonitor_core::models::_entities::event_outbox::Column::Origin
+                    .eq("outro-processo"),
+            )
+            .count(&ctx.db)
+            .await
+            .expect("contar o outbox");
+        assert_eq!(linhas, 1, "o ciclo mexeu no outbox de outro processo");
     })
     .await;
 }

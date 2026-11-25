@@ -53,8 +53,7 @@ class DeviceModel {
     this.macAddress,
     this.isMonitored = true,
     this.snmpEnabled = false,
-    this.snmpCommunity,
-    this.snmpVersion,
+    this.snmpProfileId,
     this.snmpPollIntervalSeconds,
     this.accessMode,
     this.effectiveAccessMode,
@@ -90,8 +89,9 @@ class DeviceModel {
   final bool isMonitored;
   final String status;
   final bool snmpEnabled;
-  final String? snmpCommunity;
-  final String? snmpVersion;
+
+  /// A credencial SNMP (`/api/snmp/credentials`); `null` é a padrão.
+  final int? snmpProfileId;
   final int? snmpPollIntervalSeconds;
   final String? accessMode;
   final String? effectiveAccessMode;
@@ -130,8 +130,7 @@ class DeviceModel {
       isMonitored: (json['isMonitored'] as bool?) ?? true,
       status: (json['status'] as String?) ?? 'unknown',
       snmpEnabled: (json['snmpEnabled'] as bool?) ?? false,
-      snmpCommunity: json['snmpCommunity'] as String?,
-      snmpVersion: json['snmpVersion'] as String?,
+      snmpProfileId: parseIntOrNull(json['snmpProfileId']),
       snmpPollIntervalSeconds: parseIntOrNull(json['snmpPollIntervalSeconds']),
       accessMode: json['accessMode'] as String?,
       effectiveAccessMode: json['effectiveAccessMode'] as String?,
@@ -176,8 +175,7 @@ class DeviceModel {
       isMonitored: isMonitored,
       status: status ?? this.status,
       snmpEnabled: snmpEnabled,
-      snmpCommunity: snmpCommunity,
-      snmpVersion: snmpVersion,
+      snmpProfileId: snmpProfileId,
       snmpPollIntervalSeconds: snmpPollIntervalSeconds,
       accessMode: accessMode,
       effectiveAccessMode: effectiveAccessMode,

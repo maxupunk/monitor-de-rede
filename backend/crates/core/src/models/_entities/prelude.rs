@@ -56,6 +56,7 @@ pub use super::registry_uploads::Entity as RegistryUploads;
 pub use super::scheduled_task_runs::Entity as ScheduledTaskRuns;
 pub use super::scheduled_tasks::Entity as ScheduledTasks;
 pub use super::sites::Entity as Sites;
+pub use super::snmp_profiles::Entity as SnmpProfiles;
 pub use super::storage_destinations::Entity as StorageDestinations;
 pub use super::system_backup_plan::Entity as SystemBackupPlan;
 pub use super::system_settings::Entity as SystemSettings;

@@ -29,8 +29,9 @@ use crate::{
     services::{alerts::contracts::AlertStatus, shared::errors::AppResult, telemetry},
 };
 
-/// O outbox é buffer de retransmissão, não histórico: o relay lê os últimos
-/// segundos. Meia hora é folga de sobra para um processo que reiniciou.
+/// O outbox não é histórico: a linha serve ao aviso entre processos (o evento
+/// grande vai por ela) e à releitura de quem perdeu a escuta por alguns
+/// instantes (ADR 025). Meia hora é folga de sobra para os dois.
 pub const OUTBOX_RETENTION_MINUTES: i64 = 30;
 
 pub const DEFAULT_RETENTION_MONITOR_RESULTS_DAYS: i64 = 14;

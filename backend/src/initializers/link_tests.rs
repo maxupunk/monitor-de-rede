@@ -17,6 +17,7 @@ use loco_rs::{
     Result,
 };
 
+use netmonitor_core::cluster::leadership::{spawn_while_leader, LeaderRole};
 use netmonitor_network_link_tests::{janitor, LinkTestEnv};
 
 pub struct LinkTestsInitializer;
@@ -31,12 +32,20 @@ impl Initializer for LinkTestsInitializer {
         if ctx.environment == Environment::Test {
             return Ok(());
         }
-        let env = LinkTestEnv::from_context(ctx);
-        tokio::spawn(async move {
-            if let Err(error) = janitor::recover(&env).await {
-                tracing::warn!(%error, "falha ao limpar testes de enlace interrompidos");
-            }
-        });
+        // Só o líder limpa (ADR 024): um processo que sobe ao lado de outro
+        // não pode marcar como interrompido o teste que o outro está rodando.
+        // Roda uma vez, quando este processo assume.
+        spawn_while_leader(
+            ctx,
+            LeaderRole::Background,
+            "limpeza_testes_de_enlace",
+            |ctx| async move {
+                let env = LinkTestEnv::from_context(&ctx);
+                if let Err(error) = janitor::recover(&env).await {
+                    tracing::warn!(%error, "falha ao limpar testes de enlace interrompidos");
+                }
+            },
+        );
         Ok(())
     }
 }

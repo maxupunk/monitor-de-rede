@@ -389,7 +389,7 @@ class CreateVpnPeerPayload {
     this.ipAddress,
     this.siteId,
     this.snmpEnabled = false,
-    this.snmpCommunity,
+    this.snmpProfileId,
     this.description,
     this.installAgent = false,
     this.agentId,
@@ -401,7 +401,9 @@ class CreateVpnPeerPayload {
   final String? ipAddress;
   final int? siteId;
   final bool snmpEnabled;
-  final String? snmpCommunity;
+
+  /// A credencial SNMP do equipamento; `null` é a padrão.
+  final int? snmpProfileId;
   final String? description;
   final bool installAgent;
   final int? agentId;
@@ -414,10 +416,7 @@ class CreateVpnPeerPayload {
       'ipAddress': ipAddress!.trim(),
     if (siteId != null) 'siteId': siteId,
     'snmpEnabled': snmpEnabled,
-    if (snmpEnabled &&
-        snmpCommunity != null &&
-        snmpCommunity!.trim().isNotEmpty)
-      'snmpCommunity': snmpCommunity!.trim(),
+    if (snmpEnabled && snmpProfileId != null) 'snmpProfileId': snmpProfileId,
     if (description != null && description!.trim().isNotEmpty)
       'description': description!.trim(),
     if (installAgent) 'installAgent': true,

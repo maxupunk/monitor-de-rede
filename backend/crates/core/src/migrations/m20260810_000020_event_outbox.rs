@@ -1,10 +1,13 @@
 //! §6 #20 — `event_outbox`.
 //!
-//! Caixa de saída de eventos: ponte entre os processos que produzem eventos
-//! (scheduler, worker, probes) e o processo HTTP que mantém as conexões SSE.
-//! O EventBus é um `broadcast` em memória, então sem esta tabela nada que roda
-//! em background chega ao navegador. É consequência direta do ADR 005, que põe
-//! o scheduler num processo separado.
+//! Caixa de saída de eventos de domínio. Cada `EventBus::publish` grava uma
+//! linha; no PostgreSQL o mesmo commit dispara o `NOTIFY` que leva o evento
+//! aos outros processos da central (ADR 024). A linha é o que garante a
+//! entrega quando o aviso não cabe nos 8000 bytes do `NOTIFY` (ele leva só o
+//! `id`) e o que um processo relê depois de perder a conexão de escuta.
+//!
+//! `snapshot_key` marca a linha de um snapshot grande demais para o aviso: o
+//! processo que a recebe a guarda no cache de snapshots, e não como evento.
 
 use sea_orm_migration::prelude::*;
 
@@ -21,7 +24,9 @@ impl MigrationTrait for Migration {
             .col(string("type"))
             // Identifica o processo emissor para que ele não reprocesse o próprio evento
             .col(string("origin"))
-            .col(json_binary("payload"));
+            .col(json_binary("payload"))
+            // Chave do snapshot (`EventBus::publish_snapshot`); nula em evento.
+            .col(string_null("snapshot_key"));
 
         m.create_table(append_only(stmt.take())).await?;
 

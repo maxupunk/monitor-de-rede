@@ -15,32 +15,26 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use tokio::sync::OnceCell;
 
-static UDP_V4: OnceCell<UdpTransport> = OnceCell::const_new();
-static UDP_V6: OnceCell<UdpTransport> = OnceCell::const_new();
+thread_local! {
+    /// Um transporte UDP por thread do runtime (IPv4 e IPv6), não um por
+    /// processo. O `UdpTransport` guarda a tarefa de recepção no runtime que o
+    /// criou e morre com ele: num `static`, o primeiro runtime a encerrar —
+    /// cada `#[tokio::test]` tem o seu — derrubava o SNMP de todos os outros
+    /// com "Tokio context … being shutdown". No servidor isso dá um socket por
+    /// *worker* do runtime: poucos, e reaproveitados por todas as consultas.
+    static UDP: std::cell::RefCell<[Option<UdpTransport>; 2]> =
+        const { std::cell::RefCell::new([None, None]) };
+}
 static ENGINE_CACHE: OnceLock<Arc<EngineCache>> = OnceLock::new();
 static MASTER_KEYS: OnceLock<Mutex<HashMap<[u8; 32], MasterKeys>>> = OnceLock::new();
 
 const LOOKUP_TIMEOUT: Duration = Duration::from_secs(5);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SnmpVersion {
-    V1,
-    V2c,
-    V3,
-}
+use netmonitor_core::devices::snmp_credentials::SnmpCredentials;
+/// A versão é a das credenciais do núcleo: o perfil grava, o cliente usa.
+pub use netmonitor_core::devices::snmp_credentials::SnmpVersion;
 
-impl SnmpVersion {
-    pub fn parse(value: &str) -> Option<Self> {
-        match value.to_ascii_lowercase().as_str() {
-            "v1" | "1" => Some(Self::V1),
-            "v2c" | "2c" | "2" => Some(Self::V2c),
-            "v3" | "3" => Some(Self::V3),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct SnmpConfig {
     pub host: String,
     pub version: SnmpVersion,
@@ -50,22 +44,56 @@ pub struct SnmpConfig {
     pub auth_key: Option<String>,
     pub priv_protocol: Option<String>,
     pub priv_key: Option<String>,
+    /// `contextName` do SNMPv3 (vazio é o contexto padrão do agente).
+    pub context_name: Option<String>,
     pub port: u16,
     pub timeout_ms: u64,
+}
+
+/// Sem segredo no `Debug`: a configuração aparece em `tracing` de erro.
+impl std::fmt::Debug for SnmpConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SnmpConfig")
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("version", &self.version)
+            .field("username", &self.username)
+            .field("auth_protocol", &self.auth_protocol)
+            .field("priv_protocol", &self.priv_protocol)
+            .field("timeout_ms", &self.timeout_ms)
+            .finish_non_exhaustive()
+    }
 }
 
 impl SnmpConfig {
     #[must_use]
     pub fn v2c(host: impl Into<String>, community: impl Into<String>, port: u16) -> Self {
+        Self::from_credentials(
+            host,
+            port,
+            &SnmpCredentials::community(SnmpVersion::V2c, community),
+        )
+    }
+
+    /// A consulta a `host:port` com uma credencial resolvida
+    /// (`devices::snmp_credentials`) — o único ponto em que perfil vira
+    /// configuração do cliente.
+    #[must_use]
+    pub fn from_credentials(
+        host: impl Into<String>,
+        port: u16,
+        credentials: &SnmpCredentials,
+    ) -> Self {
         Self {
             host: host.into(),
-            version: SnmpVersion::V2c,
-            community: community.into(),
-            username: None,
-            auth_protocol: None,
-            auth_key: None,
-            priv_protocol: None,
-            priv_key: None,
+            version: credentials.version,
+            community: credentials.community.clone(),
+            username: credentials.username.clone(),
+            auth_protocol: credentials.auth_protocol.clone(),
+            auth_key: credentials.auth_key.clone(),
+            priv_protocol: credentials.priv_protocol.clone(),
+            priv_key: credentials.priv_key.clone(),
+            context_name: credentials.context_name.clone(),
             port,
             timeout_ms: 4_000,
         }
@@ -284,7 +312,7 @@ impl SnmpClient {
             .max_walk_results(20_000)
             .engine_cache(engine_cache());
         let transport = shared_transport(target.ip()).await?;
-        builder.build_with(transport).await.map_err(map_error)
+        builder.build_with(&transport).await.map_err(map_error)
     }
 }
 
@@ -379,6 +407,13 @@ fn auth(config: &SnmpConfig) -> Result<Auth, SnmpError> {
                     "privacidade SNMPv3 exige autenticação".to_string(),
                 ));
             }
+            if let Some(context) = config
+                .context_name
+                .as_deref()
+                .filter(|value| !value.is_empty())
+            {
+                usm = usm.context_name(context);
+            }
             Ok(usm.into())
         }
     }
@@ -435,14 +470,21 @@ fn master_keys(
     Ok(keys)
 }
 
-async fn shared_transport(ip: IpAddr) -> Result<&'static UdpTransport, SnmpError> {
-    let (cell, bind) = if ip.is_ipv6() {
-        (&UDP_V6, "[::]:0")
+async fn shared_transport(ip: IpAddr) -> Result<UdpTransport, SnmpError> {
+    let (slot, bind) = if ip.is_ipv6() {
+        (1, "[::]:0")
     } else {
-        (&UDP_V4, "0.0.0.0:0")
+        (0, "0.0.0.0:0")
     };
-    cell.get_or_try_init(|| async { UdpTransport::bind(bind).await.map_err(map_error) })
-        .await
+    if let Some(transport) = UDP.with(|cell| cell.borrow()[slot].clone()) {
+        return Ok(transport);
+    }
+    let transport = UdpTransport::bind(bind).await.map_err(map_error)?;
+    // Entre o `bind` e aqui a tarefa pode ter mudado de thread: o transporte
+    // fica na thread em que ela retomou, e é tão válido quanto — o runtime é
+    // o mesmo.
+    UDP.with(|cell| cell.borrow_mut()[slot] = Some(transport.clone()));
+    Ok(transport)
 }
 
 async fn resolve_target(host: &str, port: u16) -> Result<std::net::SocketAddr, SnmpError> {
@@ -670,6 +712,38 @@ mod tests {
     }
 
     #[test]
+    fn credencial_vira_configuracao_sem_vazar_segredo() {
+        let credencial = SnmpCredentials {
+            version: SnmpVersion::V3,
+            community: String::new(),
+            username: Some("monitor".into()),
+            auth_protocol: Some("sha".into()),
+            auth_key: Some("senha-auth".into()),
+            priv_protocol: Some("aes128".into()),
+            priv_key: Some("senha-priv".into()),
+            context_name: Some("vlan10".into()),
+        };
+        let config = SnmpConfig::from_credentials("10.0.0.1", 1161, &credencial);
+        assert_eq!(config.version, SnmpVersion::V3);
+        assert_eq!(config.port, 1161);
+        assert_eq!(config.username.as_deref(), Some("monitor"));
+        assert_eq!(config.priv_key.as_deref(), Some("senha-priv"));
+        assert_eq!(config.context_name.as_deref(), Some("vlan10"));
+        assert!(auth(&config).is_ok());
+        let texto = format!("{config:?}");
+        assert!(!texto.contains("senha-auth") && !texto.contains("senha-priv"));
+
+        let v1 = SnmpConfig::from_credentials(
+            "10.0.0.1",
+            161,
+            &SnmpCredentials::community(SnmpVersion::V1, "segredo"),
+        );
+        assert_eq!(v1.version, SnmpVersion::V1);
+        assert_eq!(v1.community, "segredo");
+        assert!(!format!("{v1:?}").contains("segredo"));
+    }
+
+    #[test]
     fn preserves_binary_and_text_octets() {
         let mac = SnmpValue::Bytes(vec![0x00, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e]);
         assert_eq!(mac.mac().as_deref(), Some("00:1a:2b:3c:4d:5e"));
@@ -718,6 +792,9 @@ mod tests {
                 user.auth(AuthProtocol::Sha256, "auth-password")
                     .privacy(PrivProtocol::Aes128, "priv-password")
             })
+            .usm_user("leitor", |user| {
+                user.auth(AuthProtocol::Sha256, "auth-password")
+            })
             .handler(oid!(1, 3, 6, 1, 2, 1, 1), Arc::new(TestMib))
             .cancel(cancel.clone())
             .build()
@@ -740,23 +817,40 @@ mod tests {
             assert!(values["1.3.6.1.2.1.1.1.0"].is_some());
         }
 
-        let client = SnmpClient::new(SnmpConfig {
-            host: "127.0.0.1".into(),
-            version: SnmpVersion::V3,
-            community: String::new(),
-            username: Some("scanner".into()),
-            auth_protocol: Some("sha256".into()),
-            auth_key: Some("auth-password".into()),
-            priv_protocol: Some("aes128".into()),
-            priv_key: Some("priv-password".into()),
-            port,
-            timeout_ms: 500,
-        });
-        assert!(!client
+        let v3 = |user: &str, auth_key: &str, privacy: Option<&str>| {
+            let mut config = SnmpConfig::from_credentials(
+                "127.0.0.1",
+                port,
+                &SnmpCredentials {
+                    version: SnmpVersion::V3,
+                    community: String::new(),
+                    username: Some(user.into()),
+                    auth_protocol: Some("sha256".into()),
+                    auth_key: Some(auth_key.into()),
+                    priv_protocol: privacy.map(|_| "aes128".into()),
+                    priv_key: privacy.map(Into::into),
+                    context_name: None,
+                },
+            );
+            config.timeout_ms = 500;
+            SnmpClient::new(config)
+        };
+        // authPriv e authNoPriv pelo mesmo caminho do perfil.
+        assert!(!v3("scanner", "auth-password", Some("priv-password"))
             .walk("1.3.6.1.2.1.1")
             .await
-            .expect("GETBULK SNMPv3")
+            .expect("GETBULK SNMPv3 authPriv")
             .is_empty());
+        assert!(v3("leitor", "auth-password", None)
+            .get(&["1.3.6.1.2.1.1.1.0"])
+            .await
+            .expect("GET SNMPv3 authNoPriv")["1.3.6.1.2.1.1.1.0"]
+            .is_some());
+        // Senha errada não vira "sem dados": é erro.
+        assert!(v3("scanner", "senha-errada", Some("priv-password"))
+            .get(&["1.3.6.1.2.1.1.1.0"])
+            .await
+            .is_err());
 
         cancel.cancel();
         let _ = worker.await;

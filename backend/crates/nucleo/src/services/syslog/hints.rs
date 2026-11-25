@@ -26,7 +26,10 @@ use std::{
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder};
 use tokio::{net::TcpStream, time::timeout};
 
-use netmonitor_core::devices::access::{DeviceAccess, SnmpSystemInfo};
+use netmonitor_core::devices::{
+    access::{DeviceAccess, SnmpSystemInfo},
+    snmp_credentials::{self, SnmpCredentials},
+};
 
 use super::nat::NatDetector;
 use crate::{
@@ -88,7 +91,7 @@ pub async fn collect(
     let snmp_fut = async {
         match host {
             Some(endereco) if dispositivo.snmp_enabled => {
-                sistema_por_snmp(access, endereco, dispositivo).await
+                sistema_por_snmp(db, access, endereco, dispositivo).await
             }
             _ => None,
         }
@@ -188,32 +191,26 @@ pub async fn mac_conhecido(
 }
 
 /// Lê a identidade SNMP do equipamento pelo acesso da Rede — ver
-/// `netmonitor_network::device_access::snmp_identity`. Sem a área, ou com a
-/// comunidade vazia, não há palpite.
+/// `netmonitor_network::device_access::snmp_identity`. Sem a área não há
+/// palpite.
 pub async fn identidade_snmp(
     access: Option<&dyn DeviceAccess>,
     host: IpAddr,
-    comunidade: &str,
-    versao: Option<&str>,
+    credencial: &SnmpCredentials,
 ) -> Option<SnmpSystemInfo> {
-    if comunidade.trim().is_empty() {
-        return None;
-    }
-    access?.snmp_identity(host, comunidade, versao).await
+    access?.snmp_identity(host, credencial).await
 }
 
+/// A identidade SNMP com a credencial do dispositivo (a dele ou a padrão).
+/// Credencial ilegível vira "sem palpite", como agente fora do ar.
 async fn sistema_por_snmp(
+    db: &sea_orm::DatabaseConnection,
     access: Option<&dyn DeviceAccess>,
     host: IpAddr,
     dispositivo: &devices::Model,
 ) -> Option<SnmpSystemInfo> {
-    let community = dispositivo
-        .snmp_community
-        .as_deref()
-        .map(str::trim)
-        .filter(|valor| !valor.is_empty())
-        .unwrap_or(crate::services::preferences::DEFAULT_SNMP_COMMUNITY);
-    identidade_snmp(access, host, community, dispositivo.snmp_version.as_deref()).await
+    let credencial = snmp_credentials::for_device(db, dispositivo).await.ok()?;
+    identidade_snmp(access, host, &credencial).await
 }
 
 /// Descobre o endereço local que o sistema operacional usaria para falar com

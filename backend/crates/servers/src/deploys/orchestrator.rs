@@ -505,29 +505,25 @@ pub async fn cancel(ctx: &AppContext, run_id: i64, user: &str) -> AppResult<depl
     .await
 }
 
-/// Sobe o despachante. Fora do ambiente de teste.
-pub fn spawn(ctx: &AppContext) {
-    if ctx.environment == loco_rs::environment::Environment::Test {
-        return;
+/// O despachante, para sempre. Rotina do processo líder (ADR 024), subida
+/// pelo ponto de montagem fora do ambiente de teste: a recuperação do começo
+/// roda a cada vez que este processo assume.
+pub async fn run(ctx: AppContext) {
+    if let Err(error) = recover_interrupted(&ctx).await {
+        tracing::warn!(%error, "não foi possível encerrar os deploys interrompidos");
     }
-    let ctx = ctx.clone();
-    tokio::spawn(async move {
-        if let Err(error) = recover_interrupted(&ctx).await {
-            tracing::warn!(%error, "não foi possível encerrar os deploys interrompidos");
+    if let Err(error) = super::builds::recover(&ctx).await {
+        tracing::warn!(%error, "não foi possível retomar as compilações interrompidas");
+    }
+    loop {
+        if let Err(error) = dispatch(&ctx, Utc::now()).await {
+            tracing::warn!(%error, "ciclo do despachante de deploys falhou");
         }
-        if let Err(error) = super::builds::recover(&ctx).await {
-            tracing::warn!(%error, "não foi possível retomar as compilações interrompidas");
+        tokio::select! {
+            () = WAKE.notified() => {}
+            () = tokio::time::sleep(TICK) => {}
         }
-        loop {
-            if let Err(error) = dispatch(&ctx, Utc::now()).await {
-                tracing::warn!(%error, "ciclo do despachante de deploys falhou");
-            }
-            tokio::select! {
-                () = WAKE.notified() => {}
-                () = tokio::time::sleep(TICK) => {}
-            }
-        }
-    });
+    }
 }
 
 /// Deploys que estavam rodando quando o processo caiu não têm mais quem os

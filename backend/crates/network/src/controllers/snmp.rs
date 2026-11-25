@@ -1,32 +1,24 @@
-//! Endpoints SNMP de teste e coleta de dispositivo.
+//! Endpoints SNMP de teste e coleta de dispositivo, e o cadastro das
+//! credenciais SNMP (`/api/snmp/credentials`).
 
+use axum::{http::HeaderMap, http::StatusCode, response::IntoResponse};
 use loco_rs::prelude::*;
 use sea_orm::EntityTrait;
 
-use crate::snmp::{
-    client::{SnmpConfig, SnmpVersion},
-    service,
+use crate::{
+    dtos::snmp_credentials::{SnmpCredentialInput, SnmpCredentialTestInput, SnmpTargetInput},
+    snmp::{
+        client::SnmpConfig,
+        credentials,
+        service::{self, DetectCandidate},
+    },
 };
 use netmonitor_core::{
+    audit::{AuditAction, AuditActor, AuditChanges, AuditEntryInput, AuditService, ResourceType},
     models::devices,
     monitoring::execution_guard::{try_acquire_snmp_device, DeviceSnmpExecutionGuard},
     shared::errors::{AppError, AppResult},
 };
-
-#[derive(Debug, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SnmpTestInput {
-    host: String,
-    port: Option<u16>,
-    version: Option<String>,
-    community: Option<String>,
-    username: Option<String>,
-    auth_protocol: Option<String>,
-    auth_key: Option<String>,
-    priv_protocol: Option<String>,
-    priv_key: Option<String>,
-    auto_detect: Option<bool>,
-}
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SnmpApplyInput {
@@ -42,49 +34,23 @@ struct InterfaceMonitoringInput {
     enabled: bool,
 }
 
-fn config(
-    host: impl Into<String>,
-    port: u16,
-    version: Option<&str>,
-    community: Option<&str>,
-) -> AppResult<SnmpConfig> {
-    let mut config = SnmpConfig::v2c(host, community.unwrap_or("public"), port);
-    config.version = SnmpVersion::parse(version.unwrap_or("v2c"))
-        .ok_or_else(|| AppError::validation("Versão SNMP inválida"))?;
-    Ok(config)
-}
-fn config_from_test_input(input: &SnmpTestInput, port: u16) -> AppResult<SnmpConfig> {
-    let mut config = config(
-        input.host.clone(),
-        port,
-        input.version.as_deref(),
-        input.community.as_deref(),
-    )?;
-    config.username = input.username.clone();
-    config.auth_protocol = input.auth_protocol.clone();
-    config.auth_key = input.auth_key.clone();
-    config.priv_protocol = input.priv_protocol.clone();
-    config.priv_key = input.priv_key.clone();
-    Ok(config)
-}
-async fn test(Json(input): Json<SnmpTestInput>) -> AppResult<Response> {
-    if input.host.trim().is_empty() {
-        return Err(AppError::validation("Host SNMP é obrigatório"));
-    }
-    let port = input.port.unwrap_or(161);
+/// `POST /api/snmp/test` — testa a credencial (perfil, avulsa ou padrão)
+/// contra um alvo; com `autoDetect`, tenta também os perfis cadastrados e diz
+/// qual respondeu (`profileId`).
+async fn test(
+    State(ctx): State<AppContext>,
+    Json(input): Json<SnmpTargetInput>,
+) -> AppResult<Response> {
+    let config = credentials::target_config(&ctx.db, &input).await?;
     if input.auto_detect.unwrap_or(false) {
+        let preferred = credentials::target_candidate(&ctx.db, &input).await?;
+        let candidates = DetectCandidate::load(&ctx.db).await?;
         return Ok(format::json(
-            service::detect_connection(
-                &input.host,
-                port,
-                Some(config_from_test_input(&input, port)?),
-            )
-            .await?,
+            service::detect_connection(&config.host, config.port, Some(preferred), &candidates)
+                .await?,
         )?);
     }
-    Ok(format::json(
-        service::test_connection(config_from_test_input(&input, port)?).await?,
-    )?)
+    Ok(format::json(service::test_connection(config).await?)?)
 }
 /// Quanto uma mudança de configuração espera a coleta em curso do mesmo
 /// dispositivo terminar antes de desistir com 409: o poll agendado de um
@@ -113,8 +79,7 @@ async fn device_with_config(ctx: &AppContext, id: i64) -> AppResult<(devices::Mo
         .one(&ctx.db)
         .await?
         .ok_or_else(|| AppError::not_found("Dispositivo não encontrado"))?;
-    let prefs = netmonitor_core::preferences::load(&ctx.db).await?;
-    let config = service::device_config_with(&device, &prefs.default_snmp_community)?;
+    let config = service::device_config(&ctx.db, &device).await?;
     Ok((device, config))
 }
 async fn scan(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
@@ -183,14 +148,132 @@ async fn set_interface_monitoring(
 }
 /// Consulta a lista de interfaces de um alvo SNMP sem precisar que o dispositivo
 /// já esteja salvo no banco. Útil para preenchimento de seletores na criação.
-async fn query_interfaces(Json(input): Json<SnmpTestInput>) -> AppResult<Response> {
-    if input.host.trim().is_empty() {
-        return Err(AppError::validation("Host SNMP é obrigatório"));
-    }
-    let port = input.port.unwrap_or(161);
-    let cfg = config_from_test_input(&input, port)?;
+async fn query_interfaces(
+    State(ctx): State<AppContext>,
+    Json(input): Json<SnmpTargetInput>,
+) -> AppResult<Response> {
+    let cfg: SnmpConfig = credentials::target_config(&ctx.db, &input).await?;
     let ifaces = service::query_interfaces(cfg).await?;
     Ok(format::json(ifaces)?)
+}
+
+async fn audit(
+    ctx: &AppContext,
+    headers: &HeaderMap,
+    action: AuditAction,
+    id: i64,
+    label: &str,
+    description: String,
+    changes: Option<AuditChanges>,
+) {
+    let _ = AuditService::new(&ctx.db)
+        .log(
+            AuditActor::from_headers(headers, &ctx.db)
+                .await
+                .unwrap_or_default(),
+            AuditEntryInput {
+                action,
+                resource_type: ResourceType::SnmpCredential,
+                resource_id: Some(id),
+                resource_label: Some(label.to_owned()),
+                description: Some(description),
+                changes,
+            },
+        )
+        .await;
+}
+
+async fn list_credentials(State(ctx): State<AppContext>) -> AppResult<Response> {
+    Ok(format::json(credentials::list(&ctx.db).await?)?)
+}
+
+async fn show_credential(
+    State(ctx): State<AppContext>,
+    Path(id): Path<i64>,
+) -> AppResult<Response> {
+    Ok(format::json(credentials::show(&ctx.db, id).await?)?)
+}
+
+async fn create_credential(
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Json(input): Json<SnmpCredentialInput>,
+) -> AppResult<Response> {
+    let created = credentials::create(&ctx.db, &input).await?;
+    audit(
+        &ctx,
+        &headers,
+        AuditAction::Create,
+        created.id,
+        &created.name,
+        format!(
+            "Credencial SNMP '{}' ({}) criada",
+            created.name, created.version
+        ),
+        Some(AuditChanges {
+            old: None,
+            new: serde_json::to_value(&created).ok(),
+        }),
+    )
+    .await;
+    Ok((StatusCode::CREATED, Json(created)).into_response())
+}
+
+async fn update_credential(
+    State(ctx): State<AppContext>,
+    Path(id): Path<i64>,
+    headers: HeaderMap,
+    Json(input): Json<SnmpCredentialInput>,
+) -> AppResult<Response> {
+    let (before, after) = credentials::update(&ctx.db, id, &input).await?;
+    audit(
+        &ctx,
+        &headers,
+        AuditAction::Update,
+        after.id,
+        &after.name,
+        format!("Credencial SNMP '{}' atualizada", after.name),
+        Some(AuditChanges {
+            old: serde_json::to_value(before).ok(),
+            new: serde_json::to_value(&after).ok(),
+        }),
+    )
+    .await;
+    Ok(format::json(after)?)
+}
+
+async fn delete_credential(
+    State(ctx): State<AppContext>,
+    Path(id): Path<i64>,
+    headers: HeaderMap,
+) -> AppResult<Response> {
+    let removed = credentials::delete(&ctx.db, id).await?;
+    audit(
+        &ctx,
+        &headers,
+        AuditAction::Delete,
+        removed.id,
+        &removed.name,
+        format!("Credencial SNMP '{}' excluída", removed.name),
+        Some(AuditChanges {
+            old: serde_json::to_value(&removed).ok(),
+            new: None,
+        }),
+    )
+    .await;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+/// `POST /api/snmp/credentials/{id}/test` — a credencial gravada contra um
+/// alvo, sem o segredo passar pela tela.
+async fn test_credential(
+    State(ctx): State<AppContext>,
+    Path(id): Path<i64>,
+    Json(input): Json<SnmpCredentialTestInput>,
+) -> AppResult<Response> {
+    Ok(format::json(
+        credentials::test_against(&ctx.db, id, &input.host, input.port).await?,
+    )?)
 }
 
 /// `POST /api/snmp/interfaces/suggestions` — o Decisor indica o uplink e as
@@ -234,6 +317,12 @@ pub fn routes() -> Routes {
         .add("/snmp/profiles", get(list_profiles))
         .add("/snmp/profiles", post(save_profile))
         .add("/snmp/profiles/{id}", delete(delete_profile))
+        .add("/snmp/credentials", get(list_credentials))
+        .add("/snmp/credentials", post(create_credential))
+        .add("/snmp/credentials/{id}", get(show_credential))
+        .add("/snmp/credentials/{id}", put(update_credential))
+        .add("/snmp/credentials/{id}", delete(delete_credential))
+        .add("/snmp/credentials/{id}/test", post(test_credential))
         .add("/devices/{id}/snmp/scan", post(scan))
         .add("/devices/{id}/snmp/poll", post(poll))
         .add("/devices/{id}/snmp/apply-monitors", post(apply_monitors))

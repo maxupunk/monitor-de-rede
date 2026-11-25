@@ -17,6 +17,13 @@
 //! A tarefa `scheduler_loop` continua registrada para quem quiser o ciclo em um
 //! processo à parte (`SCHEDULER_ENABLED=false` no servidor + um container só
 //! com a tarefa).
+//!
+//! **Liderança (ADR 024).** Os três caminhos respeitam a função `Scheduler`:
+//! o servidor e o `scheduler_loop` só rodam o ciclo enquanto este processo for
+//! o líder (e o retomam se voltarem a sê-lo); o `scheduler_run` pega a função
+//! para a única passada e **recusa** se outro processo for o líder — dois
+//! ciclos ao mesmo tempo executariam os mesmos monitores. No SQLite o processo
+//! é sempre o líder.
 
 use std::collections::{BTreeMap, HashSet};
 
@@ -24,6 +31,7 @@ use chrono::Utc;
 use futures::{stream, StreamExt};
 use loco_rs::prelude::*;
 use netmonitor_core::{
+    cluster::leadership::{while_leader, LeaderRole, Leadership},
     models::monitors,
     monitoring::MonitorGroups,
     routines::{AreaRoutines, Cycle},
@@ -62,7 +70,11 @@ impl Task for SchedulerRun {
     }
 
     async fn run(&self, ctx: &AppContext, _vars: &task::Vars) -> Result<()> {
-        run_cycle(ctx).await.map(|_| ()).map_err(Into::into)
+        Leadership::from_context(ctx)
+            .run_once(LeaderRole::Scheduler, run_cycle(ctx))
+            .await
+            .map(|_| ())
+            .map_err(Into::into)
     }
 }
 
@@ -164,7 +176,36 @@ impl Task for SchedulerLoop {
 
     async fn run(&self, ctx: &AppContext, vars: &task::Vars) -> Result<()> {
         let seconds = resolve_interval_seconds(vars.cli_arg("interval_seconds").ok());
-        run_forever(ctx, seconds, shutdown_signal()).await;
+        let leadership = Leadership::from_context(ctx);
+        let mut is_leader = leadership.watch(LeaderRole::Scheduler);
+        let stop = tokio_util::sync::CancellationToken::new();
+        tokio::spawn({
+            let stop = stop.clone();
+            async move {
+                shutdown_signal().await;
+                stop.cancel();
+            }
+        });
+        // Líder: o sinal encerra o laço entre ciclos (`run_forever`).
+        // Seguidor: não há ciclo a drenar, e o sinal encerra a espera.
+        let cycle = while_leader(
+            leadership.watch(LeaderRole::Scheduler),
+            "ciclo_do_scheduler",
+            || run_forever(ctx, seconds, stop.clone().cancelled_owned()),
+        );
+        tokio::pin!(cycle);
+        loop {
+            let leading = *is_leader.borrow_and_update();
+            tokio::select! {
+                () = &mut cycle => break,
+                () = stop.cancelled(), if !leading => break,
+                changed = is_leader.changed() => {
+                    if changed.is_err() {
+                        break;
+                    }
+                }
+            }
+        }
         Ok(())
     }
 }
@@ -271,9 +312,9 @@ async fn run_cycle_inner(ctx: &AppContext, detach_discovery: bool) -> AppResult<
             tracing::warn!(%error, "falha ao avaliar padrões de log");
         }
     }
-    // O relay do `event_outbox` **não** roda aqui. Ele é in-process e só
-    // entrega a quem tem conexão SSE aberta — o servidor. Ver
-    // `initializers::monitoring::spawn_event_relay`.
+    // Os eventos que o ciclo publicou chegam aos outros processos pelo
+    // `NOTIFY` do próprio commit (ADR 024); o ciclo não entrega nada de
+    // outro processo.
     Ok(due.len())
 }
 

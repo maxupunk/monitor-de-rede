@@ -9,7 +9,10 @@ use agent_protocol::device_io::{Login, TransportKind};
 use async_trait::async_trait;
 use loco_rs::app::AppContext;
 use netmonitor_core::{
-    devices::access::{CredentialView, DeviceAccess, DeviceShell, SnmpSystemInfo},
+    devices::{
+        access::{CredentialView, DeviceAccess, DeviceShell, SnmpSystemInfo},
+        snmp_credentials::SnmpCredentials,
+    },
     models::devices,
     shared::errors::{AppError, AppResult},
 };
@@ -21,7 +24,7 @@ use crate::{
         transport::shell::{ssh, telnet},
     },
     snmp::{
-        client::{SnmpClient, SnmpConfig, SnmpVersion},
+        client::{SnmpClient, SnmpConfig},
         collectors::{collect_hardware, collect_system},
     },
 };
@@ -37,18 +40,8 @@ pub struct NetworkDeviceAccess;
 ///
 /// Falha vira `None` — é um palpite, e um agente SNMP fora do ar não pode
 /// impedir a tela de abrir.
-pub async fn snmp_identity(
-    host: IpAddr,
-    comunidade: &str,
-    versao: Option<&str>,
-) -> Option<SnmpSystemInfo> {
-    if comunidade.trim().is_empty() {
-        return None;
-    }
-    let mut config = SnmpConfig::v2c(host.to_string(), comunidade.to_owned(), 161);
-    if versao.map(str::trim) == Some("v1") {
-        config.version = SnmpVersion::V1;
-    }
+pub async fn snmp_identity(host: IpAddr, credentials: &SnmpCredentials) -> Option<SnmpSystemInfo> {
+    let mut config = SnmpConfig::from_credentials(host.to_string(), 161, credentials);
     // Teto curto: isto roda na abertura de um diálogo, não num ciclo de coleta.
     config.timeout_ms = 1_500;
     let client = SnmpClient::new(config);
@@ -95,10 +88,9 @@ impl DeviceAccess for NetworkDeviceAccess {
     async fn snmp_identity(
         &self,
         host: IpAddr,
-        community: &str,
-        version: Option<&str>,
+        credentials: &SnmpCredentials,
     ) -> Option<SnmpSystemInfo> {
-        snmp_identity(host, community, version).await
+        snmp_identity(host, credentials).await
     }
 
     async fn has_wifi_reader(&self, db: &DatabaseConnection, device_id: i64) -> AppResult<bool> {

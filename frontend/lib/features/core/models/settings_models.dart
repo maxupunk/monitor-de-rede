@@ -67,17 +67,14 @@ class OnboardingStatus {
 class SystemPreferences {
   const SystemPreferences({
     this.defaultPingIntervalSeconds = 60,
-    this.defaultSnmpCommunity = 'public',
     this.autoDiscoveryEnabled = true,
   });
 
   final int defaultPingIntervalSeconds;
-  final String defaultSnmpCommunity;
   final bool autoDiscoveryEnabled;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'defaultPingIntervalSeconds': defaultPingIntervalSeconds,
-    'defaultSnmpCommunity': defaultSnmpCommunity,
     'autoDiscoveryEnabled': autoDiscoveryEnabled,
   };
 
@@ -85,8 +82,7 @@ class SystemPreferences {
     return SystemPreferences(
       defaultPingIntervalSeconds:
           parseIntOrNull(json['defaultPingIntervalSeconds']) ?? 60,
-      defaultSnmpCommunity: (json['defaultSnmpCommunity'] ?? 'public')
-          .toString(),
+
       autoDiscoveryEnabled: json['autoDiscoveryEnabled'] != false,
     );
   }
