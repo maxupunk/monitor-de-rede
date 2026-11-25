@@ -89,7 +89,7 @@ pub async fn acknowledge_alert<C: ConnectionTrait>(
 ///
 /// O `data` carrega o título e o contexto do disparo; sobrescrevê-lo inteiro
 /// apagaria justamente o que a tela mostra sobre o alerta.
-fn merge_data(current: Option<Value>, key: &str, value: Value) -> Value {
+pub(crate) fn merge_data(current: Option<Value>, key: &str, value: Value) -> Value {
     let mut object = match current {
         Some(Value::Object(map)) => map,
         _ => serde_json::Map::new(),

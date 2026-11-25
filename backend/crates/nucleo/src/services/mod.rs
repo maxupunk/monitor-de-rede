@@ -14,6 +14,7 @@ pub mod alerts;
 pub mod audit;
 pub mod auth;
 pub mod backup;
+pub mod client_failures;
 pub mod dashboard;
 pub mod devices;
 pub mod maintenance;

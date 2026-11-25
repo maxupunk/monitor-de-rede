@@ -149,6 +149,7 @@ const List<(String, String)> kAuditResourceOptions = <(String, String)>[
   ('probe', 'Probe'),
   ('vpn_peer', 'Peer VPN'),
   ('alert_rule', 'Regra de alerta'),
+  ('alert_event', 'Alerta'),
   ('maintenance_window', 'Janela de manutenção'),
   ('scheduled_task', 'Tarefa agendada'),
   ('storage', 'Armazenamento'),

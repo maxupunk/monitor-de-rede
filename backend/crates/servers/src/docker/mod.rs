@@ -34,6 +34,13 @@ use netmonitor_core::shared::errors::{AppError, AppResult};
 
 const OPERATION_TIMEOUT: Duration = Duration::from_secs(12);
 
+/// Iniciar, parar, reiniciar e remover um container. O `stop` espera o
+/// `stop_grace_period` do próprio container (10 s por padrão, e o compose
+/// costuma aumentar) antes de matar o processo: com o teto de 12 s das
+/// consultas, a Engine seguia parando o container enquanto a tela recebia
+/// "Engine indisponível".
+pub const LIFECYCLE_TIMEOUT: Duration = Duration::from_secs(3 * 60);
+
 pub const DISABLED_REASON: &str =
     "Integração Docker desativada: DOCKER_ENABLED=false no ambiente do agente";
 pub const UNAVAILABLE_REASON: &str = "O agente não conseguiu acessar a Docker Engine. A Engine pode estar desligada, o socket pode não estar montado no container do agente ou ele pode não ter permissão";
@@ -60,7 +67,15 @@ pub fn client() -> Result<Docker, DockerError> {
 pub(crate) async fn call<T>(
     future: impl Future<Output = Result<T, bollard::errors::Error>>,
 ) -> Result<T, DockerError> {
-    match tokio::time::timeout(OPERATION_TIMEOUT, future).await {
+    call_within(OPERATION_TIMEOUT, future).await
+}
+
+/// [`call`] com outro teto — o das ações de ciclo de vida.
+pub(crate) async fn call_within<T>(
+    timeout: Duration,
+    future: impl Future<Output = Result<T, bollard::errors::Error>>,
+) -> Result<T, DockerError> {
+    match tokio::time::timeout(timeout, future).await {
         Ok(Ok(value)) => Ok(value),
         Ok(Err(error)) => Err(map_engine_error(&error)),
         Err(_) => Err(DockerError::Unavailable),

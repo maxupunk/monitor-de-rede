@@ -104,6 +104,7 @@ class ServerAddressEntry {
     required this.overridden,
     required this.source,
     required this.https,
+    this.url,
   });
 
   final String id;
@@ -116,6 +117,10 @@ class ServerAddressEntry {
   final String source;
   final bool https;
 
+  /// A URL desta central por este caminho, com a porta certa (calculada pelo
+  /// servidor, a mesma regra dos comandos de instalação do agente).
+  final String? url;
+
   factory ServerAddressEntry.fromJson(Map<String, dynamic> json) {
     return ServerAddressEntry(
       id: (json['id'] ?? '').toString(),
@@ -127,6 +132,7 @@ class ServerAddressEntry {
       overridden: json['overridden'] == true,
       source: (json['source'] ?? '').toString(),
       https: json['https'] == true,
+      url: json['url'] as String?,
     );
   }
 }

@@ -96,6 +96,16 @@ stateDiagram-v2
 - **`flapping`**: Ocorrência de oscilações repetidas (recaídas frequentes). O sistema consolida o estado para evitar disparos contínuos de notificações repetitivas.
 - **`resolved`**: Incidente finalizado com sucesso após confirmação de estabilidade.
 
+**Alerta de monitor × alerta de evento.** O alerta de um monitor é observado a
+cada checagem: a janela de recuperação espera uma checagem ok depois de vencer.
+O alerta de evento (túnel VPN, status de interface — sem monitor) recebe a volta
+**uma vez só** (o túnel reconectou, a interface subiu); para ele a própria volta
+fecha o alerta, sem janela, porque não haverá segunda leitura para confirmar
+(`recovery::observed_policy`). "Verificar agora" não tem o que repetir num
+alerta de evento e diz isso; se a volta nunca chegou, o operador **encerra** o
+alerta (`POST /api/alerts/{id}/close`, auditado). Se a condição persistir, um
+alerta novo abre na próxima detecção.
+
 ---
 
 ## 4. Vocabulário de Fatos (`condition.field`) e Operadores
@@ -183,6 +193,9 @@ O motor estatístico calcula o comportamento normal histórico do alvo para a me
 
 Na rota `/alerts` da aplicação:
 - **Aba Pendentes**: Visualização dos incidentes em aberto com badges de severidade, status, tempo decorrido, diagnósticos e botão direto para consulta ao Assistente IA.
+  - **Verificar agora** repete a checagem do monitor (com progresso no botão); num alerta de evento, explica que não há checagem e oferece **Encerrar**.
+  - **Encerrar** fecha o alerta à mão, com confirmação.
+  - **Resumo IA** abre uma folha que explica o que a IA consulta, mostra o progresso, o resumo gravado e o atalho **Continuar no chat**. A ação é declarada pela IA no `AlertActionRegistry` (ADR 017).
 - **Aba Regras**: Tabela com todas as regras cadastradas, indicando escopo, critério, severidade, switch de ativação rápida (`enabled`) e ações de edição/exclusão.
 - **Catálogo de Regras Pré-configuradas**: Diálogo acessível pelo botão no cabeçalho com receitas de boas práticas prontas para instalação imediata.
 - **Formulário de Nova Regra**: Cadastro assistido com autocompletar para campos válidos e escopo customizado.

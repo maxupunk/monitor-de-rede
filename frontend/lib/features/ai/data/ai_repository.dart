@@ -117,6 +117,23 @@ class AiRepository {
     );
   }
 
+  /// Apaga um modelo baixado no Ollama (`DELETE /api/ai/ollama/models`).
+  /// Só administrador; o modelo do chat é recusado pelo servidor.
+  Future<AiModelRemoval> deleteOllamaModel({
+    required String model,
+    String? baseUrl,
+  }) async {
+    final json = await _api.delete<Map<String, dynamic>>(
+      '/ai/ollama/models',
+      data: <String, dynamic>{
+        'model': model.trim(),
+        if (baseUrl != null && baseUrl.trim().isNotEmpty)
+          'baseUrl': baseUrl.trim(),
+      },
+    );
+    return AiModelRemoval.fromJson(json);
+  }
+
   /// Streaming SSE-over-POST de download de modelo Ollama (`POST /api/ai/ollama/pull`).
   Stream<ModelPullProgress> pullOllamaModel({
     required String model,
@@ -356,7 +373,9 @@ class AiRepository {
   Future<AiIncidentSummary?> generateAlertSummary(int alertId) async {
     final json = await _api.post<Map<String, dynamic>>(
       '/ai/alerts/$alertId/summary',
-      timeout: const Duration(seconds: 60),
+      // A IA consulta várias ferramentas antes de responder; um modelo local
+      // passa fácil de um minuto.
+      timeout: const Duration(seconds: 90),
     );
     final raw = json['summary'];
     if (raw is Map) {

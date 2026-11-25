@@ -167,6 +167,33 @@ async fn resumo_de_incidente_fica_gravado_no_alerta_uma_vez_so() {
 
 #[tokio::test]
 #[serial]
+async fn resumo_pedido_com_a_ia_desligada_explica_onde_ligar() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
+        settings::save(
+            &ctx.db,
+            AiSettings {
+                enabled: false,
+                ..AiSettings::default()
+            },
+        )
+        .await
+        .unwrap();
+        let evento = alerta(&ctx).await;
+
+        let erro = incident::summarize_alert(&ctx, &Falso("nunca"), evento.id)
+            .await
+            .expect_err("sem IA, sem resumo");
+        assert!(
+            erro.to_string()
+                .contains("Configurações › Inteligência artificial"),
+            "{erro}"
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
 async fn resumo_periodico_sai_uma_vez_por_periodo_e_fica_consultavel() {
     request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
         let falso = Falso("Rede estável; 1 incidente resolvido.");

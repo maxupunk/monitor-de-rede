@@ -7,7 +7,9 @@ import 'package:netmonitor_app/core/utils/network_address_utils.dart';
 import 'package:netmonitor_app/features/ai/models/mcp_models.dart';
 import 'package:netmonitor_app/features/ai/providers/mcp_provider.dart';
 import 'package:netmonitor_app/features/ai/widgets/mcp_create_token_sheet.dart';
+import 'package:netmonitor_app/features/ai/widgets/mcp_endpoint_picker.dart';
 import 'package:netmonitor_app/features/ai/widgets/mcp_snippets.dart';
+import 'package:netmonitor_app/features/core/providers/settings_provider.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
 
@@ -24,12 +26,17 @@ class McpSettingsCard extends ConsumerStatefulWidget {
 }
 
 class _McpSettingsCardState extends ConsumerState<McpSettingsCard> {
+  /// O endereço escolhido para as configurações dos agentes; nulo segue o
+  /// primeiro que funciona com a política atual.
+  String? _endpointId;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         ref.read(mcpProvider.notifier).loadAll();
+        ref.read(coreSettingsProvider.notifier).fetchServerAddresses();
       }
     });
   }
@@ -82,11 +89,22 @@ class _McpSettingsCardState extends ConsumerState<McpSettingsCard> {
     final overview = state.overview ?? const McpOverview();
     final settings = overview.settings;
     final origin = resolveCentralOrigin(serverConfig.baseUrl);
-    final endpointUrl = buildMcpEndpointUrl(
-      origin: origin,
+    final endpointOptions = mcpEndpointOptions(
+      addresses: ref.watch(coreSettingsProvider).addresses,
+      currentOrigin: origin,
       endpointPath: settings.endpointPath,
     );
-    final isPublicOrigin = origin.trim().isNotEmpty && !looksPrivateUrl(origin);
+    final endpoint = pickMcpEndpoint(
+      endpointOptions,
+      selectedId: _endpointId,
+      allowPublicOrigin: settings.allowPublicOrigin,
+    );
+    final endpointUrl =
+        endpoint?.endpointUrl ??
+        buildMcpEndpointUrl(
+          origin: origin,
+          endpointPath: settings.endpointPath,
+        );
 
     return SectionCard(
       title: 'Servidor MCP (Agentes externos)',
@@ -118,7 +136,8 @@ class _McpSettingsCardState extends ConsumerState<McpSettingsCard> {
           OutlinedButton.icon(
             onPressed: () => showMcpHelpSheet(
               context,
-              origin: origin,
+              endpointUrl: endpointUrl,
+              internal: endpoint?.internal ?? true,
               settings: settings,
               toolsCount: overview.toolsCount,
             ),
@@ -169,15 +188,14 @@ class _McpSettingsCardState extends ConsumerState<McpSettingsCard> {
                       ),
                   ],
                 ),
-                if (isPublicOrigin && !settings.allowPublicOrigin) ...<Widget>[
+                if (endpointOptions.isNotEmpty) ...<Widget>[
                   const SizedBox(height: 12),
-                  const NestedPanel(
-                    tone: SemanticTone.warning,
-                    child: Text(
-                      'Endereço público detectado: por padrão o MCP recusa requisições '
-                      'vindas fora da rede interna ou VPN. Use o endereço da VPN ou '
-                      'habilite conexões externas abaixo.',
-                    ),
+                  McpEndpointPicker(
+                    options: endpointOptions,
+                    selected: endpoint,
+                    allowPublicOrigin: settings.allowPublicOrigin,
+                    onSelected: (option) =>
+                        setState(() => _endpointId = option.id),
                   ),
                 ],
                 if (overview.canManageSettings) ...<Widget>[

@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
-import 'package:netmonitor_app/core/utils/network_address_utils.dart';
 import 'package:netmonitor_app/features/ai/models/mcp_models.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
@@ -40,6 +39,21 @@ String buildMcpJsonSnippet({
   });
 }
 
+/// Bloco do Antigravity (`mcp_config.json`): servidor remoto em `serverUrl`.
+String buildAntigravityMcpSnippet({
+  required String endpointUrl,
+  required String token,
+}) {
+  return const JsonEncoder.withIndent('  ').convert(<String, dynamic>{
+    'mcpServers': <String, dynamic>{
+      'netmonitor': <String, dynamic>{
+        'serverUrl': endpointUrl,
+        'headers': <String, String>{'Authorization': 'Bearer $token'},
+      },
+    },
+  });
+}
+
 /// Bloco do VS Code (`.vscode/mcp.json`): chave `servers` e `type: http`.
 String buildVsCodeMcpSnippet({
   required String endpointUrl,
@@ -67,6 +81,10 @@ String buildClaudeCodeCliSnippet({
 
 /// Os clientes com configuração pronta: cada um sabe o próprio formato.
 enum McpClient {
+  antigravity(
+    'Antigravity',
+    'Antigravity (Agente › MCP Servers › Manage › View raw config)',
+  ),
   cursor('Cursor', 'Cursor (~/.cursor/mcp.json)'),
   vscode('VS Code', 'VS Code (.vscode/mcp.json)'),
   claudeCode('Claude Code', 'Claude Code (terminal)');
@@ -78,6 +96,10 @@ enum McpClient {
 
   String snippet({required String endpointUrl, required String token}) {
     return switch (this) {
+      McpClient.antigravity => buildAntigravityMcpSnippet(
+        endpointUrl: endpointUrl,
+        token: token,
+      ),
       McpClient.cursor => buildMcpJsonSnippet(
         endpointUrl: endpointUrl,
         token: token,
@@ -95,17 +117,16 @@ enum McpClient {
 }
 
 /// Abre o guia rápido com snippets prontos para conectar agentes externos ao servidor MCP.
+///
+/// `endpointUrl` é o endereço escolhido no cartão; `internal` diz se ele é da
+/// rede local ou da VPN.
 Future<void> showMcpHelpSheet(
   BuildContext context, {
-  required String origin,
+  required String endpointUrl,
+  required bool internal,
   required McpSettings settings,
   required int toolsCount,
 }) {
-  final endpointUrl = buildMcpEndpointUrl(
-    origin: origin,
-    endpointPath: settings.endpointPath,
-  );
-  final isPublicOrigin = origin.trim().isNotEmpty && !looksPrivateUrl(origin);
   const placeholderToken = '<SEU_TOKEN_MCP>';
 
   return showAdaptiveFormSheet<void>(
@@ -127,13 +148,13 @@ Future<void> showMcpHelpSheet(
           ),
           const SizedBox(height: 12),
         ],
-        if (isPublicOrigin && !settings.allowPublicOrigin) ...<Widget>[
+        if (!internal && !settings.allowPublicOrigin) ...<Widget>[
           const NestedPanel(
             tone: SemanticTone.warning,
             child: Text(
-              'Atenção: o endereço atual parece público, mas a opção '
+              'Atenção: o endereço escolhido passa pela internet, mas a opção '
               '"Permitir conexões fora da rede interna/VPN" está desativada. '
-              'Conecte-se pela VPN do NetMonitor ou pela rede interna, ou '
+              'Escolha no cartão o endereço da rede local ou da VPN, ou '
               'libere conexões externas nas configurações do servidor MCP.',
             ),
           ),
@@ -183,7 +204,7 @@ class McpCreatedTokenBanner extends StatefulWidget {
 
 class _McpCreatedTokenBannerState extends State<McpCreatedTokenBanner> {
   /// `null` mostra o token bruto.
-  McpClient? _client = McpClient.cursor;
+  McpClient? _client = McpClient.values.first;
 
   /// O segredo só aparece uma vez: fechar sem ter copiado pede confirmação.
   Future<void> _dismiss() async {

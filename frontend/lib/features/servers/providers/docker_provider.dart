@@ -14,6 +14,11 @@ const int _operationLinesLimit = 50;
 const int _operationsKept = 20;
 const int _logLinesKept = 2000;
 
+/// Iniciar, parar, reiniciar e remover: o `stop` espera o tempo de parada do
+/// container (10 s por padrão, mais se o compose pedir) e a volta pelo
+/// agente. Com os 15 s padrão, a ação acontecia e a tela dizia "falha".
+const Duration dockerLifecycleTimeout = Duration(minutes: 4);
+
 @immutable
 class DockerHostState {
   const DockerHostState({
@@ -236,18 +241,21 @@ class DockerHostApi {
   Future<void> startContainer(String id) async {
     await _api.post<dynamic>(
       '$_base/containers/${Uri.encodeComponent(id)}/start',
+      timeout: dockerLifecycleTimeout,
     );
   }
 
   Future<void> stopContainer(String id) async {
     await _api.post<dynamic>(
       '$_base/containers/${Uri.encodeComponent(id)}/stop',
+      timeout: dockerLifecycleTimeout,
     );
   }
 
   Future<void> restartContainer(String id) async {
     await _api.post<dynamic>(
       '$_base/containers/${Uri.encodeComponent(id)}/restart',
+      timeout: dockerLifecycleTimeout,
     );
   }
 
@@ -261,6 +269,7 @@ class DockerHostApi {
     await _api.delete<dynamic>(
       '$_base/containers/${Uri.encodeComponent(id)}',
       queryParameters: <String, dynamic>{'force': force},
+      timeout: dockerLifecycleTimeout,
     );
   }
 
@@ -364,13 +373,6 @@ class DockerHostApi {
     await _api.post<dynamic>(
       '$_base/images/pull',
       data: <String, dynamic>{'image': image},
-    );
-  }
-
-  Future<List<ComposeProject>> composeProjects() async {
-    final raw = await _api.get<Map<String, dynamic>>('$_base/compose');
-    return List<ComposeProject>.unmodifiable(
-      asJsonList(raw['data'], ComposeProject.fromJson),
     );
   }
 
@@ -567,39 +569,22 @@ class DockerNotifier extends Notifier<DockerState> {
     }
   }
 
-  Future<void> refreshContainers() async {
-    final hostKey = state.selectedHostKey;
-    if (hostKey.isEmpty) return;
-    final api = apiFor(hostKey);
-    try {
-      final containers = await api.containers();
-      final status = await api.status();
-      final metrics = await api.metrics();
-      _updateHostState(hostKey, (prev) {
-        final next = prev.copyWith(status: status, containers: containers);
-        return _appendAggregate(next, metrics);
-      });
-    } catch (err) {
-      state = state.copyWith(
-        error: describeError(err, fallback: 'Erro ao atualizar containers'),
-      );
-    }
-  }
-
-  Future<bool> runAction(
-    Future<void> Function() action, {
-    Future<void> Function()? refresh,
-  }) async {
+  /// Executa uma ação. O estado novo **não** é relido por HTTP: o agente
+  /// publica um snapshot pelo SSE logo depois de toda mudança. Reler aqui
+  /// fazia uma ação concluída virar "falha" quando a releitura demorava.
+  Future<bool> runAction(Future<void> Function() action) async {
     state = state.copyWith(actionLoading: true, clearError: true);
     try {
       await action();
-      if (refresh != null) await refresh();
       state = state.copyWith(actionLoading: false);
       return true;
     } catch (err) {
       state = state.copyWith(
         actionLoading: false,
-        error: describeError(err, fallback: 'Operação Docker não concluída'),
+        error: describeActionError(
+          err,
+          fallback: 'Operação Docker não concluída',
+        ),
       );
       return false;
     }
@@ -611,26 +596,21 @@ class DockerNotifier extends Notifier<DockerState> {
     String containerId,
     DockerContainerActionKey actionKey,
   ) {
-    return runAction(
-      () async {
-        final api = apiFor();
-        switch (actionKey) {
-          case DockerContainerActionKey.start:
-            await api.startContainer(containerId);
-          case DockerContainerActionKey.stop:
-            await api.stopContainer(containerId);
-          case DockerContainerActionKey.restart:
-            await api.restartContainer(containerId);
-          case DockerContainerActionKey.update:
-            await api.updateContainer(containerId);
-          case DockerContainerActionKey.remove:
-            await api.removeContainer(containerId);
-        }
-      },
-      refresh: actionKey == DockerContainerActionKey.update
-          ? null
-          : refreshContainers,
-    );
+    return runAction(() async {
+      final api = apiFor();
+      switch (actionKey) {
+        case DockerContainerActionKey.start:
+          await api.startContainer(containerId);
+        case DockerContainerActionKey.stop:
+          await api.stopContainer(containerId);
+        case DockerContainerActionKey.restart:
+          await api.restartContainer(containerId);
+        case DockerContainerActionKey.update:
+          await api.updateContainer(containerId);
+        case DockerContainerActionKey.remove:
+          await api.removeContainer(containerId);
+      }
+    });
   }
 
   Future<DockerContainerDetail> fetchContainerDetail(String containerId) =>
@@ -652,19 +632,13 @@ class DockerNotifier extends Notifier<DockerState> {
       apiFor().exportVolume(volumeName);
 
   Future<bool> removeVolume(String volumeName, {bool force = false}) =>
-      runAction(
-        () => apiFor().removeVolume(volumeName, force: force),
-        refresh: refreshAll,
-      );
+      runAction(() => apiFor().removeVolume(volumeName, force: force));
 
   Future<DockerNetworkDetail> fetchNetworkDetail(String networkId) =>
       apiFor().networkDetail(networkId);
 
   Future<bool> createNetwork(String name, {String driver = 'bridge'}) =>
-      runAction(
-        () => apiFor().createNetwork(name, driver: driver),
-        refresh: refreshAll,
-      );
+      runAction(() => apiFor().createNetwork(name, driver: driver));
 
   Future<bool> connectNetwork(String networkId, String containerId) =>
       runAction(() => apiFor().connectNetwork(networkId, containerId));
@@ -678,7 +652,7 @@ class DockerNotifier extends Notifier<DockerState> {
   );
 
   Future<bool> removeNetwork(String networkId) =>
-      runAction(() => apiFor().removeNetwork(networkId), refresh: refreshAll);
+      runAction(() => apiFor().removeNetwork(networkId));
 
   Future<DockerImageDetail> fetchImageDetail(String imageId) =>
       apiFor().imageDetail(imageId);
@@ -686,19 +660,10 @@ class DockerNotifier extends Notifier<DockerState> {
   Future<bool> pullImage(String image) =>
       runAction(() => apiFor().pullImage(image));
 
-  Future<DockerPruneResponse> pruneImages() async {
-    final result = await apiFor().pruneImages();
-    await refreshAll();
-    return result;
-  }
+  Future<DockerPruneResponse> pruneImages() => apiFor().pruneImages();
 
-  Future<bool> removeImage(String imageId, {bool force = false}) => runAction(
-    () => apiFor().removeImage(imageId, force: force),
-    refresh: refreshAll,
-  );
-
-  Future<List<ComposeProject>> fetchComposeProjects([String? hostKey]) =>
-      apiFor(hostKey).composeProjects();
+  Future<bool> removeImage(String imageId, {bool force = false}) =>
+      runAction(() => apiFor().removeImage(imageId, force: force));
 
   Future<bool> runComposeAction(
     String project,

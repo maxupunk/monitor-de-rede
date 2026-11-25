@@ -266,6 +266,24 @@ fn policy_for(policies: &HashMap<i64, RulePolicies>, event: &alert_events::Model
         .unwrap_or_default()
 }
 
+/// A janela de estabilidade só vale para quem é observado de novo.
+///
+/// Um monitor checa o alvo a cada ciclo: a janela espera uma **nova** checagem
+/// ok antes de fechar. Um alerta de evento (túnel VPN, status de interface)
+/// recebe a volta uma vez só — o túnel reconectou, a interface subiu — e não
+/// haverá segunda leitura para confirmar: com a janela, o alerta entrava em
+/// `recovering` e ficava preso lá para sempre. Para ele, a própria volta fecha.
+fn observed_policy(policy: EpisodePolicy, observed_again: bool) -> EpisodePolicy {
+    if observed_again {
+        policy
+    } else {
+        EpisodePolicy {
+            recovery_window_seconds: 0,
+            ..policy
+        }
+    }
+}
+
 async fn run(
     ctx: &AppContext,
     scope_key: &str,
@@ -291,7 +309,7 @@ async fn run(
     for event in open {
         let now = Utc::now();
         let rule_policies = policy_for(&policies, &event);
-        let policy = rule_policies.episode;
+        let policy = observed_policy(rule_policies.episode, event.monitor_id.is_some());
         // Status fora do vocabulário (linha antiga) é tratado como `active`:
         // o pior caso é entrar em observação quando poderia fechar.
         let status = event.status.parse().unwrap_or(AlertStatus::Active);
@@ -401,4 +419,50 @@ async fn persist_enter_recovering(
     active.status = Set(AlertStatus::Recovering.as_str().into());
     active.data = Set(Some(Value::Object(data)));
     Ok(active.update(&ctx.db).await?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn decide_recovery(policy: EpisodePolicy, status: AlertStatus) -> Transition {
+        let now = Utc::now();
+        state_machine::decide(&EpisodeInput {
+            status,
+            data: None,
+            started_at: now - chrono::Duration::days(6),
+            policy,
+            condition_matched: false,
+            degraded: false,
+            recovered: true,
+            silenced_now: false,
+            now,
+        })
+    }
+
+    #[test]
+    fn alerta_de_evento_fecha_na_propria_volta() {
+        // O túnel VPN e a interface: janela de 120 s na regra, volta única.
+        let rule = EpisodePolicy {
+            recovery_window_seconds: 120,
+            ..EpisodePolicy::default()
+        };
+        assert!(matches!(
+            decide_recovery(observed_policy(rule, false), AlertStatus::Acknowledged),
+            Transition::Resolve { .. }
+        ));
+    }
+
+    #[test]
+    fn monitor_continua_esperando_a_janela() {
+        let rule = EpisodePolicy {
+            recovery_window_seconds: 120,
+            ..EpisodePolicy::default()
+        };
+        assert_eq!(observed_policy(rule, true), rule);
+        assert!(matches!(
+            decide_recovery(observed_policy(rule, true), AlertStatus::Active),
+            Transition::EnterRecovering
+        ));
+    }
 }

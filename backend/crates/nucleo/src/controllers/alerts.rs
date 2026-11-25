@@ -378,14 +378,46 @@ async fn acknowledge(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppR
 async fn verify(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
     let event = check_and_resolve(&ctx, load_event(&ctx, id).await?).await?;
     let resolved = event.status == AlertStatus::Resolved.as_str();
+    // Sem monitor não há o que checar de novo: dizer "continua ativo" seria
+    // afirmar algo que ninguém observou.
+    let checkable = event.monitor_id.is_some();
     Ok(format::json(json!({
         "message": if resolved {
             format!("Alerta #{id} resolvido com sucesso!")
+        } else if !checkable {
+            EVENT_ALERT_NOT_CHECKABLE.to_string()
         } else {
-            format!("Alerta #{id} continua ativo.")
+            format!("Alerta #{id} continua ativo: a checagem de agora ainda vê o problema.")
         },
         "event": serialize_one(&ctx, &event).await?,
         "resolved": resolved,
+        "checkable": checkable,
+    }))?)
+}
+
+/// A resposta de "verificar" para alerta de evento.
+const EVENT_ALERT_NOT_CHECKABLE: &str = "Este alerta vem de um evento (o túnel caiu, a interface mudou de estado), não de um monitor: não há checagem para repetir agora. Ele fecha sozinho quando o evento de volta chega. Se a condição já passou, encerre o alerta.";
+
+/// `POST /api/alerts/{id}/close` — encerra o alerta à mão.
+async fn close(
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> AppResult<Response> {
+    let event = alert_actions::close(&ctx, load_event(&ctx, id).await?).await?;
+    crate::services::audit::record(
+        &ctx.db,
+        &headers,
+        crate::services::audit::AuditAction::Update,
+        crate::services::audit::ResourceType::AlertEvent,
+        (id, event.message.as_deref().unwrap_or("alerta")),
+        "Encerrou o alerta manualmente".to_string(),
+    )
+    .await;
+    Ok(format::json(json!({
+        "message": format!("Alerta #{id} encerrado."),
+        "event": serialize_one(&ctx, &event).await?,
+        "resolved": true,
     }))?)
 }
 
@@ -394,17 +426,31 @@ async fn verify_all(State(ctx): State<AppContext>) -> AppResult<Response> {
         .filter(alert_events_entity::Column::Status.is_in(AlertStatus::OPEN))
         .all(&ctx.db)
         .await?;
-    let total_checked = pending.len();
+    // Só alerta de monitor tem checagem a repetir; o de evento não entra na
+    // conta de "verificados".
+    let (checkable, event_driven): (Vec<_>, Vec<_>) = pending
+        .into_iter()
+        .partition(|event| event.monitor_id.is_some());
+    let total_checked = checkable.len();
     let mut resolved_count = 0;
-    for event in pending {
+    for event in checkable {
         if check_and_resolve(&ctx, event).await?.status == AlertStatus::Resolved.as_str() {
             resolved_count += 1;
         }
     }
+    let mut message =
+        format!("{resolved_count} de {total_checked} alerta(s) de monitor resolvido(s)");
+    if !event_driven.is_empty() {
+        message.push_str(&format!(
+            "; {} alerta(s) de evento fecham sozinhos quando o evento de volta chega",
+            event_driven.len()
+        ));
+    }
     Ok(format::json(json!({
-        "message": format!("{resolved_count} de {total_checked} alerta(s) pendente(s) resolvido(s)"),
+        "message": message,
         "totalChecked": total_checked,
         "resolvedCount": resolved_count,
+        "eventDriven": event_driven.len(),
     }))?)
 }
 
@@ -505,6 +551,7 @@ pub fn routes() -> Routes {
         .add("/verify-all", post(verify_all))
         .add("/{id}/acknowledge", post(acknowledge))
         .add("/{id}/verify", post(verify))
+        .add("/{id}/close", post(close))
         .add("/{id}/silence", post(silence_alert))
         .add("/{id}/correlation", get(correlation_index))
 }

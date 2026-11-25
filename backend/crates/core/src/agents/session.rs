@@ -25,6 +25,9 @@ use agent_protocol::{
     Hello, RemoteError, TunnelFrame, TunnelPayload, WireFrame,
 };
 
+/// Pedido que levou isto ou mais aparece no log da aplicação.
+const SLOW_REQUEST: Duration = Duration::from_secs(5);
+
 /// Um pedido à espera de resposta.
 struct Pending {
     chunks: Option<mpsc::UnboundedSender<Value>>,
@@ -188,6 +191,64 @@ impl AgentSession {
         if self.is_closed() {
             return Err(RemoteError::disconnected());
         }
+        let label = call.command.label();
+        let started = std::time::Instant::now();
+        let timeout = call.timeout;
+        let result = self.send_and_wait(call).await;
+        self.log_outcome(&label, started.elapsed(), timeout, &result);
+        result
+    }
+
+    /// O que o operador precisa achar no log quando a tela falha: qual agente,
+    /// qual pedido, quanto tempo. Erro de negócio (não encontrado, conflito)
+    /// não entra — é resposta, não falha do canal.
+    fn log_outcome(
+        &self,
+        label: &str,
+        elapsed: Duration,
+        timeout: Duration,
+        result: &Result<Value, RemoteError>,
+    ) {
+        let elapsed_ms = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
+        match result {
+            Err(error) if matches!(error.code, ErrorCode::Timeout) => tracing::warn!(
+                agent = %self.name,
+                command = label,
+                elapsed_ms,
+                timeout_s = timeout.as_secs(),
+                "o agente não respondeu ao pedido a tempo"
+            ),
+            Err(error) if matches!(error.code, ErrorCode::Disconnected) => tracing::warn!(
+                agent = %self.name,
+                command = label,
+                elapsed_ms,
+                "o canal com o agente caiu durante o pedido"
+            ),
+            Err(error)
+                if matches!(
+                    error.code,
+                    ErrorCode::Unavailable | ErrorCode::Engine | ErrorCode::Internal
+                ) =>
+            {
+                tracing::warn!(
+                    agent = %self.name,
+                    command = label,
+                    elapsed_ms,
+                    error = %error.message,
+                    "o agente não conseguiu executar o pedido"
+                );
+            }
+            Ok(_) if elapsed >= SLOW_REQUEST => tracing::info!(
+                agent = %self.name,
+                command = label,
+                elapsed_ms,
+                "pedido ao agente demorou"
+            ),
+            _ => {}
+        }
+    }
+
+    async fn send_and_wait(&self, call: Call) -> Result<Value, RemoteError> {
         let (reply, response) = oneshot::channel();
         self.lock_pending().insert(
             call.id,

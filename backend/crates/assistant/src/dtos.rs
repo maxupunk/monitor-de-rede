@@ -662,6 +662,16 @@ pub struct OllamaModelItem {
     /// Da família treinada com as ferramentas do NetMonitor (prompt enxuto).
     #[serde(default)]
     pub netmonitor_trained: bool,
+    /// O digest do manifesto: dois nomes com o mesmo digest são o mesmo
+    /// arquivo no disco (apagar um só remove o nome).
+    #[serde(default)]
+    pub digest: Option<String>,
+    /// É o modelo configurado no chat — não pode ser apagado.
+    #[serde(default)]
+    pub in_use: bool,
+    /// Os outros nomes com o mesmo arquivo: apagar este não devolve disco.
+    #[serde(default)]
+    pub shared_with: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -706,6 +716,34 @@ pub struct OllamaPullRequest {
     pub model: String,
     #[serde(default)]
     pub base_url: Option<String>,
+}
+
+/// `DELETE /api/ai/ollama/models` — o modelo a apagar e, opcionalmente, o
+/// Ollama da tela (o mesmo `baseUrl` do pull).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct OllamaDeleteRequest {
+    pub model: String,
+    #[serde(default)]
+    pub base_url: Option<String>,
+}
+
+/// O que apagar um modelo do Ollama faz (ou fez): o espaço devolvido ao
+/// disco e os nomes que dividem o mesmo arquivo.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct OllamaModelRemoval {
+    pub name: String,
+    /// Tamanho do modelo, como o Ollama informa.
+    #[ts(type = "number | null")]
+    pub size: Option<u64>,
+    /// Quanto volta ao disco: zero quando outro nome usa o mesmo arquivo.
+    #[ts(type = "number")]
+    pub freed_bytes: u64,
+    /// Os outros nomes com o mesmo arquivo (que continuam instalados).
+    pub shared_with: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

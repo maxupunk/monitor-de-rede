@@ -183,6 +183,57 @@ class DeviceDetailTabContribution {
   final bool Function(int deviceId)? visibleWhen;
 }
 
+/// O alerta, como uma ação de outra feature o recebe — tipo neutro: quem
+/// declara a ação (a IA, por exemplo) não importa o modelo do Núcleo.
+@immutable
+class AlertActionTarget {
+  const AlertActionTarget({
+    required this.alertId,
+    required this.title,
+    required this.status,
+    this.deviceId,
+    this.monitorId,
+    this.data,
+  });
+
+  final int alertId;
+  final String title;
+  final String status;
+  final int? deviceId;
+  final int? monitorId;
+
+  /// O `data` do alerta (resumo da IA, triagem, silêncio…).
+  final Map<String, dynamic>? data;
+}
+
+/// Ação que outra feature oferece no cartão de alerta (ADR 017): o Núcleo
+/// mostra o botão sem conhecer quem o atende.
+@immutable
+class AlertActionContribution {
+  const AlertActionContribution({
+    required this.id,
+    required this.label,
+    required this.icon,
+    required this.tone,
+    required this.area,
+    required this.onPressed,
+  });
+
+  final String id;
+  final String Function(AlertActionTarget target) label;
+  final IconData icon;
+  final SemanticTone tone;
+
+  /// Área que precisa estar visível para a ação aparecer.
+  final ProductArea area;
+  final void Function(
+    BuildContext context,
+    WidgetRef ref,
+    AlertActionTarget target,
+  )
+  onPressed;
+}
+
 typedef NavActionHandler = void Function(BuildContext context, WidgetRef ref);
 typedef AreaSseRoutesBuilder = Map<String, SseRoute> Function(Ref ref);
 
@@ -206,6 +257,7 @@ class AreaContribution {
     this.serverConnectPaths = const <ServerConnectPathContribution>[],
     this.backupTabs = const <BackupTabContribution>[],
     this.deviceDetailTabs = const <DeviceDetailTabContribution>[],
+    this.alertActions = const <AlertActionContribution>[],
     this.shellOverlays = const <WidgetBuilder>[],
     this.extraShellOverlays = const <ProductArea, List<WidgetBuilder>>{},
   });
@@ -230,6 +282,7 @@ class AreaContribution {
   final List<ServerConnectPathContribution> serverConnectPaths;
   final List<BackupTabContribution> backupTabs;
   final List<DeviceDetailTabContribution> deviceDetailTabs;
+  final List<AlertActionContribution> alertActions;
 
   /// Widgets globais montados dentro do shell sob gating de `this.id`.
   final List<WidgetBuilder> shellOverlays;

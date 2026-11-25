@@ -10,6 +10,7 @@ use crate::{
         SaveServerAddressesInput, ServerAddressEntry, ServerAddressesResponse,
     },
     services::{
+        agents::install_address,
         server_addresses::{self, CustomAddress, ServerAddress, StoredAddresses},
         shared::errors::AppResult,
     },
@@ -19,8 +20,12 @@ use crate::{
 async fn index(State(ctx): State<AppContext>) -> AppResult<Response> {
     let lista = server_addresses::list(&ctx.db, &server_addresses::nat_detector(&ctx)).await?;
     let documento = server_addresses::stored(&ctx.db).await?;
+    let ports = install_address::ports(&ctx);
     Ok(format::json(ServerAddressesResponse {
-        data: lista.into_iter().map(serializa).collect(),
+        data: lista
+            .into_iter()
+            .map(|endereco| serializa(endereco, ports))
+            .collect(),
         preferred_id: documento.preferred_id,
         domain_https: documento.domain_https,
     })?)
@@ -58,8 +63,10 @@ async fn save(
     index(State(ctx)).await
 }
 
-fn serializa(endereco: ServerAddress) -> ServerAddressEntry {
+fn serializa(endereco: ServerAddress, ports: (u16, u16)) -> ServerAddressEntry {
+    let url = install_address::server_url_for(&endereco, ports);
     ServerAddressEntry {
+        url,
         id: endereco.id,
         kind: endereco.kind.id().to_owned(),
         label: endereco.label,

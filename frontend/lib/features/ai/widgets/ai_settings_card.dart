@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/ai/models/ai_models.dart';
 import 'package:netmonitor_app/features/ai/providers/ai_providers.dart';
+import 'package:netmonitor_app/features/ai/widgets/ai_installed_models_panel.dart';
 import 'package:netmonitor_app/features/ai/widgets/ai_model_catalog_sheet.dart';
 import 'package:netmonitor_app/features/ai/widgets/ai_model_pull_panel.dart';
 import 'package:netmonitor_app/features/ai/widgets/ai_proactive_settings_section.dart';
@@ -375,6 +376,8 @@ class _AiSettingsCardState extends ConsumerState<AiSettingsCard> {
                           .pullOllamaModel(m, baseUrl: _ollamaUrlCtrl.text);
                     },
                   ),
+                  const SizedBox(height: 8),
+                  AiInstalledModelsPanel(baseUrl: () => _ollamaUrlCtrl.text),
                 ] else if (_form.activeDriver == 'openrouter') ...<Widget>[
                   TextField(
                     controller: _openRouterKeyCtrl,

@@ -1,12 +1,14 @@
-//! Ações do operador sobre um alerta: reconhecer e silenciar.
+//! Ações do operador sobre um alerta: reconhecer, silenciar e encerrar.
 //!
 //! Gravar o novo estado e avisar as telas pelo barramento são um passo só —
 //! quem reconhece pela tela e quem reconhece pela IA passam pelo mesmo lugar.
 
+use chrono::Utc;
 use loco_rs::prelude::AppContext;
+use sea_orm::{ActiveModelTrait, Set};
 use serde_json::{json, Value};
 
-use super::{feed, silence};
+use super::{contracts::AlertStatus, feed, silence};
 use crate::{models::alert_events, services::shared::errors::AppResult};
 
 fn action_payload(event: &alert_events::Model) -> Value {
@@ -57,4 +59,33 @@ pub async fn silence(
     payload["durationMinutes"] = json!(minutes);
     feed::publish(ctx, "alert:silenced", payload).await;
     Ok(event)
+}
+
+/// Encerra o alerta à mão e publica `alert:resolved`.
+///
+/// É a saída para o alerta que a central não tem como reverificar — o de
+/// evento (túnel VPN, status de interface) cuja volta nunca chegou — e para o
+/// que o operador sabe que já passou. Não notifica: quem encerrou já sabe. Se
+/// a condição ainda existir, a próxima checagem abre um alerta novo.
+///
+/// # Errors
+///
+/// Propaga erro do banco.
+pub async fn close(ctx: &AppContext, event: alert_events::Model) -> AppResult<alert_events::Model> {
+    if event.status == AlertStatus::Resolved.as_str() {
+        return Ok(event);
+    }
+    let now = Utc::now();
+    let data = silence::merge_data(
+        event.data.clone(),
+        "closedManuallyAt",
+        json!(now.to_rfc3339()),
+    );
+    let mut active: alert_events::ActiveModel = event.into();
+    active.status = Set(AlertStatus::Resolved.as_str().into());
+    active.resolved_at = Set(Some(now.into()));
+    active.data = Set(Some(data));
+    let saved = active.update(&ctx.db).await?;
+    feed::publish(ctx, "alert:resolved", feed::event_payload(&saved)).await;
+    Ok(saved)
 }

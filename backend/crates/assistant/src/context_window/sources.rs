@@ -169,19 +169,6 @@ impl WindowLookup for ModelsDevLookup {
 
 // --- Ollama ------------------------------------------------------------------
 
-/// `llama3.2` e `llama3.2:latest` são o mesmo modelo para o Ollama.
-fn same_ollama_model(a: &str, b: &str) -> bool {
-    let normalize = |name: &str| {
-        let name = name.trim().to_ascii_lowercase();
-        if name.contains(':') {
-            name
-        } else {
-            format!("{name}:latest")
-        }
-    };
-    normalize(a) == normalize(b)
-}
-
 /// Janela do modelo **carregado agora** (`/api/ps`): é a que o servidor usa
 /// de fato, já com `num_ctx`, `OLLAMA_CONTEXT_LENGTH` e o ajuste por VRAM.
 #[must_use]
@@ -193,7 +180,7 @@ pub fn parse_ollama_ps(running: &Value, model: &str) -> Option<u64> {
             ["name", "model"].iter().any(|key| {
                 entry[*key]
                     .as_str()
-                    .is_some_and(|name| same_ollama_model(name, model))
+                    .is_some_and(|name| crate::ollama::same_model(name, model))
             })
         })
         .and_then(|entry| positive(entry.get("context_length")))

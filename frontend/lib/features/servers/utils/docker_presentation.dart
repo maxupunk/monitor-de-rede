@@ -168,6 +168,84 @@ List<ContainerGroup> groupDockerContainers(
   return groups;
 }
 
+const String _composeProjectLabel = 'com.docker.compose.project';
+const String _composeWorkingDirLabel = 'com.docker.compose.project.working_dir';
+const String _composeConfigFilesLabel =
+    'com.docker.compose.project.config_files';
+const String _composeServiceLabel = 'com.docker.compose.service';
+
+/// Projetos compose dos containers ao vivo (o snapshot do SSE), pela mesma
+/// regra de `compose::projects` da central: as labels que o CLI grava, e só
+/// projetos com diretório de trabalho conhecido — sem ele o agente não tem
+/// onde rodar o `docker compose`. Lidos do estado ao vivo, os cartões mudam
+/// junto com os containers, sem nova consulta.
+List<ComposeProject> composeProjectsOf(
+  List<DockerContainerSummary> containers,
+) {
+  final byName = <String, _ComposeDraft>{};
+  for (final container in containers) {
+    final name = container.labels[_composeProjectLabel] ?? '';
+    final workingDir = container.labels[_composeWorkingDirLabel] ?? '';
+    if (name.isEmpty || workingDir.isEmpty) continue;
+    final draft = byName.putIfAbsent(
+      name,
+      () => _ComposeDraft(
+        workingDir,
+        (container.labels[_composeConfigFilesLabel] ?? '')
+            .split(',')
+            .map((file) => file.trim())
+            .where((file) => file.isNotEmpty)
+            .toList(growable: false),
+      ),
+    );
+    final running = container.state == 'running';
+    draft.protected = draft.protected || container.isProtected;
+    draft.containers++;
+    if (running) draft.running++;
+    final service = container.labels[_composeServiceLabel];
+    if (service != null) {
+      final counts = draft.services.putIfAbsent(service, () => <int>[0, 0]);
+      counts[0]++;
+      if (running) counts[1]++;
+    }
+  }
+  final names = byName.keys.toList()..sort();
+  return List<ComposeProject>.unmodifiable(
+    names.map((name) {
+      final draft = byName[name]!;
+      final services = draft.services.keys.toList()..sort();
+      return ComposeProject(
+        name: name,
+        workingDir: draft.workingDir,
+        configFiles: List<String>.unmodifiable(draft.configFiles),
+        services: List<ComposeService>.unmodifiable(
+          services.map(
+            (service) => ComposeService(
+              name: service,
+              containers: draft.services[service]![0],
+              running: draft.services[service]![1],
+            ),
+          ),
+        ),
+        containers: draft.containers,
+        running: draft.running,
+        protected: draft.protected,
+      );
+    }),
+  );
+}
+
+class _ComposeDraft {
+  _ComposeDraft(this.workingDir, this.configFiles);
+
+  final String workingDir;
+  final List<String> configFiles;
+  final Map<String, List<int>> services = <String, List<int>>{};
+  int containers = 0;
+  int running = 0;
+  bool protected = false;
+}
+
 enum DockerContainerActionKey { start, stop, restart, update, remove }
 
 @immutable

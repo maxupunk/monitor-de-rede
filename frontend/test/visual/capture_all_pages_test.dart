@@ -1456,36 +1456,6 @@ class _FakeVisualDockerHostApi extends DockerHostApi {
   const _FakeVisualDockerHostApi(super.api, super.hostKey);
 
   @override
-  Future<List<ComposeProject>> composeProjects() async =>
-      const <ComposeProject>[
-        ComposeProject(
-          name: 'netmonitor',
-          workingDir: '/opt/netmonitor',
-          configFiles: <String>['docker-compose.yml'],
-          services: <ComposeService>[
-            ComposeService(name: 'api', containers: 1, running: 1),
-            ComposeService(name: 'postgres', containers: 1, running: 1),
-            ComposeService(name: 'agent', containers: 1, running: 1),
-          ],
-          containers: 3,
-          running: 3,
-          protected: true,
-        ),
-        ComposeProject(
-          name: 'portal-clientes',
-          workingDir: '/stacks/portal-clientes',
-          configFiles: <String>['docker-compose.yml'],
-          services: <ComposeService>[
-            ComposeService(name: 'web', containers: 1, running: 1),
-            ComposeService(name: 'redis', containers: 1, running: 1),
-          ],
-          containers: 2,
-          running: 2,
-          protected: false,
-        ),
-      ];
-
-  @override
   Future<List<DockerVolumeSummary>> volumes() async =>
       const <DockerVolumeSummary>[
         DockerVolumeSummary(
@@ -1701,7 +1671,13 @@ class _SeededDockerNotifier extends DockerNotifier {
             imageId: 'sha256:9f8e7d6c5b4a',
             state: 'running',
             status: 'Up 6 days (healthy)',
-            labels: <String, String>{'com.netmonitor.protected': 'true'},
+            labels: <String, String>{
+              'com.netmonitor.protected': 'true',
+              'com.docker.compose.project': 'netmonitor',
+              'com.docker.compose.project.working_dir': '/opt/netmonitor',
+              'com.docker.compose.project.config_files': 'docker-compose.yml',
+              'com.docker.compose.service': 'api',
+            },
             ports: <DockerPortBinding>[
               DockerPortBinding(
                 ip: '0.0.0.0',
@@ -1721,7 +1697,13 @@ class _SeededDockerNotifier extends DockerNotifier {
             imageId: 'sha256:1a2b3c4d5e6f',
             state: 'running',
             status: 'Up 2 days',
-            labels: <String, String>{},
+            labels: <String, String>{
+              'com.docker.compose.project': 'portal-clientes',
+              'com.docker.compose.project.working_dir':
+                  '/stacks/portal-clientes',
+              'com.docker.compose.project.config_files': 'docker-compose.yml',
+              'com.docker.compose.service': 'web',
+            },
             ports: <DockerPortBinding>[
               DockerPortBinding(
                 ip: '0.0.0.0',

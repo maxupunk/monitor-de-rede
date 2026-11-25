@@ -45,3 +45,44 @@ async fn leitor_salva_o_proprio_menu_e_a_sessao_o_le() {
     })
     .await;
 }
+
+#[tokio::test]
+#[serial]
+async fn o_navegador_avisa_a_requisicao_sem_resposta() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let aviso = serde_json::json!({
+            "method": "POST",
+            "path": "/api/docker/hosts/agent-9/containers/692de2f68d60/stop",
+            "kind": "timeout",
+            "elapsedMs": 15000,
+            "page": "/docker/compose"
+        });
+
+        // Sem sessão, não há aviso: a rota é de quem está logado.
+        let anonimo = request.post("/api/me/client-failures").json(&aviso).await;
+        assert_eq!(anonimo.status_code(), 401, "{}", anonimo.text());
+
+        // Quem só lê também avisa: o aviso é do navegador dele.
+        let session = prepare_data::init_operator(&ctx).await;
+        let mut active = session.user.into_active_model();
+        active.role = Set("viewer".into());
+        active.update(&ctx.db).await.unwrap();
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+
+        let aceito = request.post("/api/me/client-failures").json(&aviso).await;
+        assert_eq!(aceito.status_code(), 204, "{}", aceito.text());
+
+        let forjado = request
+            .post("/api/me/client-failures")
+            .json(&serde_json::json!({
+                "method": "GET",
+                "path": "/api/x\nlinha forjada no log",
+                "kind": "network",
+                "elapsedMs": 1
+            }))
+            .await;
+        assert_eq!(forjado.status_code(), 422, "{}", forjado.text());
+    })
+    .await;
+}

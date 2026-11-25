@@ -17,7 +17,12 @@
 //!
 //! O detalhe continua só no log: a tela recebe o código e onde procurá-lo.
 
-use std::{any::Any, panic::AssertUnwindSafe, sync::Once};
+use std::{
+    any::Any,
+    panic::AssertUnwindSafe,
+    sync::Once,
+    time::{Duration, Instant},
+};
 
 use axum::{
     extract::Request,
@@ -30,6 +35,11 @@ use futures::FutureExt;
 
 /// Cabeçalho com o código, para quem lê a resposta sem o corpo.
 pub const INCIDENT_HEADER: &str = "x-incident-id";
+
+/// Requisição que leva isto ou mais até a resposta vai para o log. É o rastro
+/// do que o navegador vê como "falha de conexão": ele desiste em 15 s, a
+/// central termina depois e ninguém fica sabendo.
+pub const SLOW_REQUEST: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone)]
 struct RequestInfo {
@@ -84,6 +94,7 @@ pub struct IncidentLogged;
 
 /// Middleware de toda a aplicação. Ver a nota do módulo.
 pub async fn track(request: Request, next: Next) -> Response {
+    let started = Instant::now();
     let info = RequestInfo {
         incident: new_code(),
         method: request.method().to_string(),
@@ -95,11 +106,38 @@ pub async fn track(request: Request, next: Next) -> Response {
             AssertUnwindSafe(next.run(request)).catch_unwind(),
         )
         .await;
-    let response = match outcome {
+    let mut response = match outcome {
         Ok(response) => response,
         // A causa (mensagem e `arquivo:linha`) já foi registrada pelo gancho.
         Err(_) => return incident_response(&info.incident),
     };
+    let elapsed = started.elapsed();
+    if elapsed >= SLOW_REQUEST {
+        tracing::warn!(
+            incident = %info.incident,
+            method = %info.method,
+            path = %info.path,
+            status = response.status().as_u16(),
+            elapsed_ms = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX),
+            "requisição lenta"
+        );
+    }
+    if is_gateway_failure(response.status()) {
+        // 502/503/504 têm corpo próprio (o agente desconectado, a Engine
+        // fora): a tela continua com a mensagem; o log ganha o rastro e o
+        // código liga os dois.
+        tracing::warn!(
+            incident = %info.incident,
+            method = %info.method,
+            path = %info.path,
+            status = response.status().as_u16(),
+            "requisição sem o serviço de que dependia"
+        );
+        if let Ok(value) = HeaderValue::from_str(&info.incident) {
+            response.headers_mut().insert(INCIDENT_HEADER, value);
+        }
+        return response;
+    }
     if response.status() != StatusCode::INTERNAL_SERVER_ERROR {
         return response;
     }
@@ -114,6 +152,15 @@ pub async fn track(request: Request, next: Next) -> Response {
         );
     }
     incident_response(&info.incident)
+}
+
+/// Falha de algo de que a requisição dependia (agente, Engine, serviço
+/// externo) — não regra de negócio nem erro interno.
+fn is_gateway_failure(status: StatusCode) -> bool {
+    matches!(
+        status,
+        StatusCode::BAD_GATEWAY | StatusCode::SERVICE_UNAVAILABLE | StatusCode::GATEWAY_TIMEOUT
+    )
 }
 
 /// Texto de um pânico, que pode ser `&str`, `String` ou outra coisa.
@@ -248,6 +295,23 @@ mod tests {
             "o log e a tela citam o mesmo incidente"
         );
         assert_eq!(body["incidentId"], visto);
+    }
+
+    #[tokio::test]
+    async fn servico_indisponivel_ganha_codigo_e_mantem_a_mensagem() {
+        let router = Router::new().route(
+            "/x",
+            get(|| async {
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(serde_json::json!({ "message": "Agente desconectado" })),
+                )
+            }),
+        );
+        let (status, header, body) = call(router).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert!(header.is_some(), "o código liga a tela ao log");
+        assert_eq!(body["message"], "Agente desconectado");
     }
 
     #[tokio::test]

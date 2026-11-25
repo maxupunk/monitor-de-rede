@@ -534,7 +534,14 @@ void main() {
             data: <String, dynamic>{'reason': 'token_revoked'},
           ),
         );
-        await Future<void>.delayed(const Duration(milliseconds: 950));
+        // Espera a recarga em si, não um tempo fixo: sob a carga da suíte
+        // inteira, 150 ms de folga sobre o debounce não bastavam.
+        final deadline = DateTime.now().add(const Duration(seconds: 5));
+        while ((overviewGets <= getsBeforeSse ||
+                tokenGets <= tokenGetsBeforeSse) &&
+            DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        }
 
         expect(overviewGets, getsBeforeSse + 1);
         expect(tokenGets, tokenGetsBeforeSse + 1);
@@ -920,7 +927,7 @@ void main() {
 
         expect(find.text('Como conectar agentes ao MCP'), findsOneWidget);
         expect(
-          find.textContaining('o endereço atual parece público'),
+          find.textContaining('o endereço escolhido passa pela internet'),
           findsOneWidget,
         );
         expect(

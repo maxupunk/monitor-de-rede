@@ -5,8 +5,10 @@ import 'package:netmonitor_app/core/areas/area_models.dart';
 import 'package:netmonitor_app/core/navigation/nav_models.dart';
 import 'package:netmonitor_app/core/realtime/sse_service.dart';
 import 'package:netmonitor_app/features/ai/pages/ai_chat_page.dart';
+import 'package:netmonitor_app/features/ai/models/ai_models.dart';
 import 'package:netmonitor_app/features/ai/pages/decider_benchmark_page.dart';
 import 'package:netmonitor_app/features/ai/providers/ai_providers.dart';
+import 'package:netmonitor_app/features/ai/widgets/ai_alert_summary_sheet.dart';
 import 'package:netmonitor_app/features/ai/widgets/ai_approval_notice.dart';
 import 'package:netmonitor_app/features/ai/widgets/ai_chat_drawer.dart';
 import 'package:netmonitor_app/features/ai/widgets/ai_data_export_card.dart';
@@ -246,6 +248,34 @@ final AreaContribution vpnArea = AreaContribution(
       order: 30,
       area: ProductArea.core,
       builder: (_) => const AiDataExportCard(),
+    ),
+  ],
+  // Ação no cartão de alerta (`AlertActionRegistry`): o resumo da IA é do
+  // Núcleo, mas a tela de alertas não importa a feature da IA (ADR 017).
+  alertActions: <AlertActionContribution>[
+    AlertActionContribution(
+      id: 'ai-summary',
+      area: ProductArea.core,
+      icon: Icons.auto_awesome,
+      tone: SemanticTone.ai,
+      label: (target) =>
+          target.data?['aiSummary'] is Map ? 'Ver resumo IA' : 'Resumo IA',
+      onPressed: (context, ref, target) {
+        final raw = target.data?['aiSummary'];
+        showAiAlertSummarySheet(
+          context: context,
+          target: AiAlertSummaryTarget(
+            alertId: target.alertId,
+            title: target.title,
+            deviceId: target.deviceId,
+            monitorId: target.monitorId,
+            resolved: target.status == 'resolved',
+            existing: raw is Map
+                ? AiIncidentSummary.fromJson(Map<String, dynamic>.from(raw))
+                : null,
+          ),
+        );
+      },
     ),
   ],
   // 4. Abas plugáveis em `/devices/:id` (`DeviceDetailTabRegistry`)

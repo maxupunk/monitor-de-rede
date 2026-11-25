@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:netmonitor_app/core/config/server_config.dart';
+import 'package:netmonitor_app/core/network/client_failure_reporter.dart';
 import 'package:netmonitor_app/core/network/sse_client.dart';
 
 /// Código de negócio retornado pelo backend quando falta credencial de dispositivo.
@@ -199,13 +200,50 @@ class ApiException implements Exception {
 
 /// Erro de rede ou timeout antes de receber resposta HTTP.
 class NetworkException implements Exception {
-  const NetworkException([this.message = 'Falha de conexão com o servidor.']);
+  const NetworkException([this.message = 'Falha de conexão com o servidor.'])
+    : timedOut = false;
+
+  /// O navegador desistiu de esperar: a central pode ter concluído o pedido.
+  NetworkException.timeout(Duration limit)
+    : message = 'O servidor não respondeu em ${limit.inSeconds} s.',
+      timedOut = true;
 
   final String message;
+  final bool timedOut;
 
   @override
   String toString() => message;
 }
+
+/// Requisição que terminou sem resposta, do jeito que o navegador a viu.
+@immutable
+class ClientFailure {
+  const ClientFailure({
+    required this.method,
+    required this.path,
+    required this.timedOut,
+    required this.elapsed,
+  });
+
+  final String method;
+  final String path;
+  final bool timedOut;
+  final Duration elapsed;
+}
+
+/// Cabeçalho com o código que liga a resposta de erro à linha do log.
+const String incidentHeader = 'x-incident-id';
+
+/// A mensagem com o código do incidente, quando o corpo ainda não o cita (o
+/// 500 já vem com ele; 502/503/504 trazem só o cabeçalho).
+String withIncidentCode(String message, String? incident) {
+  final code = incident?.trim() ?? '';
+  if (code.isEmpty || message.contains(code)) return message;
+  return '$message (incidente $code)';
+}
+
+/// Rota em que a central recebe os avisos — que nunca se avisam a si mesmos.
+const String clientFailuresPath = '/me/client-failures';
 
 @immutable
 class DownloadResult {
@@ -257,6 +295,7 @@ class ApiClient {
     required this.baseUrlProvider,
     required this.tokenProvider,
     required this.onUnauthorized,
+    this.onNetworkFailure,
     Dio? dio,
   }) : _dio =
            dio ??
@@ -285,6 +324,9 @@ class ApiClient {
   final String Function() baseUrlProvider;
   final String? Function() tokenProvider;
   final VoidCallback onUnauthorized;
+
+  /// Chamado quando uma requisição termina sem resposta (ver [ClientFailure]).
+  final void Function(ClientFailure failure)? onNetworkFailure;
   final Dio _dio;
 
   String _buildUrl(String path) {
@@ -390,8 +432,9 @@ class ApiClient {
     int statusCode,
     String? statusMessage,
     String path,
-    Object? rawData,
-  ) {
+    Object? rawData, {
+    String? incident,
+  }) {
     final normalizedPath = _normalizeApiPath(path);
     final payload = ApiErrorPayload.tryFromDynamic(rawData);
     if (statusCode == 401 &&
@@ -399,11 +442,14 @@ class ApiClient {
       onUnauthorized();
     }
     return ApiException(
-      message: _extractErrorMessage(
-        statusCode,
-        statusMessage,
-        payload,
-        path: normalizedPath,
+      message: withIncidentCode(
+        _extractErrorMessage(
+          statusCode,
+          statusMessage,
+          payload,
+          path: normalizedPath,
+        ),
+        incident,
       ),
       statusCode: statusCode,
       payload: payload,
@@ -418,6 +464,7 @@ class ApiClient {
         response.statusMessage,
         path,
         response.data,
+        incident: response.headers.value(incidentHeader),
       );
     }
 
@@ -455,9 +502,11 @@ class ApiClient {
   }
 
   Future<T> _runRequest<T>(
+    String method,
     String path,
     Future<Response<dynamic>> Function(String url) executor,
   ) async {
+    final watch = Stopwatch()..start();
     try {
       final response = await executor(_buildUrl(path));
       return _handleResponse<T>(response, path);
@@ -471,10 +520,44 @@ class ApiClient {
           err.response!.statusMessage,
           path,
           err.response!.data,
+          incident: err.response!.headers.value(incidentHeader),
         );
       }
-      throw const NetworkException();
+      throw _networkFailure(method, path, err, watch.elapsed);
     }
+  }
+
+  /// Traduz a falha sem resposta e avisa quem registra (a central).
+  NetworkException _networkFailure(
+    String method,
+    String path,
+    DioException err,
+    Duration elapsed,
+  ) {
+    final timedOut = switch (err.type) {
+      DioExceptionType.connectionTimeout ||
+      DioExceptionType.sendTimeout ||
+      DioExceptionType.receiveTimeout => true,
+      _ => false,
+    };
+    final apiPath = _normalizeApiPath(path);
+    if (apiPath != clientFailuresPath) {
+      onNetworkFailure?.call(
+        ClientFailure(
+          method: method,
+          path: apiPath,
+          timedOut: timedOut,
+          elapsed: elapsed,
+        ),
+      );
+    }
+    if (!timedOut) return const NetworkException();
+    final limit = switch (err.type) {
+      DioExceptionType.connectionTimeout => err.requestOptions.connectTimeout,
+      DioExceptionType.sendTimeout => err.requestOptions.sendTimeout,
+      _ => err.requestOptions.receiveTimeout,
+    };
+    return NetworkException.timeout(limit ?? elapsed);
   }
 
   Options _jsonOptions({Duration? timeout}) => Options(
@@ -490,6 +573,7 @@ class ApiClient {
     CancelToken? cancelToken,
   }) {
     return _runRequest<T>(
+      'GET',
       path,
       (url) => _dio.get<dynamic>(
         url,
@@ -508,6 +592,7 @@ class ApiClient {
     CancelToken? cancelToken,
   }) {
     return _runRequest<T>(
+      'POST',
       path,
       (url) => _dio.post<dynamic>(
         url,
@@ -527,6 +612,7 @@ class ApiClient {
     CancelToken? cancelToken,
   }) {
     return _runRequest<T>(
+      'PUT',
       path,
       (url) => _dio.put<dynamic>(
         url,
@@ -546,6 +632,7 @@ class ApiClient {
     CancelToken? cancelToken,
   }) {
     return _runRequest<T>(
+      'PATCH',
       path,
       (url) => _dio.patch<dynamic>(
         url,
@@ -565,6 +652,7 @@ class ApiClient {
     CancelToken? cancelToken,
   }) {
     return _runRequest<T>(
+      'DELETE',
       path,
       (url) => _dio.delete<dynamic>(
         url,
@@ -600,6 +688,7 @@ class ApiClient {
     CancelToken? cancelToken,
   }) {
     return _runRequest<T>(
+      'POST',
       path,
       (url) => _dio.post<dynamic>(
         url,
@@ -623,6 +712,7 @@ class ApiClient {
     CancelToken? cancelToken,
   }) {
     return _runRequest<T>(
+      'POST',
       path,
       (url) => _dio.post<dynamic>(
         url,
@@ -665,6 +755,7 @@ class ApiClient {
           response.statusMessage,
           path,
           rawText,
+          incident: response.headers.value(incidentHeader),
         );
       }
 
@@ -715,6 +806,7 @@ class ApiClient {
           response.reasonPhrase,
           path,
           errorBody,
+          incident: response.headers[incidentHeader],
         );
       }
 
@@ -775,6 +867,7 @@ class ApiClient {
           response.reasonPhrase,
           path,
           errorBody,
+          incident: response.headers[incidentHeader],
         );
       }
 
@@ -813,7 +906,7 @@ class ApiClient {
   }
 }
 
-final apiClientProvider = Provider<ApiClient>((ref) {
+final Provider<ApiClient> apiClientProvider = Provider<ApiClient>((ref) {
   return ApiClient(
     baseUrlProvider: () => ref.read(serverConfigProvider).apiBaseUrl,
     tokenProvider: () => ref.read(sessionTokenProvider),
@@ -821,5 +914,7 @@ final apiClientProvider = Provider<ApiClient>((ref) {
       ref.read(sessionTokenProvider.notifier).state = null;
       ref.read(sessionExpiredSignalProvider.notifier).state++;
     },
+    onNetworkFailure: (failure) =>
+        ref.read(clientFailureReporterProvider).report(failure),
   );
 });

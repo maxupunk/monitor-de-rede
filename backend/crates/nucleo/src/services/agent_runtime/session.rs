@@ -221,6 +221,7 @@ pub async fn run(
     tracing::info!(probe_id = welcome.probe_id, name = %welcome.name, "conectado à central");
 
     let refresh = Arc::new(Notify::new());
+    let mut live = LivePublisher::new(deps.clone(), envelopes.clone());
     let limiter = Arc::new(Semaphore::new(MAX_CONCURRENT_REQUESTS));
     let tunnel_slots = Arc::new(Semaphore::new(MAX_TUNNELS));
     let mut in_flight: HashMap<Uuid, CancellationToken> = HashMap::new();
@@ -302,11 +303,14 @@ pub async fn run(
                 tunnel_routes.remove(&id);
             }
             _ = live_timer.tick(), if live_interval > 0 => {
-                publish_live(&deps, &envelopes, live_ticks.is_multiple_of(INVENTORY_EVERY)).await;
+                live.request(live_ticks.is_multiple_of(INVENTORY_EVERY), false);
                 live_ticks = live_ticks.wrapping_add(1);
             }
             () = refresh.notified(), if live_interval > 0 => {
-                publish_live(&deps, &envelopes, true).await;
+                live.request(true, true);
+            }
+            () = live.finished() => {
+                live.collected(live_interval > 0);
             }
             _ = flush_timer.tick() => {
                 flush_outbox(&deps.outbox, &envelopes).await;
@@ -317,6 +321,7 @@ pub async fn run(
     for token in in_flight.into_values() {
         token.cancel();
     }
+    live.stop();
     drop(tunnel_routes);
     drop(tunnel_out);
     drop(envelopes);
@@ -329,6 +334,79 @@ fn live_ticker(interval_ms: u64) -> tokio::time::Interval {
     let mut ticker = tokio::time::interval(period);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     ticker
+}
+
+/// A coleta ao vivo, **fora** do laço que atende a central.
+///
+/// Ler status, containers e `stats` de cada container leva segundos (a
+/// Engine espera uma segunda amostra para a CPU), e o inventário mais ainda.
+/// Feita dentro do `select!`, ela segurava a leitura dos pedidos: uma
+/// listagem ou um `stop` ficavam na fila até a coleta acabar e o navegador
+/// desistia antes — a ação acontecia e a tela dizia "falha de conexão".
+///
+/// Uma coleta por vez: um tick que chega no meio dela é dispensado (a leitura
+/// em curso já é a mais nova); um pedido de inventário ou de atualização
+/// depois de uma mudança fica guardado e roda assim que ela termina.
+struct LivePublisher {
+    deps: SessionDeps,
+    envelopes: mpsc::Sender<Envelope>,
+    running: Option<tokio::task::JoinHandle<()>>,
+    queued: Option<bool>,
+}
+
+impl LivePublisher {
+    const fn new(deps: SessionDeps, envelopes: mpsc::Sender<Envelope>) -> Self {
+        Self {
+            deps,
+            envelopes,
+            running: None,
+            queued: None,
+        }
+    }
+
+    /// Pede uma coleta. `must_run` vale para depois de uma mudança: mesmo
+    /// com outra em curso, uma nova roda em seguida.
+    fn request(&mut self, with_inventory: bool, must_run: bool) {
+        if self.running.is_none() {
+            self.start(with_inventory);
+        } else if with_inventory || must_run {
+            self.queued = Some(self.queued.unwrap_or(false) || with_inventory);
+        }
+    }
+
+    fn start(&mut self, with_inventory: bool) {
+        let deps = self.deps.clone();
+        let envelopes = self.envelopes.clone();
+        self.running = Some(tokio::spawn(async move {
+            publish_live(&deps, &envelopes, with_inventory).await;
+        }));
+    }
+
+    /// Termina quando a coleta em curso acaba; sem coleta, nunca.
+    async fn finished(&mut self) {
+        match self.running.as_mut() {
+            Some(handle) => {
+                let _ = handle.await;
+            }
+            None => std::future::pending().await,
+        }
+    }
+
+    /// A coleta acabou: roda a que ficou guardada, se a central ainda quer.
+    fn collected(&mut self, enabled: bool) {
+        self.running = None;
+        if let Some(with_inventory) = self.queued.take() {
+            if enabled {
+                self.start(with_inventory);
+            }
+        }
+    }
+
+    fn stop(&mut self) {
+        if let Some(handle) = self.running.take() {
+            handle.abort();
+        }
+    }
 }
 
 async fn publish_live(
@@ -585,5 +663,127 @@ impl super::sampler::RollupSink for OutboxSink {
         self.0.push(AgentEvent::MetricsRollup {
             rollup: Box::new(rollup),
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+    use crate::services::agents::protocol::{Capability, DockerCall, PROTOCOL_VERSION};
+
+    /// Coleta que nunca termina: a Engine travada num `stats`.
+    struct StuckLive;
+
+    #[async_trait]
+    impl LiveSource for StuckLive {
+        async fn live(&self) -> Option<DockerLiveSnapshot> {
+            std::future::pending().await
+        }
+
+        async fn inventory(&self) -> Option<DockerInventorySnapshot> {
+            std::future::pending().await
+        }
+    }
+
+    struct ListsNothing;
+
+    #[async_trait]
+    impl CommandExecutor for ListsNothing {
+        async fn execute(
+            &self,
+            _command: Command,
+            _chunks: mpsc::UnboundedSender<Value>,
+            _cancel: CancellationToken,
+        ) -> Result<Value, RemoteError> {
+            Ok(json!([]))
+        }
+    }
+
+    struct NoTunnels;
+
+    #[async_trait]
+    impl TunnelOpener for NoTunnels {
+        async fn open(&self, _host: &str, _port: u16) -> Result<TunnelStream, RemoteError> {
+            Err(RemoteError::new(ErrorCode::Unsupported, "sem ponte"))
+        }
+
+        async fn open_volume(&self, _name: &str) -> Result<TunnelStream, RemoteError> {
+            Err(RemoteError::new(ErrorCode::Unsupported, "sem ponte"))
+        }
+    }
+
+    fn hello() -> Hello {
+        Hello {
+            protocol: PROTOCOL_VERSION,
+            agent_version: "0.1.0".into(),
+            hostname: "srv".into(),
+            os: "Debian".into(),
+            arch: "x86_64".into(),
+            in_container: false,
+            policy: vec![Permission::Read],
+            docker: Capability::default(),
+            compose: Capability::default(),
+        }
+    }
+
+    fn text(envelope: &Envelope) -> WireFrame {
+        WireFrame::Text(envelope.encode().expect("quadro"))
+    }
+
+    #[tokio::test]
+    async fn pedido_da_central_nao_espera_a_coleta_ao_vivo() {
+        let (to_agent, incoming) = mpsc::channel(16);
+        let (outgoing, mut from_agent) = mpsc::channel(16);
+        let deps = SessionDeps {
+            executor: Arc::new(ListsNothing),
+            outbox: Arc::new(Outbox::in_memory(10)),
+            live: Arc::new(StuckLive),
+            tunnels: Arc::new(NoTunnels),
+        };
+        let agent = tokio::spawn(run(deps, hello(), incoming, outgoing));
+
+        // Hello → Welcome com o ao vivo ligado: o primeiro tick dispara na
+        // hora e a coleta trava.
+        from_agent.recv().await.expect("hello");
+        to_agent
+            .send(text(&Envelope::new(Body::Welcome(Welcome {
+                probe_id: 1,
+                name: "srv".into(),
+                live_interval_ms: 500,
+            }))))
+            .await
+            .expect("welcome");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let request = Envelope::new(Body::Request {
+            deadline_ms: 5_000,
+            command: Command::Docker {
+                call: DockerCall::ListContainers,
+            },
+        });
+        to_agent.send(text(&request)).await.expect("pedido");
+
+        let answered = tokio::time::timeout(Duration::from_secs(2), async {
+            while let Some(WireFrame::Text(text)) = from_agent.recv().await {
+                let envelope = Envelope::decode(&text).expect("quadro do agente");
+                if envelope.id == request.id {
+                    return Some(envelope.body);
+                }
+            }
+            None
+        })
+        .await
+        .expect("a resposta não pode esperar a coleta ao vivo terminar");
+        assert!(matches!(
+            answered,
+            Some(Body::Response {
+                outcome: Outcome::Ok { .. }
+            })
+        ));
+
+        drop(to_agent);
+        let _ = tokio::time::timeout(Duration::from_secs(2), agent).await;
     }
 }

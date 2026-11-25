@@ -22,8 +22,12 @@ use netmonitor_core::{
     alerts::{contracts::AlertStatus, feed},
     events::EventBus,
     models::alert_events,
-    shared::errors::AppResult,
+    shared::errors::{AppError, AppResult},
 };
+
+/// O que a tela mostra quando pedem um resumo com a IA desligada.
+pub const DISABLED_MESSAGE: &str =
+    "A IA está desligada. Ligue em Configurações › Inteligência artificial para gerar o resumo.";
 
 /// Campo de `alert_events.data` onde o resumo fica.
 pub const SUMMARY_FIELD: &str = "aiSummary";
@@ -75,13 +79,16 @@ fn with_summary(data: Option<Value>, summary: &AiIncidentSummary) -> Value {
 ///
 /// # Errors
 ///
-/// Provedor indisponível ou erro do banco.
+/// IA desligada (`BusinessRule`), provedor indisponível ou erro do banco.
 pub async fn summarize_alert(
     ctx: &AppContext,
     drivers: &dyn DriverFactory,
     alert_id: i64,
 ) -> AppResult<Option<AiIncidentSummary>> {
     let settings = settings::load(&ctx.db).await?;
+    if !settings.enabled {
+        return Err(AppError::BusinessRule(DISABLED_MESSAGE.into()));
+    }
     let Some(event) = alert_events::Entity::find_by_id(alert_id)
         .one(&ctx.db)
         .await?

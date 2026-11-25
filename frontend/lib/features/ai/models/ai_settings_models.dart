@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/core/utils/json_parsers.dart';
 
 /// Modos de automação da IA (`AiAutomationMode`).
@@ -146,6 +147,9 @@ class AiProviderModelItem {
     this.installed = false,
     this.recommended = false,
     this.vendor,
+    this.modifiedAt,
+    this.inUse = false,
+    this.sharedWith = const <String>[],
   });
 
   final String id;
@@ -159,6 +163,15 @@ class AiProviderModelItem {
   final bool recommended;
   final String? vendor;
 
+  /// Quando o modelo foi baixado ou atualizado no Ollama.
+  final DateTime? modifiedAt;
+
+  /// É o modelo configurado no chat — o servidor recusa apagá-lo.
+  final bool inUse;
+
+  /// Outros nomes com o mesmo arquivo: apagar este não devolve disco.
+  final List<String> sharedWith;
+
   factory AiProviderModelItem.fromOllamaInstalled(Map<String, dynamic> json) {
     final name = (json['name'] ?? json['id'] ?? '').toString();
     return AiProviderModelItem(
@@ -169,6 +182,9 @@ class AiProviderModelItem {
       isFree: true,
       supportsTools: parseBool(json['supportsTools'], fallback: true),
       installed: true,
+      modifiedAt: parseDateOrNull(json['modifiedAt']),
+      inUse: parseBool(json['inUse']),
+      sharedWith: asStringList(json['sharedWith']),
     );
   }
 
@@ -214,6 +230,49 @@ class AiProviderModelsCatalog {
   final List<AiProviderModelItem> models;
   final bool isOnline;
   final String? errorMessage;
+
+  /// Os modelos baixados no servidor (sem os só recomendados).
+  List<AiProviderModelItem> get installedModels =>
+      models.where((m) => m.installed).toList(growable: false);
+
+  /// Espaço que os modelos baixados ocupam no disco: nomes que dividem o
+  /// mesmo arquivo (`sharedWith`) contam uma vez só.
+  int get installedDiskBytes {
+    final counted = <String>{};
+    var total = 0;
+    for (final model in installedModels) {
+      if (!model.sharedWith.any(counted.contains)) {
+        total += model.sizeBytes ?? 0;
+      }
+      counted.add(model.id);
+    }
+    return total;
+  }
+}
+
+/// O que apagar um modelo do Ollama fez (`DELETE /api/ai/ollama/models`).
+@immutable
+class AiModelRemoval {
+  const AiModelRemoval({
+    required this.name,
+    this.sizeBytes,
+    this.freedBytes = 0,
+    this.sharedWith = const <String>[],
+  });
+
+  final String name;
+  final int? sizeBytes;
+  final int freedBytes;
+  final List<String> sharedWith;
+
+  factory AiModelRemoval.fromJson(Map<String, dynamic> json) {
+    return AiModelRemoval(
+      name: (json['name'] ?? '').toString(),
+      sizeBytes: parseIntOrNull(json['size']),
+      freedBytes: parseIntOrNull(json['freedBytes']) ?? 0,
+      sharedWith: asStringList(json['sharedWith']),
+    );
+  }
 }
 
 @immutable

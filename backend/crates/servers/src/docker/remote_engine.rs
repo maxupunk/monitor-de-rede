@@ -37,6 +37,11 @@ use crate::views::docker::{DockerActionResponse, DockerMetricsResponse};
 /// Consultas e ciclo de vida: generoso para a volta pelo túnel, curto o
 /// bastante para a tela não ficar pendurada.
 const QUERY_TIMEOUT: Duration = Duration::from_secs(25);
+/// Ciclo de vida de um container: o teto do agente para a Engine, mais a
+/// volta pelo túnel. Com o das consultas (25 s), um `stop` de container com
+/// `stop_grace_period` longo caía em timeout aqui enquanto o agente o
+/// concluía.
+const LIFECYCLE_TIMEOUT: Duration = Duration::from_secs(super::LIFECYCLE_TIMEOUT.as_secs() + 30);
 /// Pull, recreate e compose podem baixar imagens grandes.
 const OPERATION_TIMEOUT: Duration = Duration::from_secs(35 * 60);
 /// Teto de um follow de logs; a central encerra antes (ver `log_stream`).
@@ -113,11 +118,15 @@ impl DockerEngine for AgentEngine {
     }
 
     async fn container_action(&self, id: &str, action: ContainerAction) -> Result<(), DockerError> {
-        self.unit(DockerCall::ContainerAction {
-            id: id.into(),
-            action,
-        })
+        self.call(
+            DockerCall::ContainerAction {
+                id: id.into(),
+                action,
+            },
+            LIFECYCLE_TIMEOUT,
+        )
         .await
+        .map(|_| ())
     }
 
     async fn container_logs_raw(

@@ -74,6 +74,25 @@ filtro fixado. Se o log interno não aparece:
    SQL bem-sucedidas. `WARN` e `ERROR` do SQLx **continuam** passando — é o que
    você procura quando o banco trava.
 
+### A tela diz "falha", mas a ação aconteceu
+
+Quando a requisição fica sem resposta, cada ponta deixa um rastro no **mesmo**
+log interno (Logs › Este servidor). Procure pelo caminho da requisição:
+
+| Mensagem | Quem grava | O que diz |
+| --- | --- | --- |
+| `o navegador ficou sem resposta` | o navegador, por `POST /api/me/client-failures` | `kind` (`tempo esgotado` ou `conexão interrompida`), quanto esperou e em que tela |
+| `requisição lenta` | a central, para toda requisição de 10 s ou mais | status, tempo e o código de incidente |
+| `requisição sem o serviço de que dependia` | a central, para 502/503/504 | o mesmo código vai no cabeçalho `x-incident-id` da resposta |
+| `o agente não respondeu ao pedido a tempo` | a central | agente, pedido (`docker.container_action`) e o teto |
+| `o canal com o agente caiu durante o pedido` | a central | o túnel do agente caiu com o pedido em curso |
+| `o agente não conseguiu executar o pedido` | a central | Engine indisponível ou erro interno do lado do agente |
+| `pedido ao agente demorou` | a central | pedido concluído, mas em 5 s ou mais |
+
+"Navegador sem resposta" com a central concluindo **depois** quer dizer que a
+resposta só demorou: a ação valeu. A tela já trata assim. Uma ação que esgota
+o tempo diz que pode ter sido concluída, e o estado chega pelo SSE.
+
 ## 4. Retenção: a disputa pelo orçamento de log
 
 `retention::prune` corta o banco de logs por idade **e por tamanho** (4 GB, mais

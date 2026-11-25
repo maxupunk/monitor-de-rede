@@ -93,6 +93,18 @@ class DeviceDetailTabRegistry {
   }
 }
 
+/// Ações extras do cartão de alerta declaradas pelas áreas (ex.: "Resumo IA").
+class AlertActionRegistry {
+  AlertActionRegistry._();
+
+  static List<AlertActionContribution> visible(Set<ProductArea> visibleAreas) =>
+      List<AlertActionContribution>.unmodifiable(<AlertActionContribution>[
+        for (final area in registeredAreas)
+          for (final action in area.alertActions)
+            if (visibleAreas.contains(action.area)) action,
+      ]);
+}
+
 /// Slot declarativo dos caminhos de conexão de servidor remoto (LAN, VPN, Internet HTTPS).
 class ServerConnectSlot {
   ServerConnectSlot._();

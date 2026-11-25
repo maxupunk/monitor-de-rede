@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:netmonitor_app/areas/area_contribution.dart';
+import 'package:netmonitor_app/areas/composition_registries.dart';
+import 'package:netmonitor_app/core/areas/areas_provider.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/core/models/alert_models.dart';
@@ -35,6 +38,9 @@ class _AlertsPageState extends ConsumerState<AlertsPage>
   String _severityFilter = 'all';
   String _statusFilter = 'all';
   bool _catalogOpened = false;
+
+  /// Alertas com "Verificar agora" em andamento: o botão mostra o progresso.
+  final Set<int> _verifying = <int>{};
 
   static const List<String> _tabs = <String>[
     'active',
@@ -416,8 +422,66 @@ class _AlertsPageState extends ConsumerState<AlertsPage>
     );
   }
 
+  Future<void> _verify(AlertEvent alert) async {
+    setState(() => _verifying.add(alert.id));
+    final res = await ref.read(alertsProvider.notifier).verifyAlert(alert.id);
+    if (!mounted) return;
+    setState(() => _verifying.remove(alert.id));
+    final canClose = !res.checkable && ref.read(authProvider).canWrite;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        duration: Duration(seconds: res.checkable ? 4 : 10),
+        content: Text(
+          res.message ??
+              (res.resolved
+                  ? 'Alerta resolvido após verificação.'
+                  : 'Condição ainda ativa.'),
+        ),
+        action: canClose
+            ? SnackBarAction(
+                label: 'Encerrar',
+                onPressed: () => _confirmClose(alert),
+              )
+            : null,
+      ),
+    );
+  }
+
+  Future<void> _confirmClose(AlertEvent alert) async {
+    final confirmed = await showConfirmActionDialog(
+      context: context,
+      title: 'Encerrar o alerta?',
+      message:
+          'Use quando a condição já passou e o alerta não fechou sozinho. '
+          'Se o problema ainda existir, um alerta novo abre na próxima vez '
+          'que ele for detectado.',
+      confirmLabel: 'Encerrar alerta',
+      tone: SemanticTone.warning,
+      icon: Icons.task_alt,
+    );
+    if (!confirmed || !mounted) return;
+    final res = await ref.read(alertsProvider.notifier).closeAlert(alert.id);
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(res.message ?? 'Alerta encerrado.')));
+  }
+
+  /// O alerta como as ações de outras features o recebem (ADR 017).
+  AlertActionTarget _actionTarget(AlertEvent alert) => AlertActionTarget(
+    alertId: alert.id,
+    title: alert.title,
+    status: alert.status,
+    deviceId: alert.deviceId,
+    monitorId: alert.monitorId,
+    data: alert.data,
+  );
+
   Widget _buildActiveTab(AlertsState state, AuthState auth) {
     final active = _filterEvents(state.activeAlerts);
+    final extraActions = AlertActionRegistry.visible(
+      ref.watch(visibleAreasProvider),
+    );
     final clusters =
         state.rcaSummary?.activeClusters ?? const <IncidentCluster>[];
 
@@ -506,22 +570,9 @@ class _AlertsPageState extends ConsumerState<AlertsPage>
                 onAck: () => ref
                     .read(alertsProvider.notifier)
                     .acknowledgeAlert(alert.id),
-                onVerify: () async {
-                  final res = await ref
-                      .read(alertsProvider.notifier)
-                      .verifyAlert(alert.id);
-                  if (!mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        res.message ??
-                            (res.resolved
-                                ? 'Alerta resolvido após verificação.'
-                                : 'Condição ainda ativa.'),
-                      ),
-                    ),
-                  );
-                },
+                verifying: _verifying.contains(alert.id),
+                onVerify: () => _verify(alert),
+                onClose: () => _confirmClose(alert),
                 onSilence: () => showAlertSilenceSheet(
                   context: context,
                   ref: ref,
@@ -532,19 +583,10 @@ class _AlertsPageState extends ConsumerState<AlertsPage>
                   ref: ref,
                   alert: alert,
                 ),
-                onAiSummary: () async {
-                  final err = await ref
-                      .read(alertsProvider.notifier)
-                      .requestAiSummary(alert.id);
-                  if (!mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        err ?? 'Resumo de incidente solicitado à IA.',
-                      ),
-                    ),
-                  );
-                },
+                extraActions: extraActions,
+                actionTarget: _actionTarget(alert),
+                onExtraAction: (action, target) =>
+                    action.onPressed(context, ref, target),
               ),
               const SizedBox(height: 10),
             ],
@@ -795,9 +837,13 @@ class _AlertEventCard extends StatelessWidget {
     required this.canWrite,
     required this.onAck,
     required this.onVerify,
+    required this.verifying,
+    required this.onClose,
     required this.onSilence,
     required this.onCorrelation,
-    required this.onAiSummary,
+    required this.extraActions,
+    required this.actionTarget,
+    required this.onExtraAction,
   });
 
   final AlertEvent alert;
@@ -805,9 +851,14 @@ class _AlertEventCard extends StatelessWidget {
   final bool canWrite;
   final VoidCallback onAck;
   final VoidCallback onVerify;
+  final bool verifying;
+  final VoidCallback onClose;
   final VoidCallback onSilence;
   final VoidCallback onCorrelation;
-  final VoidCallback onAiSummary;
+  final List<AlertActionContribution> extraActions;
+  final AlertActionTarget actionTarget;
+  final void Function(AlertActionContribution action, AlertActionTarget target)
+  onExtraAction;
 
   @override
   Widget build(BuildContext context) {
@@ -818,6 +869,8 @@ class _AlertEventCard extends StatelessWidget {
     ) = switch (alert.status) {
       'acknowledged' => ('Reconhecido', SemanticTone.info),
       'silenced' => ('Silenciado', SemanticTone.caution),
+      'recovering' => ('Recuperando', SemanticTone.success),
+      'flapping' => ('Oscilando', SemanticTone.warning),
       'resolved' => ('Resolvido', SemanticTone.success),
       _ => ('Em alerta', tone),
     };
@@ -841,6 +894,27 @@ class _AlertEventCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           if (alert.message.isNotEmpty) Text(alert.message),
+          if (alert.monitorId == null) ...<Widget>[
+            const SizedBox(height: 8),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Icon(
+                  Icons.info_outline,
+                  size: 16,
+                  color: context.semanticColors.info,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Alerta de evento: fecha sozinho quando o evento de volta '
+                    'chega. Se a condição já passou, encerre-o.',
+                    style: context.textTheme.bodySmall,
+                  ),
+                ),
+              ],
+            ),
+          ],
           if (aiSummary != null) ...<Widget>[
             const SizedBox(height: 10),
             NestedPanel(
@@ -887,10 +961,26 @@ class _AlertEventCard extends StatelessWidget {
               if (canWrite) ...<Widget>[
                 OutlinedButton.icon(
                   style: OutlinedButton.styleFrom(padding: compactBtnPadding),
-                  onPressed: onVerify,
-                  icon: const Icon(Icons.fact_check_outlined, size: 16),
+                  onPressed: verifying ? null : onVerify,
+                  icon: verifying
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.fact_check_outlined, size: 16),
+                  label: Text(
+                    verifying ? 'Verificando…' : 'Verificar agora',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(padding: compactBtnPadding),
+                  onPressed: onClose,
+                  icon: const Icon(Icons.task_alt, size: 16),
                   label: const Text(
-                    'Verificar agora',
+                    'Encerrar',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -916,24 +1006,48 @@ class _AlertEventCard extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(padding: compactBtnPadding),
-                onPressed: onAiSummary,
-                icon: Icon(
-                  Icons.auto_awesome,
-                  size: 16,
-                  color: context.semanticColors.ai,
+              for (final action in extraActions)
+                _ExtraActionButton(
+                  action: action,
+                  label: action.label(actionTarget),
+                  padding: compactBtnPadding,
+                  onPressed: () => onExtraAction(action, actionTarget),
                 ),
-                label: Text(
-                  'Resumo IA',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: context.semanticColors.ai),
-                ),
-              ),
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _ExtraActionButton extends StatelessWidget {
+  const _ExtraActionButton({
+    required this.action,
+    required this.label,
+    required this.padding,
+    required this.onPressed,
+  });
+
+  final AlertActionContribution action;
+  final String label;
+  final EdgeInsets padding;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = context.semanticColors
+        .resolve(action.tone, context.colorScheme)
+        .foreground;
+    return OutlinedButton.icon(
+      style: OutlinedButton.styleFrom(padding: padding),
+      onPressed: onPressed,
+      icon: Icon(action.icon, size: 16, color: color),
+      label: Text(
+        label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(color: color),
       ),
     );
   }

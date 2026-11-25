@@ -198,6 +198,16 @@ async fn comandos_de_instalacao_usam_os_enderecos_deste_servidor() {
             .and_then(|entry| entry["id"].as_str())
             .expect("id do personalizado")
             .to_string();
+        // A lista já traz a URL de cada caminho — a mesma dos comandos de
+        // instalação, que o MCP e outras telas reaproveitam.
+        let custom = json_of(&saved.text())["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["kind"] == "custom")
+            .cloned()
+            .unwrap();
+        assert_eq!(custom["url"], "http://172.20.0.5:9000");
 
         // Sem dispositivo vinculado, o padrão é o preferido do operador — e
         // não a origem de quem abriu a tela.

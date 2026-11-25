@@ -4,13 +4,17 @@ import 'package:go_router/go_router.dart';
 import 'package:netmonitor_app/core/areas/area_models.dart';
 import 'package:netmonitor_app/core/auth/area_access.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
-import 'package:netmonitor_app/core/utils/error_utils.dart';
 import 'package:netmonitor_app/features/servers/models/docker_models.dart';
 import 'package:netmonitor_app/features/servers/providers/docker_provider.dart';
+import 'package:netmonitor_app/features/servers/utils/docker_presentation.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
 
 /// Aba "Projetos" (Docker Compose) (`/docker/compose`).
+///
+/// Os projetos saem dos containers ao vivo do host (o snapshot do SSE): os
+/// cartões acompanham cada `up`/`stop` sem nova consulta, e a aba não depende
+/// de uma requisição ao agente para abrir.
 class DockerComposePage extends ConsumerStatefulWidget {
   const DockerComposePage({super.key});
 
@@ -19,46 +23,6 @@ class DockerComposePage extends ConsumerStatefulWidget {
 }
 
 class _DockerComposePageState extends ConsumerState<DockerComposePage> {
-  List<ComposeProject> _projects = const <ComposeProject>[];
-  bool _loading = false;
-  String? _error;
-  String _loadedHostKey = '';
-
-  @override
-  void initState() {
-    super.initState();
-    Future<void>.microtask(_load);
-  }
-
-  Future<void> _load() async {
-    final hostKey = ref.read(dockerProvider).selectedHostKey;
-    if (hostKey.isEmpty) return;
-    setState(() {
-      _loading = true;
-      _error = null;
-      _loadedHostKey = hostKey;
-    });
-    try {
-      final list = await ref
-          .read(dockerProvider.notifier)
-          .fetchComposeProjects(hostKey);
-      if (!mounted) return;
-      setState(() {
-        _projects = list;
-        _loading = false;
-      });
-    } catch (err) {
-      if (!mounted) return;
-      setState(() {
-        _error = describeError(
-          err,
-          fallback: 'Erro ao listar projetos Compose.',
-        );
-        _loading = false;
-      });
-    }
-  }
-
   Future<void> _runComposeAction(
     ComposeProject project,
     String action, {
@@ -104,12 +68,8 @@ class _DockerComposePageState extends ConsumerState<DockerComposePage> {
     final docker = ref.watch(dockerProvider);
     final auth = ref.watch(authProvider);
     final selectedHost = docker.selectedHost;
-
-    if (docker.selectedHostKey.isNotEmpty &&
-        docker.selectedHostKey != _loadedHostKey &&
-        !_loading) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _load());
-    }
+    final live = docker.current;
+    final projects = composeProjectsOf(live.containers);
 
     final composeReady =
         (selectedHost?.composeAvailable == true) && docker.allows('compose');
@@ -120,25 +80,13 @@ class _DockerComposePageState extends ConsumerState<DockerComposePage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        Row(
-          children: <Widget>[
-            Expanded(
-              child: Text(
-                'Projetos Docker Compose',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: context.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            IconButton.filledTonal(
-              tooltip: 'Recarregar projetos',
-              onPressed: _loading ? null : _load,
-              icon: const Icon(Icons.refresh, size: 19),
-            ),
-          ],
+        Text(
+          'Projetos Docker Compose',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: context.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w800,
+          ),
         ),
         const SizedBox(height: 10),
 
@@ -154,11 +102,19 @@ class _DockerComposePageState extends ConsumerState<DockerComposePage> {
           const SizedBox(height: 12),
         ],
 
-        if (_error != null)
-          ErrorStateView(message: _error!, onRetry: _load)
-        else if (_loading && _projects.isEmpty)
-          const LoadingStateView(message: 'Listando projetos compose...')
-        else if (_projects.isEmpty)
+        if (live.status == null)
+          const LoadingStateView(
+            message: 'Aguardando os containers deste host...',
+          )
+        else if (!live.available)
+          NestedPanel(
+            tone: SemanticTone.warning,
+            child: Text(
+              live.status?.reason ??
+                  'A Docker Engine deste host não está acessível agora.',
+            ),
+          )
+        else if (projects.isEmpty)
           const EmptyStateView(
             title: 'Nenhum projeto Compose detectado',
             description:
@@ -172,7 +128,7 @@ class _DockerComposePageState extends ConsumerState<DockerComposePage> {
             md: 2,
             lg: 2,
             xl: 2,
-            children: _projects
+            children: projects
                 .map((project) {
                   return SectionCard(
                     title: project.name,

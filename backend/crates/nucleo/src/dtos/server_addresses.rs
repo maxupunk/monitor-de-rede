@@ -29,6 +29,10 @@ pub struct ServerAddressEntry {
     pub source: String,
     /// Chega-se por HTTPS (o domínio atrás de um proxy).
     pub https: bool,
+    /// A URL desta central por este caminho, com a porta certa (a da API pelo
+    /// túnel, a publicada pela rede local e pela internet). Nula sem valor.
+    /// É a mesma regra dos comandos de instalação do agente.
+    pub url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

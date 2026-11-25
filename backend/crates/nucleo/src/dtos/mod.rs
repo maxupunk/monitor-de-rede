@@ -2,6 +2,7 @@ pub mod agents;
 pub mod alerts;
 pub mod areas;
 pub mod backup;
+pub mod client_failures;
 pub mod common;
 pub mod devices;
 pub mod diagnostics;

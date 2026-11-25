@@ -19,6 +19,7 @@ class AiSettingsState {
     this.pulling = false,
     this.pullProgress,
     this.pullingModel,
+    this.deletingModel,
     this.error,
   });
 
@@ -33,6 +34,9 @@ class AiSettingsState {
   final bool pulling;
   final ModelPullProgress? pullProgress;
   final String? pullingModel;
+
+  /// O modelo que está sendo apagado do Ollama agora.
+  final String? deletingModel;
   final String? error;
 
   AiSettingsState copyWith({
@@ -49,6 +53,8 @@ class AiSettingsState {
     ModelPullProgress? pullProgress,
     bool clearPullProgress = false,
     String? pullingModel,
+    String? deletingModel,
+    bool clearDeletingModel = false,
     String? error,
     bool clearError = false,
   }) {
@@ -66,6 +72,9 @@ class AiSettingsState {
           ? null
           : (pullProgress ?? this.pullProgress),
       pullingModel: pullingModel ?? this.pullingModel,
+      deletingModel: clearDeletingModel
+          ? null
+          : (deletingModel ?? this.deletingModel),
       error: clearError ? null : (error ?? this.error),
     );
   }
@@ -239,6 +248,33 @@ class AiSettingsNotifier extends Notifier<AiSettingsState> {
   }
 
   bool _pullCancelled = false;
+
+  /// Apaga um modelo do Ollama e recarrega a lista. Devolve o que foi
+  /// liberado, ou a mensagem de erro para a tela mostrar ao lado da ação.
+  Future<({AiModelRemoval? removal, String? error})> deleteOllamaModel(
+    String model, {
+    String? baseUrl,
+  }) async {
+    if (state.deletingModel != null) {
+      return (removal: null, error: 'Aguarde a remoção em andamento.');
+    }
+    state = state.copyWith(deletingModel: model);
+    try {
+      final removal = await _repo.deleteOllamaModel(
+        model: model,
+        baseUrl: baseUrl,
+      );
+      await loadOllamaModels(baseUrl: baseUrl);
+      return (removal: removal, error: null);
+    } catch (err) {
+      return (
+        removal: null,
+        error: describeError(err, fallback: 'Falha ao apagar o modelo.'),
+      );
+    } finally {
+      state = state.copyWith(clearDeletingModel: true);
+    }
+  }
 
   void cancelPull() {
     _pullCancelled = true;

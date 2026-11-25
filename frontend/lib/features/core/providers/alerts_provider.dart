@@ -190,9 +190,10 @@ class AlertsNotifier extends Notifier<AlertsState> {
     }
   }
 
-  Future<({bool ok, bool resolved, String? message})> verifyAlert(
-    int alertId,
-  ) async {
+  /// Repete a checagem do alvo. `checkable` falso: o alerta é de evento (sem
+  /// monitor) e não havia o que checar — a tela oferece encerrar.
+  Future<({bool ok, bool resolved, bool checkable, String? message})>
+  verifyAlert(int alertId) async {
     try {
       final res = await ref
           .read(apiClientProvider)
@@ -203,10 +204,31 @@ class AlertsNotifier extends Notifier<AlertsState> {
       return (
         ok: true,
         resolved: res['resolved'] == true,
+        checkable: res['checkable'] != false,
         message: res['message'] as String?,
       );
     } catch (err) {
-      return (ok: false, resolved: false, message: describeError(err));
+      return (
+        ok: false,
+        resolved: false,
+        checkable: true,
+        message: describeError(err),
+      );
+    }
+  }
+
+  /// Encerra o alerta à mão (a condição já passou e a volta não chegou).
+  Future<({bool ok, String? message})> closeAlert(int alertId) async {
+    try {
+      final res = await ref
+          .read(apiClientProvider)
+          .post<Map<String, dynamic>>('/alerts/$alertId/close');
+      if (res['event'] is Map) {
+        upsertAlertEvent(AlertEvent.fromJson(asJsonMap(res['event'])));
+      }
+      return (ok: true, message: res['message'] as String?);
+    } catch (err) {
+      return (ok: false, message: describeError(err));
     }
   }
 
@@ -246,20 +268,6 @@ class AlertsNotifier extends Notifier<AlertsState> {
     } catch (err) {
       state = state.copyWith(error: describeError(err));
       return false;
-    }
-  }
-
-  Future<String?> requestAiSummary(int alertId) async {
-    try {
-      final res = await ref
-          .read(apiClientProvider)
-          .post<Map<String, dynamic>>('/ai/alerts/$alertId/summary');
-      if (res['summary'] is Map) {
-        applyAiSummary(alertId, asJsonMap(res['summary']));
-      }
-      return null;
-    } catch (err) {
-      return describeError(err);
     }
   }
 

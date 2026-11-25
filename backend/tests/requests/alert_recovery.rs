@@ -297,3 +297,64 @@ async fn janela_negativa_e_recusada_e_o_campo_sobrevive_ao_put_parcial() {
     })
     .await;
 }
+
+#[tokio::test]
+#[serial]
+async fn alerta_de_evento_diz_que_nao_ha_checagem_e_pode_ser_encerrado() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+
+        // O túnel VPN caiu há 6 dias e a volta nunca chegou.
+        let evento = alert_events::ActiveModel {
+            status: Set("acknowledged".into()),
+            severity: Set("critical".into()),
+            scope_key: Set(Some("vpn_peer:1".into())),
+            started_at: Set((Utc::now() - Duration::days(6)).into()),
+            message: Set(Some("Túnel VPN de hostinger-srv-1 caiu.".into())),
+            data: Set(Some(json!({ "title": "Túnel VPN caiu" }))),
+            created_at: Set(Utc::now().into()),
+            updated_at: Set(Utc::now().into()),
+            ..Default::default()
+        }
+        .insert(&ctx.db)
+        .await
+        .unwrap();
+
+        let verificado = json_of(
+            &request
+                .post(&format!("/api/alerts/{}/verify", evento.id))
+                .await
+                .text(),
+        );
+        assert_eq!(verificado["checkable"], false);
+        assert_eq!(verificado["resolved"], false);
+        assert!(verificado["message"]
+            .as_str()
+            .unwrap()
+            .contains("vem de um evento"));
+
+        let encerrado = request
+            .post(&format!("/api/alerts/{}/close", evento.id))
+            .await;
+        assert_eq!(encerrado.status_code(), 200, "{}", encerrado.text());
+        let salvo = alert_events::Entity::find_by_id(evento.id)
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(salvo.status, "resolved");
+        assert!(salvo.resolved_at.is_some());
+        let data = salvo.data.unwrap();
+        assert!(data["closedManuallyAt"].is_string());
+        assert_eq!(data["title"], "Túnel VPN caiu", "o resto do data fica");
+
+        // Encerrar de novo não muda nada nem falha.
+        let de_novo = request
+            .post(&format!("/api/alerts/{}/close", evento.id))
+            .await;
+        assert_eq!(de_novo.status_code(), 200);
+    })
+    .await;
+}

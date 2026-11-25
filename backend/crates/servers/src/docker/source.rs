@@ -25,9 +25,9 @@ use tokio_util::sync::CancellationToken;
 use crate::views::docker::DockerMetricsResponse;
 
 use super::{
-    call, client,
+    call, call_within, client,
     engine::{ContainerAction, LogFilters},
-    DockerError,
+    DockerError, LIFECYCLE_TIMEOUT,
 };
 
 const STATUS_TIMEOUT: Duration = Duration::from_secs(3);
@@ -143,17 +143,30 @@ impl DockerEngine for LocalEngine {
     async fn container_action(&self, id: &str, action: ContainerAction) -> Result<(), DockerError> {
         let client = client()?;
         match action {
-            ContainerAction::Start => call(client.start_container::<String>(id, None)).await?,
-            ContainerAction::Stop => call(client.stop_container(id, None)).await?,
-            ContainerAction::Restart => call(client.restart_container(id, None)).await?,
+            ContainerAction::Start => {
+                call_within(
+                    LIFECYCLE_TIMEOUT,
+                    client.start_container::<String>(id, None),
+                )
+                .await?;
+            }
+            ContainerAction::Stop => {
+                call_within(LIFECYCLE_TIMEOUT, client.stop_container(id, None)).await?;
+            }
+            ContainerAction::Restart => {
+                call_within(LIFECYCLE_TIMEOUT, client.restart_container(id, None)).await?;
+            }
             ContainerAction::Remove { force } => {
-                call(client.remove_container(
-                    id,
-                    Some(RemoveContainerOptions {
-                        force,
-                        ..Default::default()
-                    }),
-                ))
+                call_within(
+                    LIFECYCLE_TIMEOUT,
+                    client.remove_container(
+                        id,
+                        Some(RemoveContainerOptions {
+                            force,
+                            ..Default::default()
+                        }),
+                    ),
+                )
                 .await?;
             }
         }

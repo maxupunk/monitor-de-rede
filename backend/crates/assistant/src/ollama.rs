@@ -381,6 +381,7 @@ struct OllamaTagItem {
     name: String,
     size: Option<u64>,
     modified_at: Option<String>,
+    digest: Option<String>,
     details: Option<OllamaTagDetails>,
 }
 
@@ -424,34 +425,124 @@ async fn fill_context_lengths(
     }
 }
 
-/// Consulta os modelos instalados no Ollama e retorna cruzados com os recomendados.
-pub async fn list_models(base_url: &str) -> AppResult<OllamaModelsResponse> {
-    let root_url = locate_root(base_url).await;
-    let tags_url = format!("{root_url}/api/tags");
+/// `llama3.2` e `llama3.2:latest` são o mesmo modelo para o Ollama.
+#[must_use]
+pub fn same_model(a: &str, b: &str) -> bool {
+    let normalize = |name: &str| {
+        let name = name.trim().to_ascii_lowercase();
+        if name.contains(':') {
+            name
+        } else {
+            format!("{name}:latest")
+        }
+    };
+    normalize(a) == normalize(b)
+}
 
-    let client = reqwest::Client::builder()
+fn tags_client() -> AppResult<reqwest::Client> {
+    reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
         .build()
-        .map_err(|e| AppError::service_unavailable(format!("Erro no cliente HTTP: {e}")))?;
+        .map_err(|e| AppError::service_unavailable(format!("Erro no cliente HTTP: {e}")))
+}
 
-    let response = client.get(&tags_url).send().await;
+/// Os modelos instalados no Ollama (`/api/tags`), sem a janela de contexto.
+/// `Err` com a frase do que deu errado quando o Ollama não responde.
+async fn fetch_installed(
+    client: &reqwest::Client,
+    root_url: &str,
+    configured_model: &str,
+) -> Result<Vec<OllamaModelItem>, String> {
+    let res = client
+        .get(format!("{root_url}/api/tags"))
+        .send()
+        .await
+        .map_err(|e| format!("Não foi possível conectar ao Ollama em '{root_url}': {e}"))?;
+    if !res.status().is_success() {
+        return Err(format!("Ollama retornou status HTTP {}", res.status()));
+    }
+    let Ok(tags) = res.json::<OllamaTagsResponse>().await else {
+        return Ok(Vec::new());
+    };
+    let mut items: Vec<OllamaModelItem> = tags
+        .models
+        .unwrap_or_default()
+        .into_iter()
+        .map(|m| OllamaModelItem {
+            netmonitor_trained: is_known_netmonitor_trained(&m.name),
+            in_use: same_model(&m.name, configured_model),
+            name: m.name,
+            size: m.size,
+            parameter_size: m.details.and_then(|d| d.parameter_size),
+            modified_at: m.modified_at,
+            digest: m.digest,
+            context_length: None,
+            shared_with: Vec::new(),
+        })
+        .collect();
+    crate::model_cleanup::link_shared(&mut items);
+    Ok(items)
+}
 
-    let (installed_items, is_online, error_message) = match response {
-        Ok(res) if res.status().is_success() => {
-            if let Ok(tags) = res.json::<OllamaTagsResponse>().await {
-                let mut items: Vec<OllamaModelItem> = tags
-                    .models
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|m| OllamaModelItem {
-                        netmonitor_trained: is_known_netmonitor_trained(&m.name),
-                        name: m.name,
-                        size: m.size,
-                        parameter_size: m.details.and_then(|d| d.parameter_size),
-                        modified_at: m.modified_at,
-                        context_length: None,
-                    })
-                    .collect();
+/// Os modelos instalados no Ollama de `base_url`, marcando o que o chat usa.
+///
+/// # Errors
+///
+/// `503` quando o Ollama não responde.
+pub async fn installed_models(
+    base_url: &str,
+    configured_model: &str,
+) -> AppResult<Vec<OllamaModelItem>> {
+    let root_url = locate_root(base_url).await;
+    fetch_installed(&tags_client()?, &root_url, configured_model)
+        .await
+        .map_err(AppError::service_unavailable)
+}
+
+/// Apaga um modelo do Ollama (`DELETE /api/delete`). Quem decide se pode é
+/// [`crate::model_cleanup`]; aqui só a chamada.
+///
+/// # Errors
+///
+/// `404` quando o Ollama não tem o modelo; `503` quando não responde ou recusa.
+pub async fn delete_model(base_url: &str, model: &str) -> AppResult<()> {
+    let root_url = locate_root(base_url).await;
+    let res = tags_client()?
+        .delete(format!("{root_url}/api/delete"))
+        .json(&serde_json::json!({ "model": model, "name": model }))
+        .send()
+        .await
+        .map_err(|e| {
+            AppError::service_unavailable(format!(
+                "Não foi possível conectar ao Ollama em '{root_url}': {e}"
+            ))
+        })?;
+    match res.status() {
+        status if status.is_success() => Ok(()),
+        reqwest::StatusCode::NOT_FOUND => Err(AppError::not_found(format!(
+            "O Ollama não tem o modelo '{model}'."
+        ))),
+        status => {
+            let body = res.text().await.unwrap_or_default();
+            Err(AppError::service_unavailable(format!(
+                "O Ollama recusou apagar '{model}' (HTTP {status}): {body}"
+            )))
+        }
+    }
+}
+
+/// Consulta os modelos instalados no Ollama e retorna cruzados com os
+/// recomendados. `configured_model` é o do chat: sai marcado como em uso.
+pub async fn list_models(
+    base_url: &str,
+    configured_model: &str,
+) -> AppResult<OllamaModelsResponse> {
+    let root_url = locate_root(base_url).await;
+    let client = tags_client()?;
+
+    let (installed_items, is_online, error_message) =
+        match fetch_installed(&client, &root_url, configured_model).await {
+            Ok(mut items) => {
                 fill_context_lengths(&client, &root_url, &mut items).await;
                 items.sort_by_key(|m| {
                     BUNDLED_MODELS
@@ -460,26 +551,9 @@ pub async fn list_models(base_url: &str) -> AppResult<OllamaModelsResponse> {
                         .unwrap_or(usize::MAX)
                 });
                 (items, true, None)
-            } else {
-                (Vec::new(), true, None)
             }
-        }
-        Ok(res) => {
-            let status = res.status();
-            (
-                Vec::new(),
-                false,
-                Some(format!("Ollama retornou status HTTP {status}")),
-            )
-        }
-        Err(e) => (
-            Vec::new(),
-            false,
-            Some(format!(
-                "Não foi possível conectar ao Ollama em '{root_url}': {e}"
-            )),
-        ),
-    };
+            Err(message) => (Vec::new(), false, Some(message)),
+        };
 
     let installed_names: Vec<&str> = installed_items.iter().map(|m| m.name.as_str()).collect();
 

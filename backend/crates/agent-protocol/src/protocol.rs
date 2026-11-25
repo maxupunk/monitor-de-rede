@@ -490,6 +490,23 @@ pub enum DockerCall {
 }
 
 impl Command {
+    /// Nome curto do pedido para o log — `monitor`, `docker.container_action`.
+    /// É a etiqueta do fio (`op` e, no Docker, `call`), nunca os argumentos:
+    /// não carrega id, caminho nem segredo.
+    #[must_use]
+    pub fn label(&self) -> String {
+        fn tag(value: serde_json::Result<Value>, key: &str) -> String {
+            value
+                .ok()
+                .and_then(|value| value.get(key)?.as_str().map(str::to_string))
+                .unwrap_or_else(|| "desconhecido".to_string())
+        }
+        match self {
+            Self::Docker { call } => format!("docker.{}", tag(serde_json::to_value(call), "call")),
+            other => tag(serde_json::to_value(other), "op"),
+        }
+    }
+
     /// Permissão que a política do agente precisa conceder.
     #[must_use]
     pub const fn permission(&self) -> Permission {
@@ -898,6 +915,26 @@ mod tests {
         assert_eq!(
             Command::SetLive { interval_ms: 0 }.permission(),
             Permission::Read
+        );
+    }
+
+    #[test]
+    fn rotulo_do_pedido_e_a_etiqueta_do_fio_sem_argumentos() {
+        let action = Command::Docker {
+            call: DockerCall::ContainerAction {
+                id: "segredo-do-id".into(),
+                action: ContainerAction::Stop,
+            },
+        };
+        assert_eq!(action.label(), "docker.container_action");
+        assert!(!action.label().contains("segredo"));
+        assert_eq!(Command::SetLive { interval_ms: 0 }.label(), "set_live");
+        assert_eq!(
+            Command::VolumeExport {
+                name: "dados".into()
+            }
+            .label(),
+            "volume_export"
         );
     }
 }

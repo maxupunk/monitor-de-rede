@@ -45,3 +45,19 @@ String describeError(
   final cleaned = raw.replaceFirst(_technicalPrefixPattern, '').trim();
   return cleaned.isNotEmpty ? cleaned : fallback;
 }
+
+/// Como [describeError], para uma **ação** (iniciar, parar, aplicar).
+///
+/// Sem resposta não quer dizer que a ação falhou: a central pode tê-la
+/// concluído depois que o navegador desistiu de esperar. Dizer "falha" aí
+/// levava o operador a repetir o comando em algo que já tinha mudado.
+String describeActionError(
+  Object? err, {
+  String fallback = 'Não foi possível concluir a operação.',
+}) {
+  if (err is NetworkException && err.timedOut) {
+    return '${err.message} A ação pode ter sido concluída mesmo assim: '
+        'confira o estado na tela, que se atualiza sozinha.';
+  }
+  return describeError(err, fallback: fallback);
+}

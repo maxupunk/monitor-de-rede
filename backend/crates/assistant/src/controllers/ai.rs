@@ -24,19 +24,19 @@ use crate::{
     drivers::{self, openai_compatible::OpenAiCompatibleDriver, traits::AiDriver},
     dtos::{
         AiMentionQuery, ChatStreamRequest, DeciderFormInput, ExecuteToolRequest,
-        ExecuteToolResponse, ModelPullProgress, OllamaPullRequest, TestConnectionInput,
-        TestConnectionResponse, TestDeciderInput,
+        ExecuteToolResponse, ModelPullProgress, OllamaDeleteRequest, OllamaPullRequest,
+        TestConnectionInput, TestConnectionResponse, TestDeciderInput,
     },
     harness::{
         agent::{run_agent_loop, AgentRequest},
         confirmation,
     },
-    mentions, ollama, opencode, openrouter,
+    mentions, model_cleanup, ollama, opencode, openrouter,
     proactive::{digest, incident, runner::ProviderDrivers, schedule::period_hours},
     settings::{self, AiSettings, DEFAULT_OLLAMA_BASE_URL},
 };
 use netmonitor_core::{
-    audit::AuditActor,
+    audit::{self, require_admin, AuditAction, AuditActor, ResourceType},
     shared::errors::{AppError, AppResult},
 };
 
@@ -302,14 +302,41 @@ async fn list_ollama_models(
     Query(query): Query<OllamaModelsQuery>,
 ) -> AppResult<Response> {
     let settings = settings::load(&ctx.db).await?;
-    let base_url = query
-        .base_url
-        .filter(|u| !u.trim().is_empty())
-        .or(settings.ollama_base_url)
-        .unwrap_or_else(|| DEFAULT_OLLAMA_BASE_URL.to_string());
-
-    let models = ollama::list_models(&base_url).await?;
+    let base_url = model_cleanup::resolve_base_url(&settings, query.base_url);
+    let models = ollama::list_models(&base_url, model_cleanup::configured_model(&settings)).await?;
     Ok(format::json(models)?)
+}
+
+/// `DELETE /api/ai/ollama/models` — apaga um modelo baixado no Ollama para
+/// devolver o disco. Só o administrador; o modelo do chat é recusado.
+async fn delete_ollama_model(
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Json(input): Json<OllamaDeleteRequest>,
+) -> AppResult<Response> {
+    require_admin(
+        &ctx,
+        &headers,
+        "Apenas administradores podem apagar modelos de IA do servidor.",
+    )
+    .await?;
+    let settings = settings::load(&ctx.db).await?;
+    let removal = model_cleanup::remove(&settings, input.base_url, &input.model).await?;
+
+    audit::record(
+        &ctx.db,
+        &headers,
+        AuditAction::Delete,
+        ResourceType::SystemSetting,
+        (0, &format!("ollama:{}", removal.name)),
+        format!(
+            "Modelo de IA '{}' apagado do Ollama ({} bytes liberados)",
+            removal.name, removal.freed_bytes
+        ),
+    )
+    .await;
+
+    Ok(format::json(removal)?)
 }
 
 /// `POST /api/ai/ollama/pull` — streaming SSE do download (pull) de modelo no Ollama com porcentagem e status.
@@ -318,11 +345,7 @@ async fn pull_ollama_model(
     Json(input): Json<OllamaPullRequest>,
 ) -> AppResult<Response> {
     let settings = settings::load(&ctx.db).await?;
-    let base_url = input
-        .base_url
-        .filter(|u| !u.trim().is_empty())
-        .or(settings.ollama_base_url)
-        .unwrap_or_else(|| DEFAULT_OLLAMA_BASE_URL.to_string());
+    let base_url = model_cleanup::resolve_base_url(&settings, input.base_url);
 
     let progress_stream = ollama::pull_model_stream(&base_url, &input.model).await?;
     Ok(pull_progress_sse(progress_stream))
@@ -508,7 +531,10 @@ pub fn routes() -> Routes {
         .add("/alerts/{id}/summary", post(summarize_alert_now))
         .add("/opencode/models", get(list_opencode_models))
         .add("/openrouter/models", get(list_openrouter_models))
-        .add("/ollama/models", get(list_ollama_models))
+        .add(
+            "/ollama/models",
+            get(list_ollama_models).delete(delete_ollama_model),
+        )
         .add("/ollama/pull", post(pull_ollama_model))
         .add("/chat/benchmark", get(show_chat_benchmark))
         .add("/decider", get(show_decider).put(update_decider))

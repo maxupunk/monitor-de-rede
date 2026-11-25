@@ -30,6 +30,7 @@ pub mod local_models;
 pub mod local_server;
 pub mod mentions;
 pub mod migrations;
+pub mod model_cleanup;
 pub mod ollama;
 pub mod opencode;
 pub mod openrouter;
