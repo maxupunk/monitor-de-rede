@@ -267,4 +267,146 @@ void main() {
       },
     );
   });
+
+  group('Local storage root formatting & subfolder validation', () {
+    test(
+      'formatLocalStorageRoot always guarantees trailing slash on prefix',
+      () {
+        expect(
+          formatLocalStorageRoot('/data/storage'),
+          equals((label: '/data/storage', prefix: '/data/storage/')),
+        );
+        expect(
+          formatLocalStorageRoot('/data/storage/'),
+          equals((label: '/data/storage', prefix: '/data/storage/')),
+        );
+        expect(
+          formatLocalStorageRoot('storage/'),
+          equals((label: 'storage', prefix: 'storage/')),
+        );
+        expect(
+          formatLocalStorageRoot('storage'),
+          equals((label: 'storage', prefix: 'storage/')),
+        );
+        expect(formatLocalStorageRoot('/'), equals((label: '/', prefix: '/')));
+        expect(
+          formatLocalStorageRoot(r'C:\backups\'),
+          equals((label: 'C:/backups', prefix: 'C:/backups/')),
+        );
+        expect(
+          formatLocalStorageRoot('   '),
+          equals((label: 'storage', prefix: 'storage/')),
+        );
+      },
+    );
+
+    test(
+      'validateLocalBasePath accepts relative subfolders and rejects escapes',
+      () {
+        expect(validateLocalBasePath('', rootLabel: '/data/storage'), isNull);
+        expect(
+          validateLocalBasePath('databases-local', rootLabel: '/data/storage'),
+          isNull,
+        );
+        expect(
+          validateLocalBasePath('bancos/producao', rootLabel: '/data/storage'),
+          isNull,
+        );
+        expect(
+          validateLocalBasePath('/databases-local', rootLabel: '/data/storage'),
+          contains('/data/storage/'),
+        );
+        expect(
+          validateLocalBasePath(
+            r'\databases-local',
+            rootLabel: '/data/storage',
+          ),
+          contains('/data/storage/'),
+        );
+        expect(
+          validateLocalBasePath('../data', rootLabel: '/data/storage'),
+          contains('..'),
+        );
+        expect(
+          validateLocalBasePath('a/../b', rootLabel: '/data/storage'),
+          contains('..'),
+        );
+        expect(
+          validateLocalBasePath('C:/Windows', rootLabel: '/data/storage'),
+          isNotNull,
+        );
+      },
+    );
+  });
+
+  group('Local storage root formatting & subfolder validation', () {
+    test(
+      'formatLocalStorageRoot always guarantees trailing slash on prefix',
+      () {
+        expect(
+          formatLocalStorageRoot('/data/storage'),
+          equals((label: '/data/storage', prefix: '/data/storage/')),
+        );
+        expect(
+          formatLocalStorageRoot('/data/storage/'),
+          equals((label: '/data/storage', prefix: '/data/storage/')),
+        );
+        expect(
+          formatLocalStorageRoot('storage/'),
+          equals((label: 'storage', prefix: 'storage/')),
+        );
+        expect(
+          formatLocalStorageRoot('storage'),
+          equals((label: 'storage', prefix: 'storage/')),
+        );
+        expect(formatLocalStorageRoot('/'), equals((label: '/', prefix: '/')));
+        expect(
+          formatLocalStorageRoot(r'C:\backups\'),
+          equals((label: 'C:/backups', prefix: 'C:/backups/')),
+        );
+        expect(
+          formatLocalStorageRoot('   '),
+          equals((label: 'storage', prefix: 'storage/')),
+        );
+      },
+    );
+
+    test(
+      'validateLocalBasePath accepts relative subfolders and rejects escapes',
+      () {
+        expect(validateLocalBasePath('', rootLabel: '/data/storage'), isNull);
+        expect(
+          validateLocalBasePath('databases-local', rootLabel: '/data/storage'),
+          isNull,
+        );
+        expect(
+          validateLocalBasePath('bancos/producao', rootLabel: '/data/storage'),
+          isNull,
+        );
+        expect(
+          validateLocalBasePath('/databases-local', rootLabel: '/data/storage'),
+          contains('/data/storage/'),
+        );
+        expect(
+          validateLocalBasePath(
+            r'\databases-local',
+            rootLabel: '/data/storage',
+          ),
+          contains('/data/storage/'),
+        );
+        expect(
+          validateLocalBasePath('../data', rootLabel: '/data/storage'),
+          contains('..'),
+        );
+        expect(
+          validateLocalBasePath('a/../b', rootLabel: '/data/storage'),
+          contains('..'),
+        );
+        expect(
+          validateLocalBasePath('C:/Windows', rootLabel: '/data/storage'),
+          isNotNull,
+        );
+      },
+    );
+  });
 }

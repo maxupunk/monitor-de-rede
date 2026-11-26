@@ -94,3 +94,41 @@ StorageProviderInfo storageProviderInfo(String provider) {
   }
   return storageProvidersCatalog.first;
 }
+
+/// Formata a raiz local retornada pela API para exibição no formulário.
+///
+/// - `label`: caminho limpo sem barra final (ex.: `/data/storage`), exceto `/`
+/// - `prefix`: sempre termina com `/` (ex.: `/data/storage/`), evitando que a
+///   subpasta digitada fique colada visualmente na raiz.
+({String label, String prefix}) formatLocalStorageRoot(String rawRoot) {
+  final normalized = rawRoot.trim().replaceAll(r'\', '/');
+  if (normalized.isEmpty) {
+    return (label: 'storage', prefix: 'storage/');
+  }
+  final clean = normalized.replaceFirst(RegExp(r'/+$'), '');
+  final label = clean.isEmpty ? '/' : clean;
+  final prefix = label.endsWith('/') ? label : '$label/';
+  return (label: label, prefix: prefix);
+}
+
+/// Valida a subpasta relativa de um destino local antes do envio à API.
+///
+/// Retorna `null` quando o caminho é válido (vazio usa a própria raiz) ou uma
+/// mensagem explicativa para exibição inline no campo.
+String? validateLocalBasePath(String rawValue, {required String rootLabel}) {
+  final trimmed = rawValue.trim();
+  if (trimmed.isEmpty) return null;
+
+  if (trimmed.startsWith('/') || trimmed.startsWith(r'\')) {
+    final prefix = rootLabel.endsWith('/') ? rootLabel : '$rootLabel/';
+    return 'Não comece com "/" — a barra já faz parte de $prefix.';
+  }
+  if (trimmed.contains('\u0000') || trimmed.contains(':')) {
+    return 'Informe apenas uma subpasta relativa dentro de $rootLabel.';
+  }
+  final segments = trimmed.split(RegExp(r'[/\\]'));
+  if (segments.any((segment) => segment == '..')) {
+    return 'Não use ".." — a pasta precisa ficar dentro de $rootLabel.';
+  }
+  return null;
+}

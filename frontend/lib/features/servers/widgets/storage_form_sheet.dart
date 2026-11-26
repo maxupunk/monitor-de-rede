@@ -189,7 +189,23 @@ class _StorageFormBodyState extends ConsumerState<StorageFormBody> {
     }
   }
 
+  String? _localPathValidationError() {
+    final configType = storageProviderInfo(_provider).configType;
+    if (configType != 'local') return null;
+    final rawRoot = ref.read(storagesProvider).meta?.localRoot ?? 'storage';
+    final root = formatLocalStorageRoot(rawRoot);
+    return validateLocalBasePath(_basePathCtrl.text, rootLabel: root.label);
+  }
+
   Future<void> _test() async {
+    final localError = _localPathValidationError();
+    if (localError != null) {
+      setState(() {
+        _error = null;
+        _testMessage = null;
+      });
+      return;
+    }
     setState(() {
       _testing = true;
       _testFailed = false;
@@ -229,6 +245,11 @@ class _StorageFormBodyState extends ConsumerState<StorageFormBody> {
       setState(() => _error = 'Informe um nome para o destino.');
       return;
     }
+    final localError = _localPathValidationError();
+    if (localError != null) {
+      setState(() => _error = null);
+      return;
+    }
     setState(() {
       _saving = true;
       _error = null;
@@ -262,13 +283,24 @@ class _StorageFormBodyState extends ConsumerState<StorageFormBody> {
   }
 
   List<Widget> _buildProviderFields(String configType, String localRoot) {
+    final root = formatLocalStorageRoot(localRoot);
+    final localPathError = configType == 'local'
+        ? validateLocalBasePath(_basePathCtrl.text, rootLabel: root.label)
+        : null;
+
     return switch (configType) {
       'local' => <Widget>[
         TextField(
           controller: _basePathCtrl,
+          onChanged: (_) => setState(() => _error = null),
           decoration: InputDecoration(
-            labelText: 'Subpasta dentro de $localRoot',
-            prefixText: localRoot,
+            labelText: 'Subpasta dentro de ${root.label}',
+            floatingLabelBehavior: FloatingLabelBehavior.always,
+            prefixText: root.prefix,
+            hintText: 'ex.: databases-local',
+            helperText:
+                'Opcional — deixe em branco para salvar direto em ${root.label}.',
+            errorText: localPathError,
           ),
         ),
       ],

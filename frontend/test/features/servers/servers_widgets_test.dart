@@ -8,6 +8,7 @@ import 'package:netmonitor_app/features/servers/models/agent_models.dart';
 import 'package:netmonitor_app/features/servers/models/deploy_models.dart';
 import 'package:netmonitor_app/features/servers/models/docker_models.dart';
 import 'package:netmonitor_app/features/servers/models/registry_models.dart';
+import 'package:netmonitor_app/features/servers/models/storage_models.dart';
 import 'package:netmonitor_app/features/servers/pages/deploys_page.dart';
 import 'package:netmonitor_app/features/servers/pages/docker_containers_page.dart';
 import 'package:netmonitor_app/features/servers/pages/docker_history_page.dart';
@@ -19,8 +20,10 @@ import 'package:netmonitor_app/features/servers/providers/agents_provider.dart';
 import 'package:netmonitor_app/features/servers/providers/deploys_provider.dart';
 import 'package:netmonitor_app/features/servers/providers/docker_provider.dart';
 import 'package:netmonitor_app/features/servers/providers/registry_provider.dart';
+import 'package:netmonitor_app/features/servers/providers/storages_provider.dart';
 import 'package:netmonitor_app/features/servers/widgets/deploy_env_dialog.dart';
 import 'package:netmonitor_app/features/servers/widgets/stacked_container_usage_chart.dart';
+import 'package:netmonitor_app/features/servers/widgets/storage_form_sheet.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
 
@@ -598,7 +601,105 @@ void main() {
         expect(find.text('valor_b'), findsOneWidget);
       },
     );
+
+    testWidgets(
+      'StorageFormBody shows trailing slash on localRoot prefix and guides user on leading slash',
+      (tester) async {
+        final notifier = _RecordingStoragesNotifier();
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: <Override>[
+              authProvider.overrideWith(_AdminAuthNotifier.new),
+              storagesProvider.overrideWith(() => notifier),
+            ],
+            child: MaterialApp(
+              theme: AppTheme.dark(),
+              home: const Scaffold(
+                body: SingleChildScrollView(
+                  padding: EdgeInsets.all(16),
+                  child: StorageFormBody(),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final fields = tester
+            .widgetList<TextField>(find.byType(TextField))
+            .toList();
+        expect(fields.length, 2);
+        final subfolderField = fields[1];
+        expect(
+          subfolderField.decoration?.labelText,
+          'Subpasta dentro de /data/storage',
+        );
+        expect(subfolderField.decoration?.prefixText, '/data/storage/');
+
+        // Digitar barra inicial mostra erro inline e bloqueia o envio antes da API.
+        await tester.enterText(find.byType(TextField).at(0), 'databases-local');
+        await tester.enterText(
+          find.byType(TextField).at(1),
+          '/databases-local',
+        );
+        await tester.pumpAndSettle();
+
+        expect(
+          find.text(
+            'Não comece com "/" — a barra já faz parte de /data/storage/.',
+          ),
+          findsOneWidget,
+        );
+        await tester.tap(find.text('Salvar destino'));
+        await tester.pumpAndSettle();
+        expect(notifier.savedInputs, isEmpty);
+
+        // Sem barra inicial envia a subpasta relativa limpa.
+        await tester.enterText(find.byType(TextField).at(1), 'databases-local');
+        await tester.pumpAndSettle();
+        expect(
+          find.text(
+            'Não comece com "/" — a barra já faz parte de /data/storage/.',
+          ),
+          findsNothing,
+        );
+        await tester.tap(find.text('Salvar destino'));
+        await tester.pumpAndSettle();
+
+        expect(notifier.savedInputs.length, 1);
+        expect(
+          notifier.savedInputs.single.config['basePath'],
+          'databases-local',
+        );
+      },
+    );
   });
+}
+
+class _RecordingStoragesNotifier extends StoragesNotifier {
+  final List<StorageDestinationInput> savedInputs = <StorageDestinationInput>[];
+
+  @override
+  StoragesState build() => const StoragesState(
+    loaded: true,
+    meta: StoragesMetaResponse(localRoot: '/data/storage'),
+  );
+
+  @override
+  Future<StorageDestinationDetail> save(
+    int? id,
+    StorageDestinationInput input,
+  ) async {
+    savedInputs.add(input);
+    return StorageDestinationDetail(
+      id: 1,
+      name: input.name,
+      provider: input.provider,
+      target: '/data/storage/${input.config['basePath'] ?? ''}',
+      config: input.config,
+      secretsSet: const <String>[],
+    );
+  }
 }
 
 class _EnvSeededDeploysNotifier extends _SeededDeploysNotifier {

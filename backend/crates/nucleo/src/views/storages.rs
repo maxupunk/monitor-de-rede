@@ -160,8 +160,8 @@ fn target_of(config: &StorageConfig) -> String {
     let prefix = config.prefix();
     match config {
         StorageConfig::Local(_) => {
-            let root = local_root().display().to_string().replace('\\', "/");
-            join_key(&root, &prefix)
+            let root = local_root().display().to_string();
+            join_local_display(&root, &prefix)
         }
         StorageConfig::S3(s3) => format!("s3://{}", join_key(s3.bucket.trim(), &prefix)),
         StorageConfig::Gcs(gcs) => format!("gs://{}", join_key(gcs.bucket.trim(), &prefix)),
@@ -176,10 +176,56 @@ fn target_of(config: &StorageConfig) -> String {
     }
 }
 
+/// Junta a raiz local (preservando a barra inicial em caminhos absolutos Unix)
+/// com a subpasta relativa do destino, para exibição.
+fn join_local_display(root: &str, prefix: &str) -> String {
+    let root = root.trim().replace('\\', "/");
+    let root_trimmed = root.trim_end_matches('/');
+    let prefix = prefix.trim_matches('/');
+
+    match (root_trimmed.is_empty(), prefix.is_empty()) {
+        (true, true) => {
+            if root.starts_with('/') {
+                "/".to_string()
+            } else {
+                String::new()
+            }
+        }
+        (true, false) => {
+            if root.starts_with('/') {
+                format!("/{prefix}")
+            } else {
+                prefix.to_string()
+            }
+        }
+        (false, true) => root_trimmed.to_string(),
+        (false, false) => format!("{root_trimmed}/{prefix}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::services::storage::config::{S3Config, SftpConfig};
+
+    #[test]
+    fn o_destino_local_preserva_barra_inicial_e_junta_subpasta() {
+        assert_eq!(
+            join_local_display("/data/storage", "databases-local"),
+            "/data/storage/databases-local"
+        );
+        assert_eq!(
+            join_local_display("/data/storage/", "databases-local/"),
+            "/data/storage/databases-local"
+        );
+        assert_eq!(join_local_display("/data/storage", ""), "/data/storage");
+        assert_eq!(
+            join_local_display("storage", "databases-local"),
+            "storage/databases-local"
+        );
+        assert_eq!(join_local_display("/", "copias"), "/copias");
+        assert_eq!(join_local_display(r"C:\backups\", "db"), "C:/backups/db");
+    }
 
     #[test]
     fn o_destino_s3_aparece_como_url() {
