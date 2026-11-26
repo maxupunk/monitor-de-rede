@@ -644,6 +644,16 @@ pub struct DeployReferencesView {
     pub tags: Vec<String>,
 }
 
+/// Arquivo `.env.example` / `.env.*` encontrado na raiz do repositório,
+/// oferecido como ponto de partida no passo 3 do assistente de deploy.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DeployEnvTemplateView {
+    pub name: String,
+    pub content: String,
+}
+
 /// O que o compose do repositório preenche sozinho.
 #[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -658,6 +668,8 @@ pub struct DeployComposeDiscovery {
     pub image_tag_variable: Option<String>,
     /// O que ajustar no compose antes do primeiro deploy.
     pub notes: Vec<String>,
+    /// Modelos `.env.example` / `.env.*` encontrados na raiz do repositório.
+    pub env_templates: Vec<DeployEnvTemplateView>,
 }
 
 /// O `deploy.yml` do repositório comparado ao gerado.

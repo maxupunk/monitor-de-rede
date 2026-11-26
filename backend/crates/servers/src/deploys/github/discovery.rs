@@ -5,12 +5,18 @@
 use serde::Deserialize;
 
 use super::{compose, encode, Client, GitHubError, PER_PAGE};
-use crate::views::deploys::{DeployComposeDiscovery, DeployReferencesView, DeployRepositoryView};
+use crate::views::deploys::{
+    DeployComposeDiscovery, DeployEnvTemplateView, DeployReferencesView, DeployRepositoryView,
+};
 
 /// Até 500 repositórios: mais que isso, a busca da tela resolve.
 const MAX_PAGES: usize = 5;
 /// Tags recentes oferecidas como exemplo de padrão.
 const MAX_TAGS: usize = 30;
+/// Limite de arquivos `.env*` carregados da raiz do repositório.
+const MAX_ENV_TEMPLATE_FILES: usize = 8;
+/// Limite de tamanho (64 KiB) por arquivo `.env*` carregado no assistente.
+const MAX_ENV_TEMPLATE_BYTES: u64 = 64 * 1024;
 
 /// De onde vem a lista: o que a instalação do app enxerga ou o que o dono do
 /// token enxerga.
@@ -124,9 +130,39 @@ struct Entry {
     name: String,
     #[serde(rename = "type")]
     kind: String,
+    #[serde(default)]
+    size: u64,
 }
 
-/// Os arquivos compose da raiz e o que o principal diz.
+/// Reconhece arquivos `.env` e `.env.*` (`.env.example`, `.env.sample`,
+/// `.env.production.example`, `.env.docker`, etc.), ignorando scripts como `.envrc`.
+fn is_env_template_file(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower == ".env" || (lower.starts_with(".env.") && lower.len() > ".env.".len())
+}
+
+/// Prioridade de exibição dos modelos `.env`: `.env.example` primeiro, depois
+/// exemplos de produção/docker, outros exemplos/templates, ambientes e `.env`.
+fn env_template_priority(name: &str) -> (u8, String) {
+    let lower = name.to_ascii_lowercase();
+    let rank = match lower.as_str() {
+        ".env.example" => 0,
+        ".env.production.example" | ".env.prod.example" | ".env.docker.example" => 1,
+        _ if lower.ends_with(".example")
+            || lower.ends_with(".sample")
+            || lower.ends_with(".template")
+            || lower.ends_with(".dist") =>
+        {
+            2
+        }
+        ".env.production" | ".env.prod" | ".env.docker" => 3,
+        ".env" => 4,
+        _ => 5,
+    };
+    (rank, lower)
+}
+
+/// Os arquivos compose da raiz e o que o principal diz, além de modelos `.env*`.
 ///
 /// Compose inválido não é erro: vira nota, e a tela deixa preencher à mão.
 ///
@@ -145,11 +181,34 @@ pub async fn compose(
         .get(&format!("/repos/{repository}/contents{query}"))
         .await?;
     let mut files: Vec<String> = entries
-        .into_iter()
+        .iter()
         .filter(|entry| entry.kind == "file" && compose::is_compose_file(&entry.name))
-        .map(|entry| entry.name)
+        .map(|entry| entry.name.clone())
         .collect();
     files.sort();
+
+    let mut env_names: Vec<String> = entries
+        .iter()
+        .filter(|entry| {
+            entry.kind == "file"
+                && is_env_template_file(&entry.name)
+                && entry.size <= MAX_ENV_TEMPLATE_BYTES
+        })
+        .map(|entry| entry.name.clone())
+        .collect();
+    env_names.sort_by_key(|name| env_template_priority(name));
+    env_names.truncate(MAX_ENV_TEMPLATE_FILES);
+
+    let mut env_templates = Vec::with_capacity(env_names.len());
+    for name in env_names {
+        let path = format!("/repos/{repository}/contents/{}{query}", encode(&name));
+        if let Ok(Some(content)) = client.raw(&path).await {
+            if (content.len() as u64) <= MAX_ENV_TEMPLATE_BYTES {
+                env_templates.push(DeployEnvTemplateView { name, content });
+            }
+        }
+    }
+
     let mut out = DeployComposeDiscovery {
         suggested_files: Vec::new(),
         services: Vec::new(),
@@ -157,6 +216,7 @@ pub async fn compose(
         image_tag_variable: None,
         notes: Vec::new(),
         files,
+        env_templates,
     };
     let Some(main) = compose::main_file(&out.files).or_else(|| out.files.first().cloned()) else {
         out.notes
@@ -183,4 +243,53 @@ pub async fn compose(
         Err(reason) => out.notes.push(reason),
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reconhece_arquivos_env_e_ignora_envrc() {
+        for valid in [
+            ".env",
+            ".env.example",
+            ".env.sample",
+            ".env.production.example",
+            ".env.prod",
+            ".ENV.EXAMPLE",
+        ] {
+            assert!(is_env_template_file(valid), "deveria aceitar {valid}");
+        }
+        for invalid in [".envrc", ".env.", "docker-compose.yml", "README.md"] {
+            assert!(
+                !is_env_template_file(invalid),
+                "não deveria aceitar {invalid}"
+            );
+        }
+    }
+
+    #[test]
+    fn ordena_modelos_env_com_example_primeiro() {
+        let mut names = vec![
+            ".env.local",
+            ".env",
+            ".env.sample",
+            ".env.production.example",
+            ".env.example",
+            ".env.prod",
+        ];
+        names.sort_by_key(|name| env_template_priority(name));
+        assert_eq!(
+            names,
+            vec![
+                ".env.example",
+                ".env.production.example",
+                ".env.sample",
+                ".env.prod",
+                ".env",
+                ".env.local",
+            ]
+        );
+    }
 }

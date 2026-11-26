@@ -461,6 +461,7 @@ class DeploysNotifier extends Notifier<DeploysState> {
 
   Future<DeployComposeDiscovery> githubCompose({
     required String repository,
+    String? reference,
     int? connectionId,
     int? credentialId,
   }) async {
@@ -468,6 +469,8 @@ class DeploysNotifier extends Notifier<DeploysState> {
       '/deploys/github/compose',
       queryParameters: <String, dynamic>{
         'repository': repository,
+        if (reference != null && reference.trim().isNotEmpty)
+          'reference': reference.trim(),
         'connectionId': ?connectionId,
         'credentialId': ?credentialId,
       },

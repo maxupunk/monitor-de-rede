@@ -24,6 +24,7 @@ import 'package:netmonitor_app/features/servers/providers/docker_provider.dart';
 import 'package:netmonitor_app/features/servers/providers/registry_provider.dart';
 import 'package:netmonitor_app/features/servers/providers/storages_provider.dart';
 import 'package:netmonitor_app/features/servers/widgets/databases_backup_tab.dart';
+import 'package:netmonitor_app/features/servers/widgets/deploy/deploy_setup_wizard_dialog.dart';
 import 'package:netmonitor_app/features/servers/widgets/deploy_env_dialog.dart';
 import 'package:netmonitor_app/features/servers/widgets/stacked_container_usage_chart.dart';
 import 'package:netmonitor_app/features/servers/widgets/storage_form_sheet.dart';
@@ -768,7 +769,197 @@ void main() {
         expect(dbNotifier.savedInputs.single.backupEnabled, isTrue);
       },
     );
+
+    testWidgets(
+      'DeploySetupDialog lists GitHub App repositories, filters as user types, and auto-fills on tap',
+      (tester) async {
+        final deploysNotifier = _RepoDiscoveryDeploysNotifier();
+        final dbNotifier = _InteractiveDatabasesNotifier();
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: <Override>[
+              authProvider.overrideWith(_AdminAuthNotifier.new),
+              deploysProvider.overrideWith(() => deploysNotifier),
+              databasesProvider.overrideWith(() => dbNotifier),
+            ],
+            child: MaterialApp(
+              theme: AppTheme.dark(),
+              home: Scaffold(
+                body: Builder(
+                  builder: (ctx) => FilledButton(
+                    onPressed: () => showDeploySetupDialog(ctx),
+                    child: const Text('Abrir wizard'),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+
+        await tester.tap(find.text('Abrir wizard'));
+        await tester.pumpAndSettle();
+
+        // Repositórios do GitHub App conectado aparecem automaticamente.
+        expect(find.text('maxupunk/sgc-v4'), findsOneWidget);
+        expect(find.text('maxupunk/site-institucional'), findsOneWidget);
+
+        // Digitar no campo filtra a lista em tempo real.
+        await tester.enterText(
+          find.widgetWithText(TextField, 'Repositório (dono/repo)'),
+          'sgc',
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('maxupunk/sgc-v4'), findsOneWidget);
+        expect(find.text('maxupunk/site-institucional'), findsNothing);
+
+        // Selecionar o repositório preenche nome, compose e recolhe a lista.
+        final repoItem = find.text('maxupunk/sgc-v4');
+        await tester.ensureVisible(repoItem);
+        await tester.pumpAndSettle();
+        await tester.tap(repoItem);
+        await tester.pumpAndSettle();
+
+        expect(find.text('Trocar'), findsOneWidget);
+        expect(find.text('sgc-v4'), findsOneWidget);
+        expect(find.text('docker-compose.prod.yml'), findsOneWidget);
+        expect(
+          find.textContaining('Detectado: docker-compose.prod.yml'),
+          findsOneWidget,
+        );
+        expect(find.textContaining('.env.example'), findsOneWidget);
+
+        // No passo 2, a branch padrão e os chips de branch já vêm prontos.
+        final nextBtn = find.text('Próximo');
+        await tester.ensureVisible(nextBtn);
+        await tester.pumpAndSettle();
+        await tester.tap(nextBtn);
+        await tester.pumpAndSettle();
+        expect(find.text('production'), findsWidgets);
+        expect(find.text('staging'), findsOneWidget);
+
+        // No passo 3, o .env.example vem pré-carregado no Modo lista e permite trocar de modelo.
+        await tester.ensureVisible(nextBtn);
+        await tester.pumpAndSettle();
+        await tester.tap(nextBtn);
+        await tester.pumpAndSettle();
+
+        expect(find.text('.env.example'), findsOneWidget);
+        expect(find.text('.env.production.example'), findsOneWidget);
+        expect(find.text('DATABASE_URL'), findsOneWidget);
+        expect(find.text('JWT_SECRET'), findsOneWidget);
+        expect(find.text('1 em branco'), findsOneWidget);
+
+        // Trocar para o segundo modelo atualiza a lista de variáveis.
+        await tester.tap(find.text('.env.production.example'));
+        await tester.pumpAndSettle();
+        expect(find.text('NODE_ENV'), findsOneWidget);
+        expect(find.text('production'), findsOneWidget);
+
+        // Alternar para Texto .env exibe o conteúdo serializado.
+        await tester.tap(find.text('Texto .env'));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('NODE_ENV=production'), findsOneWidget);
+      },
+    );
   });
+}
+
+class _RepoDiscoveryDeploysNotifier extends _SeededDeploysNotifier {
+  @override
+  DeploysState build() => const DeploysState(
+    overview: DeployOverview(
+      applications: <DeployApplicationView>[],
+      recentRuns: <DeployRunView>[],
+      counts: DeployCounts(),
+      credentials: <DeployCredentialView>[],
+      githubConnections: <DeployGithubConnectionView>[
+        DeployGithubConnectionView(
+          id: 5,
+          account: 'maxupunk',
+          appSlug: 'netmonitor-prod',
+          installed: true,
+          canWrite: true,
+          installUrl:
+              'https://github.com/apps/netmonitor-prod/installations/new',
+          settingsUrl: 'https://github.com/settings/installations/1',
+          createdAt: '2026-11-20T10:00:00Z',
+        ),
+      ],
+      hookPath: '/api/deploys/hook',
+      oidcAudience: 'netmonitor',
+      guide: DeployGuideView(complete: true, steps: <DeployGuideStep>[]),
+    ),
+    agents: <DeployAgentView>[
+      DeployAgentView(
+        id: 1,
+        name: 'Este servidor',
+        connected: true,
+        allowsDeploy: true,
+        allowsBuild: true,
+      ),
+    ],
+  );
+
+  @override
+  Future<void> fetchAgents() async {}
+
+  @override
+  Future<List<DeployRepositoryView>> githubRepositories({
+    int? connectionId,
+    int? credentialId,
+  }) async => const <DeployRepositoryView>[
+    DeployRepositoryView(
+      fullName: 'maxupunk/sgc-v4',
+      isPrivate: true,
+      defaultBranch: 'production',
+      description: 'ERP principal',
+    ),
+    DeployRepositoryView(
+      fullName: 'maxupunk/site-institucional',
+      isPrivate: false,
+      defaultBranch: 'main',
+    ),
+  ];
+
+  @override
+  Future<DeployComposeDiscovery> githubCompose({
+    required String repository,
+    String? reference,
+    int? connectionId,
+    int? credentialId,
+  }) async => const DeployComposeDiscovery(
+    files: <String>['docker-compose.prod.yml'],
+    suggestedFiles: <String>['docker-compose.prod.yml'],
+    services: <String>['api', 'web'],
+    images: <DeployBuildImage>[],
+    imageTagVariable: 'IMAGE_TAG',
+    notes: <String>[],
+    envTemplates: <DeployEnvTemplateView>[
+      DeployEnvTemplateView(
+        name: '.env.example',
+        content: 'DATABASE_URL=postgres://localhost:5432/app\nJWT_SECRET=\n',
+      ),
+      DeployEnvTemplateView(
+        name: '.env.production.example',
+        content: 'NODE_ENV=production\n',
+      ),
+    ],
+  );
+
+  @override
+  Future<DeployReferencesView> githubReferences({
+    required String repository,
+    int? connectionId,
+    int? credentialId,
+  }) async => const DeployReferencesView(
+    defaultBranch: 'production',
+    branches: <String>['production', 'staging', 'main'],
+    tags: <String>['v1.0.0'],
+  );
+
+  @override
+  Future<DeployReadinessView> readinessFor(int probeId, String project) async =>
+      const DeployReadinessView(ready: true, checks: <DeployReadinessCheck>[]);
 }
 
 class _InteractiveDatabasesNotifier extends DatabasesNotifier {

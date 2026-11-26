@@ -441,6 +441,21 @@ class DeployReferencesView {
 }
 
 @immutable
+class DeployEnvTemplateView {
+  const DeployEnvTemplateView({required this.name, required this.content});
+
+  final String name;
+  final String content;
+
+  factory DeployEnvTemplateView.fromJson(Map<String, dynamic> json) {
+    return DeployEnvTemplateView(
+      name: (json['name'] as String?) ?? '',
+      content: (json['content'] as String?) ?? '',
+    );
+  }
+}
+
+@immutable
 class DeployComposeDiscovery {
   const DeployComposeDiscovery({
     required this.files,
@@ -449,6 +464,7 @@ class DeployComposeDiscovery {
     required this.images,
     required this.imageTagVariable,
     required this.notes,
+    this.envTemplates = const <DeployEnvTemplateView>[],
   });
 
   final List<String> files;
@@ -457,6 +473,7 @@ class DeployComposeDiscovery {
   final List<DeployBuildImage> images;
   final String imageTagVariable;
   final List<String> notes;
+  final List<DeployEnvTemplateView> envTemplates;
 
   factory DeployComposeDiscovery.fromJson(Map<String, dynamic> json) {
     return DeployComposeDiscovery(
@@ -470,6 +487,9 @@ class DeployComposeDiscovery {
       ),
       imageTagVariable: (json['imageTagVariable'] as String?) ?? 'IMAGE_TAG',
       notes: List<String>.unmodifiable(asStringList(json['notes'])),
+      envTemplates: List<DeployEnvTemplateView>.unmodifiable(
+        asJsonList(json['envTemplates'], DeployEnvTemplateView.fromJson),
+      ),
     );
   }
 }

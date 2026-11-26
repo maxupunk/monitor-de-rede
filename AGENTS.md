@@ -303,6 +303,13 @@
       e inverte dependências; mudança de comportamento vai em PR separado. A
       ordem das fases está no roadmap da arquitetura modular.
 
+14. **Padrões de UX e Comportamento em Formulários & Ações Assíncronas**:
+    - **Prefixo de caminho local sempre com barra final:** campos de subpasta sob uma raiz fixa (ex.: `storage_form_sheet.dart`) devem formatar o `prefixText` sempre terminando em `/` (`/data/storage/`) com `FloatingLabelBehavior.always`, evitando colagem visual (`/data/storagedatabases`) e validando inline barra inicial/`..` sem relaxar a barreira de path traversal do backend. Na exibição do caminho resolvido (`views/storages.rs`), preservar a barra inicial de caminhos absolutos Unix.
+    - **Nova execução limpa o aviso de falha anterior na hora:** ao iniciar um novo backup ou job assíncrono (`running`), ocultar imediatamente o `lastBackupError` anterior e trocar o selo/ícone de `Último falhou` (`error`) para `Em andamento` (`info`) — nunca mostrar erro antigo junto com o progresso da nova execução, nem duplicar o mesmo erro no card e no banner do job (`database_presentation.dart`, `databases_backup_tab.dart`, `backup_page.dart`).
+    - **Padrões prontos para uso (defaults inteligentes) em configuração de backup:** ao criar uma configuração de backup (`database_connection_form_sheet.dart`, `backup_page.dart`), pré-selecionar o primeiro destino de armazenamento disponível (inclusive quando carregado assincronamente) e deixar o **Backup automático** ligado por padrão. Se não houver destino selecionado, desabilitar o switch com explicação clara e nunca enviar `backupEnabled: true` sem destino.
+    - **Seleção assistida em integrações conectadas (estilo Dokploy):** sempre que houver integração ativa (ex.: GitHub App no assistente de deploy contínuo), listar os repositórios automaticamente com filtro em tempo real (`deploy_repository_picker.dart`, `GET /api/deploys/github/repositories`), preenchendo nome, projeto, arquivos compose, branch padrão e modelos `.env.example`/`.env.*` no editor estruturado do passo 3 (`deploy_env_editor.dart`, `discovery.rs`) — mantendo digitação manual apenas como fallback.
+    - **`AppDropdownFormField` com valor atualizado programaticamente:** como `DropdownButtonFormField.initialValue` só é lido no primeiro build do `FormField`, passe `key: ValueKey(valorResolvido)` sempre que o valor puder mudar por carregamento assíncrono ou pré-seleção automática.
+
 ## Pós-treinamento da IA — mora em outro repositório
 
 O pós-treinamento dos modelos do NetMonitor (fine-tune, calibração, critérios,

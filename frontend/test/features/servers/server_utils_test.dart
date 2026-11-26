@@ -5,6 +5,7 @@ import 'package:netmonitor_app/features/servers/models/docker_models.dart';
 import 'package:netmonitor_app/features/servers/models/registry_models.dart';
 import 'package:netmonitor_app/features/servers/utils/server_utils.dart';
 import 'package:netmonitor_app/features/servers/utils/stacked_usage.dart';
+import 'package:netmonitor_app/features/servers/widgets/deploy/deploy_repository_picker.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
 
 void main() {
@@ -494,6 +495,39 @@ void main() {
         expect(pres.effectiveStatus, 'failed');
         expect(pres.showBackupJobBanner, isFalse);
         expect(pres.showLastBackupError, isTrue);
+      },
+    );
+  });
+
+  group('Deploy repository picker filtering', () {
+    const repos = <DeployRepositoryView>[
+      DeployRepositoryView(
+        fullName: 'maxupunk/sgc-v4',
+        isPrivate: true,
+        defaultBranch: 'production',
+        description: 'Sistema de gestão comercial',
+      ),
+      DeployRepositoryView(
+        fullName: 'maxupunk/site-institucional',
+        isPrivate: false,
+        defaultBranch: 'main',
+        description: 'Landing page em Next.js',
+      ),
+    ];
+
+    test(
+      'matches by repository fullName and description case-insensitively',
+      () {
+        expect(filterDeployRepositories(repos, '').length, 2);
+        expect(
+          filterDeployRepositories(repos, 'SGC').map((r) => r.fullName),
+          equals(<String>['maxupunk/sgc-v4']),
+        );
+        expect(
+          filterDeployRepositories(repos, 'next.js').map((r) => r.fullName),
+          equals(<String>['maxupunk/site-institucional']),
+        );
+        expect(filterDeployRepositories(repos, 'inexistente'), isEmpty);
       },
     );
   });
