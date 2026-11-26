@@ -5,6 +5,7 @@ import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/servers/models/database_models.dart';
 import 'package:netmonitor_app/features/servers/providers/databases_provider.dart';
 import 'package:netmonitor_app/features/servers/providers/storages_provider.dart';
+import 'package:netmonitor_app/features/servers/utils/database_presentation.dart';
 import 'package:netmonitor_app/features/servers/widgets/database_backup_history_sheet.dart';
 import 'package:netmonitor_app/features/servers/widgets/database_connection_form_sheet.dart';
 import 'package:netmonitor_app/features/servers/widgets/database_restore_dialog.dart';
@@ -151,8 +152,16 @@ class _DatabasesBackupTabState extends ConsumerState<DatabasesBackupTab> {
           if (_originFilter != 'all' && _originKey(c) != _originFilter) {
             return false;
           }
-          if (_healthFilter == 'failed' && c.lastBackupStatus != 'failed') {
-            return false;
+          if (_healthFilter == 'failed') {
+            final pres = resolveDatabaseBackupCardPresentation(
+              c,
+              dbState.jobFor('backup', c.id),
+            );
+            final retryingFailure =
+                c.lastBackupStatus == 'failed' && pres.isRunning;
+            if (!pres.isFailed && !retryingFailure) {
+              return false;
+            }
           }
           if (_healthFilter == 'no_storage' && c.storageDestinationId != null) {
             return false;
@@ -167,7 +176,12 @@ class _DatabasesBackupTabState extends ConsumerState<DatabasesBackupTab> {
         .toList(growable: false);
 
     final failedCount = connections
-        .where((c) => c.lastBackupStatus == 'failed')
+        .where(
+          (c) => resolveDatabaseBackupCardPresentation(
+            c,
+            dbState.jobFor('backup', c.id),
+          ).isFailed,
+        )
         .length;
     final noStorageCount = connections
         .where((c) => c.storageDestinationId == null)
@@ -415,33 +429,20 @@ class _DatabasesBackupTabState extends ConsumerState<DatabasesBackupTab> {
   Widget _buildCard(DatabaseConnectionResponse conn, DatabasesState dbState) {
     final activeBackupJob = dbState.jobFor('backup', conn.id);
     final activeRestoreJob = dbState.jobFor('restore', conn.id);
-    final statusTone = switch (conn.lastBackupStatus) {
-      'success' => SemanticTone.success,
-      'failed' => SemanticTone.error,
-      'running' => SemanticTone.info,
-      _ =>
-        conn.storageDestinationId == null
-            ? SemanticTone.warning
-            : SemanticTone.secondary,
-    };
+    final presentation = resolveDatabaseBackupCardPresentation(
+      conn,
+      activeBackupJob,
+    );
 
     return SectionCard(
       title: conn.name,
       subtitle:
           '${conn.engineLabel} · ${conn.host}:${conn.port} (${_originLabel(conn)})',
       icon: Icons.storage_outlined,
-      iconTone: statusTone,
+      iconTone: presentation.iconTone,
       trailing: SemanticChip(
-        label: conn.lastBackupStatus == 'failed'
-            ? 'Último falhou'
-            : (conn.backupEnabled
-                  ? 'A cada ${conn.backupIntervalHours}h'
-                  : 'Manual'),
-        tone: conn.lastBackupStatus == 'failed'
-            ? SemanticTone.error
-            : (conn.backupEnabled
-                  ? SemanticTone.success
-                  : SemanticTone.secondary),
+        label: presentation.badgeLabel,
+        tone: presentation.badgeTone,
         compact: true,
       ),
       footer: Row(
@@ -547,8 +548,7 @@ class _DatabasesBackupTabState extends ConsumerState<DatabasesBackupTab> {
             value:
                 '${countNoun(conn.backupRetention, 'cópia')} · Último: ${formatRelativeTime(conn.lastBackupAt)}',
           ),
-          if (conn.lastBackupError != null &&
-              conn.lastBackupError!.isNotEmpty) ...<Widget>[
+          if (presentation.showLastBackupError) ...<Widget>[
             const SizedBox(height: 8),
             NestedPanel(
               tone: SemanticTone.error,
@@ -558,7 +558,8 @@ class _DatabasesBackupTabState extends ConsumerState<DatabasesBackupTab> {
               ),
             ),
           ],
-          if (activeBackupJob != null) ...<Widget>[
+          if (presentation.showBackupJobBanner &&
+              activeBackupJob != null) ...<Widget>[
             const SizedBox(height: 10),
             DatabaseJobProgressBanner(job: activeBackupJob),
           ],

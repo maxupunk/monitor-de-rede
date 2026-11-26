@@ -46,7 +46,9 @@ class _DatabaseConnectionFormBodyState
   String _sslMode = 'prefer';
   int? _viaProbeId;
   int? _storageDestinationId;
+  bool _storageTouched = false;
   bool _backupEnabled = true;
+  bool _backupEnabledTouched = false;
   bool _allDatabases = true;
   List<String> _discoveredDatabases = const <String>[];
   Set<String> _selectedDatabases = <String>{};
@@ -61,10 +63,13 @@ class _DatabaseConnectionFormBodyState
   void initState() {
     super.initState();
     final e = widget.existing;
+    final initialStorages = ref.read(storagesProvider).storages;
     _engine = e?.engine ?? 'postgres';
     _sslMode = e?.sslMode ?? 'prefer';
     _viaProbeId = e?.viaProbeId;
-    _storageDestinationId = e?.storageDestinationId;
+    _storageDestinationId = e != null
+        ? e.storageDestinationId
+        : (initialStorages.isNotEmpty ? initialStorages.first.id : null);
     _backupEnabled = e?.backupEnabled ?? true;
     _allDatabases = e == null || e.databases.isEmpty;
     _selectedDatabases = Set<String>.from(e?.databases ?? const <String>[]);
@@ -91,6 +96,15 @@ class _DatabaseConnectionFormBodyState
           ref.read(databasesProvider.notifier).fetchContainers(),
         ref.read(storagesProvider.notifier).fetchStorages(),
       ]);
+      if (!mounted) return;
+      if (widget.existing == null &&
+          !_storageTouched &&
+          _storageDestinationId == null) {
+        final loadedStorages = ref.read(storagesProvider).storages;
+        if (loadedStorages.isNotEmpty) {
+          setState(() => _storageDestinationId = loadedStorages.first.id);
+        }
+      }
     });
   }
 
@@ -193,6 +207,10 @@ class _DatabaseConnectionFormBodyState
       setState(() => _error = 'Preencha nome e host do banco.');
       return;
     }
+    final storages = ref.read(storagesProvider).storages;
+    final resolvedStorageId = storages.any((s) => s.id == _storageDestinationId)
+        ? _storageDestinationId
+        : null;
     setState(() {
       _saving = true;
       _error = null;
@@ -215,9 +233,9 @@ class _DatabaseConnectionFormBodyState
               databases: _allDatabases
                   ? const <String>[]
                   : _selectedDatabases.toList(),
-              storageDestinationId: _storageDestinationId,
+              storageDestinationId: resolvedStorageId,
               viaProbeId: _viaProbeId,
-              backupEnabled: _storageDestinationId != null && _backupEnabled,
+              backupEnabled: resolvedStorageId != null && _backupEnabled,
               backupIntervalHours:
                   int.tryParse(_intervalCtrl.text.trim()) ?? 24,
               backupRetention: int.tryParse(_retentionCtrl.text.trim()) ?? 7,
@@ -238,6 +256,9 @@ class _DatabaseConnectionFormBodyState
     final dbState = ref.watch(databasesProvider);
     final storages = ref.watch(storagesProvider).storages;
     final discoveredContainers = dbState.containers.containers;
+    final resolvedStorageId = storages.any((s) => s.id == _storageDestinationId)
+        ? _storageDestinationId
+        : null;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -507,11 +528,13 @@ class _DatabaseConnectionFormBodyState
 
         const Divider(height: 24),
         AppDropdownFormField<int?>(
-          initialValue: storages.any((s) => s.id == _storageDestinationId)
-              ? _storageDestinationId
-              : null,
-          decoration: const InputDecoration(
+          key: ValueKey<int?>(resolvedStorageId),
+          initialValue: resolvedStorageId,
+          decoration: InputDecoration(
             labelText: 'Destino de armazenamento',
+            helperText: storages.isEmpty
+                ? 'Nenhum destino cadastrado — crie um na aba Destinos para habilitar backups.'
+                : null,
           ),
           items: <DropdownMenuItem<int?>>[
             const DropdownMenuItem<int?>(
@@ -528,20 +551,34 @@ class _DatabaseConnectionFormBodyState
               ),
             ),
           ],
-          onChanged: (v) => setState(() => _storageDestinationId = v),
+          onChanged: (v) => setState(() {
+            final wasNull = _storageDestinationId == null;
+            _storageTouched = true;
+            _storageDestinationId = v;
+            if (v != null && wasNull && !_backupEnabledTouched) {
+              _backupEnabled = true;
+            }
+          }),
         ),
         const SizedBox(height: 10),
 
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
-          value: _storageDestinationId != null && _backupEnabled,
+          value: resolvedStorageId != null && _backupEnabled,
           title: const Text('Backup automático agendado'),
-          subtitle: const Text(
-            'Snapshot consistente sem travar escrita no banco.',
+          subtitle: Text(
+            resolvedStorageId == null
+                ? (storages.isEmpty
+                      ? 'Cadastre um destino na aba Destinos para ativar o agendamento.'
+                      : 'Selecione um destino de armazenamento acima para ativar o agendamento.')
+                : 'Snapshot consistente sem travar escrita no banco.',
           ),
-          onChanged: _storageDestinationId == null
+          onChanged: resolvedStorageId == null
               ? null
-              : (v) => setState(() => _backupEnabled = v),
+              : (v) => setState(() {
+                  _backupEnabledTouched = true;
+                  _backupEnabled = v;
+                }),
         ),
         ResponsiveFieldRow(
           breakpoint: 480,

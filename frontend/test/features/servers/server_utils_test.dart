@@ -1,9 +1,11 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:netmonitor_app/features/servers/models/database_models.dart';
 import 'package:netmonitor_app/features/servers/models/deploy_models.dart';
 import 'package:netmonitor_app/features/servers/models/docker_models.dart';
 import 'package:netmonitor_app/features/servers/models/registry_models.dart';
 import 'package:netmonitor_app/features/servers/utils/server_utils.dart';
 import 'package:netmonitor_app/features/servers/utils/stacked_usage.dart';
+import 'package:netmonitor_app/theme/app_theme.dart';
 
 void main() {
   group('Docker protected container security rules (ADR 014)', () {
@@ -339,73 +341,159 @@ void main() {
     );
   });
 
-  group('Local storage root formatting & subfolder validation', () {
+  group('Database backup card live status & error visibility', () {
+    DatabaseConnectionResponse makeConn({
+      String? lastBackupStatus = 'failed',
+      String? lastBackupError = 'password authentication failed',
+      String? lastBackupAt = '2026-11-26T12:00:00Z',
+      bool backupEnabled = true,
+    }) {
+      return DatabaseConnectionResponse(
+        id: 1,
+        name: 'sgc-v4-prod-postgres',
+        engine: 'postgres',
+        host: '172.19.0.6',
+        port: 5432,
+        username: 'sgc4user',
+        passwordSet: true,
+        sslMode: 'prefer',
+        databases: const <String>['app'],
+        storageDestinationId: 10,
+        storageDestinationName: 'backups-database',
+        backupEnabled: backupEnabled,
+        backupIntervalHours: 24,
+        backupRetention: 7,
+        lastBackupAt: lastBackupAt,
+        lastBackupStatus: lastBackupStatus,
+        lastBackupError: lastBackupError,
+      );
+    }
+
+    test('shows persisted failure when no live job exists', () {
+      final pres = resolveDatabaseBackupCardPresentation(makeConn(), null);
+      expect(pres.effectiveStatus, 'failed');
+      expect(pres.iconTone, SemanticTone.error);
+      expect(pres.badgeLabel, 'Último falhou');
+      expect(pres.showLastBackupError, isTrue);
+      expect(pres.showBackupJobBanner, isFalse);
+    });
+
     test(
-      'formatLocalStorageRoot always guarantees trailing slash on prefix',
+      'hides stale failure and switches to Em andamento when backup starts',
       () {
-        expect(
-          formatLocalStorageRoot('/data/storage'),
-          equals((label: '/data/storage', prefix: '/data/storage/')),
+        const runningJob = DatabaseJobSnapshot(
+          id: 'job-2',
+          kind: 'backup',
+          connectionId: 1,
+          database: 'app',
+          stage: 'Dados de public.conversation_messages',
+          rows: 18463,
+          bytes: 7738490,
+          databasesDone: 0,
+          databasesTotal: 1,
+          status: 'running',
+          startedAt: '2026-11-26T12:01:00Z',
         );
-        expect(
-          formatLocalStorageRoot('/data/storage/'),
-          equals((label: '/data/storage', prefix: '/data/storage/')),
+
+        final pres = resolveDatabaseBackupCardPresentation(
+          makeConn(),
+          runningJob,
         );
-        expect(
-          formatLocalStorageRoot('storage/'),
-          equals((label: 'storage', prefix: 'storage/')),
-        );
-        expect(
-          formatLocalStorageRoot('storage'),
-          equals((label: 'storage', prefix: 'storage/')),
-        );
-        expect(formatLocalStorageRoot('/'), equals((label: '/', prefix: '/')));
-        expect(
-          formatLocalStorageRoot(r'C:\backups\'),
-          equals((label: 'C:/backups', prefix: 'C:/backups/')),
-        );
-        expect(
-          formatLocalStorageRoot('   '),
-          equals((label: 'storage', prefix: 'storage/')),
-        );
+        expect(pres.effectiveStatus, 'running');
+        expect(pres.iconTone, SemanticTone.info);
+        expect(pres.badgeLabel, 'Em andamento');
+        expect(pres.badgeTone, SemanticTone.info);
+        expect(pres.showLastBackupError, isFalse);
+        expect(pres.showBackupJobBanner, isTrue);
       },
     );
 
     test(
-      'validateLocalBasePath accepts relative subfolders and rejects escapes',
+      'hides stale failure immediately when live job succeeds before refetch',
       () {
-        expect(validateLocalBasePath('', rootLabel: '/data/storage'), isNull);
-        expect(
-          validateLocalBasePath('databases-local', rootLabel: '/data/storage'),
-          isNull,
+        const successJob = DatabaseJobSnapshot(
+          id: 'job-2',
+          kind: 'backup',
+          connectionId: 1,
+          database: 'app',
+          stage: 'Concluído',
+          rows: 18463,
+          bytes: 7738490,
+          databasesDone: 1,
+          databasesTotal: 1,
+          status: 'success',
+          message: 'app copiado para backups-database',
+          startedAt: '2026-11-26T12:01:00Z',
+          finishedAt: '2026-11-26T12:01:15Z',
         );
-        expect(
-          validateLocalBasePath('bancos/producao', rootLabel: '/data/storage'),
-          isNull,
+
+        final pres = resolveDatabaseBackupCardPresentation(
+          makeConn(),
+          successJob,
         );
-        expect(
-          validateLocalBasePath('/databases-local', rootLabel: '/data/storage'),
-          contains('/data/storage/'),
+        expect(pres.effectiveStatus, 'success');
+        expect(pres.iconTone, SemanticTone.success);
+        expect(pres.badgeLabel, 'A cada 24h');
+        expect(pres.showLastBackupError, isFalse);
+        expect(pres.showBackupJobBanner, isTrue);
+      },
+    );
+
+    test(
+      'avoids duplicating error box when failed live job already shows message',
+      () {
+        const failedJob = DatabaseJobSnapshot(
+          id: 'job-2',
+          kind: 'backup',
+          connectionId: 1,
+          database: 'app',
+          stage: 'Falhou',
+          rows: 0,
+          bytes: 0,
+          databasesDone: 0,
+          databasesTotal: 1,
+          status: 'failed',
+          message: 'password authentication failed',
+          startedAt: '2026-11-26T12:00:00Z',
+          finishedAt: '2026-11-26T12:00:02Z',
         );
-        expect(
-          validateLocalBasePath(
-            r'\databases-local',
-            rootLabel: '/data/storage',
-          ),
-          contains('/data/storage/'),
+
+        final pres = resolveDatabaseBackupCardPresentation(
+          makeConn(),
+          failedJob,
         );
-        expect(
-          validateLocalBasePath('../data', rootLabel: '/data/storage'),
-          contains('..'),
+        expect(pres.effectiveStatus, 'failed');
+        expect(pres.showBackupJobBanner, isTrue);
+        expect(pres.showLastBackupError, isFalse);
+      },
+    );
+
+    test(
+      'falls back to persisted failure if a later scheduled failure superseded an old job',
+      () {
+        const olderSuccessJob = DatabaseJobSnapshot(
+          id: 'job-1',
+          kind: 'backup',
+          connectionId: 1,
+          database: 'app',
+          stage: 'Concluído',
+          rows: 100,
+          bytes: 1024,
+          databasesDone: 1,
+          databasesTotal: 1,
+          status: 'success',
+          message: 'app copiado',
+          startedAt: '2026-11-26T10:00:00Z',
+          finishedAt: '2026-11-26T10:00:10Z',
         );
-        expect(
-          validateLocalBasePath('a/../b', rootLabel: '/data/storage'),
-          contains('..'),
+
+        final pres = resolveDatabaseBackupCardPresentation(
+          makeConn(lastBackupAt: '2026-11-26T12:00:00Z'),
+          olderSuccessJob,
         );
-        expect(
-          validateLocalBasePath('C:/Windows', rootLabel: '/data/storage'),
-          isNotNull,
-        );
+        expect(pres.effectiveStatus, 'failed');
+        expect(pres.showBackupJobBanner, isFalse);
+        expect(pres.showLastBackupError, isTrue);
       },
     );
   });

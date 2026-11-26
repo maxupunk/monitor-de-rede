@@ -334,11 +334,13 @@ class _SystemBackupTab extends ConsumerWidget {
                 ? 'Destino: ${plan!.storageDestinationName} · a cada ${plan.backupIntervalHours}h (retém ${plan.backupRetention})'
                 : 'Configure um destino para ativar cópias periódicas automáticas',
             icon: Icons.backup_outlined,
-            iconTone: plan?.lastBackupStatus == 'failed'
-                ? SemanticTone.error
-                : (plan?.backupEnabled == true
-                      ? SemanticTone.success
-                      : SemanticTone.info),
+            iconTone: state.running
+                ? SemanticTone.info
+                : (plan?.lastBackupStatus == 'failed'
+                      ? SemanticTone.error
+                      : (plan?.backupEnabled == true
+                            ? SemanticTone.success
+                            : SemanticTone.info)),
             trailing: SemanticChip(
               label: plan?.backupEnabled == true ? 'Ativo' : 'Desativado',
               tone: plan?.backupEnabled == true
@@ -371,7 +373,8 @@ class _SystemBackupTab extends ConsumerWidget {
                               ? formatDateTime(plan.nextBackupAt)
                               : '—',
                         ),
-                        if (plan.lastBackupError != null &&
+                        if (!state.running &&
+                            plan.lastBackupError != null &&
                             plan.lastBackupError!.isNotEmpty) ...<Widget>[
                           const SizedBox(height: 8),
                           NestedPanel(
@@ -797,7 +800,8 @@ class _BackupPlanSheetBody extends ConsumerStatefulWidget {
 
 class _BackupPlanSheetBodyState extends ConsumerState<_BackupPlanSheetBody> {
   int? _storageId;
-  bool _enabled = false;
+  bool _enabled = true;
+  bool _enabledTouched = false;
   late final TextEditingController _intervalCtrl;
   late final TextEditingController _retentionCtrl;
   bool _saving = false;
@@ -805,8 +809,20 @@ class _BackupPlanSheetBodyState extends ConsumerState<_BackupPlanSheetBody> {
   @override
   void initState() {
     super.initState();
-    _storageId = widget.plan?.storageDestinationId;
-    _enabled = widget.plan?.backupEnabled ?? false;
+    final existingStorageId = widget.plan?.storageDestinationId;
+    final hasExistingStorage =
+        existingStorageId != null &&
+        widget.storages.any((s) => s.id == existingStorageId);
+    if (hasExistingStorage) {
+      _storageId = existingStorageId;
+      _enabled = widget.plan?.backupEnabled ?? true;
+    } else if (widget.storages.isNotEmpty) {
+      _storageId = widget.storages.first.id;
+      _enabled = true;
+    } else {
+      _storageId = null;
+      _enabled = false;
+    }
     _intervalCtrl = TextEditingController(
       text: '${widget.plan?.backupIntervalHours ?? 24}',
     );
@@ -823,6 +839,9 @@ class _BackupPlanSheetBodyState extends ConsumerState<_BackupPlanSheetBody> {
   }
 
   Future<void> _save() async {
+    final resolvedStorageId = widget.storages.any((s) => s.id == _storageId)
+        ? _storageId
+        : null;
     final interval = (int.tryParse(_intervalCtrl.text.trim()) ?? 24).clamp(
       1,
       720,
@@ -836,8 +855,8 @@ class _BackupPlanSheetBodyState extends ConsumerState<_BackupPlanSheetBody> {
       await ref
           .read(backupProvider.notifier)
           .savePlan(
-            storageDestinationId: _storageId,
-            backupEnabled: _enabled,
+            storageDestinationId: resolvedStorageId,
+            backupEnabled: resolvedStorageId != null && _enabled,
             backupIntervalHours: interval,
             backupRetention: retention,
           );
@@ -853,15 +872,21 @@ class _BackupPlanSheetBodyState extends ConsumerState<_BackupPlanSheetBody> {
 
   @override
   Widget build(BuildContext context) {
+    final resolvedStorageId = widget.storages.any((s) => s.id == _storageId)
+        ? _storageId
+        : null;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
         AppDropdownFormField<int?>(
-          initialValue: widget.storages.any((s) => s.id == _storageId)
-              ? _storageId
-              : null,
-          decoration: const InputDecoration(
+          key: ValueKey<int?>(resolvedStorageId),
+          initialValue: resolvedStorageId,
+          decoration: InputDecoration(
             labelText: 'Destino de armazenamento',
+            helperText: widget.storages.isEmpty
+                ? 'Nenhum destino cadastrado — crie um na aba Destinos.'
+                : null,
           ),
           items: <DropdownMenuItem<int?>>[
             const DropdownMenuItem<int?>(
@@ -877,7 +902,13 @@ class _BackupPlanSheetBodyState extends ConsumerState<_BackupPlanSheetBody> {
                 ),
               ),
           ],
-          onChanged: (v) => setState(() => _storageId = v),
+          onChanged: (v) => setState(() {
+            final wasNull = _storageId == null;
+            _storageId = v;
+            if (v != null && wasNull && !_enabledTouched) {
+              _enabled = true;
+            }
+          }),
         ),
         const SizedBox(height: 12),
         ResponsiveFieldRow(
@@ -898,9 +929,21 @@ class _BackupPlanSheetBodyState extends ConsumerState<_BackupPlanSheetBody> {
         const SizedBox(height: 8),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
-          value: _enabled,
-          onChanged: (v) => setState(() => _enabled = v),
+          value: resolvedStorageId != null && _enabled,
+          onChanged: resolvedStorageId == null
+              ? null
+              : (v) => setState(() {
+                  _enabledTouched = true;
+                  _enabled = v;
+                }),
           title: const Text('Backup automático habilitado'),
+          subtitle: resolvedStorageId == null
+              ? Text(
+                  widget.storages.isEmpty
+                      ? 'Cadastre um destino na aba Destinos para ativar o agendamento.'
+                      : 'Selecione um destino de armazenamento acima para ativar o agendamento.',
+                )
+              : null,
         ),
         const SizedBox(height: 14),
         FilledButton.icon(

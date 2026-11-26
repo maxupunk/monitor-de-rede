@@ -5,6 +5,7 @@ export 'package:netmonitor_app/core/utils/network_address_utils.dart'
 
 export 'agent_presentation.dart';
 export 'collection_helpers.dart';
+export 'database_presentation.dart';
 export 'deploy_presentation.dart';
 export 'docker_presentation.dart';
 export 'env_file_parser.dart';

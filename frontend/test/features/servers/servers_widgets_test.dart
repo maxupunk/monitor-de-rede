@@ -5,6 +5,7 @@ import 'package:netmonitor_app/core/auth/area_access.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
 import 'package:netmonitor_app/core/network/api_client.dart';
 import 'package:netmonitor_app/features/servers/models/agent_models.dart';
+import 'package:netmonitor_app/features/servers/models/database_models.dart';
 import 'package:netmonitor_app/features/servers/models/deploy_models.dart';
 import 'package:netmonitor_app/features/servers/models/docker_models.dart';
 import 'package:netmonitor_app/features/servers/models/registry_models.dart';
@@ -17,10 +18,12 @@ import 'package:netmonitor_app/features/servers/pages/docker_overview_page.dart'
 import 'package:netmonitor_app/features/servers/pages/registry_page.dart';
 import 'package:netmonitor_app/features/servers/pages/remote_servers_page.dart';
 import 'package:netmonitor_app/features/servers/providers/agents_provider.dart';
+import 'package:netmonitor_app/features/servers/providers/databases_provider.dart';
 import 'package:netmonitor_app/features/servers/providers/deploys_provider.dart';
 import 'package:netmonitor_app/features/servers/providers/docker_provider.dart';
 import 'package:netmonitor_app/features/servers/providers/registry_provider.dart';
 import 'package:netmonitor_app/features/servers/providers/storages_provider.dart';
+import 'package:netmonitor_app/features/servers/widgets/databases_backup_tab.dart';
 import 'package:netmonitor_app/features/servers/widgets/deploy_env_dialog.dart';
 import 'package:netmonitor_app/features/servers/widgets/stacked_container_usage_chart.dart';
 import 'package:netmonitor_app/features/servers/widgets/storage_form_sheet.dart';
@@ -673,7 +676,193 @@ void main() {
         );
       },
     );
+
+    testWidgets(
+      'DatabasesBackupTab clears stale failure warning immediately when starting a new backup',
+      (tester) async {
+        final dbNotifier = _InteractiveDatabasesNotifier();
+        final storagesNotifier = _RecordingStoragesNotifier();
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: <Override>[
+              authProvider.overrideWith(_AdminAuthNotifier.new),
+              databasesProvider.overrideWith(() => dbNotifier),
+              storagesProvider.overrideWith(() => storagesNotifier),
+            ],
+            child: MaterialApp(
+              theme: AppTheme.dark(),
+              home: const Scaffold(body: DatabasesBackupTab()),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.text('Último falhou'), findsOneWidget);
+        expect(
+          find.textContaining('password authentication failed'),
+          findsOneWidget,
+        );
+
+        await tester.tap(find.text('Backup agora'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 100));
+
+        // Assim que o novo backup inicia, o erro antigo e "Último falhou" somem.
+        expect(find.text('Último falhou'), findsNothing);
+        expect(
+          find.textContaining('password authentication failed'),
+          findsNothing,
+        );
+        expect(find.text('Em andamento'), findsWidgets);
+      },
+    );
+
+    testWidgets(
+      'DatabaseConnectionFormBody preselects first storage destination and enables scheduled backup by default',
+      (tester) async {
+        final dbNotifier = _InteractiveDatabasesNotifier();
+        final storagesNotifier = _RecordingStoragesNotifier();
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: <Override>[
+              authProvider.overrideWith(_AdminAuthNotifier.new),
+              databasesProvider.overrideWith(() => dbNotifier),
+              storagesProvider.overrideWith(() => storagesNotifier),
+            ],
+            child: MaterialApp(
+              theme: AppTheme.dark(),
+              home: const Scaffold(
+                body: SingleChildScrollView(
+                  padding: EdgeInsets.all(16),
+                  child: DatabaseConnectionFormBody(),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.text('backups-database (local)'), findsOneWidget);
+
+        final scheduledSwitch = tester.widget<SwitchListTile>(
+          find.widgetWithText(SwitchListTile, 'Backup automático agendado'),
+        );
+        expect(scheduledSwitch.value, isTrue);
+        expect(scheduledSwitch.onChanged, isNotNull);
+
+        await tester.enterText(
+          find.widgetWithText(TextField, 'Nome da conexão'),
+          'erp-prod',
+        );
+        await tester.enterText(
+          find.widgetWithText(TextField, 'Host / IP'),
+          '10.0.0.20',
+        );
+        final saveBtn = find.text('Salvar conexão');
+        await tester.ensureVisible(saveBtn);
+        await tester.tap(saveBtn);
+        await tester.pumpAndSettle();
+
+        expect(dbNotifier.savedInputs.length, 1);
+        expect(dbNotifier.savedInputs.single.storageDestinationId, 10);
+        expect(dbNotifier.savedInputs.single.backupEnabled, isTrue);
+      },
+    );
   });
+}
+
+class _InteractiveDatabasesNotifier extends DatabasesNotifier {
+  final List<DatabaseConnectionInput> savedInputs = <DatabaseConnectionInput>[];
+
+  @override
+  DatabasesState build() => const DatabasesState(
+    loaded: true,
+    connections: <DatabaseConnectionResponse>[
+      DatabaseConnectionResponse(
+        id: 1,
+        name: 'sgc-v4-prod-postgres',
+        engine: 'postgres',
+        host: '172.19.0.6',
+        port: 5432,
+        username: 'sgc4user',
+        passwordSet: true,
+        sslMode: 'prefer',
+        databases: <String>['app'],
+        storageDestinationId: 10,
+        storageDestinationName: 'backups-database',
+        backupEnabled: true,
+        backupIntervalHours: 24,
+        backupRetention: 7,
+        lastBackupAt: '2026-11-26T12:00:00Z',
+        lastBackupStatus: 'failed',
+        lastBackupError:
+            'app: Não foi possível conectar: password authentication failed for user "sgc4user"',
+      ),
+    ],
+  );
+
+  @override
+  Future<bool> fetchConnections() async => true;
+
+  @override
+  Future<void> fetchAgents() async {}
+
+  @override
+  Future<void> fetchContainers() async {}
+
+  @override
+  Future<DatabaseConnectionResponse> save(
+    int? id,
+    DatabaseConnectionInput input,
+  ) async {
+    savedInputs.add(input);
+    return DatabaseConnectionResponse(
+      id: id ?? 2,
+      name: input.name,
+      engine: input.engine,
+      host: input.host,
+      port: input.port,
+      username: input.username,
+      passwordSet: input.password != null,
+      sslMode: input.sslMode,
+      databases: input.databases,
+      storageDestinationId: input.storageDestinationId,
+      backupEnabled: input.backupEnabled,
+      backupIntervalHours: input.backupIntervalHours,
+      backupRetention: input.backupRetention,
+    );
+  }
+
+  @override
+  Future<DatabaseJobSnapshot?> runBackup(int id) async {
+    final snap = DatabaseJobSnapshot(
+      id: 'job-running-1',
+      kind: 'backup',
+      connectionId: id,
+      database: 'app',
+      stage: 'Dados de public.conversation_messages',
+      rows: 18463,
+      bytes: 7738490,
+      databasesDone: 0,
+      databasesTotal: 1,
+      status: 'running',
+      startedAt: '2026-11-26T12:01:00Z',
+    );
+    applyJob(<String, dynamic>{
+      'id': snap.id,
+      'kind': snap.kind,
+      'connectionId': snap.connectionId,
+      'database': snap.database,
+      'stage': snap.stage,
+      'rows': snap.rows,
+      'bytes': snap.bytes,
+      'databasesDone': snap.databasesDone,
+      'databasesTotal': snap.databasesTotal,
+      'status': snap.status,
+      'startedAt': snap.startedAt,
+    });
+    return snap;
+  }
 }
 
 class _RecordingStoragesNotifier extends StoragesNotifier {
@@ -683,7 +872,24 @@ class _RecordingStoragesNotifier extends StoragesNotifier {
   StoragesState build() => const StoragesState(
     loaded: true,
     meta: StoragesMetaResponse(localRoot: '/data/storage'),
+    storages: <StorageDestinationResponse>[
+      StorageDestinationResponse(
+        id: 10,
+        name: 'backups-database',
+        provider: 'local',
+        target: '/data/storage/databases-local',
+      ),
+      StorageDestinationResponse(
+        id: 11,
+        name: 's3-offsite',
+        provider: 'aws_s3',
+        target: 's3://empresa-backups',
+      ),
+    ],
   );
+
+  @override
+  Future<bool> fetchStorages() async => true;
 
   @override
   Future<StorageDestinationDetail> save(
