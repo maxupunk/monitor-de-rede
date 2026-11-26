@@ -133,6 +133,14 @@ class _DeploySetupBodyState extends ConsumerState<_DeploySetupBody> {
       initialDeploys.githubConnections,
     );
     _githubConnectionId = initialConnection?.id;
+    _probeId ??= initialDeploys.agents
+        .where((a) => a.allowsDeploy)
+        .firstOrNull
+        ?.id;
+    _buildProbeId = initialDeploys.agents
+        .where((a) => a.allowsBuild)
+        .firstOrNull
+        ?.id;
 
     Future<void>.microtask(() async {
       if (initialConnection != null && initialConnection.installed) {
@@ -210,9 +218,26 @@ class _DeploySetupBodyState extends ConsumerState<_DeploySetupBody> {
     }
   }
 
+  void _syncSuggestedProject() {
+    if (_existingAppId != null) return;
+    final current = _projectCtrl.text.trim();
+    if (current.isNotEmpty && current != _autoFilledProject) return;
+    final suggested = suggestComposeProjectName(
+      appName: _appNameCtrl.text,
+      repository: _repoCtrl.text,
+    );
+    if (suggested.isNotEmpty) {
+      _projectCtrl.text = suggested;
+      _autoFilledProject = suggested;
+    }
+  }
+
   void _selectRepository(DeployRepositoryView repo) {
     final repoName = repo.fullName.split('/').last;
-    final slugName = repoName.toLowerCase();
+    final slugName = suggestComposeProjectName(
+      appName: repoName,
+      repository: repo.fullName,
+    );
     setState(() {
       _repoCtrl.text = repo.fullName;
       _showRepoPicker = false;
@@ -233,8 +258,9 @@ class _DeploySetupBodyState extends ConsumerState<_DeploySetupBody> {
         _appNameCtrl.text = repoName;
         _autoFilledAppName = repoName;
       }
-      if (_projectCtrl.text.trim().isEmpty ||
-          _projectCtrl.text.trim() == _autoFilledProject) {
+      if ((_projectCtrl.text.trim().isEmpty ||
+              _projectCtrl.text.trim() == _autoFilledProject) &&
+          slugName.isNotEmpty) {
         _projectCtrl.text = slugName;
         _autoFilledProject = slugName;
       }
@@ -282,8 +308,11 @@ class _DeploySetupBodyState extends ConsumerState<_DeploySetupBody> {
   }
 
   Future<void> _discoverCompose({String? reference}) async {
-    final repo = _repoCtrl.text.trim();
+    final repo = normalizeGithubRepository(_repoCtrl.text);
     if (repo.isEmpty) return;
+    if (repo != _repoCtrl.text.trim()) {
+      _repoCtrl.text = repo;
+    }
     final effectiveRef = (reference ?? _refCtrl.text).trim();
     final repoKey = '$repo@$effectiveRef';
     setState(() {
@@ -373,10 +402,37 @@ class _DeploySetupBodyState extends ConsumerState<_DeploySetupBody> {
   }
 
   Future<void> _submit() async {
-    if (_probeId == null || _projectCtrl.text.trim().isEmpty) {
-      setState(
-        () => _error = 'Escolha o servidor alvo e o nome do projeto compose.',
-      );
+    final normalizedRepo = normalizeGithubRepository(_repoCtrl.text);
+    if (_existingAppId == null && normalizedRepo.isEmpty) {
+      setState(() {
+        _step = 0;
+        _error = 'Informe ou selecione o repositório (dono/repo) no passo 1.';
+      });
+      return;
+    }
+    if (_existingAppId == null && normalizedRepo != _repoCtrl.text.trim()) {
+      _repoCtrl.text = normalizedRepo;
+    }
+    _syncSuggestedProject();
+    final deploys = ref.read(deploysProvider);
+    final validProbeId =
+        deploys.agents.any((a) => a.id == _probeId && a.allowsDeploy)
+        ? _probeId
+        : null;
+    if (validProbeId == null) {
+      setState(() {
+        _step = 1;
+        _error =
+            'Escolha um servidor alvo com permissão "deploy" habilitada no passo 2.';
+      });
+      return;
+    }
+    if (_projectCtrl.text.trim().isEmpty) {
+      setState(() {
+        _step = 1;
+        _error =
+            'Informe o nome do projeto Docker Compose no passo 2 (ex.: minha-app).';
+      });
       return;
     }
     setState(() {
@@ -391,7 +447,7 @@ class _DeploySetupBodyState extends ConsumerState<_DeploySetupBody> {
           .toList(growable: false);
       final appName = _appNameCtrl.text.trim().isNotEmpty
           ? _appNameCtrl.text.trim()
-          : _repoCtrl.text.trim().split('/').last;
+          : normalizedRepo.split('/').last;
       final slug = sanitizeFileSlug(appName, fallback: 'app')
           .replaceAll(RegExp(r'[^a-z0-9-]+'), '-')
           .replaceAll(RegExp(r'^[-]+|[-]+$'), '');
@@ -406,7 +462,7 @@ class _DeploySetupBodyState extends ConsumerState<_DeploySetupBody> {
                   : DeployApplicationInput(
                       name: appName,
                       slug: slug.isEmpty ? 'app' : slug,
-                      repository: _repoCtrl.text.trim(),
+                      repository: normalizedRepo,
                       credentialId: _credentialId,
                       githubConnectionId: _githubConnectionId,
                       composeFiles: composeFiles.isEmpty
@@ -424,7 +480,7 @@ class _DeploySetupBodyState extends ConsumerState<_DeploySetupBody> {
                     ),
               target: DeployTargetInput(
                 name: _targetNameCtrl.text.trim(),
-                probeId: _probeId!,
+                probeId: validProbeId,
                 project: _projectCtrl.text.trim(),
                 reference: _refCtrl.text.trim(),
                 requiresApproval: _requiresApproval,
@@ -496,7 +552,11 @@ class _DeploySetupBodyState extends ConsumerState<_DeploySetupBody> {
           ],
           selected: <int>{_step},
           onSelectionChanged: (set) {
-            setState(() => _step = set.first);
+            setState(() {
+              _step = set.first;
+              _error = null;
+              if (_step == 1) _syncSuggestedProject();
+            });
             if (_step == 1) _checkReadiness();
             if (_step == 2) _ensureEnvTemplatesForStep();
           },
@@ -583,10 +643,23 @@ class _DeploySetupBodyState extends ConsumerState<_DeploySetupBody> {
             InlineFieldActionRow(
               field: TextField(
                 controller: _repoCtrl,
-                onChanged: (_) => setState(() {
-                  _showRepoPicker = true;
-                  _composeSummary = null;
-                }),
+                onChanged: (value) {
+                  final normalized = normalizeGithubRepository(value);
+                  if (normalized != value.trim() &&
+                      value.trim().contains('github.com')) {
+                    _repoCtrl.value = TextEditingValue(
+                      text: normalized,
+                      selection: TextSelection.collapsed(
+                        offset: normalized.length,
+                      ),
+                    );
+                  }
+                  setState(() {
+                    _showRepoPicker = true;
+                    _composeSummary = null;
+                    _error = null;
+                  });
+                },
                 decoration: InputDecoration(
                   labelText: 'Repositório (dono/repo)',
                   hintText: activeGithubConnection != null
@@ -655,6 +728,7 @@ class _DeploySetupBodyState extends ConsumerState<_DeploySetupBody> {
             const SizedBox(height: 10),
             TextField(
               controller: _appNameCtrl,
+              onChanged: (_) => _syncSuggestedProject(),
               decoration: const InputDecoration(labelText: 'Nome da aplicação'),
             ),
             const SizedBox(height: 10),
@@ -726,8 +800,10 @@ class _DeploySetupBodyState extends ConsumerState<_DeploySetupBody> {
             children: <Widget>[
               TextField(
                 controller: _projectCtrl,
+                onChanged: (_) => setState(() => _error = null),
                 decoration: const InputDecoration(
                   labelText: 'Projeto Docker Compose',
+                  hintText: 'ex.: minha-app',
                 ),
                 onEditingComplete: _checkReadiness,
               ),
@@ -924,7 +1000,11 @@ class _DeploySetupBodyState extends ConsumerState<_DeploySetupBody> {
             if (_step < 2)
               FilledButton(
                 onPressed: () {
-                  setState(() => _step++);
+                  setState(() {
+                    _step++;
+                    _error = null;
+                    if (_step == 1) _syncSuggestedProject();
+                  });
                   if (_step == 1) _checkReadiness();
                   if (_step == 2) _ensureEnvTemplatesForStep();
                 },

@@ -9,7 +9,7 @@ List<DeployRepositoryView> filterDeployRepositories(
   List<DeployRepositoryView> repositories,
   String query,
 ) {
-  final term = query.trim().toLowerCase();
+  final term = normalizeGithubRepository(query).toLowerCase();
   if (term.isEmpty) return repositories;
   return repositories
       .where((repo) {
@@ -18,6 +18,53 @@ List<DeployRepositoryView> filterDeployRepositories(
         return desc != null && desc.toLowerCase().contains(term);
       })
       .toList(growable: false);
+}
+
+/// Normaliza entradas coladas como URL do GitHub (`https://github.com/dono/repo`,
+/// `git@github.com:dono/repo.git`, `github.com/dono/repo`) para `dono/repo`.
+String normalizeGithubRepository(String raw) {
+  var value = raw.trim();
+  if (value.isEmpty) return '';
+
+  final sshMatch = RegExp(
+    r'^git@github\.com:([^/\s]+/[^/\s]+?)(?:\.git)?/?$',
+    caseSensitive: false,
+  ).firstMatch(value);
+  if (sshMatch != null) {
+    return sshMatch.group(1)!;
+  }
+
+  final httpsMatch = RegExp(
+    r'^(?:https?://)?(?:www\.)?github\.com/([^/\s]+/[^/\s#?]+)',
+    caseSensitive: false,
+  ).firstMatch(value);
+  if (httpsMatch != null) {
+    value = httpsMatch.group(1)!;
+  }
+
+  value = value.replaceFirst(RegExp(r'\.git$', caseSensitive: false), '');
+  return value.replaceFirst(RegExp(r'/+$'), '');
+}
+
+/// Sugere um nome válido de projeto Docker Compose (minúsculo, letras/números/`-`)
+/// a partir do nome da aplicação ou do repositório.
+String suggestComposeProjectName({
+  required String appName,
+  required String repository,
+}) {
+  final normalizedRepo = normalizeGithubRepository(repository);
+  final repoLeaf = normalizedRepo.contains('/')
+      ? normalizedRepo.split('/').last
+      : normalizedRepo;
+  final source = appName.trim().isNotEmpty ? appName.trim() : repoLeaf;
+  if (source.isEmpty) return '';
+
+  final slug = sanitizeFileSlug(source, fallback: '')
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z0-9_-]+'), '-')
+      .replaceAll(RegExp(r'-{2,}'), '-')
+      .replaceAll(RegExp(r'^[-_]+|[-_]+$'), '');
+  return slug;
 }
 
 /// Seletor pesquisável de repositórios do GitHub App (estilo Dokploy), usado no

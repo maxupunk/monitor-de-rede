@@ -530,5 +530,53 @@ void main() {
         expect(filterDeployRepositories(repos, 'inexistente'), isEmpty);
       },
     );
+
+    test(
+      'normalizeGithubRepository extracts owner/repo from HTTPS and SSH URLs',
+      () {
+        expect(
+          normalizeGithubRepository('https://github.com/maxupunk/VX-academia'),
+          'maxupunk/VX-academia',
+        );
+        expect(
+          normalizeGithubRepository(
+            'https://github.com/maxupunk/VX-academia.git',
+          ),
+          'maxupunk/VX-academia',
+        );
+        expect(
+          normalizeGithubRepository('git@github.com:maxupunk/VX-academia.git'),
+          'maxupunk/VX-academia',
+        );
+        expect(
+          normalizeGithubRepository('  maxupunk/VX-academia/  '),
+          'maxupunk/VX-academia',
+        );
+      },
+    );
+
+    test(
+      'suggestComposeProjectName derives clean slug from app name or repo',
+      () {
+        expect(
+          suggestComposeProjectName(
+            appName: 'VX-Academia',
+            repository: 'https://github.com/maxupunk/VX-academia',
+          ),
+          'vx-academia',
+        );
+        expect(
+          suggestComposeProjectName(appName: 'Meu App Prod', repository: ''),
+          'meu-app-prod',
+        );
+        expect(
+          suggestComposeProjectName(
+            appName: '',
+            repository: 'https://github.com/maxupunk/VX-academia.git',
+          ),
+          'vx-academia',
+        );
+      },
+    );
   });
 }
