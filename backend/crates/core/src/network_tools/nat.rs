@@ -89,6 +89,13 @@ pub struct NatDetector {
     /// A rota padrão vista de dentro, separada dos endereços declarados à mão:
     /// é ela que diz em que tipo de rede este processo está.
     default_gateway: Option<IpAddr>,
+    /// Os endereços declarados em [`ENV_GATEWAYS`] — a única outra prova,
+    /// além das faixas do Docker, de que a rota padrão é uma ponte.
+    declared: BTreeSet<IpAddr>,
+    /// Se as interfaces do próprio host (`docker0`, `veth*`) estão à vista: só
+    /// acontece em `network_mode: host`, porque a rede de um container em
+    /// bridge tem apenas o `lo` e o par `eth0` dele.
+    host_interfaces_visible: bool,
     /// Se o processo está mesmo dentro de um container. Só informativo — a
     /// decisão de mascaramento é por endereço, não por ambiente.
     pub containerized: bool,
@@ -106,12 +113,13 @@ impl NatDetector {
         if let Some(gateway) = default_gateway {
             gateways.insert(gateway);
         }
-        for endereco in declarados_no_ambiente() {
-            gateways.insert(endereco);
-        }
+        let declared: BTreeSet<IpAddr> = declarados_no_ambiente().into_iter().collect();
+        gateways.extend(declared.iter().copied());
         Self {
             gateways,
             default_gateway,
+            declared,
+            host_interfaces_visible: interfaces_do_host_visiveis(),
             containerized: crate::shared::runtime::in_container(),
         }
     }
@@ -156,12 +164,20 @@ impl NatDetector {
     /// Quem depende disso é o MAC-Telnet: ele descobre o equipamento por
     /// difusão na LAN, e difusão não atravessa a ponte. Sem esta resposta a
     /// tela ofereceria um meio de acesso que não tem como funcionar ali.
+    ///
+    /// A rota padrão é comparada só com as faixas do Docker e com os endereços
+    /// declarados — nunca com `gateways`, que a contém por construção (era o
+    /// que fazia todo container, até em modo host, parecer estar em bridge). E
+    /// uma LAN que use `172.16.0.0/12` não é confundida com a ponte quando as
+    /// interfaces do host estão à vista.
     #[must_use]
     pub fn bridged_container(&self) -> bool {
         self.containerized
-            && self
-                .default_gateway
-                .is_some_and(|rota| self.is_masked(rota))
+            && !self.host_interfaces_visible
+            && self.default_gateway.is_some_and(|rota| {
+                self.declared.contains(&rota)
+                    || matches!(rota, IpAddr::V4(v4) if FAIXAS_DE_BRIDGE.iter().any(|f| f.e_gateway(v4)))
+            })
     }
 }
 
@@ -197,6 +213,21 @@ fn declarados_no_ambiente() -> Vec<IpAddr> {
         .split(',')
         .filter_map(|item| item.trim().parse::<IpAddr>().ok())
         .collect()
+}
+
+/// Se a rede do processo mostra as interfaces do host Docker. Em
+/// `network_mode: host` o container vê o `docker0` e os `veth*` dos outros
+/// containers; em bridge, só o próprio `eth0` e o `lo`.
+fn interfaces_do_host_visiveis() -> bool {
+    std::fs::read_dir("/sys/class/net").is_ok_and(|entries| {
+        entries
+            .filter_map(Result::ok)
+            .any(|entry| e_interface_do_host(&entry.file_name().to_string_lossy()))
+    })
+}
+
+fn e_interface_do_host(nome: &str) -> bool {
+    nome == "docker0" || nome.starts_with("veth") || nome.starts_with("br-")
 }
 
 /// O gateway padrão visto de dentro do container, lido do `/proc/net/route`.
@@ -247,6 +278,33 @@ mod tests {
 
     fn ip(texto: &str) -> IpAddr {
         texto.parse().expect("ip do teste")
+    }
+
+    fn detector(rota: &str, containerized: bool, host_visivel: bool) -> NatDetector {
+        let rota = ip(rota);
+        NatDetector {
+            gateways: [rota].into_iter().collect(),
+            default_gateway: Some(rota),
+            declared: BTreeSet::new(),
+            host_interfaces_visible: host_visivel,
+            containerized,
+        }
+    }
+
+    #[test]
+    fn modo_host_nao_e_confundido_com_bridge() {
+        // Rota padrão para o roteador da LAN: a rota está em `gateways` por
+        // construção, e isso não pode bastar para dizer "bridge".
+        assert!(!detector("10.0.0.1", true, false).bridged_container());
+        assert!(!detector("192.168.1.1", true, false).bridged_container());
+        // Rota na ponte do Docker, sem as interfaces do host à vista: bridge.
+        assert!(detector("172.18.0.1", true, false).bridged_container());
+        // LAN em 172.16.0.0/12 com o host à vista: modo host.
+        assert!(!detector("172.20.0.1", true, true).bridged_container());
+        // Fora de container nunca é bridge.
+        assert!(!detector("172.18.0.1", false, false).bridged_container());
+        assert!(e_interface_do_host("docker0") && e_interface_do_host("veth9a1b"));
+        assert!(!e_interface_do_host("eth0") && !e_interface_do_host("wg0"));
     }
 
     #[test]

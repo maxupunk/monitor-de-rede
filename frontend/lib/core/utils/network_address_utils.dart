@@ -124,6 +124,49 @@ bool looksPrivateUrl(String rawUrl) {
   return isPrivateHost(uri.host);
 }
 
+/// `true` se o texto é um IP literal (IPv4 ou IPv6, com ou sem colchetes).
+bool isIpLiteral(String raw) {
+  var value = raw.trim();
+  if (value.startsWith('[') && value.endsWith(']')) {
+    value = value.substring(1, value.length - 1);
+  }
+  if (value.isEmpty) return false;
+  try {
+    Uri.parseIPv4Address(value);
+    return true;
+  } on FormatException {
+    // Não é IPv4; tenta IPv6 abaixo.
+  }
+  try {
+    Uri.parseIPv6Address(value);
+    return true;
+  } on FormatException {
+    return false;
+  }
+}
+
+/// Sugere o endpoint público (DDNS) a partir do host pelo qual a central é
+/// acessada — um host (`monitor.exemplo.com.br:8443`) ou uma URL completa.
+///
+/// Devolve só o nome de domínio, sem esquema, porta ou caminho. Endereço IP
+/// (IPv4/IPv6) e `localhost` não servem de sugestão: devolve `null`.
+String? suggestPublicEndpoint(String? hostOrUrl) {
+  final value = hostOrUrl?.trim() ?? '';
+  if (value.isEmpty || isIpLiteral(value)) return null;
+  final uri = Uri.tryParse(value.contains('://') ? value : 'http://$value');
+  var host = (uri?.host ?? '').toLowerCase();
+  while (host.endsWith('.')) {
+    host = host.substring(0, host.length - 1);
+  }
+  if (host.isEmpty ||
+      isIpLiteral(host) ||
+      host == 'localhost' ||
+      host.endsWith('.localhost')) {
+    return null;
+  }
+  return host;
+}
+
 /// Resolve a origem HTTP/HTTPS efetiva da central (Web PWA vs cliente nativo).
 String resolveCentralOrigin(String configuredBaseUrl) {
   return kIsWeb ? Uri.base.origin : configuredBaseUrl;

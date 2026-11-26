@@ -285,6 +285,35 @@ impl From<validator::ValidationErrors> for AppError {
     }
 }
 
+/// A rejeição do extrator `Json` do axum (corpo ilegível, campo com tipo ou
+/// valor que o DTO não aceita). O `Json` do Loco a devolve como
+/// `{"error":"Bad Request"}`, sem dizer o que estava errado; aqui ela vira o
+/// corpo `{"message": ...}` que a tela mostra. Quem usa é
+/// [`crate::shared::body::AppJson`].
+impl From<axum::extract::rejection::JsonRejection> for AppError {
+    fn from(rejection: axum::extract::rejection::JsonRejection) -> Self {
+        use axum::extract::rejection::JsonRejection as R;
+        use std::error::Error as _;
+        // O `Display` da rejeição é o texto genérico do axum; o motivo (campo
+        // e valor recusados) está na causa.
+        let cause = rejection
+            .source()
+            .map_or_else(|| rejection.to_string(), ToString::to_string);
+        match rejection {
+            R::JsonDataError(_) => {
+                Self::validation(format!("Dados inválidos na requisição: {cause}"))
+            }
+            R::JsonSyntaxError(_) => {
+                Self::bad_request(format!("JSON malformado na requisição: {cause}"))
+            }
+            R::MissingJsonContentType(_) => {
+                Self::bad_request("Envie o corpo da requisição como application/json")
+            }
+            _ => Self::bad_request("Não foi possível ler o corpo da requisição"),
+        }
+    }
+}
+
 /// Alias de conveniência para as funções de serviço.
 pub type AppResult<T> = std::result::Result<T, AppError>;
 

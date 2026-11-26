@@ -1,4 +1,28 @@
-//! Corpo de requisição opcional.
+//! Corpo de requisição: o JSON obrigatório com erro legível ([`AppJson`]) e o
+//! opcional ([`optional_body`]).
+
+use axum::extract::{FromRequest, Request};
+
+use super::errors::AppError;
+
+/// O `Json` do axum com a rejeição em [`AppError`]: um campo que o DTO não
+/// aceita volta como `{"message": "Dados inválidos na requisição: <campo>: <motivo>"}`
+/// em vez do `{"error":"Bad Request"}` mudo do `Json` do Loco.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AppJson<T>(pub T);
+
+impl<T, S> FromRequest<S> for AppJson<T>
+where
+    axum::Json<T>: FromRequest<S, Rejection = axum::extract::rejection::JsonRejection>,
+    S: Send + Sync,
+{
+    type Rejection = AppError;
+
+    async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
+        let axum::Json(value) = axum::Json::<T>::from_request(req, state).await?;
+        Ok(Self(value))
+    }
+}
 
 /// Lê um corpo de requisição **opcional** sem deixá-lo mascarar o erro real.
 ///

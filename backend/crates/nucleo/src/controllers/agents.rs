@@ -25,7 +25,10 @@ use axum::{
 };
 use futures::{SinkExt, StreamExt};
 use loco_rs::prelude::*;
-use netmonitor_core::{agents::install_policy::InstallPolicy, shared::client_addr::TrustedProxies};
+use netmonitor_core::{
+    agents::install_policy::InstallPolicy,
+    shared::{body::AppJson, client_addr::TrustedProxies},
+};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -247,7 +250,7 @@ async fn install_commands(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
     PeerAddr(peer): PeerAddr,
-    Json(input): Json<AgentInstallCommandsInput>,
+    AppJson(input): AppJson<AgentInstallCommandsInput>,
 ) -> AppResult<Response> {
     let policy = InstallPolicy::chosen_or_suggested(input.policy.as_ref())?;
     if input.policy.is_some() {

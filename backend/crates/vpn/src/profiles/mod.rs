@@ -7,6 +7,7 @@ pub mod contract;
 pub mod mikrotik;
 pub mod openwrt;
 pub mod registry;
+pub mod snmp_v3;
 pub mod variants;
 pub mod wg_conf;
 

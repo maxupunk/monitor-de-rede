@@ -95,11 +95,10 @@ Ver `docs/adr/` para as decisões arquiteturais vigentes.
   novo sumiria ([ADR 018](../docs/adr/018-loco-ou-axum.md)).
 - **Tabelas novas** entram em `crates/core/src/models/tables.rs` (`CREATION_ORDER`). O
   `Hooks::truncate` já as cobre; não mexa no `app.rs`.
-- **Sem produção, sem migration nova para alterar esquema.** O sistema nunca foi
-  instalado de verdade: mudar uma tabela é editar a migration que a cria e
-  recriar o banco de desenvolvimento. Não gere migration de `alter`, de
-  compatibilidade nem rotina de upgrade (ver `AGENTS.md` §3 e o DB-02 em
-  `docs/debitos_tecnicos.md`).
+- **Em produção: esquema muda só por migration nova.** Desde 2026-11-25 há
+  instalação real. Migration publicada nunca é editada; a mudança vai numa
+  migration nova, no fim da lista, que leva o banco instalado ao esquema novo
+  sem perder dados e também vale num banco vazio (ver `AGENTS.md` §3).
 - **Migrations:** cada crate leva as próprias tabelas em `src/migrations/`
   (o núcleo em `crates/core`, cada área no seu crate; tabela de área só tem
   FK para o núcleo — `tests/conventions/architecture.rs` confere) e usa os

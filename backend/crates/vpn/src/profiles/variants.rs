@@ -6,6 +6,7 @@
 //! mudança de endpoint se propagam sozinhas.
 
 use super::contract::{artifact_header, ArtifactVariant, PeerConfigContext, WG_TUNNEL_NAME};
+use super::snmp_v3::purge_persisted_users;
 use crate::shell_escape::{escape_uci, strip_controls};
 
 /// Detecção de gerenciador de pacotes: primeira família encontrada vence.
@@ -84,12 +85,31 @@ fn linux_snmp_section(
         return Vec::new();
     }
     let community = context.sanitized_community();
-    let mut lines = vec![
-        String::new(),
-        step(&format!(
-            "SNMP para o NetMonitor (community \"{community}\", restrita à faixa da VPN)"
-        )),
-    ];
+    // Com perfil v3, o snmpd ganha o usuário no lugar da community; um perfil
+    // que a plataforma não aceita vira aviso e o SNMP fica sem configurar.
+    let access = match context.snmp_v3_user().map(|user| {
+        user.net_snmp_directives()
+            .map(|lines| (user.username.to_string(), lines))
+    }) {
+        Some(Err(reason)) => {
+            return vec![
+                String::new(),
+                format!(
+                    "echo 'SNMPv3 nao configurado: {}.' >&2",
+                    escape_uci(&reason)
+                ),
+            ];
+        }
+        Some(Ok(v3)) => Some(v3),
+        None => None,
+    };
+    let title = match &access {
+        Some((username, _)) => format!("SNMPv3 para o NetMonitor (usuário \"{username}\")"),
+        None => {
+            format!("SNMP para o NetMonitor (community \"{community}\", restrita à faixa da VPN)")
+        }
+    };
+    let mut lines = vec![String::new(), step(&title)];
     lines.extend(package_manager_branch(|manager| {
         manager
             .snmp_install
@@ -107,18 +127,33 @@ fn linux_snmp_section(
         "install -d -m 755 /etc/snmp".to_string(),
         "cp -n /etc/snmp/snmpd.conf /etc/snmp/snmpd.conf.netmonitor.bak 2>/dev/null || true"
             .to_string(),
+        "systemctl stop snmpd 2>/dev/null || rc-service snmpd stop 2>/dev/null || true".to_string(),
         "cat > /etc/snmp/snmpd.conf <<'EOF'".to_string(),
         "# Gerado pelo NetMonitor".to_string(),
         "agentaddress udp:161".to_string(),
-        format!(
+    ]);
+    match &access {
+        Some((_, directives)) => lines.extend(directives.iter().cloned()),
+        None => lines.push(format!(
             "rocommunity {community} {}",
             strip_controls(&context.vpn_cidr)
-        ),
+        )),
+    }
+    lines.extend([
         "sysLocation NetMonitor".to_string(),
         "sysServices 72".to_string(),
         "EOF".to_string(),
+    ]);
+    if access.is_some() {
+        // A senha do usuário fica no arquivo: só o root lê.
+        lines.extend([
+            "chmod 600 /etc/snmp/snmpd.conf".to_string(),
+            purge_persisted_users(),
+        ]);
+    }
+    lines.extend([
         String::new(),
-        "systemctl restart snmpd 2>/dev/null || rc-service snmpd restart 2>/dev/null || true"
+        "systemctl start snmpd 2>/dev/null || rc-service snmpd start 2>/dev/null || true"
             .to_string(),
         "systemctl enable snmpd 2>/dev/null || true".to_string(),
     ]);
@@ -462,6 +497,21 @@ mod tests {
         assert!(bash.content.contains("PrivateKey = CHAVE"));
         let ps = windows_winget_variant(&contexto(), CONF);
         assert!(ps.content.contains("PrivateKey = CHAVE"));
+    }
+
+    #[test]
+    fn linux_com_perfil_v3_troca_a_community_pelo_usuario() {
+        use super::super::contract::tests::contexto_v3;
+        let script = linux_bash_variant(&contexto_v3("sha256", "aes128"), CONF).content;
+        assert!(script.contains("createUser netmonitor SHA-256 \"senha-auth\" AES \"senha-priv\""));
+        assert!(script.contains("rouser netmonitor priv"));
+        assert!(!script.contains("rocommunity"));
+        assert!(script.contains("chmod 600 /etc/snmp/snmpd.conf"));
+        assert!(script.contains("sed -i '/^usmUser /d'"));
+
+        let recusado = linux_bash_variant(&contexto_v3("sha", "aes256"), CONF).content;
+        assert!(recusado.contains("SNMPv3 nao configurado"));
+        assert!(!recusado.contains("createUser"));
     }
 
     #[test]

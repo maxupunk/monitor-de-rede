@@ -11,6 +11,7 @@ use super::contract::{
     artifact_header, artifact_summary, ArtifactDelivery, ArtifactVariant, GeneratedArtifact,
     PeerConfigContext, VpnProfileGenerator, PERSISTENT_KEEPALIVE_SECONDS,
 };
+use super::snmp_v3::{purge_persisted_users, SnmpV3User};
 use crate::shell_escape::{escape_uci, sanitize_file_name};
 
 pub const INTERFACE_NAME: &str = "wg_nm";
@@ -63,6 +64,9 @@ impl OpenWrtProfileGenerator {
         if !context.snmp_enabled {
             return Vec::new();
         }
+        if let Some(user) = context.snmp_v3_user() {
+            return Self::snmp_v3_section(manager, &user);
+        }
         let mut lines = vec![
             String::new(),
             "# SNMP (community cadastrada no NetMonitor)".to_string(),
@@ -77,6 +81,44 @@ impl OpenWrtProfileGenerator {
                 "uci set snmpd.public.source='{}'",
                 escape_uci(&context.vpn_cidr)
             ),
+            "uci commit snmpd && /etc/init.d/snmpd restart && /etc/init.d/snmpd enable".to_string(),
+        ]);
+        lines
+    }
+
+    /// O usuário v3 vai no `/etc/snmp/snmpd.conf`, que o snmpd do OpenWrt lê
+    /// junto do arquivo gerado pelo UCI (o UCI não descreve usuário v3). A
+    /// community `public` do UCI fica presa ao próprio roteador: com perfil
+    /// v3, ela não pode continuar aberta para a rede.
+    fn snmp_v3_section(manager: PackageManager, user: &SnmpV3User<'_>) -> Vec<String> {
+        let directives = match user.net_snmp_directives() {
+            Ok(directives) => directives,
+            Err(reason) => {
+                return vec![
+                    String::new(),
+                    format!("# SNMPv3 nao configurado: {reason}."),
+                ];
+            }
+        };
+        let mut lines = vec![
+            String::new(),
+            "# SNMPv3 (perfil SNMP cadastrado no NetMonitor)".to_string(),
+        ];
+        lines.extend(manager.install_snmp());
+        lines.extend([
+            "/etc/init.d/snmpd stop 2>/dev/null || true".to_string(),
+            "mkdir -p /etc/snmp".to_string(),
+            "cp -n /etc/snmp/snmpd.conf /etc/snmp/snmpd.conf.netmonitor.bak 2>/dev/null || true"
+                .to_string(),
+            "cat > /etc/snmp/snmpd.conf <<'EOF'".to_string(),
+            "# Gerado pelo NetMonitor".to_string(),
+        ]);
+        lines.extend(directives);
+        lines.extend([
+            "EOF".to_string(),
+            "chmod 600 /etc/snmp/snmpd.conf".to_string(),
+            purge_persisted_users(),
+            "uci set snmpd.public.source='127.0.0.1'".to_string(),
             "uci commit snmpd && /etc/init.d/snmpd restart && /etc/init.d/snmpd enable".to_string(),
         ]);
         lines
@@ -283,6 +325,19 @@ mod tests {
         assert!(artifact
             .content
             .contains("uci set snmpd.public.source='10.8.0.0/24'"));
+    }
+
+    #[test]
+    fn perfil_v3_grava_o_usuario_e_fecha_a_community_publica() {
+        use super::super::contract::tests::contexto_v3;
+        let content = OpenWrtProfileGenerator
+            .generate(&contexto_v3("sha", "aes128"))
+            .content;
+        assert!(content.contains("createUser netmonitor SHA \"senha-auth\" AES \"senha-priv\""));
+        assert!(content.contains("rouser netmonitor priv"));
+        assert!(content.contains("chmod 600 /etc/snmp/snmpd.conf"));
+        assert!(content.contains("uci set snmpd.public.source='127.0.0.1'"));
+        assert!(!content.contains("snmpd.public.community"));
     }
 
     #[test]

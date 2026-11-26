@@ -22,6 +22,9 @@ use crate::{
 const DOCKER_DATABASE_TARGETS: &str =
     "172.16.0.0/12:5432,172.16.0.0/12:3306,192.168.0.0/16:5432,192.168.0.0/16:3306";
 
+/// A ponte de banco liberada sem nenhum destino.
+pub const MISSING_DATABASE_TARGETS: &str = "A ponte de banco precisa de ao menos um destino      permitido (IP:porta ou faixa:porta, ex.: 10.0.0.20:5432). Informe os destinos ou desmarque      a permissão.";
+
 /// Chave em `probes.configuration` com a política escolhida na instalação.
 const CONFIG_KEY: &str = "installPolicy";
 
@@ -54,9 +57,14 @@ impl InstallPolicy {
     /// # Errors
     ///
     /// `validation` para um destino inválido — ele vai para um comando de
-    /// shell e para a política do host.
+    /// shell e para a política do host — e para a ponte de banco sem destino:
+    /// a lista é obrigatória no agente (ADR 013) e, vazia, a permissão não
+    /// alcança banco nenhum.
     pub fn new(allow: &[Permission], database_targets: &str) -> AppResult<Self> {
         let database_targets = parse_targets(database_targets).map_err(AppError::validation)?;
+        if allow.contains(&Permission::Database) && database_targets.is_empty() {
+            return Err(AppError::validation(MISSING_DATABASE_TARGETS));
+        }
         Ok(Self {
             policy: Policy::from_permissions(allow.iter().copied()),
             database_targets,
@@ -159,6 +167,13 @@ mod tests {
                 "{raw}"
             );
         }
+    }
+
+    #[test]
+    fn ponte_de_banco_sem_destino_e_recusada() {
+        let err = InstallPolicy::new(&[Permission::Database], " , ").unwrap_err();
+        assert_eq!(err.to_string(), MISSING_DATABASE_TARGETS);
+        assert!(InstallPolicy::new(&[Permission::Lifecycle], "").is_ok());
     }
 
     #[test]

@@ -175,47 +175,6 @@ class VpnInstallPolicy {
   }
 }
 
-/// Permissões conhecidas do agente remoto (`AGENT_ALLOW`, ADR 011/013/021/022).
-const List<({String id, String label, String description})>
-vpnAgentPermissions = <({String id, String label, String description})>[
-  (
-    id: 'metrics',
-    label: 'Métricas do host',
-    description: 'CPU, memória, disco e rede do servidor.',
-  ),
-  (
-    id: 'docker_read',
-    label: 'Docker (leitura)',
-    description: 'Listar containers, logs, imagens e estatísticas.',
-  ),
-  (
-    id: 'docker_control',
-    label: 'Docker (controle)',
-    description: 'Iniciar, parar e reiniciar containers não protegidos.',
-  ),
-  (
-    id: 'deploy',
-    label: 'Deploy contínuo',
-    description: 'Aplicar revisões Compose em AGENT_STACKS_DIR.',
-  ),
-  (
-    id: 'build',
-    label: 'Compilar imagens',
-    description: 'Construir imagens Docker no builder dedicado.',
-  ),
-  (
-    id: 'database',
-    label: 'Ponte de banco',
-    description: 'Túnel de bytes para backups de bancos na rede do agente.',
-  ),
-  (
-    id: 'device_io',
-    label: 'Acesso a equipamentos',
-    description:
-        'Encaminhar SSH/Telnet/HTTP de plugins para dispositivos remotos.',
-  ),
-];
-
 @immutable
 class VpnArtifactSummaryItem {
   const VpnArtifactSummaryItem({required this.label, required this.value});

@@ -25,7 +25,8 @@ Duas entregas que se apoiam:
   esquema **edita a migration existente** e recria o banco de desenvolvimento:
   nada de migration de compatibilidade, initializer de upgrade, estado `auto`
   ou *shim* de rota, campo ou tópico antigo. A regra se inverte na primeira
-  instalação real — e isso será anunciado.
+  instalação real — e isso será anunciado. **Invertida em 2026-11-25: o
+  sistema está em produção; mudança de esquema é migration nova.**
 - **Sem reescrita.** O código atual é a especificação; ~2.400 testes são o
   contrato. Código **muda de lugar**, não de comportamento, salvo quando a fase
   diz o contrário.

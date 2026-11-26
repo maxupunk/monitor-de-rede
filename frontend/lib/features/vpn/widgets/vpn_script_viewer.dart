@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/utils/clipboard_utils.dart';
 import 'package:netmonitor_app/core/utils/file_download.dart';
+import 'package:netmonitor_app/features/core/models/agent_permission_models.dart';
 import 'package:netmonitor_app/features/vpn/models/vpn_models.dart';
 import 'package:netmonitor_app/features/vpn/providers/vpn_provider.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
@@ -116,6 +117,9 @@ class _VpnScriptViewerBodyState extends ConsumerState<_VpnScriptViewerBody> {
       instructions: _artifact.instructions,
     );
   }
+
+  String? get _databaseTargetsError =>
+      missingDatabaseTargetsError(_agentAllow, _dbTargetsCtrl.text);
 
   Future<void> _applyPolicyUpdate() async {
     final effectivePeerId = widget.peerId ?? _artifact.peerId;
@@ -355,18 +359,18 @@ class _VpnScriptViewerBodyState extends ConsumerState<_VpnScriptViewerBody> {
                 Wrap(
                   spacing: 8,
                   runSpacing: 6,
-                  children: vpnAgentPermissions
+                  children: agentPermissionsCatalog
                       .map((perm) {
-                        final selected = _agentAllow.contains(perm.id);
+                        final selected = _agentAllow.contains(perm.key);
                         return FilterChip(
                           label: Text(perm.label),
                           selected: selected,
                           onSelected: (value) {
                             setState(() {
                               if (value) {
-                                _agentAllow.add(perm.id);
+                                _agentAllow.add(perm.key);
                               } else {
-                                _agentAllow.remove(perm.id);
+                                _agentAllow.remove(perm.key);
                               }
                             });
                           },
@@ -378,9 +382,11 @@ class _VpnScriptViewerBodyState extends ConsumerState<_VpnScriptViewerBody> {
                   const SizedBox(height: 10),
                   TextField(
                     controller: _dbTargetsCtrl,
-                    decoration: const InputDecoration(
+                    onChanged: (_) => setState(() {}),
+                    decoration: InputDecoration(
                       labelText: 'Destinos de banco permitidos (host:porta)',
                       hintText: '10.0.0.10:5432, 10.0.0.11:3306',
+                      errorText: _databaseTargetsError,
                     ),
                   ),
                 ],
@@ -388,7 +394,9 @@ class _VpnScriptViewerBodyState extends ConsumerState<_VpnScriptViewerBody> {
                 Align(
                   alignment: Alignment.centerRight,
                   child: FilledButton.tonalIcon(
-                    onPressed: _updatingPolicy ? null : _applyPolicyUpdate,
+                    onPressed: _updatingPolicy || _databaseTargetsError != null
+                        ? null
+                        : _applyPolicyUpdate,
                     icon: _updatingPolicy
                         ? const SizedBox(
                             width: 16,

@@ -97,10 +97,9 @@ struct PeerBundle {
     network: networks::Model,
     /// Agente remoto vinculado ao dispositivo deste peer, se houver.
     agent: Option<probes::Model>,
-    /// A comunidade que o script grava no equipamento — da credencial SNMP do
-    /// dispositivo. `None` sem SNMP ou com credencial v3 (o script só sabe
-    /// configurar comunidade; o usuário v3 é configurado à mão).
-    snmp_community: Option<String>,
+    /// A credencial SNMP do dispositivo — comunidade ou usuário v3 — que o
+    /// script grava no equipamento. `None` sem SNMP.
+    snmp_credentials: Option<snmp_credentials::SnmpCredentials>,
 }
 
 async fn load_peer(db: &DatabaseConnection, peer_id: i64) -> AppResult<PeerBundle> {
@@ -115,11 +114,8 @@ async fn load_peer(db: &DatabaseConnection, peer_id: i64) -> AppResult<PeerBundl
     let network = server_service::network_of(db, &server).await?;
     let device = devices::Entity::find_by_id(peer.device_id).one(db).await?;
     let agent = registration::for_device(db, peer.device_id).await?;
-    let snmp_community = match device.as_ref().filter(|device| device.snmp_enabled) {
-        Some(device) => snmp_credentials::for_device(db, device)
-            .await?
-            .community_text()
-            .map(str::to_owned),
+    let snmp_credentials = match device.as_ref().filter(|device| device.snmp_enabled) {
+        Some(device) => Some(snmp_credentials::for_device(db, device).await?),
         None => None,
     };
     Ok(PeerBundle {
@@ -128,7 +124,7 @@ async fn load_peer(db: &DatabaseConnection, peer_id: i64) -> AppResult<PeerBundl
         server,
         network,
         agent,
-        snmp_community,
+        snmp_credentials,
     })
 }
 
@@ -191,8 +187,8 @@ fn build_context_with_agent(
         endpoint_port: bundle.server.listen_port,
         mtu: bundle.server.mtu,
         dns_servers: bundle.server.dns_servers.clone(),
-        snmp_enabled: bundle.snmp_community.is_some(),
-        snmp_community: bundle.snmp_community.clone(),
+        snmp_enabled: bundle.snmp_credentials.is_some(),
+        snmp_credentials: bundle.snmp_credentials.clone(),
         agent,
     })
 }
@@ -780,10 +776,15 @@ mod tests {
     fn bundle(endpoint: Option<&str>, device: Option<devices::Model>) -> PeerBundle {
         let now = Utc::now();
         PeerBundle {
-            snmp_community: device
+            snmp_credentials: device
                 .as_ref()
                 .filter(|device| device.snmp_enabled)
-                .map(|_| "netmon".to_string()),
+                .map(|_| {
+                    snmp_credentials::SnmpCredentials::community(
+                        snmp_credentials::SnmpVersion::V2c,
+                        "netmon",
+                    )
+                }),
             peer: vpn_peers::Model {
                 id: 1,
                 vpn_server_id: 1,

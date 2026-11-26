@@ -416,11 +416,11 @@ lista e a ordem de criação moram em `src/models/tables.rs` (`CREATION_ORDER`) 
 pai antes de filho, por causa das FKs — e são a mesma ordem das migrations. Um
 teste garante que as duas não divirjam; este documento não repete a lista.
 
-**O sistema ainda não foi para produção.** Mudança de esquema edita a migration
-existente e recria o banco de desenvolvimento — sem migration de
-compatibilidade nem rotina de upgrade. A consolidação das migrations numa base
-está planejada (DB-02, Fase 1 do
-[roadmap da arquitetura modular](roadmap_arquitetura_modular.md)).
+**O sistema está em produção desde 2026-11-25.** Migration publicada nunca é
+editada: mudança de esquema é uma migration nova, no fim da lista, que leva o
+banco instalado ao esquema novo sem perder dados e também vale num banco vazio
+(AGENTS.md §3). As migrations publicadas até essa data são a base consolidada
+do DB-02.
 
 Notas que valem mais que a lista:
 

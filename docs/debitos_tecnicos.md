@@ -133,7 +133,7 @@ Este documento consolida a auditoria de arquitetura, código-fonte, padrões de 
 ### 🟢 DB-02: Versionamento de Migrations — Concluído (ADR 017)
 - **Descrição:** 64 migrations históricas, mais o `migration::purge_removed_migrations` para bancos que aplicaram migrations já removidas.
 - **Mudança de premissa (2026-11-05):** o sistema nunca foi para produção, então não há `seaql_migrations` real a preservar. A orientação anterior ("manter como está") caiu.
-- **Implementado:** 64 → 37 migrations (uma por tabela, com os `ALTER` dobrados) e 4 → 3 no banco de logs; esquema idêntico em SQLite e PostgreSQL; `purge_removed_migrations` removido. Mudança de esquema edita a migration da tabela.
+- **Implementado:** 64 → 37 migrations (uma por tabela, com os `ALTER` dobrados) e 4 → 3 no banco de logs; esquema idêntico em SQLite e PostgreSQL; `purge_removed_migrations` removido. Mudança de esquema editava a migration da tabela até 2026-11-25; desde então o sistema está em produção e toda mudança é migration nova.
 
 ---
 

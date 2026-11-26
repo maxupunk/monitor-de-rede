@@ -138,13 +138,7 @@ class _AgentEnrollmentBodyState extends ConsumerState<_AgentEnrollmentBody> {
   }
 
   void _selectAllPermissions() {
-    setState(
-      () => _policy = _policy.copyWith(
-        allow: agentPermissionsCatalog
-            .map((e) => e.key)
-            .toList(growable: false),
-      ),
-    );
+    setState(() => _policy = _policy.copyWith(allow: allAgentPermissionKeys()));
     unawaited(_regenerateCommands());
   }
 

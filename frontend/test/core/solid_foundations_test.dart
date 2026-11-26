@@ -194,6 +194,53 @@ void main() {
         expect(looksPrivateUrl('https://netmonitor.exemplo.com.br'), isFalse);
       },
     );
+
+    test(
+      'suggestPublicEndpoint: domínio vira sugestão; IP e localhost não',
+      () {
+        // Domínio, com ou sem esquema, porta e caminho.
+        expect(
+          suggestPublicEndpoint('monitor.master.pro.br'),
+          'monitor.master.pro.br',
+        );
+        expect(
+          suggestPublicEndpoint('https://Monitor.Master.pro.br/vpn?x=1'),
+          'monitor.master.pro.br',
+        );
+        expect(
+          suggestPublicEndpoint('monitor.master.pro.br:8443'),
+          'monitor.master.pro.br',
+        );
+        expect(
+          suggestPublicEndpoint('http://monitor.master.pro.br:5150'),
+          'monitor.master.pro.br',
+        );
+
+        // IPv4, IPv6 e localhost: o campo fica vazio.
+        for (final host in <String>[
+          '203.0.113.7',
+          '192.168.1.10:5150',
+          'http://127.0.0.1:3333',
+          '::1',
+          '2001:db8::1',
+          '[2001:db8::1]:8443',
+          'https://[2001:db8::1]/',
+          'localhost',
+          'http://localhost:5150',
+        ]) {
+          expect(suggestPublicEndpoint(host), isNull, reason: host);
+        }
+
+        // Vazio.
+        expect(suggestPublicEndpoint(null), isNull);
+        expect(suggestPublicEndpoint(''), isNull);
+        expect(suggestPublicEndpoint('   '), isNull);
+
+        expect(isIpLiteral('10.8.0.1'), isTrue);
+        expect(isIpLiteral('[fe80::1]'), isTrue);
+        expect(isIpLiteral('vpn.exemplo.com'), isFalse);
+      },
+    );
   });
 
   group('device_presentation & mdi_icons', () {

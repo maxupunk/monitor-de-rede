@@ -5,10 +5,12 @@ import 'package:netmonitor_app/areas/area_contribution.dart';
 import 'package:netmonitor_app/core/areas/area_models.dart';
 import 'package:netmonitor_app/core/areas/areas_provider.dart';
 import 'package:netmonitor_app/core/auth/auth_state.dart';
+import 'package:netmonitor_app/core/config/server_config.dart';
 import 'package:netmonitor_app/core/notifications/notifications_service.dart';
 import 'package:netmonitor_app/core/notifications/web_notifications_interop.dart';
 import 'package:netmonitor_app/core/realtime/sse_service.dart';
 import 'package:netmonitor_app/core/utils/error_utils.dart';
+import 'package:netmonitor_app/core/utils/network_address_utils.dart';
 import 'package:netmonitor_app/features/core/models/settings_models.dart';
 import 'package:netmonitor_app/features/core/presentation/backup/backup_page.dart';
 import 'package:netmonitor_app/features/core/providers/onboarding_provider.dart';
@@ -182,6 +184,13 @@ class _OnboardingWizardBodyState extends ConsumerState<_OnboardingWizardBody> {
     super.initState();
     final st = ref.read(onboardingProvider).status;
     if (st?.detectedLanIp != null) _lanAddrCtrl.text = st!.detectedLanIp!;
+    // Endpoint da VPN: o domínio pelo qual a central é acessada (navegador na
+    // Web, URL configurada no Android); IP não vira sugestão.
+    _vpnEndpointCtrl.text =
+        suggestPublicEndpoint(
+          resolveCentralOrigin(ref.read(serverConfigProvider).baseUrl),
+        ) ??
+        '';
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         ref.read(coreSettingsProvider.notifier).fetchServerAddresses();
@@ -295,6 +304,7 @@ class _OnboardingWizardBodyState extends ConsumerState<_OnboardingWizardBody> {
             ),
             defaultSnmpCommunity: _snmpCommCtrl.text,
             lanAddressOverride: _lanAddrCtrl.text,
+            vpnPublicEndpoint: _enableVpn ? _vpnEndpointCtrl.text : null,
             enableNetwork: _enableNetwork,
             siteName: _siteNameCtrl.text,
             networkName: _networkNameCtrl.text,

@@ -6,6 +6,10 @@
 use serde::Serialize;
 use ts_rs::TS;
 
+pub use netmonitor_core::devices::snmp_credentials::SnmpCredentials;
+
+use super::snmp_v3::SnmpV3User;
+
 pub use netmonitor_core::agents::install_policy::InstallPolicyView;
 pub use netmonitor_core::shared::secret_store::PRIVATE_KEY_UNAVAILABLE;
 
@@ -41,7 +45,9 @@ pub struct PeerConfigContext {
     pub mtu: i32,
     pub dns_servers: Option<String>,
     pub snmp_enabled: bool,
-    pub snmp_community: Option<String>,
+    /// A credencial do perfil SNMP do dispositivo: comunidade (v1/v2c) ou
+    /// usuário v3, que o script grava no equipamento.
+    pub snmp_credentials: Option<SnmpCredentials>,
     /// Instalação do agente NetMonitor ao fim do script (ADR 011). Só existe
     /// quando o dispositivo tem um agente cadastrado e o artefato é útil
     /// (a chave privada ainda não foi entregue).
@@ -87,10 +93,18 @@ impl PeerConfigContext {
 
     #[must_use]
     pub fn community(&self) -> &str {
-        self.snmp_community
-            .as_deref()
-            .filter(|value| !value.is_empty())
+        self.snmp_credentials
+            .as_ref()
+            .and_then(SnmpCredentials::community_text)
             .unwrap_or("public")
+    }
+
+    /// O usuário v3 a criar no equipamento, quando o perfil é v3.
+    #[must_use]
+    pub fn snmp_v3_user(&self) -> Option<SnmpV3User<'_>> {
+        self.snmp_credentials
+            .as_ref()
+            .and_then(SnmpV3User::from_credentials)
     }
 
     #[must_use]
@@ -303,10 +317,11 @@ pub fn artifact_summary(context: &PeerConfigContext) -> Vec<ArtifactSummaryItem>
         },
     ));
     if context.snmp_enabled {
-        summary.push(item(
-            "SNMP",
-            format!("community \"{}\"", context.community()),
-        ));
+        let value = match context.snmp_v3_user() {
+            Some(user) => format!("SNMPv3, usuário \"{}\"", user.username),
+            None => format!("community \"{}\"", context.community()),
+        };
+        summary.push(item("SNMP", value));
     }
     summary
 }
@@ -314,6 +329,22 @@ pub fn artifact_summary(context: &PeerConfigContext) -> Vec<ArtifactSummaryItem>
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
+
+    /// Contexto com SNMP ligado e um perfil v3 authPriv.
+    pub(crate) fn contexto_v3(auth: &str, privacy: &str) -> PeerConfigContext {
+        use netmonitor_core::devices::snmp_credentials::SnmpVersion;
+        let mut context = contexto();
+        context.snmp_enabled = true;
+        context.snmp_credentials = Some(SnmpCredentials {
+            username: Some("netmonitor".into()),
+            auth_protocol: Some(auth.into()),
+            auth_key: Some("senha-auth".into()),
+            priv_protocol: Some(privacy.into()),
+            priv_key: Some("senha-priv".into()),
+            ..SnmpCredentials::community(SnmpVersion::V3, "")
+        });
+        context
+    }
 
     pub(crate) fn contexto() -> PeerConfigContext {
         PeerConfigContext {
@@ -329,7 +360,7 @@ pub(super) mod tests {
             mtu: 1_420,
             dns_servers: None,
             snmp_enabled: false,
-            snmp_community: None,
+            snmp_credentials: None,
             agent: None,
         }
     }
@@ -369,7 +400,10 @@ pub(super) mod tests {
         let mut context = contexto();
         context.dns_servers = Some("10.8.0.1".into());
         context.snmp_enabled = true;
-        context.snmp_community = Some("netmon".into());
+        context.snmp_credentials = Some(SnmpCredentials::community(
+            netmonitor_core::devices::snmp_credentials::SnmpVersion::V2c,
+            "netmon",
+        ));
         let summary = artifact_summary(&context);
         assert_eq!(summary.len(), base + 2);
         assert!(summary.iter().any(|item| item.value.contains("netmon")));

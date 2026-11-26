@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/network/api_client.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/core/utils/json_parsers.dart';
+import 'package:netmonitor_app/features/core/models/agent_permission_models.dart';
 import 'package:netmonitor_app/features/vpn/models/vpn_models.dart';
 
 /// Repositório REST do domínio VPN WireGuard (13 endpoints dedicados + leituras auxiliares).
@@ -195,14 +196,19 @@ class VpnRepository {
     }
   }
 
+  /// A sugestão da central (`GET /api/agents/install-policy`); sem resposta,
+  /// a mesma sugestão montada aqui: tudo liberado e os bancos do Docker.
   Future<VpnInstallPolicy> fetchSuggestedAgentPolicy() async {
     try {
       final json = await _api.get<Map<String, dynamic>>(
-        '/agents/suggested-policy',
+        '/agents/install-policy',
       );
       return VpnInstallPolicy.fromJson(json);
     } catch (_) {
-      return const VpnInstallPolicy(allow: <String>['metrics', 'docker_read']);
+      return VpnInstallPolicy(
+        allow: allAgentPermissionKeys(),
+        databaseTargets: defaultDatabaseTargets,
+      );
     }
   }
 

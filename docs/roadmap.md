@@ -825,7 +825,7 @@ docker build -t netmonitor:check .
 3. Itens da **Fase 2** podem ser paralelizados, mas não devem ser iniciados antes da Fase 0 estar completa.
 4. Itens da **Fase 3** são planejados; a prioridade entre eles é decidida conforme feedback de uso e capacidade do time.
 5. Ao concluir um item, marque `[x]`, atualize este arquivo e, se necessário, o `docs/debitos_tecnicos.md`.
-6. **O sistema ainda não foi para produção:** item que muda o esquema edita a migration existente — sem migration de compatibilidade nem rotina de upgrade.
+6. **O sistema está em produção (desde 2026-11-25):** item que muda o esquema entra como migration **nova**, que preserva os dados do banco instalado — migration publicada nunca é editada.
 
 ---
 

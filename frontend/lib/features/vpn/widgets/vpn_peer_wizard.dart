@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:netmonitor_app/core/utils/form_validators.dart';
 import 'package:netmonitor_app/features/core/presentation/widgets/snmp_credential_dropdown.dart';
+import 'package:netmonitor_app/features/core/models/agent_permission_models.dart';
 import 'package:netmonitor_app/features/vpn/models/vpn_models.dart';
 import 'package:netmonitor_app/features/vpn/providers/vpn_provider.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
@@ -55,7 +56,7 @@ class _VpnPeerWizardBodyState extends ConsumerState<_VpnPeerWizardBody> {
   bool _snmpEnabled = false;
   int? _snmpProfileId;
   bool _installAgent = false;
-  List<String> _agentAllow = <String>['metrics', 'docker_read'];
+  List<String> _agentAllow = List<String>.from(allAgentPermissionKeys());
   bool _loadingIp = false;
   bool _submitting = false;
 
@@ -67,7 +68,7 @@ class _VpnPeerWizardBodyState extends ConsumerState<_VpnPeerWizardBody> {
     _nameCtrl = TextEditingController(text: widget.preset?.name ?? '');
     _ipCtrl = TextEditingController();
     _descriptionCtrl = TextEditingController();
-    _dbTargetsCtrl = TextEditingController();
+    _dbTargetsCtrl = TextEditingController(text: defaultDatabaseTargets);
 
     if (_isPreset) {
       _selectedProfile = 'linux';
@@ -369,9 +370,9 @@ class _VpnPeerWizardBodyState extends ConsumerState<_VpnPeerWizardBody> {
               Wrap(
                 spacing: 8,
                 runSpacing: 6,
-                children: vpnAgentPermissions
+                children: agentPermissionsCatalog
                     .map((perm) {
-                      final selected = _agentAllow.contains(perm.id);
+                      final selected = _agentAllow.contains(perm.key);
                       return FilterChip(
                         label: Text(perm.label),
                         tooltip: perm.description,
@@ -379,9 +380,9 @@ class _VpnPeerWizardBodyState extends ConsumerState<_VpnPeerWizardBody> {
                         onSelected: (value) {
                           setState(() {
                             if (value) {
-                              _agentAllow.add(perm.id);
+                              _agentAllow.add(perm.key);
                             } else {
-                              _agentAllow.remove(perm.id);
+                              _agentAllow.remove(perm.key);
                             }
                           });
                         },
@@ -396,7 +397,11 @@ class _VpnPeerWizardBodyState extends ConsumerState<_VpnPeerWizardBody> {
                   decoration: const InputDecoration(
                     labelText: 'Destinos de banco permitidos',
                     hintText: '10.0.0.10:5432, 10.0.0.11:3306',
+                    helperText:
+                        'IP:porta ou faixa:porta que a ponte pode alcançar (ADR 013).',
                   ),
+                  validator: (value) =>
+                      missingDatabaseTargetsError(_agentAllow, value ?? ''),
                 ),
               ],
             ],

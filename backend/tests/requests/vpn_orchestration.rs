@@ -955,3 +955,82 @@ async fn politica_do_agente_vpn_e_ajustavel_no_visualizador_e_preservada_na_rota
     .await;
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// O formulário "Adicionar dispositivo VPN" com o perfil Linux, SNMP
+/// desligado e o agente com todas as permissões: o JSON que o
+/// `CreateVpnPeerPayload.toJson()` do Flutter monta.
+#[tokio::test]
+#[serial]
+async fn o_formulario_linux_com_agente_e_todas_as_permissoes_cria_o_peer() {
+    let dir = isolar_volume_wireguard("agent-all-perms");
+    let _ = std::fs::remove_dir_all(&dir);
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+        request
+            .put("/api/vpn/server")
+            .json(&serde_json::json!({ "publicEndpoint": "vpn.exemplo.com.br" }))
+            .await;
+
+        // A tela parte da sugestão da central.
+        let sugerida = request.get("/api/agents/install-policy").await;
+        assert_eq!(sugerida.status_code(), 200, "{}", sugerida.text());
+        let sugerida = json_of(&sugerida.text());
+        let todas = sugerida["allow"].clone();
+        assert!(todas.as_array().unwrap().contains(&"database".into()));
+        let destinos = sugerida["databaseTargets"].as_str().unwrap().to_string();
+
+        let formulario = |allow: serde_json::Value, targets: &str| {
+            serde_json::json!({
+                "name": "srv-app",
+                "profile": "linux",
+                "ipAddress": "10.8.0.2",
+                "snmpEnabled": false,
+                "installAgent": true,
+                "agentPolicy": { "allow": allow, "databaseTargets": targets }
+            })
+        };
+
+        // Permissão que o agente não conhece: 422 dizendo qual, não um
+        // "Bad Request" mudo.
+        let desconhecida = request
+            .post("/api/vpn/peers")
+            .json(&formulario(serde_json::json!(["read", "metrics"]), ""))
+            .await;
+        assert_eq!(desconhecida.status_code(), 422, "{}", desconhecida.text());
+        let mensagem = json_of(&desconhecida.text())["message"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(
+            mensagem.starts_with("Dados inválidos na requisição") && mensagem.contains("metrics"),
+            "{mensagem}"
+        );
+
+        // Ponte de banco sem destino: a lista é obrigatória no agente.
+        let sem_destino = request
+            .post("/api/vpn/peers")
+            .json(&formulario(todas.clone(), ""))
+            .await;
+        assert_eq!(sem_destino.status_code(), 422, "{}", sem_destino.text());
+        assert_eq!(
+            json_of(&sem_destino.text())["message"],
+            netmonitor_core::agents::install_policy::MISSING_DATABASE_TARGETS
+        );
+
+        let criado = request
+            .post("/api/vpn/peers")
+            .json(&formulario(todas.clone(), &destinos))
+            .await;
+        assert_eq!(criado.status_code(), 201, "{}", criado.text());
+        let criado = json_of(&criado.text());
+        assert_eq!(criado["artifact"]["agentInstall"]["policy"]["allow"], todas);
+        assert!(criado["artifact"]["variants"][0]["content"]
+            .as_str()
+            .unwrap()
+            .contains(&format!("AGENT_DATABASE_TARGETS='{destinos}'")));
+    })
+    .await;
+    let _ = std::fs::remove_dir_all(&dir);
+}

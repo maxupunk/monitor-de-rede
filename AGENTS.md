@@ -47,11 +47,14 @@
      continua precisando valer nos dois dialetos: quebrar o Postgres quebra a
      instalação, e quebrar o SQLite quebra a suíte. Não reintroduza SQLite em
      configuração de dev ou de produção.
-   - **O sistema ainda não foi para produção.** Mudança de esquema **edita a
-     migration existente** e recria o banco de desenvolvimento: não crie
-     migration nova para alterar tabela, nem migration de compatibilidade,
-     initializer de upgrade ou *shim* de campo/rota/tópico antigo. Essa regra se
-     inverte na primeira instalação real, e isso será anunciado.
+   - **O sistema está em produção** (desde 2026-11-25). Migration já
+     publicada **nunca é editada**: toda mudança de esquema é uma migration
+     **nova** (`mAAAAMMDD_NNNNNN_*`, registrada no fim da lista), que leva o
+     banco instalado ao esquema novo sem perder dados — inclusive movendo o
+     dado que muda de lugar (ex.: um segredo que passa a ser cifrado). Ela
+     precisa valer num banco recém-criado e num já instalado, nos dois
+     dialetos. Campo, rota ou tópico removido some do código só depois que a
+     migration que o substitui estiver publicada.
    - **Transação que escreve abre com `shared::transaction::begin_write`**,
      nunca com `begin()`: o `BEGIN` deferido do SQLite falha na hora com
      `database is locked` quando outra conexão escreve entre a leitura e a

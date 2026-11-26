@@ -47,16 +47,36 @@ impl MikrotikProfileGenerator {
         if !context.snmp_enabled {
             return Vec::new();
         }
-        vec![
-            String::new(),
-            "# SNMP (community cadastrada no NetMonitor)".to_string(),
-            format!(
-                "/snmp/community/set [find default=yes] addresses={} name=\"{}\"",
-                escape_routeros(&context.vpn_cidr),
-                context.sanitized_community()
-            ),
-            "/snmp/set enabled=yes contact=\"NetMonitor\"".to_string(),
-        ]
+        let mut lines = vec![String::new()];
+        match context.snmp_v3_user() {
+            // O RouterOS guarda o usuário v3 como uma entrada de community; a
+            // remoção prévia pelo nome mantém o script repetível.
+            Some(user) => {
+                lines.push("# SNMPv3 (perfil SNMP cadastrado no NetMonitor)".to_string());
+                match user.routeros_command(&context.vpn_cidr) {
+                    Ok(command) => lines.extend([
+                        format!(
+                            "/snmp/community/remove [find name=\"{}\"]",
+                            escape_routeros(user.username)
+                        ),
+                        command,
+                    ]),
+                    Err(reason) => {
+                        lines.push(format!("# SNMPv3 nao configurado: {reason}."));
+                    }
+                }
+            }
+            None => lines.extend([
+                "# SNMP (community cadastrada no NetMonitor)".to_string(),
+                format!(
+                    "/snmp/community/set [find default=yes] addresses={} name=\"{}\"",
+                    escape_routeros(&context.vpn_cidr),
+                    context.sanitized_community()
+                ),
+            ]),
+        }
+        lines.push("/snmp/set enabled=yes contact=\"NetMonitor\"".to_string());
+        lines
     }
 }
 
@@ -236,6 +256,26 @@ mod tests {
         let content = MikrotikProfileGenerator.generate(&context).content;
         assert!(content.contains("/snmp/set enabled=yes"));
         assert!(content.contains("name=\"public\""));
+    }
+
+    #[test]
+    fn perfil_v3_cria_o_usuario_no_lugar_da_community() {
+        use super::super::contract::tests::contexto_v3;
+        let content = MikrotikProfileGenerator
+            .generate(&contexto_v3("sha", "aes128"))
+            .content;
+        assert!(content.contains("/snmp/community/remove [find name=\"netmonitor\"]"));
+        assert!(content.contains(
+            "security=private authentication-protocol=SHA1 authentication-password=\"senha-auth\" encryption-protocol=AES"
+        ));
+        assert!(!content.contains("[find default=yes]"));
+        assert!(content.contains("/snmp/set enabled=yes"));
+
+        let content = MikrotikProfileGenerator
+            .generate(&contexto_v3("sha512", "aes128"))
+            .content;
+        assert!(content.contains("# SNMPv3 nao configurado"));
+        assert!(!content.contains("/snmp/community/add"));
     }
 
     #[test]

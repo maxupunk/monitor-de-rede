@@ -16,7 +16,10 @@ use netmonitor_core::{
         AuditAction, AuditActor, AuditChanges, AuditEntryInput, AuditService, ResourceType,
         AUTHENTICATED_USER_HEADER,
     },
-    shared::errors::{AppError, AppResult},
+    shared::{
+        body::AppJson,
+        errors::{AppError, AppResult},
+    },
 };
 
 use crate::{
@@ -210,7 +213,7 @@ async fn next_ip(State(ctx): State<AppContext>) -> AppResult<Response> {
 async fn store(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
-    Json(input): Json<CreatePeerInput>,
+    AppJson(input): AppJson<CreatePeerInput>,
 ) -> AppResult<Response> {
     let central = Central::from_context(&ctx)?;
     let name = input
@@ -287,7 +290,7 @@ async fn update(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
     Path(id): Path<i64>,
-    Json(input): Json<RenamePeerInput>,
+    AppJson(input): AppJson<RenamePeerInput>,
 ) -> AppResult<Response> {
     let central = Central::from_context(&ctx)?;
     let name = input
@@ -434,7 +437,7 @@ async fn rotate(
 async fn agent_policy(
     State(ctx): State<AppContext>,
     Path(id): Path<i64>,
-    Json(input): Json<UpdatePeerAgentPolicyInput>,
+    AppJson(input): AppJson<UpdatePeerAgentPolicyInput>,
 ) -> AppResult<Response> {
     let (agent_install, variants) = peer_service::restamp_agent_policy(
         &ctx.db,

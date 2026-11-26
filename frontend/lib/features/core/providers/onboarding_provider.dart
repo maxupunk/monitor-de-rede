@@ -81,6 +81,7 @@ class OnboardingNotifier extends Notifier<OnboardingState> {
     required SystemPreferences preferences,
     String? defaultSnmpCommunity,
     String? lanAddressOverride,
+    String? vpnPublicEndpoint,
     required bool enableNetwork,
     String? siteName,
     String? networkName,
@@ -103,6 +104,16 @@ class OnboardingNotifier extends Notifier<OnboardingState> {
       await ref
           .read(snmpCredentialsProvider.notifier)
           .saveDefaultCommunity(community);
+    }
+
+    // O endpoint da etapa VPN vira o `publicEndpoint` do servidor WireGuard;
+    // o `PUT` cria o servidor com os padrões quando ele ainda não existe.
+    final endpoint = (vpnPublicEndpoint ?? '').trim();
+    if (endpoint.isNotEmpty) {
+      await api.put<dynamic>(
+        '/vpn/server',
+        data: <String, dynamic>{'publicEndpoint': endpoint},
+      );
     }
 
     final lan = (lanAddressOverride ?? '').trim();
