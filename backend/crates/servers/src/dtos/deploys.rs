@@ -249,7 +249,7 @@ pub enum DeployWhen {
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct DeployInput {
     /// Commit a publicar; vazio republica a versão no ar (com o `.env`
-    /// atual).
+    /// atual) ou, sem versão no ar, o commit mais novo da branch do alvo.
     #[serde(default)]
     #[ts(optional)]
     pub commit_sha: Option<String>,

@@ -455,6 +455,17 @@ class _DeployRunBodyState extends ConsumerState<_DeployRunBody> {
               ? '(Aguardando saída do agente...)'
               : lines.join('\n'),
           maxHeight: 280,
+          followTail: true,
+          actions: <Widget>[
+            AiLogAnalysisButton(
+              source:
+                  'Deploy #$_runId · ${run.applicationName} -> ${run.targetName}',
+              content: lines.join('\n'),
+              chatPrompt:
+                  'Sobre o deploy #$_runId: leia o console (get_deploy_log) e '
+                  'explique os erros e avisos e como resolvê-los.',
+            ),
+          ],
         ),
       ],
     );

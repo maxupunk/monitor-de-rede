@@ -3,6 +3,8 @@ pub mod traits;
 
 use std::sync::Arc;
 
+use futures::StreamExt;
+
 use crate::{
     context_window::sources::{ModelsDevLookup, OllamaLookup, OpenRouterLookup, MODELS_DEV_URL},
     dtos::TestConnectionInput,
@@ -11,7 +13,7 @@ use crate::{
 };
 use netmonitor_core::shared::errors::{AppError, AppResult};
 use openai_compatible::OpenAiCompatibleDriver;
-use traits::AiDriver;
+use traits::{AiChatOptions, AiDriver, AiMessage};
 
 const OPENROUTER_BASE_URL: &str = "https://openrouter.ai/api/v1";
 
@@ -131,6 +133,28 @@ pub async fn connect(settings: &AiSettings) -> AppResult<Box<dyn AiDriver>> {
         ..settings.clone()
     };
     create_driver(&located)
+}
+
+/// Uma resposta inteira, sem ferramentas: manda `messages`, junta os deltas
+/// de texto do stream e devolve o texto sem espaço nas pontas (vazio quando o
+/// provedor não escreveu nada — quem chama decide se isso é erro).
+///
+/// # Errors
+///
+/// Provedor indisponível ou erro no meio do stream.
+pub async fn complete(
+    driver: &dyn AiDriver,
+    messages: &[AiMessage],
+    options: AiChatOptions,
+) -> AppResult<String> {
+    let mut stream = driver.chat_stream(messages, &[], options).await?;
+    let mut text = String::new();
+    while let Some(chunk) = stream.next().await {
+        if let Some(delta) = chunk?.text_delta {
+            text.push_str(&delta);
+        }
+    }
+    Ok(text.trim().to_string())
 }
 
 pub fn create_driver(settings: &AiSettings) -> AppResult<Box<dyn AiDriver>> {

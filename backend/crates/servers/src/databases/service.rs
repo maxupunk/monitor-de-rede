@@ -9,7 +9,7 @@ use sea_orm::{
     QueryOrder, Set,
 };
 
-use super::{reach::reach, DatabaseEngine, DatabaseTarget, Probe, SslMode};
+use super::{follow::ContainerLink, reach::reach, DatabaseEngine, DatabaseTarget, Probe, SslMode};
 use netmonitor_core::{
     models::{database_connections, probes, storage_destinations},
     shared::{
@@ -38,6 +38,8 @@ pub struct ConnectionInput {
     pub backup_enabled: bool,
     pub backup_interval_hours: i32,
     pub backup_retention: i32,
+    /// O contêiner que o endereço acompanha; `None` fixa o endereço digitado.
+    pub container: Option<ContainerLink>,
 }
 
 /// Uma conexão com a senha já em claro.
@@ -139,7 +141,7 @@ pub async fn create<C: ConnectionTrait>(
 ) -> AppResult<database_connections::Model> {
     let input = normalize(db, input, None).await?;
     let password = input.password.clone().unwrap_or_default();
-    let row = database_connections::ActiveModel {
+    let mut row = database_connections::ActiveModel {
         name: Set(input.name),
         engine: Set(input.engine.as_str().to_string()),
         host: Set(input.host),
@@ -154,10 +156,9 @@ pub async fn create<C: ConnectionTrait>(
         backup_interval_hours: Set(input.backup_interval_hours),
         backup_retention: Set(input.backup_retention),
         ..Default::default()
-    }
-    .insert(db)
-    .await?;
-    Ok(row)
+    };
+    ContainerLink::apply(input.container.as_ref(), &mut row);
+    Ok(row.insert(db).await?)
 }
 
 /// Edita uma conexão. Senha ausente mantém a gravada.
@@ -188,6 +189,7 @@ pub async fn update<C: ConnectionTrait>(
     row.backup_enabled = Set(input.backup_enabled);
     row.backup_interval_hours = Set(input.backup_interval_hours);
     row.backup_retention = Set(input.backup_retention);
+    ContainerLink::apply(input.container.as_ref(), &mut row);
     Ok(row.update(db).await?)
 }
 
@@ -281,6 +283,7 @@ async fn normalize<C: ConnectionTrait>(
         return Err(AppError::validation("Informe o usuário do banco"));
     }
     input.databases = normalize_databases(input.databases)?;
+    input.container = input.container.map(ContainerLink::normalized).transpose()?;
     validate_policy(input.backup_interval_hours, input.backup_retention)?;
     if input.backup_enabled && input.storage_destination_id.is_none() {
         return Err(AppError::validation(

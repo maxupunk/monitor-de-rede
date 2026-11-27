@@ -30,9 +30,7 @@ use chrono::{DateTime, Local, Utc};
 use loco_rs::app::AppContext;
 use tokio::sync::Notify;
 
-use agent_protocol::{
-    docker::stacks::validate_commit, docker::stacks::validate_image_tag, policy::Permission,
-};
+use agent_protocol::{docker::stacks::validate_image_tag, policy::Permission};
 use netmonitor_core::{
     agents::hub::AgentHub,
     models::{deploy_applications, deploy_runs, deploy_targets},
@@ -44,7 +42,7 @@ use netmonitor_core::{
 
 use super::{
     applications::{self, rollout_of},
-    env_versions, events, executor,
+    builds, env_versions, events, executor, next_revision,
     notify::{self, Moment},
     runs::{self, Change, NewRun},
     window::Window,
@@ -228,11 +226,14 @@ pub async fn request_from_hook(
     Ok(created)
 }
 
-/// "Publicar": uma versão escolhida (ou a do ar de novo, com o `.env` atual).
+/// "Publicar": uma versão escolhida, a do ar de novo (com o `.env` atual) ou,
+/// num alvo nunca publicado, o commit mais novo da branch
+/// ([`next_revision::resolve`]).
 ///
 /// # Errors
 ///
-/// `404`; `Validation` sem versão no ar e sem commit, ou commit/tag inválidos.
+/// `404`; `Validation` com commit/tag inválidos ou quando o commit vem vazio
+/// e não há versão no ar nem como descobrir o mais novo.
 pub async fn request_manual(
     ctx: &AppContext,
     target_id: i64,
@@ -248,7 +249,7 @@ pub async fn request_manual(
 ///
 /// # Errors
 ///
-/// `404`; `Validation` sem versão no ar e sem commit, ou commit/tag inválidos.
+/// Como [`request_manual`].
 pub async fn request_manual_with_approval_policy(
     ctx: &AppContext,
     target_id: i64,
@@ -258,54 +259,16 @@ pub async fn request_manual_with_approval_policy(
 ) -> AppResult<deploy_runs::Model> {
     let target = applications::find_target(&ctx.db, target_id).await?;
     let application = applications::find(&ctx.db, target.application_id).await?;
-    let commit = input
-        .commit_sha
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    let revision = match commit {
-        Some(commit) => {
-            let commit = commit.to_lowercase();
-            if commit.len() != 40 {
-                return Err(AppError::validation(
-                    "Informe o SHA completo do commit (40 caracteres)",
-                ));
-            }
-            validate_commit(&commit).map_err(|error| AppError::validation(error.to_string()))?;
-            let known = runs::recent(&ctx.db, Some(target_id), 200)
-                .await?
-                .into_iter()
-                .find(|run| run.commit_sha == commit);
-            Revision {
-                image_tag: input
-                    .image_tag
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .map(ToString::to_string)
-                    .or_else(|| known.as_ref().map(|run| run.image_tag.clone()))
-                    .unwrap_or_else(|| commit.clone()),
-                commit_message: known.as_ref().and_then(|run| run.commit_message.clone()),
-                build_id: known.as_ref().and_then(|run| run.build_id),
-                reference: known.and_then(|run| run.reference),
-                commit_sha: commit,
-            }
-        }
-        None => {
-            let live = runs::live(&ctx.db, target_id).await?.ok_or_else(|| {
-                AppError::validation(
-                    "Este alvo ainda não tem versão publicada: informe o commit a publicar",
-                )
-            })?;
-            Revision {
-                commit_sha: live.commit_sha,
-                commit_message: live.commit_message,
-                reference: live.reference,
-                image_tag: live.image_tag,
-                build_id: live.build_id,
-            }
-        }
-    };
+    let db = ctx.db.clone();
+    let owner = application.clone();
+    let revision = next_revision::resolve(
+        &ctx.db,
+        &application,
+        &target,
+        input,
+        move |branch| async move { builds::head_of(&db, &owner, &branch).await },
+    )
+    .await?;
     validate_image_tag(&revision.image_tag)
         .map_err(|error| AppError::validation(error.to_string()))?;
     create(

@@ -704,6 +704,8 @@ void main() {
           findsOneWidget,
         );
 
+        await tester.ensureVisible(find.text('Backup agora'));
+        await tester.pumpAndSettle();
         await tester.tap(find.text('Backup agora'));
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 100));

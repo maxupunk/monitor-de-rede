@@ -5,6 +5,7 @@ pub use netmonitor_core::migrations::{MigrationTrait, MigratorTrait};
 
 mod m20261007_000001_database_connections;
 mod m20261108_000001_deploys;
+mod m20261126_000001_database_connection_container;
 
 /// As migrations da área, na ordem de criação.
 #[must_use]
@@ -12,6 +13,7 @@ pub fn migrations() -> Vec<Box<dyn MigrationTrait>> {
     vec![
         Box::new(m20261007_000001_database_connections::Migration),
         Box::new(m20261108_000001_deploys::Migration),
+        Box::new(m20261126_000001_database_connection_container::Migration),
     ]
 }
 

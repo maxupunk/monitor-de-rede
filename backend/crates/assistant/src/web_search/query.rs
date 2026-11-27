@@ -10,7 +10,10 @@ use std::{collections::BTreeSet, net::IpAddr, sync::LazyLock};
 use regex::{Captures, Regex};
 use serde::Serialize;
 
-use crate::harness::grounding::LOCAL_SUFFIXES;
+use crate::{
+    harness::grounding::LOCAL_SUFFIXES,
+    redaction::{AUTH_HEADER, PEM_BLOCK, SECRET_PAIR, URL_USERINFO},
+};
 use netmonitor_core::shared::{
     cidr::is_internal_address,
     errors::{AppError, AppResult},
@@ -56,22 +59,6 @@ impl Serialize for Redaction {
     }
 }
 
-static PEM_BLOCK: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?s)-----BEGIN [A-Z0-9 ]+-----.*?(?:-----END [A-Z0-9 ]+-----|$)")
-        .expect("regex de bloco PEM")
-});
-static URL_USERINFO: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b([a-z][a-z0-9+.-]*://)[^\s/:@]+(?::[^\s/@]*)?@").expect("regex de userinfo")
-});
-static SECRET_PAIR: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r#"(?i)\b(?:password|passwd|pwd|pass|senha|secret|segredo|token|api[_-]?key|apikey|community|comunidade|psk|(?:pre[_-]?shared|private)[_-]?key|key|auth)\s*[:=]\s*(?:"[^"]*"|'[^']*'|\S+)"#,
-    )
-    .expect("regex de par com segredo")
-});
-static AUTH_HEADER: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}").expect("regex de autorização")
-});
 static EMAIL: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\b[a-z0-9._%+-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\b")
         .expect("regex de e-mail")

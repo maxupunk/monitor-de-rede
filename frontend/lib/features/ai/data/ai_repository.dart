@@ -370,6 +370,20 @@ class AiRepository {
 
   // --- Proactive Incident Summary ---
 
+  /// A IA lê o console e devolve erros, avisos e descontinuações.
+  Future<AiLogAnalysisReport> analyzeLog({
+    required String source,
+    required String content,
+  }) async {
+    final json = await _api.post<Map<String, dynamic>>(
+      '/ai/log-analysis',
+      data: <String, dynamic>{'source': source, 'content': content},
+      // Console grande num modelo local passa fácil de um minuto.
+      timeout: const Duration(seconds: 120),
+    );
+    return AiLogAnalysisReport.fromJson(json);
+  }
+
   Future<AiIncidentSummary?> generateAlertSummary(int alertId) async {
     final json = await _api.post<Map<String, dynamic>>(
       '/ai/alerts/$alertId/summary',

@@ -417,7 +417,7 @@ pub fn summarize(
 }
 
 /// Cruza um contêiner descoberto com as conexões já cadastradas em `/backup`:
-/// mesmo SGBD, mesma rota (`via_probe_id`) e endereço/porta candidato (nome na
+/// pelo vínculo da conexão com o contêiner ou, sem vínculo, mesmo SGBD, mesma rota (`via_probe_id`) e endereço/porta candidato (nome na
 /// rede Docker, alias, IP do contêiner, porta publicada ou loopback).
 #[must_use]
 pub fn find_matching_connection<'a>(
@@ -426,6 +426,10 @@ pub fn find_matching_connection<'a>(
     connections: &'a [database_connections::Model],
 ) -> Option<&'a database_connections::Model> {
     connections.iter().find(|conn| {
+        // Vinculada ao contêiner: casa mesmo que o IP salvo já seja outro.
+        if super::follow::ContainerLink::of(conn).is_some_and(|link| link.matches(container)) {
+            return true;
+        }
         if !conn.engine.eq_ignore_ascii_case(container.engine.as_str()) {
             return false;
         }
@@ -683,31 +687,50 @@ fn ports_from_inspect(raw: &Value) -> Vec<DockerContainerPort> {
     out
 }
 
-/// Lê o contêiner de novo e testa os endereços dele pela rota que a conexão
-/// vai usar ([`attempt_all`]).
-///
-/// # Errors
-///
-/// Host inválido ou desconectado, contêiner que não existe mais ou que não é
-/// de banco.
-pub async fn resolve(
-    ctx: &AppContext,
-    host_key: &str,
-    container_id: &str,
-) -> AppResult<DatabaseContainerResolution> {
-    let key: HostKey = host_key.parse()?;
-    let host = docker_hosts(ctx)
+/// Um contêiner de banco lido agora no host dele.
+pub struct Inspected {
+    pub container: DatabaseContainer,
+    /// Do mais recomendado ao último recurso.
+    pub addresses: Vec<CandidateAddress>,
+    environment: Vec<String>,
+}
+
+/// O host conectado, pela chave.
+async fn connected_host(ctx: &AppContext, key: &HostKey) -> AppResult<DockerHostView> {
+    docker_hosts(ctx)
         .await?
         .into_iter()
         .find(|host| host.key == key.to_string())
         .ok_or_else(|| {
             AppError::service_unavailable("O agente deste host não está conectado à central")
-        })?;
+        })
+}
+
+/// Inspeciona um contêiner (pelo id **ou pelo nome** — a Engine aceita os
+/// dois) e monta os endereços dele. Não testa nenhum.
+///
+/// # Errors
+///
+/// Host desconectado, contêiner que não existe (`404`) ou que não é de banco.
+pub async fn inspect(
+    ctx: &AppContext,
+    host_key: &str,
+    container_ref: &str,
+) -> AppResult<Inspected> {
+    let key: HostKey = host_key.parse()?;
+    let host = connected_host(ctx, &key).await?;
     let docker = hosts::resolve(ctx, key)?;
+    inspect_on(&host, docker.engine.as_ref(), container_ref).await
+}
+
+async fn inspect_on(
+    host: &DockerHostView,
+    engine: &dyn crate::docker::source::DockerEngine,
+    container_ref: &str,
+) -> AppResult<Inspected> {
     // Uma única chamada `inspect` traz portas, redes, labels e variáveis.
-    let raw = docker
-        .engine
-        .inspect_container_raw(container_id)
+    let raw = engine
+        .inspect_container_raw(container_ref)
         .await
         .map_err(|error| match error {
             crate::docker::DockerError::NotFound => {
@@ -741,17 +764,94 @@ pub async fn resolve(
         ports: container_ports,
         created: 0,
     };
-    let container = summarize(&host, &summary, engine);
+    let container = summarize(host, &summary, engine);
     let addresses = candidate_addresses(&detail, &summary.ports, container.port, container.local);
-    let (username, database) = credentials_hint(engine, &detail.config.environment);
+    Ok(Inspected {
+        container,
+        addresses,
+        environment: detail.config.environment,
+    })
+}
 
+/// Reencontra o contêiner de um vínculo no host dele: pelo nome e, quando o
+/// nome não existe mais (o compose recriou com outro), pelo projeto e serviço
+/// do compose. É o que deixa o backup acompanhar um banco reiniciado ou
+/// recriado com outro IP.
+///
+/// # Errors
+///
+/// Host desconectado; nenhum contêiner com aquele nome nem com aquele
+/// projeto/serviço (`404`).
+pub async fn locate(ctx: &AppContext, link: &super::follow::ContainerLink) -> AppResult<Inspected> {
+    let key: HostKey = link.host_key.parse()?;
+    let host = connected_host(ctx, &key).await?;
+    let docker = hosts::resolve(ctx, key)?;
+    let engine = docker.engine.as_ref();
+    let by_name = inspect_on(&host, engine, &link.name).await;
+    let Err(error) = by_name else {
+        return by_name;
+    };
+    let Some(service) = link.service.as_deref() else {
+        return Err(error);
+    };
+    let summaries = list_containers_with_networks(engine)
+        .await
+        .map_err(|error| AppError::business_rule(error.to_string()))?;
+    let found = summaries
+        .iter()
+        .map(|(summary, _, _)| summary)
+        .filter(|summary| {
+            summary
+                .labels
+                .get("com.docker.compose.service")
+                .map(String::as_str)
+                == Some(service)
+                && summary.project_name.as_deref() == link.project.as_deref()
+        })
+        // Rodando primeiro: numa troca, o novo sobe antes do velho sumir.
+        .min_by_key(|summary| summary.state != "running");
+    match found {
+        Some(summary) => inspect_on(&host, engine, &summary.id).await,
+        None => Err(error),
+    }
+}
+
+/// Testa os endereços pela rota da conexão e devolve o primeiro, na ordem
+/// recomendada, que respondeu — com as tentativas, para a tela explicar.
+pub async fn reachable(
+    ctx: &AppContext,
+    via_probe_id: Option<i64>,
+    addresses: &[CandidateAddress],
+) -> (Option<CandidateAddress>, Vec<AddressAttempt>) {
     let hub = AgentHub::from_context(ctx).ok();
-    let attempts = attempt_all(hub.as_ref(), container.via_probe_id, &addresses).await;
+    let attempts = attempt_all(hub.as_ref(), via_probe_id, addresses).await;
+    (choose(&attempts), attempts)
+}
+
+/// Lê o contêiner de novo e testa os endereços dele pela rota que a conexão
+/// vai usar ([`attempt_all`]).
+///
+/// # Errors
+///
+/// Host inválido ou desconectado, contêiner que não existe mais ou que não é
+/// de banco.
+pub async fn resolve(
+    ctx: &AppContext,
+    host_key: &str,
+    container_id: &str,
+) -> AppResult<DatabaseContainerResolution> {
+    let Inspected {
+        container,
+        addresses,
+        environment,
+    } = inspect(ctx, host_key, container_id).await?;
+    let (username, database) = credentials_hint(container.engine, &environment);
+    let (chosen, attempts) = reachable(ctx, container.via_probe_id, &addresses).await;
     Ok(DatabaseContainerResolution {
         container,
         username,
         database,
-        chosen: choose(&attempts),
+        chosen,
         addresses,
         attempts,
     })
@@ -1194,6 +1294,10 @@ mod tests {
                 last_backup_error: None,
                 created_at: now,
                 updated_at: now,
+                container_host_key: None,
+                container_name: None,
+                container_project: None,
+                container_service: None,
             };
 
         // Pelo IP do contêiner naquele agente: casa mesmo com outro nome de conexão.

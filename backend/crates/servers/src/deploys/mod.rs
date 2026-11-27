@@ -30,6 +30,7 @@
 //! | [`notify`] | os avisos (canais e Web Push) |
 //! | [`workflow`] | o `.github/workflows/deploy.yml` sugerido — puro |
 //! | [`github`] | os commits entre duas versões, para a aprovação |
+//! | [`next_revision`] | a versão que o "Publicar" leva (commit vazio incluído) |
 //! | [`readiness`] | o que falta para o primeiro deploy |
 //! | [`ai_tools`] | as ferramentas da IA: consultar e agir (sempre confirmado) |
 //! | [`catalog`] | a página inteira numa consulta (hidratação das views) |
@@ -52,6 +53,7 @@ pub mod executor;
 pub mod github;
 pub mod guide;
 pub mod images;
+pub mod next_revision;
 pub mod notify;
 pub mod oidc;
 pub mod orchestrator;

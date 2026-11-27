@@ -31,10 +31,12 @@
 //! | [`jobs`] | o andamento ao vivo, pelo SSE |
 //! | [`schedule`] | o ciclo que dispara os backups automáticos |
 //! | [`discovery`] | os bancos em contêineres dos agentes e por qual endereço chegar |
+//! | [`follow`] | o endereço que acompanha o contêiner quando ele reinicia com outro IP |
 
 pub mod backups;
 pub mod discovery;
 pub mod dump;
+pub mod follow;
 pub mod jobs;
 pub mod mysql;
 pub mod notify;
@@ -281,8 +283,11 @@ pub enum DatabaseError {
     /// O servidor respondeu e recusou (senha, banco inexistente).
     #[error("Não foi possível conectar: {0}")]
     Connection(String),
-    /// A rede não chegou ao servidor (recusa TCP, tempo esgotado).
-    #[error("Não foi possível conectar: {0}")]
+    /// A rede não chegou ao servidor (recusa TCP, tempo esgotado). A frase
+    /// é outra que a de [`Self::Connection`] de propósito: a tela sugere
+    /// reencontrar o contêiner só quando o endereço não respondeu, nunca para
+    /// senha errada.
+    #[error("Servidor inalcançável — não foi possível conectar: {0}")]
     Unreachable(String),
     /// A conexão já aberta caiu no meio do trabalho.
     #[error("A conexão com o banco caiu: {0}")]

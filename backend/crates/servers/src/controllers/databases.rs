@@ -14,7 +14,7 @@ use loco_rs::prelude::*;
 
 use agent_protocol::policy::Permission;
 use netmonitor_core::{
-    agents::{identity, routes::route_options},
+    agents::{identity, routes::route_options, HostKey},
     audit::{AuditAction, ResourceType},
     models::{database_connections, probes, storage_destinations},
     shared::errors::AppResult,
@@ -24,11 +24,13 @@ use netmonitor_core::{
 use crate::{
     databases::{
         backups::{self, Trigger},
-        discovery, service, DatabaseEngine,
+        discovery,
+        follow::{self, Followed},
+        service, DatabaseEngine,
     },
     dtos::databases::{
-        DatabaseConnectionInput, DatabaseContainerResolveInput, DatabaseProbeInput,
-        DatabaseRestoreInput,
+        DatabaseConnectionInput, DatabaseContainerLinkInput, DatabaseContainerResolveInput,
+        DatabaseProbeInput, DatabaseRestoreInput,
     },
     views::databases::{DatabaseBackupResponse, DatabaseConnectionResponse, DatabaseProbeResponse},
 };
@@ -67,13 +69,31 @@ async fn storage_names(ctx: &AppContext) -> AppResult<Names> {
     })
 }
 
+/// O agente (host Docker) do contêiner que a conexão acompanha.
+fn container_host_id(row: &database_connections::Model) -> Option<i64> {
+    row.container_host_key
+        .as_deref()
+        .and_then(|key| key.parse::<HostKey>().ok())
+        .map(|key| key.probe_id())
+}
+
+async fn agent_name(ctx: &AppContext, id: Option<i64>) -> Result<Option<String>, sea_orm::DbErr> {
+    let Some(id) = id else {
+        return Ok(None);
+    };
+    Ok(probes::Entity::find_by_id(id)
+        .one(&ctx.db)
+        .await?
+        .map(|m| m.name))
+}
+
 /// Resolve apenas os nomes de armazenamento e agente referenciados por uma
 /// única conexão, evitando carregar tabelas inteiras.
 async fn respond_one(
     ctx: &AppContext,
     row: &database_connections::Model,
 ) -> AppResult<DatabaseConnectionResponse> {
-    let (storage_name, agent_name) = tokio::try_join!(
+    let (storage_name, agent_name, container_host_name) = tokio::try_join!(
         async {
             if let Some(id) = row.storage_destination_id {
                 Ok::<_, sea_orm::DbErr>(
@@ -86,23 +106,14 @@ async fn respond_one(
                 Ok(None)
             }
         },
-        async {
-            if let Some(id) = row.via_probe_id {
-                Ok::<_, sea_orm::DbErr>(
-                    probes::Entity::find_by_id(id)
-                        .one(&ctx.db)
-                        .await?
-                        .map(|m| m.name),
-                )
-            } else {
-                Ok(None)
-            }
-        }
+        agent_name(ctx, row.via_probe_id),
+        agent_name(ctx, container_host_id(row)),
     )?;
     Ok(DatabaseConnectionResponse::new(
         row,
         storage_name,
         agent_name,
+        container_host_name,
     ))
 }
 
@@ -113,6 +124,7 @@ fn respond(row: &database_connections::Model, names: &Names) -> DatabaseConnecti
         row,
         name(&names.storages, row.storage_destination_id),
         name(&names.agents, row.via_probe_id),
+        name(&names.agents, container_host_id(row)),
     )
 }
 
@@ -237,6 +249,79 @@ async fn resolve_container(
     )?)
 }
 
+/// "Vincular a um contêiner": o endereço passa a acompanhar o contêiner.
+async fn link_container(
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+    Json(input): Json<DatabaseContainerLinkInput>,
+) -> AppResult<Response> {
+    let container_id = crate::docker::validate_identifier(&input.container_id, "Container")?;
+    let row = follow::link(&ctx, id, &input.host_key, &container_id).await?;
+    service::publish_updated(&ctx).await;
+    audit(
+        &ctx,
+        &headers,
+        AuditAction::Update,
+        (row.id, &row.name),
+        format!(
+            "Conexão de banco '{}' vinculada ao contêiner '{}' ({}:{})",
+            row.name,
+            row.container_name.as_deref().unwrap_or("?"),
+            row.host,
+            row.port
+        ),
+    )
+    .await;
+    Ok(format::json(respond_one(&ctx, &row).await?)?)
+}
+
+/// Desfaz o vínculo: o endereço fica fixo.
+async fn unlink_container(
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> AppResult<Response> {
+    let row = follow::unlink(&ctx.db, id).await?;
+    service::publish_updated(&ctx).await;
+    audit(
+        &ctx,
+        &headers,
+        AuditAction::Update,
+        (row.id, &row.name),
+        format!(
+            "Conexão de banco '{}' desvinculada do contêiner; endereço fixo {}:{}",
+            row.name, row.host, row.port
+        ),
+    )
+    .await;
+    Ok(format::json(respond_one(&ctx, &row).await?)?)
+}
+
+/// "Reencontrar endereço agora".
+async fn follow_container(
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> AppResult<Response> {
+    let (row, outcome) = follow::relocate(&ctx, id).await?;
+    if let Followed::Moved { from, to } = &outcome {
+        service::publish_updated(&ctx).await;
+        audit(
+            &ctx,
+            &headers,
+            AuditAction::Update,
+            (row.id, &row.name),
+            format!(
+                "Endereço da conexão de banco '{}' atualizado: {from} → {to}",
+                row.name
+            ),
+        )
+        .await;
+    }
+    Ok(format::json(respond_one(&ctx, &row).await?)?)
+}
+
 async fn history(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
     service::find(&ctx.db, id).await?;
     let rows = backups::history(&ctx.db, id).await?;
@@ -310,5 +395,10 @@ pub fn routes() -> Routes {
         .add("/containers/resolve", post(resolve_container))
         .add("/{id}", get(show).put(update).delete(destroy))
         .add("/{id}/backups", get(history).post(run_backup))
+        .add(
+            "/{id}/container",
+            put(link_container).delete(unlink_container),
+        )
+        .add("/{id}/container/follow", post(follow_container))
         .add("/backups/{backup_id}/restore", post(restore))
 }

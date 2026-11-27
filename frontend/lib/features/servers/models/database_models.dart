@@ -3,6 +3,54 @@ import 'package:netmonitor_app/core/utils/json_parsers.dart';
 
 export 'system_database_models.dart';
 
+/// De qual contêiner a conexão veio: o endereço acompanha o contêiner quando
+/// ele reinicia ou é recriado com outro IP (`databases::follow` no backend).
+@immutable
+class DatabaseContainerLink {
+  const DatabaseContainerLink({
+    required this.hostKey,
+    required this.name,
+    this.project,
+    this.service,
+  });
+
+  /// `agent-<id>`.
+  final String hostKey;
+  final String name;
+  final String? project;
+  final String? service;
+
+  factory DatabaseContainerLink.fromContainer(DatabaseContainer container) {
+    return DatabaseContainerLink(
+      hostKey: container.hostKey,
+      name: container.containerName,
+      project: container.project,
+      service: container.service,
+    );
+  }
+
+  static DatabaseContainerLink? tryFromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final json = asJsonMap(raw);
+    final hostKey = json['hostKey'] as String?;
+    final name = json['name'] as String?;
+    if (hostKey == null || name == null) return null;
+    return DatabaseContainerLink(
+      hostKey: hostKey,
+      name: name,
+      project: json['project'] as String?,
+      service: json['service'] as String?,
+    );
+  }
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'hostKey': hostKey,
+    'name': name,
+    'project': project,
+    'service': service,
+  };
+}
+
 /// Conexão de banco de dados gerenciada para backup/restauração (ADR 013).
 @immutable
 class DatabaseConnectionResponse {
@@ -27,6 +75,8 @@ class DatabaseConnectionResponse {
     this.lastBackupStatus,
     this.lastBackupError,
     this.nextBackupAt,
+    this.container,
+    this.containerHostName,
     this.createdAt,
     this.updatedAt,
   });
@@ -51,6 +101,10 @@ class DatabaseConnectionResponse {
   final String? lastBackupStatus;
   final String? lastBackupError;
   final String? nextBackupAt;
+
+  /// O contêiner que o endereço acompanha; nulo é endereço fixo.
+  final DatabaseContainerLink? container;
+  final String? containerHostName;
   final String? createdAt;
   final String? updatedAt;
 
@@ -85,6 +139,8 @@ class DatabaseConnectionResponse {
       lastBackupStatus: json['lastBackupStatus'] as String?,
       lastBackupError: json['lastBackupError'] as String?,
       nextBackupAt: json['nextBackupAt'] as String?,
+      container: DatabaseContainerLink.tryFromJson(json['container']),
+      containerHostName: json['containerHostName'] as String?,
       createdAt: json['createdAt'] as String?,
       updatedAt: json['updatedAt'] as String?,
     );
@@ -107,6 +163,7 @@ class DatabaseConnectionInput {
     required this.backupEnabled,
     required this.backupIntervalHours,
     required this.backupRetention,
+    this.container,
   });
 
   final String name;
@@ -123,6 +180,9 @@ class DatabaseConnectionInput {
   final int backupIntervalHours;
   final int backupRetention;
 
+  /// O contêiner que o endereço acompanha; nulo fixa o endereço digitado.
+  final DatabaseContainerLink? container;
+
   Map<String, dynamic> toJson() => <String, dynamic>{
     'name': name,
     'engine': engine,
@@ -137,6 +197,7 @@ class DatabaseConnectionInput {
     'backupEnabled': backupEnabled,
     'backupIntervalHours': backupIntervalHours,
     'backupRetention': backupRetention,
+    'container': container?.toJson(),
   };
 }
 
@@ -176,7 +237,10 @@ class DatabaseContainer {
     required this.engine,
     required this.running,
     this.project,
+    this.service,
+    this.port,
     this.existingConnectionId,
+    this.existingConnectionName,
   });
 
   final String hostKey;
@@ -188,7 +252,14 @@ class DatabaseContainer {
   final String engine;
   final bool running;
   final String? project;
+
+  /// Serviço do compose.
+  final String? service;
+  final int? port;
+
+  /// Conexão de `/backup` que já acompanha este contêiner.
   final int? existingConnectionId;
+  final String? existingConnectionName;
 
   factory DatabaseContainer.fromJson(Map<String, dynamic> json) {
     return DatabaseContainer(
@@ -201,7 +272,12 @@ class DatabaseContainer {
       engine: (json['engine'] as String?) ?? 'postgres',
       running: parseBool(json['running']) || json['state'] == 'running',
       project: json['project'] as String? ?? json['projectName'] as String?,
-      existingConnectionId: parseIntOrNull(json['existingConnectionId']),
+      service: json['service'] as String?,
+      port: parseIntOrNull(json['port']),
+      existingConnectionId: parseIntOrNull(
+        json['protectedConnectionId'] ?? json['existingConnectionId'],
+      ),
+      existingConnectionName: json['protectedConnectionName'] as String?,
     );
   }
 }

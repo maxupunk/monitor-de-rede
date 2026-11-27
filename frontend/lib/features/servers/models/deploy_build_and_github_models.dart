@@ -288,6 +288,37 @@ class DeployCommitView {
   }
 }
 
+/// Os commits recentes da branch de um alvo (`GET /deploys/targets/{id}/github/commits`).
+@immutable
+class DeployBranchCommitsView {
+  const DeployBranchCommitsView({
+    this.branch,
+    required this.commits,
+    this.unavailableReason,
+  });
+
+  /// A branch do alvo; `null` quando ele acompanha tags (`v*`).
+  final String? branch;
+
+  /// O mais novo primeiro.
+  final List<DeployCommitView> commits;
+
+  /// Por que a lista não veio — o mesmo texto que o "Publicar" daria.
+  final String? unavailableReason;
+
+  DeployCommitView? get latest => commits.isEmpty ? null : commits.first;
+
+  factory DeployBranchCommitsView.fromJson(Map<String, dynamic> json) {
+    return DeployBranchCommitsView(
+      branch: json['branch'] as String?,
+      commits: List<DeployCommitView>.unmodifiable(
+        asJsonList(json['commits'], DeployCommitView.fromJson),
+      ),
+      unavailableReason: json['unavailableReason'] as String?,
+    );
+  }
+}
+
 @immutable
 class DeployChangesView {
   const DeployChangesView({

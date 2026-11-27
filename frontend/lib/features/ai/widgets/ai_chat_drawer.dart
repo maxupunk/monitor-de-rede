@@ -5,11 +5,13 @@ import 'package:netmonitor_app/areas/area_contribution.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/ai/providers/ai_providers.dart';
 import 'package:netmonitor_app/features/ai/widgets/ai_chat_thread.dart';
+import 'package:netmonitor_app/features/ai/widgets/ai_log_analysis_sheet.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
 
 /// Overlay invisível montado no shell que registra o `AiChatDrawer` no
-/// `aiDrawerBuilderProvider` e inicializa a lista de Aplicativos de plugin no menu.
+/// `aiDrawerBuilderProvider` (e a análise de console no
+/// `aiLogAnalysisLauncherProvider`) e inicializa a lista de Aplicativos de plugin no menu.
 class AiAndAppsShellBootstrapOverlay extends ConsumerStatefulWidget {
   const AiAndAppsShellBootstrapOverlay({super.key});
 
@@ -27,6 +29,8 @@ class _AiAndAppsShellBootstrapOverlayState
       if (!mounted) return;
       ref.read(aiDrawerBuilderProvider.notifier).state = (_) =>
           const AiChatDrawer();
+      ref.read(aiLogAnalysisLauncherProvider.notifier).state =
+          showAiLogAnalysisSheet;
       ref.read(aiSettingsProvider.notifier).load();
     });
   }

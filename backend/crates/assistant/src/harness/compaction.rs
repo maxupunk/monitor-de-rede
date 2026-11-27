@@ -21,10 +21,11 @@
 //! a janela. Aí não há o que resumir: os resultados de ferramenta das rodadas
 //! anteriores, que a IA já leu, dão lugar a um aviso ([`prune_tool_results`]).
 
-use futures::StreamExt;
-
 use crate::{
-    drivers::traits::{AiChatOptions, AiDriver, AiMessage},
+    drivers::{
+        self,
+        traits::{AiChatOptions, AiDriver, AiMessage},
+    },
     dtos::ChatMessageInput,
 };
 use netmonitor_core::shared::errors::{AppError, AppResult};
@@ -357,22 +358,14 @@ pub async fn summarize(
             tool_call_id: None,
         },
     ];
-    let mut stream = driver
-        .chat_stream(
-            &messages,
-            &[],
-            AiChatOptions {
-                max_tokens: Some(SUMMARY_MAX_TOKENS),
-            },
-        )
-        .await?;
-    let mut summary = String::new();
-    while let Some(chunk) = stream.next().await {
-        if let Some(delta) = chunk?.text_delta {
-            summary.push_str(&delta);
-        }
-    }
-    let summary = summary.trim().to_string();
+    let summary = drivers::complete(
+        driver,
+        &messages,
+        AiChatOptions {
+            max_tokens: Some(SUMMARY_MAX_TOKENS),
+        },
+    )
+    .await?;
     if summary.is_empty() {
         return Err(AppError::service_unavailable(
             "O provedor não devolveu o resumo da conversa",

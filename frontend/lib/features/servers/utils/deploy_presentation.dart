@@ -236,6 +236,47 @@ Map<String, String> computeBuildStageStates(String? stage, String status) {
 String refShortName(String? reference) =>
     (reference ?? '').replaceFirst(RegExp(r'^refs/(heads|tags)/'), '');
 
+/// O que o "Publicar" faz com o commit vazio, dito a quem opera.
+///
+/// `allowed` é `false` quando o vazio seria recusado (alvo de tag sem versão
+/// no ar, ou o último commit da branch não pôde ser descoberto): aí a tela
+/// pede o commit em vez de deixar o operador tropeçar no erro.
+({String hint, bool allowed}) publishEmptyCommitPlan({
+  required String reference,
+  String? liveShortSha,
+  String? latestShortSha,
+  bool latestUnavailable = false,
+}) {
+  final branch = refShortName(reference);
+  if (liveShortSha != null) {
+    return (
+      hint: 'Vazio reaplica a versão no ar ($liveShortSha) com o .env atual.',
+      allowed: true,
+    );
+  }
+  if (branch.contains('*')) {
+    return (
+      hint:
+          'Este alvo acompanha tags ($branch) e ainda não tem versão publicada: informe o commit.',
+      allowed: false,
+    );
+  }
+  if (latestUnavailable) {
+    return (
+      hint:
+          'Informe o commit: o último de $branch não pôde ser descoberto no GitHub.',
+      allowed: false,
+    );
+  }
+  if (latestShortSha != null) {
+    return (
+      hint: 'Vazio publica o último commit de $branch ($latestShortSha).',
+      allowed: true,
+    );
+  }
+  return (hint: 'Vazio publica o último commit de $branch.', allowed: true);
+}
+
 String commitUrl(String repository, String sha) =>
     'https://github.com/$repository/commit/$sha';
 

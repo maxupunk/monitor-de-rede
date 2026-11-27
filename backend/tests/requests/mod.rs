@@ -14,6 +14,7 @@ mod ai_decider;
 mod ai_decider_cloud;
 mod ai_device_plugins;
 mod ai_grep;
+mod ai_log_analysis;
 mod ai_mentions;
 mod ai_ollama_models;
 mod ai_proactive;

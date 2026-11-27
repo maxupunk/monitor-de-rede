@@ -40,11 +40,56 @@ class _DeployPublishBodyState extends ConsumerState<_DeployPublishBody> {
   String _when = 'now';
   bool _submitting = false;
   String? _error;
+  DeployBranchCommitsView? _commits;
+  bool _loadingCommits = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _shaCtrl.addListener(_onShaChanged);
+    Future<void>.microtask(_loadCommits);
+  }
 
   @override
   void dispose() {
-    _shaCtrl.dispose();
+    _shaCtrl
+      ..removeListener(_onShaChanged)
+      ..dispose();
     super.dispose();
+  }
+
+  void _onShaChanged() {
+    if (mounted) setState(() {});
+  }
+
+  /// Uma consulta ao abrir: os commits recentes da branch do alvo.
+  Future<void> _loadCommits() async {
+    DeployBranchCommitsView commits;
+    try {
+      commits = await ref
+          .read(deploysProvider.notifier)
+          .targetCommits(widget.target.id);
+    } catch (err) {
+      commits = DeployBranchCommitsView(
+        branch: refShortName(widget.target.reference),
+        commits: const <DeployCommitView>[],
+        unavailableReason: describeError(
+          err,
+          fallback: 'Não foi possível listar os commits da branch.',
+        ),
+      );
+    }
+    if (!mounted) return;
+    setState(() {
+      _commits = commits;
+      _loadingCommits = false;
+    });
+  }
+
+  /// Um toque escolhe o commit (preenche o SHA); outro no mesmo desfaz.
+  void _toggleCommit(DeployCommitView commit) {
+    final selected = _shaCtrl.text.trim().toLowerCase() == commit.sha;
+    _shaCtrl.text = selected ? '' : commit.sha;
   }
 
   Future<void> _submit() async {
@@ -74,19 +119,45 @@ class _DeployPublishBodyState extends ConsumerState<_DeployPublishBody> {
 
   @override
   Widget build(BuildContext context) {
+    final target = widget.target;
     final hasWindow =
-        widget.target.windowStart != null &&
-        widget.target.windowStart!.isNotEmpty;
+        target.windowStart != null && target.windowStart!.isNotEmpty;
+    final commits = _commits;
+    final live = target.live;
+    final plan = publishEmptyCommitPlan(
+      reference: target.reference,
+      liveShortSha: live?.shortSha,
+      latestShortSha: commits?.latest?.shortSha,
+      latestUnavailable: commits?.unavailableReason != null,
+    );
+    final typed = _shaCtrl.text.trim();
+    final canSubmit = !_submitting && (typed.isNotEmpty || plan.allowed);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
         TextField(
           controller: _shaCtrl,
           decoration: InputDecoration(
-            labelText:
-                'Commit SHA (opcional — vazio usa o mais recente / reaplica .env)',
-            hintText: widget.target.live?.shortSha ?? '40 caracteres hex',
+            labelText: plan.allowed ? 'Commit SHA (opcional)' : 'Commit SHA',
+            hintText: '40 caracteres hex',
+            helperText: typed.isEmpty ? plan.hint : null,
+            helperMaxLines: 3,
+            suffixIcon: typed.isEmpty
+                ? null
+                : IconButton(
+                    tooltip: 'Limpar',
+                    icon: const Icon(Icons.clear),
+                    onPressed: _shaCtrl.clear,
+                  ),
           ),
+        ),
+        const SizedBox(height: 12),
+        _PublishCommitList(
+          loading: _loadingCommits,
+          commits: commits,
+          liveSha: live?.commitSha,
+          selectedSha: typed.toLowerCase(),
+          onSelect: _toggleCommit,
         ),
         const SizedBox(height: 12),
         if (hasWindow)
@@ -117,12 +188,140 @@ class _DeployPublishBodyState extends ConsumerState<_DeployPublishBody> {
         Align(
           alignment: Alignment.centerRight,
           child: FilledButton.icon(
-            onPressed: _submitting ? null : _submit,
+            onPressed: canSubmit ? _submit : null,
             icon: const Icon(Icons.rocket_launch),
             label: const Text('Publicar'),
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Os commits recentes da branch do alvo; sem a lista, o motivo — com o que
+/// fazer.
+class _PublishCommitList extends StatelessWidget {
+  const _PublishCommitList({
+    required this.loading,
+    required this.commits,
+    required this.liveSha,
+    required this.selectedSha,
+    required this.onSelect,
+  });
+
+  final bool loading;
+  final DeployBranchCommitsView? commits;
+  final String? liveSha;
+  final String selectedSha;
+  final ValueChanged<DeployCommitView> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    if (loading) {
+      return const Row(
+        children: <Widget>[
+          SizedBox.square(
+            dimension: 16,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          SizedBox(width: 10),
+          Expanded(child: Text('Buscando os commits recentes no GitHub…')),
+        ],
+      );
+    }
+    final view = commits;
+    if (view == null) return const SizedBox.shrink();
+    final reason = view.unavailableReason;
+    if (reason != null) {
+      return NestedPanel(tone: SemanticTone.warning, child: Text(reason));
+    }
+    if (view.commits.isEmpty) return const SizedBox.shrink();
+    return NestedPanel(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 6, 14, 4),
+            child: Text(
+              'Commits recentes de ${view.branch ?? ''} — toque para escolher',
+              style: context.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          for (final (index, commit) in view.commits.indexed)
+            _PublishCommitTile(
+              commit: commit,
+              latest: index == 0,
+              live: commit.sha == liveSha,
+              selected: commit.sha == selectedSha,
+              onTap: () => onSelect(commit),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PublishCommitTile extends StatelessWidget {
+  const _PublishCommitTile({
+    required this.commit,
+    required this.latest,
+    required this.live,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final DeployCommitView commit;
+  final bool latest;
+  final bool live;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = context.colorScheme;
+    final details = <String>[
+      if (commit.author != null) commit.author!,
+      if (commit.date != null) formatRelativeTime(commit.date),
+    ].join(' · ');
+    // Material próprio: o fundo do NestedPanel esconderia a seleção e o toque.
+    return Material(
+      type: MaterialType.transparency,
+      child: ListTile(
+        dense: true,
+        selected: selected,
+        onTap: onTap,
+        leading: Icon(
+          selected ? Icons.check_circle : Icons.radio_button_unchecked,
+          color: selected ? scheme.primary : scheme.onSurface,
+        ),
+        title: Text(
+          '${commit.shortSha} · ${commitFirstLine(commit.message)}',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontFamily: 'monospace'),
+        ),
+        subtitle: details.isEmpty ? null : Text(details),
+        trailing: Wrap(
+          spacing: 4,
+          children: <Widget>[
+            if (live)
+              const SemanticChip(
+                label: 'No ar',
+                tone: SemanticTone.success,
+                compact: true,
+              ),
+            if (latest)
+              const SemanticChip(
+                label: 'Mais recente',
+                tone: SemanticTone.info,
+                compact: true,
+              ),
+          ],
+        ),
+      ),
     );
   }
 }

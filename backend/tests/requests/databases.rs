@@ -84,6 +84,67 @@ async fn a_senha_entra_e_nao_sai_e_editar_sem_ela_mantem() {
     .await;
 }
 
+/// A conexão criada a partir de um contêiner guarda de qual ele veio — é o
+/// que deixa o backup reencontrar o banco quando o contêiner volta com outro
+/// IP. Editar sem o vínculo, ou desvincular, fixa o endereço.
+#[tokio::test]
+#[serial]
+async fn o_vinculo_com_o_conteiner_entra_sai_e_pode_ser_desfeito() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        session_with_role(&mut request, &ctx, Role::Admin).await;
+        let link = json!({
+            "hostKey": "agent-999",
+            "name": "/erp-db-1",
+            "project": "erp",
+            "service": "db"
+        });
+
+        let mut invalid = connection("ERP inválido", 5432, "x", None);
+        invalid["container"] = json!({ "hostKey": "docker-local", "name": "erp-db-1" });
+        let refused = request.post("/api/databases").json(&invalid).await;
+        assert_eq!(refused.status_code(), 422, "{}", refused.text());
+
+        let mut input = connection("ERP", 5432, "x", None);
+        input["container"] = link.clone();
+        let created = request.post("/api/databases").json(&input).await;
+        assert_eq!(created.status_code(), 201, "{}", created.text());
+        let created = body(&created.text());
+        assert_eq!(created["container"]["hostKey"], json!("agent-999"));
+        assert_eq!(created["container"]["name"], json!("erp-db-1"));
+        assert_eq!(created["container"]["service"], json!("db"));
+        let id = created["id"].as_i64().unwrap();
+
+        // Agente fora do ar: "Reencontrar agora" diz por quê, sem mexer no
+        // endereço salvo.
+        let follow = request
+            .post(&format!("/api/databases/{id}/container/follow"))
+            .await;
+        assert!(follow.status_code().is_client_error() || follow.status_code().is_server_error());
+        assert!(follow.text().contains("agente"), "{}", follow.text());
+        let shown = body(&request.get(&format!("/api/databases/{id}")).await.text());
+        assert_eq!(shown["host"], json!("127.0.0.1"));
+
+        // Editar mandando o vínculo mantém; desvincular fixa o endereço.
+        let mut edit = connection("ERP", 5432, "", None);
+        edit["container"] = link;
+        let kept = request
+            .put(&format!("/api/databases/{id}"))
+            .json(&edit)
+            .await;
+        assert_eq!(body(&kept.text())["container"]["name"], json!("erp-db-1"));
+        let unlinked = request
+            .delete(&format!("/api/databases/{id}/container"))
+            .await;
+        assert_eq!(unlinked.status_code(), 200, "{}", unlinked.text());
+        assert_eq!(body(&unlinked.text())["container"], Value::Null);
+        let follow = request
+            .post(&format!("/api/databases/{id}/container/follow"))
+            .await;
+        assert_eq!(follow.status_code(), 422, "{}", follow.text());
+    })
+    .await;
+}
+
 #[tokio::test]
 #[serial]
 async fn backup_automatico_sem_armazenamento_e_recusado() {

@@ -268,6 +268,19 @@ class _DeployBuildBodyState extends ConsumerState<_DeployBuildBody> {
     }
   }
 
+  /// "Analisar com a IA" do console: manda o log inteiro, como está agora.
+  Widget _analyzeButton(String? application, List<String> lines) {
+    return AiLogAnalysisButton(
+      source: application == null
+          ? 'Compilação #$_buildId'
+          : 'Compilação #$_buildId · $application',
+      content: lines.join('\n'),
+      chatPrompt:
+          'Sobre a compilação #$_buildId: leia o console (get_build_log) e '
+          'explique os erros e avisos e como resolvê-los.',
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final deploys = ref.watch(deploysProvider);
@@ -292,6 +305,7 @@ class _DeployBuildBodyState extends ConsumerState<_DeployBuildBody> {
           CodeViewer(
             title: 'Console da compilação #$_buildId',
             code: lines.isEmpty ? '(sem saída registrada)' : lines.join('\n'),
+            actions: <Widget>[_analyzeButton(null, lines)],
           ),
         ],
       );
@@ -402,6 +416,8 @@ class _DeployBuildBodyState extends ConsumerState<_DeployBuildBody> {
               ? '(Aguardando logs do builder...)'
               : lines.join('\n'),
           maxHeight: 280,
+          followTail: true,
+          actions: <Widget>[_analyzeButton(build.application, lines)],
         ),
       ],
     );

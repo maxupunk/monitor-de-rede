@@ -539,6 +539,15 @@ class DeploysNotifier extends Notifier<DeploysState> {
     );
   }
 
+  /// Os commits recentes da branch do alvo — uma consulta ao abrir o
+  /// "Publicar" (sem repetição).
+  Future<DeployBranchCommitsView> targetCommits(int targetId) async {
+    final raw = await _api.get<Map<String, dynamic>>(
+      '/deploys/targets/$targetId/github/commits',
+    );
+    return DeployBranchCommitsView.fromJson(raw);
+  }
+
   Future<DeployChangesView> runChanges(int runId) async {
     final raw = await _api.get<Map<String, dynamic>>(
       '/deploys/runs/$runId/changes',

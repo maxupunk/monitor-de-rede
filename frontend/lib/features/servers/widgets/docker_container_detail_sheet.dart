@@ -789,6 +789,15 @@ class _ContainerDetailBodyState extends ConsumerState<_ContainerDetailBody>
                   code: visible.isEmpty
                       ? '(Nenhuma linha de log encontrada)'
                       : visible.map((e) => e.formattedLine).join('\n'),
+                  followTail: true,
+                  actions: <Widget>[
+                    AiLogAnalysisButton(
+                      source:
+                          'Logs do container '
+                          '${containerDisplayName(widget.initialContainer)}',
+                      content: visible.map((e) => e.formattedLine).join('\n'),
+                    ),
+                  ],
                 ),
         ),
       ],

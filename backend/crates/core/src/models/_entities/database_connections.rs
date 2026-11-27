@@ -31,6 +31,11 @@ pub struct Model {
     pub last_backup_error: Option<String>,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
+    /// Host Docker (`agent-<id>`) do contêiner que a conexão acompanha.
+    pub container_host_key: Option<String>,
+    pub container_name: Option<String>,
+    pub container_project: Option<String>,
+    pub container_service: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

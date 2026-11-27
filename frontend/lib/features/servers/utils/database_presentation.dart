@@ -103,3 +103,76 @@ DatabaseBackupCardPresentation resolveDatabaseBackupCardPresentation(
     showBackupJobBanner: jobIsCurrent,
   );
 }
+
+/// O que o card sugere quando o backup não alcançou o banco.
+enum DatabaseAddressAdvice {
+  /// Nada a sugerir.
+  none,
+
+  /// Sem vínculo: vincular a um contêiner faz o endereço acompanhá-lo.
+  linkContainer,
+
+  /// Com vínculo: reencontrar o endereço agora, sem esperar o próximo backup.
+  followContainer,
+}
+
+/// Sugestão do card para uma falha de conexão. Só aparece quando a falha é de
+/// rede — "Servidor inalcançável…" (`DatabaseError::Unreachable`) ou o
+/// contêiner sem endereço que responda (`databases::follow`): senha errada ou
+/// disco cheio não se resolvem trocando o endereço.
+DatabaseAddressAdvice resolveDatabaseAddressAdvice(
+  DatabaseConnectionResponse conn,
+  DatabaseBackupCardPresentation presentation,
+) {
+  if (!presentation.isFailed) return DatabaseAddressAdvice.none;
+  final error = (conn.lastBackupError ?? '').toLowerCase();
+  // As frases de rede cobrem também as falhas gravadas antes da distinção.
+  const networkHints = <String>[
+    'inalcançável',
+    'endereço do contêiner',
+    'não tem endereço',
+    'tempo esgotado',
+    'connection refused',
+    'recusou a conexão',
+    'no route to host',
+    'host is unreachable',
+    'timed out',
+    'failed to lookup address',
+  ];
+  final unreachable = networkHints.any(error.contains);
+  if (!unreachable) return DatabaseAddressAdvice.none;
+  return conn.container == null
+      ? DatabaseAddressAdvice.linkContainer
+      : DatabaseAddressAdvice.followContainer;
+}
+
+/// Contêineres que podem ser o banco de [conn], do mais provável ao menos:
+/// mesmo protocolo; depois a mesma rota (mesmo agente), a mesma porta e os
+/// que estão rodando. Contêiner já acompanhado por outra conexão fica de fora.
+List<DatabaseContainer> rankContainersForConnection(
+  DatabaseConnectionResponse conn,
+  List<DatabaseContainer> containers,
+) {
+  String family(String engine) => engine == 'postgres' ? 'postgres' : 'mysql';
+  int score(DatabaseContainer c) =>
+      (c.probeId == conn.viaProbeId ? 4 : 0) +
+      (c.port == conn.port ? 2 : 0) +
+      (c.running ? 1 : 0);
+  final candidates = containers
+      .where(
+        (c) =>
+            family(c.engine) == conn.protocolFamily &&
+            (c.existingConnectionId == null ||
+                c.existingConnectionId == conn.id),
+      )
+      .toList();
+  candidates.sort((a, b) {
+    final byScore = score(b).compareTo(score(a));
+    return byScore != 0
+        ? byScore
+        : a.containerName.toLowerCase().compareTo(
+            b.containerName.toLowerCase(),
+          );
+  });
+  return List<DatabaseContainer>.unmodifiable(candidates);
+}

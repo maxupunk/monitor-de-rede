@@ -8,7 +8,9 @@ use ts_rs::TS;
 
 use netmonitor_core::models::{database_backups, database_connections};
 
-use crate::databases::{schedule, service::databases_of, DatabaseEngine, Probe, SslMode};
+use crate::databases::{
+    follow::ContainerLink, schedule, service::databases_of, DatabaseEngine, Probe, SslMode,
+};
 
 #[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -40,18 +42,23 @@ pub struct DatabaseConnectionResponse {
     pub last_backup_status: Option<String>,
     pub last_backup_error: Option<String>,
     pub next_backup_at: Option<String>,
+    /// O contêiner que o endereço acompanha; nulo é endereço fixo.
+    pub container: Option<ContainerLink>,
+    /// Nome do host Docker do contêiner (o agente).
+    pub container_host_name: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
 
 impl DatabaseConnectionResponse {
-    /// `storage_name` e `agent_name`: os nomes do armazenamento e do agente
-    /// da conexão, quando há.
+    /// `storage_name`, `agent_name` e `container_host_name`: os nomes do
+    /// armazenamento, do agente da rota e do host do contêiner, quando há.
     #[must_use]
     pub fn new(
         row: &database_connections::Model,
         storage_name: Option<String>,
         agent_name: Option<String>,
+        container_host_name: Option<String>,
     ) -> Self {
         Self {
             id: row.id,
@@ -76,6 +83,8 @@ impl DatabaseConnectionResponse {
             next_backup_at: schedule::policy(row)
                 .next_run(Utc::now())
                 .map(|at| at.to_rfc3339()),
+            container: ContainerLink::of(row),
+            container_host_name,
             created_at: row.created_at.to_rfc3339(),
             updated_at: row.updated_at.to_rfc3339(),
         }

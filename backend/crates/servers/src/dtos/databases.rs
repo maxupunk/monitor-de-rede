@@ -5,6 +5,7 @@ use ts_rs::TS;
 
 use crate::databases::{
     backups::RestoreRequest,
+    follow::ContainerLink,
     service::{ConnectionInput, ProbeInput},
     DatabaseEngine, RestoreMode, SslMode,
 };
@@ -51,6 +52,11 @@ pub struct DatabaseConnectionInput {
     pub backup_enabled: bool,
     pub backup_interval_hours: i32,
     pub backup_retention: i32,
+    /// O contêiner que o endereço acompanha (quando a conexão veio de um
+    /// contêiner descoberto); ausente ou nulo fixa o endereço digitado.
+    #[serde(default)]
+    #[ts(optional)]
+    pub container: Option<ContainerLink>,
 }
 
 impl From<DatabaseConnectionInput> for ConnectionInput {
@@ -69,8 +75,20 @@ impl From<DatabaseConnectionInput> for ConnectionInput {
             backup_enabled: input.backup_enabled,
             backup_interval_hours: input.backup_interval_hours,
             backup_retention: input.backup_retention,
+            container: input.container,
         }
     }
+}
+
+/// "Vincular a um contêiner": qual host e qual contêiner a conexão passa a
+/// acompanhar.
+#[derive(Debug, Clone, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DatabaseContainerLinkInput {
+    /// `agent-<id>`.
+    pub host_key: String,
+    pub container_id: String,
 }
 
 /// "Testar e listar bancos" do formulário.

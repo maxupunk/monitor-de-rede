@@ -45,6 +45,9 @@ class _DatabaseConnectionFormBodyState
   String _engine = 'postgres';
   String _sslMode = 'prefer';
   int? _viaProbeId;
+
+  /// O contêiner que o endereço acompanha; nulo é endereço fixo.
+  DatabaseContainerLink? _container;
   int? _storageDestinationId;
   bool _storageTouched = false;
   bool _backupEnabled = true;
@@ -67,6 +70,7 @@ class _DatabaseConnectionFormBodyState
     _engine = e?.engine ?? 'postgres';
     _sslMode = e?.sslMode ?? 'prefer';
     _viaProbeId = e?.viaProbeId;
+    _container = e?.container;
     _storageDestinationId = e != null
         ? e.storageDestinationId
         : (initialStorages.isNotEmpty ? initialStorages.first.id : null);
@@ -134,6 +138,7 @@ class _DatabaseConnectionFormBodyState
           res.chosen ?? (res.addresses.isNotEmpty ? res.addresses.first : null);
       setState(() {
         _engine = container.engine;
+        _container = DatabaseContainerLink.fromContainer(res.container);
         _nameCtrl.text = container.containerName;
         if (chosen != null) {
           _hostCtrl.text = chosen.host;
@@ -239,6 +244,7 @@ class _DatabaseConnectionFormBodyState
               backupIntervalHours:
                   int.tryParse(_intervalCtrl.text.trim()) ?? 24,
               backupRetention: int.tryParse(_retentionCtrl.text.trim()) ?? 7,
+              container: _container,
             ),
           );
       if (mounted) Navigator.of(context).pop();
@@ -402,6 +408,29 @@ class _DatabaseConnectionFormBodyState
         ],
         const SizedBox(height: 12),
 
+        if (_container != null) ...<Widget>[
+          NestedPanel(
+            tone: SemanticTone.info,
+            child: Row(
+              children: <Widget>[
+                const Icon(Icons.link, size: 18),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'O endereço acompanha o contêiner ${_container!.name}: '
+                    'se ele reiniciar ou for recriado com outro IP, o backup o reencontra sozinho.',
+                  ),
+                ),
+                const SizedBox(width: 8),
+                TextButton(
+                  onPressed: () => setState(() => _container = null),
+                  child: const Text('Fixar endereço'),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
         ResponsiveFieldRow(
           breakpoint: 480,
           spacing: 10,
@@ -409,7 +438,13 @@ class _DatabaseConnectionFormBodyState
           children: <Widget>[
             TextField(
               controller: _hostCtrl,
-              decoration: const InputDecoration(labelText: 'Host / IP'),
+              decoration: InputDecoration(
+                labelText: 'Host / IP',
+                helperText: _container == null
+                    ? null
+                    : 'Atualizado sozinho se o contêiner mudar de IP',
+                helperMaxLines: 2,
+              ),
             ),
             TextField(
               controller: _portCtrl,

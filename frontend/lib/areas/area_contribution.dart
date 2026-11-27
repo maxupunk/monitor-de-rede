@@ -303,6 +303,34 @@ final aiDrawerOpenProvider = StateProvider<bool>((ref) => false);
 /// Builder plugável do conteúdo do Assistente IA (fornecido pela área Core).
 final aiDrawerBuilderProvider = StateProvider<WidgetBuilder?>((ref) => null);
 
+/// Um console (compilação, deploy, container) a mandar para a IA analisar.
+@immutable
+class AiLogAnalysisRequest {
+  const AiLogAnalysisRequest({
+    required this.source,
+    required this.content,
+    this.chatPrompt,
+  });
+
+  /// De onde vem o console ("Compilação #12 · api").
+  final String source;
+
+  /// O console inteiro, no momento do pedido.
+  final String content;
+
+  /// Pergunta para "Continuar no chat", quando a tela tem uma.
+  final String? chatPrompt;
+}
+
+/// Abre a análise de console da IA (fornecido pelo Assistente, área Core).
+typedef AiLogAnalysisLauncher =
+    Future<void> Function(BuildContext context, AiLogAnalysisRequest request);
+
+/// Lançador plugável da análise de console; `null` sem o Assistente montado.
+final aiLogAnalysisLauncherProvider = StateProvider<AiLogAnalysisLauncher?>(
+  (ref) => null,
+);
+
 /// Gatilho plugável do Assistente Inicial (fornecido pela área Core).
 final onboardingTriggerProvider =
     StateProvider<void Function(BuildContext context)?>((ref) => null);

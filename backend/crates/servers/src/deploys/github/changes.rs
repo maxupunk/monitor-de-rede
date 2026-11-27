@@ -7,7 +7,7 @@
 
 use serde::Deserialize;
 
-use super::{Client, GitHubError};
+use super::{encode, Client, GitHubError};
 use crate::{
     deploys::short_sha,
     views::deploys::{DeployChangesView, DeployCommitView},
@@ -69,6 +69,26 @@ pub fn compare_url(repository: &str, base: Option<&str>, head: &str) -> String {
         Some(base) => format!("https://github.com/{repository}/compare/{base}...{head}"),
         None => format!("https://github.com/{repository}/commit/{head}"),
     }
+}
+
+/// Os `limit` commits mais novos de uma branch, o mais recente primeiro.
+///
+/// # Errors
+///
+/// [`GitHubError`].
+pub async fn recent(
+    client: &Client,
+    repository: &str,
+    branch: &str,
+    limit: usize,
+) -> Result<Vec<DeployCommitView>, GitHubError> {
+    let commits: Vec<Commit> = client
+        .get(&format!(
+            "/repos/{repository}/commits?sha={}&per_page={limit}",
+            encode(branch)
+        ))
+        .await?;
+    Ok(commits.into_iter().map(view).collect())
 }
 
 /// Os commits de `base` (a versão no ar) até `head`. Nunca falha: o que

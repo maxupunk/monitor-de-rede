@@ -27,6 +27,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 
 use super::{
     dump::{create_private, DumpFile, DumpStats, DumpWriter, TempFile},
+    follow::{self, Followed},
     jobs::{DatabaseJobKind, DatabaseJobSnapshot, DatabaseJobStatus, Job},
     notify::{self, FailureKind},
     reach::{reach, Reached},
@@ -281,7 +282,8 @@ pub async fn run_backup(
 ) {
     let db = &ctx.db;
     let started = Utc::now();
-    let outcome = backup_all(ctx, connection, destination, job, trigger).await;
+    let (target, followed) = follow::follow(ctx, connection, job).await;
+    let outcome = backup_all(ctx, connection, target, destination, job, trigger).await;
 
     let (ok, message) = match &outcome {
         Ok(summary) if summary.failures.is_empty() => (
@@ -300,6 +302,7 @@ pub async fn run_backup(
         Ok(summary) => (false, summary.failures.join("; ")),
         Err(error) => (false, error.to_string()),
     };
+    let message = with_note(message, &followed);
     let mut row: database_connections::ActiveModel = connection.row.clone().into();
     row.last_backup_at = Set(Some(started.into()));
     row.last_backup_status = Set(Some(
@@ -324,6 +327,14 @@ pub async fn run_backup(
     job.finish(ok, message);
 }
 
+/// O resumo com o que o acompanhamento do contêiner fez, quando fez algo.
+fn with_note(message: String, followed: &Followed) -> String {
+    match followed.note() {
+        Some(note) => format!("{message} — {note}"),
+        None => message,
+    }
+}
+
 /// "vendas", "vendas e estoque", "vendas, estoque e mais 3".
 fn list_names(names: &[String]) -> String {
     match names {
@@ -345,6 +356,7 @@ struct Summary {
 async fn backup_all(
     ctx: &AppContext,
     connection: &Connection,
+    target: DatabaseTarget,
     destination: &Destination,
     job: &Job,
     trigger: Trigger,
@@ -355,7 +367,7 @@ async fn backup_all(
         job.milestone("Abrindo a ponte pelo agente");
     }
     // A ponte (se houver) vive até o último banco ser copiado.
-    let reached = reach(ctx, connection.target(), connection.row.via_probe_id).await?;
+    let reached = reach(ctx, target, connection.row.via_probe_id).await?;
     let databases = if connection.databases.is_empty() {
         let driver = connection.engine.driver();
         reached
@@ -773,10 +785,11 @@ pub async fn start_restore(
             } else {
                 None
             };
+            let (address, _) = follow::follow(&ctx, &target, &job).await;
             if target.row.via_probe_id.is_some() {
                 job.milestone("Abrindo a ponte pelo agente");
             }
-            let reached = reach(&ctx, target.target(), target.row.via_probe_id).await?;
+            let reached = reach(&ctx, address, target.row.via_probe_id).await?;
             let reader = match &local {
                 Some(local) => open_local(&local.0).await?,
                 None => explorer.read_object(&key).await.map_err(AppError::from)?,
@@ -896,6 +909,10 @@ mod tests {
             last_backup_error: None,
             created_at: now,
             updated_at: now,
+            container_host_key: None,
+            container_name: None,
+            container_project: None,
+            container_service: None,
         };
         let at = Utc.with_ymd_and_hms(2026, 10, 7, 3, 0, 9).unwrap();
         assert_eq!(

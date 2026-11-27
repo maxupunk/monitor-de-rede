@@ -6,9 +6,15 @@
 use backend::app::App;
 use loco_rs::{app::AppContext, testing::prelude::*, TestServer};
 use netmonitor_core::models::users;
+use netmonitor_core::shared::errors::AppError;
 use netmonitor_servers::{
-    deploys::{oidc::GithubClaims, webhook, RunStatus},
-    dtos::deploys::HookInput,
+    deploys::{
+        next_revision,
+        oidc::GithubClaims,
+        runs::{self, NewRun},
+        webhook, RunStatus, RunTrigger,
+    },
+    dtos::deploys::{DeployInput, DeployWhen, HookInput},
 };
 use sea_orm::{ActiveModelTrait, IntoActiveModel, Set};
 use serde_json::{json, Value};
@@ -506,12 +512,145 @@ async fn env_guarda_versoes_e_mostra_so_os_nomes_que_mudam() {
         );
         assert_eq!(current["content"], json!(next));
 
-        // Republicar sem versão no ar não tem o que republicar.
+        // Sem versão no ar e sem acesso ao GitHub não há o que publicar — e
+        // a resposta diz o que fazer, sem perguntar nada ao GitHub.
         let deploy = request
             .post(&format!("/api/deploys/targets/{target_id}/deploy"))
             .json(&json!({ "when": "now" }))
             .await;
         assert_eq!(deploy.status_code(), 422, "{}", deploy.text());
+        assert!(
+            deploy.text().contains("não tem acesso ao GitHub")
+                && deploy.text().contains("informe o commit a publicar"),
+            "{}",
+            deploy.text()
+        );
+        // O diálogo lê o mesmo motivo, sem erro.
+        let commits = request
+            .get(&format!("/api/deploys/targets/{target_id}/github/commits"))
+            .await;
+        assert_eq!(commits.status_code(), 200, "{}", commits.text());
+        let commits = body(&commits.text());
+        assert_eq!(commits["branch"], json!("main"));
+        assert_eq!(commits["commits"], json!([]));
+        assert!(commits["unavailableReason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("não tem acesso ao GitHub")));
+    })
+    .await;
+}
+
+/// O dublê do GitHub para quando ele não pode ser consultado.
+async fn never_asked(branch: String) -> Result<(String, Option<String>), AppError> {
+    panic!("perguntou ao GitHub o último commit de {branch} sem precisar")
+}
+
+/// O "Publicar" com o commit vazio: alvo nunca publicado leva o commit mais
+/// novo da branch (o GitHub é um dublê); alvo com versão no ar a reaplica; o
+/// GitHub que não responde, alvo de tag e aplicação sem acesso viram texto
+/// que diz o que fazer.
+#[tokio::test]
+#[serial]
+async fn publicar_sem_commit_usa_o_mais_novo_da_branch_ou_reaplica_o_do_ar() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
+        let (agent, _) = enrolled_agent(&ctx, "debian-prod").await;
+        let (application, target) = netmonitor_servers::deploys::applications::setup(
+            &ctx.db,
+            &serde_json::from_value(setup(agent.id, "sgc", false)).expect("setup"),
+            None,
+        )
+        .await
+        .expect("assistente");
+        // Com acesso ao GitHub (o token só precisa existir: quem responde é o
+        // dublê).
+        let mut connected = application.clone();
+        connected.credential_id = Some(1);
+        let empty = DeployInput {
+            commit_sha: Some("  ".into()),
+            image_tag: None,
+            when: DeployWhen::Now,
+        };
+        let head = "C".repeat(40);
+
+        let asked = std::sync::Mutex::new(Vec::<String>::new());
+        let revision = next_revision::resolve(&ctx.db, &connected, &target, &empty, |branch| {
+            asked.lock().expect("trava").push(branch);
+            let head = head.clone();
+            async move { Ok((head, Some("feat: login".to_string()))) }
+        })
+        .await
+        .expect("o mais novo da main");
+        assert_eq!(asked.lock().expect("trava").as_slice(), ["main"]);
+        assert_eq!(revision.commit_sha, "c".repeat(40));
+        assert_eq!(revision.image_tag, "c".repeat(40));
+        assert_eq!(revision.reference.as_deref(), Some("main"));
+        assert_eq!(revision.commit_message.as_deref(), Some("feat: login"));
+
+        // O GitHub que não responde: o motivo e o que fazer.
+        let failed = next_revision::resolve(&ctx.db, &connected, &target, &empty, |_| async {
+            Err::<(String, Option<String>), _>(AppError::business_rule("O GitHub negou o acesso"))
+        })
+        .await
+        .expect_err("sem o mais novo");
+        let text = failed.to_string();
+        assert!(text.contains("último commit de main"), "{text}");
+        assert!(text.contains("O GitHub negou o acesso"), "{text}");
+        assert!(text.contains("informe o commit a publicar"), "{text}");
+
+        // Sem acesso ao GitHub, nem pergunta.
+        let refused = next_revision::resolve(&ctx.db, &application, &target, &empty, never_asked)
+            .await
+            .expect_err("sem acesso");
+        assert!(refused.to_string().contains("não tem acesso ao GitHub"));
+
+        // Alvo de tag não tem "mais novo" seguro.
+        let mut tagged = target.clone();
+        tagged.reference = "v*".into();
+        let tag = next_revision::resolve(&ctx.db, &connected, &tagged, &empty, never_asked)
+            .await
+            .expect_err("tag");
+        assert!(tag.to_string().contains("acompanha tags (v*)"), "{tag}");
+
+        // Com versão no ar, o vazio a reaplica — o GitHub nem é consultado.
+        let live = runs::insert(
+            &ctx.db,
+            NewRun {
+                application_id: application.id,
+                target_id: target.id,
+                trigger: RunTrigger::Manual,
+                triggered_by: None,
+                reference: Some("main".into()),
+                commit_sha: "a".repeat(40),
+                commit_message: Some("feat: NF-e".into()),
+                image_tag: "v4.2.0".into(),
+                build_id: None,
+                env_version_id: None,
+                status: RunStatus::Succeeded,
+                rollback_of_run_id: None,
+                after_run_id: None,
+                approved_by: None,
+                scheduled_for: None,
+            },
+        )
+        .await
+        .expect("versão no ar");
+        let again = next_revision::resolve(&ctx.db, &connected, &target, &empty, never_asked)
+            .await
+            .expect("reaplica");
+        assert_eq!(again.commit_sha, live.commit_sha);
+        assert_eq!(again.image_tag, "v4.2.0");
+
+        // Commit informado continua valendo, e herda a tag do deploy anterior.
+        let chosen = DeployInput {
+            commit_sha: Some("A".repeat(40)),
+            image_tag: None,
+            when: DeployWhen::Now,
+        };
+        let picked = next_revision::resolve(&ctx.db, &connected, &target, &chosen, never_asked)
+            .await
+            .expect("commit");
+        assert_eq!(picked.commit_sha, "a".repeat(40));
+        assert_eq!(picked.image_tag, "v4.2.0");
     })
     .await;
 }

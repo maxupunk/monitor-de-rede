@@ -985,3 +985,16 @@ pub struct AiDataExportSummary {
     pub oldest: Option<String>,
     pub newest: Option<String>,
 }
+
+/// Corpo de `POST /api/ai/log-analysis`: um console (compilação, deploy,
+/// container) para a IA apontar erros, avisos e descontinuações.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct LogAnalysisInput {
+    /// De onde vem o console ("Compilação #12 · api"), para a IA e o relatório.
+    #[serde(default)]
+    pub source: String,
+    /// O console inteiro, uma linha por `\n`.
+    pub content: String,
+}

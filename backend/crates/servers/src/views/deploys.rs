@@ -522,6 +522,20 @@ pub struct DeployChangesView {
     pub unavailable_reason: Option<String>,
 }
 
+/// Os commits recentes da branch de um alvo, para o "Publicar" escolher.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DeployBranchCommitsView {
+    /// A branch do alvo; `None` quando ele acompanha tags (`v*`).
+    pub branch: Option<String>,
+    /// O mais novo primeiro.
+    pub commits: Vec<DeployCommitView>,
+    /// Por que a lista não veio (sem acesso ao GitHub, repositório que o
+    /// acesso não enxerga…) — o mesmo texto que o "Publicar" daria.
+    pub unavailable_reason: Option<String>,
+}
+
 /// O workflow sugerido e o que configurar no GitHub.
 #[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]

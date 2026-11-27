@@ -26,7 +26,7 @@ use crate::{
     deploys::{
         access, applications, catalog, credentials, env_versions, events,
         github::{self, app::normalize_origin, app::Scope},
-        oidc, orchestrator, readiness, runs, short_sha, webhook, workflow,
+        next_revision, oidc, orchestrator, readiness, runs, short_sha, webhook, workflow,
     },
     dtos::deploys::{
         ApplicationInput, ApproveInput, CentralUrlQuery, CredentialInput, DeployInput, DeployWhen,
@@ -367,6 +367,16 @@ async fn target_readiness(
 async fn target_history(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
     Ok(format::json(
         catalog::history(&ctx, id, HISTORY_LIMIT).await?,
+    )?)
+}
+
+/// Os commits recentes da branch do alvo (o diálogo "Publicar" abre e pede
+/// uma vez — sem repetição).
+async fn target_commits(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
+    let target = applications::find_target(&ctx.db, id).await?;
+    let application = applications::find(&ctx.db, target.application_id).await?;
+    Ok(format::json(
+        next_revision::branch_commits(&ctx.db, &application, &target).await?,
     )?)
 }
 
@@ -720,6 +730,7 @@ pub fn routes() -> Routes {
         .add("/targets/{id}", put(update_target).delete(destroy_target))
         .add("/targets/{id}/readiness", get(target_readiness))
         .add("/targets/{id}/runs", get(target_history))
+        .add("/targets/{id}/github/commits", get(target_commits))
         .add("/targets/{id}/deploy", post(deploy_target))
         .add("/targets/{id}/env", get(env_current).put(env_save))
         .add("/targets/{id}/env/versions", get(env_versions_list))

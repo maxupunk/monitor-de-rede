@@ -706,7 +706,7 @@ impl AiToolHandler for DeployAction {
     }
 
     fn description(&self) -> &'static str {
-        "Age sobre o deploy contínuo, sempre com confirmação do usuário: 'approve'/'reject' um deploy aguardando aprovação (runId), 'deploy' publica uma versão num alvo (targetId e commitSha completo; sem commit republica a versão no ar), 'restore' volta um alvo à versão de um deploy que deu certo (runId), 'build' compila no servidor uma aplicação que não usa GitHub Actions (applicationId; branch, commitSha e noCache opcionais) e os alvos recebem o deploy ao fim, 'cancel' cancela um deploy pendente (runId) ou uma compilação em andamento (buildId). 'when': 'now' (padrão) ou 'window' (janela de manutenção do alvo)."
+        "Age sobre o deploy contínuo, sempre com confirmação do usuário: 'approve'/'reject' um deploy aguardando aprovação (runId), 'deploy' publica uma versão num alvo (targetId e commitSha completo; sem commit republica a versão no ar ou, em alvo nunca publicado, o commit mais novo da branch), 'restore' volta um alvo à versão de um deploy que deu certo (runId), 'build' compila no servidor uma aplicação que não usa GitHub Actions (applicationId; branch, commitSha e noCache opcionais) e os alvos recebem o deploy ao fim, 'cancel' cancela um deploy pendente (runId) ou uma compilação em andamento (buildId). 'when': 'now' (padrão) ou 'window' (janela de manutenção do alvo)."
     }
 
     fn parameters(&self) -> Value {
@@ -766,7 +766,8 @@ impl AiToolHandler for DeployAction {
                     None => "alvo não informado".to_string(),
                 };
                 let version = args.text("commitSha").map_or_else(
-                    || "a versão no ar (de novo)".to_string(),
+                    || "a versão no ar de novo (ou, sem versão no ar, o commit mais novo da branch)"
+                        .to_string(),
                     |sha| format!("a versão {}", short_sha(&sha)),
                 );
                 format!("Publicar {version} em {target}, {when}")

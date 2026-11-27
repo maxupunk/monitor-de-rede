@@ -24,14 +24,14 @@ use crate::{
     drivers,
     dtos::{
         AiMentionQuery, ChatStreamRequest, DeciderFormInput, ExecuteToolRequest,
-        ExecuteToolResponse, OllamaDeleteRequest, OllamaPullRequest, TestConnectionInput,
-        TestConnectionResponse, TestDeciderInput,
+        ExecuteToolResponse, LogAnalysisInput, OllamaDeleteRequest, OllamaPullRequest,
+        TestConnectionInput, TestConnectionResponse, TestDeciderInput,
     },
     harness::{
         agent::{run_agent_loop, AgentRequest},
         confirmation,
     },
-    mentions, model_cleanup, ollama, opencode, openrouter,
+    log_analysis, mentions, model_cleanup, ollama, opencode, openrouter,
     proactive::{digest, incident, runner::ProviderDrivers, schedule::period_hours},
     settings::{self, AiSettings},
 };
@@ -237,6 +237,20 @@ async fn summarize_alert_now(
 ) -> AppResult<Response> {
     let summary = incident::summarize_alert(&ctx, &ProviderDrivers, id).await?;
     Ok(format::json(serde_json::json!({ "summary": summary }))?)
+}
+
+/// `POST /api/ai/log-analysis` — a IA lê um console (compilação, deploy,
+/// container) e devolve erros, avisos, descontinuações e sugestões, cada um
+/// com a linha de origem. As credenciais saem antes do envio
+/// ([`log_analysis::prepare`]). Quem pode escrever pede, como no chat: a
+/// guarda da API recusa o `POST` de quem só vê.
+async fn analyze_log(
+    State(ctx): State<AppContext>,
+    Json(input): Json<LogAnalysisInput>,
+) -> AppResult<Response> {
+    Ok(format::json(
+        log_analysis::analyze(&ctx.db, &ProviderDrivers, input).await?,
+    )?)
 }
 
 #[derive(Debug, Deserialize)]
@@ -512,6 +526,7 @@ pub fn routes() -> Routes {
         .add("/mentions", get(search_mentions))
         .add("/digest/run", post(run_digest))
         .add("/alerts/{id}/summary", post(summarize_alert_now))
+        .add("/log-analysis", post(analyze_log))
         .add("/opencode/models", get(list_opencode_models))
         .add("/openrouter/models", get(list_openrouter_models))
         .add(

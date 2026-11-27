@@ -180,6 +180,11 @@ class DatabasesNotifier extends Notifier<DatabasesState> {
             '/databases/$id',
             data: input.toJson(),
           );
+    return _upsert(raw);
+  }
+
+  /// Troca a conexão gravada pela que o servidor devolveu.
+  DatabaseConnectionResponse _upsert(Map<String, dynamic> raw) {
     final saved = DatabaseConnectionResponse.fromJson(raw);
     state = state.copyWith(
       connections: upsertSortedByName<DatabaseConnectionResponse>(
@@ -190,6 +195,37 @@ class DatabasesNotifier extends Notifier<DatabasesState> {
       ),
     );
     return saved;
+  }
+
+  /// "Vincular a um contêiner": o endereço passa a acompanhá-lo.
+  Future<DatabaseConnectionResponse> linkContainer(
+    int id,
+    DatabaseContainer container,
+  ) async {
+    final raw = await _api.put<Map<String, dynamic>>(
+      '/databases/$id/container',
+      data: <String, dynamic>{
+        'hostKey': container.hostKey,
+        'containerId': container.containerId,
+      },
+    );
+    return _upsert(raw);
+  }
+
+  /// Desfaz o vínculo: o endereço salvo fica fixo.
+  Future<DatabaseConnectionResponse> unlinkContainer(int id) async {
+    final raw = await _api.delete<Map<String, dynamic>>(
+      '/databases/$id/container',
+    );
+    return _upsert(raw);
+  }
+
+  /// "Reencontrar endereço agora".
+  Future<DatabaseConnectionResponse> followContainer(int id) async {
+    final raw = await _api.post<Map<String, dynamic>>(
+      '/databases/$id/container/follow',
+    );
+    return _upsert(raw);
   }
 
   Future<bool> remove(int id) async {

@@ -8,6 +8,7 @@ import 'package:netmonitor_app/features/servers/providers/storages_provider.dart
 import 'package:netmonitor_app/features/servers/utils/database_presentation.dart';
 import 'package:netmonitor_app/features/servers/widgets/database_backup_history_sheet.dart';
 import 'package:netmonitor_app/features/servers/widgets/database_connection_form_sheet.dart';
+import 'package:netmonitor_app/features/servers/widgets/database_container_link_sheet.dart';
 import 'package:netmonitor_app/features/servers/widgets/database_restore_dialog.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
@@ -108,6 +109,62 @@ class _DatabasesBackupTabState extends ConsumerState<DatabasesBackupTab> {
           content: Text('Falha no teste de conexão: ${describeError(err)}'),
         ),
       );
+    }
+  }
+
+  void _notify(String message) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _linkContainer(DatabaseConnectionResponse conn) async {
+    final saved = await showDatabaseContainerLinkSheet(
+      context,
+      connection: conn,
+    );
+    if (!mounted || saved == null) return;
+    _notify(
+      '${saved.name} agora acompanha o contêiner ${saved.container?.name} '
+      '(${saved.host}:${saved.port}).',
+    );
+  }
+
+  Future<void> _followContainer(DatabaseConnectionResponse conn) async {
+    try {
+      final saved = await ref
+          .read(databasesProvider.notifier)
+          .followContainer(conn.id);
+      if (!mounted) return;
+      final moved = saved.host != conn.host || saved.port != conn.port;
+      _notify(
+        moved
+            ? 'Endereço atualizado: ${conn.host}:${conn.port} → ${saved.host}:${saved.port}.'
+            : 'O endereço ${saved.host}:${saved.port} ainda é o do contêiner.',
+      );
+    } catch (err) {
+      if (!mounted) return;
+      _notify(
+        'Não foi possível reencontrar o contêiner: ${describeError(err)}',
+      );
+    }
+  }
+
+  Future<void> _unlinkContainer(DatabaseConnectionResponse conn) async {
+    final confirmed = await showConfirmActionDialog(
+      context: context,
+      title: 'Fixar o endereço de ${conn.name}?',
+      message:
+          'A conexão deixa de acompanhar o contêiner ${conn.container?.name} e passa a usar sempre ${conn.host}:${conn.port}. '
+          'Se o contêiner voltar com outro IP, o backup vai falhar até você editar o endereço.',
+      confirmLabel: 'Fixar endereço',
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      await ref.read(databasesProvider.notifier).unlinkContainer(conn.id);
+    } catch (err) {
+      if (!mounted) return;
+      _notify('Não foi possível desvincular: ${describeError(err)}');
     }
   }
 
@@ -433,6 +490,8 @@ class _DatabasesBackupTabState extends ConsumerState<DatabasesBackupTab> {
       conn,
       activeBackupJob,
     );
+    final advice = resolveDatabaseAddressAdvice(conn, presentation);
+    final link = conn.container;
 
     return SectionCard(
       title: conn.name,
@@ -496,12 +555,18 @@ class _DatabasesBackupTabState extends ConsumerState<DatabasesBackupTab> {
                   _openForm(existing: conn);
                 case 'probe':
                   _testConnection(conn);
+                case 'link':
+                  _linkContainer(conn);
+                case 'follow':
+                  _followContainer(conn);
+                case 'unlink':
+                  _unlinkContainer(conn);
                 case 'delete':
                   _deleteConnection(conn);
               }
             },
-            itemBuilder: (_) => const <PopupMenuEntry<String>>[
-              PopupMenuItem<String>(
+            itemBuilder: (_) => <PopupMenuEntry<String>>[
+              const PopupMenuItem<String>(
                 value: 'edit',
                 child: ListTile(
                   dense: true,
@@ -509,7 +574,7 @@ class _DatabasesBackupTabState extends ConsumerState<DatabasesBackupTab> {
                   title: Text('Configurar backup'),
                 ),
               ),
-              PopupMenuItem<String>(
+              const PopupMenuItem<String>(
                 value: 'probe',
                 child: ListTile(
                   dense: true,
@@ -517,8 +582,35 @@ class _DatabasesBackupTabState extends ConsumerState<DatabasesBackupTab> {
                   title: Text('Testar conexão agora'),
                 ),
               ),
-              PopupMenuDivider(),
-              PopupMenuItem<String>(
+              if (link == null)
+                const PopupMenuItem<String>(
+                  value: 'link',
+                  child: ListTile(
+                    dense: true,
+                    leading: Icon(Icons.link),
+                    title: Text('Vincular a um contêiner'),
+                  ),
+                )
+              else ...<PopupMenuEntry<String>>[
+                const PopupMenuItem<String>(
+                  value: 'follow',
+                  child: ListTile(
+                    dense: true,
+                    leading: Icon(Icons.travel_explore),
+                    title: Text('Reencontrar endereço agora'),
+                  ),
+                ),
+                const PopupMenuItem<String>(
+                  value: 'unlink',
+                  child: ListTile(
+                    dense: true,
+                    leading: Icon(Icons.link_off),
+                    title: Text('Fixar endereço (desvincular)'),
+                  ),
+                ),
+              ],
+              const PopupMenuDivider(),
+              const PopupMenuItem<String>(
                 value: 'delete',
                 child: ListTile(
                   dense: true,
@@ -533,6 +625,13 @@ class _DatabasesBackupTabState extends ConsumerState<DatabasesBackupTab> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
+          KeyValueRow(
+            label: 'Endereço',
+            value: link == null
+                ? 'Fixo · ${conn.host}:${conn.port}'
+                : 'Acompanha o contêiner ${link.name}'
+                      '${conn.containerHostName != null ? ' (${conn.containerHostName})' : ''}',
+          ),
           KeyValueRow(
             label: 'Destino',
             value: conn.storageDestinationName ?? 'Nenhum destino configurado',
@@ -558,6 +657,14 @@ class _DatabasesBackupTabState extends ConsumerState<DatabasesBackupTab> {
               ),
             ),
           ],
+          if (advice != DatabaseAddressAdvice.none) ...<Widget>[
+            const SizedBox(height: 8),
+            _AddressAdvicePanel(
+              advice: advice,
+              onLink: () => _linkContainer(conn),
+              onFollow: () => _followContainer(conn),
+            ),
+          ],
           if (presentation.showBackupJobBanner &&
               activeBackupJob != null) ...<Widget>[
             const SizedBox(height: 10),
@@ -567,6 +674,52 @@ class _DatabasesBackupTabState extends ConsumerState<DatabasesBackupTab> {
             const SizedBox(height: 10),
             DatabaseJobProgressBanner(job: activeRestoreJob),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Sugestão do card quando o backup não alcançou o banco: vincular ao
+/// contêiner (o endereço passa a acompanhá-lo) ou reencontrá-lo agora.
+class _AddressAdvicePanel extends StatelessWidget {
+  const _AddressAdvicePanel({
+    required this.advice,
+    required this.onLink,
+    required this.onFollow,
+  });
+
+  final DatabaseAddressAdvice advice;
+  final VoidCallback onLink;
+  final VoidCallback onFollow;
+
+  @override
+  Widget build(BuildContext context) {
+    final linking = advice == DatabaseAddressAdvice.linkContainer;
+    return NestedPanel(
+      tone: SemanticTone.info,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Text(
+            linking
+                ? 'O banco roda num contêiner? Ao reiniciar, ele pode ter voltado com outro IP. '
+                      'Vincule a conexão ao contêiner e o endereço passa a acompanhá-lo.'
+                : 'O contêiner não respondeu no último backup. '
+                      'Reencontre o endereço agora para não esperar o próximo.',
+            style: context.textTheme.bodySmall,
+          ),
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: FilledButton.tonalIcon(
+              onPressed: linking ? onLink : onFollow,
+              icon: Icon(linking ? Icons.link : Icons.travel_explore, size: 16),
+              label: Text(
+                linking ? 'Vincular a um contêiner' : 'Reencontrar endereço',
+              ),
+            ),
+          ),
         ],
       ),
     );
