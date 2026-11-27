@@ -53,6 +53,12 @@ pub struct AlertEvaluationContext {
     /// pacotes, DNS parcial). Não dispara regra, mas conta como problema para
     /// a janela de recuperação dos eventos abertos do escopo (Fase 2).
     pub degraded: bool,
+
+    /// `true` quando o fato descreve um **estado** que pode mudar enquanto o
+    /// alerta segue aberto (quantas vulnerabilidades a imagem tem agora): a
+    /// continuação do episódio regrava a mensagem e os dados do produtor. Os
+    /// demais (`false`) guardam a mensagem de quando o problema começou.
+    pub refresh_open: bool,
 }
 
 /// Um dataset de alerta de área (ADR 017): o que um produtor de fatos
@@ -76,6 +82,23 @@ pub trait AlertDataset {
     /// `true` quando o alvo voltou ao normal (ver
     /// [`AlertEvaluationContext::recovered`]).
     fn is_recovery(&self) -> bool;
+
+    /// De onde o alerta vem, quando não há equipamento nem monitor que o
+    /// diga ([`super::SOURCE_LABEL`]). Padrão: nada — a tela usa o alvo.
+    fn source_label(&self) -> Option<&'static str> {
+        None
+    }
+
+    /// Como o alerta fecha sozinho ([`super::CLOSES_WHEN`]). Padrão: nada —
+    /// a tela usa o aviso genérico.
+    fn closes_when(&self) -> Option<&'static str> {
+        None
+    }
+
+    /// Ver [`AlertEvaluationContext::refresh_open`]. Padrão: `false`.
+    fn refreshes_open_alert(&self) -> bool {
+        false
+    }
 }
 
 /// O alvo de um [`AlertDataset`].
@@ -99,6 +122,12 @@ impl AlertEvaluationContext {
         let facts = dataset.facts();
         let mut data = Map::new();
         data.insert("eventType".into(), Value::from(dataset.event_type()));
+        if let Some(source) = dataset.source_label() {
+            data.insert(super::SOURCE_LABEL.into(), Value::from(source));
+        }
+        if let Some(closes) = dataset.closes_when() {
+            data.insert(super::CLOSES_WHEN.into(), Value::from(closes));
+        }
         data.extend(target.data);
         data.extend(facts.clone());
         Self {
@@ -110,6 +139,7 @@ impl AlertEvaluationContext {
             data,
             recovered: dataset.is_recovery(),
             degraded: false,
+            refresh_open: dataset.refreshes_open_alert(),
         }
     }
 }
@@ -236,6 +266,15 @@ impl AlertScopeKey {
         format!("wifi_roaming:{mac}")
     }
 
+    /// As vulnerabilidades de uma severidade (`critical`, `high`) na imagem
+    /// de um repositório do registry. Uma chave por severidade: cada uma abre
+    /// e fecha o próprio alerta — as críticas corrigidas fecham o alerta
+    /// crítico mesmo com altas ainda abertas.
+    #[must_use]
+    pub fn registry_image(repository_id: i64, severity: &str) -> String {
+        format!("registry_image:{repository_id}:{severity}")
+    }
+
     /// Extrai o id quando a chave é de monitor.
     ///
     /// Existe por causa da recuperação: alertas antigos foram gravados só com
@@ -260,6 +299,10 @@ mod tests {
         assert_eq!(
             AlertScopeKey::wifi_roaming("aa:bb:cc:dd:ee:01"),
             "wifi_roaming:aa:bb:cc:dd:ee:01"
+        );
+        assert_eq!(
+            AlertScopeKey::registry_image(5, "critical"),
+            "registry_image:5:critical"
         );
     }
 
@@ -315,6 +358,10 @@ mod tests {
         assert_eq!(context.data["alvoId"], 99);
         assert!(!context.recovered);
         assert!(!context.degraded);
+        // Sem dica do produtor, a tela fica com o alvo e o aviso genérico.
+        assert!(context.data.get(crate::alerts::SOURCE_LABEL).is_none());
+        assert!(context.data.get(crate::alerts::CLOSES_WHEN).is_none());
+        assert!(!context.refresh_open);
 
         assert!(AlertEvaluationContext::of(&Fake { voltou: true }, target).recovered);
     }

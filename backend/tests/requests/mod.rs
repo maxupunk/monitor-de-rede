@@ -69,6 +69,7 @@ mod push;
 mod quick_ping;
 mod reach_monitors;
 mod registry;
+mod registry_vulnerability_alerts;
 mod root;
 mod saas_monitoring;
 mod scheduled_tasks;

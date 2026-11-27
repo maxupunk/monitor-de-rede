@@ -217,10 +217,20 @@ class AlertActionContribution {
     required this.tone,
     required this.area,
     required this.onPressed,
+    this.appliesTo,
   });
 
   final String id;
   final String Function(AlertActionTarget target) label;
+
+  /// Em quais alertas a ação aparece; `null` = em todos (ex.: "Resumo IA").
+  /// Uma área usa para a ação que só faz sentido no alerta dela — o
+  /// `eventType` em `data` diz de onde ele veio.
+  final bool Function(AlertActionTarget target)? appliesTo;
+
+  /// Se a ação aparece no cartão deste alerta.
+  bool isAvailableFor(AlertActionTarget target) =>
+      appliesTo?.call(target) ?? true;
   final IconData icon;
   final SemanticTone tone;
 

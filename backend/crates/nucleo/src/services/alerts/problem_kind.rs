@@ -42,6 +42,8 @@ pub enum ProblemKind {
     WifiRoaming,
     /// Anomalia estatística (Z-Score ou desvio relevante em relação à baseline).
     StatisticalAnomaly,
+    /// Vulnerabilidade conhecida (CVE) em aberto numa imagem do registry.
+    Vulnerability,
 }
 
 impl ProblemKind {
@@ -60,6 +62,7 @@ impl ProblemKind {
             Self::WifiSignal => "wifi_signal",
             Self::WifiRoaming => "wifi_roaming",
             Self::StatisticalAnomaly => "statistical_anomaly",
+            Self::Vulnerability => "vulnerability",
         }
     }
 
@@ -79,6 +82,7 @@ impl ProblemKind {
             "wifi_signal" => Some(Self::WifiSignal),
             "wifi_roaming" => Some(Self::WifiRoaming),
             "statistical_anomaly" | "anomaly" => Some(Self::StatisticalAnomaly),
+            "vulnerability" => Some(Self::Vulnerability),
             _ => None,
         }
     }
@@ -98,6 +102,7 @@ impl ProblemKind {
             Self::WifiSignal => "sinal Wi-Fi ruim",
             Self::WifiRoaming => "ping-pong entre APs",
             Self::StatisticalAnomaly => "anomalia estatística",
+            Self::Vulnerability => "vulnerabilidade na imagem",
         }
     }
 }
@@ -138,6 +143,9 @@ pub fn observed_value(kind: ProblemKind, dataset: &AlertFacts) -> Option<String>
         ProblemKind::WifiRoaming => {
             number(fields::WIFI_ROAM_COUNT).map(|count| format!("{count:.0} trocas de AP"))
         }
+        ProblemKind::Vulnerability => number(fields::IMAGE_VULN_CRITICAL)
+            .map(|count| format!("{count:.0} crítica(s)"))
+            .or_else(|| number(fields::IMAGE_VULN_HIGH).map(|count| format!("{count:.0} alta(s)"))),
         ProblemKind::StatisticalAnomaly => number(fields::LATENCY_Z_SCORE)
             .map(|z| format!("{z:+.1}σ latência"))
             .or_else(|| number(fields::PACKET_LOSS_Z_SCORE).map(|z| format!("{z:+.1}σ perda")))
@@ -219,6 +227,7 @@ fn kind_of_field(field: &str) -> Option<ProblemKind> {
             Some(ProblemKind::WifiSignal)
         }
         fields::WIFI_ROAM_STATUS | fields::WIFI_ROAM_COUNT => Some(ProblemKind::WifiRoaming),
+        fields::IMAGE_VULN_CRITICAL | fields::IMAGE_VULN_HIGH => Some(ProblemKind::Vulnerability),
         // `status`, `statusCode`, `snmpUptime`, tráfego e campos desconhecidos
         // não dizem nada por si: a decisão passa para o dataset.
         _ => None,
@@ -251,6 +260,11 @@ fn classify_by_dataset(dataset: &AlertFacts) -> ProblemKind {
     }
     if dataset.contains_key(fields::WIFI_ROAM_STATUS) {
         return ProblemKind::WifiRoaming;
+    }
+    if dataset.contains_key(fields::IMAGE_VULN_CRITICAL)
+        || dataset.contains_key(fields::IMAGE_VULN_HIGH)
+    {
+        return ProblemKind::Vulnerability;
     }
     if dataset.get("type").and_then(Value::as_str) == Some("dns") {
         return ProblemKind::DnsFailure;
@@ -298,10 +312,27 @@ mod tests {
             ProblemKind::DnsFailure,
             ProblemKind::InterfaceFlap,
             ProblemKind::VpnInstability,
+            ProblemKind::Vulnerability,
         ] {
             assert_eq!(ProblemKind::parse(kind.as_str()), Some(kind));
         }
         assert_eq!(ProblemKind::parse("flapping"), None);
+    }
+
+    #[test]
+    fn vulnerabilidade_na_imagem_tem_tipo_e_valor_proprios() {
+        let critical = dataset(&[(fields::IMAGE_VULN_CRITICAL, json!(2))]);
+        assert_eq!(
+            classify(Some(fields::IMAGE_VULN_CRITICAL), &critical),
+            ProblemKind::Vulnerability
+        );
+        // Sem regra (o caminho do `warning`), o dataset basta.
+        let high = dataset(&[(fields::IMAGE_VULN_HIGH, json!(12))]);
+        assert_eq!(classify(None, &high), ProblemKind::Vulnerability);
+        assert_eq!(
+            observed_value(ProblemKind::Vulnerability, &high).as_deref(),
+            Some("12 alta(s)")
+        );
     }
 
     #[test]

@@ -3,20 +3,57 @@ import 'package:netmonitor_app/core/utils/json_parsers.dart';
 
 @immutable
 class RegistrySettings {
-  const RegistrySettings({required this.keepVersions, required this.quotaGib});
+  const RegistrySettings({
+    required this.keepVersions,
+    required this.quotaGib,
+    this.vulnerabilityAlerts = RegistryVulnerabilityAlerts.high,
+  });
 
   final int keepVersions;
   final int quotaGib;
 
+  /// A partir de qual severidade a vulnerabilidade vira alerta em `/alerts`.
+  final RegistryVulnerabilityAlerts vulnerabilityAlerts;
+
+  RegistrySettings copyWith({
+    int? keepVersions,
+    int? quotaGib,
+    RegistryVulnerabilityAlerts? vulnerabilityAlerts,
+  }) {
+    return RegistrySettings(
+      keepVersions: keepVersions ?? this.keepVersions,
+      quotaGib: quotaGib ?? this.quotaGib,
+      vulnerabilityAlerts: vulnerabilityAlerts ?? this.vulnerabilityAlerts,
+    );
+  }
+
   Map<String, dynamic> toJson() => <String, dynamic>{
     'keepVersions': keepVersions,
     'quotaGib': quotaGib,
+    'vulnerabilityAlerts': vulnerabilityAlerts.name,
   };
 
   factory RegistrySettings.fromJson(Map<String, dynamic> json) {
     return RegistrySettings(
       keepVersions: parseIntOrNull(json['keepVersions']) ?? 10,
       quotaGib: parseIntOrNull(json['quotaGib']) ?? 20,
+      vulnerabilityAlerts: RegistryVulnerabilityAlerts.parse(
+        json['vulnerabilityAlerts'],
+      ),
+    );
+  }
+}
+
+/// `RegistryVulnerabilityAlerts` do backend: o nome é o valor no fio.
+enum RegistryVulnerabilityAlerts {
+  off,
+  critical,
+  high;
+
+  static RegistryVulnerabilityAlerts parse(Object? raw) {
+    return RegistryVulnerabilityAlerts.values.firstWhere(
+      (value) => value.name == raw,
+      orElse: () => RegistryVulnerabilityAlerts.high,
     );
   }
 }
@@ -64,6 +101,7 @@ class RegistryRepositoryView {
     required this.versions,
     required this.bytes,
     this.lastPush,
+    this.latestTag,
     this.latestScan,
   });
 
@@ -74,6 +112,10 @@ class RegistryRepositoryView {
   final int versions;
   final int bytes;
   final String? lastPush;
+
+  /// A tag empurrada por último — a versão que o alerta de vulnerabilidade
+  /// acompanha.
+  final String? latestTag;
   final RegistryScanSummary? latestScan;
 
   factory RegistryRepositoryView.fromJson(Map<String, dynamic> json) {
@@ -87,6 +129,7 @@ class RegistryRepositoryView {
       versions: parseIntOrNull(json['versions']) ?? 0,
       bytes: parseIntOrNull(json['bytes']) ?? 0,
       lastPush: json['lastPush'] as String? ?? json['lastPushedAt'] as String?,
+      latestTag: json['latestTag'] as String?,
       latestScan: rawScan is Map
           ? RegistryScanSummary.fromJson(asJsonMap(rawScan))
           : null,

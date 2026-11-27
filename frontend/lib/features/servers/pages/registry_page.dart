@@ -17,15 +17,21 @@ import 'package:netmonitor_app/theme/app_theme.dart';
 
 /// Página do Container Registry (`/registry` — ADR 022 / ADR 023).
 /// 4 abas: Imagens, Tokens de acesso, Vulnerabilidades e Configurações (admin).
+///
+/// `?tab=` escolhe a aba ([kRegistryTabs]) e `?repository=` abre a imagem — é
+/// por onde o alerta de vulnerabilidade em `/alerts` e o menu chegam aqui.
 class RegistryPage extends ConsumerStatefulWidget {
-  const RegistryPage({super.key});
+  const RegistryPage({super.key, this.tab, this.repositoryId});
+
+  final String? tab;
+  final int? repositoryId;
 
   @override
   ConsumerState<RegistryPage> createState() => _RegistryPageState();
 }
 
 class _RegistryPageState extends ConsumerState<RegistryPage> {
-  int _tabIndex = 0;
+  late int _tabIndex = registryTabIndex(widget.tab);
 
   final TextEditingController _keepVersionsCtrl = TextEditingController();
   final TextEditingController _quotaGibCtrl = TextEditingController();
@@ -36,6 +42,35 @@ class _RegistryPageState extends ConsumerState<RegistryPage> {
   void initState() {
     super.initState();
     Future<void>.microtask(_bootstrap);
+  }
+
+  @override
+  void didUpdateWidget(covariant RegistryPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // O mesmo `/registry` com outra aba ou imagem (o menu, um alerta).
+    if (oldWidget.tab != widget.tab) {
+      setState(() => _tabIndex = registryTabIndex(widget.tab));
+    }
+    if (oldWidget.repositoryId != widget.repositoryId) {
+      Future<void>.microtask(_openRequestedRepository);
+    }
+  }
+
+  /// Abre a imagem pedida em `?repository=`, quando ela está na visão geral.
+  void _openRequestedRepository() {
+    final id = widget.repositoryId;
+    if (id == null || !mounted) return;
+    final repos =
+        ref.read(registryProvider).overview?.repositories ??
+        const <RegistryRepositoryView>[];
+    final repo = repos.where((r) => r.id == id).firstOrNull;
+    if (repo == null) return;
+    showRegistryRepositoryDetailSheet(
+      context,
+      repository: repo,
+      canAdmin:
+          ref.read(authProvider).roleIn(ProductArea.servers) == UserRole.admin,
+    );
   }
 
   @override
@@ -50,6 +85,7 @@ class _RegistryPageState extends ConsumerState<RegistryPage> {
     await notifier.fetchOverview();
     if (!mounted) return;
     _syncSettingsFields();
+    _openRequestedRepository();
     await Future.wait<void>(<Future<void>>[
       notifier.fetchTokens(),
       notifier.fetchExceptions(),
@@ -69,11 +105,15 @@ class _RegistryPageState extends ConsumerState<RegistryPage> {
 
   Future<void> _saveSettings() async {
     setState(() => _savingSettings = true);
+    // O que esta aba não edita (o alerta de vulnerabilidade) segue como está.
+    final current =
+        ref.read(registryProvider).overview?.settings ??
+        const RegistrySettings(keepVersions: 10, quotaGib: 20);
     try {
       await ref
           .read(registryProvider.notifier)
           .saveSettings(
-            RegistrySettings(
+            current.copyWith(
               keepVersions: (int.tryParse(_keepVersionsCtrl.text.trim()) ?? 10)
                   .clamp(1, 200),
               quotaGib: (int.tryParse(_quotaGibCtrl.text.trim()) ?? 20).clamp(

@@ -139,6 +139,8 @@ async fn remove(
         format!("Versão {} apagada do registry", row.digest),
     )
     .await;
+    // A versão mais recente pode ter mudado: o alerta passa a olhar a outra.
+    scan::alerts::evaluate_all(&ctx).await;
     events::publish_changed(&ctx);
     Ok(StatusCode::NO_CONTENT.into_response())
 }
@@ -162,11 +164,15 @@ async fn save_settings(
         AuditAction::Update,
         (0, "registry"),
         format!(
-            "Registry: guardar {} versões, cota de {} GiB",
-            input.keep_versions, input.quota_gib
+            "Registry: guardar {} versões, cota de {} GiB, alertas de vulnerabilidade: {}",
+            input.keep_versions,
+            input.quota_gib,
+            input.vulnerability_alerts.label()
         ),
     )
     .await;
+    // Desligar fecha os alertas abertos; ligar abre os que valem agora.
+    scan::alerts::evaluate_all(&ctx).await;
     events::publish_changed(&ctx);
     Ok(format::json(input)?)
 }
@@ -260,6 +266,8 @@ async fn add_exception(
         ),
     )
     .await;
+    // Risco aceito: o alerta que só existia por ele fecha.
+    scan::alerts::evaluate_all(&ctx).await;
     events::publish_changed(&ctx);
     Ok(StatusCode::CREATED.into_response())
 }
@@ -279,6 +287,7 @@ async fn remove_exception(
         format!("Exceção #{id} removida"),
     )
     .await;
+    scan::alerts::evaluate_all(&ctx).await;
     events::publish_changed(&ctx);
     Ok(StatusCode::NO_CONTENT.into_response())
 }
@@ -316,6 +325,7 @@ async fn collect(State(ctx): State<AppContext>, headers: HeaderMap) -> AppResult
         format!("Limpeza do registry: {freed} bytes liberados"),
     )
     .await;
+    scan::alerts::evaluate_all(&ctx).await;
     Ok(format::json(
         serde_json::json!({ "freedBytes": freed, "repositories": catalog::count_repositories(&ctx.db).await? }),
     )?)

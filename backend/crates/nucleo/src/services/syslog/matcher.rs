@@ -395,6 +395,7 @@ pub async fn evaluate(ctx: &AppContext, matcher: &PatternMatcher) -> AppResult<u
                 // acontecer. Sem isto o alerta nunca resolveria.
                 recovered: observacao.count == 0,
                 degraded: false,
+                refresh_open: false,
             },
         )
         .await

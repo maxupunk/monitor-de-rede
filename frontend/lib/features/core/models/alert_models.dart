@@ -224,6 +224,22 @@ class AlertEvent {
   Map<String, dynamic>? get aiSummary =>
       data?['aiSummary'] is Map ? asJsonMap(data!['aiSummary']) : null;
 
+  /// De onde o alerta vem quando não há equipamento nem monitor (o produtor
+  /// grava em `data.sourceLabel`, ex.: "Registry · vulnerabilidades").
+  String? get sourceLabel => _dataText('sourceLabel');
+
+  /// Como o alerta fecha sozinho, quando o produtor sabe dizer
+  /// (`data.closesWhen`).
+  String? get closesWhen => _dataText('closesWhen');
+
+  /// Onde o alerta aconteceu, para o subtítulo do cartão.
+  String get originLabel => deviceName ?? monitorName ?? sourceLabel ?? 'Geral';
+
+  String? _dataText(String key) {
+    final value = data?[key];
+    return value is String && value.trim().isNotEmpty ? value : null;
+  }
+
   Map<String, dynamic>? get deciderTriage =>
       data?['deciderTriage'] is Map ? asJsonMap(data!['deciderTriage']) : null;
 

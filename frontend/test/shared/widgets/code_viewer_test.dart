@@ -106,6 +106,82 @@ void main() {
     expect(find.textContaining('Ir para o fim'), findsNothing);
   });
 
+  group('barras de rolagem nas bordas do console', () {
+    Future<void> pumpStatic(WidgetTester tester, String code) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          child: MaterialApp(
+            theme: AppTheme.light(),
+            home: Scaffold(
+              body: CodeViewer(title: 'Console', code: code, maxHeight: 200),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    Finder scrollbarOf(Axis axis) => find.byWidgetPredicate(
+      (w) =>
+          w is Scrollbar &&
+          w.controller != null &&
+          w.controller!.hasClients &&
+          w.controller!.position.axis == axis,
+    );
+
+    /// A primeira é a do console; o `SelectableText` tem a sua, interna.
+    Finder scrollableOf(AxisDirection direction) => find
+        .byWidgetPredicate(
+          (w) => w is Scrollable && w.axisDirection == direction,
+        )
+        .first;
+
+    /// A barra vertical e a viewport vão até a borda direita do console
+    /// (descontada a borda de 1 px), e a horizontal até a borda de baixo.
+    void expectAtEdges(WidgetTester tester) {
+      final console = tester.getRect(find.byType(CodeViewer));
+      final vertical = tester.getRect(scrollbarOf(Axis.vertical));
+      final horizontal = tester.getRect(scrollbarOf(Axis.horizontal));
+      final viewport = tester.getRect(scrollableOf(AxisDirection.down));
+      expect(vertical.right, moreOrLessEquals(console.right - 1));
+      expect(viewport.right, moreOrLessEquals(console.right - 1));
+      expect(vertical.width, moreOrLessEquals(console.width - 2));
+      expect(horizontal.bottom, moreOrLessEquals(console.bottom - 1));
+      expect(horizontal.right, moreOrLessEquals(console.right - 1));
+    }
+
+    testWidgets('linhas curtas num console largo: vertical na borda direita', (
+      tester,
+    ) async {
+      await pumpStatic(tester, _lines(80));
+      final textWidth = tester.getSize(find.byType(SelectableText)).width;
+      final consoleWidth = tester.getSize(find.byType(CodeViewer)).width;
+      expect(textWidth, lessThan(consoleWidth / 2), reason: 'linhas curtas');
+      expect(_verticalPosition(tester).maxScrollExtent, greaterThan(0));
+      expectAtEdges(tester);
+    });
+
+    testWidgets(
+      'linhas longas rolam na horizontal e a vertical fica na borda',
+      (tester) async {
+        final long = List<String>.generate(
+          80,
+          (i) => 'linha ${i + 1} ${'x' * 300}',
+        ).join('\n');
+        await pumpStatic(tester, long);
+        final horizontal = tester
+            .state<ScrollableState>(scrollableOf(AxisDirection.right))
+            .position;
+        expect(horizontal.maxScrollExtent, greaterThan(0));
+        expectAtEdges(tester);
+
+        horizontal.jumpTo(horizontal.maxScrollExtent);
+        await tester.pumpAndSettle();
+        expectAtEdges(tester);
+      },
+    );
+  });
+
   group('AiLogAnalysisButton no cabeçalho', () {
     Future<void> pumpButton(
       WidgetTester tester, {

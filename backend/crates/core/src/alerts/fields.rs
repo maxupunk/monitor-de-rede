@@ -144,6 +144,15 @@ pub const WIFI_ROAM_STATUS: &str = "wifiRoamStatus";
 /// Quantas trocas de AP o aparelho fez dentro da janela configurada.
 pub const WIFI_ROAM_COUNT: &str = "wifiRoamCount";
 
+// --- Vulnerabilidades nas imagens do registry --------------------------------
+
+/// Vulnerabilidades críticas em aberto na versão mais recente da imagem — sem
+/// as cobertas por exceção válida. Só existe no dataset da severidade crítica.
+pub const IMAGE_VULN_CRITICAL: &str = "imageVulnCritical";
+/// Vulnerabilidades altas em aberto na versão mais recente da imagem. Só
+/// existe no dataset da severidade alta.
+pub const IMAGE_VULN_HIGH: &str = "imageVulnHigh";
+
 // --- Padrões no log recebido por syslog -------------------------------------
 
 /// Chave do padrão que casou, igual à do template (`log_login_failure`).
@@ -161,7 +170,7 @@ pub const VPN_PREVIOUS_STATUS: &str = "vpnPreviousStatus";
 
 /// Vocabulário completo oferecido na tela de regras. A **ordem importa**: é a
 /// ordem em que os campos aparecem no seletor da interface.
-pub const ALERT_FIELDS: [&str; 60] = [
+pub const ALERT_FIELDS: [&str; 62] = [
     STATUS,
     REACHABILITY_CAUSE,
     LATENCY_MS,
@@ -196,6 +205,8 @@ pub const ALERT_FIELDS: [&str; 60] = [
     WIFI_CLIENT_HEALTH,
     WIFI_ROAM_STATUS,
     WIFI_ROAM_COUNT,
+    IMAGE_VULN_CRITICAL,
+    IMAGE_VULN_HIGH,
     LOG_PATTERN_KEY,
     LOG_MATCH_COUNT,
     LOG_WINDOW_SECONDS,

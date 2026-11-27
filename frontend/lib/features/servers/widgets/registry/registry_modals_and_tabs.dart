@@ -7,6 +7,8 @@ import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/servers/models/registry_models.dart';
 import 'package:netmonitor_app/features/servers/providers/registry_provider.dart';
 import 'package:netmonitor_app/features/servers/utils/server_utils.dart';
+import 'package:netmonitor_app/features/servers/widgets/registry/registry_repository_sheets.dart';
+import 'package:netmonitor_app/features/servers/widgets/registry/registry_vulnerability_alerts_card.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
 
@@ -528,6 +530,14 @@ class RegistryVulnerabilitiesTab extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
+        _OpenVulnerabilitiesSection(
+          repositories:
+              overview?.repositories ?? const <RegistryRepositoryView>[],
+          canAdmin: canAdmin,
+        ),
+        const SizedBox(height: 14),
+        const RegistryVulnerabilityAlertsCard(showRegistryLink: false),
+        const SizedBox(height: 14),
         SectionCard(
           title: 'Bases locais de vulnerabilidades (OSV.dev)',
           subtitle:
@@ -653,6 +663,76 @@ class RegistryVulnerabilitiesTab extends ConsumerWidget {
                 ),
         ),
       ],
+    );
+  }
+}
+
+/// As imagens cuja versão mais recente tem vulnerabilidade crítica ou alta —
+/// o que vira alerta em `/alerts` — e como fechar cada uma.
+class _OpenVulnerabilitiesSection extends StatelessWidget {
+  const _OpenVulnerabilitiesSection({
+    required this.repositories,
+    required this.canAdmin,
+  });
+
+  final List<RegistryRepositoryView> repositories;
+  final bool canAdmin;
+
+  @override
+  Widget build(BuildContext context) {
+    final open = repositoriesWithOpenVulnerabilities(repositories);
+
+    return SectionCard(
+      title: 'Imagens com vulnerabilidades em aberto',
+      subtitle:
+          'Versão mais recente de cada imagem, críticas e altas — é o que aparece em Alertas.',
+      icon: Icons.gpp_bad_outlined,
+      iconTone: open.isEmpty ? SemanticTone.success : SemanticTone.error,
+      child: open.isEmpty
+          ? const EmptyStateView(
+              icon: Icons.verified_user_outlined,
+              tone: SemanticTone.success,
+              title: 'Nenhuma vulnerabilidade crítica ou alta',
+              description:
+                  'Toda imagem analisada está limpa nessas severidades (ou com o risco aceito).',
+            )
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                const NestedPanel(
+                  tone: SemanticTone.info,
+                  child: Text(
+                    'Para fechar o alerta: recompile a aplicação sem cache e publique a versão '
+                    'corrigida, ou aceite o risco com uma exceção abaixo. Toque na imagem para '
+                    'ver cada vulnerabilidade e o pacote que a corrige.',
+                  ),
+                ),
+                const SizedBox(height: 10),
+                for (final repo in open)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: ChoiceCard(
+                      title: repo.name,
+                      subtitle: <String>[
+                        if (repo.latestTag != null)
+                          'Versão ${shortRegistryTag(repo.latestTag!)}',
+                        registryScanSentence(repo.latestScan),
+                        if (repo.applicationName != null)
+                          'App ${repo.applicationName}',
+                      ].join(' · '),
+                      icon: Icons.inventory_2_outlined,
+                      tone: registryScanTone(repo.latestScan),
+                      badge: repo.latestScan!.critical > 0 ? 'Crítica' : 'Alta',
+                      badgeTone: registryScanTone(repo.latestScan),
+                      onTap: () => showRegistryRepositoryDetailSheet(
+                        context,
+                        repository: repo,
+                        canAdmin: canAdmin,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
     );
   }
 }

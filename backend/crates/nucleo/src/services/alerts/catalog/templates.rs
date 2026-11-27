@@ -101,10 +101,11 @@ pub enum AlertCategory {
     Vpn,
     Logs,
     Wifi,
+    Vulnerabilidades,
 }
 
 impl AlertCategory {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::Disponibilidade,
         Self::Desempenho,
         Self::Servicos,
@@ -114,6 +115,7 @@ impl AlertCategory {
         Self::Vpn,
         Self::Logs,
         Self::Wifi,
+        Self::Vulnerabilidades,
     ];
 
     #[must_use]
@@ -128,6 +130,7 @@ impl AlertCategory {
             Self::Vpn => "vpn",
             Self::Logs => "logs",
             Self::Wifi => "wifi",
+            Self::Vulnerabilidades => "vulnerabilidades",
         }
     }
 
@@ -144,6 +147,7 @@ impl AlertCategory {
             Self::Vpn => "Túneis VPN (WireGuard)",
             Self::Logs => "Padrões no log (syslog)",
             Self::Wifi => "Aparelhos vigiados (Wi-Fi)",
+            Self::Vulnerabilidades => "Vulnerabilidades nas imagens (CVE)",
         }
     }
 
@@ -159,6 +163,7 @@ impl AlertCategory {
             | Self::Logs => Area::Core,
             Self::Interfaces | Self::Equipamento | Self::Wifi => Area::Network,
             Self::Vpn => Area::Vpn,
+            Self::Vulnerabilidades => Area::Servers,
         }
     }
 }
@@ -745,6 +750,55 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             inhibit_when_parent_down: false,
             recommended: false,
         },
+        // --- Vulnerabilidades nas imagens do registry ----------------------
+        //
+        // Fora do conjunto básico: entram quando a primeira imagem analisada
+        // traz uma vulnerabilidade crítica ou alta
+        // (`catalog::once::ensure_image_vulnerabilities`) — sem registry em
+        // uso, não há o que vigiar. O fato é a versão mais recente de cada
+        // repositório, já sem as exceções aceitas; a severidade mínima que
+        // vira fato é ajuste do registry (Configurações › Notificações).
+        AlertRuleTemplate {
+            key: "image_vulnerability_critical",
+            name: "Imagem com vulnerabilidade crítica",
+            description: "A versão mais recente de uma imagem do registry tem vulnerabilidade crítica conhecida (CVE) sem exceção aceita. Só avisa: não bloqueia compilação nem deploy. Fecha sozinho quando uma versão corrigida é publicada ou o risco é aceito.",
+            category: AlertCategory::Vulnerabilidades,
+            rule_type: "custom",
+            condition: json!({
+                "field": fields::IMAGE_VULN_CRITICAL,
+                "operator": "gte",
+                "value": 1,
+            }),
+            severity: "critical",
+            duration_seconds: 0,
+            // O fato é estado, não leitura: some a vulnerabilidade, fecha na hora.
+            recovery_window_seconds: 0,
+            flap_threshold: 0,
+            flap_window_seconds: 900,
+            notification_cooldown_seconds: 900,
+            inhibit_when_parent_down: false,
+            recommended: false,
+        },
+        AlertRuleTemplate {
+            key: "image_vulnerability_high",
+            name: "Imagem com vulnerabilidade alta",
+            description: "A versão mais recente de uma imagem do registry tem vulnerabilidade alta conhecida (CVE) sem exceção aceita. Só avisa: não bloqueia compilação nem deploy. Fecha sozinho quando uma versão corrigida é publicada ou o risco é aceito.",
+            category: AlertCategory::Vulnerabilidades,
+            rule_type: "custom",
+            condition: json!({
+                "field": fields::IMAGE_VULN_HIGH,
+                "operator": "gte",
+                "value": 1,
+            }),
+            severity: "warning",
+            duration_seconds: 0,
+            recovery_window_seconds: 0,
+            flap_threshold: 0,
+            flap_window_seconds: 900,
+            notification_cooldown_seconds: 900,
+            inhibit_when_parent_down: false,
+            recommended: false,
+        },
         // --- Padrões no log (Fase 6 do roadmap de syslog) -------------------
         log_pattern(LogPatternSpec {
             key: "log_login_failure",
@@ -892,6 +946,11 @@ pub const WIFI_WATCH_KEYS: [&str; 2] = ["wifi_watched_offline", "wifi_watched_po
 /// A regra do ping-pong de roaming, aplicada quando o primeiro roaming é visto.
 pub const WIFI_ROAMING_KEYS: [&str; 1] = ["wifi_roaming_ping_pong"];
 
+/// As regras de vulnerabilidade nas imagens, aplicadas quando a primeira
+/// imagem analisada traz uma crítica ou alta.
+pub const IMAGE_VULNERABILITY_KEYS: [&str; 2] =
+    ["image_vulnerability_critical", "image_vulnerability_high"];
+
 /// Um template pela chave.
 #[must_use]
 pub fn find(key: &str) -> Option<AlertRuleTemplate> {
@@ -913,8 +972,8 @@ mod tests {
     /// roadmap de syslog) + 3 de saúde de equipamento (Fase 3 do roadmap do
     /// servidor como dispositivo) + 3 de baseline móvel + 3 de anomalias
     /// estatísticas (§2.3.3) + 2 dos aparelhos Wi-Fi vigiados + 1 do
-    /// ping-pong de roaming.
-    const TOTAL_TEMPLATES: usize = 38;
+    /// ping-pong de roaming + 2 de vulnerabilidade nas imagens do registry.
+    const TOTAL_TEMPLATES: usize = 40;
 
     #[test]
     fn o_catalogo_tem_os_templates_dos_dois_roadmaps() {
@@ -945,7 +1004,7 @@ mod tests {
                 template.category.id()
             );
         }
-        assert_eq!(labels.len(), 9);
+        assert_eq!(labels.len(), 10);
     }
 
     #[test]

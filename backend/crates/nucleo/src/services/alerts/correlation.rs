@@ -13,7 +13,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use chrono::{Duration, Utc};
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, Condition, ConnectionTrait, EntityTrait, QueryFilter};
 
 use crate::{
     models::{_entities::alert_events as alert_events_entity, alert_events, device_links, devices},
@@ -818,8 +818,17 @@ pub async fn analyze_active_clusters<C: ConnectionTrait>(
 ) -> AppResult<RootCauseAnalysisSummary> {
     let window = window_seconds.unwrap_or(DEFAULT_WINDOW_SECONDS).max(1);
 
+    // A causa raiz é de topologia (dependência entre equipamentos, site,
+    // rede): alerta sem equipamento nem monitor — a vulnerabilidade de uma
+    // imagem, por exemplo — não tem onde se encaixar e viraria um falso
+    // "Dispositivo isolado" com zero alvos.
     let open_events = alert_events::Entity::find()
         .filter(alert_events_entity::Column::Status.is_in(AlertStatus::OPEN))
+        .filter(
+            Condition::any()
+                .add(alert_events_entity::Column::DeviceId.is_not_null())
+                .add(alert_events_entity::Column::MonitorId.is_not_null()),
+        )
         .all(db)
         .await?;
 

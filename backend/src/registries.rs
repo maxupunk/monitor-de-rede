@@ -135,6 +135,20 @@ impl netmonitor_servers::central::CentralServices for ServersCentral {
         .await?
         .sent)
     }
+
+    async fn evaluate_alert(
+        &self,
+        ctx: &AppContext,
+        context: &AlertEvaluationContext,
+    ) -> AppResult<()> {
+        alert_manager::evaluate(ctx, context).await
+    }
+
+    async fn ensure_image_vulnerability_rules(&self, db: &DatabaseConnection) -> AppResult<()> {
+        alert_catalog::once::ensure_image_vulnerabilities(db)
+            .await
+            .map(|_| ())
+    }
 }
 
 /// Os serviços da central para a área Servidores, para o `shared_store`.

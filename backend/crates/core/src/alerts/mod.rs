@@ -13,6 +13,16 @@ pub mod triage;
 /// como `lastProblemAt`).
 pub const PROBLEM_KIND: &str = "problemKind";
 
+/// Chave de `alert_events.data` com a origem do alerta quando ele não tem
+/// equipamento nem monitor ("Registry · vulnerabilidades") — o cartão em
+/// `/alerts` a mostra no lugar de "Geral".
+pub const SOURCE_LABEL: &str = "sourceLabel";
+
+/// Chave de `alert_events.data` com como o alerta fecha sozinho, quando o
+/// produtor sabe dizer — o cartão a mostra no lugar do aviso genérico de
+/// alerta de evento.
+pub const CLOSES_WHEN: &str = "closesWhen";
+
 /// Peso de prioridade topológica por tipo de equipamento.
 #[must_use]
 pub fn role_weight(device_type: &str) -> i32 {

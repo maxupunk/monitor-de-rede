@@ -882,7 +882,7 @@ class _AlertEventCard extends StatelessWidget {
     return SectionCard(
       title: alert.title,
       subtitle:
-          '${alert.deviceName ?? alert.monitorName ?? 'Geral'} · ${formatRelativeTime(alert.startedAt ?? alert.createdAt)}',
+          '${alert.originLabel} · ${formatRelativeTime(alert.startedAt ?? alert.createdAt)}',
       icon: Icons.notifications_active_outlined,
       iconTone: tone,
       trailing: SemanticChip(
@@ -907,8 +907,9 @@ class _AlertEventCard extends StatelessWidget {
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
-                    'Alerta de evento: fecha sozinho quando o evento de volta '
-                    'chega. Se a condição já passou, encerre-o.',
+                    alert.closesWhen ??
+                        'Alerta de evento: fecha sozinho quando o evento de volta '
+                            'chega. Se a condição já passou, encerre-o.',
                     style: context.textTheme.bodySmall,
                   ),
                 ),
@@ -1007,12 +1008,13 @@ class _AlertEventCard extends StatelessWidget {
                 ),
               ),
               for (final action in extraActions)
-                _ExtraActionButton(
-                  action: action,
-                  label: action.label(actionTarget),
-                  padding: compactBtnPadding,
-                  onPressed: () => onExtraAction(action, actionTarget),
-                ),
+                if (action.isAvailableFor(actionTarget))
+                  _ExtraActionButton(
+                    action: action,
+                    label: action.label(actionTarget),
+                    padding: compactBtnPadding,
+                    onPressed: () => onExtraAction(action, actionTarget),
+                  ),
             ],
           ),
         ],

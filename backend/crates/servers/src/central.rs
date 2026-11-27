@@ -1,7 +1,8 @@
 //! O que a área Servidores pede ao resto da central (ADR 017).
 //!
 //! O deploy contínuo avisa pelos canais de notificação (Telegram, Discord,
-//! e-mail, webhook) e por Web Push a quem tem acesso à área — peças do
+//! e-mail, webhook) e por Web Push a quem tem acesso à área; o registry
+//! entrega as vulnerabilidades das imagens ao motor de alertas — peças do
 //! núcleo que esta área não pode nomear. O ponto de montagem implementa
 //! [`CentralServices`] e o põe no `shared_store`, em todo processo.
 
@@ -10,6 +11,7 @@ use std::{ops::Deref, sync::Arc};
 use async_trait::async_trait;
 use loco_rs::app::AppContext;
 use netmonitor_core::{
+    alerts::contracts::AlertEvaluationContext,
     notifications::NotificationMessage,
     shared::errors::{AppError, AppResult},
 };
@@ -24,6 +26,18 @@ pub trait CentralServices: Send + Sync {
     /// Web Push a quem tem acesso à área Servidores (ADR 019). Devolve quantos
     /// aparelhos receberam.
     async fn push_to_servers(&self, db: &DatabaseConnection, payload: &Value) -> AppResult<u64>;
+
+    /// Entrega um conjunto de fatos ao motor de alertas, que decide pelas
+    /// regras configuradas se abre, mantém ou fecha um alerta.
+    async fn evaluate_alert(
+        &self,
+        ctx: &AppContext,
+        context: &AlertEvaluationContext,
+    ) -> AppResult<()>;
+
+    /// Cria, uma vez na vida da instalação, as regras de vulnerabilidade nas
+    /// imagens — chamado quando a primeira vulnerabilidade aparece.
+    async fn ensure_image_vulnerability_rules(&self, db: &DatabaseConnection) -> AppResult<()>;
 }
 
 /// O [`CentralServices`] do processo, guardado no `shared_store`.

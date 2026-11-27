@@ -38,6 +38,7 @@ class _CodeViewerState extends State<CodeViewer> {
   static const double _bottomSlack = 24;
 
   final ScrollController _vertical = ScrollController();
+  final ScrollController _horizontal = ScrollController();
 
   /// Quem lê está no fim: linha nova rola junto.
   bool _following = true;
@@ -72,6 +73,7 @@ class _CodeViewerState extends State<CodeViewer> {
   @override
   void dispose() {
     _vertical.dispose();
+    _horizontal.dispose();
     super.dispose();
   }
 
@@ -176,22 +178,46 @@ class _CodeViewerState extends State<CodeViewer> {
             constraints: BoxConstraints(
               maxHeight: widget.maxHeight ?? double.infinity,
             ),
+            // `passthrough`: a viewport ocupa a largura toda do console, e
+            // não só a do texto — senão a barra vertical fica colada ao fim
+            // da linha mais larga, no meio do console.
             child: Stack(
+              fit: StackFit.passthrough,
               children: <Widget>[
-                NotificationListener<ScrollNotification>(
-                  onNotification: _onScroll,
-                  child: SingleChildScrollView(
-                    controller: _vertical,
-                    child: SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      padding: const EdgeInsets.all(14),
-                      child: SelectableText(
-                        widget.code,
-                        style: TextStyle(
-                          fontFamily: 'monospace',
-                          fontSize: 12.5,
-                          height: 1.45,
-                          color: scheme.onSurface,
+                // As duas barras envolvem a viewport externa: a vertical fica
+                // na borda direita e a horizontal (notificações de
+                // profundidade 1, da rolagem interna) na borda de baixo da
+                // área visível, qualquer que seja a largura das linhas.
+                Scrollbar(
+                  controller: _vertical,
+                  child: Scrollbar(
+                    controller: _horizontal,
+                    notificationPredicate: (notification) =>
+                        notification.depth == 1,
+                    child: ScrollConfiguration(
+                      // As barras são as de cima; sem as automáticas do
+                      // desktop, que seguiriam o conteúdo.
+                      behavior: ScrollConfiguration.of(
+                        context,
+                      ).copyWith(scrollbars: false),
+                      child: NotificationListener<ScrollNotification>(
+                        onNotification: _onScroll,
+                        child: SingleChildScrollView(
+                          controller: _vertical,
+                          child: SingleChildScrollView(
+                            controller: _horizontal,
+                            scrollDirection: Axis.horizontal,
+                            padding: const EdgeInsets.all(14),
+                            child: SelectableText(
+                              widget.code,
+                              style: TextStyle(
+                                fontFamily: 'monospace',
+                                fontSize: 12.5,
+                                height: 1.45,
+                                color: scheme.onSurface,
+                              ),
+                            ),
+                          ),
                         ),
                       ),
                     ),

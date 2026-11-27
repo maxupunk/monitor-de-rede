@@ -8,6 +8,7 @@
 //! volta a contar sem nova análise.
 
 pub mod advisory;
+pub mod alerts;
 pub mod osv;
 pub mod packages;
 pub mod version;
@@ -252,7 +253,9 @@ async fn from_layers(store: &dyn BlobStore, image: &registry_manifests::Model) -
 ///
 /// Erro do banco.
 pub async fn run(ctx: &AppContext, top: &registry_manifests::Model) -> AppResult<()> {
-    run_inner(ctx, top, true).await
+    run_inner(ctx, top, true).await?;
+    alerts::evaluate_repository(ctx, top.repository_id).await;
+    Ok(())
 }
 
 async fn run_inner(
@@ -427,6 +430,35 @@ impl Exceptions {
     }
 }
 
+/// Os achados de uma versão que continuam valendo — sem os cobertos por
+/// exceção válida — e quantos a exceção cobriu. É a mesma conta para o
+/// veredito do deploy e para o alerta da imagem.
+///
+/// # Errors
+///
+/// Erro do banco.
+pub async fn open_findings(
+    db: &DatabaseConnection,
+    manifest: &registry_manifests::Model,
+    application_id: Option<i64>,
+) -> AppResult<(Vec<registry_findings::Model>, u32)> {
+    let findings = registry_findings::Entity::find()
+        .filter(registry_findings::Column::ManifestId.eq(manifest.id))
+        .all(db)
+        .await?;
+    let exceptions = Exceptions::active(db, application_id).await?;
+    let (skipped, kept): (Vec<_>, Vec<_>) = findings
+        .into_iter()
+        .partition(|finding| exceptions.covers(finding));
+    Ok((kept, u32::try_from(skipped.len()).unwrap_or(u32::MAX)))
+}
+
+/// Como um achado aparece numa mensagem (`CVE-… em pacote`).
+#[must_use]
+pub fn finding_label(finding: &registry_findings::Model) -> String {
+    format!("{} em {}", finding.advisory, finding.package)
+}
+
 /// O veredito com as exceções válidas descontadas.
 ///
 /// # Errors
@@ -437,19 +469,12 @@ pub async fn verdict(
     manifest: &registry_manifests::Model,
     application_id: Option<i64>,
 ) -> AppResult<ScanVerdict> {
-    let findings = registry_findings::Entity::find()
-        .filter(registry_findings::Column::ManifestId.eq(manifest.id))
-        .all(db)
-        .await?;
-    let exceptions = Exceptions::active(db, application_id).await?;
-    let excepted = |finding: &&registry_findings::Model| exceptions.covers(finding);
-    let (skipped, kept): (Vec<_>, Vec<_>) = findings.iter().partition(excepted);
+    let (mut kept, excepted) = open_findings(db, manifest, application_id).await?;
     let counts = count(
         kept.iter()
             .map(|finding| Severity::parse(&finding.severity)),
     );
-    let mut worst = kept.clone();
-    worst.sort_by_key(|finding| std::cmp::Reverse(Severity::parse(&finding.severity)));
+    kept.sort_by_key(|finding| std::cmp::Reverse(Severity::parse(&finding.severity)));
     Ok(ScanVerdict {
         status: manifest
             .scan_status
@@ -460,12 +485,8 @@ pub async fn verdict(
         medium: counts[2],
         low: counts[1],
         unknown: counts[0],
-        excepted: u32::try_from(skipped.len()).unwrap_or(u32::MAX),
-        top: worst
-            .iter()
-            .take(5)
-            .map(|finding| format!("{} em {}", finding.advisory, finding.package))
-            .collect(),
+        excepted,
+        top: kept.iter().take(5).map(finding_label).collect(),
     })
 }
 
@@ -489,6 +510,14 @@ pub fn refresh_guard() -> AppResult<netmonitor_core::shared::run_guard::RunGuard
 ///
 /// Erro do banco.
 pub async fn refresh(ctx: &AppContext) -> AppResult<u32> {
+    let count = refresh_feeds(ctx).await?;
+    // Mesmo sem base nova: uma exceção pode ter vencido desde ontem, e o
+    // achado que ela cobria volta a ser alerta.
+    alerts::evaluate_all(ctx).await;
+    Ok(count)
+}
+
+async fn refresh_feeds(ctx: &AppContext) -> AppResult<u32> {
     let feeds = netmonitor_core::models::registry_feeds::Entity::find()
         .all(&ctx.db)
         .await?;

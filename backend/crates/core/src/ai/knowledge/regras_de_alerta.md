@@ -31,6 +31,7 @@
 - Túneis VPN: `vpnPeerName`, `vpnPeerStatus` (`connected`|`unstable`|`disconnected`|`awaiting`), `vpnStatusTransition` (`connected_to_disconnected`|`connected_to_unstable`|`reconnected`), `vpnSecondsSinceActivity`.
 - Aparelhos Wi-Fi vigiados (câmeras, IoT — só quem foi marcado como vigiado): `wifiClientName`, `wifiClientStatus` (`connected`|`offline`), `wifiClientOfflineSeconds` (há quanto tempo não aparece em nenhum roteador), `wifiClientSignalDbm`, `wifiClientHealth` (`healthy`|`fair`|`high_retries`|`critical`|`power_save`).
 - Roaming Wi-Fi (qualquer aparelho): `wifiRoamStatus` (`ping_pong`|`stable` — trocas de AP demais na janela das Configurações de Wi-Fi, padrão 4 em 10 min), `wifiRoamCount` (trocas na janela).
+- Vulnerabilidades nas imagens do registry (versão mais recente de cada repositório, já sem as exceções aceitas): `imageVulnCritical`, `imageVulnHigh` (quantas em aberto). As regras `image_vulnerability_critical`/`image_vulnerability_high` nascem sozinhas na primeira vulnerabilidade; a severidade mínima que vira alerta é ajuste do registry (Configurações › Notificações). Resolver é publicar uma versão corrigida (recompilar sem cache costuma trazer o pacote novo) ou aceitar o risco com uma exceção no Registry › Vulnerabilidades.
 - Logs (syslog): `logPatternKey`, `logMatchCount` (ocorrências na janela), `logWindowSeconds`, `logSeverity` (0 = emergência … 7 = debug), `logMessage`.
 - Anomalia estatística (comparação com o normal do próprio alvo): `latencyZScore`, `latencyDeviationPercent`, `latencyUpperBandMs`, `packetLossZScore`, `packetLossDeviationPercent`, `uptimeZScore`, `uptimeDeviationPercent`, `syslogVolumeZScore`, `trafficInZScore`, `trafficOutZScore`. Z-score ≥ 3 é um desvio forte.
 
@@ -45,6 +46,7 @@
 - Túnel VPN caiu: `vpnStatusTransition eq "connected_to_disconnected"`, `critical`.
 - Latência fora do normal: `latencyZScore gte 3`, duração 300 s, `info`.
 - Site HTTP com erro: `statusCode gte 500`, `critical`.
+- Imagem com CVE crítica: `imageVulnCritical gte 1`, `critical` (já vem pronta).
 
 ## Diagnosticar de onde vem um alerta
 1. `explain_alert` com o `alert_id`: traz a regra que disparou (condição, janelas, escopo), o alvo exato (equipamento, monitor, interface ou túnel VPN), os fatos/métricas reais que casaram a condição, disparos nas últimas 24 h e outros alertas em aberto no mesmo equipamento.

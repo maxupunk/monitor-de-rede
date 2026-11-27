@@ -161,6 +161,7 @@ pub async fn evaluate_monitor_result_with_device(
             data,
             recovered: result.status == MonitorStatus::Up,
             degraded: result.status == MonitorStatus::Warning,
+            refresh_open: false,
         },
     )
     .await?;
@@ -443,9 +444,20 @@ async fn update_open_event_in_txn<C: sea_orm::ConnectionTrait>(
                 json!(now.to_rfc3339()),
             );
             let mut active: alert_events::ActiveModel = open.clone().into();
+            // Fato de estado (ver `refresh_open`): a tela mostra o agora, não
+            // o de quando o alerta abriu. O que é do episódio fica.
+            let refreshed =
+                context.refresh_open && (context.message.is_some() || !context.data.is_empty());
+            if context.refresh_open {
+                data.extend(context.data.clone());
+                if let Some(message) = &context.message {
+                    active.message = Set(Some(message.clone()));
+                }
+                active.updated_at = Set(now.into());
+            }
             active.data = Set(Some(Value::Object(data)));
-            active.update(txn).await?;
-            Ok(None)
+            let saved = active.update(txn).await?;
+            Ok(refreshed.then_some(OpenEventEffect::Updated(saved)))
         }
         // Com a condição batendo a máquina só devolve os três ramos acima.
         _ => Ok(None),

@@ -20,6 +20,7 @@ use crate::{
 
 const WIFI_WATCH_MARKER: &str = "alerts.wifi_watch_defaults_applied";
 const WIFI_ROAMING_MARKER: &str = "alerts.wifi_roaming_defaults_applied";
+const IMAGE_VULNERABILITY_MARKER: &str = "alerts.image_vulnerability_defaults_applied";
 
 /// Aplica os templates no escopo se o marcador ainda não existe.
 ///
@@ -74,6 +75,24 @@ pub async fn ensure_wifi_roaming<C: ConnectionTrait>(
         db,
         WIFI_ROAMING_MARKER,
         &templates::WIFI_ROAMING_KEYS,
+        TemplateScope::global(),
+    )
+    .await
+}
+
+/// As regras de vulnerabilidade nas imagens do registry, quando a primeira
+/// imagem analisada traz uma vulnerabilidade crítica ou alta.
+///
+/// # Errors
+///
+/// Propaga erro do banco.
+pub async fn ensure_image_vulnerabilities<C: ConnectionTrait>(
+    db: &C,
+) -> AppResult<CatalogApplicationResult> {
+    apply_once(
+        db,
+        IMAGE_VULNERABILITY_MARKER,
+        &templates::IMAGE_VULNERABILITY_KEYS,
         TemplateScope::global(),
     )
     .await

@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:netmonitor_app/theme/app_theme.dart';
+import 'package:netmonitor_app/features/servers/widgets/registry/registry_vulnerability_alerts_card.dart';
+import 'package:netmonitor_app/features/servers/utils/registry_presentation.dart';
+import 'package:netmonitor_app/core/utils/json_parsers.dart';
 import 'package:netmonitor_app/areas/area_contribution.dart';
 import 'package:netmonitor_app/core/areas/area_models.dart';
 import 'package:netmonitor_app/core/navigation/nav_models.dart';
@@ -195,7 +199,12 @@ final AreaContribution serversArea = AreaContribution(
     GoRoute(
       path: '/registry',
       name: 'registry',
-      builder: (context, state) => const RegistryPage(),
+      builder: (context, state) => RegistryPage(
+        tab: state.uri.queryParameters['tab'],
+        repositoryId: int.tryParse(
+          state.uri.queryParameters['repository'] ?? '',
+        ),
+      ),
     ),
   ],
   // ADR 017 / ADR 019: `/remote-servers` pertence à área `core`; Docker/Deploys/Registry pertencem a `servers`.
@@ -249,6 +258,16 @@ final AreaContribution serversArea = AreaContribution(
       ),
     ),
     NavEntry(
+      area: ProductArea.servers,
+      section: NavSectionId.servers,
+      order: 17,
+      item: NavItemSpec(
+        title: 'Vulnerabilidades (CVE)',
+        icon: Icons.gpp_maybe_outlined,
+        to: '/registry?tab=$kRegistryVulnerabilitiesTab',
+      ),
+    ),
+    NavEntry(
       area: ProductArea.core,
       section: NavSectionId.servers,
       order: 20,
@@ -293,6 +312,34 @@ final AreaContribution serversArea = AreaContribution(
       order: 20,
       area: ProductArea.core,
       builder: (_) => const DatabaseInfoCard(),
+    ),
+    // O alerta de CVE nasce aqui, mas é ajuste de notificação: fica ao lado
+    // dos canais, em Configurações › Notificações.
+    SettingsCardContribution(
+      tab: 'notificacoes',
+      order: 20,
+      mdCols: 8,
+      lgCols: 6,
+      area: ProductArea.servers,
+      builder: (_) => const RegistryVulnerabilityAlertsCard(),
+    ),
+  ],
+  // "Ver no Registry" no alerta de vulnerabilidade da imagem
+  // (`scan::alerts` no backend): leva à aba Vulnerabilidades com a imagem
+  // aberta.
+  alertActions: <AlertActionContribution>[
+    AlertActionContribution(
+      id: 'registry-image-vulnerabilities',
+      area: ProductArea.servers,
+      icon: Icons.gpp_maybe_outlined,
+      tone: SemanticTone.warning,
+      label: (_) => 'Ver no Registry',
+      appliesTo: isImageVulnerabilityAlert,
+      onPressed: (context, _, target) => context.go(
+        registryVulnerabilitiesRoute(
+          repositoryId: parseIntOrNull(target.data?['repositoryId']),
+        ),
+      ),
     ),
   ],
   // 10 rotas SSE da área `servers` (incluindo os 4 subtipos de `docker:*` = 10 eventos).
