@@ -524,7 +524,8 @@ pub async fn run_discovery(
 
     // Auditoria de conflitos/clones de IP e MAC após a varredura (chama mesmo
     // quando vazio para auto-resolver alertas de conflitos que sumiram).
-    if let Ok(conflicts) = super::conflicts::analyze_network_conflicts(&ctx.db).await {
+    if let Ok(conflicts) = super::conflicts::analyze_network_conflicts(&ctx.db, Some(run_id)).await
+    {
         let _ = super::conflicts::alert_on_conflicts(ctx, &conflicts).await;
     }
 

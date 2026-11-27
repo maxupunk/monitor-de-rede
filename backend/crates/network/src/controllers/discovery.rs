@@ -57,12 +57,12 @@ async fn environment() -> AppResult<Response> {
 
 async fn list_conflicts(State(ctx): State<AppContext>) -> AppResult<Response> {
     Ok(format::json(
-        conflicts::analyze_network_conflicts(&ctx.db).await?,
+        conflicts::analyze_network_conflicts(&ctx.db, None).await?,
     )?)
 }
 
 async fn check_conflicts(State(ctx): State<AppContext>) -> AppResult<Response> {
-    let list = conflicts::analyze_network_conflicts(&ctx.db).await?;
+    let list = conflicts::analyze_network_conflicts(&ctx.db, None).await?;
     conflicts::alert_on_conflicts(&ctx, &list).await?;
     Ok(format::json(serde_json::json!({
         "count": list.len(),

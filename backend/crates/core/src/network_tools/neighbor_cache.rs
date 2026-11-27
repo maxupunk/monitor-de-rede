@@ -12,6 +12,47 @@ pub struct NeighborEntry {
     pub state: Option<String>,
 }
 
+/// Estados em que o kernel confirmou o vizinho há pouco. `STALE`/`DELAY` são
+/// lembranças: o host pode ter saído da rede — ou o IP ter ido para outro
+/// aparelho por DHCP — desde então. No Linux a entrada velha não é coletada
+/// enquanto a tabela tiver menos de `gc_thresh1` (128) vizinhos: ela dura horas.
+pub const FRESH_STATES: &[&str] = &["REACHABLE", "PERMANENT", "NOARP"];
+
+impl NeighborEntry {
+    /// A entrada prova sozinha que o par (IP, MAC) vale agora? Sem estado
+    /// (fonte que não o informa) conta como fresca.
+    #[must_use]
+    pub fn is_fresh(&self) -> bool {
+        is_fresh_state(self.state.as_deref())
+    }
+}
+
+/// [`NeighborEntry::is_fresh`] para quem só tem o estado.
+#[must_use]
+pub fn is_fresh_state(state: Option<&str>) -> bool {
+    state.is_none_or(|state| FRESH_STATES.contains(&state))
+}
+
+/// Junta observações de momentos diferentes sem inventar conflito: a
+/// observação mais antiga sai quando o seu IP ou o seu MAC já aparece na mais
+/// nova. Um IP que trocou de aparelho (lease DHCP, MAC aleatório de celular) ou
+/// um aparelho que trocou de IP é mudança, não colisão nem clone.
+#[must_use]
+pub fn overlay_newer(
+    newer: Vec<NeighborEntry>,
+    older: impl IntoIterator<Item = NeighborEntry>,
+) -> Vec<NeighborEntry> {
+    let ips: BTreeSet<String> = newer.iter().map(|n| n.ip_address.clone()).collect();
+    let macs: BTreeSet<String> = newer.iter().map(|n| n.mac_address.clone()).collect();
+    let mut merged = newer;
+    merged.extend(
+        older
+            .into_iter()
+            .filter(|old| !ips.contains(&old.ip_address) && !macs.contains(&old.mac_address)),
+    );
+    merged
+}
+
 /// Normaliza um endereço MAC no formato padrão `aa:bb:cc:dd:ee:ff`.
 #[must_use]
 pub fn normalize_mac(mac: &str) -> Option<String> {
@@ -347,6 +388,52 @@ IP address       HW type     Flags       HW address            Mask     Device
         let duplicates = find_mac_duplicates(&entries);
         assert_eq!(duplicates.len(), 1);
         assert_eq!(duplicates["48:8f:5a:aa:bb:cc"].len(), 2);
+    }
+
+    fn entry(ip: &str, mac: &str, state: Option<&str>) -> NeighborEntry {
+        NeighborEntry {
+            ip_address: ip.into(),
+            mac_address: mac.into(),
+            interface: None,
+            state: state.map(Into::into),
+        }
+    }
+
+    #[test]
+    fn so_estado_confirmado_e_fresco() {
+        assert!(entry("10.0.0.1", "aa:aa:aa:aa:aa:01", Some("REACHABLE")).is_fresh());
+        assert!(entry("10.0.0.1", "aa:aa:aa:aa:aa:01", None).is_fresh());
+        assert!(!entry("10.0.0.1", "aa:aa:aa:aa:aa:01", Some("STALE")).is_fresh());
+        assert!(!entry("10.0.0.1", "aa:aa:aa:aa:aa:01", Some("DELAY")).is_fresh());
+    }
+
+    #[test]
+    fn troca_de_lease_nao_vira_colisao_nem_clone() {
+        // Varredura anterior: .105 com o celular A. Agora: .105 com o B e o A
+        // no .147 (renovou o lease em outro endereço).
+        let older = vec![
+            entry("10.0.0.105", "46:24:1f:69:16:f4", None),
+            entry("10.0.0.20", "aa:aa:aa:aa:aa:20", None),
+        ];
+        let newer = vec![
+            entry("10.0.0.105", "e4:46:da:66:5f:82", Some("REACHABLE")),
+            entry("10.0.0.147", "46:24:1f:69:16:f4", Some("REACHABLE")),
+        ];
+        let merged = overlay_newer(newer, older);
+        assert!(find_ip_collisions(&merged).is_empty());
+        assert!(find_mac_duplicates(&merged).is_empty());
+        // O que a observação nova não contradiz continua valendo.
+        assert!(merged.iter().any(|n| n.ip_address == "10.0.0.20"));
+    }
+
+    #[test]
+    fn conflito_na_mesma_observacao_continua_detectado() {
+        let newer = vec![
+            entry("10.0.0.50", "00:11:22:33:44:55", None),
+            entry("10.0.0.51", "00:11:22:33:44:55", None),
+        ];
+        let merged = overlay_newer(newer, Vec::new());
+        assert_eq!(find_mac_duplicates(&merged).len(), 1);
     }
 
     #[test]

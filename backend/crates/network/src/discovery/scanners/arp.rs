@@ -9,10 +9,6 @@ use std::{collections::BTreeSet, net::IpAddr};
 use crate::discovery::merger::DiscoveredHost;
 use netmonitor_core::network_tools::neighbor_cache;
 
-/// Estados em que a entrada foi confirmada há pouco. `STALE`/`DELAY` são
-/// lembranças: o host pode ter saído da rede desde então.
-const CONFIRMED_STATES: &[&str] = &["REACHABLE", "PERMANENT", "NOARP"];
-
 pub async fn scan(allowed: &[IpAddr]) -> Vec<DiscoveredHost> {
     let allowed: BTreeSet<_> = allowed.iter().map(ToString::to_string).collect();
     neighbor_cache::read_system_neighbors()
@@ -35,10 +31,11 @@ pub async fn scan(allowed: &[IpAddr]) -> Vec<DiscoveredHost> {
 /// A entrada prova sozinha que o host está na rede agora?
 #[must_use]
 pub fn is_confirmed(host: &DiscoveredHost) -> bool {
-    host.data
-        .get("neighborState")
-        .and_then(serde_json::Value::as_str)
-        .is_none_or(|state| CONFIRMED_STATES.contains(&state))
+    neighbor_cache::is_fresh_state(
+        host.data
+            .get("neighborState")
+            .and_then(serde_json::Value::as_str),
+    )
 }
 
 #[cfg(test)]

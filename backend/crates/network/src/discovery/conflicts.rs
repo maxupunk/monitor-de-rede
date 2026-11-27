@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use crate::vendors;
 use netmonitor_core::{
+    alerts::contracts::AlertStatus,
     events::EventBus,
     models::_entities::{
         alert_events, device_interfaces, devices, discovery_results, discovery_runs,
@@ -50,54 +51,75 @@ pub struct NetworkConflict {
 }
 
 /// Identifica conflitos de IP e clonagem de MAC na rede local.
-pub async fn analyze_network_conflicts(db: &DatabaseConnection) -> AppResult<Vec<NetworkConflict>> {
+///
+/// `current_run` é a varredura que acabou de gravar os resultados e ainda não
+/// foi marcada `completed`: ela substitui a anterior da mesma rede. Sem isso a
+/// auditoria do fim da varredura comparava a tabela ARP de agora com a run de
+/// uma hora atrás, e todo lease DHCP trocado no intervalo virava conflito.
+pub async fn analyze_network_conflicts(
+    db: &DatabaseConnection,
+    current_run: Option<i64>,
+) -> AppResult<Vec<NetworkConflict>> {
     if !can_inspect_l2() {
         return Ok(Vec::new());
     }
     vendors::service::ensure_loaded(db).await;
 
-    let mut neighbors = neighbor_cache::read_system_neighbors().await;
+    // Só o que o kernel confirmou há pouco: entrada STALE é lembrança.
+    let fresh: Vec<NeighborEntry> = neighbor_cache::read_system_neighbors()
+        .await
+        .into_iter()
+        .filter(NeighborEntry::is_fresh)
+        .collect();
 
-    // Complementa só com a última varredura concluída de cada rede: leases
-    // DHCP históricos não viram falso conflito, e uma rede varrida menos de
-    // uma vez por dia não alterna o alerta entre resolvido e recriado (o que
-    // um corte absoluto de 24h fazia).
-    if let Ok(recent) = latest_run_results_with_mac(db).await {
-        for disc in recent {
-            if let Some(mac) = disc
+    // Complementa com a última varredura de cada rede (não um corte de 24h:
+    // uma rede varrida menos de uma vez por dia não alterna o alerta entre
+    // resolvido e recriado). A varredura é mais antiga que a tabela ARP: onde
+    // as duas divergem, vale a tabela.
+    let scanned = latest_run_results_with_mac(db, current_run)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|disc| {
+            let mac = disc
                 .mac_address
                 .as_deref()
-                .and_then(neighbor_cache::normalize_mac)
-            {
-                neighbors.push(NeighborEntry {
-                    ip_address: disc.ip_address,
-                    mac_address: mac,
-                    interface: None,
-                    state: Some("DISCOVERED".into()),
-                });
-            }
-        }
-    }
+                .and_then(neighbor_cache::normalize_mac)?;
+            Some(NeighborEntry {
+                ip_address: disc.ip_address,
+                mac_address: mac,
+                interface: None,
+                state: Some("DISCOVERED".into()),
+            })
+        });
 
+    let neighbors = neighbor_cache::overlay_newer(fresh, scanned);
     let deduped = neighbor_cache::dedup_neighbors(neighbors);
     evaluate_conflicts_pure(db, &deduped).await
 }
 
-/// Os resultados com MAC da última run concluída de cada rede.
+/// Os resultados com MAC da última run concluída de cada rede — ou de
+/// `current_run`, na rede dela.
 async fn latest_run_results_with_mac(
     db: &DatabaseConnection,
+    current_run: Option<i64>,
 ) -> AppResult<Vec<discovery_results::Model>> {
-    let latest_runs: Vec<i64> = discovery_runs::Entity::find()
+    let mut runs: Vec<(i64, Option<i64>)> = discovery_runs::Entity::find()
         .select_only()
+        .column(discovery_runs::Column::NetworkId)
         .column_as(discovery_runs::Column::Id.max(), "id")
         .filter(discovery_runs::Column::Status.eq("completed"))
         .group_by(discovery_runs::Column::NetworkId)
-        .into_tuple::<Option<i64>>()
+        .into_tuple::<(i64, Option<i64>)>()
         .all(db)
-        .await?
-        .into_iter()
-        .flatten()
-        .collect();
+        .await?;
+    if let Some(current) = current_run {
+        if let Some(run) = discovery_runs::Entity::find_by_id(current).one(db).await? {
+            runs.retain(|(network_id, _)| *network_id != run.network_id);
+            runs.push((run.network_id, Some(run.id)));
+        }
+    }
+    let latest_runs: Vec<i64> = runs.into_iter().filter_map(|(_, id)| id).collect();
     if latest_runs.is_empty() {
         return Ok(Vec::new());
     }
@@ -261,9 +283,11 @@ pub async fn alert_on_conflicts(ctx: &AppContext, conflicts: &[NetworkConflict])
     // 1. Auto-resolve alertas anteriores e registra novos conflitos numa
     // única transação de escrita.
     let txn = begin_write(&ctx.db).await?;
+    // Todo alerta aberto, não só o `active`: um conflito reconhecido também
+    // precisa fechar quando some, e não pode ganhar um duplicado se persistir.
     let active_events = alert_events::Entity::find()
         .filter(alert_events::Column::ScopeKey.is_not_null())
-        .filter(alert_events::Column::Status.eq("active"))
+        .filter(alert_events::Column::Status.is_in(AlertStatus::OPEN))
         .all(&txn)
         .await?;
     let mut existing_scopes: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -359,7 +383,7 @@ mod tests {
         .id
     }
 
-    async fn run_with(db: &DatabaseConnection, network_id: i64, status: &str, mac: &str) {
+    async fn run_with(db: &DatabaseConnection, network_id: i64, status: &str, mac: &str) -> i64 {
         // Varredura antiga: o corte absoluto de 24h a descartaria.
         let seen = (Utc::now() - chrono::Duration::days(6)).fixed_offset();
         let run = discovery_runs::ActiveModel {
@@ -387,6 +411,7 @@ mod tests {
         .insert(db)
         .await
         .unwrap();
+        run.id
     }
 
     #[tokio::test]
@@ -399,7 +424,27 @@ mod tests {
         run_with(&db, semanal, "failed", "aa:aa:aa:aa:aa:03").await;
         run_with(&db, outra, "completed", "aa:aa:aa:aa:aa:04").await;
 
-        let mut macs: Vec<String> = latest_run_results_with_mac(&db)
+        let mut macs: Vec<String> = latest_run_results_with_mac(&db, None)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter_map(|result| result.mac_address)
+            .collect();
+        macs.sort();
+        assert_eq!(macs, ["aa:aa:aa:aa:aa:02", "aa:aa:aa:aa:aa:04"]);
+    }
+
+    #[tokio::test]
+    async fn a_run_em_andamento_substitui_a_anterior_da_mesma_rede() {
+        let db = db().await;
+        let rede = network(&db, "192.168.0.0/24").await;
+        let outra = network(&db, "10.0.0.0/24").await;
+        run_with(&db, rede, "completed", "aa:aa:aa:aa:aa:01").await;
+        run_with(&db, outra, "completed", "aa:aa:aa:aa:aa:04").await;
+        // A auditoria roda antes de a run ser marcada `completed`.
+        let current = run_with(&db, rede, "running", "aa:aa:aa:aa:aa:02").await;
+
+        let mut macs: Vec<String> = latest_run_results_with_mac(&db, Some(current))
             .await
             .unwrap()
             .into_iter()
