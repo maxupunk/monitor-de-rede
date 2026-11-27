@@ -176,7 +176,7 @@ impl CreditWindow {
         let add = u64::from(count);
         let _ = self
             .available
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |current| {
                 Some(current.checked_add(add).map_or(cap, |next| next.min(cap)))
             });
         self.notify.notify_one();

@@ -8,8 +8,8 @@
 //! (snapshot, esquecimento, efêmero, `Resync`) vão por uma fila limitada a uma
 //! tarefa só, que preserva a ordem por processo.
 //!
-//! **Recepção.** [`spawn_listener`] mantém um `PgListener` (uma conexão do
-//! pool, fora dele enquanto escuta) e entrega cada aviso pelo
+//! **Recepção.** [`spawn_listener`] mantém um `PgListener` (numa conexão
+//! própria, fora do pool da aplicação) e entrega cada aviso pelo
 //! [`super::receive::deliver`]. Se a conexão cair, entre a queda e o novo
 //! `LISTEN` os avisos se perdem — o `NOTIFY` não guarda nada para quem não
 //! escuta. A recuperação é em duas partes, as duas **depois** do novo
@@ -32,7 +32,7 @@ use std::{sync::Arc, time::Duration};
 use async_trait::async_trait;
 use chrono::Utc;
 use sea_orm::{ConnectionTrait, DatabaseConnection, DbBackend, Statement};
-use sqlx::postgres::PgListener;
+use sqlx::postgres::{PgListener, PgPoolOptions};
 use tokio::sync::mpsc;
 
 use super::{insert_row, receive, EventFanout};
@@ -210,8 +210,16 @@ async fn listen_forever(db: DatabaseConnection, bus: EventBus) {
     }
 }
 
+/// A escuta segura a conexão dela enquanto viver; por isso ela sai de um pool
+/// próprio de uma conexão, com as mesmas opções do da aplicação. Tirada do pool
+/// da aplicação, ela ocuparia uma vaga dele para sempre — e, num pool de uma
+/// conexão (o dos testes), travaria toda consulta até o `ConnectionAcquire`.
 async fn open(db: &DatabaseConnection) -> Result<PgListener, sqlx::Error> {
-    let mut listener = PgListener::connect_with(db.get_postgres_connection_pool()).await?;
+    let options = db.get_postgres_connection_pool().connect_options();
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect_lazy_with((*options).clone());
+    let mut listener = PgListener::connect_with(&pool).await?;
     listener.listen(CHANNEL).await?;
     Ok(listener)
 }

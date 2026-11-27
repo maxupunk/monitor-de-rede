@@ -152,7 +152,11 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
+          # Versão fixa: o `stable` solto trouxe o 3.50, que depreca o
+          # `package:flutter/material.dart` e derruba o `flutter analyze` com
+          # centenas de infos. Suba junto com o ambiente local e a migração.
           channel: stable
+          flutter-version: 3.47.9
           cache: true
       - name: Install dependencies
         run: flutter pub get
