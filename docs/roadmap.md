@@ -450,6 +450,7 @@ Cada item carrega severidade, esforço, responsável sugerido e critério de ace
   - **Implementado:**
     - `CodeViewer(followTail: true)`: a cada linha nova (SSE) o console rola até o fim enquanto quem lê estiver no fim; rolou para cima, o acompanhamento pausa e aparece "Ir para o fim" ("Novas linhas · Ir para o fim" quando chegou linha). Ligado nos consoles de compilação, de deploy e de logs de container.
     - "Analisar com a IA" ao lado de "Copiar" (`actions` do `CodeViewer`, lançador plugável `aiLogAnalysisLauncherProvider` registrado pelo Assistente — as áreas não importam a IA): `POST /api/ai/log-analysis` mascara credenciais (padrões únicos em `redaction.rs`, os mesmos da pesquisa na web), numera as linhas, recorta para ~24 mil caracteres priorizando as linhas com erro/aviso/descontinuação e o final, e devolve itens (erro, aviso, descontinuado, sugestão) com linha, trecho e como resolver. A folha trata carregando, IA desligada (com atalho às configurações), falha com "Tentar de novo", nenhum problema, resposta fora do formato e o aviso de corte.
+    - "Copiar análise" na folha (só com o resultado pronto): copia a análise em Markdown — resumo, contagens, aviso de corte/credenciais e cada item com linha, trecho e como resolver — para levar a outra IA, a um chamado ou a uma issue. O texto sai de `formatAiLogAnalysisForCopy` (`features/ai/utils/ai_log_analysis_presentation.dart`), que divide com a tela os rótulos e as contagens.
 
 - [x] **Janelas de manutenção** 🟢 Concluído
   - **Severidade:** 🟡 Média

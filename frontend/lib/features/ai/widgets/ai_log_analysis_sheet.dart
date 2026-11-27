@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:netmonitor_app/areas/area_contribution.dart';
+import 'package:netmonitor_app/core/utils/clipboard_utils.dart';
 import 'package:netmonitor_app/core/utils/error_utils.dart';
 import 'package:netmonitor_app/core/utils/formatters.dart';
 import 'package:netmonitor_app/features/ai/models/ai_models.dart';
 import 'package:netmonitor_app/features/ai/providers/ai_providers.dart';
+import 'package:netmonitor_app/features/ai/utils/ai_log_analysis_presentation.dart';
 import 'package:netmonitor_app/shared/widgets/widgets.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
 
@@ -54,6 +56,7 @@ class AiLogAnalysisBody extends ConsumerWidget {
         : ref.watch(aiLogAnalysisProvider(request));
     final loading = analysis?.isLoading ?? false;
     final failed = analysis?.hasError == true && !loading;
+    final report = loading ? null : analysis?.valueOrNull;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -110,6 +113,18 @@ class AiLogAnalysisBody extends ConsumerWidget {
                 icon: const Icon(Icons.refresh, size: 18),
                 label: Text(failed ? 'Tentar de novo' : 'Analisar de novo'),
               ),
+            if (report != null)
+              OutlinedButton.icon(
+                onPressed: () => copyToClipboardWithFeedback(
+                  context,
+                  formatAiLogAnalysisForCopy(report, source: request.source),
+                  message:
+                      'Análise copiada — cole em outra IA, num chamado ou '
+                      'numa issue.',
+                ),
+                icon: const Icon(Icons.copy_all_outlined, size: 18),
+                label: const Text('Copiar análise'),
+              ),
             if (!disabled && request.chatPrompt != null)
               FilledButton.tonalIcon(
                 onPressed: loading ? null : () => _openChat(context, ref),
@@ -156,38 +171,25 @@ class _Analyzing extends StatelessWidget {
 ) {
   return switch (kind) {
     AiLogFindingKind.error => (
-      label: 'Erro',
+      label: aiLogFindingKindLabel(kind),
       tone: SemanticTone.error,
       icon: Icons.error_outline,
     ),
     AiLogFindingKind.warning => (
-      label: 'Aviso',
+      label: aiLogFindingKindLabel(kind),
       tone: SemanticTone.warning,
       icon: Icons.warning_amber_rounded,
     ),
     AiLogFindingKind.deprecation => (
-      label: 'Descontinuado',
+      label: aiLogFindingKindLabel(kind),
       tone: SemanticTone.caution,
       icon: Icons.history_toggle_off,
     ),
     AiLogFindingKind.suggestion => (
-      label: 'Sugestão',
+      label: aiLogFindingKindLabel(kind),
       tone: SemanticTone.info,
       icon: Icons.lightbulb_outline,
     ),
-  };
-}
-
-String _countLabel(AiLogFindingKind kind, int count) {
-  return switch (kind) {
-    AiLogFindingKind.error => countNoun(count, 'erro'),
-    AiLogFindingKind.warning => countNoun(count, 'aviso'),
-    AiLogFindingKind.deprecation => countNoun(
-      count,
-      'descontinuação',
-      'descontinuações',
-    ),
-    AiLogFindingKind.suggestion => countNoun(count, 'sugestão', 'sugestões'),
   };
 }
 
@@ -238,7 +240,7 @@ class _ReportView extends StatelessWidget {
                   children: <Widget>[
                     for (final kind in kinds)
                       SemanticChip(
-                        label: _countLabel(kind, report.count(kind)),
+                        label: aiLogFindingCountLabel(kind, report.count(kind)),
                         tone: _kindMeta(kind).tone,
                         icon: _kindMeta(kind).icon,
                         compact: true,

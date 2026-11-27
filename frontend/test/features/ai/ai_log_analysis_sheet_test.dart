@@ -1,14 +1,38 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:netmonitor_app/areas/area_contribution.dart';
 import 'package:netmonitor_app/core/network/api_client.dart';
 import 'package:netmonitor_app/features/ai/models/ai_models.dart';
 import 'package:netmonitor_app/features/ai/providers/ai_providers.dart';
+import 'package:netmonitor_app/features/ai/utils/ai_log_analysis_presentation.dart';
 import 'package:netmonitor_app/features/ai/widgets/ai_log_analysis_sheet.dart';
 import 'package:netmonitor_app/theme/app_theme.dart';
+
+const AiLogAnalysisReport _report = AiLogAnalysisReport(
+  summary: 'A instalação das dependências falhou.',
+  totalLines: 3000,
+  analyzedLines: 640,
+  truncated: true,
+  masked: true,
+  model: 'qwen3:8b',
+  findings: <AiLogFinding>[
+    AiLogFinding(
+      kind: AiLogFindingKind.error,
+      line: 2,
+      excerpt: 'npm ERR! code ERESOLVE',
+      message: 'Conflito de dependências no npm',
+      suggestion: 'Alinhe as versões ou use --legacy-peer-deps',
+    ),
+    AiLogFinding(
+      kind: AiLogFindingKind.deprecation,
+      message: 'Pacote request descontinuado',
+    ),
+  ],
+);
 
 const AiLogAnalysisRequest _request = AiLogAnalysisRequest(
   source: 'Compilação #7 · api',
@@ -68,6 +92,7 @@ void main() {
     expect(find.textContaining('A IA está lendo o console'), findsOneWidget);
     expect(find.textContaining('3 linhas'), findsOneWidget);
     expect(analyses.requests, 1);
+    expect(find.text('Copiar análise'), findsNothing);
 
     analyses.reply.complete(
       const AiLogAnalysisReport(
@@ -146,6 +171,7 @@ void main() {
     expect(find.textContaining('A IA está desligada'), findsOneWidget);
     expect(find.text('Abrir configurações de IA'), findsOneWidget);
     expect(find.text('Analisar de novo'), findsNothing);
+    expect(find.text('Copiar análise'), findsNothing);
     expect(analyses.requests, 0);
   });
 
@@ -173,8 +199,98 @@ void main() {
 
     expect(find.textContaining('120 s'), findsOneWidget);
     expect(find.text('Abrir configurações de IA'), findsOneWidget);
+    expect(find.text('Copiar análise'), findsNothing);
     await tester.tap(find.text('Tentar de novo'));
     await tester.pumpAndSettle();
     expect(analyses.requests, 2);
+  });
+
+  testWidgets('copia a análise em Markdown para usar em outra IA', (
+    tester,
+  ) async {
+    String? copied;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied = (call.arguments as Map)['text'] as String?;
+        }
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+
+    final analyses = await _pump(tester);
+    analyses.reply.complete(_report);
+    await tester.pumpAndSettle();
+
+    await tester.ensureVisible(find.text('Copiar análise'));
+    await tester.tap(find.text('Copiar análise'));
+    await tester.pumpAndSettle();
+
+    expect(
+      copied,
+      formatAiLogAnalysisForCopy(_report, source: _request.source),
+    );
+    expect(find.textContaining('Análise copiada'), findsOneWidget);
+  });
+
+  group('formatAiLogAnalysisForCopy', () {
+    test('leva resumo, contagens, avisos e cada item com linha e solução', () {
+      final text = formatAiLogAnalysisForCopy(
+        _report,
+        source: 'Compilação #7 · api',
+      );
+      expect(
+        text,
+        startsWith('# Análise do console pela IA — Compilação #7 · api'),
+      );
+      expect(text, contains('A instalação das dependências falhou.'));
+      expect(text, contains('1 erro · 1 descontinuação'));
+      expect(text, contains('> O console tem 3000 linhas; a IA leu 640'));
+      expect(text, contains('> Credenciais encontradas'));
+      expect(text, contains('### 1. Erro — linha 2'));
+      expect(text, contains('```text\nnpm ERR! code ERESOLVE\n```'));
+      expect(
+        text,
+        contains(
+          '**Como resolver:** Alinhe as versões ou use --legacy-peer-deps',
+        ),
+      );
+      expect(text, contains('### 2. Descontinuado\n'));
+      expect(text, contains('_Modelo qwen3:8b_'));
+    });
+
+    test('sem itens diz que está limpo; fora do formato não afirma isso', () {
+      const clean = AiLogAnalysisReport(
+        summary: 'Compilação limpa.',
+        findings: <AiLogFinding>[],
+      );
+      expect(
+        formatAiLogAnalysisForCopy(clean, source: ''),
+        allOf(
+          startsWith('# Análise do console pela IA\n'),
+          contains('Nenhum problema encontrado'),
+          isNot(contains('> ')),
+        ),
+      );
+      const free = AiLogAnalysisReport(
+        summary: 'Parece que o npm falhou.',
+        findings: <AiLogFinding>[],
+        structured: false,
+      );
+      expect(
+        formatAiLogAnalysisForCopy(free, source: 'x'),
+        allOf(
+          contains('Parece que o npm falhou.'),
+          isNot(contains('Nenhum problema encontrado')),
+        ),
+      );
+    });
   });
 }
