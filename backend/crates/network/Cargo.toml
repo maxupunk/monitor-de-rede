@@ -55,7 +55,7 @@ md-5 = { version = "0.11" }
 # O agente SNMP de teste (os testes do cliente sobem um em 127.0.0.1).
 async-snmp = { version = "0.16", default-features = false, features = ["agent", "crypto-rustcrypto"] }
 loco-rs = { workspace = true, features = ["testing"] }
-serial_test = { version = "3.1.1" }
+serial_test = { version = "4.0.1" }
 # Relógio pausado nos testes de amostragem: o tempo avança só quando o teste
 # espera, e o resultado não depende da carga da máquina.
 tokio = { workspace = true, features = ["test-util"] }
