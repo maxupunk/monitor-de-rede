@@ -425,9 +425,9 @@ dependencies = [
 
 [[package]]
 name = "async-snmp"
-version = "0.16.0"
+version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "95a4dab958a01191eafdf0ded772ad5ee5c9a849573351656bfd0e6cdd2e5bfa"
+checksum = "62c73521f81d79ffef8d7b3d4ece05c5d46f30729526a71af422aa0399cdc0b4"
 dependencies = [
  "aes 0.9.4",
  "bytes",
@@ -436,10 +436,12 @@ dependencies = [
  "des",
  "digest 0.11.3",
  "futures-core",
+ "futures-util",
  "getrandom 0.4.3",
  "hmac 0.13.0",
+ "libc",
  "md-5",
- "quinn-udp 0.6.3",
+ "nix",
  "sha1 0.11.0",
  "sha2 0.11.2",
  "smallvec",
@@ -449,6 +451,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "windows-sys 0.61.2",
  "zeroize",
 ]
 
@@ -5414,7 +5417,7 @@ dependencies = [
  "cfg_aliases",
  "pin-project-lite",
  "quinn-proto",
- "quinn-udp 0.5.16",
+ "quinn-udp",
  "rustc-hash",
  "rustls",
  "socket2 0.6.5",
@@ -5456,19 +5459,6 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.5",
- "tracing",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "quinn-udp"
-version = "0.6.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47091c86514c2e11452cb228dee77037334b99d92a23e4c69aa5982261f39247"
-dependencies = [
- "cfg_aliases",
- "libc",
  "socket2 0.6.5",
  "tracing",
  "windows-sys 0.61.2",

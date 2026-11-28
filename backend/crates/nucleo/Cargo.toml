@@ -72,7 +72,7 @@ hickory-proto = { version = "0.24", default-features = false }
 reqwest = { workspace = true }
 
 # --- rede: SNMP (§3.4 SPIKE-01) ---
-async-snmp = { version = "0.16", default-features = false, features = ["crypto-rustcrypto"] }
+async-snmp = { version = "0.18", default-features = false, features = ["crypto-rustcrypto"] }
 
 # --- rede: syslog (roadmap_syslog_nativo.md) ---
 # O parser permissivo do Vector. Não devolve `Result`: linha que não casa com
@@ -135,7 +135,7 @@ libc = { version = "0.2" }
 [dev-dependencies]
 # Só nos testes: o esquema da VPN, que o endereço do túnel lê pelas entidades do core.
 netmonitor-vpn = { workspace = true }
-async-snmp = { version = "0.16", default-features = false, features = ["agent", "crypto-rustcrypto"] }
+async-snmp = { version = "0.18", default-features = false, features = ["agent", "crypto-rustcrypto"] }
 loco-rs = { workspace = true, features = ["testing"] }
 serial_test = { version = "3.1.1" }
 tempfile = { version = "3" }

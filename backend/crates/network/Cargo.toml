@@ -39,7 +39,7 @@ surge-ping = { workspace = true }
 # Nomes por mDNS/NBNS na descoberta (wire format, §3.4 SPIKE-04).
 hickory-proto = { version = "0.24", default-features = false }
 # SNMP (§3.4 SPIKE-01).
-async-snmp = { version = "0.16", default-features = false, features = ["crypto-rustcrypto"] }
+async-snmp = { version = "0.18", default-features = false, features = ["crypto-rustcrypto"] }
 phf = { version = "0.11", features = ["macros"] }
 uuid = { workspace = true }
 # SSH dos plugins e da ativação do log no roteador (Rust puro, ver o
@@ -53,7 +53,7 @@ md-5 = { version = "0.11" }
 
 [dev-dependencies]
 # O agente SNMP de teste (os testes do cliente sobem um em 127.0.0.1).
-async-snmp = { version = "0.16", default-features = false, features = ["agent", "crypto-rustcrypto"] }
+async-snmp = { version = "0.18", default-features = false, features = ["agent", "crypto-rustcrypto"] }
 loco-rs = { workspace = true, features = ["testing"] }
 serial_test = { version = "3.1.1" }
 # Relógio pausado nos testes de amostragem: o tempo avança só quando o teste
