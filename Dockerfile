@@ -25,7 +25,7 @@
 # O Flutter entra na versão exata de `environment.flutter` do `pubspec.yaml` —
 # a mesma do CI e do ambiente local. Uma imagem `:stable` trocaria de versão
 # sozinha (e a do cirruslabs parou de publicar versões novas).
-FROM debian:bookworm-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241 AS web
+FROM debian:bookworm-slim@sha256:e67eeead736ff7bbe258ef088bff683635c561b1fcfefad0806c1df4ab49ce0e AS web
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git curl unzip xz-utils ca-certificates \
@@ -59,7 +59,7 @@ RUN find dist -type f \
 # ------------------------------------------------------------- rust-base ----
 # Fonte e toolchain, sem compilar nada: `builder` (a central) e
 # `agent-builder` (o agente) partem daqui, e cada `--target` compila só o seu.
-FROM rust:slim-bookworm@sha256:94e9efa4033213dbb70d4f665527e7ece3944ddb7ba1dd2e43f6fd6e2490af58 AS rust-base
+FROM rust:slim-bookworm@sha256:bb875b0f8ce726053e259034848c471840e96bfe591fd52556178ae9a05e6126 AS rust-base
 
 WORKDIR /usr/src/app
 
@@ -127,7 +127,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
 # o socket da Engine já é equivalente a root no host, e o GID do grupo docker
 # muda de servidor para servidor. O `git` é do deploy contínuo (ADR 021): o
 # agente sincroniza o repositório da stack no commit da imagem.
-FROM docker:27-cli@sha256:851f91d241214e7c6db86513b270d58776379aacc5eb9c4a87e5b47115e3065c AS agent
+FROM docker:28-cli@sha256:625d9431a9f54c5a2bc90f24f0e1c3d55b1349fd857dd85035f98c2c9acbdd4d AS agent
 RUN apk add --no-cache tini ca-certificates git
 COPY --from=agent-builder /usr/local/bin/netmonitor-agent /usr/local/bin/netmonitor-agent
 # O registro do builder dedicado do buildx (ADR 023) mora no volume do
@@ -153,7 +153,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
           target/release/examples/spike_async_snmp \
           /usr/local/bin/
 
-FROM debian:bookworm-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241 AS spike
+FROM debian:bookworm-slim@sha256:e67eeead736ff7bbe258ef088bff683635c561b1fcfefad0806c1df4ab49ce0e AS spike
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates iputils-ping \
@@ -168,7 +168,7 @@ USER app
 CMD ["spike_icmp_dgram", "1.1.1.1"]
 
 # --------------------------------------------------------------- runtime ----
-FROM debian:bookworm-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241 AS runtime
+FROM debian:bookworm-slim@sha256:e67eeead736ff7bbe258ef088bff683635c561b1fcfefad0806c1df4ab49ce0e AS runtime
 
 # `wireguard-tools` traz `wg` e `wg-quick`; `iproute2` e `iptables` são o que o
 # `wg-quick` chama para criar a interface e aplicar as regras de `PostUp`.
