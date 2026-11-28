@@ -27,7 +27,7 @@ rand = { workspace = true }
 # IP público visto pela internet (pré-voo).
 reqwest = { workspace = true }
 # Par de chaves do WireGuard (Curve25519).
-x25519-dalek = { version = "2", features = ["static_secrets"] }
+x25519-dalek = { version = "3", features = ["static_secrets"] }
 # QR Code do arquivo do peer, para o app móvel.
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 
