@@ -83,7 +83,7 @@ reqwest = { version = "0.12", default-features = false, features = [
 ] }
 # ICMP nativo (ADR 003). O `socket2` acompanha a major que o `surge-ping`
 # pede — ver o comentário em `[dependencies]`.
-surge-ping = { version = "0.8" }
+surge-ping = { version = "0.9" }
 socket2 = { version = "0.6" }
 netmonitor-core = { path = "crates/core" }
 netmonitor-nucleo = { path = "crates/nucleo" }
