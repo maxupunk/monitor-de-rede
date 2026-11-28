@@ -1,0 +1,53 @@
+name: Security Audit
+
+# Auditoria das dependências Rust contra o RustSec.
+#
+# Fica fora do CI porque o resultado muda sem mudança no código: um alerta
+# publicado hoje reprovaria qualquer push, inclusive um que só mexe no
+# frontend. Aqui ela roda:
+#
+# * em todo push/PR que mexe nas dependências — o PR que traz uma versão
+#   vulnerável é reprovado;
+# * todo dia, para avisar (e-mail de workflow com falha) quando sai um alerta
+#   novo para o que já está em uso — a correção chega pelo Dependabot.
+#
+# Exceção só com motivo, em `backend/.cargo/audit.toml`.
+
+on:
+  push:
+    branches:
+      - master
+      - main
+    paths:
+      - "backend/Cargo.lock"
+      - "backend/**/Cargo.toml"
+      - "backend/.cargo/audit.toml"
+      - ".github/workflows/security-audit.yml"
+  pull_request:
+    paths:
+      - "backend/Cargo.lock"
+      - "backend/**/Cargo.toml"
+      - "backend/.cargo/audit.toml"
+      - ".github/workflows/security-audit.yml"
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  cargo-audit:
+    name: Audit Rust Dependencies
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout the code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked --version 0.22.2
+      - name: Run cargo audit
+        run: cargo audit

@@ -1,0 +1,43 @@
+# Atualizações automáticas e deliberadas: cada uma chega como PR, passa pelo
+# CI inteiro e só entra se ele ficar verde. As versões do Rust
+# (`backend/rust-toolchain.toml`) e do Flutter (`environment.flutter` do
+# `frontend/pubspec.yaml`) o Dependabot não cobre: sobem à mão, num PR próprio.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /backend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      # Correções de segurança chegam juntas, sem esperar a semana.
+      rust-security:
+        applies-to: security-updates
+        patterns: ["*"]
+      rust-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: pub
+    directory: /frontend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      flutter-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      docker-images:
+        patterns: ["*"]

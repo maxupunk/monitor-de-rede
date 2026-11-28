@@ -22,11 +22,24 @@
 #   produzir sempre o mesmo resultado.
 
 # ------------------------------------------------------------------- web ----
-FROM ghcr.io/cirruslabs/flutter:stable AS web
+# O Flutter entra na versão exata de `environment.flutter` do `pubspec.yaml` —
+# a mesma do CI e do ambiente local. Uma imagem `:stable` trocaria de versão
+# sozinha (e a do cirruslabs parou de publicar versões novas).
+FROM debian:bookworm-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241 AS web
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git curl unzip xz-utils ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /web
 COPY frontend/pubspec.yaml frontend/pubspec.lock ./
-RUN flutter pub get
+RUN version="$(sed -n 's/^  flutter: *\([0-9][0-9.]*\) *$/\1/p' pubspec.yaml)" \
+    && test -n "$version" \
+    && git clone --depth 1 --branch "$version" https://github.com/flutter/flutter.git /opt/flutter
+ENV PATH="/opt/flutter/bin:${PATH}"
+RUN flutter config --no-analytics --no-cli-animations \
+    && flutter precache --web --no-android --no-ios \
+    && flutter pub get
 
 COPY frontend/ ./
 # `--no-web-resources-cdn` empacota CanvasKit/WASM localmente para funcionar
@@ -63,6 +76,11 @@ ENV CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS}
 RUN apt-get update \
     && apt-get install -y --no-install-recommends pkg-config libssl-dev ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+
+# A versão do Rust é a de `rust-toolchain.toml` (a mesma do CI e do ambiente
+# local), não a da imagem base; instalada numa camada própria, fica em cache.
+COPY backend/rust-toolchain.toml .
+RUN rustup toolchain install && rustc --version
 
 COPY backend/ .
 

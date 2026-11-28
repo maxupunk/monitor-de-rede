@@ -7,12 +7,20 @@ on:
       - main
   pull_request:
 
-env:
-  RUST_TOOLCHAIN: stable
+# Um push novo na mesma branch cancela o run anterior, que já não importa.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 # Todos os jobs do backend rodam a partir de backend/; os do frontend a partir de
 # frontend/. O workflow fica na raiz porque é o único lugar que o GitHub Actions
 # lê (INF-01 / SEC-03).
+#
+# Versões fixas, uma fonte só para local, CI e Dockerfile: o Rust (e o rustfmt e
+# o clippy) vem de `backend/rust-toolchain.toml`; o Flutter, do
+# `environment.flutter` de `frontend/pubspec.yaml`. Um `stable` solto trazia
+# lints novos e quebrava o CI sem nenhuma mudança no código. A auditoria de
+# dependências mora em `security-audit.yml`.
 jobs:
   rustfmt:
     name: Check Style
@@ -25,11 +33,8 @@ jobs:
     steps:
       - name: Checkout the code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
-        with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
-          components: rustfmt
+      - name: Install Rust toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
       - name: Run cargo fmt
         run: cargo fmt --all -- --check
 
@@ -44,10 +49,8 @@ jobs:
     steps:
       - name: Checkout the code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
-        with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - name: Install Rust toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -66,10 +69,8 @@ jobs:
     steps:
       - name: Checkout the code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
-        with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - name: Install Rust toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -101,10 +102,8 @@ jobs:
     steps:
       - name: Checkout the code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
-        with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - name: Install Rust toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -113,30 +112,6 @@ jobs:
         run: cargo test --all-targets
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres_test
-
-  cargo-audit:
-    name: Audit Rust Dependencies
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout the code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
-        with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
-      - name: Setup Rust cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          workspaces: backend
-      - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
-      - name: Run cargo audit
-        run: cargo audit
 
   frontend:
     name: Frontend Checks (Flutter)
@@ -152,11 +127,9 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          # Versão fixa: o `stable` solto trouxe o 3.50, que depreca o
-          # `package:flutter/material.dart` e derruba o `flutter analyze` com
-          # centenas de infos. Suba junto com o ambiente local e a migração.
-          channel: stable
-          flutter-version: 3.47.9
+          # A versão vem do `environment.flutter` do pubspec — a mesma do
+          # ambiente local e do Dockerfile.
+          flutter-version-file: frontend/pubspec.yaml
           cache: true
       - name: Install dependencies
         run: flutter pub get

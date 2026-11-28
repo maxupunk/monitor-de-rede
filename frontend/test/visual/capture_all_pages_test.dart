@@ -67,15 +67,31 @@ Directory _resolvePrintsDir() {
   return Directory('logs/prints');
 }
 
+/// `<flutter>/bin/cache/artifacts/material_fonts` do SDK que está rodando o
+/// teste: o `flutter_tester` mora em `.../artifacts/engine/<plataforma>/`, então
+/// basta subir até a pasta `artifacts`. Vale em qualquer máquina e no CI.
+Directory _sdkMaterialFontsDir() {
+  var dir = File(Platform.resolvedExecutable).parent;
+  while (dir.parent.path != dir.path) {
+    final name = dir.uri.pathSegments.lastWhere((s) => s.isNotEmpty);
+    if (name == 'artifacts') {
+      return Directory('${dir.path}/material_fonts');
+    }
+    dir = dir.parent;
+  }
+  final root = Platform.environment['FLUTTER_ROOT'];
+  return Directory('$root/bin/cache/artifacts/material_fonts');
+}
+
 Future<void> _loadRealSdkFonts() async {
-  const sdkFontsDir = r'C:\Apps\flutter\bin\cache\artifacts\material_fonts';
-  final dir = Directory(sdkFontsDir);
+  final dir = _sdkMaterialFontsDir();
+  final sdkFontsDir = dir.path;
   if (!dir.existsSync()) {
     throw StateError('Flutter SDK material_fonts not found at $sdkFontsDir');
   }
 
   Future<ByteData> readFont(String fileName) async {
-    final bytes = await File('$sdkFontsDir\\$fileName').readAsBytes();
+    final bytes = await File('$sdkFontsDir/$fileName').readAsBytes();
     return ByteData.sublistView(Uint8List.fromList(bytes));
   }
 

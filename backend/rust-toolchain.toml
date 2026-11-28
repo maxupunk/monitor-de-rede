@@ -1,0 +1,11 @@
+# Versão exata do Rust — a única fonte para o ambiente local (o rustup instala e
+# usa esta sozinho), o CI (`rustup toolchain install`) e o Dockerfile.
+#
+# Não use `stable`: cada versão nova do Rust traz lints novos do clippy, e com
+# `-D warnings` o CI quebrava sem nenhuma mudança no código. Subir de versão é
+# um PR próprio: troque aqui, rode `cargo clippy --all-targets -- -D warnings`
+# e corrija o que aparecer.
+[toolchain]
+channel = "1.96.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

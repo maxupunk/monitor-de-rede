@@ -498,7 +498,11 @@ fn statvfs_used_percent(caminho: &Path) -> Option<f64> {
         }
         stat
     };
+    // `fsblkcnt_t` é `u64` no Linux, mas `u32` no macOS: a conversão só é
+    // inútil em parte dos alvos.
+    #[allow(clippy::useless_conversion)]
     let total = u64::from(stat.f_blocks);
+    #[allow(clippy::useless_conversion)]
     let livre = u64::from(stat.f_bfree);
     if total == 0 || livre > total {
         return None;
